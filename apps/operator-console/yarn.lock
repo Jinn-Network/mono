@@ -514,10 +514,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@jinn-network/lifecycle-notifications@portal:../../packages/lifecycle-notifications::locator=%40jinn-network%2Foperator-console%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/lifecycle-notifications@portal:../../packages/lifecycle-notifications::locator=%40jinn-network%2Foperator-console%40workspace%3A."
+  languageName: node
+  linkType: soft
+
 "@jinn-network/operator-console@workspace:.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/operator-console@workspace:."
   dependencies:
+    "@jinn-network/lifecycle-notifications": "portal:../../packages/lifecycle-notifications"
     "@playwright/test": "npm:^1.62.1"
     "@tailwindcss/postcss": "npm:^4.3.3"
     "@types/node": "npm:^24.10.1"

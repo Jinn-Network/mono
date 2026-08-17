@@ -1,0 +1,82 @@
+name: Lifecycle notifications CI
+
+on:
+  pull_request:
+    paths:
+      - "packages/lifecycle-notifications/**"
+      - ".github/scripts/lifecycle-notifications-*.test.mjs"
+      - ".github/workflows/lifecycle-notifications-ci.yml"
+  push:
+    branches: [next]
+    paths:
+      - "packages/lifecycle-notifications/**"
+      - ".github/scripts/lifecycle-notifications-*.test.mjs"
+      - ".github/workflows/lifecycle-notifications-ci.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/lifecycle-notifications-package-inventory.test.mjs
+      - name: Verify source boundaries
+        run: node --test .github/scripts/lifecycle-notifications-source-boundaries.test.mjs
+
+  package:
+    needs: [architecture]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Verify lifecycle-notifications
+        working-directory: packages/lifecycle-notifications
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifecycle-notifications-dist
+          path: packages/lifecycle-notifications/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  packed-types:
+    needs: [package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: lifecycle-notifications-dist
+          path: packages/lifecycle-notifications/dist
+      - name: Compile packed public entrypoint consumers
+        run: node .github/scripts/lifecycle-notifications-packed-types.test.mjs

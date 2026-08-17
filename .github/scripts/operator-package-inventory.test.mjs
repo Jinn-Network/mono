@@ -44,6 +44,7 @@ const EXPECTED_JINN_DEPENDENCIES = {
   "@jinn-network/evidence-repository": "0.1.0",
   "@jinn-network/execution-evidence-builder": "0.1.0",
   "@jinn-network/execution-recorder": "0.1.0",
+  "@jinn-network/lifecycle-notifications": "0.1.0",
   "@jinn-network/marketplace-binding": "0.1.0",
   "@jinn-network/marketplace-pipeline": "0.1.0",
   "@jinn-network/marketplace-projector": "0.1.0",
@@ -55,6 +56,7 @@ const EXPECTED_JINN_DEPENDENCIES = {
   "@jinn-network/record-discovery-protocol": "0.1.0",
   "@jinn-network/record-discovery-serve": "0.1.0",
   "@jinn-network/record-discovery-transport-http": "0.1.0",
+  "@jinn-network/read-plane": "0.1.0",
   "@jinn-network/sdk": "0.2.0",
   "@jinn-network/task-admission": "0.1.0",
   "@jinn-network/task-execution-backend": "0.1.0",
@@ -68,6 +70,7 @@ const EXPECTED_JINN_DEPENDENCIES = {
   "@jinn-network/task-execution-workspace": "0.1.0",
   "@jinn-network/trust-authoring": "0.1.0",
   "@jinn-network/trust-core": "0.1.0",
+  "@jinn-network/trust-observation": "0.1.0",
   "@jinn-network/trust-resolve": "0.1.0"
 };
 const EXPECTED_JINN_DEV_DEPENDENCIES = {
@@ -86,6 +89,7 @@ const EXPECTED_JINN_RESOLUTIONS = {
   "@jinn-network/execution-evidence-builder": "portal:../packages/evidence/execution-evidence-builder",
   "@jinn-network/execution-recorder": "portal:../packages/evidence/execution-recorder",
   "@jinn-network/jinn-layer": "portal:../packages/layer",
+  "@jinn-network/lifecycle-notifications": "portal:../packages/lifecycle-notifications",
   "@jinn-network/marketplace-binding": "portal:../packages/marketplace/binding",
   "@jinn-network/marketplace-pipeline": "portal:../packages/marketplace/pipeline",
   "@jinn-network/marketplace-projector": "portal:../packages/marketplace/projector",
@@ -97,6 +101,7 @@ const EXPECTED_JINN_RESOLUTIONS = {
   "@jinn-network/record-discovery-protocol": "portal:../packages/discovery/protocol",
   "@jinn-network/record-discovery-serve": "portal:../packages/discovery/serve",
   "@jinn-network/record-discovery-transport-http": "portal:../packages/discovery/transport-http",
+  "@jinn-network/read-plane": "portal:../packages/read-plane",
   "@jinn-network/sdk": "portal:../packages/sdk",
   "@jinn-network/task-admission": "portal:../packages/task-supply/admission",
   "@jinn-network/task-execution-backend": "portal:../packages/task-execution/backend",
@@ -110,6 +115,7 @@ const EXPECTED_JINN_RESOLUTIONS = {
   "@jinn-network/task-execution-workspace": "portal:../packages/task-execution/backend-local/workspace",
   "@jinn-network/trust-authoring": "portal:../packages/trust/authoring",
   "@jinn-network/trust-core": "portal:../packages/trust/core",
+  "@jinn-network/trust-observation": "portal:../packages/trust/observation",
   "@jinn-network/trust-resolve": "portal:../packages/trust/resolve"
 };
 

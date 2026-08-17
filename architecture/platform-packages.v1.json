@@ -82,6 +82,14 @@
       "kind": "workflow",
       "path": ".github/workflows/policy-optimization-ci.yml"
     },
+    "lifecycle-notifications-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/lifecycle-notifications-ci.yml"
+    },
+    "read-plane-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/read-plane-ci.yml"
+    },
     "benchmark-product-ci": {
       "kind": "workflow",
       "path": ".github/workflows/benchmark-product-ci.yml"
@@ -137,7 +145,7 @@
   },
   "releaseGroups": {
     "platform-v1": {
-      "expectedPackageCount": 59,
+      "expectedPackageCount": 60,
       "publishPolicies": [
         "canary-only"
       ],
@@ -199,6 +207,44 @@
       "canary": false,
       "stable": false
     },
+    "experimental-lifecycle-notifications": {
+      "expectedPackageCount": 1,
+      "publishPolicies": [
+        "disabled"
+      ],
+      "requiredGateIds": [
+        "lifecycle-notifications-ci"
+      ],
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-lifecycle-notifications",
+        "platform-v1"
+      ],
+      "stackPublished": false,
+      "canary": false,
+      "stable": false
+    },
+    "experimental-read-plane": {
+      "expectedPackageCount": 1,
+      "publishPolicies": [
+        "disabled"
+      ],
+      "requiredGateIds": [
+        "read-plane-ci"
+      ],
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-read-plane",
+        "platform-v1"
+      ],
+      "stackPublished": false,
+      "canary": false,
+      "stable": false
+    },
     "experimental-environment-supply": {
       "expectedPackageCount": 8,
       "publishPolicies": [
@@ -240,7 +286,9 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "experimental-lifecycle-notifications",
         "experimental-policy",
+        "experimental-read-plane",
         "experimental-task-supply",
         "legacy-product-lines",
         "platform-v1"
@@ -276,7 +324,9 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "experimental-lifecycle-notifications",
         "experimental-policy",
+        "experimental-read-plane",
         "experimental-task-supply",
         "legacy-product-lines",
         "platform-v1",
@@ -4140,6 +4190,90 @@
       "replacedBy": []
     },
     {
+      "name": "@jinn-network/lifecycle-notifications",
+      "path": "packages/lifecycle-notifications",
+      "domain": "lifecycle",
+      "role": "pure notification derivation from receipts and live-health",
+      "tier": 3,
+      "tierReason": "A pure deriver over receipts and live-health: no I/O, no product identifiers, proven passable by an in-tree fake.",
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md",
+            "status": "ratified"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-04-headless-operator-reconciliation.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "experimental-lifecycle-notifications",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "lifecycle-notifications-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/lifecycle-notifications-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/read-plane",
+      "path": "packages/read-plane",
+      "domain": "read-plane",
+      "role": "health/ready, freshness, SSE resume, constructor token gate, payload classes, OpenAPI generation",
+      "tier": 3,
+      "tierReason": "A shared read-plane kit with no product identifiers, proven passable by an in-tree fake that is not the daemon HTTP server.",
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md",
+            "status": "ratified"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-04-headless-operator-reconciliation.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "experimental-read-plane",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "read-plane-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/read-plane-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
       "name": "@jinn-network/policy-optimization",
       "path": "packages/policy-optimization",
       "domain": "policy",
@@ -4349,6 +4483,52 @@
           "fixtures"
         ],
         "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/trust-observation",
+      "path": "packages/trust/observation",
+      "domain": "trust",
+      "role": "Class O/A receipt container profile and writeObservation()",
+      "tier": 3,
+      "tierReason": "Filesystem container for unsigned Class O receipts living next to trust-core; Class A remains a target-state profile.",
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md",
+            "status": "ratified"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "trust-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/trust-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": [
+          "./testing"
+        ]
       },
       "supersedes": [],
       "replacedBy": []

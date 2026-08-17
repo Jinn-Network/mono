@@ -51,6 +51,7 @@
  * for the full 16-kind table.
  */
 import type { Hono } from 'hono';
+import { cachePolicyHeaders } from '@jinn-network/read-plane';
 import type { Store } from '../store/store.js';
 import { getCachedGatheredStatus } from './gathered-status-cache.js';
 import type { gatherGatheredStatusRaw, StatusGatherConfig } from './gather-status.js';
@@ -175,6 +176,9 @@ export function addNotificationsRoutes(app: Hono, deps: NotificationsRoutesConfi
         generatedAt: new Date(nowMs).toISOString(),
         notifications,
       };
+      for (const [name, value] of Object.entries(cachePolicyHeaders({ generatedAt: body.generatedAt }))) {
+        c.header(name, value);
+      }
       return c.json(body);
     } catch (err) {
       const message = maskUrlsInMessage(err instanceof Error ? err.message : String(err));

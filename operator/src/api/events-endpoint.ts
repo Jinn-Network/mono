@@ -12,6 +12,7 @@
  */
 import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { parseLastEventId, sseResumePlan } from '@jinn-network/read-plane';
 import {
   activityRowToCloudEvent,
   type LifecycleCloudEventSource,
@@ -59,10 +60,7 @@ function toCloudEvent(row: LifecycleTailRow, uris: LifecycleCloudEventSource) {
 }
 
 function parseResumeId(raw: string | undefined): number | undefined {
-  if (raw === undefined || raw.trim() === '') return undefined;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 0) return undefined;
-  return n;
+  return parseLastEventId(raw);
 }
 
 export function createStoreLifecycleTail(store: Store): LifecycleEventTail {
@@ -97,13 +95,13 @@ export function addEventsRoutes(app: Hono, config: EventsRoutesConfig): void {
     const kinds = parseKinds(c.req.query('kinds'));
     const lastEventId = parseResumeId(c.req.header('Last-Event-ID') ?? undefined);
     return streamSSE(c, async (stream) => {
-      if (lastEventId !== undefined && !tail.hasId(lastEventId)) {
-        // Hono's writeSSE has no `comment` field; SSE comments are `: ...` lines.
+      const plan = sseResumePlan(lastEventId, (id) => tail.hasId(id));
+      if (plan.action === 'id-not-in-buffer') {
         await stream.write(': id-not-in-buffer\n\n');
       } else {
         const backfill =
-          lastEventId !== undefined
-            ? tail.getAfterId(lastEventId, 50)
+          plan.afterId !== undefined
+            ? tail.getAfterId(plan.afterId, 50)
             : [...tail.getRecent(50)].reverse();
         for (const row of backfill) {
           if (!matchesKinds(row.kind, kinds)) continue;

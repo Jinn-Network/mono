@@ -2,10 +2,10 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalEnvironmentSupply": 8,
-    "inventory": 94,
-    "otherPackagesRootEntries": 21,
-    "packagesRootEntries": 88,
-    "platformV1": 59
+    "inventory": 97,
+    "otherPackagesRootEntries": 23,
+    "packagesRootEntries": 91,
+    "platformV1": 60
   },
   "graph": {
     "edgeSections": {
@@ -522,6 +522,11 @@
       {
         "from": "@jinn-network/client",
         "kind": "runtime",
+        "to": "@jinn-network/lifecycle-notifications"
+      },
+      {
+        "from": "@jinn-network/client",
+        "kind": "runtime",
         "to": "@jinn-network/marketplace-binding"
       },
       {
@@ -548,6 +553,11 @@
         "from": "@jinn-network/client",
         "kind": "runtime",
         "to": "@jinn-network/policy-identity"
+      },
+      {
+        "from": "@jinn-network/client",
+        "kind": "runtime",
+        "to": "@jinn-network/read-plane"
       },
       {
         "from": "@jinn-network/client",
@@ -638,6 +648,11 @@
         "from": "@jinn-network/client",
         "kind": "runtime",
         "to": "@jinn-network/trust-core"
+      },
+      {
+        "from": "@jinn-network/client",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-observation"
       },
       {
         "from": "@jinn-network/client",
@@ -958,6 +973,11 @@
         "from": "@jinn-network/marketplace-venue-base",
         "kind": "runtime",
         "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@jinn-network/operator-console",
+        "kind": "runtime",
+        "to": "@jinn-network/lifecycle-notifications"
       },
       {
         "from": "@jinn-network/plugin-runtime",
@@ -1580,6 +1600,7 @@
       "@jinn-network/indexer-enrichment",
       "@jinn-network/information-world",
       "@jinn-network/jinn-layer",
+      "@jinn-network/lifecycle-notifications",
       "@jinn-network/marketplace-binding",
       "@jinn-network/marketplace-pipeline",
       "@jinn-network/marketplace-projector",
@@ -1591,6 +1612,7 @@
       "@jinn-network/policy-identity",
       "@jinn-network/policy-optimization",
       "@jinn-network/policy-outcomes",
+      "@jinn-network/read-plane",
       "@jinn-network/record-discovery-client",
       "@jinn-network/record-discovery-facts-benchmarking",
       "@jinn-network/record-discovery-facts-chain-environments",
@@ -1622,6 +1644,7 @@
       "@jinn-network/task-posting",
       "@jinn-network/trust-authoring",
       "@jinn-network/trust-core",
+      "@jinn-network/trust-observation",
       "@jinn-network/trust-resolve",
       "@jinn-network/trust-testing",
       "@jinn-network/website"
@@ -1987,6 +2010,7 @@
           "@jinn-network/trust-core"
         ],
         "@jinn-network/trust-core": [],
+        "@jinn-network/trust-observation": [],
         "@jinn-network/trust-resolve": [
           "@jinn-network/trust-core"
         ],
@@ -1999,7 +2023,8 @@
         [
           "@jinn-network/evidence-protocol",
           "@jinn-network/task-execution-protocol",
-          "@jinn-network/trust-core"
+          "@jinn-network/trust-core",
+          "@jinn-network/trust-observation"
         ],
         [
           "@jinn-network/benchmarking-protocol",
@@ -2074,19 +2099,19 @@
   },
   "ownership": {
     "counts": {
-      "authorityDocuments": 31,
-      "boundaryPolicies": 24,
-      "catalogManifests": 94,
-      "catalogPublicSurfaces": 1293,
+      "authorityDocuments": 32,
+      "boundaryPolicies": 26,
+      "catalogManifests": 97,
+      "catalogPublicSurfaces": 1296,
       "catalogSchema": 2,
-      "conformancePackedTargets": 56,
-      "conformanceSources": 28,
+      "conformancePackedTargets": 62,
+      "conformanceSources": 31,
       "decisionRecords": 5,
       "discoveredFirstPartySurfaces": 2969,
-      "generatedOutputSources": 1349,
-      "generatorSources": 643,
+      "generatedOutputSources": 1358,
+      "generatorSources": 657,
       "marketplaceControl": 2,
-      "requiredGates": 23,
+      "requiredGates": 25,
       "staticControl": 6
     },
     "paths": [
@@ -2544,6 +2569,37 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/layer-publish-workflow.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/lifecycle-notifications-package-inventory.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/lifecycle-notifications-packed-types.test.mjs"
+      },
+      {
+        "categories": [
+          "boundaryPolicies",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/lifecycle-notifications-source-boundaries.test.mjs"
       },
       {
         "categories": [
@@ -3038,6 +3094,37 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/published-artifacts-smoke-workflow.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/read-plane-package-inventory.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/read-plane-packed-types.test.mjs"
+      },
+      {
+        "categories": [
+          "boundaryPolicies",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/read-plane-source-boundaries.test.mjs"
       },
       {
         "categories": [
@@ -3685,6 +3772,17 @@
       },
       {
         "categories": [
+          "generatorSources",
+          "requiredGates"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/workflows/lifecycle-notifications-ci.yml"
+      },
+      {
+        "categories": [
           "generatorSources"
         ],
         "owners": [
@@ -3860,6 +3958,17 @@
           "@ritsukai"
         ],
         "path": ".github/workflows/published-artifacts-smoke.yml"
+      },
+      {
+        "categories": [
+          "generatorSources",
+          "requiredGates"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/workflows/read-plane-ci.yml"
       },
       {
         "categories": [
@@ -4488,6 +4597,16 @@
           "@ritsukai"
         ],
         "path": "docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md"
+      },
+      {
+        "categories": [
+          "authorityDocuments"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md"
       },
       {
         "categories": [
@@ -33169,6 +33288,70 @@
       },
       {
         "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/lifecycle-notifications/dist/testing.d.ts"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/lifecycle-notifications/dist/testing.js"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/lifecycle-notifications/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/lifecycle-notifications/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/lifecycle-notifications/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "conformanceSources",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/lifecycle-notifications/src/testing.ts"
+      },
+      {
+        "categories": [
           "marketplaceControl"
         ],
         "owners": [
@@ -35558,6 +35741,70 @@
           "@ritsukai"
         ],
         "path": "packages/policy/outcomes/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/read-plane/dist/testing.d.ts"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/read-plane/dist/testing.js"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/read-plane/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/read-plane/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/read-plane/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "conformanceSources",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/read-plane/src/testing.ts"
       },
       {
         "categories": [
@@ -41639,6 +41886,70 @@
       },
       {
         "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/observation/dist/testing.d.ts"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/observation/dist/testing.js"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/observation/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/observation/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/observation/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "conformanceSources",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/observation/src/testing.ts"
+      },
+      {
+        "categories": [
           "catalogManifests"
         ],
         "owners": [
@@ -42602,6 +42913,7 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@jinn-network/lifecycle-notifications",
           "class-variance-authority",
           "clsx",
           "lucide-react",
@@ -42708,12 +43020,14 @@
           "@jinn-network/evidence-repository",
           "@jinn-network/execution-evidence-builder",
           "@jinn-network/execution-recorder",
+          "@jinn-network/lifecycle-notifications",
           "@jinn-network/marketplace-binding",
           "@jinn-network/marketplace-pipeline",
           "@jinn-network/marketplace-projector",
           "@jinn-network/marketplace-venue-base",
           "@jinn-network/plugin",
           "@jinn-network/policy-identity",
+          "@jinn-network/read-plane",
           "@jinn-network/record-discovery-client",
           "@jinn-network/record-discovery-facts-task-execution",
           "@jinn-network/record-discovery-protocol",
@@ -42732,6 +43046,7 @@
           "@jinn-network/task-execution-workspace",
           "@jinn-network/trust-authoring",
           "@jinn-network/trust-core",
+          "@jinn-network/trust-observation",
           "@jinn-network/trust-resolve",
           "@lmoe/gliner-onnx",
           "@modelcontextprotocol/sdk",
@@ -45265,6 +45580,42 @@
     {
       "boundaryPolicy": {
         "kind": "source-boundary",
+        "path": ".github/scripts/lifecycle-notifications-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": []
+      },
+      "domain": "lifecycle",
+      "name": "@jinn-network/lifecycle-notifications",
+      "ownerGroup": "architecture-control",
+      "path": "packages/lifecycle-notifications",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "disabled",
+      "releaseGroup": "experimental-lifecycle-notifications",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "lifecycle-notifications-ci"
+      ],
+      "role": "pure notification derivation from receipts and live-health",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
         "path": ".github/scripts/marketplace-source-boundaries.test.mjs"
       },
       "classification": "platform",
@@ -45657,6 +46008,44 @@
         "policy-ci"
       ],
       "role": "policy-keyed outcomes projection",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/read-plane-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "zod"
+        ]
+      },
+      "domain": "read-plane",
+      "name": "@jinn-network/read-plane",
+      "ownerGroup": "architecture-control",
+      "path": "packages/read-plane",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "disabled",
+      "releaseGroup": "experimental-read-plane",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "read-plane-ci"
+      ],
+      "role": "health/ready, freshness, SSE resume, constructor token gate, payload classes, OpenAPI generation",
       "stability": "experimental",
       "supersedes": [],
       "tier": 3,
@@ -46447,6 +46836,44 @@
       "stability": "candidate",
       "supersedes": [],
       "tier": 1,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/trust-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "zod"
+        ]
+      },
+      "domain": "trust",
+      "name": "@jinn-network/trust-observation",
+      "ownerGroup": "architecture-control",
+      "path": "packages/trust/observation",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "canary-only",
+      "releaseGroup": "platform-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "trust-ci"
+      ],
+      "role": "Class O/A receipt container profile and writeObservation()",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 3,
       "transition": null,
       "version": "0.1.0"
     },
@@ -51512,6 +51939,18 @@
       },
       {
         "claim": null,
+        "export": "./testing",
+        "kind": "conformance",
+        "package": "@jinn-network/lifecycle-notifications",
+        "packedTargets": [
+          "./dist/testing.d.ts",
+          "./dist/testing.js"
+        ],
+        "path": "packages/lifecycle-notifications/src/testing.ts",
+        "relativeSource": "src/testing.ts"
+      },
+      {
+        "claim": null,
         "export": null,
         "kind": "fixtures",
         "package": "@jinn-network/marketplace-binding",
@@ -52205,6 +52644,18 @@
         "packedTargets": [],
         "path": "packages/policy/outcomes/fixtures/projection-golden.json",
         "relativeSource": "fixtures/projection-golden.json"
+      },
+      {
+        "claim": null,
+        "export": "./testing",
+        "kind": "conformance",
+        "package": "@jinn-network/read-plane",
+        "packedTargets": [
+          "./dist/testing.d.ts",
+          "./dist/testing.js"
+        ],
+        "path": "packages/read-plane/src/testing.ts",
+        "relativeSource": "src/testing.ts"
       },
       {
         "claim": null,
@@ -54641,6 +55092,18 @@
       },
       {
         "claim": null,
+        "export": "./testing",
+        "kind": "conformance",
+        "package": "@jinn-network/trust-observation",
+        "packedTargets": [
+          "./dist/testing.d.ts",
+          "./dist/testing.js"
+        ],
+        "path": "packages/trust/observation/src/testing.ts",
+        "relativeSource": "src/testing.ts"
+      },
+      {
+        "claim": null,
         "export": null,
         "kind": "fixtures",
         "package": "@jinn-network/trust-testing",
@@ -55515,6 +55978,17 @@
         "schemas": []
       },
       {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "name": "@jinn-network/lifecycle-notifications",
+        "path": "packages/lifecycle-notifications",
+        "profiles": [],
+        "releaseGroup": "experimental-lifecycle-notifications",
+        "schemas": []
+      },
+      {
         "conformance": [],
         "fixtures": [
           "fixtures"
@@ -55606,6 +56080,17 @@
         "path": "packages/policy/outcomes",
         "profiles": [],
         "releaseGroup": "experimental-policy",
+        "schemas": []
+      },
+      {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "name": "@jinn-network/read-plane",
+        "path": "packages/read-plane",
+        "profiles": [],
+        "releaseGroup": "experimental-read-plane",
         "schemas": []
       },
       {
@@ -55809,6 +56294,17 @@
         ],
         "name": "@jinn-network/trust-core",
         "path": "packages/trust/core",
+        "profiles": [],
+        "releaseGroup": "platform-v1",
+        "schemas": []
+      },
+      {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "name": "@jinn-network/trust-observation",
+        "path": "packages/trust/observation",
         "profiles": [],
         "releaseGroup": "platform-v1",
         "schemas": []
@@ -56263,6 +56759,7 @@
         "@jinn-network/task-execution-workspace",
         "@jinn-network/trust-authoring",
         "@jinn-network/trust-core",
+        "@jinn-network/trust-observation",
         "@jinn-network/trust-resolve",
         "@jinn-network/trust-testing"
       ],
@@ -56909,6 +57406,17 @@
           ],
           "environment": "npm-publish",
           "organization": "Jinn-Network",
+          "package": "@jinn-network/trust-observation",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
           "package": "@jinn-network/trust-resolve",
           "provider": "GitHub Actions",
           "repository": "mono",
@@ -56960,6 +57468,28 @@
       "stable": false,
       "stackPublished": false
     },
+    "experimental-lifecycle-notifications": {
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-lifecycle-notifications",
+        "platform-v1"
+      ],
+      "canary": false,
+      "expectedPackageCount": 1,
+      "packages": [
+        "@jinn-network/lifecycle-notifications"
+      ],
+      "publishPolicies": [
+        "disabled"
+      ],
+      "requiredGateIds": [
+        "lifecycle-notifications-ci"
+      ],
+      "stable": false,
+      "stackPublished": false
+    },
     "experimental-policy": {
       "allowedClassifications": [
         "platform"
@@ -56979,6 +57509,28 @@
       ],
       "requiredGateIds": [
         "policy-ci"
+      ],
+      "stable": false,
+      "stackPublished": false
+    },
+    "experimental-read-plane": {
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-read-plane",
+        "platform-v1"
+      ],
+      "canary": false,
+      "expectedPackageCount": 1,
+      "packages": [
+        "@jinn-network/read-plane"
+      ],
+      "publishPolicies": [
+        "disabled"
+      ],
+      "requiredGateIds": [
+        "read-plane-ci"
       ],
       "stable": false,
       "stackPublished": false
@@ -57018,7 +57570,9 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "experimental-lifecycle-notifications",
         "experimental-policy",
+        "experimental-read-plane",
         "experimental-task-supply",
         "legacy-product-lines",
         "platform-v1"
@@ -57056,7 +57610,7 @@
         "platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 59,
+      "expectedPackageCount": 60,
       "packages": [
         "@jinn-network/attestation-issuer",
         "@jinn-network/benchmarking-aggregate",
@@ -57115,6 +57669,7 @@
         "@jinn-network/task-execution-workspace",
         "@jinn-network/trust-authoring",
         "@jinn-network/trust-core",
+        "@jinn-network/trust-observation",
         "@jinn-network/trust-resolve",
         "@jinn-network/trust-testing"
       ],
@@ -57141,7 +57696,9 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "experimental-lifecycle-notifications",
         "experimental-policy",
+        "experimental-read-plane",
         "experimental-task-supply",
         "legacy-product-lines",
         "platform-v1",

@@ -845,12 +845,14 @@ __metadata:
     "@jinn-network/execution-evidence-builder": "npm:0.1.0"
     "@jinn-network/execution-recorder": "npm:0.1.0"
     "@jinn-network/jinn-layer": "portal:../packages/layer"
+    "@jinn-network/lifecycle-notifications": "npm:0.1.0"
     "@jinn-network/marketplace-binding": "npm:0.1.0"
     "@jinn-network/marketplace-pipeline": "npm:0.1.0"
     "@jinn-network/marketplace-projector": "npm:0.1.0"
     "@jinn-network/marketplace-venue-base": "npm:0.1.0"
     "@jinn-network/plugin": "npm:0.1.2"
     "@jinn-network/policy-identity": "npm:0.1.0"
+    "@jinn-network/read-plane": "npm:0.1.0"
     "@jinn-network/record-discovery-client": "npm:0.1.0"
     "@jinn-network/record-discovery-facts-task-execution": "npm:0.1.0"
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
@@ -870,6 +872,7 @@ __metadata:
     "@jinn-network/task-execution-workspace": "npm:0.1.0"
     "@jinn-network/trust-authoring": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
+    "@jinn-network/trust-observation": "npm:0.1.0"
     "@jinn-network/trust-resolve": "npm:0.1.0"
     "@lmoe/gliner-onnx": "npm:0.1.0"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
@@ -1074,6 +1077,12 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/lifecycle-notifications@portal:../packages/lifecycle-notifications::locator=%40jinn-network%2Fclient%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/lifecycle-notifications@portal:../packages/lifecycle-notifications::locator=%40jinn-network%2Fclient%40workspace%3A."
+  languageName: node
+  linkType: soft
+
 "@jinn-network/marketplace-binding@portal:../packages/marketplace/binding::locator=%40jinn-network%2Fclient%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/marketplace-binding@portal:../packages/marketplace/binding::locator=%40jinn-network%2Fclient%40workspace%3A."
@@ -1146,6 +1155,14 @@ __metadata:
   dependencies:
     "@noble/curves": "npm:^2.0.0"
     "@noble/hashes": "npm:^2.2.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/read-plane@portal:../packages/read-plane::locator=%40jinn-network%2Fclient%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/read-plane@portal:../packages/read-plane::locator=%40jinn-network%2Fclient%40workspace%3A."
+  dependencies:
+    zod: "npm:4.4.3"
   languageName: node
   linkType: soft
 
@@ -1354,6 +1371,14 @@ __metadata:
   dependencies:
     "@noble/curves": "npm:^2.0.0"
     "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/trust-observation@portal:../packages/trust/observation::locator=%40jinn-network%2Fclient%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/trust-observation@portal:../packages/trust/observation::locator=%40jinn-network%2Fclient%40workspace%3A."
+  dependencies:
     zod: "npm:4.4.3"
   languageName: node
   linkType: soft
