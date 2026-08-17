@@ -70,13 +70,13 @@ Steady-state dashboard with four regions, fed by polling and SSE:
 - **Status** — at-a-glance state for an operator who already knows what they're looking at. Daemon health, in-flight Tasks, recent verdicts, earnings, fleet state, master gas runway, recent activity. Source: `GET /v1/status` (see `src/api/gather-status.ts`), polled at the configured interval.
 - **Visibility** — the "what is the daemon doing right now" surface. A live event stream over SSE on `/v1/events`, populated from a daemon-side ring buffer of structured events. Filterable, pinnable, with a collapsible raw-log tail.
 - **Setup** — the same 11-step state machine, but in steady-state mode it surfaces only what changes after bootstrap (re-keying, fleet scale, identity binding retries).
-- **Agent** — an embedded Claude Code session running in Auto Mode, attached to the operator MCP server so the AI can read daemon state and perform a small set of write operations (submit Task, enable SolverNet, claim rewards) without leaving the panel. Implementation is the agent WebSocket bridge at `src/agent/agent-ws.ts` attached to the same Hono server that serves the SPA.
+- **Operator console** — a separate Next.js app (`apps/operator-console`) consumes the versioned read/control plane over HTTP. The daemon origin has no human surface.
 
 The two-mode design — onboarding takeover, then operating dashboard — is intentional: a new operator's screen is dominated by what they need to do *now*, not by metrics that mean nothing yet.
 
 ### 3.3 Auth and binding
 
-The SPA is loopback-only by default. On startup the daemon prints a one-shot handshake URL with a random `?k=<key>` query param; the launcher opens it and the SPA exchanges the key for a `jinn_ui_token` cookie via `/auth/handshake`. Cost-mutating routes additionally require a bearer token (`DAEMON_API_TOKEN`, generated per-process unless the operator pins one). `GET /v1/status` is token-gated like every other operator-class route (spec §14.5); `GET /health`, `GET /ready`, and `GET /metrics` are the deliberate exception — shallow, unauthenticated-safe liveness/readiness/metrics endpoints for supervisors and scrapers (spec §6.1–§6.2). Details: `src/api/handshake.ts`, `src/api/ui-token.ts`, `src/api/health-endpoint.ts`, `src/api/metrics-endpoint.ts`, the SPA dev README at [`src/dashboard/spa/README.md`](src/dashboard/spa/README.md).
+The operator console is a separate origin (headless §9). On startup the daemon prints a one-shot handshake URL with a random `?k=<key>` query param. Cost-mutating routes additionally require a bearer token (`DAEMON_API_TOKEN`, generated per-process unless the operator pins one). `GET /v1/status` is token-gated like every other operator-class route (spec §14.5); `GET /health`, `GET /ready`, and `GET /metrics` are the deliberate exception — shallow, unauthenticated-safe liveness/readiness/metrics endpoints for supervisors and scrapers (spec §6.1–§6.2). Details: `src/api/handshake.ts`, `src/api/ui-token.ts`, `src/api/health-endpoint.ts`, `src/api/metrics-endpoint.ts`.
 
 ## 4. The CLI substrate
 

@@ -20,7 +20,7 @@ describe('mode-aware operator host factory', () => {
     const buildLegacy = vi.fn();
     const buildNative = vi.fn(async () => { throw new Error('missing trusted native source'); });
     await expect(buildOperatorHost({
-      decision: { requestedMode: 'native-v1', effectiveMode: 'native-v1', readiness: 'live-closure-validated' },
+      decision: { requestedMode: 'native-v1', effectiveMode: 'native-v1', readiness: 'explicit-native-unvalidated' },
       buildLegacy,
       buildNative,
     })).rejects.toThrow('missing trusted native source');
