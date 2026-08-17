@@ -10,6 +10,7 @@ import {
 import {
   ANCHOR_PROOF_MAX_DECODED_BYTES,
   AnchorEvidenceSchema,
+  decodeAnchorProofContent,
   parseExactAnchorEvidence,
   sealAnchorEvidence,
   validateAnchorEvidence,
@@ -194,10 +195,13 @@ describe("validateAnchorEvidence — strict schema battery", () => {
 describe("validateAnchorEvidence — proof-content rules (§5 rule 2)", () => {
   test.each([
     ["not base64 at all", "not base64!!"],
-    ["whitespace-wrapped", "amlu bi9h"],
+    // Length is a clean multiple of 4, so this reaches the alphabet check
+    // instead of being turned away by the length test.
+    ["whitespace-wrapped", "amlu bi9"],
     ["unpadded", "amlubi9hbmNob3ItZXZpZGVuY2UtdjEvZ29sZGVuLXBsYWNlaG9sZGVyLXByb29"],
     ["url-safe alphabet", "a-lu_i9hbmNob3ItZXZpZGVuY2UtdjEvZ29sZGVuLXBsYWNlaG9sZGVyLXByb29m"],
-    ["non-canonical trailing bits", "AB=="],
+    ["non-canonical trailing bits under two-character padding", "AB=="],
+    ["non-canonical trailing bits under one-character padding", "ABC="],
     ["empty", ""],
   ])("proof content that is %s fails with PROOF_CONTENT_NOT_BASE64", (_label, content) => {
     const bytes = bytesOf({
@@ -293,6 +297,17 @@ describe("parseExactAnchorEvidence", () => {
     expect(() => parseExactAnchorEvidence(pretty)).toThrow(TrustCoreError);
   });
 
+  test("a BOM-prefixed spelling of a conforming record is refused, though validate still reports it conforming", () => {
+    const { bytes } = sealAnchorEvidence(VALID_ANCHOR_EVIDENCE);
+    const withBom = new Uint8Array(bytes.length + 3);
+    withBom.set([0xef, 0xbb, 0xbf]);
+    withBom.set(bytes, 3);
+    // The UTF-8 decoder strips the BOM, so schema conformance survives it --
+    // which is exactly why exactness is parseExact's job and never validate's.
+    expect(validateAnchorEvidence(withBom).conforms).toBe(true);
+    expect(() => parseExactAnchorEvidence(withBom)).toThrow(TrustCoreError);
+  });
+
   test("a nonconforming record is refused rather than repaired", () => {
     const bytes = bytesOf({ ...VALID_ANCHOR_EVIDENCE, provider: "rfc3161-tsa" });
     expect(() => parseExactAnchorEvidence(bytes)).toThrow(TrustCoreError);
@@ -307,6 +322,22 @@ describe("parseExactAnchorEvidence", () => {
       },
     });
     expect(() => parseExactAnchorEvidence(bytes)).toThrow(TrustCoreError);
+  });
+});
+
+describe("decodeAnchorProofContent", () => {
+  test("round-trips the golden proof content to its exact bytes", () => {
+    const decoded = decodeAnchorProofContent(VALID_ANCHOR_EVIDENCE.proof.content);
+    expect(decoded).toEqual(
+      new TextEncoder().encode("jinn/anchor-evidence-v1/golden-placeholder-proof"),
+    );
+    expect(decodeAnchorProofContent(zeroBase64(ANCHOR_PROOF_MAX_DECODED_BYTES)).length)
+      .toBe(ANCHOR_PROOF_MAX_DECODED_BYTES);
+  });
+
+  test("refuses the URL-safe alphabet that the DSSE envelope decoder would accept", () => {
+    expect(() => decodeAnchorProofContent("a-lu_i9hbmNob3ItZXZpZGVuY2UtdjEvZ29sZGVu"))
+      .toThrow(TrustCoreError);
   });
 });
 

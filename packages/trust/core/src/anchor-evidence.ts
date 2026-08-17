@@ -172,8 +172,11 @@ export interface SealedAnchorEvidence {
  */
 function proofContentDiagnostic(content: string): ValidationDiagnostic | undefined {
   const decoded = decodeProofContent(content);
-  if (decoded.ok) return undefined;
-  return decoded.reason === "too-large"
+  return decoded.ok ? undefined : diagnosticFor(decoded.reason);
+}
+
+function diagnosticFor(reason: "not-base64" | "too-large"): ValidationDiagnostic {
+  return reason === "too-large"
     ? {
       code: "PROOF_CONTENT_TOO_LARGE",
       path: "proof.content",
@@ -187,11 +190,34 @@ function proofContentDiagnostic(content: string): ValidationDiagnostic | undefin
 }
 
 /**
- * Structurally validates the exact sealed bytes of an anchor-evidence record
- * against the strict §5 schema and the §5 rule-2 proof-content rules. Never
- * throws.
+ * The only sanctioned decoder for anchor proof content: canonical padded
+ * standard base64, within the v1 inline cap. Every consumer that needs the
+ * foreign proof bytes -- provider verification above all -- decodes through
+ * here rather than through `dsse.ts`'s envelope decoder, which admits the
+ * URL-safe alphabet and unpadded input. Two spellings decoding to one proof
+ * would be two records claiming one anchor, so the laxer decoder must never
+ * be pointed at this field. Throws `TrustCoreError` (`INVALID_INPUT`) on any
+ * content this record family does not admit.
+ */
+export function decodeAnchorProofContent(content: string): Uint8Array {
+  const decoded = decodeProofContent(content);
+  if (!decoded.ok) invalidInput(diagnosticFor(decoded.reason).message);
+  return decoded.bytes;
+}
+
+/**
+ * Checks one anchor-evidence record's decoded JSON against the strict §5
+ * schema and the §5 rule-2 proof-content rules, and reports what failed.
+ * Never throws.
  *
- * Conformance here is shape only. It says nothing about whether the proof
+ * This is schema-level conformance, not byte-exactness: a pretty-printed,
+ * BOM-prefixed, or duplicate-key spelling of a conforming record passes here
+ * and is still not the record. Consumers that select or identify an anchor
+ * MUST go through `parseExactAnchorEvidence`, which is where exactness is
+ * decided. (Same split as `validateKeyBinding` versus
+ * `parseExactDsseEnvelope`.)
+ *
+ * Conformance is also shape only. It says nothing about whether the proof
  * verifies, whether the subject digest names a record that exists, or whether
  * `subject.kind` describes it -- those are the `integrity-anchors` check's
  * steps 2 and 3 (§8), and a conforming record whose proof is forged is still
