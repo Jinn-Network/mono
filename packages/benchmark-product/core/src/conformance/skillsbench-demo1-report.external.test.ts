@@ -5,9 +5,6 @@ import { dirname, resolve } from "node:path";
 import {
   BENCHMARKING_PROTOCOL_V2,
   evidenceReferenceKey,
-  EXECUTION_BATCH_CAPTURE_RECORD_KIND,
-  sealBenchmarkAnalysisManifest,
-  sealBenchmarkDefinitionV2,
   sealEvidenceCohort,
   type DigestBearingResourceDescriptor,
   type EvidenceRecordReference,
@@ -35,6 +32,14 @@ import {
   verifyEvidenceNativeReport,
 } from "@jinn-network/benchmarking-evidence";
 import { SKILLSBENCH_DEMO1_PILOT_DECLARATION } from "../method/skillsbench-demo1-current.js";
+import {
+  demo1Capture,
+  demo1MethodBytes,
+  sealDemo1Definition,
+  sealDemo1Manifest,
+  SKILLSBENCH_DEMO1_SEALED_AT,
+  SKILLSBENCH_DEMO1_SOURCE_COMMIT,
+} from "../method/skillsbench-demo1-seal.js";
 import {
   admitDeclaredCells,
   type SkillsBenchDemo1AdmittedCell,
@@ -66,8 +71,8 @@ const CELLS = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/E1-arm-ce
 const BUNDLE_OUT = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/E1-demo1-evidence-bundle.v1.json");
 const REPORT_OUT = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/demo1-report.v1.json");
 
-const SEALED_AT = "2026-08-18T00:00:00.000Z";
-const SOURCE_COMMIT = "b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af";
+const SEALED_AT = SKILLSBENCH_DEMO1_SEALED_AT;
+const SOURCE_COMMIT = SKILLSBENCH_DEMO1_SOURCE_COMMIT;
 
 const encoder = new TextEncoder();
 const json = (value: unknown): Uint8Array => encoder.encode(JSON.stringify(value));
@@ -227,8 +232,7 @@ describe.skipIf(!ENABLED)("Demo-1 evidence-native report", () => {
 
     const records = new Map<string, Uint8Array>();
     const artifacts = new Map<string, Uint8Array>();
-    const methodBytes = json({ verifier: "skillsbench test.sh", reward: "/logs/verifier/reward.txt", fullSuccess: 1 });
-    const methodDigest = recordDigest(methodBytes);
+    const methodDigest = recordDigest(demo1MethodBytes());
     const members: Array<{ memberKey: string } & Record<string, unknown>> = [];
 
     let index = 1;
@@ -266,71 +270,10 @@ describe.skipIf(!ENABLED)("Demo-1 evidence-native report", () => {
     }
 
     const declarationDigest = recordDigest(json(declaration));
-    const benchmarkRecord = sealBenchmarkDefinitionV2({
-      protocol: BENCHMARKING_PROTOCOL_V2,
-      name: "Demo-1: Skill delivery A/B on SkillsBench v1.1",
-      description: "Holding task, model, harness, instruction bodies, non-instruction resources and environment fixed: does native progressive Skill delivery change performance versus the same bytes in root CLAUDE.md, against a no-instruction manipulation control?",
-      author: "urn:agent:colophon-skillsbench",
-      version: "1.0.0",
-      items: declaration.slate.map((entry) => ({
-        task: descriptor(`${entry.taskId}-task.json`, recordDigest(json({ benchmark: "skillsbench", release: "v1.1", commit: SOURCE_COMMIT, task: entry.taskId, arm: "A-native-skill", replicate: 0 })), "application/json"),
-        identifiers: [{ scheme: "https://github.com/benchflow-ai/skillsbench/identifiers/task", value: entry.taskId }],
-      })).sort((left, right) => left.task.digest.sha256.localeCompare(right.task.digest.sha256)),
-      reveal: { policy: "immediate" },
-      license: "https://www.apache.org/licenses/LICENSE-2.0",
-    } as never);
-    const benchmark = descriptor("benchmark-v2.json", benchmarkRecord.digest);
-    const capture = {
-      recordKind: EXECUTION_BATCH_CAPTURE_RECORD_KIND,
-      record: descriptor("skillsbench-arm-capture.json", recordDigest(json({ commit: SOURCE_COMMIT, declaration: declarationDigest, cells: admission.cells.length }))),
-    };
+    const benchmarkRecord = sealDemo1Definition(declaration);
+    const capture = demo1Capture(declaration);
 
-    const manifest = sealing("manifest", () => sealBenchmarkAnalysisManifest({
-      protocol: BENCHMARKING_PROTOCOL_V2,
-      benchmark,
-      owner: "urn:agent:colophon-skillsbench",
-      sources: [{ source: capture, cutoff: SEALED_AT }],
-      groups: [
-        { groupId: "A-native-skill", selection: descriptor("arm-a.json", recordDigest(json({ arm: "A-native-skill" }))) },
-        { groupId: "B-flat-claude-md", selection: descriptor("arm-b.json", recordDigest(json({ arm: "B-flat-claude-md" }))) },
-        { groupId: "C-no-instructions", selection: descriptor("arm-c.json", recordDigest(json({ arm: "C-no-instructions" }))) },
-      ],
-      taskRelation: { exactDigestRequired: true },
-      multiplicity: {
-        correlationUnit: "execution",
-        duplicatePolicy: "retain-distinct",
-        retryPolicy: "correlated",
-        assignmentPolicy: descriptor("assignment.json", recordDigest(json({ slot: "skillsbench-arm-cell", declaration: declarationDigest }))),
-      },
-      evaluationAdmission: {
-        evaluatorAllowlist: [VERIFIER_ID],
-        methodAllowlist: [descriptor("skillsbench-verifier.json", methodDigest)],
-        minimumClaims: 1,
-        distinctEvaluators: true,
-        humanLabelPolicy: "not-required",
-        conflictPolicy: "preserve-unresolved",
-        supersessionPolicy: "preserve-all",
-        trustPolicy: descriptor("trust.json", recordDigest(json({ policy: "skillsbench-arm-cell" }))),
-      },
-      verificationAdmission: {
-        requiredChecks: [],
-        trustPolicy: descriptor("verification-trust.json", recordDigest(json({ policy: "skillsbench-arm-cell" }))),
-        failurePolicy: "disclose",
-      },
-      completeness: {
-        required: "complete",
-        unavailableSource: "indeterminate",
-        discoveredOmission: "fail",
-        excludedMember: "count-attrition",
-      },
-      analysisPlan: [
-        { id: "jinn.benchmarking.method/manipulation-check", version: "1", parameters: { control: "C-no-instructions" } },
-        { id: "jinn.benchmarking.method/paired-delta", version: "1", parameters: { pairedBy: "task", arms: ["A-native-skill", "B-flat-claude-md"] } },
-        { id: "jinn.benchmarking.method/variance-decomposition", version: "1", parameters: { components: ["replicate-noise", "task-heterogeneity"] } },
-      ],
-      closeAt: SEALED_AT,
-      preregistration: stage === "final" ? "local-sealed-before-selection" : "post-hoc-exploratory",
-    } as never));
+    const manifest = sealing("manifest", () => sealDemo1Manifest(declaration, stage));
 
     const cohort = sealing("cohort", () => sealEvidenceCohort({
       protocol: BENCHMARKING_PROTOCOL_V2,

@@ -88,6 +88,13 @@ const manifestBytes = fromB64(bundle.manifest);
 const cohortBytes = fromB64(bundle.cohort);
 const matrixBytes = fromB64(bundle.matrix);
 const envelopeBytes = fromB64(bundle.reportEnvelope);
+
+// The committed preregistration must carry byte-identical declaration and manifest — that equality
+// is what shows the analysis was declared before the evidence completed, not fit to it.
+const preregistration = JSON.parse(readFileSync(resolve(BASE, "E1-demo1-preregistration.v1.json"), "utf8"));
+check(JSON.stringify(preregistration.declaration) === JSON.stringify(bundle.declaration),
+  "preregistered declaration matches the bundle");
+check(preregistration.manifest === bundle.manifest, "preregistered manifest bytes match the bundle");
 check(recordDigest(manifestBytes) === summary.digests.analysisManifest, "analysis manifest digest matches");
 check(recordDigest(cohortBytes) === summary.digests.cohort, "cohort digest matches");
 check(recordDigest(matrixBytes) === summary.digests.matrix, "matrix digest matches");

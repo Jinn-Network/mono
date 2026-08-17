@@ -202,10 +202,10 @@
   "digests": {
     "declaration": "sha256:56bb1521f762a13e126fee63868717e7496fa569634924d3589b9e4b16d666b2",
     "benchmark": "sha256:e9694d24e9f269a58bcd5c0b09f79416304993173d408ee274e7675817130e2b",
-    "analysisManifest": "sha256:ce3d3fac150646a486930b39b7b72faa6b2b4fdd26d45b7ecab5a6aefe4d2c77",
-    "cohort": "sha256:145329c8f4a08d47b65ac8cf0452ef429a23c0e4ad635599c322c47b5cb00902",
-    "matrix": "sha256:9362c211a4fa722083c173891f442756788523d73435ab1519016fac41d7f0b0",
-    "report": "sha256:562092b657ec739a15b96dc6268235dfde6b85068185a40fe37a5e3df7853a8e"
+    "analysisManifest": "sha256:66fb4ae8d71e4203f3bdc82beee2883d171dd22f037f1d4364d55066853cf8d3",
+    "cohort": "sha256:6e5b1f00f9571a2116467d2ee8a1b6348fe6edc394a6aed9a708c781e8383ca9",
+    "matrix": "sha256:d0948f7fcf9b12136b91040d2eb06eff285e3f1779413acc2bb93f5ba8bb3492",
+    "report": "sha256:e1596ccb36c921115a7855f4846c0a34d0f0fa0db3f986faa670e90408a1a397"
   },
   "verify": "cd packages/benchmark-product/core && yarn demo1:verify",
   "verified": {
