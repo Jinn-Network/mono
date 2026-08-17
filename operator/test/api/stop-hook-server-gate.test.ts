@@ -85,10 +85,17 @@ describe('POST /api/stop-hook — auth gate (§14.1)', () => {
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
 
-  it('still sends CORS headers on an unrelated route (e.g. GET /v1/status)', async () => {
+  it('echoes an allowlisted CORS origin on an unrelated route (e.g. GET /v1/status)', async () => {
     const res = await fetch(`${baseUrl}/v1/status`, {
       headers: { Origin: 'http://127.0.0.1:3000' },
     });
-    expect(res.headers.get('access-control-allow-origin')).not.toBeNull();
+    expect(res.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:3000');
+  });
+
+  it('does not echo a random origin on GET /v1/status', async () => {
+    const res = await fetch(`${baseUrl}/v1/status`, {
+      headers: { Origin: 'https://example.com' },
+    });
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
 });

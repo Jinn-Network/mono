@@ -168,9 +168,8 @@ jobs:
         run: yarn test:hermetic
 
       # App-flow determinism: mocked-daemon Playwright against the operator
-      # console (Stage 6). Chromium only. The console portals
-      # @jinn-network/lifecycle-notifications, whose exports point at dist/,
-      # so build that package before yarn install / next build.
+      # console (Stage 6). Chromium only. The console imports the kit from
+      # `dist/` (portal:), so build it before install — same as operator-console-ci.yml.
       - name: Build lifecycle-notifications
         working-directory: packages/lifecycle-notifications
         run: |
