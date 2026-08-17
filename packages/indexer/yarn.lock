@@ -440,12 +440,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@hono/node-server@npm:^2.0.11":
-  version: 2.0.11
-  resolution: "@hono/node-server@npm:2.0.11"
+"@hono/node-server@npm:^2.1.1":
+  version: 2.1.1
+  resolution: "@hono/node-server@npm:2.1.1"
   peerDependencies:
     hono: ^4
-  checksum: 10c0/eedfff2122bcb23b368f4a785c2f8d93ecd653c14ecdbf47422fedeb559fb7201c183b10020c3cc01457d856cdda6868fdc5e8f60c3af1d6c6ddd77291689736
+  checksum: 10c0/7ef810ca647c56d8d9386fd81609e18443b3a5634aa5ecabdf357e7ca724613c535e863c15ded9b7ae89b935a073040fb11e6d59041f3b1c3e153d8ecb699880
   languageName: node
   linkType: hard
 
@@ -487,14 +487,14 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/indexer@workspace:."
   dependencies:
-    "@hono/node-server": "npm:^2.0.11"
+    "@hono/node-server": "npm:^2.1.1"
     "@jinn-network/benchmarking-records": "portal:../benchmarking/records"
-    "@types/node": "npm:^26.1.1"
+    "@types/node": "npm:^26.2.0"
     drizzle-orm: "npm:^0.45.2"
-    hono: "npm:^4.12.31"
-    ponder: "npm:^0.17.1"
+    hono: "npm:^4.13.2"
+    ponder: "npm:^0.17.6"
     typescript: "npm:^5.4.0"
-    viem: "npm:^2.55.8"
+    viem: "npm:^2.55.16"
     vitest: "npm:^4.1.10"
   languageName: unknown
   linkType: soft
@@ -999,12 +999,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^26.1.1":
-  version: 26.1.1
-  resolution: "@types/node@npm:26.1.1"
+"@types/node@npm:^26.2.0":
+  version: 26.2.0
+  resolution: "@types/node@npm:26.2.0"
   dependencies:
     undici-types: "npm:~8.3.0"
-  checksum: 10c0/25ac5093195736dd074d5027adbba85617bc951d5a41506ebd3b9073048acb7233613f3822d5f9b9447f9c0841c91f6387c46283916767e3ef79f23917452c46
+  checksum: 10c0/f8566d88162241eb55a46f7e4ea097188eab0aaafefea7a58e63adab8c4144eb98c08b7911452c846104c339a0f82282f5e1ed4b26b578d60709614fe2843f4d
   languageName: node
   linkType: hard
 
@@ -1934,10 +1934,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:^4.12.31":
-  version: 4.12.31
-  resolution: "hono@npm:4.12.31"
-  checksum: 10c0/f80be65cd657cc353b3e478d55424a373d11801b2a1ffc96d94def813c6d852e76bea4437f5df252b15caca98742040d26950bc9c865d8720b89a00a9eac5249
+"hono@npm:^4.13.2":
+  version: 4.13.2
+  resolution: "hono@npm:4.13.2"
+  checksum: 10c0/063daaa596bfb1ed3a4dc523a9f47725cf8d56e0918c21a241161f6f1996229f5525bf0f70d6b15cc28912720ddde519584eeb06fb92730a66f01e39faba8131
   languageName: node
   linkType: hard
 
@@ -2320,9 +2320,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ox@npm:0.14.32":
-  version: 0.14.32
-  resolution: "ox@npm:0.14.32"
+"ox@npm:0.14.33":
+  version: 0.14.33
+  resolution: "ox@npm:0.14.33"
   dependencies:
     "@adraffy/ens-normalize": "npm:^1.11.0"
     "@noble/ciphers": "npm:^1.3.0"
@@ -2337,7 +2337,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/e07c0b18f967f93bf9b52dd5f00cd72db38be435f06cb16e7852c08cc6f05730c031a3ae5dbe058682160ec25b8a8664df334e28fe0677f7848abd0b9a9b59f0
+  checksum: 10c0/3fae8d41cc9e8d56112d7f6e5cc2e90ba8dc4d3764b01ead34798b8d2436a8009c1ccbe2731ae587e69cd31dba8e7fe9f08c586abc1eadb588a42a174e46d766
   languageName: node
   linkType: hard
 
@@ -2560,9 +2560,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ponder@npm:^0.17.1":
-  version: 0.17.1
-  resolution: "ponder@npm:0.17.1"
+"ponder@npm:^0.17.6":
+  version: 0.17.6
+  resolution: "ponder@npm:0.17.6"
   dependencies:
     "@babel/code-frame": "npm:^7.23.4"
     "@commander-js/extra-typings": "npm:^12.0.1"
@@ -2609,7 +2609,7 @@ __metadata:
       optional: true
   bin:
     ponder: ./dist/esm/bin/ponder.js
-  checksum: 10c0/9d6f2438101e103dc98a647caf7b9c46dc942d43208160859af86eabed7d83f14be1b23aec2e044fd8f222dcc536f69601f490ab9332518563500a4a17e93819
+  checksum: 10c0/dfa2c8b54d0324bed390da76d25307019393644cf462ad1d4f3f68befe088c30cb8b219f7c51dbca560a8294cf76bc84f811b85e560e0f2b67a5fd7696f9a9a4
   languageName: node
   linkType: hard
 
@@ -3252,9 +3252,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.55.8":
-  version: 2.55.8
-  resolution: "viem@npm:2.55.8"
+"viem@npm:^2.55.16":
+  version: 2.55.16
+  resolution: "viem@npm:2.55.16"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -3262,14 +3262,14 @@ __metadata:
     "@scure/bip39": "npm:1.6.0"
     abitype: "npm:1.2.3"
     isows: "npm:1.0.7"
-    ox: "npm:0.14.32"
+    ox: "npm:0.14.33"
     ws: "npm:8.21.0"
   peerDependencies:
     typescript: ">=5.0.4"
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/30457ab22c174e02680831f841cd27ba806346ea2099e6b091a53bb46f0bcd6406d93704ef1d91be0d21fd367e38fe81573a9a89a84906e469bdb9c12be7a0bb
+  checksum: 10c0/4cba977b07a7bfb04310fc0bd212c798f268f582d7ed74d0a4f7855aa572e36ebbb5c3101925d7ea06b91a77e82413a4e68e2c14bd0ad93fb37cfe47308ad7ea
   languageName: node
   linkType: hard
 
