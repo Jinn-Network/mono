@@ -101,7 +101,7 @@ function harborArmDispatchPlan(executable: string, paths: WorkspacePaths): Launc
   const waitPath = join(paths.meta, "harbor-arm-wait.json");
   const script = `const { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } = require("fs");
 const { join } = require("path");
-const { spawn, spawnSync } = require("child_process");
+const { spawnSync } = require("child_process");
 const waitPath = ${JSON.stringify(waitPath)};
 const rolePath = ${JSON.stringify(rolePath)};
 const jobPath = ${JSON.stringify(jobPath)};
@@ -183,8 +183,8 @@ if (role === "leader" && wait.kind === "planned") {
     try {
       writeFileSync(wait.startedMarkerPath, "started\\n", { flag: "wx" });
       mkdirSync(harborTmp, { recursive: true });
-      const child = spawn(${JSON.stringify(executable)}, ["run", "-c", jobPath], { stdio: "ignore", env: harborEnv, cwd: process.cwd(), detached: true });
-      child.unref();
+      const result = spawnSync(${JSON.stringify(executable)}, ["run", "-c", jobPath], { stdio: "ignore", env: harborEnv, cwd: process.cwd() });
+      if (result.status !== 0) process.exit(result.status === null ? 1 : result.status);
     } catch (cause) {
       if (cause.code !== "EEXIST") throw cause;
     }

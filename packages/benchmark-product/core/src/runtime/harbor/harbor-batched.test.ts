@@ -139,6 +139,7 @@ for (const name of names) {
 writeFileSync(join(job, "result.json"), JSON.stringify({
   id: config.job_name,
   status: "success",
+  finished_at: new Date().toISOString(),
   n_total_trials: index,
   stats: { n_retries: nRetries },
 }));
