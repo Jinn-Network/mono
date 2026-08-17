@@ -8,6 +8,7 @@ export * from "./errors.js";
 export * from "./types.js";
 export * from "./spellings.js";
 export * from "./key-binding.js";
+export * from "./anchor-evidence.js";
 export * from "./revocation.js";
 export * from "./authorization.js";
 export * from "./policy.js";

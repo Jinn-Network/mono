@@ -2018,13 +2018,13 @@
       "authorityDocuments": 32,
       "boundaryPolicies": 26,
       "catalogManifests": 97,
-      "catalogPublicSurfaces": 1316,
+      "catalogPublicSurfaces": 1319,
       "catalogSchema": 2,
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 5,
-      "discoveredFirstPartySurfaces": 2980,
-      "generatedOutputSources": 1378,
+      "discoveredFirstPartySurfaces": 2983,
+      "generatedOutputSources": 1381,
       "generatorSources": 657,
       "marketplaceControl": 2,
       "requiredGates": 25,
@@ -41762,6 +41762,42 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/trust/core/fixtures/anchor-evidence-v1"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/core/fixtures/anchor-evidence-v1/expected-digests.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/core/fixtures/anchor-evidence-v1/golden.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/trust/core/fixtures/ceremony-v1"
       },
       {
@@ -55220,6 +55256,24 @@
         ],
         "path": "packages/task-supply/derivation/src/testing.ts",
         "relativeSource": "src/testing.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-core",
+        "packedTargets": [],
+        "path": "packages/trust/core/fixtures/anchor-evidence-v1/expected-digests.json",
+        "relativeSource": "fixtures/anchor-evidence-v1/expected-digests.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-core",
+        "packedTargets": [],
+        "path": "packages/trust/core/fixtures/anchor-evidence-v1/golden.json",
+        "relativeSource": "fixtures/anchor-evidence-v1/golden.json"
       },
       {
         "claim": null,
