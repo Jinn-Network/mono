@@ -21,7 +21,7 @@ function specifierRegex(innerPattern: string): RegExp {
 }
 
 const FORBIDDEN_PATTERNS: Array<{ label: string; regex: RegExp }> = [
-  { label: 'operator/src', regex: specifierRegex('[^\'"]*\\bclient\\/src\\/[^\'"]*') },
+  { label: 'operator/src', regex: specifierRegex('[^\'"]*\\boperator\\/src\\/[^\'"]*') },
   { label: '@jinn-network/*', regex: specifierRegex('@jinn-network\\/[^\'"]*') },
   { label: 'viem', regex: specifierRegex('viem') },
   { label: '@modelcontextprotocol/sdk', regex: specifierRegex('@modelcontextprotocol\\/sdk(\\/[^\'"]*)?') },

@@ -122,7 +122,7 @@ describe('deriveSearchTerms (rescope §3.3)', () => {
   it('path-segments a `/`-bearing identifier-shaped token, contributing each cleaned segment (>=3 chars) after the full token (#1791)', () => {
     const terms = deriveSearchTerms('fix the flake under operator/src/dashboard/spa/src please');
     expect(terms).toContain('operator/src/dashboard/spa/src');
-    expect(terms).toContain('client');
+    expect(terms).toContain('operator');
     expect(terms).toContain('dashboard');
     expect(terms).toContain('spa');
     // 'src' is exactly MIN_PATH_SEGMENT_LENGTH (3 chars) — included, not excluded.
@@ -667,11 +667,11 @@ describe('lexical v2 validation table (#1791 decision comment)', () => {
   it('Run B (verbatim, #1791): retrieves the on-topic source record; the same-repo distractor scores repo-name-only and is excluded; the other-domain distractor scores 0', () => {
     const message =
       'The dashboard notification tests keep going flaky in CI. Please look at the async waits in ' +
-      'the notifications tests under operator/src/dashboard/spa/src and make them deterministic, then ' +
+      'the notifications tests under apps/operator-console and make them deterministic, then ' +
       'run that test file.';
     const terms = deriveSearchTerms(message, REPO);
 
-    expect(scoreKnowledgeHit(SOURCE, terms)).toBe(3);
+    expect(scoreKnowledgeHit(SOURCE, terms)).toBe(4);
     expect(scoreKnowledgeHit(OPERATOR_CLAIMS, terms)).toBe(1);
     expect(scoreKnowledgeHit(SYMPY, terms)).toBe(0);
 
