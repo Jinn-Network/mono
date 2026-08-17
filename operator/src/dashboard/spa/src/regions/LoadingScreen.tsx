@@ -1,7 +1,7 @@
 import { useState, type JSX } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useEventStream } from '../api/events.js';
-import type { StructuredEvent } from '../../../../api/contract/index.js';
+import type { OperatorLifecycleCloudEvent } from '../../../../api/contract/index.js';
 import { Button } from '../components/ui/button.js';
 import { Card, CardContent } from '../components/ui/card.js';
 import { ScrollArea } from '../components/ui/scroll-area.js';
@@ -53,19 +53,19 @@ export function LoadingScreen({ headline }: { headline: string }): JSX.Element {
                         key={e.id}
                         className="grid grid-cols-[68px_84px_1fr] gap-3 py-0.5"
                       >
-                        <span className="text-[var(--fg-dim)]">{e.ts.slice(11, 19)}</span>
+                        <span className="text-[var(--fg-dim)]">{e.time.slice(11, 19)}</span>
                         <span
                           className={cn(
-                            e.kind === 'error'
+                            e.data.severity === 'error'
                               ? 'text-[var(--break-red)]'
-                              : e.kind === 'system'
+                              : e.data.kind === 'startup'
                                 ? 'text-[var(--accent-sky)]'
                                 : 'text-[var(--fg-dim)]',
                           )}
                         >
-                          {e.kind}
+                          {e.data.kind}
                         </span>
-                        <span className="text-foreground">{e.message}</span>
+                        <span className="text-foreground">{e.data.message}</span>
                       </div>
                     ))}
                 </div>
@@ -78,7 +78,7 @@ export function LoadingScreen({ headline }: { headline: string }): JSX.Element {
   );
 }
 
-function statusLineFor(e: StructuredEvent): string {
-  if (e.kind === 'error') return `Error: ${e.message}`;
-  return e.message;
+function statusLineFor(e: OperatorLifecycleCloudEvent): string {
+  if (e.data.severity === 'error') return `Error: ${e.data.message}`;
+  return e.data.message;
 }

@@ -2,7 +2,7 @@
  * /v1/activity-events — paginated, filtered access to the persistent
  * `activity_events` lifecycle stream.
  *
- * Distinct from /v1/events (the in-memory StructuredEvent ring buffer). This
+ * Distinct from /v1/events (the lifecycle CloudEvents SSE tail). This
  * endpoint reads the SQLite table populated by emitEvent() and supports
  * kind/outcome/request-id filtering plus id-cursored pagination.
  */
