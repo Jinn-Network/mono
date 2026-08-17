@@ -67,12 +67,12 @@ jobs:
       - name: Install npm 11.19.0
         run: npm install -g npm@11.19.0
       - name: Download same-run prepublication artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: platform-verification-artifacts
           path: .platform-verification
       - name: Download same-run verification receipt
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: platform-verification-receipt
           path: .platform-verification-receipt
@@ -214,12 +214,12 @@ jobs:
         with:
           node-version: 22
       - name: Download same-run profile root
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: platform-verification-artifacts
           path: .platform-verification
       - name: Download same-run verification receipt
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: platform-verification-receipt
           path: .platform-verification-receipt
@@ -269,7 +269,7 @@ jobs:
       artifact-metadata: write
     steps:
       - name: Download live host receipt
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: platform-live-host-receipt
           path: .platform-live-host-receipt

@@ -248,7 +248,7 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore all package distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: task-supply-*-dist
           path: .task-supply-dist

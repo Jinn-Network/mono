@@ -98,7 +98,7 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore Task Execution Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-protocol-dist
           path: packages/task-execution/protocol/dist
@@ -136,7 +136,7 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore Task Execution Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-protocol-dist
           path: packages/task-execution/protocol/dist
@@ -175,12 +175,12 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore Task Execution Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-protocol-dist
           path: packages/task-execution/protocol/dist
       - name: Restore Task Execution Backend distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-backend-dist
           path: packages/task-execution/backend/dist
@@ -219,12 +219,12 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore Task Execution Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-protocol-dist
           path: packages/task-execution/protocol/dist
       - name: Restore Task Execution Profiles distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-profiles-dist
           path: packages/task-execution/profiles/dist
@@ -263,29 +263,29 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore Task Execution Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-protocol-dist
           path: packages/task-execution/protocol/dist
       - name: Restore Task Execution Backend distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-backend-dist
           path: packages/task-execution/backend/dist
       - name: Restore Task Execution Profiles distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-profiles-dist
           path: packages/task-execution/profiles/dist
       - name: Restore Task Execution Supervisor distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-supervisor-dist
           path: packages/task-execution/backend-local/supervisor/dist
       - name: Restore executable bit on native custody binaries
         run: chmod +x packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim*
       - name: Restore Task Execution Workspace distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-workspace-dist
           path: packages/task-execution/backend-local/workspace/dist
@@ -327,34 +327,34 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore Task Execution Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-protocol-dist
           path: packages/task-execution/protocol/dist
       - name: Restore Task Execution Backend distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-backend-dist
           path: packages/task-execution/backend/dist
       - name: Restore Task Execution Supervisor distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-supervisor-dist
           path: packages/task-execution/backend-local/supervisor/dist
       - name: Restore executable bit on native custody binaries
         run: chmod +x packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim*
       - name: Restore Task Execution Workspace distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-workspace-dist
           path: packages/task-execution/backend-local/workspace/dist
       - name: Restore Task Execution Launchers distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-launchers-dist
           path: packages/task-execution/backend-local/launchers/dist
       - name: Restore Task Execution Profiles distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-profiles-dist
           path: packages/task-execution/profiles/dist
@@ -411,22 +411,22 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore Task Execution Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-protocol-dist
           path: packages/task-execution/protocol/dist
       - name: Restore Task Execution Backend distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-backend-dist
           path: packages/task-execution/backend/dist
       - name: Restore Task Execution Profiles distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-profiles-dist
           path: packages/task-execution/profiles/dist
       - name: Restore Task Execution Supervisor distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-supervisor-dist
           path: packages/task-execution/backend-local/supervisor/dist
@@ -436,12 +436,12 @@ jobs:
           # Rebuild on this runner so artifact bit-loss cannot leave a non-exec probe/spawn path.
           (cd packages/task-execution/backend-local/supervisor && node scripts/build-native.mjs)
       - name: Restore Task Execution Workspace distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-workspace-dist
           path: packages/task-execution/backend-local/workspace/dist
       - name: Restore Task Execution Launchers distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: task-execution-launchers-dist
           path: packages/task-execution/backend-local/launchers/dist
@@ -497,7 +497,7 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore all Task Execution distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: task-execution-*-dist
           path: .task-execution-dist
@@ -573,7 +573,7 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore all Task Execution distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: task-execution-*-dist
           path: .task-execution-dist
@@ -639,7 +639,7 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore all Task Execution distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: task-execution-*-dist
           path: .task-execution-dist
@@ -737,7 +737,7 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore all package distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: task-execution-*-dist
           path: .task-execution-dist

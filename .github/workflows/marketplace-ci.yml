@@ -118,7 +118,7 @@ jobs:
         run: |
           (cd contracts && yarn install --immutable && yarn compile)
       - name: Restore Marketplace Binding distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: marketplace-binding-dist
           path: packages/marketplace/binding/dist
@@ -175,7 +175,7 @@ jobs:
           (cd packages/discovery/protocol && yarn install --immutable && yarn build)
           (cd packages/trust/testing && yarn install --immutable && yarn build)
       - name: Restore Marketplace Binding distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: marketplace-binding-dist
           path: packages/marketplace/binding/dist
@@ -223,12 +223,12 @@ jobs:
           (cd packages/discovery/serve && yarn install --immutable && yarn build)
           (cd packages/discovery/testing && yarn install --immutable && yarn build)
       - name: Restore Marketplace Binding distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: marketplace-binding-dist
           path: packages/marketplace/binding/dist
       - name: Restore Marketplace Projector distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: marketplace-projector-dist
           path: packages/marketplace/projector/dist
@@ -289,17 +289,17 @@ jobs:
           (cd packages/discovery/testing && yarn install --immutable && yarn build)
           (cd packages/trust/testing && yarn install --immutable && yarn build)
       - name: Restore Marketplace Binding distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: marketplace-binding-dist
           path: packages/marketplace/binding/dist
       - name: Restore Marketplace Projector distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: marketplace-projector-dist
           path: packages/marketplace/projector/dist
       - name: Restore Marketplace Venue Base distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: marketplace-venue-base-dist
           path: packages/marketplace/venue-base/dist
@@ -376,17 +376,17 @@ jobs:
           (cd packages/discovery/testing && yarn install --immutable && yarn build)
           (cd packages/trust/testing && yarn install --immutable && yarn build)
       - name: Restore Marketplace Binding distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: marketplace-binding-dist
           path: packages/marketplace/binding/dist
       - name: Restore Marketplace Projector distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: marketplace-projector-dist
           path: packages/marketplace/projector/dist
       - name: Restore Marketplace Venue Base distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: marketplace-venue-base-dist
           path: packages/marketplace/venue-base/dist
@@ -441,7 +441,7 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore all package distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: marketplace-*-dist
           path: .marketplace-dist
