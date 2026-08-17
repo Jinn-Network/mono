@@ -79,6 +79,15 @@ export const ALLOWED_SIGNERINFO_DIGEST_OIDS: readonly string[] = [
  * the floor is preserved, and refusing the bare OID would reject conformant
  * production output over a spelling. RSASSA-PSS likewise carries its digest in
  * the algorithm parameters, which is why the crypto port takes `parameters`.
+ *
+ * Membership here is therefore necessary but never sufficient. For RSASSA-PSS
+ * the rule engine MUST parse `RSASSA-PSS-params` and floor its `hashAlgorithm`
+ * against `ALLOWED_SIGNERINFO_DIGEST_OIDS`, carrying `saltLength` and
+ * `trailerField` to the port alongside it: the OID names the scheme, not the
+ * hash, so a PSS signature over SHA-1 would otherwise sail through an allowlist
+ * check that admits the OID. For bare `rsaEncryption` the same floor binds
+ * through the SignerInfo `digestAlgorithm`, which reaches the port as
+ * `digestAlgorithmOid` and never as a platform default.
  */
 export const ALLOWED_SIGNATURE_ALGORITHM_OIDS: readonly string[] = [
   OID_ECDSA_WITH_SHA256,

@@ -185,6 +185,37 @@ describe("definite-length DER reader", () => {
     expect(() => decodeDer(bytes(0x00, 0x00))).toThrow(/reserved/i);
   });
 
+  test("enforces the DER BOOLEAN value form", () => {
+    expect(decodeDer(bytes(DER_TAG.BOOLEAN, 0x01, 0x00)).content).toEqual(bytes(0x00));
+    expect(decodeDer(bytes(DER_TAG.BOOLEAN, 0x01, 0xff)).content).toEqual(bytes(0xff));
+    // 0x01 is a truthy BER encoding; DER admits only 0x00 and 0xFF.
+    expect(() => decodeDer(bytes(DER_TAG.BOOLEAN, 0x01, 0x01))).toThrow(/BOOLEAN/);
+    expect(() => decodeDer(bytes(DER_TAG.BOOLEAN, 0x01, 0x7f))).toThrow(/BOOLEAN/);
+    expect(code(() => decodeDer(bytes(DER_TAG.BOOLEAN, 0x01, 0x01)))).toBe("CONFORMANCE_FAILURE");
+  });
+
+  test("enforces INTEGER minimality and refuses an empty INTEGER", () => {
+    // A redundant 0x00 before a byte whose high bit is already clear.
+    expect(() => decodeDer(bytes(0x02, 0x02, 0x00, 0x7f))).toThrow(/minimal/i);
+    // A redundant 0xFF before a byte whose high bit is already set.
+    expect(() => decodeDer(bytes(0x02, 0x02, 0xff, 0x80))).toThrow(/minimal/i);
+    // An INTEGER always carries at least one content octet.
+    expect(() => decodeDer(bytes(0x02, 0x00))).toThrow(/INTEGER/);
+    // 0x00 before a high-bit-set byte is required, not redundant: this is 128.
+    expect(decodeDer(bytes(0x02, 0x02, 0x00, 0x80)).content).toEqual(bytes(0x00, 0x80));
+    // 0xFF before a high-bit-clear byte is likewise required: this is -129.
+    expect(decodeDer(bytes(0x02, 0x02, 0xff, 0x7f)).content).toEqual(bytes(0xff, 0x7f));
+  });
+
+  test("enforces BIT STRING shape", () => {
+    // The unused-bits octet is mandatory.
+    expect(() => decodeDer(bytes(0x03, 0x00))).toThrow(/BIT STRING/);
+    // Only 0..7 bits can go unused.
+    expect(() => decodeDer(bytes(0x03, 0x02, 0x08, 0xff))).toThrow(/BIT STRING/);
+    expect(decodeDer(bytes(0x03, 0x02, 0x00, 0xff)).content).toEqual(bytes(0x00, 0xff));
+    expect(decodeDer(bytes(0x03, 0x02, 0x07, 0x80)).content).toEqual(bytes(0x07, 0x80));
+  });
+
   test("refuses non-byte input as caller error", () => {
     expect(code(() => decodeDer([0x05, 0x00] as unknown as Uint8Array))).toBe("INVALID_INPUT");
   });

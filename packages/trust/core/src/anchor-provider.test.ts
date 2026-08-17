@@ -9,8 +9,11 @@ import {
 } from "./anchor-provider.js";
 import type {
   AnchorCertificateFacts,
+  AnchorChainVerifier,
+  AnchorClass,
   AnchorProofResult,
   AnchorProofVerifier,
+  AnchorSignatureVerifier,
   AnchorSignerIdentifier,
 } from "./anchor-provider.js";
 
@@ -129,5 +132,50 @@ describe("the tier-1 anchor provider contract (design §4.3)", () => {
     };
     expect(certificate.sid.map((identifier) => identifier.kind))
       .toEqual(["issuerAndSerialNumber", "subjectKeyIdentifier"]);
+  });
+
+  test("names both anchor classes (§4.1's third declared fact)", () => {
+    const classes: readonly AnchorClass[] = ["lookup", "proof-carrying"];
+    expect(classes).toEqual(["lookup", "proof-carrying"]);
+  });
+
+  test("carries the SignerInfo digest algorithm to the signature port", () => {
+    // A hash-agnostic signature OID (bare rsaEncryption) names no digest, so
+    // the port must be told which one to verify under rather than defaulting.
+    const seen: string[] = [];
+    const port: AnchorSignatureVerifier = {
+      verifySignature: ({ algorithmOid, digestAlgorithmOid }) => {
+        seen.push(`${algorithmOid}/${digestAlgorithmOid}`);
+        return true;
+      },
+    };
+    expect(port.verifySignature({
+      algorithmOid: "1.2.840.113549.1.1.1",
+      digestAlgorithmOid: "2.16.840.1.101.3.4.2.3",
+      spkiDer: Uint8Array.from([0x30, 0x00]),
+      message: Uint8Array.from([0x31, 0x00]),
+      signature: Uint8Array.from([0x01]),
+    })).toBe(true);
+    expect(seen).toEqual(["1.2.840.113549.1.1.1/2.16.840.1.101.3.4.2.3"]);
+  });
+
+  test("validates a chain at the token's own genTime, against caller-supplied roots", () => {
+    const port: AnchorChainVerifier = {
+      // `verified` is unreachable without this port; an empty root set can
+      // never yield it (§8 step 3).
+      verifyCertificateChain: ({ trustAnchorsDer, atTime }) =>
+        trustAnchorsDer.length > 0 && atTime === "2026-08-17T12:00:00Z",
+    };
+    const chain = [Uint8Array.from([0x30, 0x00])];
+    expect(port.verifyCertificateChain({
+      certificateChainDer: chain,
+      trustAnchorsDer: [Uint8Array.from([0x30, 0x01, 0x00])],
+      atTime: "2026-08-17T12:00:00Z",
+    })).toBe(true);
+    expect(port.verifyCertificateChain({
+      certificateChainDer: chain,
+      trustAnchorsDer: [],
+      atTime: "2026-08-17T12:00:00Z",
+    })).toBe(false);
   });
 });

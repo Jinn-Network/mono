@@ -40,6 +40,19 @@ export const ANCHOR_TIME_BASES = ["authority-time", "chain-time"] as const;
 export type AnchorTimeBasis = (typeof ANCHOR_TIME_BASES)[number];
 
 /**
+ * The anchor class a profile belongs to (§4.1) -- the third fact every profile
+ * declares. A `lookup` anchor is queried by digest and answered by observation,
+ * and the surface itself supplies the trust design §7.3 properties. A
+ * `proof-carrying` anchor's evidence is a byte artifact that travels with the
+ * record set and verifies without querying anything.
+ *
+ * The distinction is not cosmetic: only §7.3-conforming surfaces may feed
+ * key-binding at-time resolution, and a proof-carrying `authority-time` anchor
+ * never qualifies (§4.1, §14).
+ */
+export type AnchorClass = "lookup" | "proof-carrying";
+
+/**
  * What checking a profile's proof requires (§4.1) -- reported alongside the
  * time basis and never blurred into one badge.
  */
@@ -79,6 +92,15 @@ export interface VerifiedAnchorProof<TFacts> {
  * for its class, but the material needed to evaluate its time basis was not
  * supplied. Extracted facts are reported -- they are extracted, never asserted
  * -- but no evaluated `time` is, because none was evaluated.
+ *
+ * `present` is the default outcome, not an edge case: a verifier ships with no
+ * trust roots (§8 step 3), so an operator who configured none gets `present`
+ * for every well-formed proof. The §8 step-4 splice-catch therefore applies
+ * here too -- an `authority-time` lock anchor must still satisfy
+ * `genTime <= run.closeAt`, and the check reaches that instant through
+ * `facts.genTime`, which every `authority-time` profile extracts. Routing the
+ * splice-catch through `time` instead would silently disable it in exactly the
+ * default configuration; `time` stays `verified`-only by design.
  */
 export interface PresentAnchorProof<TFacts> {
   readonly status: "present";
@@ -158,15 +180,30 @@ export interface AnchorProofSource {
 }
 
 // ---------------------------------------------------------------------------
-// The two injected crypto ports (§6.1 "Placement"). Core produces the exact
-// bytes a signature must cover and states the rules; the two platform
-// primitives cross the boundary. Hand-writing an X.509 parser to make a
-// security decision is the invention §3 exists to prevent.
+// The injected crypto ports (§6.1 "Placement"). Core produces the exact bytes a
+// signature must cover and states the rules; only platform primitives cross the
+// boundary. Hand-writing an X.509 parser to make a security decision is the
+// invention §3 exists to prevent.
 // ---------------------------------------------------------------------------
 
 export interface AnchorSignatureVerificationInput {
   /** Dotted-string signature algorithm OID from the SignerInfo. */
   readonly algorithmOid: string;
+  /**
+   * The SignerInfo `digestAlgorithm` OID, and the **authoritative** source of
+   * the verification hash whenever `algorithmOid` is hash-agnostic -- bare
+   * `rsaEncryption` (1.2.840.113549.1.1.1) names no digest at all.
+   *
+   * The rule engine MUST set this from the SignerInfo `digestAlgorithm`, and a
+   * port implementation MUST derive the hash it verifies under from this field
+   * rather than from a platform default. Node's `crypto.verify` falls back to
+   * SHA-256 when the algorithm pins no digest, so a conformant SHA-384 or
+   * SHA-512 `rsaEncryption` token would be verified under the wrong hash and
+   * reported `invalid`. Worse, the §6.1 rule 5 SHA-256-family floor is stated
+   * over exactly this field -- leaving the hash to a default would make the
+   * floor bind by accident of that default rather than by rule.
+   */
+  readonly digestAlgorithmOid: string;
   /** Exact DER of `AlgorithmIdentifier.parameters` when present -- RSASSA-PSS
    * carries its digest and salt there. */
   readonly parameters?: Uint8Array;
@@ -223,4 +260,37 @@ export interface AnchorCertificateFacts {
 
 export interface AnchorCertificateReader {
   readCertificate(certificateDer: Uint8Array): AnchorCertificateFacts;
+}
+
+export interface AnchorChainVerificationInput {
+  /** The certificate chain carried by the proof, leaf first. Bundle-carried
+   * chains are archival convenience and are labeled as such (§8 step 3). */
+  readonly certificateChainDer: readonly Uint8Array[];
+  /** The roots the verifier's operator chose to trust. Strictly verifier-side
+   * configuration: the verifier ships with none, and a chain validated solely
+   * against bundle-supplied roots would re-import the self-run problem with
+   * extra ceremony (§8 step 3). An empty set cannot yield `verified`. */
+  readonly trustAnchorsDer: readonly Uint8Array[];
+  /** The instant to validate the chain at, as calendar-strict RFC 3339 UTC:
+   * the token's own `genTime` rendered through the pinned positional transform
+   * (§6.1). Validating at the wall clock instead would make a historical token
+   * with an expired-but-then-valid chain fail for the wrong reason. */
+  readonly atTime: string;
+}
+
+/**
+ * Chain validation to caller-supplied roots -- the third injected port, and the
+ * one that separates `present` from `verified`.
+ *
+ * Without it, `verified` is unreachable: §4.3 reserves that status for a proof
+ * whose time basis was evaluated against verifier-supplied trust material, and
+ * evaluating an `authority-time` basis means chaining the embedded signer
+ * certificate to a root the caller chose. Neither existing port can do that --
+ * `readCertificate` reports facts about one certificate, and `verifySignature`
+ * checks one signature -- so core would have to parse and chain X.509 itself,
+ * which its dependency floor forbids and which §3 names as the invention to
+ * avoid. Implemented verifier-side with `node:crypto`, like the other two.
+ */
+export interface AnchorChainVerifier {
+  verifyCertificateChain(input: AnchorChainVerificationInput): boolean;
 }

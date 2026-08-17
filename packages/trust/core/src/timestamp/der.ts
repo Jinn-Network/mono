@@ -20,11 +20,15 @@
  * - **High-tag-number form** (`tagNumber === 0x1f`). No tag above 30 occurs in
  *   CMS or X.509, so supporting the multi-octet form would only add a
  *   canonicalization question with no reachable caller.
- * - **Universal-tag shape** -- SEQUENCE and SET must be constructed, and the
- *   universal types DER pins as primitive must not be (a constructed OCTET
- *   STRING is BER); NULL carries no content and BOOLEAN carries exactly one
- *   octet; universal tag 0 (end-of-contents, a BER-only construct) never
- *   appears.
+ * - **Universal-tag shape and value form** -- SEQUENCE and SET must be
+ *   constructed, and the universal types DER pins as primitive must not be (a
+ *   constructed OCTET STRING is BER); NULL carries no content; BOOLEAN carries
+ *   exactly one octet, and that octet is 0x00 or 0xFF; INTEGER is non-empty and
+ *   carries no redundant sign octet; BIT STRING carries an unused-bits octet in
+ *   0..7; universal tag 0 (end-of-contents, a BER-only construct) never
+ *   appears. These value-form rules matter because DER's promise is one
+ *   encoding per value -- where a rule compares bytes, a second admissible
+ *   encoding of the same value is an evasion.
  *
  * `content` and `bytes` are views over the caller's buffer, never copies:
  * `bytes` is the exact TLV slice that signedAttrs re-encoding and any
@@ -149,10 +153,51 @@ function assertUniversalShape(element: DerElement, offset: number): void {
   if (tagNumber === 5 && content.length !== 0) {
     conformanceFailure(`NULL at offset ${offset} carries ${content.length} content octet(s).`);
   }
-  if (tagNumber === 1 && content.length !== 1) {
-    conformanceFailure(
-      `BOOLEAN at offset ${offset} carries ${content.length} content octets; DER encodes exactly one.`,
-    );
+  if (tagNumber === 1) {
+    if (content.length !== 1) {
+      conformanceFailure(
+        `BOOLEAN at offset ${offset} carries ${content.length} content octets; DER encodes exactly one.`,
+      );
+    }
+    // X.690 11.1: DER admits exactly two BOOLEAN encodings. Any other octet
+    // is BER, and tolerating it would let a critical-extension flag (§6.1
+    // rule 2's TSTInfo extension read, and rule 9's recorded certificate gap)
+    // be smuggled past a truthiness test that only compared against 0x00.
+    if (content[0] !== 0x00 && content[0] !== 0xff) {
+      conformanceFailure(
+        `BOOLEAN at offset ${offset} encodes 0x${content[0]!.toString(16)}; DER encodes FALSE as 0x00 and TRUE as 0xFF.`,
+      );
+    }
+  }
+  if (tagNumber === 2) {
+    if (content.length === 0) {
+      conformanceFailure(`INTEGER at offset ${offset} has no content octets.`);
+    }
+    // X.690 8.3.2: the leading nine bits are never all-zero or all-one, so a
+    // redundant sign octet is refused. Without this, one serial number or
+    // version has many encodings, and a byte comparison (§6.1 rule 7) could
+    // be evaded by re-padding.
+    if (content.length > 1) {
+      const first = content[0]!;
+      const second = content[1]!;
+      if ((first === 0x00 && (second & 0x80) === 0) || (first === 0xff && (second & 0x80) !== 0)) {
+        conformanceFailure(
+          `INTEGER at offset ${offset} has a redundant leading 0x${first.toString(16)} octet; DER integers are minimal.`,
+        );
+      }
+    }
+  }
+  if (tagNumber === 3) {
+    if (content.length === 0) {
+      conformanceFailure(
+        `BIT STRING at offset ${offset} has no content octets; the unused-bits octet is required.`,
+      );
+    }
+    if (content[0]! > 7) {
+      conformanceFailure(
+        `BIT STRING at offset ${offset} declares ${content[0]} unused bits; DER admits 0 through 7.`,
+      );
+    }
   }
 }
 
