@@ -9,6 +9,7 @@ import {
 function cell(taskId: string, arm: SkillsBenchDemo1AdmittedCell["arm"], replicate: number, reward: number): SkillsBenchDemo1AdmittedCell {
   return {
     cellId: `${taskId}/${arm}/r${replicate}`,
+    section: "slate",
     taskId,
     arm,
     replicate,

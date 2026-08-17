@@ -5113,6 +5113,58 @@
       ],
       "claudeMdSha256": null,
       "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "ada-bathroom-plan-repair/B-flat-claude-md/r0": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 547,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": "b4d512d58ad1c6cc5223fbb396ced1140dc658148603a6522e496653d2c6da19",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "energy-ac-optimal-power-flow/B-flat-claude-md/r0": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 228,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "6e88beec982e5212325a55c0e2f6b51299d5df80b2d38b3eba682b08de20b236",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
     }
   },
   "whyNotAResult": [

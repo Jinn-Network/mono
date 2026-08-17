@@ -96,4 +96,31 @@ describe("admitDeclaredCells", () => {
     expect(() => admitDeclaredCells(declaration({ slate: [] }), { cells: completeCells() }))
       .toThrow(/empty slate/u);
   });
+
+  describe("screening section", () => {
+    it("admits screening cells tagged by section and fails closed on them too", () => {
+      const cells = completeCells();
+      cells["floor/A-native-skill/r0"] = cell("floor", "A-native-skill", 0, "0");
+      cells["floor/C-no-instructions/r0"] = cell("floor", "C-no-instructions", 0, "0");
+      const withScreening = declaration({
+        screening: [{ taskId: "floor", expected: { "A-native-skill": 1, "C-no-instructions": 1 } }],
+      });
+      const admitted = admitDeclaredCells(withScreening, { cells });
+      expect(admitted.cells.filter((c) => c.section === "screening")).toHaveLength(2);
+      expect(admitted.cells.filter((c) => c.section === "slate")).toHaveLength(7);
+      expect(admitted.undeclaredCellCount).toBe(0);
+
+      delete cells["floor/C-no-instructions/r0"];
+      expect(() => admitDeclaredCells(withScreening, { cells }))
+        .toThrow(/missing cell floor\/C-no-instructions\/r0/u);
+    });
+
+    it("refuses a task declared in both sections", () => {
+      const withOverlap = declaration({
+        screening: [{ taskId: "alpha", expected: { "A-native-skill": 1 } }],
+      });
+      expect(() => admitDeclaredCells(withOverlap, { cells: completeCells() }))
+        .toThrow(/alpha appears in both slate and screening/u);
+    });
+  });
 });

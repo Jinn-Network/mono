@@ -217,10 +217,13 @@ describe.skipIf(!ENABLED)("Demo-1 evidence-native report", () => {
     const document = JSON.parse(readFileSync(CELLS, "utf8")) as { cells: Record<string, SkillsBenchDemo1CellRecord> };
 
     // Fail-closed admission: any missing, unparseable, or wrong-model declared cell throws here.
+    // Every admitted cell — slate and screening alike — enters the evidence cohort; only the
+    // declared slate enters the paired analysis.
     const admission = admitDeclaredCells(declaration, document);
-    const estimate = pairedDeltaEstimate(admission.cells);
+    const slateCells = admission.cells.filter((cell) => cell.section === "slate");
+    const estimate = pairedDeltaEstimate(slateCells);
     const decomposition = varianceDecomposition(estimate);
-    const check = manipulationCheck(admission.cells);
+    const check = manipulationCheck(slateCells);
 
     const records = new Map<string, Uint8Array>();
     const artifacts = new Map<string, Uint8Array>();
@@ -476,6 +479,8 @@ describe.skipIf(!ENABLED)("Demo-1 evidence-native report", () => {
       model: declaration.model,
       source: { benchmark: "skillsbench", release: "v1.1", commit: SOURCE_COMMIT },
       cells: admission.cells.length,
+      slateCells: slateCells.length,
+      screeningCells: admission.cells.length - slateCells.length,
       undeclaredCellsInFile: admission.undeclaredCellCount,
       results: resultsReadable,
       resultsSealedPpm: results,

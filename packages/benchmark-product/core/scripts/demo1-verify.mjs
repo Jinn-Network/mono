@@ -62,10 +62,11 @@ const admission = admitDeclaredCells(bundle.declaration, cellsDocument);
 check(admission.cells.length === summary.cells, `admission: ${admission.cells.length} cells match the report`);
 check(recordDigest(json(bundle.declaration)) === summary.digests.declaration, "declaration digest matches the report");
 
-// 2. Recompute every statistic and compare to the committed report.
-const estimate = pairedDeltaEstimate(admission.cells);
+// 2. Recompute every statistic over the declared slate and compare to the committed report.
+const slateCells = admission.cells.filter((cell) => cell.section === "slate");
+const estimate = pairedDeltaEstimate(slateCells);
 const decomposition = varianceDecomposition(estimate);
-const manipulation = manipulationCheck(admission.cells);
+const manipulation = manipulationCheck(slateCells);
 const closeTo = (a, b) => Math.abs(a - b) < 1e-9;
 const ppm = (value) => Math.round(value * 1_000_000);
 const sealedDelta = summary.resultsSealedPpm.pairedDelta;

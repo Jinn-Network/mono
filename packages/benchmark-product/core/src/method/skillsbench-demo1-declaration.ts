@@ -22,7 +22,14 @@ export interface SkillsBenchDemo1Declaration {
   readonly schema: typeof SKILLSBENCH_DEMO1_DECLARATION_SCHEMA;
   /** The subject model every admitted cell must have run on. */
   readonly model: string;
+  /** The analysis population: tasks whose cells enter the paired estimate. */
   readonly slate: readonly SkillsBenchDemo1SlateEntry[];
+  /**
+   * Slate-selection evidence: every other cell the experiment produced, enumerated exactly.
+   * Screening cells are admitted into the evidence cohort under the same fail-closed rules but
+   * are excluded from the paired analysis by declaration, not by outcome.
+   */
+  readonly screening?: readonly SkillsBenchDemo1SlateEntry[];
 }
 
 export interface SkillsBenchDemo1CellRecord {
@@ -36,6 +43,7 @@ export interface SkillsBenchDemo1CellRecord {
 
 export interface SkillsBenchDemo1AdmittedCell {
   readonly cellId: string;
+  readonly section: "slate" | "screening";
   readonly taskId: string;
   readonly arm: SkillsBenchDemo1Arm;
   readonly replicate: number;
@@ -73,40 +81,53 @@ export function admitDeclaredCells(
   document: { readonly cells: Record<string, SkillsBenchDemo1CellRecord> },
 ): SkillsBenchDemo1Admission {
   if (declaration.slate.length === 0) throw new SkillsBenchDeclarationError(["empty slate"]);
+  const slateTasks = new Set(declaration.slate.map((entry) => entry.taskId));
+  for (const entry of declaration.screening ?? []) {
+    if (slateTasks.has(entry.taskId)) {
+      throw new SkillsBenchDeclarationError([`${entry.taskId} appears in both slate and screening`]);
+    }
+  }
 
   const problems: string[] = [];
   const admitted: SkillsBenchDemo1AdmittedCell[] = [];
   const declared = new Set<string>();
 
-  for (const entry of declaration.slate) {
-    for (const [arm, count] of Object.entries(entry.expected) as [SkillsBenchDemo1Arm, number][]) {
-      for (let replicate = 0; replicate < count; replicate += 1) {
-        const cellId = `${entry.taskId}/${arm}/r${replicate}`;
-        declared.add(cellId);
-        const record = document.cells[cellId];
-        if (record === undefined) {
-          problems.push(`missing cell ${cellId}`);
-          continue;
+  const sections: readonly ["slate" | "screening", readonly SkillsBenchDemo1SlateEntry[]][] = [
+    ["slate", declaration.slate],
+    ["screening", declaration.screening ?? []],
+  ];
+  for (const [section, entries] of sections) {
+    for (const entry of entries) {
+      for (const [arm, count] of Object.entries(entry.expected) as [SkillsBenchDemo1Arm, number][]) {
+        for (let replicate = 0; replicate < count; replicate += 1) {
+          const cellId = `${entry.taskId}/${arm}/r${replicate}`;
+          declared.add(cellId);
+          const record = document.cells[cellId];
+          if (record === undefined) {
+            problems.push(`missing cell ${cellId}`);
+            continue;
+          }
+          if (record.model !== declaration.model) {
+            problems.push(`wrong model ${cellId}: ${record.model}`);
+            continue;
+          }
+          const reading = readSkillsBenchReward({ rewardTxt: record.reward });
+          if (reading.outcome === "unscorable" || reading.rawReward === null) {
+            problems.push(`unparseable reward ${cellId}: ${String(record.reward)}`);
+            continue;
+          }
+          admitted.push({
+            cellId,
+            section,
+            taskId: entry.taskId,
+            arm,
+            replicate,
+            reward: record.reward as string,
+            rewardValue: reading.rawReward,
+            fullPass: reading.outcome === "full-pass",
+            baseImage: record.baseImage,
+          });
         }
-        if (record.model !== declaration.model) {
-          problems.push(`wrong model ${cellId}: ${record.model}`);
-          continue;
-        }
-        const reading = readSkillsBenchReward({ rewardTxt: record.reward });
-        if (reading.outcome === "unscorable" || reading.rawReward === null) {
-          problems.push(`unparseable reward ${cellId}: ${String(record.reward)}`);
-          continue;
-        }
-        admitted.push({
-          cellId,
-          taskId: entry.taskId,
-          arm,
-          replicate,
-          reward: record.reward as string,
-          rewardValue: reading.rawReward,
-          fullPass: reading.outcome === "full-pass",
-          baseImage: record.baseImage,
-        });
       }
     }
   }
