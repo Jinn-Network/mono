@@ -5,6 +5,7 @@ on:
     paths:
       - 'operator/**'
       - 'apps/operator-console/**'
+      - 'packages/lifecycle-notifications/**'
       - 'packages/sdk/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
@@ -17,6 +18,7 @@ on:
     paths:
       - 'operator/**'
       - 'apps/operator-console/**'
+      - 'packages/lifecycle-notifications/**'
       - 'packages/sdk/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
@@ -196,6 +198,13 @@ jobs:
       - name: Enable Yarn 4.13.0
         run: |
           corepack prepare yarn@4.13.0 --activate
+      # The console portals @jinn-network/lifecycle-notifications, whose
+      # exports point at dist/, so build that package before next build.
+      - name: Build lifecycle-notifications
+        working-directory: packages/lifecycle-notifications
+        run: |
+          yarn install --immutable
+          yarn build
       - run: yarn install --immutable
       - run: yarn playwright install --with-deps chromium
       - run: yarn e2e
