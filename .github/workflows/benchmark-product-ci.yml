@@ -153,6 +153,11 @@ jobs:
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
+          # The Trust conformance kit -- a verify devDependency only, and the source of the
+          # anchor-proof contract suite verify runs against its own node:crypto ports
+          # (anchor-evidence design §11). Built here because a portal dependency resolves
+          # through its `dist/`.
+          (cd packages/trust/testing && yarn install --immutable && yarn build)
           (cd packages/discovery/protocol && yarn install --immutable && yarn build)
           (cd packages/discovery/client && yarn install --immutable && yarn build)
           (cd packages/discovery/serve && yarn install --immutable && yarn build)
