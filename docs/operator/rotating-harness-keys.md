@@ -75,10 +75,10 @@ The symptom is a delayed, quiet failure rather than a loud startup error:
 
 In all three cases the daemon's readiness check (it probes the responsible harness before spending gas on a claim) records the Task as FAILED locally with a clear reason instead of burning a claim. So a wrong or missing key shows up as harness-not-ready and failing claims, not a crash.
 
-To confirm a key is actually loaded, use the operator app's **per-harness precheck / doctor panel** (the §2.9 Harness Selection surface in [`operator/OPERATOR-APP-SPEC.md`](../../client/OPERATOR-APP-SPEC.md)) — it runs each harness's own readiness probe (the same probe the daemon uses) and reports installed / authenticated / ready, with a re-check action. If the panel says ready, the key is reaching the binary; if it says auth-expired or not-configured, rotate it via the table above and re-check.
+To confirm a key is actually loaded, use the operator console's **per-harness precheck / doctor panel** (the §2.9 Harness Selection surface in [`apps/operator-console/OPERATOR-APP-SPEC.md`](../../apps/operator-console/OPERATOR-APP-SPEC.md)) — it runs each harness's own readiness probe (the same probe the daemon uses) and reports installed / authenticated / ready, with a re-check action. If the panel says ready, the key is reaching the binary; if it says auth-expired or not-configured, rotate it via the table above and re-check.
 
 ## Links
 
 - Operator testnet runbook: [`docs/operator-testnet.md`](../operator-testnet.md)
 - Client README (Docker auth, SolverNet harness toggles): [`operator/README.md`](../../client/README.md)
-- Operator app spec — §2.9 Harness Selection: [`operator/OPERATOR-APP-SPEC.md`](../../client/OPERATOR-APP-SPEC.md)
+- Operator app spec — §2.9 Harness Selection: [`apps/operator-console/OPERATOR-APP-SPEC.md`](../../apps/operator-console/OPERATOR-APP-SPEC.md)

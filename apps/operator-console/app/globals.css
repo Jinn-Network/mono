@@ -1,0 +1,12 @@
+/* Layer order is load-bearing:
+   1. Tailwind — preflight + utility engine.
+   2. Byte-identical design-system copies in `layer(base)`.
+   3. theme.css — the bridge, unlayered and last. */
+@import 'tailwindcss';
+@import '../styles/colors_and_type.css' layer(base);
+@import '../styles/foundations.css' layer(base);
+@import '../styles/theme.css';
+
+@source '../app';
+@source '../components';
+@source '../lib';

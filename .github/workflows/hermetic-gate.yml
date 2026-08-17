@@ -191,6 +191,13 @@ jobs:
         working-directory: operator
         run: yarn e2e:app-flow
 
+      - name: Operator console unit tests
+        working-directory: apps/operator-console
+        run: |
+          corepack prepare yarn@4.13.0 --activate
+          yarn install --immutable
+          yarn test
+
       - name: Upload app-flow traces on failure
         if: failure()
         uses: actions/upload-artifact@v7
@@ -214,7 +221,8 @@ jobs:
             "conclusion": "success",
             "scenarios": [
               { "id": "hermetic-suite", "verdict": "pass", "failClass": null, "notes": "test/hermetic/** (adversarial claim/delivery and exact solution settlement on snapshot bytecode + deterministic RPC fallback + indexer round-trip (local Ponder vs snapshot chain)) green" },
-              { "id": "app-flow-determinism", "verdict": "pass", "failClass": null, "notes": "mocked-daemon SPA journeys (solvernet-flow create→launch + join discover→join→observe) green (#1014)" }
+              { "id": "app-flow-determinism", "verdict": "pass", "failClass": null, "notes": "mocked-daemon SPA journeys (solvernet-flow create→launch + join discover→join→observe) green (#1014)" },
+              { "id": "operator-console-unit", "verdict": "pass", "failClass": null, "notes": "apps/operator-console handshake + surface-state unit tests green" }
             ],
             "summary": "Hermetic gate green on ${HEAD_SHA} — deterministic loop + adversarial conditions on real snapshot bytecode + indexer round-trip + mocked-daemon app-flow journeys."
           }

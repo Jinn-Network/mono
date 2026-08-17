@@ -1,0 +1,59 @@
+:root {
+  --font-display:
+    var(--font-instrument-serif), 'Instrument Serif', 'Times New Roman', serif;
+  --font-mono:
+    var(--font-jetbrains-mono), 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo,
+    monospace;
+  --font-serif: var(--font-display);
+  --font-sans: var(--font-mono);
+  --radius-xs: var(--radius-1);
+  --radius-sm: var(--radius-1);
+  --radius-md: var(--radius-2);
+  --radius-lg: var(--radius-3);
+  --radius-xl: var(--radius-3);
+}
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--bg-elevated);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--bg-elevated);
+  --color-popover-foreground: var(--fg);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-fg);
+  --color-secondary: var(--bg-elevated);
+  --color-secondary-foreground: var(--fg);
+  --color-muted: var(--bg-elevated);
+  --color-muted-foreground: var(--fg-muted);
+  --color-accent: var(--bg-elevated);
+  --color-accent-foreground: var(--fg);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--fg);
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--accent);
+  --color-sunken: var(--bg-sunken);
+  --color-elevated: var(--bg-elevated);
+  --color-dim: var(--fg-dim);
+  --color-gold: var(--gold);
+  --color-wane: var(--warning);
+  --color-vow: var(--success);
+  --radius-sm: var(--radius-1);
+  --radius-md: var(--radius-2);
+  --radius-lg: var(--radius-3);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+}
+
+a[data-slot='button'] {
+  text-decoration: none;
+}
