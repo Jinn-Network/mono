@@ -107,7 +107,7 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
     expect(gui.filter((entry) => entry.gui.status === "deferred")).toEqual([]);
     expect(gui.find((entry) => entry.operation === "publicationAccounting")?.gui).toEqual({ status: "shipped", action: "publication.accounting" });
     expect(gui.filter((entry) => entry.gui.status === "unavailable").map((entry) => entry.operation).sort()).toEqual([
-      "admitHumanTruth", "bindInspectBinaryJudge", "createHumanReviewPackets", "importBinaryItemBank", "migrateTerminalBenchLegacyTask",
+      "admitHumanTruth", "bindInspectBinaryJudge", "createHumanReviewPackets", "exportHarborHubPackage", "importBinaryItemBank", "migrateTerminalBenchLegacyTask",
       "selectHarborRuntime", "selectTerminalBench21Runtime", "selectTerminalBench2Runtime", "signHumanReviewResponse",
     ]);
   });

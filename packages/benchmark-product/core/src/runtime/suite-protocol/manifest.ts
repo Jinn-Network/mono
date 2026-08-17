@@ -4,6 +4,8 @@ import { z } from "zod";
 import { sha256Hex } from "../../workspace/sealed-store.js";
 import { SUITE_COVERAGE, type SuiteCoverage } from "./comparability.js";
 
+export type { SuiteCoverage };
+
 export const SUITE_PROTOCOL_PROFILE = "https://product.jinn.network/profiles/suite-protocol-selection/v1" as const;
 export const SUITE_PROTOCOL_SELECTION_ROLE = "https://product.jinn.network/artifact-roles/suite-protocol/selection/v1" as const;
 export const SUITE_PROTOCOL_SELECTION_SCHEMA = "jinn.network/benchmark-product/suite-protocol-selection/1" as const;

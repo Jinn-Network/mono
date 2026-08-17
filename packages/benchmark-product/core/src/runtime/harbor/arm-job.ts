@@ -1,5 +1,5 @@
 /** Shared per-arm Harbor Job directory, leadership, and observe-as-start mapping. */
-import { existsSync } from "node:fs";
+import { existsSync, type Dirent } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { cellKey } from "@jinn-network/benchmarking-records";
@@ -70,8 +70,8 @@ export async function observeHarborArmTrials(input: {
   const seen = new Set<string>();
   const deadline = Date.now() + (input.timeoutMs ?? 120_000);
   while (Date.now() < deadline) {
-    let entries: Awaited<ReturnType<typeof readdir>> = [];
-    try { entries = await readdir(input.jobRoot, { withFileTypes: true }); } catch { entries = []; }
+    let entries: Dirent[] = [];
+    try { entries = await readdir(input.jobRoot, { withFileTypes: true, encoding: "utf8" }); } catch { entries = []; }
     for (const entry of entries) {
       if (!entry.isDirectory() || seen.has(entry.name)) continue;
       const configPath = join(input.jobRoot, entry.name, "config.json");

@@ -170,6 +170,7 @@ export type {
   TerminalBench21SelectionResolution,
 } from "./runtime/terminal-bench-2-1/host.js";
 export {
+  COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION,
   deriveSuiteComparability,
   officialHarborExecutionConformance,
@@ -499,6 +500,7 @@ export {
   selectTerminalBench2Runtime,
   selectTerminalBench21Runtime,
   migrateTerminalBenchLegacyTask,
+  exportHarborHubPackage,
   updateDraft,
 } from "./operations/index.js";
 export type {
@@ -580,6 +582,9 @@ export type {
   SelectTerminalBench2RuntimeResult,
   SelectTerminalBench21RuntimeInput,
   SelectTerminalBench21RuntimeResult,
+  ExportHarborHubPackageInput,
+  ExportHarborHubPackageResult,
+  HarborHubExportMode,
   RunStatusCounts,
   RunDriverStatus,
   RunStatusResult,

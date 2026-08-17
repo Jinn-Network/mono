@@ -22,6 +22,9 @@ export interface DeriveSuiteComparabilityInput {
 export const SUITE_NOT_LEADERBOARD_READY_LIMITATION =
   "This run is not a Terminal-Bench 2.1 leaderboard submission: coverage is not the full official dataset, execution was not protocol-conforming, or ATIF trajectories are not part of the locked method.";
 
+export const COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE =
+  "Community submissions are currently closed for Terminal-Bench 2.1. Colophon does not place the leaderboard row.";
+
 export function deriveSuiteComparability(input: DeriveSuiteComparabilityInput): SuiteComparability {
   const leaderboardSubmitReady = input.coverage === "full"
     && input.executionConformance
