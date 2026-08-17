@@ -24,10 +24,6 @@ on:
       - "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md"
       - "docs/superpowers/plans/2026-07-31-chain-environment-program.md"
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 permissions:
   contents: read
 

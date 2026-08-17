@@ -116,6 +116,16 @@ test('domain reusable interfaces require a source SHA', () => {
   }
 });
 
+test('reusable domain gates do not declare PR-cancelling workflow concurrency', () => {
+  for (const { filename, source } of domains.values()) {
+    assert.doesNotMatch(
+      source,
+      /^concurrency:/mu,
+      `${filename} must not share a cancel-in-progress group with its pull_request trigger; that cancels the platform-verification workflow_call`,
+    );
+  }
+});
+
 test('domain checkouts use the requested SHA with the event SHA fallback', () => {
   for (const { filename, source } of domains.values()) {
     const checkouts = (source.match(/uses: actions\/checkout@v4/gu) ?? []).length;
