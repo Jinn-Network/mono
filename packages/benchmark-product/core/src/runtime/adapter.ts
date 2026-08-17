@@ -48,8 +48,9 @@ import {
   HARBOR_TRIAL_CONFIG_ROLE,
   HARBOR_TRIAL_RESULT_ROLE,
 } from "./harbor/venue.js";
-import { assertHarborTrialMatchesCell, assertSingleHarborTrial, HarborSelectionManifestSchema, harborJobSource, harborSelectedTaskNames, harborSelectionManifestBytes, normalizeHarborSavedJobConfig } from "./harbor/manifest.js";
-import { harborArmJobName } from "./harbor/launcher.js";
+import { assertHarborRetriesAccounted, assertHarborTrialMatchesCell, assertSingleHarborTrial, HarborSelectionManifestSchema, harborFollowUpJobSource, harborJobSource, harborSelectedTaskNames, harborSelectionManifestBytes, harborTrialTaskName, normalizeHarborSavedJobConfig } from "./harbor/manifest.js";
+import { harborArmFollowUpJobName, harborArmJobName } from "./harbor/launcher.js";
+import { harborLiveTrialDirectory } from "./harbor/retry-bind.js";
 import {
   TERMINAL_BENCH_2_REGISTRY_ROLE,
   TERMINAL_BENCH_2_PROFILE,
@@ -305,9 +306,12 @@ function assertInspectRegistration(
   }
 }
 
-const HARBOR_REQUIRED_NATIVE_ROLES = [
-  HARBOR_INVOCATION_CONFIG_ROLE, HARBOR_JOB_CONFIG_ROLE, HARBOR_JOB_RESULT_ROLE, HARBOR_TRIAL_CONFIG_ROLE,
+const HARBOR_ALWAYS_REQUIRED_NATIVE_ROLES = [
+  HARBOR_INVOCATION_CONFIG_ROLE, HARBOR_JOB_CONFIG_ROLE, HARBOR_TRIAL_CONFIG_ROLE,
   HARBOR_TRIAL_RESULT_ROLE, HARBOR_REWARD_ROLE,
+] as const;
+const HARBOR_REQUIRED_NATIVE_ROLES = [
+  ...HARBOR_ALWAYS_REQUIRED_NATIVE_ROLES, HARBOR_JOB_RESULT_ROLE,
 ] as const;
 const HARBOR_ALLOWED_NATIVE_ROLES = new Set<string>([
   ...HARBOR_REQUIRED_NATIVE_ROLES, HARBOR_ATIF_ROLE, HARBOR_CTRF_ROLE,
@@ -556,7 +560,7 @@ function harborRoleChecks(expectedSelectionManifestSha256: string, correlations:
     jobTrial.length === 1
       ? { name: "harbor-job-trial-correlation", status: "pass" }
       : { name: "harbor-job-trial-correlation", status: "fail", detail: "Harbor dispatch must carry exactly one Job/Trial correlation" },
-    HARBOR_REQUIRED_NATIVE_ROLES.every((role) => availableRoles.has(role))
+    HARBOR_ALWAYS_REQUIRED_NATIVE_ROLES.every((role) => availableRoles.has(role))
       ? { name: "harbor-required-native-evidence", status: "pass" }
       : { name: "harbor-required-native-evidence", status: "fail", detail: "Harbor Job/Trial configuration, result, and reward evidence are required" },
     allowed
@@ -575,7 +579,7 @@ async function harborStructureCheck(
   const selection = correlations.find((value) => value.role === HARBOR_SELECTION_ROLE);
   const correlation = correlations.find((value) => value.role === HARBOR_CORRELATION_ROLE);
   const find = (role: string) => artifacts.find((value) => value.role === role)?.artifact;
-  if (selection === undefined || correlation === undefined || HARBOR_REQUIRED_NATIVE_ROLES.some((role) => find(role) === undefined)) {
+  if (selection === undefined || correlation === undefined || HARBOR_ALWAYS_REQUIRED_NATIVE_ROLES.some((role) => find(role) === undefined)) {
     return { name: "harbor-job-trial-structure", status: "fail", detail: "required Harbor descriptors are absent" };
   }
   try {
@@ -592,36 +596,68 @@ async function harborStructureCheck(
     const submittedJob = await exact(find(HARBOR_INVOCATION_CONFIG_ROLE)!);
     const job = normalizeHarborSavedJobConfig(await exact(find(HARBOR_JOB_CONFIG_ROLE)!), submittedJob);
     const trial = await exact(find(HARBOR_TRIAL_CONFIG_ROLE)!);
-    const jobResult = await exact(find(HARBOR_JOB_RESULT_ROLE)!);
+    const jobResultArtifact = find(HARBOR_JOB_RESULT_ROLE);
+    const jobResult = jobResultArtifact === undefined ? undefined : await exact(jobResultArtifact);
     const trialResult = await exact(find(HARBOR_TRIAL_RESULT_ROLE)!);
     const selectedArm = selected.arms.find((arm) => arm.armId === parseCellKey(lineage.cellKey as string).armId);
     const grain = selected.jobGrain ?? "per-dispatch";
-    if (grain === "per-arm") {
+    const dispatchIndex = lineage.dispatchIndex as number;
+    const expectedFollowUpName = dispatchIndex > 1 && selectedArm !== undefined
+      ? harborArmFollowUpJobName(lineage.runSha256 as string, selectedArm.armId, lineage.submissionSha256 as string, dispatchIndex)
+      : undefined;
+    const followUp = expectedFollowUpName !== undefined && (job.job_name === expectedFollowUpName || harbor.jobName === expectedFollowUpName);
+    if (HARBOR_ALWAYS_REQUIRED_NATIVE_ROLES.some((role) => find(role) === undefined)
+      || ((grain === "per-dispatch" || followUp) && jobResultArtifact === undefined)) {
+      return { name: "harbor-job-trial-structure", status: "fail", detail: "required Harbor descriptors are absent" };
+    }
+    const trialTaskName = harborTrialTaskName(trial);
+    if (followUp) {
+      if (jobResult === undefined) return { name: "harbor-job-trial-structure", status: "fail", detail: "required Harbor descriptors are absent" };
+      assertSingleHarborTrial(job, trial, jobResult);
+    } else if (grain === "per-arm") {
       const coord = parseCellKey(lineage.cellKey as string);
       const names = harborSelectedTaskNames(selected.source);
       assertHarborTrialMatchesCell(job, trial, jobResult, {
-        taskName: names.length === 1 ? names[0]! : typeof trial.task === "object" && trial.task !== null && "name" in trial.task && typeof trial.task.name === "string" ? trial.task.name : "",
+        taskName: names.length === 1 ? names[0]! : trialTaskName,
         attempt: coord.replicate,
       });
     } else {
+      if (jobResult === undefined) return { name: "harbor-job-trial-structure", status: "fail", detail: "required Harbor descriptors are absent" };
       assertSingleHarborTrial(job, trial, jobResult);
     }
-    const expectedJobName = grain === "per-arm"
-      ? harborArmJobName(lineage.runSha256 as string, selectedArm?.armId ?? "")
-      : `jinn-${lineage.submissionSha256.slice(0, 24)}-d${lineage.dispatchIndex}`;
-    const effectiveJobId = jobResult.id ?? jobResult.job_id;
-    const effectiveTrialId = trialResult.id ?? trialResult.trial_id;
+    const expectedJobName = followUp
+      ? expectedFollowUpName!
+      : grain === "per-arm"
+        ? harborArmJobName(lineage.runSha256 as string, selectedArm?.armId ?? "")
+        : `jinn-${lineage.submissionSha256.slice(0, 24)}-d${dispatchIndex}`;
+    const effectiveJobId = jobResult?.id ?? jobResult?.job_id;
+    const archivedTrialId = typeof harbor.trialId === "string" ? harbor.trialId : "";
+    const liveTrialId = harborLiveTrialDirectory(archivedTrialId);
+    const resultTrialId = typeof trialResult.id === "string" ? trialResult.id
+      : typeof trialResult.trial_id === "string" ? trialResult.trial_id
+      : liveTrialId;
     const sameJson = (left: unknown, right: unknown): boolean => Buffer.from(canonicalJsonBytes(left as never)).equals(Buffer.from(canonicalJsonBytes(right as never)));
-    const expectedSource = harborJobSource(selected);
-    if (job.job_name !== expectedJobName || harbor.jobName !== expectedJobName || effectiveJobId !== harbor.jobId || effectiveTrialId !== harbor.trialId
+    const expectedSource = followUp ? harborFollowUpJobSource(selected, trialTaskName) : harborJobSource(selected);
+    const plannedRetryOk = grain !== "per-arm" || followUp || job.retry.max_retries === selected.retryPolicy.maxRetries;
+    const selectionRetryOk = grain === "per-dispatch"
+      ? selected.retryPolicy.maxRetries === 0
+      : selected.retryPolicy.maxRetries === 0 || selected.retryPolicy.maxRetries === 3;
+    if (job.job_name !== expectedJobName || harbor.jobName !== expectedJobName
+      || (jobResult !== undefined && effectiveJobId !== harbor.jobId)
+      || (jobResult === undefined && harbor.jobId !== job.job_name && harbor.jobId !== expectedJobName)
+      || (resultTrialId !== archivedTrialId && resultTrialId !== liveTrialId)
       || selectedArm === undefined || !sameJson(job.environment, { type: selected.environment.type, ...selected.environment.configuration })
       || !sameJson(job.agents, [selectedArm.jobAgent]) || !sameJson(job.artifacts, selected.outputs.map((output) => output.artifact))
       || (!("tasks" in expectedSource) ? "tasks" in job : !("tasks" in job) || !sameJson(job.tasks, expectedSource.tasks))
       || (!("datasets" in expectedSource) ? "datasets" in job : !("datasets" in job) || !sameJson(job.datasets, expectedSource.datasets))
-      || selected.retryPolicy.maxRetries !== 0
-      || (grain === "per-dispatch" && (selected.retryPolicy.nAttempts !== 1 || selected.retryPolicy.nConcurrent !== 1))
-      || (grain === "per-arm" && (job.n_attempts !== selected.retryPolicy.nAttempts || job.n_concurrent_trials !== selected.retryPolicy.nConcurrent))
+      || !selectionRetryOk
+      || !plannedRetryOk
+      || (followUp && job.retry.max_retries !== 0)
+      || (grain === "per-dispatch" && (selected.retryPolicy.nAttempts !== 1 || selected.retryPolicy.nConcurrent !== 1 || job.retry.max_retries !== 0))
+      || (followUp && (job.n_attempts !== 1 || job.n_concurrent_trials !== 1))
+      || (grain === "per-arm" && !followUp && (job.n_attempts !== selected.retryPolicy.nAttempts || job.n_concurrent_trials !== selected.retryPolicy.nConcurrent))
     ) throw new Error("Harbor Job identity, lineage, or retry policy does not match the sealed runtime selection");
+    if (jobResult !== undefined) assertHarborRetriesAccounted(job, trial, jobResult);
     return { name: "harbor-job-trial-structure", status: "pass" };
   } catch (cause) {
     return { name: "harbor-job-trial-structure", status: "fail", detail: cause instanceof Error ? cause.message : String(cause) };

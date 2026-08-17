@@ -53,9 +53,16 @@ record remains the Colophon/Jinn bundle.
 2. **Official trial settings.** Planned trials k ≥ 5 per selected task;
    `timeout_multiplier` unset or `1.0`; no agent or verifier timeout
    overrides; no resource overrides; ATIF required for Hub packaging.
-   Harbor `retry.max_retries` stays 0. Official `-k 5` is five locked
-   scientific replicates (five TEP Submissions with `attempts.maxTotal = 1`),
-   not Harbor retry under one dispatch.
+   Harbor `retry.max_retries` is **3** for Terminal-Bench 2.1, matching
+   maintainer `harbor-framework/terminal-bench-2-1` `configs/leaderboard.yaml`
+   (`n_attempts: 5`, `retry.max_retries: 3`). Official `-k 5` is five locked
+   scientific replicates (five TEP Submissions with `attempts.maxTotal = 1`).
+   Each Harbor retry that starts work is that cell’s next Colophon dispatch
+   (replacement), not a sixth replicate. TB 2.0 keeps `max_retries: 0`.
+   `source_trial` (regrade) stays refused. Until retry starts were Colophon
+   dispatches, Colophon locked `0` so Harbor could not hide salvage under one
+   dispatch ([#2752](https://github.com/Jinn-Network/mono/issues/2752) closes
+   that delta).
 
 3. **Comparability is two-axis.** Report v2 gains no new required fields.
    A sealed product `SuiteProtocolSelection` binds through the existing Run
@@ -65,7 +72,10 @@ record remains the Colophon/Jinn bundle.
      selected tasks;
    - `coverage` — `one_task` | `ten_task` | `full` | `custom`;
    - `leaderboard_submit_ready` — `full` and `execution_conformance` and
-     ≥5 trials on every dataset task and ATIF present.
+     ≥5 trials on every dataset task accounted after collect as judged or
+     Harbor-error 0, and ATIF bytes present on the retained Harbor job
+     (not quote-time `atifRequired`). Quote/lock method bits never set this
+     true.
    Named slice membership is the lexicographic first 1 / first 10 / all
    task names from the pinned snapshot, sealed at select. Custom picks are
    legal and cannot be `full` or `leaderboard_submit_ready`.
@@ -77,8 +87,12 @@ record remains the Colophon/Jinn bundle.
    trials. Two-arm Colophon comparison = two Harbor jobs. `n_concurrent_trials`
    may exceed 1 across cells, never two Attempts on one Submission. Job
    identity for this grain is Run + arm, not Submission. Each Trial binds
-   1:1 to a pre-sealed cell **as it starts**. Replacements are new
-   Submissions. Evidence is not merged.
+   1:1 to a pre-sealed cell **as it starts**. A Harbor in-job retry that
+   starts work is a new Submission for the same cell, bound in the planned
+   job. Replacements Harbor will not retry (excluded exceptions, or the
+   planned job already finished) are filled by a tiny follow-up Harbor job
+   (`n_attempts` = 1). Evidence is not merged. Hub export still copies the
+   planned Run+arm job.
 
 5. **Hub export is a derived artifact, not the claim of record.** From a
    `leaderboard_submit_ready` run, emit an uploadable Harbor job plus

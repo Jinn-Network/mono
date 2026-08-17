@@ -73,7 +73,9 @@ export function resolveTerminalBench21Selection(workspaceDir: string, input: Ter
   } else {
     throw new TypeError("Terminal-Bench 2.1 selection requires coverage or an explicit task list");
   }
-  const coverage = coverageFromSelectedNames(datasetNames, selectedTaskNames);
+  const coverage = input.taskNames === undefined && input.coverage !== undefined
+    ? input.coverage
+    : coverageFromSelectedNames(datasetNames, selectedTaskNames);
   for (const name of selectedTaskNames) {
     const matches = parsed.task_ids.filter((task) => task.name === name);
     if (matches.length !== 1) throw new TypeError(`Terminal-Bench 2.1 selected task ${name} must occur exactly once in the resolved dataset metadata`);
@@ -123,7 +125,7 @@ export function resolveTerminalBench21Selection(workspaceDir: string, input: Ter
     coverage,
     selectedTasks,
     datasetProjectionChecksum: resolved.checksum,
-    execution: { source: "dataset", nTasks: selectedTasks.length, nAttempts: 5, nConcurrent, maxRetries: 0, jobGrain: "per-arm" },
+    execution: { source: "dataset", nTasks: selectedTasks.length, nAttempts: 5, nConcurrent, maxRetries: 3, jobGrain: "per-arm" },
   });
   const profileSha256 = sha256Hex(terminalBench21SelectionBytes(profile));
   return {
@@ -137,7 +139,7 @@ export function resolveTerminalBench21Selection(workspaceDir: string, input: Ter
       arms: input.arms,
       environment: input.environment,
       outputs: input.outputs,
-      retryPolicy: { nAttempts: 5, nConcurrent, maxRetries: 0 },
+      retryPolicy: { nAttempts: 5, nConcurrent, maxRetries: 3 },
       jobGrain: "per-arm",
       profiles: { [TERMINAL_BENCH_2_1_PROFILE]: profile },
     },

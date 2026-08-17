@@ -53,8 +53,11 @@ import {
   INSPECT_SEPARATE_ASSURANCE_LIMITATIONS,
 } from "../runtime/inspect/assurance.js";
 import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
+import { join } from "node:path";
 import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
-import { suiteFactsFromHarborManifest } from "../runtime/suite-protocol/from-harbor.js";
+import { harborArmJobName } from "../runtime/harbor/launcher.js";
+import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
+import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
 import { buildWorkspaceTrustDeps } from "../report/trust.js";
 import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receipts.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
@@ -102,7 +105,9 @@ export async function verifyRunWorkspace(
           `draft ${input.draftId} has no sealed Matrix yet — nothing to verify — run collect first`,
         );
       }
-      const runRecord = parseRun(getSealedBytes(context.workspaceDir, runState.runSha256));
+      const runSha256 = runState.runSha256;
+      const matrixSha256 = runState.matrixSha256;
+      const runRecord = parseRun(getSealedBytes(context.workspaceDir, runSha256));
       const runtimeMethod = inspectRuntimeMethodForBinding(
         context.workspaceDir,
         document.spec.evaluationRuntime,
@@ -112,7 +117,7 @@ export async function verifyRunWorkspace(
       const checks: RunVerifyCheck[] = [];
 
       // ── 1. matrix-rederivation ───────────────────────────────────────────────────────────
-      const matrixBytes = getSealedBytes(context.workspaceDir, runState.matrixSha256);
+      const matrixBytes = getSealedBytes(context.workspaceDir, matrixSha256);
       const matrixRecord = parseMatrix(matrixBytes);
       const benchRecord = parseBenchmark(getSealedBytes(context.workspaceDir, document.spec.taskSet.benchmarkSha256));
       const expected = expectedCellSet(benchRecord, runRecord);
@@ -206,11 +211,16 @@ export async function verifyRunWorkspace(
         ? [...INSPECT_SEPARATE_ASSURANCE_LIMITATIONS]
         : [];
       const suiteFacts = document.spec.evaluationRuntime?.adapterId === "harbor"
-        ? suiteFactsFromHarborManifest({
+        ? suiteFactsFromAccountedRun({
           manifest: HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
           armCount: runRecord.arms.length,
           itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
           replicates: runRecord.replicates,
+          matrix: matrixRecord,
+          armJobs: document.spec.arms.map((arm) => ({
+            armId: arm.armId,
+            jobDir: join(harborArmJobsDir(context.workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId)),
+          })),
         })
         : undefined;
       const additionalLimitations = [

@@ -48,7 +48,7 @@ export const TerminalBench21SelectionManifestSchema = z.object({
     nTasks: z.number().int().positive(),
     nAttempts: z.literal(5),
     nConcurrent: z.number().int().positive(),
-    maxRetries: z.literal(0),
+    maxRetries: z.literal(3),
     jobGrain: z.literal("per-arm"),
   }).strict(),
 }).strict().superRefine((value, context) => {

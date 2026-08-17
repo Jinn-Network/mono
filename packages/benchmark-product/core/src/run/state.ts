@@ -150,6 +150,7 @@ export const RunStateSchema = z.object({
     executionConformance: z.boolean(),
     coverage: z.enum(["one_task", "ten_task", "full", "custom"]),
     leaderboardSubmitReady: z.boolean(),
+    methodLeaderboardEligible: z.boolean(),
     cellCount: z.string().min(1),
     harborVersion: z.string().min(1),
     selectedTaskCount: z.number().int().positive(),

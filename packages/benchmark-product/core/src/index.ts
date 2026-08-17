@@ -97,8 +97,11 @@ export {
   harborSelectionManifestSha256,
   assertSupportedHarborVersion,
   assertHarborRetryPinnedOff,
+  assertHarborRetriesAccounted,
   assertHarborTrialMatchesCell,
   harborSelectedTaskNames,
+  harborTrialAttemptNumber,
+  harborTrialTaskName,
 } from "./runtime/harbor/manifest.js";
 export { HARBOR_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./runtime/harbor/manifest.js";
 export {
@@ -118,7 +121,7 @@ export {
   readHarborDispatchArchiveFor,
   harborEvidenceContributionFromArchive,
 } from "./runtime/harbor/venue.js";
-export { resolveHarborSelection } from "./runtime/harbor/host.js";
+export { harborImagePinMatchesTaskToml, resolveHarborSelection } from "./runtime/harbor/host.js";
 export type {
   HarborSelectionManifest,
 } from "./runtime/harbor/manifest.js";
@@ -173,6 +176,7 @@ export {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION,
   deriveSuiteComparability,
+  methodLeaderboardEligible,
   officialHarborExecutionConformance,
   suiteLeaderboardLimitation,
 } from "./runtime/suite-protocol/comparability.js";

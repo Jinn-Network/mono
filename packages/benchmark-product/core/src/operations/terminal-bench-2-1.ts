@@ -54,6 +54,10 @@ export function selectTerminalBench21Runtime(context: OperationContext, input: S
     if (current.spec.analysis?.method === "jinn.benchmarking.method/binary-instrument") {
       refuse("validation", `drafts.${input.draftId}.spec.analysis`, "Terminal-Bench 2.1 official suite refuses binary-instrument majority-k; use wilson@1 over judged replicates");
     }
+    const replacement = current.spec.policy.replacement;
+    if (replacement.allowed && (replacement.maxPerCell ?? 1) < 3) {
+      refuse("validation", `drafts.${input.draftId}.spec.policy.replacement`, "Terminal-Bench 2.1 official suite requires replacement.maxPerCell of at least 3");
+    }
     const selected = resolveTerminalBench21Selection(context.workspaceDir, input);
     if (putSealedBytes(context.workspaceDir, terminalBench21SelectionBytes(selected.profile)) !== selected.profileSha256) {
       refuse("record-integrity", "terminalBench21.profile", "Terminal-Bench 2.1 profile bytes changed while storing");
@@ -141,6 +145,12 @@ export function selectTerminalBench21Runtime(context: OperationContext, input: S
     const draft: DraftDocument = { ...attached, updatedAt: at, spec: parseDraftSpec({
       ...attached.spec,
       replicates: 5,
+      policy: {
+        ...attached.spec.policy,
+        replacement: replacement.allowed && (replacement.maxPerCell ?? 1) >= 3
+          ? { allowed: true, maxPerCell: replacement.maxPerCell ?? 3 }
+          : { allowed: true, maxPerCell: 3 },
+      },
       arms: attached.spec.arms.map((arm) => {
         const armSelection = resolution.manifest.arms.find((candidate) => candidate.armId === arm.armId);
         if (armSelection === undefined) refuse("validation", `spec.arms.${arm.armId}`, "Terminal-Bench 2.1 selection has no exact Harbor AgentConfig mapping for this Run arm");

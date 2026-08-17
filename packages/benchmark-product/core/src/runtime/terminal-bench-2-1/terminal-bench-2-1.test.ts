@@ -114,6 +114,8 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     const one = resolveTerminalBench21Selection(workspaceDir, request("one_task"));
     expect(one.coverage).toBe("one_task");
     expect(one.selectedTaskNames).toEqual(["t00"]);
+    expect(one.profile.execution.maxRetries).toBe(3);
+    expect(one.harbor.retryPolicy).toEqual({ nAttempts: 5, nConcurrent: 1, maxRetries: 3 });
     const ten = resolveTerminalBench21Selection(workspaceDir, request("ten_task"));
     expect(ten.coverage).toBe("ten_task");
     expect(ten.selectedTaskNames).toEqual([...names.slice(0, 10)]);
@@ -131,6 +133,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(selected.result.draft.spec.replicates).toBe(5);
+    expect(selected.result.draft.spec.policy.replacement).toEqual({ allowed: true, maxPerCell: 3 });
     const benchmark = parseBenchmark(getSealedBytes(workspaceDir, selected.result.benchmarkSha256));
     expect(benchmark.items).toHaveLength(1);
     const quoted = await runQuote(context, { draftId: "one" });
@@ -140,6 +143,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
       executionConformance: true,
       coverage: "one_task",
       leaderboardSubmitReady: false,
+      methodLeaderboardEligible: false,
       cellCount: "1 × 2 × 5",
       harborVersion: "0.21.4",
       selectedTaskCount: 1,
@@ -172,7 +176,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     expect(customQuoted.result.presentation.suite).toMatchObject({ coverage: "custom", leaderboardSubmitReady: false, cellCount: "1 × 2 × 5" });
   }, 120_000);
 
-  test("full coverage quote is leaderboard_submit_ready; lock without those quote bits refuses", async () => {
+  test("full coverage quote is method-eligible and not leaderboard_submit_ready; lock without those quote bits refuses", async () => {
     const context = await prepareDraft("full");
     const selected = await selectTerminalBench21Runtime(context, { draftId: "full", ...request("full") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
@@ -184,9 +188,11 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     expect(quoted.result.presentation.suite).toMatchObject({
       coverage: "full",
       executionConformance: true,
-      leaderboardSubmitReady: true,
+      leaderboardSubmitReady: false,
+      methodLeaderboardEligible: true,
       cellCount: "12 × 2 × 5",
     });
+    expect(requireRunState(workspaceDir, "full").suiteQuote?.leaderboardSubmitReady).toBe(false);
     const locked = runLock(context, { draftId: "full" });
     expect(locked.ok, JSON.stringify(locked)).toBe(true);
 
@@ -207,6 +213,18 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     expect(refused.error.detail).toMatch(/comparability bits/u);
   }, 120_000);
 
+  test("official suite refuses a replacement budget below Harbor max_retries 3", async () => {
+    const context = await prepareDraft("small-budget");
+    expect(updateDraft(context, {
+      draftId: "small-budget",
+      patch: { policy: { completenessFloor: "1", cellWindowMs: 3_600_000, closeAfterMs: 86_400_000, replacement: { allowed: true, maxPerCell: 1 } } },
+    }).ok).toBe(true);
+    const selected = await selectTerminalBench21Runtime(context, { draftId: "small-budget", ...request("one_task") });
+    expect(selected.ok).toBe(false);
+    if (selected.ok) return;
+    expect(selected.error.detail).toMatch(/maxPerCell of at least 3/u);
+  }, 30_000);
+
   test("official suite refuses binary-instrument majority-k", async () => {
     const context = await prepareDraft("binary");
     expect(updateDraft(context, {
@@ -218,4 +236,32 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     if (selected.ok) return;
     expect(selected.error.detail).toMatch(/binary-instrument/u);
   }, 30_000);
+
+  test("explicit full coverage on a 1-task snapshot stays full and is not quote-ready", async () => {
+    writeFileSync(metadataPath, JSON.stringify({
+      name: TERMINAL_BENCH_2_1_DATASET_ID,
+      dataset_version_content_hash: TERMINAL_BENCH_2_1_DATASET_REF,
+      task_ids: [{
+        org: "terminal-bench",
+        name: "t00",
+        ref: `sha256:${computeHarbor021TaskContentHash(join(materialPath, "t00")).contentHash}`,
+      }],
+    }));
+    const context = await prepareDraft("mini-full");
+    const selected = await selectTerminalBench21Runtime(context, { draftId: "mini-full", ...request("full") });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    expect(parseBenchmark(getSealedBytes(workspaceDir, selected.result.benchmarkSha256)).items).toHaveLength(1);
+    const quoted = await runQuote(context, { draftId: "mini-full" });
+    expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
+    if (!quoted.ok) return;
+    expect(quoted.result.presentation.suite).toMatchObject({
+      coverage: "full",
+      executionConformance: true,
+      leaderboardSubmitReady: false,
+      methodLeaderboardEligible: true,
+      selectedTaskCount: 1,
+      cellCount: "1 × 2 × 5",
+    });
+  }, 60_000);
 });

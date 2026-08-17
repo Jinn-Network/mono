@@ -24,6 +24,25 @@ export interface HarborRuntimeSelectionRequest {
 
 export const HarborHostBindingSchema = z.object({ executable: z.string().min(1), sourceMaterialPath: z.string().min(1) }).strict();
 export type HarborHostBinding = z.infer<typeof HarborHostBindingSchema>;
+
+const OCI_DIGEST_SUFFIX = /@sha256:[a-f0-9]{64}$/u;
+
+function harborOciRepositoryName(image: string): string {
+  if (OCI_DIGEST_SUFFIX.test(image)) return image.replace(OCI_DIGEST_SUFFIX, "");
+  const lastSlash = image.lastIndexOf("/");
+  const lastColon = image.lastIndexOf(":");
+  return lastColon > lastSlash ? image.slice(0, lastColon) : image;
+}
+
+/** Official TB 2.1 tasks often pin a registry tag in task.toml. The selection still records a digest. */
+export function harborImagePinMatchesTaskToml(taskImage: string | undefined, selectionImage: string): boolean {
+  if (taskImage === undefined) return false;
+  if (taskImage === selectionImage) return true;
+  const taskName = harborOciRepositoryName(taskImage);
+  const selectionName = harborOciRepositoryName(selectionImage);
+  const taskIsTagged = !OCI_DIGEST_SUFFIX.test(taskImage) && taskImage.includes(":");
+  return taskIsTagged && OCI_DIGEST_SUFFIX.test(selectionImage) && taskName.length > 0 && taskName === selectionName;
+}
 export interface HarborRuntimeSelectionResolution {
   readonly manifest: HarborSelectionManifest;
   /** Private host binding: never part of the sealed selection or a public bundle. */
@@ -96,14 +115,14 @@ export async function resolveHarborSelection(input: HarborRuntimeSelectionReques
       }
       const taskToml = readFileSync(join(materialRoot, relative), "utf8");
       const image = /^\s*docker_image\s*=\s*["']([^"']+)["']/mu.exec(taskToml)?.[1];
-      if (image !== input.environment.image) throw new TypeError("selected Harbor task material does not pin the selected OCI image digest");
+      if (!harborImagePinMatchesTaskToml(image, input.environment.image)) throw new TypeError("selected Harbor task material does not pin the selected OCI image digest");
     }
   } else {
     const taskTomlPaths = resolved.files.filter((file) => file.path === "task.toml" || file.path.endsWith("/task.toml"));
     if (taskTomlPaths.length !== 1) throw new TypeError("selected Harbor source must contain exactly one executable task.toml");
     const taskToml = readFileSync(join(materialRoot, taskTomlPaths[0]!.path), "utf8");
     const image = /^\s*docker_image\s*=\s*["']([^"']+)["']/mu.exec(taskToml)?.[1];
-    if (image !== input.environment.image) throw new TypeError("selected Harbor task material does not pin the selected OCI image digest");
+    if (!harborImagePinMatchesTaskToml(image, input.environment.image)) throw new TypeError("selected Harbor task material does not pin the selected OCI image digest");
   }
   const source = input.source.kind === "task"
     ? { kind: "task" as const, input: input.source.input, jobInput: { path: ".jinn-harbor/task" as const }, resolved }

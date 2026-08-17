@@ -1,3 +1,4 @@
+import { parseMatrix } from "@jinn-network/benchmarking-records";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,9 +14,12 @@ import { computeHarbor021TaskContentHash } from "../runtime/terminal-bench-2/hos
 import { TERMINAL_BENCH_2_1_DATASET_ID, TERMINAL_BENCH_2_1_DATASET_REF } from "../runtime/terminal-bench-2-1/manifest.js";
 import type { HarborSelectionManifest } from "../runtime/harbor/manifest.js";
 import { initWorkspace } from "./init.js";
+import { runCollect } from "./run-collect.js";
+import { runLaunch } from "./run-launch.js";
 import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
 import { requireRunState } from "../run/state.js";
+import { getSealedBytes } from "../workspace/sealed-store.js";
 import { selectTerminalBench21Runtime } from "./terminal-bench-2-1.js";
 import {
   decideHarborHubExportMode,
@@ -48,6 +52,68 @@ function writeFakeHarbor(): string {
 const args = process.argv.slice(2);
 if (args[0] === "--version" && args.length === 1) { process.stdout.write("harbor 0.21.4\\n"); process.exit(0); }
 process.exit(64);
+`, { mode: 0o700 });
+  chmodSync(path, 0o700);
+  return path;
+}
+
+function writeBatchedFakeHarbor(): string {
+  const path = join(root, "harbor-batched");
+  writeFileSync(path, `#!/usr/bin/env node
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const args = process.argv.slice(2);
+if (args[0] === "--version" && args.length === 1) { process.stdout.write("harbor 0.21.4\\n"); process.exit(0); }
+if (args[0] !== "run" || args[1] !== "-c" || args.length !== 3) process.exit(64);
+const config = JSON.parse(readFileSync(args[2], "utf8"));
+if (!Array.isArray(config.datasets) || config.datasets.length !== 1) throw new Error("one DatasetConfig required");
+if (![0, 3].includes(config.retry?.max_retries)) throw new Error("hidden retry");
+if (!Number.isInteger(config.n_attempts) || config.n_attempts < 1) throw new Error("planned attempts required");
+const names = config.datasets[0].task_names;
+if (!Array.isArray(names) || names.length !== config.datasets[0].n_tasks) throw new Error("task filter mismatch");
+for (const name of names) {
+  if (!existsSync(join(process.cwd(), config.datasets[0].path, name, "task.toml"))) throw new Error("unstaged DatasetConfig");
+}
+const job = join(config.jobs_dir, config.job_name);
+mkdirSync(job, { recursive: true });
+writeFileSync(join(job, "config.json"), JSON.stringify(config));
+const sleep = (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); };
+let index = 0;
+for (const name of names) {
+  for (let attempt = 1; attempt <= config.n_attempts; attempt++) {
+    index += 1;
+    const trialName = "trial-" + index;
+    const trial = join(job, trialName);
+    mkdirSync(join(trial, "agent"), { recursive: true });
+    mkdirSync(join(trial, "verifier"), { recursive: true });
+    mkdirSync(join(trial, "artifacts"), { recursive: true });
+    writeFileSync(join(trial, "config.json"), JSON.stringify({
+      task: { name },
+      attempt,
+      agent: config.agents[0],
+    }));
+    sleep(50);
+    writeFileSync(join(trial, "result.json"), JSON.stringify({ id: trialName, status: "success" }));
+    writeFileSync(join(trial, "agent", "recording.cast"), Buffer.from([0, 255, 1]));
+    writeFileSync(join(trial, "agent", "trajectory.json"), JSON.stringify({ schema: "ATIF" }));
+    writeFileSync(join(trial, "verifier", "reward.txt"), "1\\n");
+    writeFileSync(join(trial, "ctrf.json"), JSON.stringify({ results: [] }));
+    writeFileSync(join(trial, "artifacts", "manifest.json"), JSON.stringify({ files: ["prediction.json"] }));
+    writeFileSync(join(trial, "artifacts", "prediction.json"), JSON.stringify({
+      probabilityYes: "0.5",
+      submittedAt: "2026-01-01T00:00:00Z",
+      replicate: attempt,
+      arm: config.agents[0].model_name,
+    }));
+  }
+}
+writeFileSync(join(job, "result.json"), JSON.stringify({
+  id: config.job_name,
+  status: "success",
+  n_total_trials: index,
+  stats: { n_retries: 0 },
+}));
+process.stdout.write("fake harbor completed\\n");
 `, { mode: 0o700 });
   chmodSync(path, 0o700);
   return path;
@@ -187,13 +253,51 @@ describe("Harbor Hub export", () => {
     expect(absent.error.code).toBe("not-found");
   }, 60_000);
 
-  test("leaderboard_submit_ready packages upload and lb submit instructions without placing the row", async () => {
+  test("full coverage plus stubbed result.json without collect is inspection-upload", async () => {
     const context = await prepareDraft("full");
     expect((await selectTerminalBench21Runtime(context, { draftId: "full", ...request("full") })).ok).toBe(true);
     expect((await runQuote(context, { draftId: "full" })).ok).toBe(true);
     expect(runLock(context, { draftId: "full" }).ok).toBe(true);
     stubArmJob("full", "two");
     const exported = exportHarborHubPackage(context, { draftId: "full", armId: "two" });
+    expect(exported.ok, JSON.stringify(exported)).toBe(true);
+    if (!exported.ok) return;
+    expect(exported.result.mode).toBe("inspection-upload");
+    expect(exported.result.instructions).toContain("Do not run `uv run lb submit`");
+    expect(exported.result.instructions).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
+  }, 120_000);
+
+  test("collect of a 1-task full snapshot with ATIF on the retained job is leaderboard-submit", async () => {
+    writeFileSync(metadataPath, JSON.stringify({
+      name: TERMINAL_BENCH_2_1_DATASET_ID,
+      dataset_version_content_hash: TERMINAL_BENCH_2_1_DATASET_REF,
+      task_ids: [{
+        org: "terminal-bench",
+        name: "t00",
+        ref: `sha256:${computeHarbor021TaskContentHash(join(materialPath, "t00")).contentHash}`,
+      }],
+    }));
+    executable = writeBatchedFakeHarbor();
+    const context = await prepareDraft("ready");
+    expect((await selectTerminalBench21Runtime(context, { draftId: "ready", ...request("full") })).ok).toBe(true);
+    expect((await runQuote(context, { draftId: "ready" })).ok).toBe(true);
+    expect(requireRunState(workspaceDir, "ready").suiteQuote).toMatchObject({
+      coverage: "full",
+      leaderboardSubmitReady: false,
+      methodLeaderboardEligible: true,
+    });
+    expect(runLock(context, { draftId: "ready" }).ok).toBe(true);
+    const launched = await runLaunch(context, { draftId: "ready" });
+    expect(launched.ok, JSON.stringify(launched)).toBe(true);
+    const collected = await runCollect(context, { draftId: "ready" });
+    expect(collected.ok, JSON.stringify(collected)).toBe(true);
+    const collectedState = requireRunState(workspaceDir, "ready");
+    const matrix = parseMatrix(getSealedBytes(workspaceDir, collectedState.matrixSha256!));
+    expect(matrix.cells.map((cell) => `${cell.armId}/${cell.replicate}:${cell.outcome}`)).toEqual(
+      expect.arrayContaining(["one/1:judged", "two/5:judged"]),
+    );
+    expect(matrix.cells.every((cell) => cell.outcome === "judged" || cell.outcome === "unscorable")).toBe(true);
+    const exported = exportHarborHubPackage(context, { draftId: "ready", armId: "two" });
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
     expect(exported.result.mode).toBe("leaderboard-submit");

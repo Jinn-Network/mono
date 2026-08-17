@@ -6,6 +6,7 @@ import {
 } from "./manifest.js";
 import {
   deriveSuiteComparability,
+  methodLeaderboardEligible,
   officialHarborExecutionConformance,
   suiteLeaderboardLimitation,
 } from "./comparability.js";
@@ -27,7 +28,7 @@ describe("suite protocol named slices", () => {
 describe("suite comparability", () => {
   test("1-task × 5 with official env is protocol-faithful and not leaderboard-ready", () => {
     expect(officialHarborExecutionConformance({
-      k: 5, maxRetries: 0, jobGrain: "per-arm", environmentConfiguration: {}, harborVersion: "0.21.4",
+      k: 5, maxRetries: 3, jobGrain: "per-arm", environmentConfiguration: {}, harborVersion: "0.21.4",
     })).toBe(true);
     const bits = deriveSuiteComparability({
       coverage: "one_task",
@@ -41,16 +42,19 @@ describe("suite comparability", () => {
     expect(suiteLeaderboardLimitation(bits)).toMatch(/not a Terminal-Bench 2\.1 leaderboard submission/u);
   });
 
-  test("full coverage + k=5 + ATIF + official env is leaderboard_submit_ready", () => {
-    const bits = deriveSuiteComparability({
-      coverage: "full",
+  test("full coverage + k=5 + ATIF required + official env is method-eligible, not ready until collect", () => {
+    const method = {
+      coverage: "full" as const,
       executionConformance: true,
       k: 5,
       selectedCount: 12,
       datasetCount: 12,
       atifPresent: true,
       datasetRevisionMatchesLeaderboardPin: true,
-    });
+    };
+    expect(methodLeaderboardEligible(method)).toBe(true);
+    expect(deriveSuiteComparability(method).leaderboardSubmitReady).toBe(false);
+    const bits = deriveSuiteComparability({ ...method, cellsAccounted: true, atifOnRetainedJob: true });
     expect(bits.leaderboardSubmitReady).toBe(true);
     expect(suiteLeaderboardLimitation(bits)).toBeUndefined();
   });
@@ -68,7 +72,10 @@ describe("suite comparability", () => {
 
   test("resource or timeout overrides break execution conformance", () => {
     expect(officialHarborExecutionConformance({
-      k: 5, maxRetries: 0, jobGrain: "per-arm", environmentConfiguration: { override_cpus: 4 }, harborVersion: "0.21.4",
+      k: 5, maxRetries: 3, jobGrain: "per-arm", environmentConfiguration: { override_cpus: 4 }, harborVersion: "0.21.4",
+    })).toBe(false);
+    expect(officialHarborExecutionConformance({
+      k: 5, maxRetries: 0, jobGrain: "per-arm", environmentConfiguration: {}, harborVersion: "0.21.4",
     })).toBe(false);
     expect(officialHarborExecutionConformance({
       k: 5, maxRetries: 1, jobGrain: "per-arm", environmentConfiguration: {}, harborVersion: "0.21.4",

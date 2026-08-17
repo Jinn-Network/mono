@@ -109,6 +109,7 @@ export interface QuotePresentation {
     readonly executionConformance: boolean;
     readonly coverage: "one_task" | "ten_task" | "full" | "custom";
     readonly leaderboardSubmitReady: boolean;
+    readonly methodLeaderboardEligible: boolean;
     readonly cellCount: string;
     readonly harborVersion: string;
     readonly selectedTaskCount: number;

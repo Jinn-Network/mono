@@ -1,14 +1,18 @@
 /** Package a retained Harbor Job for Terminal-Bench 2.1 Hub upload. Never places the row. */
+import { parseMatrix } from "@jinn-network/benchmarking-records";
 import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { refuse } from "../errors.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
+import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
   type SuiteCoverage,
 } from "../runtime/suite-protocol/comparability.js";
+import { suiteComparabilityForArm, suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
 import { artifactsDir } from "../workspace/layout.js";
+import { getSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operate } from "./operate.js";
@@ -82,7 +86,22 @@ export function exportHarborHubPackage(
       if (quote === undefined) {
         refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named Hub export requires a Terminal-Bench 2.1 protocol selection");
       }
-      const mode = decideHarborHubExportMode(quote);
+      const manifest = HarborSelectionManifestSchema.parse(
+        JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
+      );
+      if (suiteSelectionFromHarbor(manifest) === undefined) {
+        refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named Hub export requires a Terminal-Bench 2.1 protocol selection");
+      }
+      const jobDir = join(harborArmJobsDir(context.workspaceDir, runState.runSha256), harborArmJobName(runState.runSha256, input.armId));
+      const assessed = runState.matrixSha256 === undefined
+        ? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false }
+        : suiteComparabilityForArm({
+          manifest,
+          matrix: parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256)),
+          armId: input.armId,
+          jobDir,
+        }) ?? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false };
+      const mode = decideHarborHubExportMode(assessed);
       if (mode === "refused") {
         refuse(
           "conflict",
@@ -92,7 +111,6 @@ export function exportHarborHubPackage(
             : "execution was not protocol-conforming; suite-named Hub export is refused",
         );
       }
-      const jobDir = join(harborArmJobsDir(context.workspaceDir, runState.runSha256), harborArmJobName(runState.runSha256, input.armId));
       if (!existsSync(join(jobDir, "result.json"))) {
         refuse("not-found", `runs.${input.draftId}.harbor.jobs.${input.armId}`, "Harbor Job for this arm was not retained");
       }

@@ -575,11 +575,15 @@ be the original Jinn dispatch under this profile.
 and [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)):
 
 - **Allowed.** One Harbor Job per arm spanning that arm's selected tasks and planned trials
-  (`n_attempts` = locked scientific replicates, `retry.max_retries` = 0); each Trial binds 1:1 to
+  (`n_attempts` = locked scientific replicates). Terminal-Bench 2.1 locks maintainer
+  `configs/leaderboard.yaml` `retry.max_retries: 3`; TB 2.0 keeps `0`. Each Trial binds 1:1 to
   a pre-sealed Jinn dispatch; the adapter observes the trial **as it starts** into Submission /
-  Attempt / Execution Evidence; engine retries and Inspect epochs stay pinned off; a replacement
-  is a new Submission, filled by a tiny follow-up job if needed. A two-arm Colophon Run is two
-  Harbor Jobs. Job identity for this grain is Run + arm, not Submission.
+  Attempt / Execution Evidence, including each Harbor retry start as that cell's next dispatch.
+  Engine retries and Inspect epochs stay pinned off. A replacement Harbor will not retry is a
+  new Submission, filled by a tiny follow-up Harbor job (`n_attempts` = 1, one task) if needed.
+  Two retry authorities over the same failure are forbidden. Hub export still copies the planned
+  Run+arm job only. A two-arm Colophon Run is two planned Harbor Jobs. Job identity for the
+  planned grain is Run + arm, not Submission.
 - **Shipped v1 (TB 2.0 one-task).** One engine invocation per cell. That grain remains valid for
   the TB 2.0 path and is an adapter constraint, not Jinn identity.
 - **Scheduled (TB 2.1).** The per-arm Job grain above. Inspect stays one execution per cell.
@@ -604,7 +608,8 @@ extension's `registrationArtifacts`. Surface on the product claim package:
 - `execution_conformance` — trial settings match the protocol for the selected tasks;
 - `coverage` — `one_task` | `ten_task` | `full` | `custom`;
 - `leaderboard_submit_ready` — full coverage, execution conformance, ≥5 trials on every dataset
-  task, and ATIF present.
+  task accounted after collect as judged or Harbor-error 0, and ATIF bytes on the retained Harbor
+  job. Quote-time method bits and a job `result.json` are not enough.
 
 Named slices (lexicographic first 1 / first 10 / all from the pinned snapshot) are how a publisher
 runs cheaply. A protocol-faithful slice is not a leaderboard-complete run. When not

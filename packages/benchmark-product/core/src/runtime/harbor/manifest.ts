@@ -97,7 +97,7 @@ const ArmSelection = z.object({
   if (arm.jobAgent.model_name !== arm.model.id) context.addIssue({ code: "custom", path: ["jobAgent", "model_name"], message: "must equal resolved model id" });
 });
 
-/** Harbor 0.21 JobConfig may cover planned trials (`n_attempts` = locked replicates). Inner retry stays off. */
+/** Harbor 0.21 JobConfig may cover planned trials (`n_attempts` = locked replicates). Inner retry is 0 or the TB 2.1 recipe 3. */
 export const HarborSelectionManifestSchema = z.object({
   schema: z.literal(HARBOR_SELECTION_SCHEMA),
   adapter: z.object({ id: z.literal(HARBOR_ADAPTER_ID), version: z.literal("1") }).strict(),
@@ -118,7 +118,7 @@ export const HarborSelectionManifestSchema = z.object({
   /** `image` is immutable task/environment material evidence, never EnvironmentConfig.type. */
   environment: z.object({ type: EnvironmentType, image: z.string().regex(/@sha256:[a-f0-9]{64}$/u), configuration: HarborEnvironmentConfigurationSchema }).strict(),
   outputs: z.array(z.object({ name: z.string().min(1), mediaType: z.string().min(1), artifact: ArtifactConfig, nativePath: z.string().regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/u) }).strict()).min(1),
-  retryPolicy: z.object({ nAttempts: z.number().int().positive(), nConcurrent: z.number().int().positive(), maxRetries: z.literal(0) }).strict(),
+  retryPolicy: z.object({ nAttempts: z.number().int().positive(), nConcurrent: z.number().int().positive(), maxRetries: z.union([z.literal(0), z.literal(3)]) }).strict(),
   /** `per-dispatch` is the TB 2.0 one-trial Job. `per-arm` is one Job spanning that arm's planned trials. */
   jobGrain: z.enum(["per-dispatch", "per-arm"]).optional(),
   /** Product-tier selection profiles may bind extra immutable resolution evidence without
@@ -140,7 +140,7 @@ function refineTaskFilter(value: { task_names: readonly string[]; n_tasks: numbe
 /** The exact non-deprecated Harbor 0.21 JobConfig subset emitted by this adapter. */
 const HarborJobConfigBase = z.object({
   job_name: z.string().min(1), jobs_dir: z.string().min(1), n_attempts: z.number().int().positive(), n_concurrent_trials: z.number().int().positive(),
-  retry: z.object({ max_retries: z.literal(0) }).strict(),
+  retry: z.object({ max_retries: z.union([z.literal(0), z.literal(3)]) }).strict(),
   environment: JobEnvironmentConfig,
   agents: z.tuple([JobAgentConfig]), artifacts: z.array(ArtifactConfig).min(1),
 });
@@ -172,10 +172,10 @@ export function normalizeHarborSavedJobConfig(saved: unknown, submitted: unknown
     ...document,
     ...(document.n_attempts === undefined ? { n_attempts: committed.n_attempts } : {}),
     ...(document.n_concurrent_trials === undefined ? { n_concurrent_trials: committed.n_concurrent_trials } : {}),
-    ...(retry === undefined && committed.retry.max_retries === 0
-      ? { retry: { max_retries: 0 } }
-      : typeof retry === "object" && retry !== null && !Array.isArray(retry) && (retry as Record<string, unknown>).max_retries === undefined && committed.retry.max_retries === 0
-        ? { retry: { ...(retry as Record<string, unknown>), max_retries: 0 } }
+    ...(retry === undefined
+      ? { retry: { max_retries: committed.retry.max_retries } }
+      : typeof retry === "object" && retry !== null && !Array.isArray(retry) && (retry as Record<string, unknown>).max_retries === undefined
+        ? { retry: { ...(retry as Record<string, unknown>), max_retries: committed.retry.max_retries } }
         : {}),
     ...(environment === undefined && committedEnvironmentIsDefault
       ? { environment: { type: "docker" } }
@@ -196,35 +196,68 @@ export function harborSelectedTaskNames(source: HarborSelectionManifest["source"
   return source.taskNames ?? [source.taskName];
 }
 
-function harborTrialTaskName(trial: Readonly<Record<string, unknown>>): string {
+function lastPathComponent(value: string): string {
+  const trimmed = value.replace(/\/+$/u, "");
+  const slash = trimmed.lastIndexOf("/");
+  return slash === -1 ? trimmed : trimmed.slice(slash + 1);
+}
+
+/** Harbor 0.21 persists Trial config with exclude_defaults: no task.name, only path + trial_name. */
+export function harborTrialTaskName(trial: Readonly<Record<string, unknown>>): string {
   const task = trial.task;
-  if (typeof task === "object" && task !== null && "name" in task && typeof task.name === "string") return task.name;
-  if (typeof trial.task_name === "string") return trial.task_name;
+  if (typeof task === "object" && task !== null) {
+    if ("name" in task && typeof task.name === "string" && task.name.length > 0) return lastPathComponent(task.name);
+    if ("path" in task && typeof task.path === "string" && task.path.length > 0) return lastPathComponent(task.path);
+  }
+  if (typeof trial.task_name === "string" && trial.task_name.length > 0) return lastPathComponent(trial.task_name);
+  if (typeof trial.trial_name === "string" && trial.trial_name.length > 0) {
+    const cut = trial.trial_name.indexOf("__");
+    return cut > 0 ? trial.trial_name.slice(0, cut) : trial.trial_name;
+  }
   return "";
 }
 
-function harborTrialAttempt(trial: Readonly<Record<string, unknown>>): number {
+export function harborTrialAttemptNumber(trial: Readonly<Record<string, unknown>>): number | undefined {
   const value = trial.attempt_number ?? trial.attempt;
-  return typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : 1;
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : undefined;
 }
 
-/** Inner Harbor retry stays off for every grain. Planned `n_attempts` is not a retry. */
+/**
+ * Harbor inner retry is accounted as the cell's next Colophon dispatch, or pinned off.
+ * `source_trial` is regrade, never `max_retries`. Unmapped `n_retries` stay hidden attempts.
+ */
+export function assertHarborRetriesAccounted(
+  job: HarborJobConfig,
+  trial: Readonly<Record<string, unknown>>,
+  jobResult: Readonly<Record<string, unknown>> | undefined,
+): void {
+  if (job.retry.max_retries !== 0 && job.retry.max_retries !== 3) {
+    throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
+  }
+  if (trial.source_trial !== undefined && trial.source_trial !== null) {
+    throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
+  }
+  if (jobResult === undefined) return;
+  const stats = jobResult.stats;
+  if (typeof stats !== "object" || stats === null || Array.isArray(stats)) {
+    throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
+  }
+  const nRetries = (stats as Record<string, unknown>).n_retries;
+  if (typeof nRetries !== "number" || !Number.isInteger(nRetries) || nRetries < 0 || nRetries > job.retry.max_retries) {
+    throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
+  }
+}
+
+/** Inner Harbor retry stays off. Planned `n_attempts` is not a retry. */
 export function assertHarborRetryPinnedOff(
   job: HarborJobConfig,
   trial: Readonly<Record<string, unknown>>,
   jobResult: Readonly<Record<string, unknown>>,
 ): void {
-  const stats = jobResult.stats;
-  if (
-    job.retry.max_retries !== 0
-    || (trial.source_trial !== undefined && trial.source_trial !== null)
-    || typeof stats !== "object"
-    || stats === null
-    || Array.isArray(stats)
-    || (stats as Record<string, unknown>).n_retries !== 0
-  ) {
+  if (job.retry.max_retries !== 0) {
     throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
   }
+  assertHarborRetriesAccounted(job, trial, jobResult);
 }
 
 /**
@@ -253,18 +286,22 @@ export function assertSingleHarborTrial(
 export function assertHarborTrialMatchesCell(
   job: HarborJobConfig,
   trial: Readonly<Record<string, unknown>>,
-  jobResult: Readonly<Record<string, unknown>>,
+  jobResult: Readonly<Record<string, unknown>> | undefined,
   expected: { readonly taskName: string; readonly attempt: number },
 ): void {
-  assertHarborRetryPinnedOff(job, trial, jobResult);
+  assertHarborRetriesAccounted(job, trial, jobResult);
   const names = "datasets" in job ? job.datasets[0]!.task_names : [];
   const expectedTrials = job.n_attempts * ("datasets" in job ? job.datasets[0]!.n_tasks : 1);
+  const nRetries = jobResult !== undefined && typeof jobResult.stats === "object" && jobResult.stats !== null && !Array.isArray(jobResult.stats)
+    ? (jobResult.stats as Record<string, unknown>).n_retries
+    : undefined;
+  const skipTotalTrials = typeof nRetries === "number" && nRetries > 0;
   if (
     job.n_attempts < expected.attempt
-    || harborTrialAttempt(trial) !== expected.attempt
+    || (harborTrialAttemptNumber(trial) !== undefined && harborTrialAttemptNumber(trial) !== expected.attempt)
     || harborTrialTaskName(trial) !== expected.taskName
     || (names.length > 0 && !names.includes(expected.taskName))
-    || (typeof jobResult.n_total_trials === "number" && jobResult.n_total_trials !== expectedTrials)
+    || (!skipTotalTrials && jobResult !== undefined && typeof jobResult.n_total_trials === "number" && jobResult.n_total_trials !== expectedTrials)
   ) {
     throw new Error("Harbor Trial does not match the locked cell");
   }
@@ -274,6 +311,17 @@ export function harborJobSource(manifest: HarborSelectionManifest): { readonly t
   if (manifest.source.kind === "task") return { tasks: [manifest.source.jobInput] };
   const task_names = [...harborSelectedTaskNames(manifest.source)];
   return { datasets: [{ ...manifest.source.jobInput, task_names, n_tasks: task_names.length }] as [z.infer<typeof DatasetExecutionInput>] };
+}
+
+export function harborFollowUpJobSource(
+  manifest: HarborSelectionManifest,
+  taskName: string,
+): { readonly tasks: readonly [z.infer<typeof TaskInput>] } | { readonly datasets: readonly [z.infer<typeof DatasetExecutionInput>] } {
+  if (manifest.source.kind === "task") return { tasks: [manifest.source.jobInput] };
+  if (taskName.length === 0 || !harborSelectedTaskNames(manifest.source).includes(taskName)) {
+    throw new TypeError("Harbor follow-up Job requires a selected task name");
+  }
+  return { datasets: [{ ...manifest.source.jobInput, task_names: [taskName], n_tasks: 1 }] as [z.infer<typeof DatasetExecutionInput>] };
 }
 
 export type HarborSelectionManifest = z.infer<typeof HarborSelectionManifestSchema>;
