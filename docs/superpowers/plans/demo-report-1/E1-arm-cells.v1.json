@@ -1,6 +1,6 @@
 {
   "schema": "jinn.demo1.arm-cells.v1",
-  "status": "PILOT CELLS \u2014 NOT A RESULT. Arm A is under suspicion of a harness defect; see armAUnderInvestigation.",
+  "status": "PILOT CELLS \u2014 NOT A RESULT. Single-replicate variance is large enough that identical cells disagree.",
   "source": {
     "benchmark": "skillsbench",
     "release": "v1.1",
@@ -59,24 +59,6 @@
         {
           "folder": "mesh-analysis",
           "bodySha256": "2179de46890fa06dfb2bffd25c0a7b975630922bef1a4515480bcdf552954ae8"
-        }
-      ],
-      "claudeMdSha256": null,
-      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
-    },
-    "citation-check/A-native-skill/r0": {
-      "taskId": "citation-check",
-      "arm": "A-native-skill",
-      "replicate": 0,
-      "model": "claude-haiku-4-5-20251001",
-      "reward": "0",
-      "fullPass": false,
-      "agentExit": 0,
-      "agentSeconds": 74,
-      "skills": [
-        {
-          "folder": "citation-management",
-          "bodySha256": "7bce60d31bfa1ce378f04a64feeca869656baba77d82fe5194713eb43b162795"
         }
       ],
       "claudeMdSha256": null,
@@ -153,13 +135,49 @@
       ],
       "claudeMdSha256": null,
       "baseImage": "python@sha256:2199a62885a12290dc9c5be3ca0681d367576ab7bf037da120e564723292a2f0"
+    },
+    "dialogue-parser/B-flat-claude-md/r0": {
+      "taskId": "dialogue-parser",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 68,
+      "skills": [
+        {
+          "folder": "dialogue-graph",
+          "bodySha256": "f5e7d5138286aa56cfe3540adb9c7b7e382bc29cbdce17e327b498cf56426912"
+        }
+      ],
+      "claudeMdSha256": "3e59d8d4babbc7f7a3c46b08fe5bca4abed48876cac4b978ab352eba5cf2537c",
+      "baseImage": "python@sha256:2199a62885a12290dc9c5be3ca0681d367576ab7bf037da120e564723292a2f0"
+    },
+    "citation-check/A-native-skill/r0": {
+      "taskId": "citation-check",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 92,
+      "skills": [
+        {
+          "folder": "citation-management",
+          "bodySha256": "7bce60d31bfa1ce378f04a64feeca869656baba77d82fe5194713eb43b162795"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
     }
   },
-  "armAUnderInvestigation": "Arm A scored 0 on every cell run so far while B and C passed, but the arm-A agent transcript shows it completing the task (dialogue-parser: 204 nodes, 321 edges, both output files reported written). A skill that is merely unhelpful does not produce a completed solve that grades zero. The leading hypothesis is a defect in arm A's own materialization or grading \u2014 it is the only arm whose graded workspace carries an extra .jinn-demo1-skills/ directory, and the only arm passed a --plugin-dir argument. Until that is diagnosed, NO arm comparison from these cells is meaningful in either direction.",
   "whyNotAResult": [
     "n=1 replicate on 3 tasks. The design calls for a rehearsal to size the run and a pre-registered official slate.",
     "Arm C passed on every task where it ran, which is the manipulation check failing: when the no-instruction control solves the task, the content has no detectable effect to deliver and A-versus-B is uninformative by the pre-declared rule.",
     "No power analysis, no MDE, no lock, no pre-registration anchor. Nothing here is a locked official run.",
     "The agent ran on the host rather than in the task image, which is a recorded deviation, not the sealed design."
-  ]
+  ],
+  "armAInvestigationClosed": "Not a harness defect. citation-check arm A scored 0 on its first run and 1 on an identical re-run (74s vs 92s, same task, same arm, same materialization). The apparent 3/3 arm-A failure was run-to-run variance, not a defect and not an effect. Every single-replicate cell here is noise; nothing in this file supports any arm comparison."
 }

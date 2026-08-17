@@ -195,6 +195,6 @@ for (const armId of armIds) {
 }
 
 try { sh(`docker rmi -f ${tag}`); } catch { /* fine */ }
-rmSync(pkg, { recursive: true, force: true });
+if (process.env.DEMO1_KEEP !== "1") rmSync(pkg, { recursive: true, force: true }); else console.log(`kept ${pkg}`);
 console.log(`\ncells recorded: ${Object.keys(results.cells).length}`);
 console.log(`sealed ${OUT}`);
