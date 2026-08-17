@@ -108,8 +108,14 @@ function pinBase(dir) {
   const referenceIndex = tokens.findIndex((token) => !token.startsWith("--"));
   const reference = tokens[referenceIndex];
   if (reference.includes("@sha256:")) return { pinned: reference, text };
-  sh(`docker pull -q ${reference}`);
-  const digest = sh(`docker inspect --format '{{index .RepoDigests 0}}' ${reference}`).trim();
+  // Local inspect first: `docker pull` consults the credential helper even for public images,
+  // and a wedged helper hangs the pull indefinitely.
+  let digest = "";
+  try { digest = sh(`docker inspect --format '{{index .RepoDigests 0}}' ${reference}`).trim(); } catch { /* not local */ }
+  if (!digest.includes("@sha256:")) {
+    sh(`docker pull -q ${reference}`, { timeout: 600_000 });
+    digest = sh(`docker inspect --format '{{index .RepoDigests 0}}' ${reference}`).trim();
+  }
   // Pin the reference but keep the flags: dropping `--platform` silently changes the architecture.
   const pinnedTokens = [...tokens];
   pinnedTokens[referenceIndex] = digest;

@@ -116,8 +116,14 @@ const dockerText = readFileSync(join(pkg, "environment", "Dockerfile"), "utf8");
 const fromTokens = /^FROM\s+(.+)$/mu.exec(dockerText)[1].trim().split(/\s+/u);
 const referenceIndex = fromTokens.findIndex((token) => !token.startsWith("--"));
 const reference = fromTokens[referenceIndex];
-sh(`docker pull -q ${reference}`);
-const baseDigest = sh(`docker inspect --format '{{index .RepoDigests 0}}' ${reference}`).trim();
+// Resolve the digest from the local image when possible: `docker pull` consults the Docker
+// credential helper even for public images, and a wedged helper hangs the pull indefinitely.
+let baseDigest = "";
+try { baseDigest = sh(`docker inspect --format '{{index .RepoDigests 0}}' ${reference}`).trim(); } catch { /* not local */ }
+if (!baseDigest.includes("@sha256:")) {
+  sh(`docker pull -q ${reference}`, { timeout: 600_000 });
+  baseDigest = sh(`docker inspect --format '{{index .RepoDigests 0}}' ${reference}`).trim();
+}
 // Pin the reference but keep the flags: dropping `--platform` would silently build for the host
 // architecture, which is a different environment than the task declares.
 const pinnedTokens = [...fromTokens];
