@@ -2018,14 +2018,14 @@
       "authorityDocuments": 32,
       "boundaryPolicies": 26,
       "catalogManifests": 97,
-      "catalogPublicSurfaces": 1319,
+      "catalogPublicSurfaces": 1326,
       "catalogSchema": 2,
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 5,
-      "discoveredFirstPartySurfaces": 2983,
-      "generatedOutputSources": 1381,
-      "generatorSources": 657,
+      "discoveredFirstPartySurfaces": 2990,
+      "generatedOutputSources": 1388,
+      "generatorSources": 658,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 6
@@ -42148,6 +42148,90 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/capture-provenance.md"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/cross-validation.md"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/kit-token-canonical.der"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/README.md"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/token-digicert.der"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/token-sslcom.der"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/trust/testing/fixtures/authorization-v1"
       },
       {
@@ -42529,6 +42613,16 @@
           "@ritsukai"
         ],
         "path": "packages/trust/testing/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/testing/scripts/mint-anchor-kit-fixtures.mjs"
       },
       {
         "categories": [
@@ -55394,6 +55488,60 @@
         "packedTargets": [],
         "path": "packages/trust/testing/fixtures/adversarial-v1/README.md",
         "relativeSource": "fixtures/adversarial-v1/README.md"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/capture-provenance.md",
+        "relativeSource": "fixtures/anchor-kit-v1/capture-provenance.md"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/cross-validation.md",
+        "relativeSource": "fixtures/anchor-kit-v1/cross-validation.md"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/kit-token-canonical.der",
+        "relativeSource": "fixtures/anchor-kit-v1/kit-token-canonical.der"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/README.md",
+        "relativeSource": "fixtures/anchor-kit-v1/README.md"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/token-digicert.der",
+        "relativeSource": "fixtures/anchor-kit-v1/token-digicert.der"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/token-sslcom.der",
+        "relativeSource": "fixtures/anchor-kit-v1/token-sslcom.der"
       },
       {
         "claim": null,

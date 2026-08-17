@@ -1603,6 +1603,12 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/trust-core | packages/trust/core/fixtures/sealing-v1/revocation.json | — | — | — |
 | conformance | @jinn-network/trust-observation | packages/trust/observation/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/adversarial-v1/README.md | — | — | — |
+| fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/capture-provenance.md | — | — | — |
+| fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/cross-validation.md | — | — | — |
+| fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/kit-token-canonical.der | — | — | — |
+| fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/README.md | — | — | — |
+| fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/token-digicert.der | — | — | — |
+| fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/token-sslcom.der | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/authorization-v1/example.json | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/authorization-v1/README.md | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/binding-v1/example.json | — | — | — |
@@ -1677,7 +1683,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3811 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3819 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1685,14 +1691,14 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 32 |
 | boundaryPolicies | 26 |
 | catalogManifests | 97 |
-| catalogPublicSurfaces | 1319 |
+| catalogPublicSurfaces | 1326 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 62 |
 | conformanceSources | 31 |
 | decisionRecords | 5 |
-| discoveredFirstPartySurfaces | 2983 |
-| generatedOutputSources | 1381 |
-| generatorSources | 657 |
+| discoveredFirstPartySurfaces | 2990 |
+| generatedOutputSources | 1388 |
+| generatorSources | 658 |
 | marketplaceControl | 2 |
 | requiredGates | 25 |
 | staticControl | 6 |

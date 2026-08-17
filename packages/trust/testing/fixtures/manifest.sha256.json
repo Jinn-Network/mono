@@ -6,6 +6,30 @@
       "sha256": "b8aa398d553497c1d223bad6287219524c701949de49e74b398791c6fef85ce5"
     },
     {
+      "id": "anchor-kit-v1/README.md",
+      "sha256": "1570dd6cab358a611f50256d14f53a47da8feb215f5692570f918dfcf9e1f3bf"
+    },
+    {
+      "id": "anchor-kit-v1/capture-provenance.md",
+      "sha256": "dec5318fce424506a2a6bdb6c8e35b4199a6be6b7e6215fd4e9404f71efc232b"
+    },
+    {
+      "id": "anchor-kit-v1/cross-validation.md",
+      "sha256": "4c4199e608cf254ff5b3ef66d9b6f470e43f215675df2388044558ec3d8f539e"
+    },
+    {
+      "id": "anchor-kit-v1/kit-token-canonical.der",
+      "sha256": "726e33332520537276ca8d0fe20d5b25ccd0eeb4b95cf3bfce06d4924673c8c0"
+    },
+    {
+      "id": "anchor-kit-v1/token-digicert.der",
+      "sha256": "eeafaa030a0ae9ab7ec10f1f68e0f6632e696da8b7883a99c00d28b041e2531a"
+    },
+    {
+      "id": "anchor-kit-v1/token-sslcom.der",
+      "sha256": "fb4c2962fb88c12c1315afd99af8440eba134e2dde3f721e80ecfbdb22b571dc"
+    },
+    {
       "id": "authorization-v1/README.md",
       "sha256": "fec14d899224aec73e666ed6d55272061a3c0b305613cf1dd21a12f3d8bc0518"
     },
