@@ -108,7 +108,7 @@ describe('bundled workspace packaging', () => {
     const scopeRoot = path.join(clientRoot, 'node_modules', '@jinn-network');
     const packagePath = path.join(clientRoot, 'package.json');
     const sourceBytes = Buffer.from(`{
-  "name": "@jinn-network/client",
+  "name": "@jinn-network/operator",
   "version": "0.3.0",
   "description": "fixture",
   "type": "module",
@@ -182,7 +182,7 @@ describe('bundled workspace packaging', () => {
     const scopeRoot = path.join(clientRoot, 'node_modules', '@jinn-network');
     const packagePath = path.join(clientRoot, 'package.json');
     const sourceBytes = Buffer.from(
-      '{"name":"@jinn-network/client","dependencies":{"@jinn-network/core":"0.1.0"},"bundledDependencies":["@jinn-network/core"]}\n',
+      '{"name":"@jinn-network/operator","dependencies":{"@jinn-network/core":"0.1.0"},"bundledDependencies":["@jinn-network/core"]}\n',
     );
 
     await mkdir(path.join(coreRoot, 'dist'), { recursive: true });
@@ -224,7 +224,7 @@ describe('bundled workspace packaging', () => {
     await writeFile(
       path.join(clientRoot, 'package.json'),
       JSON.stringify({
-        name: '@jinn-network/client',
+        name: '@jinn-network/operator',
         version: '0.2.2-canary.sha.0123456789abcdef',
         dependencies: {
           '@jinn-network/core': coreVersion,
@@ -275,7 +275,7 @@ describe('bundled workspace packaging', () => {
     const scopeRoot = path.join(clientRoot, 'node_modules', '@jinn-network');
     const packagePath = path.join(clientRoot, 'package.json');
     const sourceBytes = Buffer.from(
-      '{"name":"@jinn-network/client","dependencies":{"@jinn-network/core":"1.0.0","@jinn-network/plugin":"1.0.0"},"bundledDependencies":["@jinn-network/core","@jinn-network/plugin"],"scripts":{"postinstall":"node postinstall.mjs"}}\n',
+      '{"name":"@jinn-network/operator","dependencies":{"@jinn-network/core":"1.0.0","@jinn-network/plugin":"1.0.0"},"bundledDependencies":["@jinn-network/core","@jinn-network/plugin"],"scripts":{"postinstall":"node postinstall.mjs"}}\n',
     );
 
     await mkdir(path.join(coreRoot, 'dist'), { recursive: true });

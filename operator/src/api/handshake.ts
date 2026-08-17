@@ -10,6 +10,7 @@
  */
 import type { Hono, MiddlewareHandler } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
+import { ConstructorTokenGate } from '@jinn-network/read-plane';
 
 export interface HandshakeConfig {
   token: string;
@@ -27,17 +28,26 @@ export function addHandshakeRoutes(app: Hono, cfg: HandshakeConfig): void {
       sameSite: 'Strict',
       path: '/',
       maxAge: 60 * 60 * 24 * 30,
+      secure: (c.req.header('x-forwarded-proto') ?? '').toLowerCase() === 'https',
     });
     return c.json({ ok: true });
   });
 }
 
-export function requireUiToken(expected: string): MiddlewareHandler {
+export interface UiTokenExpectation {
+  token: string;
+  expiresAt?: string;
+}
+
+export function requireUiToken(expected: string | UiTokenExpectation): MiddlewareHandler {
+  const token = typeof expected === 'string' ? expected : expected.token;
+  const expiresAt = typeof expected === 'string' ? undefined : expected.expiresAt;
+  const gate = new ConstructorTokenGate({ token, expiresAt });
   return async (c, next) => {
     const cookie = getCookie(c, 'jinn_ui_token');
     const header = c.req.header('x-jinn-ui-token');
     const supplied = cookie ?? header;
-    if (!supplied || supplied !== expected) {
+    if (!gate.accept(supplied)) {
       return c.json({ error: 'unauthorized' }, 401);
     }
     await next();

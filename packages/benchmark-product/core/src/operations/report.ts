@@ -44,6 +44,7 @@
 
 import { BENCHMARKING_METHOD_IDS, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
 import { produceReport, type ProducedReport } from "@jinn-network/benchmarking-aggregate";
+import { join } from "node:path";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
@@ -70,6 +71,10 @@ import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 import { binaryInstrumentReportLimitations } from "../run/binary-instrument-profile.js";
+import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { harborArmJobName } from "../runtime/harbor/launcher.js";
+import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
+import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
 
 export interface RunReportInput {
   readonly draftId: string;
@@ -123,8 +128,10 @@ export function runReport(
           `draft ${input.draftId} has no sealed Matrix yet — run collect first`,
         );
       }
+      const runSha256 = runState.runSha256;
+      const matrixSha256 = runState.matrixSha256;
 
-      const matrixBytes = getSealedBytes(clockedContext.workspaceDir, runState.matrixSha256);
+      const matrixBytes = getSealedBytes(clockedContext.workspaceDir, matrixSha256);
       const matrixRecord = parseMatrix(matrixBytes);
       const runRecord = parseRun(getSealedBytes(clockedContext.workspaceDir, runState.runSha256));
       const runtimeMethod = inspectRuntimeMethodForBinding(
@@ -161,6 +168,20 @@ export function runReport(
         && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
         ? INSPECT_SEPARATE_ASSURANCE_LIMITATIONS
         : [];
+      const suiteFacts = document.spec.evaluationRuntime?.adapterId === "harbor"
+        ? suiteFactsFromAccountedRun({
+          manifest: HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+          armCount: runRecord.arms.length,
+          itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+          replicates: runRecord.replicates,
+          matrix: matrixRecord,
+          armJobs: document.spec.arms.map((arm) => ({
+            armId: arm.armId,
+            jobDir: join(harborArmJobsDir(clockedContext.workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId)),
+          })),
+        })
+        : undefined;
+      const suiteLimits = suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation];
       let binaryLimits: readonly string[] = [];
       if (selected.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
         try {
@@ -177,12 +198,13 @@ export function runReport(
         ? [
             ...venueLimits,
             ...inspectLimits,
+            ...suiteLimits,
             PAIRED_ESTIMATE_LIMITATION,
             ...(previewLimitation === undefined ? [] : [previewLimitation]),
           ]
         : previewLimitation === undefined
-          ? [...venueLimits, ...inspectLimits, ...binaryLimits]
-          : [...venueLimits, ...inspectLimits, ...binaryLimits, previewLimitation];
+          ? [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits]
+          : [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits, previewLimitation];
 
       let produced: ProducedReport;
       try {
@@ -234,6 +256,13 @@ export function runReport(
         ...(previewLog !== undefined && previewLog.count > 0
           ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }
           : {}),
+        ...(suiteFacts === undefined ? {} : {
+          suiteComparability: {
+            executionConformance: suiteFacts.quote.executionConformance,
+            coverage: suiteFacts.quote.coverage,
+            leaderboardSubmitReady: suiteFacts.quote.leaderboardSubmitReady,
+          },
+        }),
       });
       writeClaimPackage(clockedContext.workspaceDir, input.draftId, claimPackage);
 

@@ -4,7 +4,6 @@
  * cacheless schema, migration, lock, and atomic read-modify-write path.
  */
 import { isDeepStrictEqual } from 'node:util';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   ContributionCandidateV1ProjectionSchema,
@@ -25,6 +24,7 @@ import type {
   MineableTraceStorePort,
   StoredMineableTraceRecord,
 } from './_swe-rebench-v2-mineable-store-port.js';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 export type {
   MineableSkillEvent,
@@ -39,7 +39,7 @@ export const resolveMineableStateDir = resolveContributionStateDir;
 
 function defaultEpisodesDir(): string {
   return process.env['JINN_LAYER_EPISODES_DIR']
-    ?? join(homedir(), '.jinn-client', 'harness-layer', 'episodes');
+    ?? join(resolveDefaultStateDir(), 'harness-layer', 'episodes');
 }
 
 function toCandidate(record: MineableTraceRecord): ContributionCandidateV1 {

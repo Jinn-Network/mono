@@ -16,6 +16,7 @@ import {
   loadCatalogPackages,
   loadPublishableCatalogPackages,
   loadPlatformCatalog,
+  resolveRequestedReleaseGroup,
 } from './platform-catalog.mjs';
 import {
   loadNativeVerticalRoleFixtures,
@@ -23,6 +24,7 @@ import {
 } from './native-vertical-role-packages.mjs';
 import { packWave } from './publish-stack-run.mjs';
 import { buildPublishPlan } from './publish-stack.mjs';
+import { resolvePublishVersion } from './stack-publish-manifest.mjs';
 import { buildDependencyGraph, topologicalWaves } from './stack-package-graph.mjs';
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
@@ -50,16 +52,7 @@ export function catalogSha256(repoRoot) {
 }
 
 function requireIdentity({ repoRoot, sourceSha, catalogDigest, releaseGroup, lane }) {
-  if (!COMMIT_SHA.test(String(sourceSha))) {
-    throw new Error('sourceSha must be a 40-character lowercase commit SHA');
-  }
-  if (!SHA256.test(String(catalogDigest))) {
-    throw new Error('catalogDigest must be a lowercase SHA-256 digest');
-  }
-  const actualDigest = catalogSha256(repoRoot);
-  if (catalogDigest !== actualDigest) {
-    throw new Error(`catalog digest mismatch: expected ${catalogDigest}, checked out catalog is ${actualDigest}`);
-  }
+  requireCatalogBinding({ repoRoot, sourceSha, catalogDigest });
   const definition = loadPlatformCatalog(repoRoot).releaseGroups[releaseGroup];
   if (!definition) throw new Error(`prepublication release group is not cataloged: ${releaseGroup}`);
   if (!LANES.has(lane)) throw new Error(`lane must be canary or stable, got ${lane ?? '<missing>'}`);
@@ -99,12 +92,13 @@ export async function buildPrepublicationBundle({
   outDir,
   sourceSha,
   catalogDigest,
-  releaseGroup = 'platform-v1',
+  releaseGroup,
   lane,
   exec,
 }) {
   const root = resolve(repoRoot);
   const output = resolve(outDir);
+  releaseGroup = resolveRequestedReleaseGroup(loadPlatformCatalog(root), releaseGroup);
   requireIdentity({ repoRoot: root, sourceSha, catalogDigest, releaseGroup, lane });
   const catalogPackages = lane === 'canary'
     ? loadPublishableCatalogPackages(root, { releaseGroup, lane })
@@ -166,6 +160,19 @@ export async function buildPrepublicationBundle({
   return manifest;
 }
 
+function requireCatalogBinding({ repoRoot, sourceSha, catalogDigest }) {
+  if (!COMMIT_SHA.test(String(sourceSha))) {
+    throw new Error('sourceSha must be a 40-character lowercase commit SHA');
+  }
+  if (!SHA256.test(String(catalogDigest))) {
+    throw new Error('catalogDigest must be a lowercase SHA-256 digest');
+  }
+  const actualDigest = catalogSha256(repoRoot);
+  if (catalogDigest !== actualDigest) {
+    throw new Error(`catalog digest mismatch: expected ${catalogDigest}, checked out catalog is ${actualDigest}`);
+  }
+}
+
 export async function buildNativeVerticalPrepublicationBundle({
   repoRoot,
   outDir,
@@ -177,8 +184,7 @@ export async function buildNativeVerticalPrepublicationBundle({
   const root = resolve(repoRoot);
   const output = resolve(outDir);
   const releaseGroup = 'native-vertical-runtime-closure';
-  const versionAuthorityGroup = 'platform-v1';
-  requireIdentity({ repoRoot: root, sourceSha, catalogDigest, releaseGroup: versionAuthorityGroup, lane });
+  requireCatalogBinding({ repoRoot: root, sourceSha, catalogDigest });
   if (lane !== 'canary') throw new Error('native vertical role closure is canary-only');
 
   const allPackages = loadCatalogPackages(root);
@@ -189,19 +195,21 @@ export async function buildNativeVerticalPrepublicationBundle({
   if (selected.some((pkg) => pkg === undefined)) {
     throw new Error('native vertical role closure contains an uncataloged package');
   }
-  const releasePlan = buildPublishPlan({
-    repoRoot: root,
-    mode: lane,
-    sha: sourceSha,
-    releaseGroup: versionAuthorityGroup,
-  });
+  const versions = new Set(selected.map((pkg) => pkg.manifest.version));
+  if (versions.size !== 1) {
+    throw new Error(
+      `native vertical selected packages must share one version; found ${[...versions].sort().join(', ')}`,
+    );
+  }
+  const [baseVersion] = [...versions];
+  const { version, distTag } = resolvePublishVersion({ mode: lane, baseVersion, sha: sourceSha });
   const waves = topologicalWaves(buildDependencyGraph(selected)).map((wave) => wave.map((name) => {
     const pkg = byName.get(name);
     return {
       name,
       directory: pkg.directory,
       manifestPath: pkg.manifestPath,
-      spec: `${name}@${releasePlan.version}`,
+      spec: `${name}@${version}`,
     };
   }));
   const packageOrder = waves.flat().map(({ name }) => name);
@@ -215,7 +223,7 @@ export async function buildNativeVerticalPrepublicationBundle({
   for (const wave of waves) {
     artifacts.push(...await packWave(wave, {
       repoRoot: root,
-      version: releasePlan.version,
+      version,
       gitHead: sourceSha,
       inSetNames,
       tarballsDir,
@@ -228,8 +236,8 @@ export async function buildNativeVerticalPrepublicationBundle({
     catalog: { path: PLATFORM_CATALOG_PATH, sha256: catalogDigest },
     releaseGroup,
     lane,
-    packageVersion: releasePlan.version,
-    distTag: releasePlan.distTag,
+    packageVersion: version,
+    distTag,
     selection: {
       kind: 'native-vertical-runtime-closure',
       roleRoots: Object.fromEntries(Object.entries(loadNativeVerticalRoleFixtures(root))
@@ -251,7 +259,6 @@ export async function buildNativeVerticalPrepublicationBundle({
 function parseArgs(argv) {
   const parsed = {
     repoRoot: process.cwd(),
-    releaseGroup: 'platform-v1',
     nativeVerticalRoles: false,
   };
   const flags = new Map([

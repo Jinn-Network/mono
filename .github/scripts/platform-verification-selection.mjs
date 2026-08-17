@@ -1,8 +1,9 @@
 // Decides whether a pull request needs platform verification to run.
 //
-// `platform-verification.yml` fans into six domain lanes through `workflow_call`,
-// and GitHub does not evaluate `paths:` filters for `workflow_call` invocations.
-// Every pull request therefore pays for all six lanes regardless of what changed.
+// `platform-verification.yml` fans into the union of stack-published domain lanes
+// through `workflow_call`, and GitHub does not evaluate `paths:` filters for
+// `workflow_call` invocations. Every pull request therefore pays for those lanes
+// regardless of what changed.
 //
 // Selection is computed from the dependency closure of the changed packages, not
 // from their catalog `domain` label: the catalog carries hundreds of cross-domain
@@ -14,24 +15,21 @@
 // is not explicitly ignorable selects every lane.
 
 import { resolve } from 'node:path';
-import { loadCatalogPackages, loadPlatformCatalog, RUNTIME_DEPENDENCY_SECTIONS } from './platform-catalog.mjs';
+import { loadCatalogPackages, loadPlatformCatalog, RUNTIME_DEPENDENCY_SECTIONS, stackPublishedReleaseGroupIds } from './platform-catalog.mjs';
 
-export const RELEASE_GROUP = 'platform-v1';
-
-// Sections whose entries mean "a change here can change this package's build or tests".
-const DEPENDENCY_SECTIONS = [...RUNTIME_DEPENDENCY_SECTIONS, 'devDependencies'];
-
-// Each required gate of the release group, mapped to the catalog domain it verifies.
-// `record-discovery-ci` verifies the `discovery` domain — the gate id and the domain
-// name differ, so this mapping cannot be derived by string surgery on the gate id.
 export const GATE_DOMAINS = new Map([
   ['benchmarking-ci', 'benchmarking'],
+  ['environments-ci', 'environments'],
   ['evidence-ci', 'evidence'],
   ['marketplace-ci', 'marketplace'],
   ['record-discovery-ci', 'discovery'],
   ['task-execution-ci', 'task-execution'],
+  ['task-supply-ci', 'task-supply'],
   ['trust-ci', 'trust'],
 ]);
+
+// Sections whose entries mean "a change here can change this package's build or tests".
+const DEPENDENCY_SECTIONS = [...RUNTIME_DEPENDENCY_SECTIONS, 'devDependencies'];
 
 // Changes here alter how verification runs, or what it claims to verify.
 export const GLOBAL_SELECTORS = [
@@ -64,17 +62,14 @@ function isUnder(path, prefix) {
 
 function requireGateCoverage(repoRoot) {
   const catalog = loadPlatformCatalog(repoRoot);
-  const group = catalog.releaseGroups?.[RELEASE_GROUP];
-  const requiredGateIds = group?.requiredGateIds;
-  if (!Array.isArray(requiredGateIds)) {
-    throw new Error(`release group ${RELEASE_GROUP} does not declare requiredGateIds`);
-  }
-  const declared = [...requiredGateIds].sort();
+  const declared = [...new Set(
+    stackPublishedReleaseGroupIds(catalog)
+      .flatMap((groupId) => catalog.releaseGroups[groupId].requiredGateIds),
+  )].sort();
   const mapped = [...GATE_DOMAINS.keys()].sort();
-  // Fail loud rather than silently under-select when the release group gains a gate.
   if (declared.join(',') !== mapped.join(',')) {
     throw new Error(
-      `GATE_DOMAINS does not cover ${RELEASE_GROUP} requiredGateIds: declared=${declared.join(',')} mapped=${mapped.join(',')}`,
+      `GATE_DOMAINS does not cover stack-published requiredGateIds: declared=${declared.join(',')} mapped=${mapped.join(',')}`,
     );
   }
   return new Set(mapped.map((gateId) => GATE_DOMAINS.get(gateId)));
@@ -107,7 +102,7 @@ function buildGraph(repoRoot) {
 }
 
 /**
- * Longest matching catalog path wins: both `client` and `operator/src/dashboard/spa`
+ * Longest matching catalog path wins: both `operator` and `apps/operator-console`
  * are catalogued, and a change under the latter must not be attributed to the former.
  */
 function matchPackage(changedPath, packages) {

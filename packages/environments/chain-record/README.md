@@ -1,8 +1,6 @@
 # @jinn-network/chain-environment-record
 
-> Phase C maturity: experimental and publication disabled. Fixtures are exact-record evidence,
-> not an approved public compatibility promise; graduation requires approved identity semantics
-> and an external packed consumer.
+> Candidate in `sealed-platform-v1`. Eligible for receipt-gated canary; that is not independent ratification.
 
 Two sealed record kinds:
 

@@ -1,6 +1,9 @@
 import {
   RUNTIME_DEPENDENCY_SECTIONS,
+  defaultStackPublishedReleaseGroup,
   loadCatalogPackages,
+  loadPlatformCatalog,
+  requireStackPublishedReleaseGroup,
 } from './platform-catalog.mjs';
 
 // Publish-manifest rewriting and validation still inspect every npm dependency
@@ -13,8 +16,11 @@ export const DEPENDENCY_SECTIONS = [
   'peerDependencies',
 ];
 
-export function discoverStackPackages(repoRoot, { releaseGroup = 'platform-v1' } = {}) {
-  return loadCatalogPackages(repoRoot, { releaseGroup }).map(({
+export function discoverStackPackages(repoRoot, { releaseGroup } = {}) {
+  const catalog = loadPlatformCatalog(repoRoot);
+  const groupId = releaseGroup ?? defaultStackPublishedReleaseGroup(catalog);
+  requireStackPublishedReleaseGroup(catalog, groupId);
+  return loadCatalogPackages(repoRoot, { releaseGroup: groupId }).map(({
     directory,
     name,
     manifest,

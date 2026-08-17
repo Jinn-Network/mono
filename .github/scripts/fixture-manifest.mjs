@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 
-import { discoverStackPackages } from './stack-package-graph.mjs';
+import { loadStackPublishedCatalogPackages } from './platform-catalog.mjs';
 
 export const FIXTURE_MANIFEST_NAME = 'manifest.sha256.json';
 
@@ -50,7 +50,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     const write = args.includes('--write');
     if (!write && !args.includes('--check')) throw new Error('pass --write or --check');
     const drift = [];
-    for (const pkg of discoverStackPackages(root)) {
+    for (const pkg of loadStackPublishedCatalogPackages(root)) {
       const packageRoot = join(root, pkg.directory);
       const built = buildFixtureManifest(packageRoot);
       if (built === null) continue;

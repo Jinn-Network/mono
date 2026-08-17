@@ -16,7 +16,9 @@
  * claim eligibility filters on `joinedSolverNets[<manifestCid>]` (per spec
  * §12), the griefer cannot claim from a manifestCid they have not joined.
  *
- * The script drives the live launcher API the same way the SPA does:
+ * The script used to drive the live launcher HTTP the same way the SPA did.
+ * That HTTP surface retired in Stage 6 Task 17; calling this helper now fails
+ * loudly rather than posting to a 404.
  *
  *   1. Spawn op-a's daemon against its gold substrate.
  *   2. Read op-a's `~/.jinn-client/ui-token` (the protection the launcher
@@ -344,6 +346,9 @@ export interface LaunchIsolatedOptions {
 }
 
 export async function launchIsolatedSolverNet(opts: LaunchIsolatedOptions = {}): Promise<LaunchOutput> {
+  throw new Error(
+    'SolverNet creation/launch HTTP retired in Stage 6 Task 17. This helper cannot drive /v1/solvernets/drafts any more.',
+  );
   const opAName = opts.opAName ?? 'op-a';
   const opAHome = goldPath(opAName);
   const apiPort = opts.apiPort ?? 7390;

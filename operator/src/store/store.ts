@@ -1533,8 +1533,8 @@ export class Store {
     return legacyRows.map(r => ({ requestId: r.request_id, role: r.role }));
   }
 
-  recordActivityEvent(event: ActivityEventInput): void {
-    this.db.prepare(
+  recordActivityEvent(event: ActivityEventInput): number {
+    const info = this.db.prepare(
       `INSERT INTO activity_events
          (ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail,
           credential_id, cost_usd_micros, model,
@@ -1560,6 +1560,7 @@ export class Store {
       estimatedCostUsdMicros: event.estimatedCostUsdMicros ?? null,
       actualCostUsdMicros: event.actualCostUsdMicros ?? null,
     });
+    return Number(info.lastInsertRowid);
   }
 
   getRecentActivityEvents(

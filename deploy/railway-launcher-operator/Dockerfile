@@ -10,13 +10,13 @@
 
 ARG BASE_TAG=latest
 # BASE_IMAGE lets CI weld this overlay to an exact base digest built from the
-# SAME commit (--build-arg BASE_IMAGE=ghcr.io/jinn-network/client@sha256:…), so
+# SAME commit (--build-arg BASE_IMAGE=ghcr.io/jinn-network/operator@sha256:…), so
 # base+overlay can never be mismatched (#1066). It defaults to the BASE_TAG-
 # resolved tag, so Railway's existing BASE_TAG service var keeps working.
-ARG BASE_IMAGE=ghcr.io/jinn-network/client:${BASE_TAG}
+ARG BASE_IMAGE=ghcr.io/jinn-network/operator:${BASE_TAG}
 FROM ${BASE_IMAGE}
 # NOTE: BASE_TAG/BASE_IMAGE must point to a published base that includes the
-# container-native changes (#988); flip the ghcr.io/jinn-network/client package
+# container-native changes (#988); flip the ghcr.io/jinn-network/operator package
 # PUBLIC first (see README).
 # gosu lets the seed script chown the mounted Railway volume and then drop root
 # before launching the daemon. ca-certificates are required by Codex's native TLS

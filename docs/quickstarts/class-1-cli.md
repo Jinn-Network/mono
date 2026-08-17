@@ -4,9 +4,10 @@ This is the process-invocation path: install the published `jinn` binary,
 let it manage its own keystore, and submit a Task with `jinn tasks submit`.
 
 **Custody note.** `jinn run` generates the master wallet mnemonic on first
-run and keeps it in a local encrypted keystore under `~/.jinn-client/`. The
+run and keeps it in a local encrypted keystore under `~/.jinn-operator/`
+(read-fallback from `~/.jinn-client` when the new directory is empty). The
 keystore password is auto-generated and stored at
-`~/.jinn-client/keystore-password` unless you set `JINN_PASSWORD` yourself.
+`~/.jinn-operator/keystore-password` unless you set `JINN_PASSWORD` yourself.
 That is the right tradeoff for an individual operator running the daemon on
 their own machine. If your organization requires posting through a KMS/HSM
 signer under a dedicated posting Safe instead of a machine-local keystore,
@@ -17,11 +18,10 @@ landed on this branch).
 ## 1. Install
 
 ```bash
-npm install -g @jinn-network/client@latest
+npm install -g @jinn-network/operator@latest
 ```
 
-This installs the `jinn` (and `client`) binaries, which run the compiled
-`dist/` tree — daemon plus the bundled operator dashboard SPA.
+This installs the `jinn` binary, which runs the compiled `dist/` tree.
 
 ## 2. First run
 

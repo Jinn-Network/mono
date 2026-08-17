@@ -1,9 +1,9 @@
 /**
  * Global structured-event emitter for the daemon.
  *
- * Singleton ring buffer + a thin `emitStructured` helper. The /v1/events SSE
- * endpoint subscribes to this buffer; the daemon's lifecycle/error sites push
- * into it. See docs/superpowers/specs/2026-05-01-operator-local-app-design.md.
+ * Singleton ring buffer + a thin `emitStructured` helper. Notifications count
+ * `claim_failed` from this private buffer. `/v1/events` SSE is the lifecycle
+ * CloudEvents tail (activity_events), not this ring.
  */
 import { randomUUID } from 'node:crypto';
 import { EventRingBuffer } from './ring-buffer.js';

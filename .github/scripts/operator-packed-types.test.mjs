@@ -57,7 +57,7 @@ test('packed operator tarball exposes resolvable declarations', async (t) => {
   );
   await writeFile(
     join(consumer, 'probe.ts'),
-    "import * as operator from '@jinn-network/client';\nexport type Probe = typeof operator;\n",
+    "import * as operator from '@jinn-network/operator';\nexport type Probe = typeof operator;\n",
   );
 
   await run('npm', ['install', '--no-audit', '--no-fund', join(scratch, archive), 'typescript@5.9.3'], { cwd: consumer });

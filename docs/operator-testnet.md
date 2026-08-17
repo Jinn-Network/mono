@@ -36,7 +36,7 @@ The daemon reads the agent key from `/tmp/jinn-engine-impl-state/claude-mcp-hype
 ## One-command install → running
 
 ```bash
-npm install -g @jinn-network/client@latest
+npm install -g @jinn-network/operator@latest
 ```
 
 Then:
@@ -70,7 +70,7 @@ When `JINN_PASSWORD` is set, no password file is written to disk. Use `--passwor
 If you'd rather have a coding agent handle the setup, wire it in:
 
 ```bash
-npm install -g @jinn-network/client@latest
+npm install -g @jinn-network/operator@latest
 jinn integrations install     # wires the jinn-operator skill + MCP into your agent
 ```
 
@@ -243,7 +243,7 @@ yarn build
 yarn dev  # = build + run
 
 # From an npm install, reinstall:
-npm install -g @jinn-network/client@latest
+npm install -g @jinn-network/operator@latest
 ```
 
 ### `jinn doctor` says `distributor_reachable: false` with "testnet staking pool is drained"
@@ -302,7 +302,7 @@ Safe — no on-chain state is lost; `jinn bootstrap` reconciles any existing ser
 
 - Protocol repo: <https://github.com/Jinn-Network/mono>
 - Rotating harness API keys (per-harness auth stores): [`docs/operator/rotating-harness-keys.md`](operator/rotating-harness-keys.md)
-- Client npm: `@jinn-network/client`
+- Operator npm: `@jinn-network/operator`
 - CDP faucet (manual): <https://portal.cdp.coinbase.com/products/faucet>
 - HL testnet: <https://app.hyperliquid-testnet.xyz>
 - Phase 1a design spec: `spec/2026-04-06-phase-1a-design.md`

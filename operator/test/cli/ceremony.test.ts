@@ -71,7 +71,7 @@ function harness(options: {
   readonly finalityFailsOnce?: boolean;
 } = {}): Harness {
   const home = mkdtempSync(join(tmpdir(), 'ceremony-cli-'));
-  const dir = join(home, '.jinn-client');
+  const dir = join(home, '.jinn-operator');
   mkdirSync(dir, { recursive: true });
   const configPath = join(dir, 'config.json');
   const calls: string[] = [];
@@ -302,7 +302,7 @@ describe('ceremony init — read-only plan', () => {
 
 describe('ceremony password identity guard', () => {
   /**
-   * The daemon's keystore-password fallback path is HARD-CODED to `~/.jinn-client/keystore-password`
+   * The daemon's keystore-password fallback path is HARD-CODED to `~/.jinn-operator/keystore-password`
    * and does not follow `--dir`, so operator B at `~/.jinn-client-op-b` has no fallback at all. A
    * ceremony that picked its own password there would mint custody the daemon can never decrypt —
    * a failure that surfaces only at the next boot, after the anchor gas is spent.
@@ -330,10 +330,10 @@ describe('ceremony password identity guard', () => {
 
   it('uses the keystore-password file for the default dir — the value the daemon itself resolves', () => {
     const home = mkdtempSync(join(tmpdir(), 'ceremony-pw-'));
-    mkdirSync(join(home, '.jinn-client'), { recursive: true });
-    writeFileSync(join(home, '.jinn-client', 'keystore-password'), `${PASSWORD}\n`);
+    mkdirSync(join(home, '.jinn-operator'), { recursive: true });
+    writeFileSync(join(home, '.jinn-operator', 'keystore-password'), `${PASSWORD}\n`);
     const resolution = resolveCeremonyPassword({
-      dir: join(home, '.jinn-client'),
+      dir: join(home, '.jinn-operator'),
       env: { HOME: home } as NodeJS.ProcessEnv,
     });
     expect(resolution).toMatchObject({ password: PASSWORD, source: 'keystore-file', warnings: [] });
@@ -341,9 +341,9 @@ describe('ceremony password identity guard', () => {
 
   it('refuses the default dir when neither the env var nor the password file exists', () => {
     const home = mkdtempSync(join(tmpdir(), 'ceremony-pw-'));
-    mkdirSync(join(home, '.jinn-client'), { recursive: true });
+    mkdirSync(join(home, '.jinn-operator'), { recursive: true });
     const resolution = resolveCeremonyPassword({
-      dir: join(home, '.jinn-client'),
+      dir: join(home, '.jinn-operator'),
       env: { HOME: home } as NodeJS.ProcessEnv,
     });
     expect('refusal' in resolution).toBe(true);
@@ -353,10 +353,10 @@ describe('ceremony password identity guard', () => {
   /** The daemon prefers the env var, so this only bites the first start that forgets to set it. */
   it('warns when JINN_PASSWORD disagrees with the on-disk keystore password', () => {
     const home = mkdtempSync(join(tmpdir(), 'ceremony-pw-'));
-    mkdirSync(join(home, '.jinn-client'), { recursive: true });
-    writeFileSync(join(home, '.jinn-client', 'keystore-password'), 'a-different-password\n');
+    mkdirSync(join(home, '.jinn-operator'), { recursive: true });
+    writeFileSync(join(home, '.jinn-operator', 'keystore-password'), 'a-different-password\n');
     const resolution = resolveCeremonyPassword({
-      dir: join(home, '.jinn-client'),
+      dir: join(home, '.jinn-operator'),
       env: { HOME: home, JINN_PASSWORD: PASSWORD } as NodeJS.ProcessEnv,
     });
     expect((resolution as { warnings: string[] }).warnings.join(' ')).toContain('differs from the password stored');

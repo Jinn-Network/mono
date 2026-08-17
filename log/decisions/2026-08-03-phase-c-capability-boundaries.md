@@ -38,6 +38,10 @@ leave multiple durable authorities for the same side effect.
    signed entries, archive pages or heads.
 6. Ratify no task-supply or environment package on Phase B evidence alone; keep speculative
    publication disabled and defer curation extraction until two real consumers prove the join.
+   **Amended 2026-08-15 by [DR-2026-08-15](2026-08-15-withdraw-task-supply-environment-publication-caste.md):**
+   the publication-disabled-until-graduation caste is withdrawn. Packages classify into the
+   sealed-platform vs implementations groups. Curation-into-discovery-facts remains deferred.
+   First-party use still does not ratify. Catalog `publishPolicy` is unchanged until a later PR.
 7. Keep solution and verdict settlement distinct.
 8. Keep the operator default `legacy` through Phase C. Every remaining compatibility surface must
    validate against the closed transition-manifest schema before the final Phase C closure.

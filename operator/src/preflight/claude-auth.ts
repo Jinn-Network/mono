@@ -203,7 +203,7 @@ function _spawnAuthStatus(context: AuthContext, cwd: string, claudePath = 'claud
 // ---------------------------------------------------------------------------
 
 export const CLAUDE_INSTALL_URL = '/v1/setup/claude/install';
-export const CLAUDE_AUTH_SPAWN_URL = '/v1/auth/claude/spawn';
+export const CLAUDE_AUTH_LOGIN_CLI = 'claude auth login';
 
 export interface BuildClaudeIsReadyOpts {
   getClaudePath: () => string;
@@ -235,7 +235,7 @@ export function buildClaudeIsReady(
       reason: result.detail,
       nextStep: binaryMissing
         ? { description: 'Install Claude Code from the operator app', url: CLAUDE_INSTALL_URL }
-        : { description: 'Sign in to Claude from the operator app', url: CLAUDE_AUTH_SPAWN_URL },
+        : { description: 'Sign in with the Claude Code CLI', cli: CLAUDE_AUTH_LOGIN_CLI },
     };
   };
 }

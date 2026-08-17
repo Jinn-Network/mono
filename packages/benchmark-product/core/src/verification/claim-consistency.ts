@@ -63,6 +63,11 @@ export function assertClaimConsistency(input: {
    * Run schema (for example, the bundled Inspect task/selection closure). */
   readonly additionalLimitations?: readonly string[];
   readonly rehearsal?: { readonly previewCount: number; readonly timestamps: readonly string[] };
+  readonly suiteComparability?: {
+    readonly executionConformance: boolean;
+    readonly coverage: "one_task" | "ten_task" | "full" | "custom";
+    readonly leaderboardSubmitReady: boolean;
+  };
 }): void {
   const { claim, identities, runRecord, matrixRecord, reportRecord } = input;
   if (identities.reportSha256 === undefined) {
@@ -104,6 +109,7 @@ export function assertClaimConsistency(input: {
       },
     },
     ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }),
+    ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   });
   if (!bytesEqual(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) {
     const field = firstDifference(claim, expected) ?? "claim";

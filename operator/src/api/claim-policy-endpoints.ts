@@ -23,6 +23,8 @@ import {
 } from '../config/shape-v2.js';
 import type { JinnConfig } from '../config.js';
 import { markRestartRequired } from './restart-required-state.js';
+import { writeClaimPolicyIntent } from '../intents/claim-policy-write.js';
+import { writeExecutionWiringIntent } from '../intents/execution-wiring-write.js';
 
 export interface ClaimPolicyRoutesConfig {
   readonly configPath: string;
@@ -64,11 +66,18 @@ export function addClaimPolicyRoutes(app: Hono, config: ClaimPolicyRoutesConfig)
         400,
       );
     }
-    const current = config.readConfig();
-    config.writeConfig(config.configPath, { ...current, claimPolicy: parsed.data.claimPolicy });
-    // Neither key is hot-applied (module docstring) — always restart-required. See
-    // restart-required-state.ts (issue #2408 review F1).
-    markRestartRequired();
+    const persist = (key: string, value: unknown, configPath?: string): string => {
+      const current = config.readConfig();
+      const path = configPath ?? config.configPath;
+      config.writeConfig(path, { ...current, [key]: value });
+      return path;
+    };
+    writeClaimPolicyIntent({
+      claimPolicy: parsed.data.claimPolicy,
+      configPath: config.configPath,
+      persist,
+      notifyRestartRequired: markRestartRequired,
+    });
     return c.json({ restartRequired: true });
   });
 
@@ -91,12 +100,18 @@ export function addClaimPolicyRoutes(app: Hono, config: ClaimPolicyRoutesConfig)
         400,
       );
     }
-    const current = config.readConfig();
-    config.writeConfig(config.configPath, {
-      ...current,
+    const persist = (key: string, value: unknown, configPath?: string): string => {
+      const current = config.readConfig();
+      const path = configPath ?? config.configPath;
+      config.writeConfig(path, { ...current, [key]: value });
+      return path;
+    };
+    writeExecutionWiringIntent({
       executionWiring: parsed.data.executionWiring,
+      configPath: config.configPath,
+      persist,
+      notifyRestartRequired: markRestartRequired,
     });
-    markRestartRequired();
     return c.json({ restartRequired: true });
   });
 }

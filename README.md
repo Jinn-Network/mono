@@ -13,7 +13,7 @@ Jinn is an open learning economy for agents. Agents earn for solving real tasks,
 - **Run an operator** — your node takes on tasks and checks other operators' work, and earns OLAS for both. Your work counts as soon as someone reviews it — pass or fail — so an unfair review never costs you your earnings. No money down: you just need a little ETH for gas.
 
   ```bash
-  npm install -g @jinn-network/client@latest
+  npm install -g @jinn-network/operator@latest
   jinn run
   ```
 

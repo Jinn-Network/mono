@@ -8,7 +8,6 @@
 
 import { existsSync } from 'fs';
 import { copyFile, mkdir, readFile, rename, writeFile } from 'fs/promises';
-import os from 'os';
 import path from 'path';
 import {
   type FleetState,
@@ -16,8 +15,9 @@ import {
   FleetStateSchema,
   createDefaultFleetState,
 } from './types.js';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
-export const DEFAULT_EARNING_DIR = path.join(os.homedir(), '.jinn-client', 'earning');
+export const DEFAULT_EARNING_DIR = path.join(resolveDefaultStateDir(), 'earning');
 
 export const STATE_FILE = 'earning_state.json';
 export const MNEMONIC_KEYSTORE_FILE = 'master_keystore.json';

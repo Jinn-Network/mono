@@ -116,7 +116,7 @@ export const nativeStatusSnapshotSchema = z.strictObject({
   reportedSourceSha: z.string(),
   role: z.enum(['requester', 'solver', 'evaluator']),
   readiness: z.enum([
-    'explicit-legacy', 'explicit-native-unvalidated', 'live-closure-missing', 'live-closure-validated',
+    'explicit-legacy', 'explicit-native-unvalidated', 'live-closure-missing',
   ]),
   health: nativeOperatorHealthSchema,
   phaseDTransitionUsage: phaseDTransitionUsageDiagnosticsSchema,

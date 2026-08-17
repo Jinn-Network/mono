@@ -21,6 +21,14 @@ The supported first slice is deliberately narrow:
 - local native `.eval` logs produced and accepted by Inspect's official
   `read_eval_log` API.
 
+That per-cell grain is the evidence-atom rule: each Execution Evidence record
+keeps an exclusive native `.eval` log, not a Harbor-copy habit. Selecting a
+supported Inspect **task** is the integration; bringing a completed Inspect
+evaluation is not ([DR-2026-08-17](../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)).
+Batching many samples into one Inspect eval waits on a specified per-sample
+artifact rule (or an honest shared-log Collection-input rule) and is not
+scheduled here.
+
 The optional OCI host narrows this further to Python `3.11.9`, Inspect Evals
 `0.16.0`, OpenAI SDK `2.53.0`, `linux/amd64`, and one exact `sampleId`. It can
 also host the narrow task-level `sandbox="docker"` shape through the product's

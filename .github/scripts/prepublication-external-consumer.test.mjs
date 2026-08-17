@@ -366,11 +366,11 @@ test('native role closures come from executable fixture manifests and include on
   assert.deepEqual(Object.keys(roles), ['requester', 'operator', 'evaluator', 'consumer']);
   assert.deepEqual(
     Object.fromEntries(Object.entries(roles).map(([role, value]) => [role, value.closure.length])),
-    { requester: 14, operator: 23, evaluator: 26, consumer: 9 },
+    { requester: 14, operator: 25, evaluator: 28, consumer: 9 },
   );
   assert.equal(
     new Set(Object.values(roles).flatMap(({ closure }) => closure)).size,
-    29,
+    31,
     'native role union must exclude the legacy marketplace pipeline',
   );
   assert.equal(roles.operator.closure.includes('@jinn-network/marketplace-pipeline'), false);

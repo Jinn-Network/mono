@@ -25,9 +25,9 @@ import {
   unlinkSync,
   readdirSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { redactValue } from './redact-secrets.js';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 export interface FileLoggerOptions {
   /** Log directory. Defaults to `~/.jinn-client/logs`. */
@@ -60,7 +60,7 @@ export class FileLogger {
   private closed = false;
 
   constructor(opts: FileLoggerOptions = {}) {
-    this.logDir = opts.logDir ?? join(homedir(), '.jinn-client', 'logs');
+    this.logDir = opts.logDir ?? join(resolveDefaultStateDir(), 'logs');
     this.maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
     this.maxFiles = opts.maxFiles ?? DEFAULT_MAX_FILES;
     this.maxAgeDays = opts.maxAgeDays ?? DEFAULT_MAX_AGE_DAYS;

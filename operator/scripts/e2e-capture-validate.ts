@@ -79,6 +79,9 @@ const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
 loadLocalEnvFile(DEFAULT_LOCAL_ENV_PATH);
 
 async function main(): Promise<void> {
+  throw new Error(
+    'Captures HTTP retired in Stage 6 Task 17. Use `jinn capture` (CLI). yarn e2e:capture is withdrawn.',
+  );
   const localConfig = readLocalConfig();
   const daemonUrl = optionalEnv('JINN_DAEMON_URL') ?? defaultDaemonUrl(localConfig);
   const uiToken = optionalEnv('JINN_UI_TOKEN') ?? readUiToken();

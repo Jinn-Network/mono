@@ -50,7 +50,7 @@ jobs:
           fi
 
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
-          IMAGE_REPO="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/client"
+          IMAGE_REPO="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/operator"
 
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "sha=${SHORT_SHA}" >> "${GITHUB_OUTPUT}"

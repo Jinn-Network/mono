@@ -1,5 +1,4 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { BASE_SEPOLIA_TODAY, type MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
 import type { NativeRequesterRoles } from '../native-requester/requester.js';
@@ -30,6 +29,7 @@ import {
   type NativeRoleIdentityRole,
   type RoleIdentitySet,
 } from './role-identities.js';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 const ZERO_CODE_HASH = /^0x0{64}$/u;
 
@@ -202,7 +202,7 @@ function configPath(): string {
   const index = process.argv.indexOf('--config');
   return index >= 0 && process.argv[index + 1]
     ? process.argv[index + 1]!
-    : join(homedir(), '.jinn-client', 'config.json');
+    : join(resolveDefaultStateDir(), 'config.json');
 }
 
 function loadProductionConfig(): NativeProductConfig {

@@ -81,6 +81,17 @@ export {
   type SelectTerminalBench2RuntimeInput,
   type SelectTerminalBench2RuntimeResult,
 } from "./terminal-bench-2.js";
+export {
+  selectTerminalBench21Runtime,
+  type SelectTerminalBench21RuntimeInput,
+  type SelectTerminalBench21RuntimeResult,
+} from "./terminal-bench-2-1.js";
+export {
+  exportHarborHubPackage,
+  type ExportHarborHubPackageInput,
+  type ExportHarborHubPackageResult,
+  type HarborHubExportMode,
+} from "./hub-export.js";
 
 export {
   armAdd,

@@ -93,10 +93,16 @@ describe('GET /v1/notifications', () => {
 
     const res = await app.request('/v1/notifications');
     expect(res.status).toBe(200);
-    const body = await res.json() as { schemaVersion: number; generatedAt: string; notifications: unknown[] };
+    const body = await res.json() as {
+      schemaVersion: number;
+      generatedAt: string;
+      notifications: unknown[];
+      contractVersion?: { major: number; minor: number };
+    };
     expect(body.schemaVersion).toBe(1);
     expect(typeof body.generatedAt).toBe('string');
     expect(body.notifications).toEqual([]);
+    expect(body.contractVersion).toEqual({ major: 1, minor: 0 });
   });
 
   it('derives bootstrap_blocked from raw.fleet (no services ⇒ not running)', async () => {

@@ -13,6 +13,7 @@ import {
   deriveMasterAddress,
 } from '../../earning/wallet.js';
 import { resolveCliPassword } from '../password.js';
+import { resolveDefaultStateDir } from '../../state-dir.js';
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -65,7 +66,7 @@ async function run(ctx: CommandContext): Promise<void> {
   const earningDir =
     ctx.env['JINN_EARNING_DIR'] ??
     configEarningDir ??
-    join(process.env['HOME'] ?? '.', '.jinn-client', 'earning');
+    join(resolveDefaultStateDir(), 'earning');
   const store = new FleetStateStore(earningDir);
 
   if (!store.hasMnemonicKeystore() && store.hasLegacyKeystore()) {

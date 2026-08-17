@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'operator/**'
+      - 'apps/operator-console/**'
+      - 'packages/lifecycle-notifications/**'
       - 'packages/sdk/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
@@ -15,6 +17,8 @@ on:
     branches: [main]
     paths:
       - 'operator/**'
+      - 'apps/operator-console/**'
+      - 'packages/lifecycle-notifications/**'
       - 'packages/sdk/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
@@ -174,46 +178,41 @@ jobs:
           echo "✓ Tarball contents verified"
 
   dashboard-e2e:
-    # Playwright E2E for the operator dashboard SPA — every top-level
-    # test/dashboard/*.e2e.test.ts, driven against a real daemon serving the
-    # built bundle with the daemon API mocked at the page.route() boundary.
-    #
-    # This job used to run ONLY funding-sequence, because the rest of the
-    # dashboard E2Es had stale failures and were quarantined behind a
-    # "fixing those is filed as a follow-up" comment with no owner and no
-    # expiry. Sitting outside CI for months is what let them rot in the first
-    # place. They are fixed and green now, so the whole surface is gated here.
-    #
-    # `e2e:dashboard-app` filters to top-level files by regex rather than
-    # naming them, so a NEW dashboard E2E is gated the moment it lands — an
-    # allowlist would re-create the quarantine one file at a time. The regex
-    # deliberately excludes test/dashboard/release-prep/, which is release-tier
-    # T1.4 and runs from `yarn release:tier-1:T1.4`, not from PR CI.
-    #
-    # solvernet-flow + join also run in hermetic-gate, where they serve a
-    # different purpose (the determinism verdict). The few seconds of overlap
-    # buy a dashboard job whose scope needs no maintenance.
-    name: Dashboard E2E (Playwright)
+    # Playwright E2E for the operator console — claim-policy, posting-status,
+    # and funding-sequence against a mocked daemon API. The daemon origin has
+    # no human surface after Stage 6.
+    name: Operator console E2E (Playwright)
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/operator-console
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: corepack enable
+        working-directory: .
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack prepare yarn@4.13.0 --activate
+      # The console portals @jinn-network/lifecycle-notifications, whose
+      # exports point at dist/, so build that package before next build.
+      - name: Build lifecycle-notifications
+        working-directory: packages/lifecycle-notifications
+        run: |
+          yarn install --immutable
+          yarn build
       - run: yarn install --immutable
-      # Install only chromium — the playwright.config.ts targets chromium
-      # exclusively, so this is the minimal browser surface.
-      - run: npx playwright install --with-deps chromium
-      - run: yarn e2e:dashboard-app
-      # Upload traces on failure so a reviewer can step through the timeline.
+      - run: yarn playwright install --with-deps chromium
+      - run: yarn e2e
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: playwright-traces
-          path: operator/test-results/
+          path: apps/operator-console/test-results/
           retention-days: 7
 
   degraded-daemon-guard-e2e:

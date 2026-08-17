@@ -69,6 +69,7 @@ import {
   DEFAULT_SYNTHETIC_ESCROW_PARAMS,
   escrowInputsFromPatch,
 } from './_swe-rebench-v2-harvest.js';
+import { STATE_DIR_NAME } from '../state-dir.js';
 
 export const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
 const SOLVER_TYPE = 'swe-rebench-v2.v1';
@@ -173,7 +174,7 @@ export function defaultStateDir(): string {
   // (`config.sweRebenchV2StateDir`). Callers must not use
   // `process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? defaultStateDir()` in
   // production — that idiom is retired (#1000).
-  return join(homedir(), '.jinn-client', 'swe-rebench-v2');
+  return join(homedir(), STATE_DIR_NAME, 'swe-rebench-v2');
 }
 
 /**

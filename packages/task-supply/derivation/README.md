@@ -1,8 +1,6 @@
 # @jinn-network/task-derivation
 
-> Phase C maturity: experimental and publication disabled. This package has no independent
-> product consumer and makes no compatibility promise until two products and approved derivation
-> semantics establish a reusable boundary.
+> Candidate in `implementations-v1`. Eligible for receipt-gated canary; that is not independent ratification.
 
 Strategies that turn a **described execution environment** plus strategy inputs into
 admitted, sealed Task + EvaluationSpec pairs in a supply pool.

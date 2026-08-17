@@ -1,5 +1,7 @@
 # @jinn-network/record-discovery-facts-environments
 
+> Candidate in `implementations-v1`. Eligible for receipt-gated canary; that is not independent ratification.
+
 The record-discovery facts profile for the environment record kind, plus the recompute
 function a consumer runs to re-derive that card from the record's own sealed bytes.
 

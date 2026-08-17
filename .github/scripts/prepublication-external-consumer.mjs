@@ -17,7 +17,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { canonicalJsonBytes, catalogSha256 } from './build-prepublication-bundle.mjs';
-import { loadCatalogPackages } from './platform-catalog.mjs';
+import { loadCatalogPackages, loadPlatformCatalog, loadStackPublishedCatalogPackages, requireStackPublishedReleaseGroup } from './platform-catalog.mjs';
 import {
   deriveNativeVerticalRoleClosures,
   loadNativeVerticalRoleFixtures,
@@ -108,7 +108,7 @@ function flattenedExportTargets(value) {
 
 export function sourceWildcardExportViolations(repoRoot) {
   const violations = [];
-  for (const pkg of loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' })) {
+  for (const pkg of loadStackPublishedCatalogPackages(repoRoot)) {
     const files = new Set();
     walkSourceFiles(join(repoRoot, pkg.directory), '', files);
     for (const [key, value] of Object.entries(pkg.manifest.exports ?? {})) {
@@ -176,10 +176,8 @@ function validateBundle(repoRoot, manifestPath) {
       throw new Error('native vertical closure-only package set does not match the catalog-derived closure');
     }
   } else {
-    if (manifest.releaseGroup !== 'platform-v1') {
-      throw new Error(`prepublication manifest releaseGroup must be platform-v1, got ${manifest.releaseGroup}`);
-    }
-    catalogPackages = allCatalogPackages.filter(({ catalog }) => catalog.releaseGroup === 'platform-v1');
+    catalogPackages = allCatalogPackages.filter(({ catalog }) => catalog.releaseGroup === manifest.releaseGroup);
+    requireStackPublishedReleaseGroup(loadPlatformCatalog(repoRoot), manifest.releaseGroup);
   }
   const catalogNames = catalogPackages.map(({ name }) => name);
   const order = manifest.packageOrder;
@@ -500,12 +498,33 @@ export function runConsumerProbe({ consumerRoot, exec = defaultExec }) {
 export async function runTarballConsumer({
   repoRoot,
   manifestPath,
+  manifestPaths,
   nativeManifestPath,
   keep = false,
   exec = defaultExec,
 }) {
   const root = resolve(repoRoot);
-  const validated = validateBundle(root, resolve(manifestPath));
+  const paths = [...new Set((manifestPaths ?? []).concat(manifestPath ? [manifestPath] : []))]
+    .map((path) => resolve(path));
+  if (paths.length === 0) throw new Error('--manifest is required');
+  const bundles = paths.map((path) => validateBundle(root, path));
+  const names = bundles.flatMap((bundle) => bundle.catalogPackages.map(({ name }) => name));
+  if (new Set(names).size !== names.length) {
+    throw new Error('stack-published prepublication manifests contain overlapping packages');
+  }
+  const identities = new Set(bundles.map((bundle) => JSON.stringify({
+    sourceSha: bundle.manifest.sourceSha,
+    catalog: bundle.manifest.catalog,
+    packageVersion: bundle.manifest.packageVersion,
+  })));
+  if (identities.size !== 1) {
+    throw new Error('stack-published prepublication manifests do not share one exact source identity');
+  }
+  const validated = {
+    manifest: bundles[0].manifest,
+    catalogPackages: bundles.flatMap((bundle) => bundle.catalogPackages),
+    tarballs: bundles.flatMap((bundle) => bundle.tarballs),
+  };
   const nativeValidated = nativeManifestPath
     ? validateBundle(root, resolve(nativeManifestPath))
     : undefined;
@@ -624,7 +643,7 @@ export async function runTarballConsumer({
 }
 
 function parseArgs(argv) {
-  const parsed = { repoRoot: process.cwd(), keep: false };
+  const parsed = { repoRoot: process.cwd(), keep: false, manifestPaths: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === '--keep') {
@@ -637,11 +656,11 @@ function parseArgs(argv) {
     const value = argv[index + 1];
     if (value === undefined) throw new Error(`${flag} requires a value`);
     if (flag === '--root') parsed.repoRoot = value;
-    if (flag === '--manifest') parsed.manifestPath = value;
+    if (flag === '--manifest') parsed.manifestPaths.push(value);
     if (flag === '--native-manifest') parsed.nativeManifestPath = value;
     index += 1;
   }
-  if (!parsed.manifestPath) throw new Error('--manifest is required');
+  if (parsed.manifestPaths.length === 0) throw new Error('--manifest is required');
   return parsed;
 }
 

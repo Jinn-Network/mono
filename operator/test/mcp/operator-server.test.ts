@@ -145,7 +145,7 @@ describe('operator MCP helpers', () => {
 
     const { __setExecSyncForTesting } = await import('@/lifecycle/process-discovery.js');
     const home = mkdtempSync(join(tmpdir(), 'jinn-mcp-recycled-pid-'));
-    const earningDir = join(home, '.jinn-client', 'earning');
+    const earningDir = join(home, '.jinn-operator', 'earning');
     mkdirSync(earningDir, { recursive: true });
     writeFileSync(join(earningDir, 'daemon.pid'), '987654\n', 'utf-8');
 
@@ -153,7 +153,7 @@ describe('operator MCP helpers', () => {
     const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
     try {
       const { startDetachedDaemon } = await import('@/mcp/operator-server.js');
-      const promise = startDetachedDaemon({ HOME: home });
+      const promise = startDetachedDaemon({ HOME: home, JINN_EARNING_DIR: earningDir });
       await vi.advanceTimersByTimeAsync(5_000);
       const result = await promise;
 
@@ -170,7 +170,7 @@ describe('operator MCP helpers', () => {
   it('returns already_running when the pidfile records a live jinn daemon', async () => {
     const { __setExecSyncForTesting } = await import('@/lifecycle/process-discovery.js');
     const home = mkdtempSync(join(tmpdir(), 'jinn-mcp-already-running-'));
-    const earningDir = join(home, '.jinn-client', 'earning');
+    const earningDir = join(home, '.jinn-operator', 'earning');
     mkdirSync(earningDir, { recursive: true });
     writeFileSync(join(earningDir, 'daemon.pid'), '987654\n', 'utf-8');
 
@@ -178,7 +178,7 @@ describe('operator MCP helpers', () => {
     const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
     try {
       const { startDetachedDaemon } = await import('@/mcp/operator-server.js');
-      const result = await startDetachedDaemon({ HOME: home });
+      const result = await startDetachedDaemon({ HOME: home, JINN_EARNING_DIR: earningDir });
 
       expect(result).toEqual({
         ok: true,

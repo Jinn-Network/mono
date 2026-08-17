@@ -4,8 +4,8 @@ import { parseOwnedPrefixes, touchesCodeOwnedPath } from '../../src/dispatcher/c
 const CODEOWNERS = `
 # Load-bearing human surfaces (DR-2026-06-03)
 /SPEC.md       @oaksprout @ritsukai
-/operator/src/dashboard/spa/src/pages/      @oaksprout @ritsukai
-/operator/src/dashboard/spa/src/App.tsx     @oaksprout @ritsukai
+/apps/operator-console/app/        @oaksprout @ritsukai
+/apps/operator-console/components/ @oaksprout @ritsukai
 `;
 
 describe('parseOwnedPrefixes', () => {
@@ -13,8 +13,8 @@ describe('parseOwnedPrefixes', () => {
     const owned = parseOwnedPrefixes(CODEOWNERS);
     expect(owned.prefixes).toEqual([
       'SPEC.md',
-      'operator/src/dashboard/spa/src/pages',
-      'operator/src/dashboard/spa/src/App.tsx',
+      'apps/operator-console/app',
+      'apps/operator-console/components',
     ]);
     expect(owned.hasUnsupportedPattern).toBe(false);
   });
@@ -44,12 +44,12 @@ describe('touchesCodeOwnedPath', () => {
   });
 
   it('matches a file under an owned directory', () => {
-    expect(touchesCodeOwnedPath(['operator/src/dashboard/spa/src/pages/Tasks.tsx'], owned)).toBe(true);
+    expect(touchesCodeOwnedPath(['apps/operator-console/app/page.tsx'], owned)).toBe(true);
   });
 
   it('does not match a sibling that only shares a prefix substring (boundary)', () => {
     expect(touchesCodeOwnedPath(['SPEC.md.bak'], owned)).toBe(false);
-    expect(touchesCodeOwnedPath(['operator/src/dashboard/spa/src/pages-legacy/X.tsx'], owned)).toBe(false);
+    expect(touchesCodeOwnedPath(['apps/operator-console/app-legacy/X.tsx'], owned)).toBe(false);
   });
 
   it('returns false when no changed file is owned', () => {

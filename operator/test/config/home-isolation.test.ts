@@ -36,6 +36,7 @@ describe('test home isolation', () => {
     // freshly computed path — is what proves the setup file wins the ordering race against the
     // first import of `src/config.ts`.
     expect(DEFAULT_CONFIG_PATH.startsWith(String(isolatedHome))).toBe(true);
+    expect(DEFAULT_CONFIG_PATH.startsWith(join(String(realHome), '.jinn-operator'))).toBe(false);
     expect(DEFAULT_CONFIG_PATH.startsWith(join(String(realHome), '.jinn-client'))).toBe(false);
   });
 
@@ -51,7 +52,7 @@ describe('test home isolation', () => {
     // migration only ever rewrites a file that already exists.
     let entries: string[] = [];
     try {
-      entries = readdirSync(join(String(isolatedHome), '.jinn-client'));
+      entries = readdirSync(join(String(isolatedHome), '.jinn-operator'));
     } catch {
       entries = [];
     }

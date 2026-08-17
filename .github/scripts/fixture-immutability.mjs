@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { discoverStackPackages } from './stack-package-graph.mjs';
+import { loadStackPublishedCatalogPackages } from './platform-catalog.mjs';
 import { FIXTURE_MANIFEST_NAME, readFixtureManifest } from './fixture-manifest.mjs';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/u;
@@ -128,7 +128,7 @@ function defaultNpm(command, args, cwd) {
 
 export function runRegistryBaseline(root, candidateVersion) {
   let checked = 0;
-  for (const pkg of discoverStackPackages(root)) {
+  for (const pkg of loadStackPublishedCatalogPackages(root)) {
     const candidate = readFixtureManifest(join(root, pkg.directory));
     if (candidate === null) continue;
     const published = readManifestFromRegistry(pkg.name);
@@ -156,7 +156,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       if (!args.includes('--base') || !base) throw new Error('--base <git-ref> is required');
       let checked = 0;
       const additions = [];
-      for (const pkg of discoverStackPackages(root)) {
+      for (const pkg of loadStackPublishedCatalogPackages(root)) {
         const candidate = readFixtureManifest(join(root, pkg.directory));
         if (candidate === null) continue;
         const baseline = readManifestAtRef(base, pkg.directory);

@@ -19,21 +19,15 @@ export interface RunTier1Result {
   outputDir: string;
 }
 
-async function runT14SpaRouteSmoke(outputDir: string): Promise<ScenarioVerdict> {
+async function runT14ConsoleRouteSmoke(outputDir: string): Promise<ScenarioVerdict> {
   const started = Date.now();
   const evidencePath = path.join(outputDir, 'T1.4.log');
 
   return new Promise<ScenarioVerdict>((resolve) => {
     const child = spawn(
       'yarn',
-      [
-        'playwright',
-        'test',
-        '--config=playwright.config.ts',
-        'test/dashboard/release-prep/spa-route-smoke.e2e.test.ts',
-        '--reporter=line',
-      ],
-      { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] },
+      ['e2e:app-flow'],
+      { cwd: path.join(process.cwd(), '..', 'apps', 'operator-console'), stdio: ['ignore', 'pipe', 'pipe'] },
     );
     let stdout = '';
     let stderr = '';
@@ -120,10 +114,12 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
       }),
     },
     {
-      // T1.4 needs a separate subprocess (Playwright); runT14SpaRouteSmoke
-      // already resolves with a verdict for both spawn-error and close cases.
+      // T1.4 needs a separate subprocess (Playwright against the operator console);
+      // runT14ConsoleRouteSmoke already resolves with a verdict for both spawn-error
+      // and close cases. Marker key stays `tier-1-spa-route-smoke` (release-readiness
+      // schema; dated spec is not retro-edited).
       id: 'T1.4',
-      run: () => runT14SpaRouteSmoke(outputDir),
+      run: () => runT14ConsoleRouteSmoke(outputDir),
     },
   ];
   const verdicts = await Promise.all(

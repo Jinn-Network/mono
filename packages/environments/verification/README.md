@@ -1,7 +1,6 @@
 # @jinn-network/environment-verification
 
-> Phase C maturity: experimental and publication disabled. Graduation requires a real verifier
-> host, substitution/conformance evidence, and approved authority.
+> Candidate in `implementations-v1`. Eligible for receipt-gated canary; that is not independent ratification.
 
 Executes the K-run verification protocol against a sealed environment record and produces
 an in-toto Statement inside a DSSE envelope.

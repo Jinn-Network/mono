@@ -60,7 +60,7 @@ describe("public surface", () => {
       "runPreview", "runQuote", "runLock", "runLaunch", "runResume", "runStatus", "runCancel", "runCollect", "runResults",
       "publicationConfigure", "publicationRegister", "publicationAccounting", "publicationStatus",
       "runReport", "runVerify", "runPublish", "listRuntimeAdapters", "runtimeNativeArtifactPublicationPolicy", "createRuntimeVenue",
-      "createDefaultBenchmarkRuntimeHost", "resolveHarborSelection", "harborEvidenceContributionFromArchive",
+      "createDefaultBenchmarkRuntimeHost", "resolveHarborSelection", "harborImagePinMatchesTaskToml", "harborTrialTaskName", "harborEvidenceContributionFromArchive",
     ] as const) {
       expect(typeof entry[name], name).toBe("function");
     }

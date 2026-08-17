@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "adversarial-v1/captured-provenance-unprovable/document.json",
+      "sha256": "ec2ba4f19d60d31b6e0dd73d389f350250c2a4c8380297586ddc5cb2c139effb"
+    },
+    {
+      "id": "adversarial-v1/corpus-body-digest-mismatch/document.json",
+      "sha256": "90956cfdf838766af5cc2a007495b9bc462dc36e213c3caf0021e24512330303"
+    },
+    {
+      "id": "adversarial-v1/corpus-injected-instruction/document.json",
+      "sha256": "5345decde756e94106671f4bf087d1c39b4fa9875e8f47f564126a796388172b"
+    },
+    {
+      "id": "adversarial-v1/entry-origin-undeclared/document.json",
+      "sha256": "fbc8ce7c4e249285f5b8ab7c2c278a4938b862823167d7507f2342dd90cb23fd"
+    },
+    {
+      "id": "adversarial-v1/manifest.json",
+      "sha256": "b074ad706f4a0c4c541f97982135e823385237c37617cb41f99b602d30850bc6"
+    },
+    {
+      "id": "adversarial-v1/miss-policy-absent/document.json",
+      "sha256": "27db3065b11b0b5719046a47942d0a077a4b26af361d9efed64fbe776c0a262e"
+    },
+    {
+      "id": "adversarial-v1/miss-policy-redirect/document.json",
+      "sha256": "93432c9dbb37b4c37b9fd77a0b9d0fd0c78736b21a9d86c3df5248eb18af119d"
+    },
+    {
+      "id": "adversarial-v1/policy-header-subset-credential/document.json",
+      "sha256": "3ea02a451973fe44bb4925cf0f1f40ba3b890fd4ec8652e8391471de589d2fd0"
+    },
+    {
+      "id": "adversarial-v1/policy-header-subset-unsorted/document.json",
+      "sha256": "04c8675cd3a75f1a9be529d5973372d227ed2d03ed799b974bad9a2872c9b563"
+    },
+    {
+      "id": "adversarial-v1/request-key-collision/document.json",
+      "sha256": "d9609ea3b8075711d537a06d1aea11fa3d271b1cdd5c6a3e70243208065bef7d"
+    },
+    {
+      "id": "adversarial-v1/request-key-declared-mismatch/document.json",
+      "sha256": "bc66b527b54cd23344ebbedc6bd4196300500cd8079ecac39a275a1b378c7c86"
+    },
+    {
+      "id": "adversarial-v1/synthetic-claims-capture/document.json",
+      "sha256": "48b190b0b515680a961dcf84516246f1e02e7888aa432f18db640dd92639b428"
+    },
+    {
+      "id": "equivalence/expected-digest.json",
+      "sha256": "46bec8f5cf57e6099f435574826a222bd90bfe4b91a58b5aa59ce5a9d8f6b6d1"
+    },
+    {
+      "id": "equivalence/input-a.json",
+      "sha256": "112d12cf3b50d53ca707178af408d04893d3566b1fc0da84e5da5357b5d0717a"
+    },
+    {
+      "id": "equivalence/input-b.json",
+      "sha256": "65fbb7efc84c260df5b2b50412af8ff9435db9aed5d3479d4aad013fa69a79e3"
+    },
+    {
+      "id": "request-key-v1/vectors.json",
+      "sha256": "50f4af8b33c26c017d5285ac9967bceff976c858a58a2e515997b6ff383c0bf7"
+    },
+    {
+      "id": "world/bodies/158a551933b311c1d20918258e79300fa2a4820d119e07dedca7cb8bc9a3f1eb.bin",
+      "sha256": "158a551933b311c1d20918258e79300fa2a4820d119e07dedca7cb8bc9a3f1eb"
+    },
+    {
+      "id": "world/bodies/1ae291ff0bd911a370ae58284360b786856994754be99dd46143dafb11223dd7.bin",
+      "sha256": "1ae291ff0bd911a370ae58284360b786856994754be99dd46143dafb11223dd7"
+    },
+    {
+      "id": "world/bodies/4775bfcd3d930813f077dce01d00f830f083da3a5b6c3951f8a0b68c22b943ff.bin",
+      "sha256": "4775bfcd3d930813f077dce01d00f830f083da3a5b6c3951f8a0b68c22b943ff"
+    },
+    {
+      "id": "world/bodies/d564d6d91ff2aa7ec2553069ce20d23da332de5a3bf01699049306e9d23f4693.bin",
+      "sha256": "d564d6d91ff2aa7ec2553069ce20d23da332de5a3bf01699049306e9d23f4693"
+    },
+    {
+      "id": "world/captured.json",
+      "sha256": "f2c7fd85cad7005736c693e94a74832b0eaa423a4c3272708f9b2e435466a2b9"
+    },
+    {
+      "id": "world/captured.sha256",
+      "sha256": "13a9abc21792840dc3e5756808fb8e6d4ac9d5bda60ba483a240fdce050eced6"
+    },
+    {
+      "id": "world/extension.json",
+      "sha256": "be8b85c72b99d1c01deccc0da2807c615d77dfab09442a1a5e8a7f815bf89dbd"
+    },
+    {
+      "id": "world/extension.sha256",
+      "sha256": "a6436ebfbee543abb514bc5fad4126564c028949a62547d959c2c247aa5fd7bc"
+    },
+    {
+      "id": "world/synthetic.json",
+      "sha256": "354cae233155ada22f72cb385c7668f9805f25a2684e03ab32a1ce0e8410ab4b"
+    },
+    {
+      "id": "world/synthetic.sha256",
+      "sha256": "219cbecd7c350f5a5f3e58871f959b0b65d639e1ac2b3b5c648394224186db9e"
+    }
+  ],
+  "errata": []
+}

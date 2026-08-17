@@ -7,6 +7,7 @@ import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig } from '../../config.js';
 import { Store } from '../../store/store.js';
 import { enumerateJinnProcesses, pidMatchesJinn, processAlive } from '../../lifecycle/process-discovery.js';
+import { resolveDefaultStateDir } from '../../state-dir.js';
 
 interface StopResult {
   schemaVersion: 1;
@@ -131,7 +132,7 @@ async function run(ctx: CommandContext): Promise<void> {
   const earningDir =
     ctx.env['JINN_EARNING_DIR'] ??
     config?.earningDir ??
-    join(process.env['HOME'] ?? '.', '.jinn-client', 'earning');
+    join(resolveDefaultStateDir(), 'earning');
   const dbPath = ctx.env['JINN_DB_PATH'] ?? config?.dbPath;
   const pidPath = join(earningDir, 'daemon.pid');
 

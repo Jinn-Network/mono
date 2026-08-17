@@ -1,5 +1,5 @@
 /**
- * @jinn-network/client learner harness impl.
+ * @jinn-network/operator learner harness impl.
  *
  * Bridges the engine's Harness interface to the learner
  * plugin shipped at operator/plugins/learner/.

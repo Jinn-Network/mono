@@ -42,6 +42,7 @@
     "test": "vitest run && node --test scripts/demo1-task-evidence-runner.test.mjs",
     "public-quickstart": "./quickstart/public-quickstart.mjs",
     "publication-release-rehearsal": "COLOPHON_PUBLICATION_RELEASE_REHEARSAL=1 vitest run src/conformance/publication-release-rehearsal.external.test.ts --reporter=verbose",
+    "tb21-one-task-qualify": "node scripts/tb21-one-task-qualify.mjs",
     "t1:cold:lifecycle": "node ../../../.github/scripts/benchmark-product-packed-types.test.mjs --t1-cold-lifecycle",
     "generate:parity": "node scripts/generate-parity-matrix.mjs",
     "check:parity": "node scripts/generate-parity-matrix.mjs --check",

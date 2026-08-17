@@ -25,6 +25,7 @@ const ENVIRONMENTS_FOREIGN_PACKAGES = [
   '@jinn-network/autopilot',
   '@jinn-network/benchmarking-*',
   '@jinn-network/client',
+  '@jinn-network/operator',
   '@jinn-network/core',
   '@jinn-network/evidence-*',
   '@jinn-network/execution-recorder',

@@ -15,6 +15,7 @@ const consumerRoot = join(temporaryRoot, 'consumer');
 const packages = [
   ['authoring', '@jinn-network/trust-authoring'],
   ['core', '@jinn-network/trust-core'],
+  ['observation', '@jinn-network/trust-observation'],
   ['resolve', '@jinn-network/trust-resolve'],
   ['testing', '@jinn-network/trust-testing'],
 ];
@@ -22,6 +23,7 @@ const packages = [
 const codeEntrypoints = [
   '@jinn-network/trust-authoring',
   '@jinn-network/trust-core',
+  '@jinn-network/trust-observation',
   '@jinn-network/trust-resolve',
   '@jinn-network/trust-testing',
 ];

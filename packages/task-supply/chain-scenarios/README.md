@@ -1,8 +1,6 @@
 # @jinn-network/chain-scenarios
 
-> Phase C maturity: experimental and publication disabled. Scenario fixtures do not ratify the
-> task-supply or environment authorities they exercise; graduation requires an independent product
-> consumer and approved chain/environment authority.
+> Candidate in `implementations-v1`. Eligible for receipt-gated canary; that is not independent ratification.
 
 ## What this package does
 

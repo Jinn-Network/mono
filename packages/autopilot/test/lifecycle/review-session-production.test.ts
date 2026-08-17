@@ -349,7 +349,7 @@ describe('production review session port', () => {
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
             closingIssuesReferences: [{ number: 42 }],
-            files: [{ path: 'operator/src/dashboard/spa/src/pages/Home.tsx' }],
+            files: [{ path: 'apps/operator-console/app/page.tsx' }],
           });
         }
         if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
@@ -368,7 +368,7 @@ describe('production review session port', () => {
         }
         if (cmd === 'git' && args.includes('show')) {
           if (args.at(-1) === `${BASE}:.github/CODEOWNERS`) {
-            return '/operator/src/dashboard/spa/src/pages/ @Jinn-Network/codeowners\n';
+            return '/apps/operator-console/app/ @Jinn-Network/codeowners\n';
           }
           throw new Error('path does not exist');
         }
@@ -407,7 +407,7 @@ describe('production review session port', () => {
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
             closingIssuesReferences: [{ number: 42 }],
-            files: [{ path: 'operator/src/dashboard/spa/src/pages/Home.tsx' }],
+            files: [{ path: 'apps/operator-console/app/page.tsx' }],
           });
         }
         if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
@@ -424,7 +424,7 @@ describe('production review session port', () => {
         }
         if (cmd === 'git' && args.includes('show')) {
           if (args.at(-1) === `${BASE}:.github/CODEOWNERS`) {
-            return '/operator/src/dashboard/spa/src/pages/ @Jinn-Network/codeowners\n';
+            return '/apps/operator-console/app/ @Jinn-Network/codeowners\n';
           }
           throw new Error('An attacker-controlled head tree must never be read');
         }

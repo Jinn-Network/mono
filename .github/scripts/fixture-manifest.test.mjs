@@ -11,6 +11,7 @@ import {
   readFixtureManifest,
   writeFixtureManifest,
 } from './fixture-manifest.mjs';
+import { loadStackPublishedCatalogPackages } from './platform-catalog.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 
@@ -81,10 +82,9 @@ test('readFixtureManifest returns null for a package with no fixtures directory'
   }
 });
 
-test('every fixture-bearing platform package has a current manifest on disk', async () => {
-  const { discoverStackPackages } = await import('./stack-package-graph.mjs');
+test('every fixture-bearing platform package has a current manifest on disk', () => {
   const drift = [];
-  for (const pkg of discoverStackPackages(repoRoot)) {
+  for (const pkg of loadStackPublishedCatalogPackages(repoRoot)) {
     const packageRoot = join(repoRoot, pkg.directory);
     const built = buildFixtureManifest(packageRoot);
     if (built === null) continue;

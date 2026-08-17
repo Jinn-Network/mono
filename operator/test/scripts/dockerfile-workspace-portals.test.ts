@@ -195,6 +195,39 @@ describe('client Docker build context', () => {
     }
   });
 
+  it('copies every stack-build script and tsconfig.build.json before yarn build', () => {
+    // Operator Images on next died at `RUN yarn build` because build:stack
+    // invokes `node scripts/build.mjs` / `tsc -p tsconfig.build.json` on
+    // portal packages, and those inputs were not in the Docker context.
+    // Recensus from operator package.json scripts, not a hardcoded file list.
+    const beforeBuild = dockerfilePrefixBefore('RUN yarn build');
+    const copied = copiedSources(beforeBuild);
+    const stackPackages = [
+      ...buildScriptClosure().join('\n').matchAll(/yarn --cwd \.\.\/(packages\/[^\s]+) build/g),
+    ].map((match) => match[1]!);
+
+    expect(stackPackages.length).toBeGreaterThan(0);
+
+    const missing: string[] = [];
+    for (const repoPath of stackPackages) {
+      const packageRoot = resolve(repoRoot, repoPath);
+      const manifest = JSON.parse(
+        readFileSync(resolve(packageRoot, 'package.json'), 'utf8'),
+      ) as { scripts?: Record<string, string> };
+      const buildCommand = manifest.scripts?.build ?? '';
+      for (const match of buildCommand.matchAll(/(?:node|tsx)\s+((?:scripts|src)\/[^\s]+)/g)) {
+        const source = `${repoPath}/${match[1]}`;
+        if (!sourceIsCopied(source, copied)) missing.push(source);
+      }
+      if (existsSync(resolve(packageRoot, 'tsconfig.build.json'))) {
+        const source = `${repoPath}/tsconfig.build.json`;
+        if (!sourceIsCopied(source, copied)) missing.push(source);
+      }
+    }
+
+    expect(missing).toEqual([]);
+  });
+
   it('copies every client TypeScript project used by the build', () => {
     const requiredConfigs = new Set(['tsconfig.json']);
     for (const command of buildScriptClosure()) {
@@ -269,7 +302,7 @@ describe('client Docker build context', () => {
 
     const buildIndex = dockerfile.indexOf('RUN yarn build');
     const pruneIndex = dockerfile.indexOf(
-      'RUN yarn workspaces focus @jinn-network/client --production',
+      'RUN yarn workspaces focus @jinn-network/operator --production',
     );
     const materializeIndex = dockerfile.indexOf(
       'RUN node scripts/materialize-bundled-workspaces.mjs prepare',

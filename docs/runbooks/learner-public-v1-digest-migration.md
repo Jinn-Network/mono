@@ -132,7 +132,7 @@ If you hit it:
 
 ## Version boundary
 
-- **Package:** `@jinn-network/client`
+- **Package:** `@jinn-network/operator`
 - **Last release under the old scheme:** `v0.2.2` (and every `0.2.2-canary.*`
   built before the commit that lands this change).
 - **First release under `learner-public.v1`:** the first `canary` published from

@@ -268,40 +268,41 @@ test('a .jsonld document is served as application/ld+json', () => {
   }
 });
 
-test('every registered resolvable identifier resolves in the real platform-v1 tree', () => {
-  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-register-'));
-  try {
-    const packages = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' });
-    const manifest = buildProfileRoot({
-      repoRoot,
-      outDir,
-      commit: SHA,
-      releaseGroup: 'platform-v1',
-      packages,
-    });
-    const paths = new Set(manifest.documents.map(({ path }) => path));
-    const catalog = JSON.parse(readFileSync(join(repoRoot, 'architecture/platform-packages.v1.json'), 'utf8'));
-    const register = catalog.resolvableIdentifiers ?? [];
-    assert.ok(register.length > 0, 'the catalog must declare which identifiers dereference');
-    for (const entry of register) {
-      assert.ok(paths.has(entry.entryPoint), `${entry.identifier} has no served entry point`);
-      const servedPath = entry.identifier.replace('https://spec.jinn.network/', '');
-      if (entry.resolution === 'prefix') {
-        assert.equal(
-          paths.has(servedPath),
-          false,
-          `${entry.identifier} is a prefix and must not also be a document`,
-        );
-        // One profile, one version segment: a prefix identifier must contain the document it
-        // declares as its entry point.
-        assert.ok(
-          entry.entryPoint.startsWith(`${servedPath}/`),
-          `${entry.identifier} is a prefix whose entry point ${entry.entryPoint} lives outside it`,
-        );
+test('every registered resolvable identifier resolves in its owning stack-published tree', () => {
+  const catalog = JSON.parse(readFileSync(join(repoRoot, 'architecture/platform-packages.v1.json'), 'utf8'));
+  const register = catalog.resolvableIdentifiers ?? [];
+  assert.ok(register.length > 0, 'the catalog must declare which identifiers dereference');
+  for (const releaseGroup of ['sealed-platform-v1', 'implementations-v1']) {
+    const outDir = mkdtempSync(join(tmpdir(), `jinn-profile-out-register-${releaseGroup}-`));
+    try {
+      const packages = loadCatalogPackages(repoRoot, { releaseGroup });
+      const owners = new Set(packages.map(({ name }) => name));
+      const manifest = buildProfileRoot({
+        repoRoot,
+        outDir,
+        commit: SHA,
+        releaseGroup,
+        packages,
+      });
+      const paths = new Set(manifest.documents.map(({ path }) => path));
+      for (const entry of register.filter(({ owner }) => owners.has(owner))) {
+        assert.ok(paths.has(entry.entryPoint), `${entry.identifier} has no served entry point`);
+        const servedPath = entry.identifier.replace('https://spec.jinn.network/', '');
+        if (entry.resolution === 'prefix') {
+          assert.equal(
+            paths.has(servedPath),
+            false,
+            `${entry.identifier} is a prefix and must not also be a document`,
+          );
+          assert.ok(
+            entry.entryPoint.startsWith(`${servedPath}/`),
+            `${entry.identifier} is a prefix whose entry point ${entry.entryPoint} lives outside it`,
+          );
+        }
       }
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
     }
-  } finally {
-    rmSync(outDir, { recursive: true, force: true });
   }
 });
 
@@ -346,12 +347,12 @@ test('a prefix identifier whose entry point lives outside it is refused', () => 
 test('every profile RO-Crate encodingFormat agrees with the manifest media type it is served under', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-crate-'));
   try {
-    const packages = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' });
+    const packages = loadCatalogPackages(repoRoot, { releaseGroup: 'sealed-platform-v1' });
     const manifest = buildProfileRoot({
       repoRoot,
       outDir,
       commit: SHA,
-      releaseGroup: 'platform-v1',
+      releaseGroup: 'sealed-platform-v1',
       packages,
     });
     const mediaTypes = new Map(manifest.documents.map(({ path, mediaType }) => [path, mediaType]));
@@ -891,7 +892,12 @@ test('manifestBytes are canonical and stable', () => {
 test('the real repository produces a non-empty profile root', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
   try {
-    const manifest = buildProfileRoot({ repoRoot, outDir, commit: SHA });
+    const manifest = buildProfileRoot({
+      repoRoot,
+      outDir,
+      commit: SHA,
+      releaseGroup: 'sealed-platform-v1',
+    });
     assert.ok(manifest.documents.length > 0, 'the platform must serve at least one profile document');
     for (const document of manifest.documents) {
       assert.match(document.sha256, /^[0-9a-f]{64}$/);
@@ -902,65 +908,68 @@ test('the real repository produces a non-empty profile root', () => {
   }
 });
 
-test('the real core root serves trace identities and excludes the experimental environment surface', () => {
-  const coreOut = mkdtempSync(join(tmpdir(), 'jinn-profile-core-out-'));
-  const experimentalOut = mkdtempSync(join(tmpdir(), 'jinn-profile-experimental-out-'));
-  const experimentalPackages = new Set(loadCatalogPackages(repoRoot, {
-    releaseGroup: 'experimental-environment-supply',
-  }).map(({ name }) => name));
+test('the real sealed root serves trace and environment identities', () => {
+  const sealedOut = mkdtempSync(join(tmpdir(), 'jinn-profile-sealed-out-'));
+  const implementationsOut = mkdtempSync(join(tmpdir(), 'jinn-profile-implementations-out-'));
   try {
-    const core = buildProfileRoot({ repoRoot, outDir: coreOut, commit: SHA });
-    const corePaths = new Set(core.documents.map((document) => document.path));
-    assert.ok(corePaths.has('schemas/trace/v1'));
-    assert.ok(corePaths.has('schemas/trace-derivation-statement/v1'));
-    assert.equal(corePaths.has('schemas/environment/v1'), false);
-    assert.deepEqual(
-      core.documents.filter((document) => experimentalPackages.has(document.sourcePackage)),
-      [],
-    );
-
-    const experimental = buildProfileRoot({
+    const sealed = buildProfileRoot({
       repoRoot,
-      outDir: experimentalOut,
+      outDir: sealedOut,
       commit: SHA,
-      releaseGroup: 'experimental-environment-supply',
+      releaseGroup: 'sealed-platform-v1',
     });
-    assert.ok(experimental.documents.some(
-      (document) => document.path === 'schemas/environment/v1'
-        && document.sourcePackage === '@jinn-network/environment-record',
-    ));
+    const sealedPaths = new Set(sealed.documents.map((document) => document.path));
+    assert.ok(sealedPaths.has('schemas/trace/v1'));
+    assert.ok(sealedPaths.has('schemas/trace-derivation-statement/v1'));
+    assert.ok(sealedPaths.has('schemas/environment/v1'));
+
+    const implementations = buildProfileRoot({
+      repoRoot,
+      outDir: implementationsOut,
+      commit: SHA,
+      releaseGroup: 'implementations-v1',
+    });
+    assert.equal(
+      implementations.documents.some(
+        (document) => document.path === 'schemas/environment/v1'
+          && document.sourcePackage === '@jinn-network/environment-record',
+      ),
+      false,
+    );
   } finally {
-    rmSync(coreOut, { recursive: true, force: true });
-    rmSync(experimentalOut, { recursive: true, force: true });
+    rmSync(sealedOut, { recursive: true, force: true });
+    rmSync(implementationsOut, { recursive: true, force: true });
   }
 });
 
 test('URI resolution gate: every real document declaring a spec.jinn.network identifier is served at exactly that path', () => {
-  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
-  try {
-    const manifest = buildProfileRoot({ repoRoot, outDir, commit: SHA });
-    let checked = 0;
-    for (const document of manifest.documents) {
-      if (document.path.split('/').includes('fixtures')) continue;
-      let parsed;
-      try {
-        parsed = JSON.parse(readFileSync(join(outDir, document.path), 'utf8'));
-      } catch {
-        continue;
+  let checked = 0;
+  for (const releaseGroup of ['sealed-platform-v1', 'implementations-v1']) {
+    const outDir = mkdtempSync(join(tmpdir(), `jinn-profile-out-uri-${releaseGroup}-`));
+    try {
+      const manifest = buildProfileRoot({ repoRoot, outDir, commit: SHA, releaseGroup });
+      for (const document of manifest.documents) {
+        if (document.path.split('/').includes('fixtures')) continue;
+        let parsed;
+        try {
+          parsed = JSON.parse(readFileSync(join(outDir, document.path), 'utf8'));
+        } catch {
+          continue;
+        }
+        for (const field of ['$id', 'profile']) {
+          const value = parsed?.[field];
+          if (typeof value !== 'string' || !value.startsWith('https://spec.jinn.network/')) continue;
+          checked += 1;
+          assert.equal(
+            `https://spec.jinn.network/${document.path}`,
+            value,
+            `${document.path} declares ${field} ${value} but is served elsewhere`,
+          );
+        }
       }
-      for (const field of ['$id', 'profile']) {
-        const value = parsed?.[field];
-        if (typeof value !== 'string' || !value.startsWith('https://spec.jinn.network/')) continue;
-        checked += 1;
-        assert.equal(
-          `https://spec.jinn.network/${document.path}`,
-          value,
-          `${document.path} declares ${field} ${value} but is served elsewhere`,
-        );
-      }
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
     }
-    assert.ok(checked >= 20, `expected to check at least 20 self-declaring documents, checked ${checked}`);
-  } finally {
-    rmSync(outDir, { recursive: true, force: true });
   }
+  assert.ok(checked >= 20, `expected to check at least 20 self-declaring documents, checked ${checked}`);
 });

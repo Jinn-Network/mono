@@ -64,7 +64,7 @@ case "$contract" in (*[!0-9]*|'') contract=0 ;; esac
 if [ "$contract" -lt "$REQUIRED_BASE_CONTRACT" ]; then
   echo "[seed] FATAL: base image contract '${JINN_BASE_CONTRACT:-unset}' < required ${REQUIRED_BASE_CONTRACT}." >&2
   echo "[seed] FATAL: this overlay needs a base built from #988+ (absolute-path CMD dispatch)." >&2
-  echo "[seed] FATAL: rebuild against a newer ghcr.io/jinn-network/client base (BASE_IMAGE/BASE_TAG)." >&2
+  echo "[seed] FATAL: rebuild against a newer ghcr.io/jinn-network/operator base (BASE_IMAGE/BASE_TAG)." >&2
   exit 1
 fi
 

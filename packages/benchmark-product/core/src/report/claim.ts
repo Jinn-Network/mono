@@ -196,6 +196,12 @@ const ClaimPackageWireSchema = z.object({
   /** binary-instrument@1's complete per-subject F6 result. This is copied exactly; it is not a
    * headline, comparison, threshold, selection, or ranking projection. */
   qualification: z.unknown().optional(),
+  /** Optional Colophon suite-protocol bits. Not Report v2 required fields. */
+  suiteComparability: z.object({
+    executionConformance: z.boolean(),
+    coverage: z.enum(["one_task", "ten_task", "full", "custom"]),
+    leaderboardSubmitReady: z.boolean(),
+  }).strict().optional(),
 }).superRefine((claim, ctx) => {
   if (claim.claimSchema === CLAIM_PACKAGE_SCHEMA_ID) {
     if (claim.headline === undefined && claim.comparison === undefined) {
@@ -346,6 +352,12 @@ export interface BuildClaimPackageInput {
    * run's lock — `buildClaimPackage` carries it into the `rehearsal` block verbatim. Absent means
    * the caller found no preview log entry, i.e. no preview preceded lock. */
   readonly previewDisclosure?: { readonly previewCount: number; readonly timestamps: readonly string[] };
+  /** Optional two-axis official-suite comparability. Absent unless a suite protocol is bound. */
+  readonly suiteComparability?: {
+    readonly executionConformance: boolean;
+    readonly coverage: "one_task" | "ten_task" | "full" | "custom";
+    readonly leaderboardSubmitReady: boolean;
+  };
 }
 
 type Comparison = z.infer<typeof ComparisonSchema>;
@@ -598,6 +610,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
         }
       : {}),
     ...(projection.comparison !== undefined ? { comparison: projection.comparison } : {}),
+    ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   };
 }
 

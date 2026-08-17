@@ -97,7 +97,7 @@ export function fixtureCatalog() {
     ['@jinn-network/indexer-enrichment', 'packages/indexer-enrichment', null, 'product-support', 'never'],
     ['@jinn-network/explorer-spa', 'packages/indexer/explorer', 4, 'product', 'private'],
     ['@jinn-network/broadcast-bot', 'apps/broadcast-bot', null, 'repository-tooling', 'never'],
-    ['@jinn-network/operator-spa', 'operator/src/dashboard/spa', 4, 'product', 'private'],
+    ['@jinn-network/operator-console', 'apps/operator-console', 4, 'product', 'private'],
     ['@jinn-network/plugin-runtime', 'plugin/runtime', null, 'product-support', 'never'],
   ].map(([name, path, tier, classification, publishPolicy]) => packageEntry(name, path, {
     tier,
@@ -113,7 +113,7 @@ export function fixtureCatalog() {
       { path: 'packages', mode: 'recursive', excludedDirectories: ['node_modules'] },
       { path: 'apps/broadcast-bot', mode: 'package' },
       { path: 'operator', mode: 'package' },
-      { path: 'operator/src/dashboard/spa', mode: 'package' },
+      { path: 'apps/operator-console', mode: 'package' },
       { path: 'plugin/runtime', mode: 'package' },
     ],
     manifestExclusions: [],

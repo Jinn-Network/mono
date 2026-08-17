@@ -15,7 +15,7 @@ import {
 } from './docker-acceptance.mjs';
 
 export const REPO_FULL_NAME = 'Jinn-Network/mono';
-export const PACKAGE_NAME = '@jinn-network/client';
+export const PACKAGE_NAME = '@jinn-network/operator';
 export const SDK_PACKAGE_NAME = '@jinn-network/sdk';
 export const REPORT_SCHEMA_VERSION = 1;
 
@@ -718,23 +718,23 @@ export function runPublishVerifications(context) {
     id: 'verify-npx-version',
     label: `verify npx ${PACKAGE_NAME}@${version}`,
     command: 'npx',
-    args: ['--yes', `${PACKAGE_NAME}@${version}`, 'version', '--json'],
+    args: ['--yes', '--package', `${PACKAGE_NAME}@${version}`, '--', 'jinn', 'version', '--json'],
   });
 
   runStep(context, {
     id: 'verify-docker-version',
     label: `verify GHCR image ${version} version`,
     command: 'docker',
-    args: ['run', '--rm', `ghcr.io/jinn-network/client:${version}`, 'version', '--json'],
+    args: ['run', '--rm', `ghcr.io/jinn-network/operator:${version}`, 'version', '--json'],
   });
   runStep(context, {
     id: 'verify-docker-doctor',
     label: `verify GHCR image ${version} doctor`,
     command: 'docker',
-    args: ['run', '--rm', `ghcr.io/jinn-network/client:${version}`, 'doctor', '--json'],
+    args: ['run', '--rm', `ghcr.io/jinn-network/operator:${version}`, 'doctor', '--json'],
   });
   context.report.dockerVerification = {
-    image: `ghcr.io/jinn-network/client:${version}`,
+    image: `ghcr.io/jinn-network/operator:${version}`,
     version,
   };
   saveReport(context.report);
@@ -771,7 +771,7 @@ export async function runRelease(options = {}) {
 export function renderHelp(scriptName = `node scripts/${basename(fileURLToPath(import.meta.url))}`) {
   return `Usage: ${scriptName} [--prepare | --publish] [options]
 
-Runs the @jinn-network/client release gate and writes an evidence report.
+Runs the @jinn-network/operator release gate and writes an evidence report.
 
 Modes:
   --prepare                  Run release gates only; do not tag or publish (default)

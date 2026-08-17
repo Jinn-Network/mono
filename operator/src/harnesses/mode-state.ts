@@ -12,7 +12,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 export interface ModeState {
   mode: 'train' | 'frozen';
@@ -24,7 +24,7 @@ export function defaultModeStatePath(): string {
   // leak writes into the developer's `~/.jinn-client/`.
   const env = process.env['JINN_HARNESS_MODE_STATE_PATH'];
   if (env && env.length > 0) return env;
-  return join(homedir(), '.jinn-client', 'harness', 'mode-state.json');
+  return join(resolveDefaultStateDir(), 'harness', 'mode-state.json');
 }
 
 export function readModeState(path: string = defaultModeStatePath()): ModeState | null {

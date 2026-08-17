@@ -6,7 +6,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
-CLIENT="$REPO_ROOT/client"
+OPERATOR="$REPO_ROOT/operator"
 PLUGIN="$REPO_ROOT/packages/plugin"
 CORE="$REPO_ROOT/packages/core"
 LAYER="$REPO_ROOT/packages/layer"
@@ -51,7 +51,7 @@ if [[ "${JINN_STAGE1_SKIP_CLIENT_BUILD:-0}" != "1" ]]; then
     yarn build
   )
   (
-    cd "$CLIENT"
+    cd "$OPERATOR"
     corepack enable
     yarn install --immutable
     yarn build
@@ -135,7 +135,7 @@ test -x "$JINN_STAGE1_LAYER_BIN"
 )
 
 (
-  cd "$CLIENT"
+  cd "$OPERATOR"
   node scripts/stage1-task-creator-acceptance.mjs
 )
 

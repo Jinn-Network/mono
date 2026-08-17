@@ -20,7 +20,7 @@
  * snapshotHash, baseCommit, effort, title, body}`. There is deliberately NO
  * shared code between `packages/autopilot` and `client` (the client package
  * must not depend on `@jinn-network/autopilot`, and autopilot must not
- * depend on `@jinn-network/client` — see `delivery-pr-bridge.ts`'s module
+ * depend on `@jinn-network/operator` — see `delivery-pr-bridge.ts`'s module
  * doc for the identical trade elsewhere in this codebase); the coupling is
  * the documented wire format only, re-parsed independently here.
  *
@@ -98,6 +98,7 @@ import type { TaskClaimPolicy } from '../types/task-document.js';
 import type { LaunchedSolverNetRecord } from '../solvernets/store.js';
 import { JinnRepoLiveIssueTaskSchema } from './jinn-repo.js';
 import { resolvePostingWindowMs } from './_jinn-repo-posting-window.js';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 const SOLVER_TYPE = 'jinn-repo.v1';
 const CONTRACT_ID = 'jinn-repo';
@@ -446,7 +447,7 @@ export interface MakeJinnRepoLiveGeneratorForLaunchedRecordOpts {
 function defaultStateDir(): string {
   const stateRoot = process.env['JINN_STATE_DIR'];
   if (stateRoot) return join(stateRoot, 'jinn-repo-live');
-  return join(process.env['HOME'] ?? '', '.jinn-client', 'jinn-repo-live');
+  return join(resolveDefaultStateDir(), 'jinn-repo-live');
 }
 
 export function makeJinnRepoLiveGeneratorForLaunchedRecord(
