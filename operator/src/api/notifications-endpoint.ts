@@ -61,6 +61,7 @@ import { getEventBuffer } from '../events/emitter.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import { isRestartRequired } from './restart-required-state.js';
 import type { NotificationsV1Response, NotificationV1 } from './contract/notifications.js';
+import { CURRENT_CONTRACT_VERSION } from './contract/version.js';
 import {
   buildNotifications,
   countRecentClaimFailures,
@@ -170,6 +171,7 @@ export function addNotificationsRoutes(app: Hono, deps: NotificationsRoutesConfi
 
       const body: NotificationsV1Response = {
         schemaVersion: 1,
+        contractVersion: CURRENT_CONTRACT_VERSION,
         generatedAt: new Date(nowMs).toISOString(),
         notifications,
       };
@@ -177,7 +179,13 @@ export function addNotificationsRoutes(app: Hono, deps: NotificationsRoutesConfi
     } catch (err) {
       const message = maskUrlsInMessage(err instanceof Error ? err.message : String(err));
       return c.json(
-        { schemaVersion: 1, generatedAt: new Date().toISOString(), notifications: [], error: message },
+        {
+          schemaVersion: 1,
+          contractVersion: CURRENT_CONTRACT_VERSION,
+          generatedAt: new Date().toISOString(),
+          notifications: [],
+          error: message,
+        },
         500,
       );
     }

@@ -65,6 +65,21 @@ describe('NotificationItem', () => {
     expect(screen.queryByRole('link')).toBeNull();
   });
 
+  it('renders an unknown kind from envelope title and severity rather than dropping the row', () => {
+    const notice: OperatorNotification = {
+      kind: 'brand_new_kind_from_newer_daemon',
+      severity: 'warning',
+      title: 'New daemon notice',
+      message: 'A kind this build does not know.',
+    };
+    const { container } = render(wrap(<NotificationItem notice={notice} />));
+    const li = container.querySelector('li');
+    expect(li?.getAttribute('data-kind')).toBe('brand_new_kind_from_newer_daemon');
+    expect(li?.getAttribute('data-severity')).toBe('warning');
+    expect(screen.getByText('New daemon notice')).toBeTruthy();
+    expect(screen.getByText('A kind this build does not know.')).toBeTruthy();
+  });
+
   it('carries data-kind and data-severity attributes for styling / test hooks', () => {
     const notice: OperatorNotification = {
       kind: 'rpc_unreachable',
