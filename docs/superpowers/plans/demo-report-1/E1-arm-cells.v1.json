@@ -1,0 +1,165 @@
+{
+  "schema": "jinn.demo1.arm-cells.v1",
+  "status": "PILOT CELLS \u2014 NOT A RESULT. Arm A is under suspicion of a harness defect; see armAUnderInvestigation.",
+  "source": {
+    "benchmark": "skillsbench",
+    "release": "v1.1",
+    "commit": "b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af"
+  },
+  "model": "claude-haiku-4-5-20251001",
+  "agentLocation": "host",
+  "deviation": "The agent runs on the host, not inside the task image. Claude Code authenticates itself there, so no credential is handled or forwarded. The agent therefore works against the host interpreter rather than the task environment; grading always happens inside the pinned image.",
+  "cells": {
+    "3d-scan-calc/A-native-skill/r0": {
+      "taskId": "3d-scan-calc",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 111,
+      "skills": [
+        {
+          "folder": "mesh-analysis",
+          "bodySha256": "2179de46890fa06dfb2bffd25c0a7b975630922bef1a4515480bcdf552954ae8"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "3d-scan-calc/B-flat-claude-md/r0": {
+      "taskId": "3d-scan-calc",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 58,
+      "skills": [
+        {
+          "folder": "mesh-analysis",
+          "bodySha256": "2179de46890fa06dfb2bffd25c0a7b975630922bef1a4515480bcdf552954ae8"
+        }
+      ],
+      "claudeMdSha256": "8ee05e73132e5ae74e54e1872910412452c4f573f7d204ec22527153d38a3670",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "3d-scan-calc/C-no-instructions/r0": {
+      "taskId": "3d-scan-calc",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 55,
+      "skills": [
+        {
+          "folder": "mesh-analysis",
+          "bodySha256": "2179de46890fa06dfb2bffd25c0a7b975630922bef1a4515480bcdf552954ae8"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "citation-check/A-native-skill/r0": {
+      "taskId": "citation-check",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 74,
+      "skills": [
+        {
+          "folder": "citation-management",
+          "bodySha256": "7bce60d31bfa1ce378f04a64feeca869656baba77d82fe5194713eb43b162795"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "citation-check/B-flat-claude-md/r0": {
+      "taskId": "citation-check",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 84,
+      "skills": [
+        {
+          "folder": "citation-management",
+          "bodySha256": "7bce60d31bfa1ce378f04a64feeca869656baba77d82fe5194713eb43b162795"
+        }
+      ],
+      "claudeMdSha256": "1fc78327e24adbdd7ad10792c8a49308161a102b4565264bd0b2c02470b07c9c",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "citation-check/C-no-instructions/r0": {
+      "taskId": "citation-check",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 66,
+      "skills": [
+        {
+          "folder": "citation-management",
+          "bodySha256": "7bce60d31bfa1ce378f04a64feeca869656baba77d82fe5194713eb43b162795"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "data-to-d3/A-native-skill/r0": {
+      "taskId": "data-to-d3",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 24,
+      "skills": [
+        {
+          "folder": "d3-visualization",
+          "bodySha256": "862a84bdd28bea0acda8e72c583441a34906741bf1763b4f44b015eaf8c7dade"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "dialogue-parser/A-native-skill/r0": {
+      "taskId": "dialogue-parser",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 201,
+      "skills": [
+        {
+          "folder": "dialogue-graph",
+          "bodySha256": "f5e7d5138286aa56cfe3540adb9c7b7e382bc29cbdce17e327b498cf56426912"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2199a62885a12290dc9c5be3ca0681d367576ab7bf037da120e564723292a2f0"
+    }
+  },
+  "armAUnderInvestigation": "Arm A scored 0 on every cell run so far while B and C passed, but the arm-A agent transcript shows it completing the task (dialogue-parser: 204 nodes, 321 edges, both output files reported written). A skill that is merely unhelpful does not produce a completed solve that grades zero. The leading hypothesis is a defect in arm A's own materialization or grading \u2014 it is the only arm whose graded workspace carries an extra .jinn-demo1-skills/ directory, and the only arm passed a --plugin-dir argument. Until that is diagnosed, NO arm comparison from these cells is meaningful in either direction.",
+  "whyNotAResult": [
+    "n=1 replicate on 3 tasks. The design calls for a rehearsal to size the run and a pre-registered official slate.",
+    "Arm C passed on every task where it ran, which is the manipulation check failing: when the no-instruction control solves the task, the content has no detectable effect to deliver and A-versus-B is uninformative by the pre-declared rule.",
+    "No power analysis, no MDE, no lock, no pre-registration anchor. Nothing here is a locked official run.",
+    "The agent ran on the host rather than in the task image, which is a recorded deviation, not the sealed design."
+  ]
+}

@@ -81,6 +81,70 @@
       "oracleReward": "1",
       "noOpReward": "0",
       "eligible": true
+    },
+    "exam-block-sequencing": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "glm-lake-mendota": {
+      "error": "Command failed: docker pull -q --platform=linux/amd64\ndocker: 'docker pull' requires 1 argument\n\nUsage:  docker pull [OPTIONS] NAME[:TAG|@DIGEST]\n\nRun 'docker pull --help' for more information\n",
+      "eligible": false
+    },
+    "grid-dispatch-operator": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "hvac-control": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "jax-computing-basics": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "lake-warming-attribution": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "llm-prefix-cache-replay": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "manufacturing-codebook-normalization": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "manufacturing-equipment-maintenance": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "manufacturing-fjsp-optimization": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "mario-coin-counting": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
     }
   }
 }
