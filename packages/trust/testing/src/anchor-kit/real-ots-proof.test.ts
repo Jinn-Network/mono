@@ -170,10 +170,20 @@ describe("the two records are one upgraded pair", () => {
     expect(bytesToHex(PENDING_PROOF)).not.toBe(bytesToHex(COMPLETE_PROOF));
   });
 
-  test("the pending proof is a prefix-shaped subset, not a different stamp", () => {
-    // Both were assembled from the same three calendar responses over the same
-    // digest, so the pending file's calendar branches survive into the upgraded
-    // one: the completed proof is strictly longer, never a replacement stamp.
+  test("the upgraded proof keeps the earlier calendar branches byte-for-byte", () => {
+    // Both files were assembled from the same three calendar responses over the
+    // same digest, so the upgrade adds to one branch rather than re-stamping.
+    // The two agree byte-for-byte as far as the point where the alice branch's
+    // Bitcoin path is spliced, and diverge from there -- so the pending file is
+    // *not* a byte prefix of the completed one, and the completed one is an
+    // addition beside it rather than a replacement for it (§5 rule 6, §6.2).
+    let shared = 0;
+    while (
+      shared < Math.min(PENDING_PROOF.length, COMPLETE_PROOF.length)
+      && PENDING_PROOF[shared] === COMPLETE_PROOF[shared]
+    ) shared += 1;
+    expect(shared).toBe(339);
+    expect(shared).toBeLessThan(PENDING_PROOF.length);
     expect(COMPLETE_PROOF.length).toBeGreaterThan(PENDING_PROOF.length);
     expect(verify(PENDING_PROOF).status).not.toBe("invalid");
   });

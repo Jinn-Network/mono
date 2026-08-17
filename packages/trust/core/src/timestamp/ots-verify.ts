@@ -49,6 +49,7 @@
  */
 
 import { sha256 } from "@noble/hashes/sha2.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 
 import { conformanceFailure } from "../errors.js";
 import { isCalendarStrictRfc3339 } from "../rfc3339.js";
@@ -288,16 +289,24 @@ function applyOperation(cursor: Cursor, message: Uint8Array, tag: number): Uint8
     return combined;
   }
 
+  // Keccak-256 is the operation an Ethereum branch commits through. Walking it
+  // is not evaluating it: the branch's attestation is a class this profile does
+  // not know, so it falls out as `unknown` and contributes nothing. Refusing the
+  // operation instead would take the *whole* proof down over a branch this
+  // profile has no opinion about -- the same accusation `readAttestation`
+  // declines to make one level up, and a real dual-anchored stamp is exactly
+  // where the two rules must agree.
+  if (tag === OP_KECCAK256) return keccak_256(message);
+
   // §11 family 7's algorithm floor, stated over the operations too: a path that
   // passes through SHA-1 or RIPEMD-160 is no stronger than the weakest hash it
-  // uses, whatever the file digest was.
+  // uses, whatever the file digest was. This is a different judgment from the
+  // one above, and deliberately so -- a broken hash on the path is a claim about
+  // *this* profile's own commitment strength, not about another chain's scope.
   if (tag === OP_SHA1 || tag === OP_RIPEMD160) {
     conformanceFailure(
       `Operation 0x${tag.toString(16).padStart(2, "0")} is below this profile's SHA-256 algorithm floor.`,
     );
-  }
-  if (tag === OP_KECCAK256) {
-    conformanceFailure("Keccak-256 commitment operations are outside this profile's Bitcoin scope.");
   }
   conformanceFailure(`Unknown operation tag 0x${tag.toString(16).padStart(2, "0")}.`);
 }
@@ -419,7 +428,7 @@ function evaluateAgainstHeaders(
   commitment: Uint8Array,
 ): HeightEvaluation {
   const forHeight = headers.filter(
-    (candidate) => candidate.height === height
+    (candidate) => candidate?.height === height
       && candidate.header instanceof Uint8Array
       && candidate.header.length === BLOCK_HEADER_BYTES,
   );
@@ -496,7 +505,18 @@ function decide(
     };
   }
 
+  // Everything the proof does carry is counted, whichever branch answers: a
+  // reason that named only the calendar promises would describe a mixed proof as
+  // if the rest of it were not there.
+  const plural = (count: number, noun: string): string =>
+    `${count} ${noun}${count === 1 ? "" : "s"}`;
   const pending = sites.filter((site) => site.attestation.kind === "pending").length;
+  const unknown = sites.filter((site) => site.attestation.kind === "unknown").length;
+  const carried = [
+    ...(pending > 0 ? [plural(pending, "calendar promise")] : []),
+    ...(unknown > 0 ? [`${plural(unknown, "attestation")} of a class this profile does not know`] : []),
+  ];
+
   if (pending > 0) {
     return {
       status: "pending",
@@ -505,7 +525,9 @@ function decide(
       // commitment: while a proof is pending, its basis is authority-time, and
       // it becomes chain-time only when a Bitcoin attestation is spliced in.
       timeBasis: "authority-time",
-      reason: `The proof carries ${pending} calendar promise${pending === 1 ? "" : "s"} and no Bitcoin attestation.`,
+      reason: carried.length > 1
+        ? `The proof carries ${carried.join(", ")}, and no Bitcoin attestation.`
+        : `The proof carries ${carried[0]} and no Bitcoin attestation.`,
     };
   }
 
@@ -513,7 +535,7 @@ function decide(
     status: "pending",
     profile: OPENTIMESTAMPS_ANCHOR_PROFILE,
     timeBasis: "authority-time",
-    reason: `The proof carries no attestation this profile evaluates (${sites.length} attestation${sites.length === 1 ? "" : "s"}, none Bitcoin or calendar).`,
+    reason: `The proof carries no attestation this profile evaluates (${carried.join(", ")}).`,
   };
 }
 
@@ -560,7 +582,13 @@ export function createOpenTimestampsProofVerifier(): AnchorProofVerifier<
           );
         }
 
-        return decide(sites, input.trust?.blockHeaders ?? []);
+        // A trust *container* the caller mis-shaped is material the operator did
+        // not supply, exactly as a mis-shaped header inside it is (see
+        // `evaluateAgainstHeaders`). Letting it fall through to the catch below
+        // would report `invalid` -- an accusation against the proof for a fault
+        // in the configuration, and with an internal message attached.
+        const supplied = input.trust?.blockHeaders;
+        return decide(sites, Array.isArray(supplied) ? supplied : []);
       } catch (cause) {
         return invalid(cause instanceof Error ? cause.message : String(cause));
       }

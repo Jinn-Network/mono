@@ -18,7 +18,7 @@ import { describe, expect, test } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
 
 import { createOpenTimestampsProofVerifier } from "./ots-verify.js";
-import type { OpenTimestampsBlockHeader } from "./ots-verify.js";
+import type { OpenTimestampsBlockHeader, OpenTimestampsTrustMaterial } from "./ots-verify.js";
 import { OPENTIMESTAMPS_ANCHOR_PROFILE } from "../anchor-provider.js";
 import type { AnchorProofResult } from "../anchor-provider.js";
 
@@ -33,6 +33,9 @@ const MAGIC = Uint8Array.of(
 const PENDING_TAG = Uint8Array.of(0x83, 0xdf, 0xe3, 0x0d, 0x2e, 0xf9, 0x0c, 0x8e);
 const BITCOIN_TAG = Uint8Array.of(0x05, 0x88, 0x96, 0x0d, 0x73, 0xd7, 0x19, 0x01);
 const LITECOIN_TAG = Uint8Array.of(0x06, 0x86, 0x9a, 0x0d, 0x73, 0xd7, 0x1b, 0x45);
+/** A second attestation class this profile does not evaluate -- the terminal an
+ * Ethereum-anchored branch carries. Only its distinctness matters here. */
+const FOREIGN_CHAIN_TAG = Uint8Array.of(0x30, 0xfe, 0x80, 0x87, 0xb5, 0xc7, 0xea, 0xd7);
 
 function concat(parts: readonly Uint8Array[]): Uint8Array {
   const total = parts.reduce((sum, part) => sum + part.length, 0);
@@ -74,6 +77,9 @@ const bitcoinAttestation = (height: number): Uint8Array =>
 const unknownAttestation = (payload: Uint8Array): Uint8Array =>
   concat([LITECOIN_TAG, varbytes(payload)]);
 
+const foreignChainAttestation = (payload: Uint8Array): Uint8Array =>
+  concat([FOREIGN_CHAIN_TAG, varbytes(payload)]);
+
 /** One serialized timestamp node: attestations and operation subtrees, framed
  * the way the reference does it -- `0xff` before every item but the last, `0x00`
  * before an attestation. Order is the caller's, deliberately: this reader must
@@ -92,6 +98,7 @@ function node(
 }
 
 const SHA256_OP = Uint8Array.of(0x08);
+const KECCAK256_OP = Uint8Array.of(0x67);
 const appendOp = (argument: Uint8Array): Uint8Array => concat([Uint8Array.of(0xf0), varbytes(argument)]);
 const prependOp = (argument: Uint8Array): Uint8Array => concat([Uint8Array.of(0xf1), varbytes(argument)]);
 
@@ -270,9 +277,18 @@ describe("the algorithm floor on commitment operations", () => {
     expect(result.status === "invalid" && result.reason).toContain("floor");
   });
 
-  test("a Keccak-256 operation is refused as out of this profile's scope", () => {
-    const proof = detached(DIGEST, path([Uint8Array.of(0x67)], [bitcoinAttestation(HEIGHT)]));
-    expect(verify(proof).status).toBe("invalid");
+  test("a Keccak-256 operation is walked, not refused", () => {
+    // Keccak is how an Ethereum branch commits. This profile evaluates no
+    // Ethereum attestation, but walking the branch and evaluating it are
+    // different acts -- refusing the operation would fail the whole proof over a
+    // branch this profile simply has no opinion about.
+    const proof = detached(DIGEST, path(
+      [Uint8Array.of(0x67)],
+      [unknownAttestation(Uint8Array.of(0x00))],
+    ));
+    const result = verify(proof, KIT_HEADERS);
+    expect(result.status).toBe("pending");
+    expect(result.status === "pending" && result.reason).toContain("no attestation this profile evaluates");
   });
 
   test("an operation tag the format does not define is invalid", () => {
@@ -369,6 +385,29 @@ describe("a structurally complete proof", () => {
     // `invalid` would make a refusal depend on configuration.
     const result = verify(completeProof, [{ height: HEIGHT, header: new Uint8Array(64) }]);
     expect(result.status).toBe("present");
+  });
+
+  test("is present when the trust container itself is mis-shaped", () => {
+    // The same judgment one level up: a caller that hands over something that is
+    // not a header list has supplied no material, and the proof is not at fault
+    // for it. Reaching the catch instead would report `invalid` with an internal
+    // message attached.
+    const containers = [
+      {},
+      { blockHeaders: null },
+      { blockHeaders: {} },
+      { blockHeaders: "0000" },
+      { blockHeaders: [null, undefined, { height: HEIGHT }] },
+    ];
+    for (const container of containers) {
+      const result = verifier.verifyProof({
+        subjectSha256: SUBJECT,
+        proofBytes: completeProof,
+        trust: container as unknown as OpenTimestampsTrustMaterial,
+      });
+      expect(result.status).toBe("present");
+      expect(result.status === "present" && result.facts).toEqual({ blockHeight: HEIGHT });
+    }
   });
 
   test("is verified when one of several headers at that height matches", () => {
@@ -487,6 +526,55 @@ describe("an attestation class this profile does not evaluate", () => {
       [unknownAttestation(Uint8Array.of(1, 2, 3)), bitcoinAttestation(HEIGHT)],
     ));
     expect(verify(proof, KIT_HEADERS).status).toBe("verified");
+  });
+
+  test("is counted in the reason beside the calendar promises it sits with", () => {
+    const proof = detached(DIGEST, path(
+      [...OPERATIONS],
+      [pendingAttestation(), unknownAttestation(Uint8Array.of(1, 2, 3))],
+    ));
+    const result = verify(proof);
+    expect(result.status === "pending" && result.reason).toContain("1 calendar promise");
+    expect(result.status === "pending" && result.reason).toContain("1 attestation of a class this profile does not know");
+  });
+});
+
+describe("a dual-anchored proof", () => {
+  // One branch commits through Keccak-256 to a chain this profile does not
+  // evaluate; the other is the ordinary Bitcoin path. Both are real shapes, and
+  // a proof carrying the first must not be refused for carrying it.
+  const dualAnchored = detached(DIGEST, node([], [
+    {
+      operation: appendOp(OTHER_NONCE),
+      next: node([], [{
+        operation: KECCAK256_OP,
+        next: node([foreignChainAttestation(Uint8Array.of(0x2a))], []),
+      }]),
+    },
+    {
+      operation: appendOp(NONCE),
+      next: node([], [{ operation: SHA256_OP, next: node([bitcoinAttestation(HEIGHT)], []) }]),
+    },
+  ]));
+
+  test("is verified on its Bitcoin branch when the header is supplied", () => {
+    const result = verify(dualAnchored, KIT_HEADERS);
+    expect(result.status).toBe("verified");
+    expect(result.status === "verified" && result.facts).toEqual({ blockHeight: HEIGHT });
+    expect(result.status === "verified" && result.time).toBe(BLOCK_TIME_RFC3339);
+  });
+
+  test("is present on that branch when no header is supplied", () => {
+    const result = verify(dualAnchored);
+    expect(result.status).toBe("present");
+    expect(result.status === "present" && result.facts).toEqual({ blockHeight: HEIGHT });
+  });
+
+  test("answers exactly as the same proof without the foreign branch", () => {
+    // What "contributes nothing" means, stated as an equality rather than an
+    // adjective: the branch is walked, and the outcome is unchanged by it.
+    expect(verify(dualAnchored, KIT_HEADERS)).toEqual(verify(completeProof, KIT_HEADERS));
+    expect(verify(dualAnchored)).toEqual(verify(completeProof));
   });
 });
 
