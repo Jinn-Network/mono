@@ -168,19 +168,113 @@ export {
 } from "./runtime/terminal-bench-2-1/manifest.js";
 export type { TerminalBench21SelectionManifest } from "./runtime/terminal-bench-2-1/manifest.js";
 export { resolveTerminalBench21Selection } from "./runtime/terminal-bench-2-1/host.js";
+export {
+  SWE_BENCH_VERIFIED_DATASET_ID,
+  SWE_BENCH_VERIFIED_DATASET_REVISION,
+  SWE_BENCH_HARNESS_ADAPTER_ID,
+  SWE_BENCH_VERIFIED_DEFAULT_TIMEOUT_SECONDS,
+  SwebenchVerifiedSelectionManifestSchema,
+  swebenchVerifiedSelectionBytes,
+} from "./runtime/swe-bench-verified/manifest.js";
+export type { SwebenchVerifiedSelectionManifest } from "./runtime/swe-bench-verified/manifest.js";
+export { resolveSwebenchVerifiedSelection } from "./runtime/swe-bench-verified/host.js";
+export type {
+  SwebenchVerifiedSelectionRequest,
+  SwebenchVerifiedSelectionResolution,
+} from "./runtime/swe-bench-verified/host.js";
+export {
+  launchSwebenchHarness,
+  writePredictionsJsonl,
+  swebenchRunId,
+  resolveSwebenchHarnessRunId,
+  swebenchModelNameOrPath,
+  collectSwebenchHarnessCells,
+} from "./runtime/swe-bench-verified/launcher.js";
+export { harnessReportsPresent, harnessReportPath, readHarnessReport } from "./runtime/swe-bench-verified/reports.js";
+export {
+  APEX_AGENTS_DATASET_ID,
+  APEX_AGENTS_DATASET_REVISION,
+  ARCHIPELAGO_ADAPTER_ID,
+  ARCHIPELAGO_COMMIT_PIN,
+  APEX_AGENTS_DEFAULT_MAX_STEPS,
+  APEX_AGENTS_DEFAULT_TIMEOUT_SECONDS,
+  ApexAgentsSelectionManifestSchema,
+  apexAgentsSelectionBytes,
+} from "./runtime/apex-agents/manifest.js";
+export type { ApexAgentsSelectionManifest } from "./runtime/apex-agents/manifest.js";
+export { resolveApexAgentsSelection } from "./runtime/apex-agents/host.js";
+export type {
+  ApexAgentsSelectionRequest,
+  ApexAgentsSelectionResolution,
+} from "./runtime/apex-agents/host.js";
+export {
+  launchArchipelago,
+  resolveArchipelagoRunId,
+  archipelagoRunId,
+  archipelagoModelId,
+  collectArchipelagoCells,
+} from "./runtime/apex-agents/launcher.js";
+export { archipelagoGradesPresent, archipelagoGradePath, readArchipelagoGrade } from "./runtime/apex-agents/grades.js";
 export type {
   TerminalBench21SelectionRequest,
   TerminalBench21SelectionResolution,
 } from "./runtime/terminal-bench-2-1/host.js";
 export {
+  TERMINAL_BENCH_3_0_DATASET_ID,
+  TERMINAL_BENCH_3_0_DATASET_REF,
+  TERMINAL_BENCH_3_0_HUB_VERSION,
+  TERMINAL_BENCH_3_0_PROFILE,
+  TERMINAL_BENCH_3_0_SELECTION_ROLE,
+  TerminalBench30SelectionManifestSchema,
+  terminalBench30SelectionBytes,
+} from "./runtime/terminal-bench-3-0/manifest.js";
+export type { TerminalBench30SelectionManifest } from "./runtime/terminal-bench-3-0/manifest.js";
+export { resolveTerminalBench30Selection } from "./runtime/terminal-bench-3-0/host.js";
+export type {
+  TerminalBench30SelectionRequest,
+  TerminalBench30SelectionResolution,
+} from "./runtime/terminal-bench-3-0/host.js";
+export {
+  APEX_SWE_DEV_ADAPTER_ID,
+  APEX_SWE_DEV_DATASET_ID,
+  APEX_SWE_DEV_DATASET_REVISION,
+  APEX_SWE_DEV_DATASET_TASK_COUNT,
+  APEX_SWE_HARNESS_REVISION,
+  APEX_SWE_DEV_SELECTION_ROLE,
+  ApexSweDevSelectionManifestSchema,
+  apexSweDevSelectionBytes,
+} from "./runtime/apex-swe-dev/manifest.js";
+export type { ApexSweDevSelectionManifest } from "./runtime/apex-swe-dev/manifest.js";
+export { resolveApexSweDevSelection, isGitLfsPointerBytes, readApexSweDevHostBinding } from "./runtime/apex-swe-dev/host.js";
+export type {
+  ApexSweDevSelectionRequest,
+  ApexSweDevSelectionResolution,
+} from "./runtime/apex-swe-dev/host.js";
+export { launchApexSweDev, collectApexSweDevCells, apexSweDevReportRoot } from "./runtime/apex-swe-dev/launcher.js";
+export {
+  harnessReportsPresent as apexSweDevHarnessReportsPresent,
+  harnessReportPath as apexSweDevHarnessReportPath,
+  readHarnessReport as readApexSweDevHarnessReport,
+} from "./runtime/apex-swe-dev/reports.js";
+export {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
+  APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION,
+  APEX_SWE_DEV_SUBMIT_CLOSED_SENTENCE,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION,
+  SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0,
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
+  officialSwebenchHarnessConformance,
+  SWE_BENCH_VERIFIED_NOT_LEADERBOARD_READY_LIMITATION,
+  SWE_BENCH_VERIFIED_SUBMIT_CLOSED_SENTENCE,
+  APEX_AGENTS_NOT_LEADERBOARD_READY_LIMITATION,
+  APEX_AGENTS_SUBMIT_CLOSED_SENTENCE,
+  officialArchipelagoConformance,
+  officialApexSweDevConformance,
   suiteLeaderboardLimitation,
 } from "./runtime/suite-protocol/comparability.js";
-export type { SuiteComparability, SuiteCoverage } from "./runtime/suite-protocol/comparability.js";
+export type { SuiteComparability, SuiteCoverage, SuiteProtocolId } from "./runtime/suite-protocol/comparability.js";
 export {
   SUITE_PROTOCOL_PROFILE,
   SUITE_PROTOCOL_SELECTION_ROLE,
@@ -503,8 +597,15 @@ export {
   selectHarborRuntime,
   selectTerminalBench2Runtime,
   selectTerminalBench21Runtime,
+  selectTerminalBench30Runtime,
+  selectSwebenchVerifiedRuntime,
+  selectApexAgentsRuntime,
+  selectApexSweDevRuntime,
   migrateTerminalBenchLegacyTask,
   exportHarborHubPackage,
+  exportSwebenchPredictions,
+  exportApexAgentsInspection,
+  exportApexSwePackage,
   updateDraft,
 } from "./operations/index.js";
 export type {
@@ -586,9 +687,26 @@ export type {
   SelectTerminalBench2RuntimeResult,
   SelectTerminalBench21RuntimeInput,
   SelectTerminalBench21RuntimeResult,
+  SelectTerminalBench30RuntimeInput,
+  SelectTerminalBench30RuntimeResult,
+  SelectSwebenchVerifiedRuntimeInput,
+  SelectSwebenchVerifiedRuntimeResult,
+  SelectApexAgentsRuntimeInput,
+  SelectApexAgentsRuntimeResult,
+  SelectApexSweDevRuntimeInput,
+  SelectApexSweDevRuntimeResult,
   ExportHarborHubPackageInput,
   ExportHarborHubPackageResult,
   HarborHubExportMode,
+  ExportSwebenchPredictionsInput,
+  ExportSwebenchPredictionsResult,
+  SwebenchPredictionsExportMode,
+  ExportApexAgentsInput,
+  ExportApexAgentsResult,
+  ApexAgentsExportMode,
+  ExportApexSwePackageInput,
+  ExportApexSwePackageResult,
+  ApexSweExportMode,
   RunStatusCounts,
   RunDriverStatus,
   RunStatusResult,

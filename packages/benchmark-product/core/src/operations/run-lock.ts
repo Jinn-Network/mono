@@ -30,7 +30,11 @@ import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { suiteProtocolDisplayName } from "../runtime/suite-protocol/comparability.js";
 import { suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
+import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
+import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
 import { runtimeRegistrationArtifacts } from "../runtime/adapter.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import type { OperationContext } from "./context.js";
@@ -95,7 +99,52 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           refuse(
             "conflict",
             `runs.${input.draftId}.suiteQuote`,
-            "full-suite Terminal-Bench 2.1 lock requires a quote that recorded comparability bits",
+            `full-suite ${suiteProtocolDisplayName(suite.protocol)} lock requires a quote that recorded comparability bits`,
+          );
+        }
+      }
+      if (document.spec.evaluationRuntime?.adapterId === "swebench-harness") {
+        const verified = SwebenchVerifiedSelectionManifestSchema.parse(
+          JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
+        );
+        if (verified.coverage === "full" && runState.suiteQuote === undefined) {
+          refuse(
+            "conflict",
+            `runs.${input.draftId}.suiteQuote`,
+            "full-suite SWE-bench Verified lock requires a quote that recorded comparability bits",
+          );
+        }
+      }
+      if (document.spec.evaluationRuntime?.adapterId === "archipelago") {
+        const apex = ApexAgentsSelectionManifestSchema.parse(
+          JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
+        );
+        if (apex.coverage === "full" && runState.suiteQuote === undefined) {
+          refuse(
+            "conflict",
+            `runs.${input.draftId}.suiteQuote`,
+            "full-suite APEX-Agents lock requires a quote that recorded comparability bits",
+          );
+        }
+      }
+      if (document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID) {
+        const apex = ApexSweDevSelectionManifestSchema.parse(
+          JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
+        );
+        // Select seals replicates into the suite; the draft spec stays patchable until lock, so a
+        // post-select `replicates: 5` would otherwise lock and quote as protocol-conforming k=1.
+        if (document.spec.replicates !== apex.suite.replicates) {
+          refuse(
+            "conflict",
+            `drafts.${input.draftId}.spec.replicates`,
+            `APEX-SWE-dev sealed replicates ${apex.suite.replicates} at select; the draft now says ${document.spec.replicates} — re-run "runtime apex-swe-dev select"`,
+          );
+        }
+        if (apex.coverage === "full" && runState.suiteQuote === undefined) {
+          refuse(
+            "conflict",
+            `runs.${input.draftId}.suiteQuote`,
+            "full-suite APEX-SWE-dev lock requires a quote that recorded comparability bits",
           );
         }
       }

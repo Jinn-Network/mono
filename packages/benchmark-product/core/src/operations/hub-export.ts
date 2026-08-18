@@ -1,4 +1,4 @@
-/** Package a retained Harbor Job for Terminal-Bench 2.1 Hub upload. Never places the row. */
+/** Package a retained Harbor Job for Terminal-Bench Hub upload. Never places the row. */
 import { parseMatrix } from "@jinn-network/benchmarking-records";
 import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -8,7 +8,9 @@ import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
+  suiteProtocolDisplayName,
   type SuiteCoverage,
+  type SuiteProtocolId,
 } from "../runtime/suite-protocol/comparability.js";
 import { suiteComparabilityForArm, suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
 import { artifactsDir } from "../workspace/layout.js";
@@ -43,7 +45,25 @@ export function decideHarborHubExportMode(input: {
   return "inspection-upload";
 }
 
-export function harborHubExportInstructions(mode: HarborHubExportMode, jobDir: string): string {
+export function harborHubExportInstructions(
+  mode: HarborHubExportMode,
+  jobDir: string,
+  protocol: SuiteProtocolId = "terminal-bench-2.1",
+): string {
+  if (protocol === "terminal-bench-3.0") {
+    if (mode === "leaderboard-submit") {
+      return [
+        "The locked Terminal-Bench 3.0 method produced a Harbor job that can be uploaded.",
+        `harbor upload --public ${jobDir}`,
+        "The Colophon bundle remains the claim of record. Colophon does not place the leaderboard row.",
+      ].join("\n");
+    }
+    return [
+      "This run matches Terminal-Bench 3.0 execution settings for the selected named slice, but it is not a leaderboard submission.",
+      `You may upload the job for inspection: harbor upload --public ${jobDir}`,
+      "Do not submit this package as a Terminal-Bench 3.0 leaderboard row; it is not leaderboard_submit_ready.",
+    ].join("\n");
+  }
   if (mode === "leaderboard-submit") {
     return [
       "The locked Terminal-Bench 2.1 method produced a Harbor job that can be uploaded.",
@@ -84,14 +104,16 @@ export function exportHarborHubPackage(
       }
       const quote = runState.suiteQuote;
       if (quote === undefined) {
-        refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named Hub export requires a Terminal-Bench 2.1 protocol selection");
+        refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named Hub export requires a suite protocol selection");
       }
       const manifest = HarborSelectionManifestSchema.parse(
         JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
       );
-      if (suiteSelectionFromHarbor(manifest) === undefined) {
-        refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named Hub export requires a Terminal-Bench 2.1 protocol selection");
+      const suite = suiteSelectionFromHarbor(manifest);
+      if (suite === undefined) {
+        refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named Hub export requires a suite protocol selection");
       }
+      const protocol = suite.protocol;
       const jobDir = join(harborArmJobsDir(context.workspaceDir, runState.runSha256), harborArmJobName(runState.runSha256, input.armId));
       const assessed = runState.matrixSha256 === undefined
         ? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false }
@@ -107,7 +129,7 @@ export function exportHarborHubPackage(
           "conflict",
           `runs.${input.draftId}.suiteQuote`,
           quote.coverage === "custom"
-            ? "custom coverage cannot wear the Terminal-Bench 2.1 Hub suite name"
+            ? `custom coverage cannot wear the ${suiteProtocolDisplayName(protocol)} Hub suite name`
             : "execution was not protocol-conforming; suite-named Hub export is refused",
         );
       }
@@ -118,7 +140,7 @@ export function exportHarborHubPackage(
       rmSync(exportDir, { recursive: true, force: true });
       mkdirSync(exportDir, { recursive: true });
       cpSync(jobDir, join(exportDir, "job"), { recursive: true });
-      const instructions = harborHubExportInstructions(mode, join(exportDir, "job"));
+      const instructions = harborHubExportInstructions(mode, join(exportDir, "job"), protocol);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, jobDir, exportDir };
     },

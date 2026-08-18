@@ -17,8 +17,21 @@ import { readRunJournalEntries } from "../run/journal.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource, recordPath } from "../run/publication-source.js";
-import { claimPackageArtifactPath, publicationDir, publicationServeRoot, publicBundlesDir, runStatePath } from "../workspace/layout.js";
-import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import { claimPackageArtifactPath, draftPath, publicationDir, publicationServeRoot, publicBundlesDir, runStatePath } from "../workspace/layout.js";
+import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import {
+  APEX_SWE_DEV_ADAPTER_ID,
+  APEX_SWE_DEV_DATASET_ID,
+  APEX_SWE_DEV_DATASET_REVISION,
+  APEX_SWE_HARNESS_REVISION,
+  ApexSweDevSelectionManifestSchema,
+  apexSweDevSelectionBytes,
+} from "../runtime/apex-swe-dev/manifest.js";
+import { SUITE_PROTOCOL_SELECTION_SCHEMA } from "../runtime/suite-protocol/manifest.js";
+import {
+  APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION,
+  SUITE_NOT_LEADERBOARD_READY_LIMITATION,
+} from "../runtime/suite-protocol/comparability.js";
 import { LEGACY_VERDICT_EVALUATOR_ID, createVerdictDsseSigner, loadOrCreateVerdictSigningKey, sealVerdictStatement } from "../venue/signing.js";
 import type { LocalVenue } from "../venue/venue.js";
 import { armAdd } from "./arms.js";
@@ -725,6 +738,79 @@ describe("runReport — analysis method selection (P4b Task 3)", () => {
       const reportRecord = parseReport(getSealedBytes(workspaceDir, outcome.result.reportSha256));
       expect(reportRecord.method.id).toBe("jinn.benchmarking.method/wilson");
       expect(reportRecord.preregistered).toBe(true);
+    },
+    30_000,
+  );
+
+  /** APEX-SWE-dev is never `leaderboardSubmitReady` (DR-2026-08-18-c §5), so its protocol-named
+   * limitation must reach `limitations[]` through the real `report` operation, not only through a
+   * direct `suiteFactsFromAccountedApexSweDevRun` call in a unit test. Their harnesses run on the
+   * operator host (`run launch` refuses the adapter outright), so this binds a genuinely
+   * schema-parsed, sealed APEX-SWE-dev selection onto a real closed run's own draft. */
+  test(
+    "the APEX-SWE-dev limitation reaches Report limitations through the report operation",
+    async () => {
+      const clock = makeClock();
+      await setUpClosedRun(clock);
+
+      const manifestBytes = apexSweDevSelectionBytes(ApexSweDevSelectionManifestSchema.parse({
+        schema: "jinn.network/benchmark-product/apex-swe-dev-selection/1",
+        dataset: {
+          id: APEX_SWE_DEV_DATASET_ID,
+          revision: APEX_SWE_DEV_DATASET_REVISION,
+          registrySnapshotSha256: "d".repeat(64),
+          registrySnapshotBytes: 128,
+          taskCount: 1,
+        },
+        coverage: "full",
+        selectedTasks: [{ taskId: "0xobs-00", taskType: "observability" }],
+        harness: {
+          adapterId: APEX_SWE_DEV_ADAPTER_ID,
+          revision: APEX_SWE_HARNESS_REVISION,
+          apxVersion: "0.0.0-test",
+          apxExecutableSha256: "e".repeat(64),
+          inspectAiVersion: "0.3.160",
+          pythonExecutableSha256: "f".repeat(64),
+          timeoutSeconds: 3600,
+          timeoutOverride: false,
+          resourceOverride: false,
+          nTrials: 1,
+          messageLimit: 250,
+        },
+        suite: {
+          schema: SUITE_PROTOCOL_SELECTION_SCHEMA,
+          protocol: "apex-swe-dev",
+          coverage: "full",
+          datasetId: APEX_SWE_DEV_DATASET_ID,
+          datasetRevision: APEX_SWE_DEV_DATASET_REVISION,
+          selectedTaskNames: ["0xobs-00"],
+          datasetTaskCount: 1,
+          replicates: 1,
+          atifRequired: false,
+          items: [{ taskName: "0xobs-00", taskSha256: "c".repeat(64), taskType: "observability" }],
+        },
+      }));
+      const selectionManifestSha256 = putSealedBytes(workspaceDir, manifestBytes);
+      const closed = readDraftDocument(workspaceDir, "draft-1");
+      writeFileSync(draftPath(workspaceDir, "draft-1"), JSON.stringify({
+        ...closed,
+        spec: {
+          ...closed.spec,
+          evaluationRuntime: {
+            adapterId: APEX_SWE_DEV_ADAPTER_ID,
+            selectionManifestSha256,
+            isolationPolicy: "unrestricted",
+          },
+        },
+      }, null, 2));
+
+      const outcome = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+      if (!outcome.ok) return;
+
+      const reportRecord = parseReport(getSealedBytes(workspaceDir, outcome.result.reportSha256));
+      expect(reportRecord.limitations).toContain(APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION);
+      expect(reportRecord.limitations).not.toContain(SUITE_NOT_LEADERBOARD_READY_LIMITATION);
     },
     30_000,
   );
