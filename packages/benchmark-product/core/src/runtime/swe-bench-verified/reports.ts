@@ -46,7 +46,3 @@ export function harnessReportsPresent(input: {
     return report !== undefined && report.instanceId === instanceId;
   });
 }
-
-export function mapHarnessReportToOutcome(path: string): "judged" | "unscorable" {
-  return readHarnessReport(path) === undefined ? "unscorable" : "judged";
-}

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { z } from "zod";
-import { atomicWriteFileSync, readFileIfExistsSync } from "../../fs/atomic.js";
+import { atomicWriteFileSync } from "../../fs/atomic.js";
 import { runtimeHostPath } from "../../workspace/layout.js";
 import { putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
 import {
@@ -130,15 +130,6 @@ export function writeApexAgentsHostBinding(
     runtimeHostPath(workspaceDir, selectionManifestSha256),
     JSON.stringify(ApexAgentsHostBindingSchema.parse(binding), null, 2),
   );
-}
-
-export function readApexAgentsHostBinding(
-  workspaceDir: string,
-  selectionManifestSha256: string,
-): ApexAgentsHostBinding {
-  const bytes = readFileIfExistsSync(runtimeHostPath(workspaceDir, selectionManifestSha256));
-  if (bytes === undefined) throw new TypeError("APEX-Agents host binding is missing");
-  return ApexAgentsHostBindingSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(bytes)));
 }
 
 export function sealApexAgentsSelectionDependencies(

@@ -78,6 +78,9 @@ export function exportApexAgentsInspection(
         refuse("conflict", `drafts.${input.draftId}.evaluationRuntime`, "APEX-Agents export requires a locked archipelago runtime");
       }
       const runState = requireRunState(context.workspaceDir, input.draftId);
+      if (runState.runSha256 === undefined) {
+        refuse("conflict", `runs.${input.draftId}`, "APEX-Agents export requires a sealed Run");
+      }
       const quote = runState.suiteQuote;
       if (quote === undefined) {
         refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named APEX-Agents export requires a protocol selection");
@@ -85,13 +88,8 @@ export function exportApexAgentsInspection(
       const manifest = ApexAgentsSelectionManifestSchema.parse(
         JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
       );
-      if (manifest.suite.protocol !== "apex-agents") {
-        refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named APEX-Agents export requires an APEX-Agents protocol selection");
-      }
       const reportRoot = join(artifactsDir(context.workspaceDir), "archipelago", input.draftId);
-      if (runState.runSha256 !== undefined) {
-        resolveArchipelagoRunId(reportRoot, runState.runSha256);
-      }
+      resolveArchipelagoRunId(reportRoot, runState.runSha256, manifest.suite.selectedTaskNames);
       const bits = runState.matrixSha256 === undefined
         ? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false }
         : suiteComparabilityForApexArm({

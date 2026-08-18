@@ -29,14 +29,31 @@ export function archipelagoRunIdPath(reportRoot: string): string {
   return join(reportRoot, "grading_run_id");
 }
 
-export function resolveArchipelagoRunId(reportRoot: string, runSha256: string): string {
+/** Canonical digest of the graded task ids, in the order the selection sealed them. */
+export function archipelagoTaskIdsSha256(taskIds: readonly string[]): string {
+  return createHash("sha256").update(taskIds.join("\n")).digest("hex");
+}
+
+/**
+ * DR-2026-08-17-e decision 4: the grading_run_id is derived from the sealed Run and the graded
+ * task ids, never read from the operator. A sidecar is accepted only when it equals the
+ * derivation, so a pre-existing cached grade tree cannot be pointed at.
+ */
+export function resolveArchipelagoRunId(
+  reportRoot: string,
+  runSha256: string,
+  taskIds: readonly string[],
+): string {
+  const derived = archipelagoRunId(runSha256, archipelagoTaskIdsSha256(taskIds));
   const sidecar = archipelagoRunIdPath(reportRoot);
-  if (!existsSync(sidecar)) return runSha256.slice(0, 32);
-  const value = readFileSync(sidecar, "utf8").trim();
-  if (!/^[a-f0-9]{32}$/u.test(value)) {
-    refuse("record-integrity", "archipelago.grading_run_id", "Archipelago grading_run_id sidecar is not a 32-hex digest");
+  if (existsSync(sidecar) && readFileSync(sidecar, "utf8").trim() !== derived) {
+    refuse(
+      "record-integrity",
+      "archipelago.grading_run_id",
+      "Archipelago grading_run_id sidecar does not equal the run id derived from the sealed Run and task ids",
+    );
   }
-  return value;
+  return derived;
 }
 
 export function launchArchipelago(input: {

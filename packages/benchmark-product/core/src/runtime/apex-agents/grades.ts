@@ -42,7 +42,3 @@ export function archipelagoGradesPresent(input: {
     return report !== undefined && report.taskId === taskId;
   });
 }
-
-export function mapArchipelagoGradeToOutcome(path: string): "judged" | "unscorable" {
-  return readArchipelagoGrade(path) === undefined ? "unscorable" : "judged";
-}

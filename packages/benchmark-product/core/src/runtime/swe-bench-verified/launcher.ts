@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { refuse } from "../../errors.js";
 import { SWE_BENCH_VERIFIED_DATASET_ID, SWE_BENCH_VERIFIED_DEFAULT_TIMEOUT_SECONDS, type SwebenchVerifiedSelectionManifest } from "./manifest.js";
 import { harnessReportPath, readHarnessReport } from "./reports.js";
-import type { SwebenchVerifiedHostBinding } from "./host.js";
+import { readSwebenchModuleVersion, type SwebenchVerifiedHostBinding } from "./host.js";
 
 export interface SwebenchPredictionRow {
   readonly instance_id: string;
@@ -35,14 +35,30 @@ export function swebenchHarnessRunIdPath(reportRoot: string): string {
   return join(reportRoot, "run_id");
 }
 
+/** The one location the derived run_id is computed from, and the one the export packages. */
+export function swebenchPredictionsPath(reportRoot: string): string {
+  return join(reportRoot, "predictions.jsonl");
+}
+
+/**
+ * DR-2026-08-17-e decision 4: the run_id is derived from the sealed Run and the predictions
+ * bytes, never read from the operator. An absent predictions file digests as the empty body
+ * `writePredictionsJsonl` writes for zero rows — no harness report tree can exist under that
+ * id either way. A sidecar is accepted only when it equals the derivation.
+ */
 export function resolveSwebenchHarnessRunId(reportRoot: string, runSha256: string): string {
+  const predictionsPath = swebenchPredictionsPath(reportRoot);
+  const predictionsBytes = existsSync(predictionsPath) ? readFileSync(predictionsPath) : Buffer.alloc(0);
+  const derived = swebenchRunId(runSha256, createHash("sha256").update(predictionsBytes).digest("hex"));
   const sidecar = swebenchHarnessRunIdPath(reportRoot);
-  if (!existsSync(sidecar)) return runSha256.slice(0, 32);
-  const value = readFileSync(sidecar, "utf8").trim();
-  if (!/^[a-f0-9]{32}$/u.test(value)) {
-    refuse("record-integrity", "swebench.harness.run_id", "harness run_id sidecar is not a 32-hex digest");
+  if (existsSync(sidecar) && readFileSync(sidecar, "utf8").trim() !== derived) {
+    refuse(
+      "record-integrity",
+      "swebench.harness.run_id",
+      "harness run_id sidecar does not equal the run_id derived from the sealed Run and predictions",
+    );
   }
-  return value;
+  return derived;
 }
 
 export function writePredictionsJsonl(path: string, rows: readonly SwebenchPredictionRow[]): string {
@@ -69,10 +85,7 @@ export function launchSwebenchHarness(input: {
   if (executableDigest !== input.manifest.harness.executableSha256) {
     refuse("record-integrity", "swebench.harness.executable", "harness executable bytes drifted from the sealed selection");
   }
-  const version = execFileSync(executable, ["--version"], {
-    encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "" },
-  }).trim().replace(/^swebench\s+/iu, "").replace(/^swebench\.harness\s+/iu, "");
+  const version = readSwebenchModuleVersion(executable);
   if (version !== input.manifest.harness.version) {
     refuse("record-integrity", "swebench.harness.version", "harness version drifted from the sealed selection");
   }

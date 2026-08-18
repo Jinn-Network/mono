@@ -3,7 +3,7 @@ import { parseMatrix } from "@jinn-network/benchmarking-records";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { refuse } from "../errors.js";
-import { resolveSwebenchHarnessRunId, swebenchModelNameOrPath } from "../runtime/swe-bench-verified/launcher.js";
+import { resolveSwebenchHarnessRunId, swebenchModelNameOrPath, swebenchPredictionsPath } from "../runtime/swe-bench-verified/launcher.js";
 import {
   SWE_BENCH_HARNESS_ADAPTER_ID,
   SwebenchVerifiedSelectionManifestSchema,
@@ -80,6 +80,9 @@ export function exportSwebenchPredictions(
         refuse("conflict", `drafts.${input.draftId}.evaluationRuntime`, "SWE-bench Verified export requires a locked swebench-harness runtime");
       }
       const runState = requireRunState(context.workspaceDir, input.draftId);
+      if (runState.runSha256 === undefined) {
+        refuse("conflict", `runs.${input.draftId}`, "SWE-bench Verified predictions export requires a sealed Run");
+      }
       const quote = runState.suiteQuote;
       if (quote === undefined) {
         refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named predictions export requires a SWE-bench Verified protocol selection");
@@ -87,11 +90,8 @@ export function exportSwebenchPredictions(
       const manifest = SwebenchVerifiedSelectionManifestSchema.parse(
         JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
       );
-      if (manifest.suite.protocol !== "swe-bench-verified") {
-        refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named predictions export requires a SWE-bench Verified protocol selection");
-      }
       const reportRoot = join(artifactsDir(context.workspaceDir), "swebench-harness", input.draftId);
-      const runId = runState.runSha256 === undefined ? input.draftId : resolveSwebenchHarnessRunId(reportRoot, runState.runSha256);
+      const runId = resolveSwebenchHarnessRunId(reportRoot, runState.runSha256);
       const arm = document.spec.arms.find((candidate) => candidate.armId === input.armId)!;
       const modelNameOrPath = swebenchModelNameOrPath(arm);
       const bits = runState.matrixSha256 === undefined
@@ -117,7 +117,7 @@ export function exportSwebenchPredictions(
       const exportDir = join(artifactsDir(context.workspaceDir), "swebench-export", input.draftId, input.armId);
       rmSync(exportDir, { recursive: true, force: true });
       mkdirSync(exportDir, { recursive: true });
-      const predictionsPath = join(reportRoot, "predictions.jsonl");
+      const predictionsPath = swebenchPredictionsPath(reportRoot);
       if (existsSync(predictionsPath)) {
         writeFileSync(join(exportDir, "predictions.jsonl"), readFileSync(predictionsPath));
       }

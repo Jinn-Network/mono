@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { z } from "zod";
-import { atomicWriteFileSync, readFileIfExistsSync } from "../../fs/atomic.js";
+import { atomicWriteFileSync } from "../../fs/atomic.js";
 import { runtimeHostPath } from "../../workspace/layout.js";
 import { putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
 import { coverageFromSelectedNames, namedSliceTaskNames, type SuiteCoverage } from "../suite-protocol/manifest.js";
@@ -11,6 +11,7 @@ import {
   SWE_BENCH_VERIFIED_DATASET_ID,
   SWE_BENCH_VERIFIED_DATASET_REVISION,
   SWE_BENCH_VERIFIED_DEFAULT_TIMEOUT_SECONDS,
+  SWEBENCH_VERSION_PROBE_SOURCE,
   SwebenchVerifiedRegistryMetadataSchema,
   assertSupportedSwebenchHarnessVersion,
   type SwebenchVerifiedSelectionManifest,
@@ -37,13 +38,20 @@ export const SwebenchVerifiedHostBindingSchema = z.object({
 }).strict();
 export type SwebenchVerifiedHostBinding = z.infer<typeof SwebenchVerifiedHostBindingSchema>;
 
-function probeHarnessVersion(executable: string): string {
-  const stdout = execFileSync(realpathSync(executable), ["--version"], {
+/**
+ * The selection executable is the interpreter that can run `-m swebench.harness.run_evaluation`
+ * (`python3`, per docs/runbooks/swebench-verified-official-one-task.md), so `--version` reports
+ * the interpreter, not the harness. Probe the module version the runbook itself verifies.
+ */
+export function readSwebenchModuleVersion(executable: string): string {
+  return execFileSync(realpathSync(executable), ["-c", SWEBENCH_VERSION_PROBE_SOURCE], {
     encoding: "utf8",
     env: { PATH: process.env.PATH ?? "" },
   }).trim();
-  const version = stdout.replace(/^swebench\s+/iu, "").replace(/^swebench\.harness\s+/iu, "");
-  return assertSupportedSwebenchHarnessVersion(version);
+}
+
+function probeHarnessVersion(executable: string): string {
+  return assertSupportedSwebenchHarnessVersion(readSwebenchModuleVersion(executable));
 }
 
 export function resolveSwebenchVerifiedSelection(
@@ -118,15 +126,6 @@ export function writeSwebenchVerifiedHostBinding(
     runtimeHostPath(workspaceDir, selectionManifestSha256),
     JSON.stringify(SwebenchVerifiedHostBindingSchema.parse(binding), null, 2),
   );
-}
-
-export function readSwebenchVerifiedHostBinding(
-  workspaceDir: string,
-  selectionManifestSha256: string,
-): SwebenchVerifiedHostBinding {
-  const bytes = readFileIfExistsSync(runtimeHostPath(workspaceDir, selectionManifestSha256));
-  if (bytes === undefined) throw new TypeError("SWE-bench Verified host binding is missing");
-  return SwebenchVerifiedHostBindingSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(bytes)));
 }
 
 export function sealSwebenchVerifiedSelectionDependencies(

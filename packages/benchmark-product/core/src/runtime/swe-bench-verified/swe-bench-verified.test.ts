@@ -13,12 +13,14 @@ import { selectSwebenchVerifiedRuntime } from "../../operations/swe-bench-verifi
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { namedSliceTaskNames } from "../suite-protocol/manifest.js";
-import { suiteFactsFromAccountedSwebenchRun } from "../suite-protocol/from-swebench.js";
+import { suiteFactsFromAccountedSwebenchRun, suiteQuoteFromSwebench } from "../suite-protocol/from-swebench.js";
 import { resolveSwebenchVerifiedSelection } from "./host.js";
 import {
   launchSwebenchHarness,
   resolveSwebenchHarnessRunId,
+  swebenchHarnessRunIdPath,
   swebenchModelNameOrPath,
+  swebenchPredictionsPath,
   writePredictionsJsonl,
   swebenchRunId,
 } from "./launcher.js";
@@ -38,7 +40,13 @@ function writeFakeHarness(): string {
 const { mkdirSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const args = process.argv.slice(2);
-if (args[0] === "--version" && args.length === 1) { process.stdout.write("4.1.0\\n"); process.exit(0); }
+if (args[0] === "-c" && args.length === 2) {
+  if (!String(args[1]).includes("swebench.__version__")) process.exit(64);
+  process.stdout.write("4.1.0\\n");
+  process.exit(0);
+}
+// The documented executable is python3: --version reports the interpreter, never the harness.
+if (args[0] === "--version" && args.length === 1) { process.stdout.write("Python 3.12.4\\n"); process.exit(0); }
 const runId = args[args.indexOf("--run_id") + 1];
 const ids = [];
 const start = args.indexOf("--instance_ids") + 1;
@@ -102,6 +110,21 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("SWE-bench Verified official-suite intake", () => {
+  test("selection probes the swebench module, not the interpreter's --version", () => {
+    const interpreterOnly = join(root, "python3-without-swebench");
+    writeFileSync(interpreterOnly, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "--version" && args.length === 1) { process.stdout.write("Python 3.12.4\\n"); process.exit(0); }
+process.stderr.write("ModuleNotFoundError: No module named 'swebench'\\n");
+process.exit(1);
+`, { mode: 0o700 });
+    chmodSync(interpreterOnly, 0o700);
+    expect(() => resolveSwebenchVerifiedSelection(workspaceDir, {
+      ...request("one_task"),
+      executable: interpreterOnly,
+    })).toThrow();
+  });
+
   test("named slices are lexicographic first 1 / first 10 / all from the 12-instance fixture", () => {
     expect(namedSliceTaskNames([...names], "one_task")).toEqual(["inst00"]);
     expect(namedSliceTaskNames([...names], "ten_task")).toEqual([...names.slice(0, 10)]);
@@ -148,7 +171,7 @@ describe("SWE-bench Verified official-suite intake", () => {
     expect(requireRunState(workspaceDir, "one").suiteQuote?.leaderboardSubmitReady).toBe(false);
   }, 60_000);
 
-  test("full coverage quote is method-eligible and not leaderboard_submit_ready; lock without those quote bits refuses", async () => {
+  test("a 12-instance snapshot claiming full coverage is refused method eligibility; lock without those quote bits refuses", async () => {
     const context = await prepareDraft("full");
     const selected = await selectSwebenchVerifiedRuntime(context, { draftId: "full", ...request("full") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
@@ -161,7 +184,9 @@ describe("SWE-bench Verified official-suite intake", () => {
       coverage: "full",
       executionConformance: true,
       leaderboardSubmitReady: false,
-      methodLeaderboardEligible: true,
+      // 12 !== SWE_BENCH_VERIFIED_DATASET_INSTANCE_COUNT: "full" over a truncated snapshot is
+      // not the official dataset, so it never earns leaderboard eligibility.
+      methodLeaderboardEligible: false,
       cellCount: "12 × 2 × 1",
     });
     expect(requireRunState(workspaceDir, "full").suiteQuote?.leaderboardSubmitReady).toBe(false);
@@ -184,6 +209,31 @@ describe("SWE-bench Verified official-suite intake", () => {
     if (refused.ok) return;
     expect(refused.error.detail).toMatch(/comparability bits/u);
   }, 120_000);
+
+  test("eligibility keys off the sealed revision pin and sealed instance count, not manifest self-agreement", async () => {
+    const context = await prepareDraft("pin");
+    const selected = await selectSwebenchVerifiedRuntime(context, { draftId: "pin", ...request("full") });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    const manifest = SwebenchVerifiedSelectionManifestSchema.parse(
+      JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))),
+    );
+    const base = { manifest, armCount: 2, itemCount: 12, replicates: 1 };
+    expect(suiteQuoteFromSwebench(base).methodLeaderboardEligible).toBe(false);
+    expect(suiteQuoteFromSwebench({ ...base, officialDatasetInstanceCount: 12 }).methodLeaderboardEligible).toBe(true);
+
+    // Self-agreeing but drifted: dataset.revision === suite.datasetRevision, neither is the pin.
+    const drifted: typeof manifest = {
+      ...manifest,
+      dataset: { ...manifest.dataset, revision: "f".repeat(40) },
+      suite: { ...manifest.suite, datasetRevision: "f".repeat(40) },
+    };
+    expect(suiteQuoteFromSwebench({
+      ...base,
+      manifest: drifted,
+      officialDatasetInstanceCount: 12,
+    }).methodLeaderboardEligible).toBe(false);
+  }, 60_000);
 });
 
 describe("SWE-bench Verified harness grade and export", () => {
@@ -199,7 +249,7 @@ describe("SWE-bench Verified harness grade and export", () => {
       JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))),
     );
     const reportRoot = join(root, "harness-out");
-    const predictionsPath = join(reportRoot, "predictions.jsonl");
+    const predictionsPath = swebenchPredictionsPath(reportRoot);
     const predictionsSha256 = writePredictionsJsonl(predictionsPath, [{
       instance_id: "inst00",
       model_name_or_path: "one",
@@ -215,6 +265,10 @@ describe("SWE-bench Verified harness grade and export", () => {
       instanceIds: ["inst00"],
     });
     expect(resolveSwebenchHarnessRunId(reportRoot, "a".repeat(64))).toBe(runId);
+    writeFileSync(swebenchHarnessRunIdPath(reportRoot), `${"9".repeat(32)}\n`);
+    expect(() => resolveSwebenchHarnessRunId(reportRoot, "a".repeat(64)))
+      .toThrow(/does not equal the run_id derived/u);
+    writeFileSync(swebenchHarnessRunIdPath(reportRoot), `${runId}\n`);
     expect(harnessReportPath({ reportRoot, runId, modelNameOrPath: "one", instanceId: "inst00" })).toMatch(/report\.json$/u);
     expect(swebenchModelNameOrPath({ armId: "solver", pinning: { model: { id: "acme-model" } } })).toBe("acme-model");
     expect(swebenchModelNameOrPath({ armId: "solver", pinning: { harness: { id: "swebench-harness" } } })).toBe("solver");
@@ -237,6 +291,7 @@ describe("SWE-bench Verified harness grade and export", () => {
       reportRoot,
       runId,
       modelNameOrPathByArm: { one: "one", two: "missing" },
+      officialDatasetInstanceCount: 1,
     });
     expect(withoutReports.quote.leaderboardSubmitReady).toBe(false);
     const twoReport = harnessReportPath({ reportRoot, runId, modelNameOrPath: "two", instanceId: "inst00" });
@@ -252,6 +307,7 @@ describe("SWE-bench Verified harness grade and export", () => {
       reportRoot,
       runId,
       modelNameOrPathByArm: { one: "one", two: "two" },
+      officialDatasetInstanceCount: 1,
     });
     expect(ready.quote.leaderboardSubmitReady).toBe(true);
     expect(ready.limitation).toBeUndefined();
@@ -261,6 +317,10 @@ describe("SWE-bench Verified harness grade and export", () => {
     const context = await prepareDraft("one");
     expect((await selectSwebenchVerifiedRuntime(context, { draftId: "one", ...request("one_task") })).ok).toBe(true);
     expect((await runQuote(context, { draftId: "one" })).ok).toBe(true);
+    const unsealed = exportSwebenchPredictions(context, { draftId: "one", armId: "one" });
+    expect(unsealed.ok).toBe(false);
+    if (!unsealed.ok) expect(unsealed.error.detail).toMatch(/requires a sealed Run/u);
+    expect(runLock(context, { draftId: "one" }).ok).toBe(true);
     const exported = exportSwebenchPredictions(context, { draftId: "one", armId: "one" });
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
@@ -274,6 +334,7 @@ describe("SWE-bench Verified harness grade and export", () => {
     const customContext = await prepareDraft("custom");
     expect((await selectSwebenchVerifiedRuntime(customContext, { draftId: "custom", ...request(undefined, ["inst11"]) })).ok).toBe(true);
     expect((await runQuote(customContext, { draftId: "custom" })).ok).toBe(true);
+    expect(runLock(customContext, { draftId: "custom" }).ok).toBe(true);
     const custom = exportSwebenchPredictions(customContext, { draftId: "custom", armId: "one" });
     expect(custom.ok).toBe(false);
     if (custom.ok) return;

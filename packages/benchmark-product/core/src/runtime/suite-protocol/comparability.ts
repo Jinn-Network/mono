@@ -19,6 +19,8 @@ export interface DeriveSuiteComparabilityInput {
   readonly datasetCount: number;
   readonly atifPresent: boolean;
   readonly datasetRevisionMatchesLeaderboardPin?: boolean;
+  /** `datasetCount` equals the suite's sealed official size. Omitted where no size is pinned. */
+  readonly datasetCountMatchesLeaderboardPin?: boolean;
   /** Present only after collect. Omitted at quote → not leaderboard-ready. */
   readonly cellsAccounted?: boolean;
   /** ATIF bytes on the retained Harbor job, not quote-time `atifRequired`. TB 2.1 only. */
@@ -55,7 +57,8 @@ export function methodLeaderboardEligible(input: DeriveSuiteComparabilityInput):
       && input.k === 1
       && input.selectedCount === input.datasetCount
       && input.datasetCount > 0
-      && input.datasetRevisionMatchesLeaderboardPin !== false;
+      && input.datasetRevisionMatchesLeaderboardPin !== false
+      && input.datasetCountMatchesLeaderboardPin !== false;
   }
   return input.coverage === "full"
     && input.executionConformance
@@ -63,7 +66,8 @@ export function methodLeaderboardEligible(input: DeriveSuiteComparabilityInput):
     && input.selectedCount === input.datasetCount
     && input.datasetCount > 0
     && input.atifPresent
-    && input.datasetRevisionMatchesLeaderboardPin !== false;
+    && input.datasetRevisionMatchesLeaderboardPin !== false
+    && input.datasetCountMatchesLeaderboardPin !== false;
 }
 
 export function deriveSuiteComparability(input: DeriveSuiteComparabilityInput): SuiteComparability {

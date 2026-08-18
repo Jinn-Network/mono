@@ -13,11 +13,13 @@ import { selectApexAgentsRuntime } from "../../operations/apex-agents.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { namedSliceTaskNames } from "../suite-protocol/manifest.js";
-import { suiteFactsFromAccountedApexRun } from "../suite-protocol/from-apex.js";
+import { suiteFactsFromAccountedApexRun, suiteQuoteFromApex } from "../suite-protocol/from-apex.js";
 import { resolveApexAgentsSelection } from "./host.js";
 import {
   archipelagoModelId,
   archipelagoRunId,
+  archipelagoRunIdPath,
+  archipelagoTaskIdsSha256,
   launchArchipelago,
   resolveArchipelagoRunId,
 } from "./launcher.js";
@@ -157,7 +159,7 @@ describe("APEX-Agents official-suite intake", () => {
     expect(requireRunState(workspaceDir, "one").suiteQuote?.leaderboardSubmitReady).toBe(false);
   }, 60_000);
 
-  test("full coverage quote is method-eligible and not leaderboard_submit_ready; lock without those quote bits refuses", async () => {
+  test("a 12-task snapshot claiming full coverage is refused method eligibility; lock without those quote bits refuses", async () => {
     const context = await prepareDraft("full");
     const selected = await selectApexAgentsRuntime(context, { draftId: "full", ...request("full") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
@@ -170,7 +172,9 @@ describe("APEX-Agents official-suite intake", () => {
       coverage: "full",
       executionConformance: true,
       leaderboardSubmitReady: false,
-      methodLeaderboardEligible: true,
+      // 12 !== APEX_AGENTS_DATASET_TASK_COUNT: "full" over a truncated snapshot is not the
+      // official dataset, so it never earns leaderboard eligibility.
+      methodLeaderboardEligible: false,
       cellCount: "12 × 2 × 1",
     });
     expect(requireRunState(workspaceDir, "full").suiteQuote?.leaderboardSubmitReady).toBe(false);
@@ -193,6 +197,31 @@ describe("APEX-Agents official-suite intake", () => {
     if (refused.ok) return;
     expect(refused.error.detail).toMatch(/comparability bits/u);
   }, 120_000);
+
+  test("eligibility keys off the sealed revision pin and sealed task count, not manifest self-agreement", async () => {
+    const context = await prepareDraft("pin");
+    const selected = await selectApexAgentsRuntime(context, { draftId: "pin", ...request("full") });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    const manifest = ApexAgentsSelectionManifestSchema.parse(
+      JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))),
+    );
+    const base = { manifest, armCount: 2, itemCount: 12, replicates: 1 };
+    expect(suiteQuoteFromApex(base).methodLeaderboardEligible).toBe(false);
+    expect(suiteQuoteFromApex({ ...base, officialDatasetTaskCount: 12 }).methodLeaderboardEligible).toBe(true);
+
+    // Self-agreeing but drifted: dataset.revision === suite.datasetRevision, neither is the pin.
+    const drifted: typeof manifest = {
+      ...manifest,
+      dataset: { ...manifest.dataset, revision: "f".repeat(40) },
+      suite: { ...manifest.suite, datasetRevision: "f".repeat(40) },
+    };
+    expect(suiteQuoteFromApex({
+      ...base,
+      manifest: drifted,
+      officialDatasetTaskCount: 12,
+    }).methodLeaderboardEligible).toBe(false);
+  }, 60_000);
 });
 
 describe("APEX-Agents Archipelago grade and export", () => {
@@ -208,8 +237,7 @@ describe("APEX-Agents Archipelago grade and export", () => {
       JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))),
     );
     const reportRoot = join(root, "archipelago-out");
-    const taskIdsSha256 = "b".repeat(64);
-    const runId = archipelagoRunId("a".repeat(64), taskIdsSha256);
+    const runId = archipelagoRunId("a".repeat(64), archipelagoTaskIdsSha256(["task_00"]));
     const matrix = {
       cells: manifest.suite.items.flatMap((item) => ["one", "two"].map((armId) => ({
         cellKey: cellKey(item.taskSha256, armId, 1),
@@ -227,6 +255,7 @@ describe("APEX-Agents Archipelago grade and export", () => {
       matrix,
       armIds: ["one", "two"],
       reportRoot,
+      officialDatasetTaskCount: 1,
     });
     expect(withoutGrades.quote.leaderboardSubmitReady).toBe(false);
     launchArchipelago({
@@ -236,7 +265,11 @@ describe("APEX-Agents Archipelago grade and export", () => {
       runId,
       taskIds: ["task_00"],
     });
-    expect(resolveArchipelagoRunId(reportRoot, "a".repeat(64))).toBe(runId);
+    expect(resolveArchipelagoRunId(reportRoot, "a".repeat(64), ["task_00"])).toBe(runId);
+    writeFileSync(archipelagoRunIdPath(reportRoot), `${"9".repeat(32)}\n`);
+    expect(() => resolveArchipelagoRunId(reportRoot, "a".repeat(64), ["task_00"]))
+      .toThrow(/does not equal the run id derived/u);
+    writeFileSync(archipelagoRunIdPath(reportRoot), `${runId}\n`);
     expect(archipelagoGradePath({ reportRoot, taskId: "task_00" })).toMatch(/grades\.json$/u);
     expect(archipelagoModelId({ armId: "solver", pinning: { model: { id: "acme-model" } } })).toBe("acme-model");
     expect(archipelagoModelId({ armId: "solver", pinning: { harness: { id: "archipelago" } } })).toBe("solver");
@@ -248,6 +281,7 @@ describe("APEX-Agents Archipelago grade and export", () => {
       matrix,
       armIds: ["one", "two"],
       reportRoot,
+      officialDatasetTaskCount: 1,
     });
     expect(ready.quote.leaderboardSubmitReady).toBe(true);
     expect(ready.limitation).toBeUndefined();
@@ -257,6 +291,10 @@ describe("APEX-Agents Archipelago grade and export", () => {
     const context = await prepareDraft("one");
     expect((await selectApexAgentsRuntime(context, { draftId: "one", ...request("one_task") })).ok).toBe(true);
     expect((await runQuote(context, { draftId: "one" })).ok).toBe(true);
+    const unsealed = exportApexAgentsInspection(context, { draftId: "one", armId: "one" });
+    expect(unsealed.ok).toBe(false);
+    if (!unsealed.ok) expect(unsealed.error.detail).toMatch(/requires a sealed Run/u);
+    expect(runLock(context, { draftId: "one" }).ok).toBe(true);
     const exported = exportApexAgentsInspection(context, { draftId: "one", armId: "one" });
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
@@ -271,6 +309,7 @@ describe("APEX-Agents Archipelago grade and export", () => {
     const customContext = await prepareDraft("custom");
     expect((await selectApexAgentsRuntime(customContext, { draftId: "custom", ...request(undefined, ["task_11"]) })).ok).toBe(true);
     expect((await runQuote(customContext, { draftId: "custom" })).ok).toBe(true);
+    expect(runLock(customContext, { draftId: "custom" }).ok).toBe(true);
     const custom = exportApexAgentsInspection(customContext, { draftId: "custom", armId: "one" });
     expect(custom.ok).toBe(false);
     if (custom.ok) return;

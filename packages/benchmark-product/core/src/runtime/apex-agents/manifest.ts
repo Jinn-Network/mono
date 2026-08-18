@@ -1,7 +1,6 @@
 /** Product-owned APEX-Agents selection. Cousin Stirrup / Harbor / Code cannot claim this id. */
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
-import { sha256Hex } from "../../workspace/sealed-store.js";
 import {
   APEX_AGENTS_DEFAULT_MAX_STEPS,
   APEX_AGENTS_DEFAULT_TIMEOUT_SECONDS,
@@ -24,7 +23,6 @@ export {
   APEX_AGENTS_DEFAULT_MAX_STEPS,
   APEX_AGENTS_DEFAULT_TIMEOUT_SECONDS,
 };
-export const APEX_AGENTS_PROFILE = "https://product.jinn.network/profiles/apex-agents-selection/v1" as const;
 export const APEX_AGENTS_SELECTION_ROLE = "https://product.jinn.network/artifact-roles/apex-agents/selection/v1" as const;
 export const APEX_AGENTS_SELECTION_SCHEMA = "jinn.network/benchmark-product/apex-agents-selection/1" as const;
 export const ARCHIPELAGO_RUNTIME_EVIDENCE_PROFILE = "https://product.jinn.network/profiles/archipelago-evidence/v1" as const;
@@ -87,10 +85,6 @@ export type ApexAgentsSelectionManifest = z.infer<typeof ApexAgentsSelectionMani
 
 export function apexAgentsSelectionBytes(value: ApexAgentsSelectionManifest): Uint8Array {
   return canonicalJsonBytes(ApexAgentsSelectionManifestSchema.parse(value) as never);
-}
-
-export function apexAgentsSelectionSha256(value: ApexAgentsSelectionManifest): string {
-  return sha256Hex(apexAgentsSelectionBytes(value));
 }
 
 export function assertSupportedArchipelagoCommit(commit: string): string {

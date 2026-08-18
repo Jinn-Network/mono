@@ -1,4 +1,8 @@
-import type { SwebenchVerifiedSelectionManifest } from "../swe-bench-verified/manifest.js";
+import {
+  SWE_BENCH_VERIFIED_DATASET_INSTANCE_COUNT,
+  SWE_BENCH_VERIFIED_DATASET_REVISION,
+  type SwebenchVerifiedSelectionManifest,
+} from "../swe-bench-verified/manifest.js";
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
@@ -15,7 +19,18 @@ export function suiteSelectionFromSwebench(manifest: SwebenchVerifiedSelectionMa
   return manifest.suite;
 }
 
-function methodBitsFromSwebench(manifest: SwebenchVerifiedSelectionManifest): {
+/**
+ * Test seam only. Production callers leave it unset so the sealed 500-instance size applies;
+ * a fixture dataset passes its own size to exercise the eligible branch without 500 instances.
+ */
+export interface OfficialSwebenchDatasetSize {
+  readonly officialDatasetInstanceCount?: number;
+}
+
+function methodBitsFromSwebench(
+  manifest: SwebenchVerifiedSelectionManifest,
+  officialDatasetInstanceCount: number = SWE_BENCH_VERIFIED_DATASET_INSTANCE_COUNT,
+): {
   readonly protocol: "swe-bench-verified";
   readonly coverage: SuiteProtocolSelection["coverage"];
   readonly executionConformance: boolean;
@@ -24,6 +39,7 @@ function methodBitsFromSwebench(manifest: SwebenchVerifiedSelectionManifest): {
   readonly datasetCount: number;
   readonly atifPresent: boolean;
   readonly datasetRevisionMatchesLeaderboardPin: boolean;
+  readonly datasetCountMatchesLeaderboardPin: boolean;
 } {
   const suite = manifest.suite;
   return {
@@ -41,7 +57,8 @@ function methodBitsFromSwebench(manifest: SwebenchVerifiedSelectionManifest): {
     selectedCount: suite.selectedTaskNames.length,
     datasetCount: suite.datasetTaskCount,
     atifPresent: suite.atifRequired,
-    datasetRevisionMatchesLeaderboardPin: suite.datasetRevision === manifest.dataset.revision,
+    datasetRevisionMatchesLeaderboardPin: suite.datasetRevision === SWE_BENCH_VERIFIED_DATASET_REVISION,
+    datasetCountMatchesLeaderboardPin: suite.datasetTaskCount === officialDatasetInstanceCount,
   };
 }
 
@@ -68,9 +85,9 @@ export function suiteQuoteFromSwebench(input: {
   readonly armCount: number;
   readonly itemCount: number;
   readonly replicates: number;
-}): SuiteQuotePresentation {
+} & OfficialSwebenchDatasetSize): SuiteQuotePresentation {
   const suite = suiteSelectionFromSwebench(input.manifest);
-  const method = methodBitsFromSwebench(input.manifest);
+  const method = methodBitsFromSwebench(input.manifest, input.officialDatasetInstanceCount);
   return presentSuiteQuote(input, suite, deriveSuiteComparability(method), methodLeaderboardEligible(method), input.manifest.harness.version);
 }
 
@@ -79,7 +96,7 @@ export function suiteFactsFromSwebenchManifest(input: {
   readonly armCount: number;
   readonly itemCount: number;
   readonly replicates: number;
-}): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
+} & OfficialSwebenchDatasetSize): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
   const quote = suiteQuoteFromSwebench(input);
   return { quote, limitation: suiteLeaderboardLimitation(quote, "swe-bench-verified") };
 }
@@ -94,9 +111,9 @@ export function suiteFactsFromAccountedSwebenchRun(input: {
   readonly reportRoot: string;
   readonly runId: string;
   readonly modelNameOrPathByArm: Readonly<Record<string, string>>;
-}): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
+} & OfficialSwebenchDatasetSize): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
   const suite = suiteSelectionFromSwebench(input.manifest);
-  const method = methodBitsFromSwebench(input.manifest);
+  const method = methodBitsFromSwebench(input.manifest, input.officialDatasetInstanceCount);
   const cellsAccounted = input.armIds.length > 0
     && input.armIds.every((armId) => accountSuiteArmCells(input.matrix, suite, armId));
   const reports = input.armIds.length > 0 && input.armIds.every((armId) => harnessReportsPresent({
@@ -117,9 +134,9 @@ export function suiteComparabilityForSwebenchArm(input: {
   readonly reportRoot: string;
   readonly runId: string;
   readonly modelNameOrPath: string;
-}): SuiteComparability {
+} & OfficialSwebenchDatasetSize): SuiteComparability {
   const suite = suiteSelectionFromSwebench(input.manifest);
-  const method = methodBitsFromSwebench(input.manifest);
+  const method = methodBitsFromSwebench(input.manifest, input.officialDatasetInstanceCount);
   const cellsAccounted = accountSuiteArmCells(input.matrix, suite, input.armId);
   const reports = harnessReportsPresent({
     reportRoot: input.reportRoot,

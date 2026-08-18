@@ -1,4 +1,8 @@
-import type { ApexAgentsSelectionManifest } from "../apex-agents/manifest.js";
+import {
+  APEX_AGENTS_DATASET_REVISION,
+  APEX_AGENTS_DATASET_TASK_COUNT,
+  type ApexAgentsSelectionManifest,
+} from "../apex-agents/manifest.js";
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
@@ -15,7 +19,18 @@ export function suiteSelectionFromApex(manifest: ApexAgentsSelectionManifest): S
   return manifest.suite;
 }
 
-function methodBitsFromApex(manifest: ApexAgentsSelectionManifest): {
+/**
+ * Test seam only. Production callers leave it unset so the sealed 480-task size applies;
+ * a fixture dataset passes its own size to exercise the eligible branch without 480 tasks.
+ */
+export interface OfficialApexDatasetSize {
+  readonly officialDatasetTaskCount?: number;
+}
+
+function methodBitsFromApex(
+  manifest: ApexAgentsSelectionManifest,
+  officialDatasetTaskCount: number = APEX_AGENTS_DATASET_TASK_COUNT,
+): {
   readonly protocol: "apex-agents";
   readonly coverage: SuiteProtocolSelection["coverage"];
   readonly executionConformance: boolean;
@@ -24,6 +39,7 @@ function methodBitsFromApex(manifest: ApexAgentsSelectionManifest): {
   readonly datasetCount: number;
   readonly atifPresent: boolean;
   readonly datasetRevisionMatchesLeaderboardPin: boolean;
+  readonly datasetCountMatchesLeaderboardPin: boolean;
 } {
   const suite = manifest.suite;
   return {
@@ -46,7 +62,8 @@ function methodBitsFromApex(manifest: ApexAgentsSelectionManifest): {
     selectedCount: suite.selectedTaskNames.length,
     datasetCount: suite.datasetTaskCount,
     atifPresent: suite.atifRequired,
-    datasetRevisionMatchesLeaderboardPin: suite.datasetRevision === manifest.dataset.revision,
+    datasetRevisionMatchesLeaderboardPin: suite.datasetRevision === APEX_AGENTS_DATASET_REVISION,
+    datasetCountMatchesLeaderboardPin: suite.datasetTaskCount === officialDatasetTaskCount,
   };
 }
 
@@ -73,9 +90,9 @@ export function suiteQuoteFromApex(input: {
   readonly armCount: number;
   readonly itemCount: number;
   readonly replicates: number;
-}): SuiteQuotePresentation {
+} & OfficialApexDatasetSize): SuiteQuotePresentation {
   const suite = suiteSelectionFromApex(input.manifest);
-  const method = methodBitsFromApex(input.manifest);
+  const method = methodBitsFromApex(input.manifest, input.officialDatasetTaskCount);
   return presentSuiteQuote(input, suite, deriveSuiteComparability(method), methodLeaderboardEligible(method), input.manifest.archipelago.commit);
 }
 
@@ -84,7 +101,7 @@ export function suiteFactsFromApexManifest(input: {
   readonly armCount: number;
   readonly itemCount: number;
   readonly replicates: number;
-}): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
+} & OfficialApexDatasetSize): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
   const quote = suiteQuoteFromApex(input);
   return { quote, limitation: suiteLeaderboardLimitation(quote, "apex-agents") };
 }
@@ -97,9 +114,9 @@ export function suiteFactsFromAccountedApexRun(input: {
   readonly matrix: { readonly cells: readonly MatrixCellAccount[] };
   readonly armIds: readonly string[];
   readonly reportRoot: string;
-}): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
+} & OfficialApexDatasetSize): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
   const suite = suiteSelectionFromApex(input.manifest);
-  const method = methodBitsFromApex(input.manifest);
+  const method = methodBitsFromApex(input.manifest, input.officialDatasetTaskCount);
   const cellsAccounted = input.armIds.length > 0
     && input.armIds.every((armId) => accountSuiteArmCells(input.matrix, suite, armId));
   const grades = archipelagoGradesPresent({
@@ -116,9 +133,9 @@ export function suiteComparabilityForApexArm(input: {
   readonly matrix: { readonly cells: readonly MatrixCellAccount[] };
   readonly armId: string;
   readonly reportRoot: string;
-}): SuiteComparability {
+} & OfficialApexDatasetSize): SuiteComparability {
   const suite = suiteSelectionFromApex(input.manifest);
-  const method = methodBitsFromApex(input.manifest);
+  const method = methodBitsFromApex(input.manifest, input.officialDatasetTaskCount);
   const cellsAccounted = accountSuiteArmCells(input.matrix, suite, input.armId);
   const grades = archipelagoGradesPresent({
     reportRoot: input.reportRoot,

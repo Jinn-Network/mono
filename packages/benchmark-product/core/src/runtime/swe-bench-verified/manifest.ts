@@ -1,7 +1,6 @@
 /** Product-owned SWE-bench Verified selection. Cousin swe-rebench cannot claim this id. */
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
-import { sha256Hex } from "../../workspace/sealed-store.js";
 import { SUITE_COVERAGE } from "../suite-protocol/comparability.js";
 import { SwebenchVerifiedSuiteProtocolSelectionSchema } from "../suite-protocol/manifest.js";
 
@@ -11,8 +10,9 @@ export const SWE_BENCH_VERIFIED_DATASET_REVISION = "c104f840cc67f8b6eec6f759ebc8
 export const SWE_BENCH_VERIFIED_DATASET_INSTANCE_COUNT = 500 as const;
 export const SWE_BENCH_HARNESS_ADAPTER_ID = "swebench-harness" as const;
 export const SWE_BENCH_HARNESS_VERSION_RANGE = "4.1.x" as const;
+/** Read the harness module version out of the interpreter that runs `-m swebench.harness.run_evaluation`. */
+export const SWEBENCH_VERSION_PROBE_SOURCE = "import swebench; print(swebench.__version__)" as const;
 export const SWE_BENCH_VERIFIED_DEFAULT_TIMEOUT_SECONDS = 1800 as const;
-export const SWE_BENCH_VERIFIED_PROFILE = "https://product.jinn.network/profiles/swe-bench-verified-selection/v1" as const;
 export const SWE_BENCH_VERIFIED_SELECTION_ROLE = "https://product.jinn.network/artifact-roles/swe-bench-verified/selection/v1" as const;
 export const SWE_BENCH_VERIFIED_SELECTION_SCHEMA = "jinn.network/benchmark-product/swe-bench-verified-selection/1" as const;
 export const SWE_BENCH_HARNESS_RUNTIME_EVIDENCE_PROFILE = "https://product.jinn.network/profiles/swebench-harness-evidence/v1" as const;
@@ -66,10 +66,6 @@ export type SwebenchVerifiedSelectionManifest = z.infer<typeof SwebenchVerifiedS
 
 export function swebenchVerifiedSelectionBytes(value: SwebenchVerifiedSelectionManifest): Uint8Array {
   return canonicalJsonBytes(SwebenchVerifiedSelectionManifestSchema.parse(value) as never);
-}
-
-export function swebenchVerifiedSelectionSha256(value: SwebenchVerifiedSelectionManifest): string {
-  return sha256Hex(swebenchVerifiedSelectionBytes(value));
 }
 
 export function assertSupportedSwebenchHarnessVersion(version: string): string {
