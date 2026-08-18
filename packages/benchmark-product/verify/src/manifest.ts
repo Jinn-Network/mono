@@ -18,6 +18,10 @@ import { refuse } from "./profile/errors.js";
 export const BUNDLE_FORMAT = "benchmark-product-public-bundle/2" as const;
 export const BUNDLE_V4_FORMAT = "benchmark-product-public-bundle/4" as const;
 export const BUNDLE_V5_FORMAT = "benchmark-product-public-bundle/5" as const;
+/** The anchored closure (anchor-evidence design §7.4). Additive: v2, v4, and v5 keep their check
+ * lists, byte shapes, and values; the `anchors/` member and the `integrity-anchors` check exist
+ * only here. */
+export const BUNDLE_V6_FORMAT = "benchmark-product-public-bundle/6" as const;
 export const SUPPORTED_BUNDLE_FORMATS = [BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT] as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 

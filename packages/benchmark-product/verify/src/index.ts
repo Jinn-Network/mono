@@ -31,7 +31,42 @@ export type {
   InspectRuntimeMethodDisclosure,
   InspectScoringProjectionDisclosure,
 } from "./profile/inspect-disclosure.js";
-export { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
+// The anchored-closure projection (anchor-evidence design §7.4, §9.2). Single-sourced here rather
+// than mirrored into the product core, so the producer's claim section and the verifier's rebuild
+// of it cannot drift -- the byte-compare depends on them being one function.
+export {
+  ANCHORED_PRE_REGISTRATION,
+  ANCHORED_TRUST_ROOT,
+  ClaimAnchorProjectionError,
+  ClaimAnchorSchema,
+  SELF_RUN_TRUST_ROOT,
+  STRUCTURAL_PRE_REGISTRATION,
+  additionalLockAnchorLine,
+  anchoredPreRegistration,
+  anchoredPreRegistrationSentence,
+  anchoredTrustRoot,
+  anchoredVenueLimits,
+  carriedMatrixAnchors,
+  deriveClaimAnchors,
+  governingLockAnchors,
+  matrixAnchorLine,
+} from "./profile/anchor-claims.js";
+export type {
+  CarriedAnchorRecord,
+  ClaimAnchor,
+  ClaimAnchorFacts,
+  ClaimAnchorSubject,
+  DeriveClaimAnchorsInput,
+  OpenTimestampsClaimAnchorFacts,
+  Rfc3161ClaimAnchorFacts,
+} from "./profile/anchor-claims.js";
+export {
+  BUNDLE_FORMAT,
+  BUNDLE_V4_FORMAT,
+  BUNDLE_V5_FORMAT,
+  BUNDLE_V6_FORMAT,
+  SUPPORTED_BUNDLE_FORMATS,
+} from "./manifest.js";
 export type { BundleManifest, VerifiedBundleSnapshot } from "./manifest.js";
 export * from "./admission/index.js";
 export * from "./schema.js";
@@ -49,6 +84,9 @@ export {
   PUBLIC_BUNDLE_V4_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V6_CHECKS,
+  PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
   PUBLIC_BUNDLE_VERIFIER_MAJOR,
   PUBLIC_BUNDLE_V4_VERIFIER_MAJOR,

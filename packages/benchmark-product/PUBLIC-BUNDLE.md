@@ -89,6 +89,79 @@ badge, social card, and share text are narrower signposts: verified state, exact
 scope, full Report digest, and relative links only. They carry no rate,
 instrument conclusion, preference, selection, or ordering.
 
+### Anchored bundle v6
+
+A run that carries third-party time evidence over one of its own sealed records
+emits the additive `benchmark-product-public-bundle/6`; the v2 grammar and bytes
+above remain unchanged, and a run that carries no anchor keeps emitting the
+version it emitted before this format existed. V6 retains the complete v2
+Run/Matrix/Report graph and adds one exact `anchors/<sha256>.bin` member per
+carried AnchorEvidence record, named by the digest of its own exact sealed
+bytes. Those bytes are the record: an alternate JSON spelling of the same
+content is a different member and is refused.
+
+A run whose sealed Run **declared** anchoring intent is on this closure too,
+even when it carries no anchor at all. Otherwise stripping the anchor would
+also drop the bundle to a version with nothing to say about the declaration,
+which is exactly the disclosure the declaration exists to make. Such a bundle
+carries an empty `anchors` section, keeps every unconditional sentence, and
+reports its lock subject as declared-but-absent.
+
+The claim package moves to `benchmark-product.claim-package/4`, which is
+claim-package/1 plus an `anchors` section. Each entry carries the subject
+reference, the resolved record kind, the provider profile, the record digest,
+and only the facts embedded in the proof's own bytes: `genTime`, `policyOid`,
+`serialNumber`, and `signerCertificateSha256` for an RFC 3161 token; the
+attested Bitcoin block height, or the calendar-only `pending` state, for an
+OpenTimestamps proof. Facts that need data from outside the bundle, such as a
+block's time, and facts with no canonical rendering, such as an issuer
+distinguished name or an accuracy interval, never enter this section; they are
+verifier-report content. Producer and verifier derive the section from the same
+bundle bytes with the same function, so claim consistency stays an exact
+byte-compare.
+
+Anchor subjects are selected by digest, never by label: the lock anchor is the
+one whose subject digest equals the digest of this bundle's exact `run.json`,
+and the matrix anchor the one that equals `matrix.json`. The record's own
+`subject.kind` is then required to equal the kind of the record its digest
+resolves to. A valid proof over a digest no bundle record has, or a kind that
+misdescribes the record it names, fails the bundle loudly rather than passing
+quietly.
+
+A carried, structurally complete, digest- and kind-matching lock anchor is what
+changes the sealed honesty copy: `venueHonesty.preRegistration` widens from
+`structural-and-append-order-only` to
+`structural-append-order-and-anchored-time`, the pre-registration limitation
+names the anchored time or block height, and the trust-root sentence records
+that the anchor is checked against trust material supplied on the verifier's
+side. Each additional lock anchor adds one neutral line, and a matrix anchor
+adds one that upgrades nothing. A pending proof, a matrix-only anchor, or no
+anchor at all leaves every sentence unconditional. What a verified anchor
+proves is that the sealed design digest existed no later than the anchored
+time — not that results were produced after it, and nothing else about the run.
+
+Trust roots are strictly verifier-side configuration. The verifier ships with
+none, so a well-formed proof reports as `present` rather than `verified` until
+an operator supplies timestamp-authority roots or Bitcoin block headers; any
+certificate chain carried inside the bundle is archival convenience and is
+never used to validate. Verification never contacts an anchor provider and
+never upgrades a pending proof.
+
+Anchored bundles pin the same verifier contract v4 does:
+
+```bash
+npx @colophon-claims/verify@2 <bundle-dir>
+```
+
+They return **seven checks**: the six above, in the same order, followed by
+`integrity-anchors`. That check is always present for this format — an anchored
+bundle whose anchors were stripped is a closure failure, not a shorter list. It
+reports every carried anchor's own outcome (`verified`, `present`, `pending`, or
+`invalid`) plus each subject's context outcome, distinguishing a clean absence
+from a run whose sealed Run declared anchoring intent that the bundle does not
+carry. An `invalid` anchor fails the whole verification; every other status is a
+disclosed fact that prints and passes.
+
 ## Portable verification
 
 Use the smaller reader package, without the product or source workspace:

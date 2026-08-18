@@ -2023,7 +2023,7 @@
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 5,
-      "discoveredFirstPartySurfaces": 2993,
+      "discoveredFirstPartySurfaces": 2995,
       "generatedOutputSources": 1391,
       "generatorSources": 659,
       "marketplaceControl": 2,
@@ -19552,6 +19552,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmark-product/core/src/bundle/testing/v6-synthetic-fixture.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmark-product/core/src/conformance"
       },
       {
@@ -19793,6 +19803,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/verify/src/profile/admission-receipts.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/verify/src/profile/anchor-claims.ts"
       },
       {
         "categories": [

@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { GATED_OPERATIONS } from "./authority/policy.js";
-import { BUNDLE_FORMAT, BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_MANIFEST_FILENAME, BUNDLE_V6_FORMAT } from "./bundle/manifest.js";
 import { PUBLIC_BUNDLE_FILES } from "./bundle/materialize.js";
 import { PRODUCT_ERROR_CODES } from "./errors.js";
 import { PRODUCT_BRANDING } from "./branding.js";
@@ -147,6 +147,31 @@ describe("product documentation consistency", () => {
     expect(guide).toContain("six checks");
     expect(guide).toMatch(/not confidential|non-confidential/i);
     expect(guide).toMatch(/local immutable emission.*not hosting/is);
+  });
+
+  it("pins the anchored bundle guide to its own closure version, member, and seven checks", () => {
+    const guide = read(bundleReadmePath);
+    const security = read(securityPath);
+    expect(guide).toContain(`\`${BUNDLE_V6_FORMAT}\``);
+    expect(guide).toContain("`benchmark-product.claim-package/4`");
+    expect(guide).toContain("`anchors/<sha256>.bin`");
+    // The seventh check is scoped to v6; v2 and v4 keep their frozen six above.
+    expect(guide).toContain("`integrity-anchors`");
+    expect(guide).toContain("seven checks");
+    expect(guide).toContain("`structural-and-append-order-only`");
+    expect(guide).toContain("`structural-append-order-and-anchored-time`");
+    for (const fact of ["genTime", "policyOid", "serialNumber", "signerCertificateSha256"]) {
+      expect(guide, fact).toContain(`\`${fact}\``);
+    }
+    expect(guide).toMatch(/selected by digest, never by label/i);
+    expect(guide).toMatch(/declared.*anchoring intent is on this\s+closure too/is);
+    expect(guide).toContain("declared-but-absent");
+    expect(guide).toMatch(/verifier ships with\s+none/is);
+    expect(guide).toMatch(/existed no later than the anchored\s+time.*not that results were produced after it/is);
+    expect(security).toMatch(/Requesting a time anchor tells the anchor provider/i);
+    expect(security).toMatch(/reveals nothing about the record's content beyond the digest itself/is);
+    expect(security).toMatch(/configuring an\s+endpoint is the operator's consent/is);
+    expect(security).toMatch(/Verification never contacts an anchor provider/i);
   });
 
   it("documents the exact private web configuration and package commands", () => {

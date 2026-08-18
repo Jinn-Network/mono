@@ -151,6 +151,27 @@ viewer-ready logs into the public bundle. Logs may contain prompts, responses,
 tool calls, transcripts, model metadata, or user data; the product does not
 silently scrub or reclassify them.
 
+### Anchor timing disclosure
+
+Requesting a time anchor tells the anchor provider that a run exists at time
+T, before the operator has published anything. That is a disclosure, and it is
+the one this feature makes. What travels to the provider is a digest: it
+reveals nothing about the record's content beyond the digest itself, and a
+sealed Run record is high-entropy, so the digest is not a guessable
+commitment. What the request does reveal is timing and volume — that this
+workspace stamped something, and when.
+
+Anchoring is attempted only when an endpoint is configured, and configuring an
+endpoint is the operator's consent to this disclosure. No endpoint ships as a
+default and no provider name appears in source. A per-draft setting turns the
+automatic path off. A failed anchor never blocks a lock, and with no anchoring
+configuration nothing is attempted and no warning prints.
+
+Verification never contacts an anchor provider. Trust material — timestamp
+authority roots, Bitcoin block headers — is strictly verifier-side
+configuration; the verifier ships with none, and any certificate chain carried
+inside a bundle is archival convenience that is never used to validate.
+
 ## Filesystem attack surface
 
 Workspace and bundle paths are server-selected. Exact manifest-relative paths

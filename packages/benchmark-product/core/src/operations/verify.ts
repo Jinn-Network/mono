@@ -41,6 +41,7 @@ import {
 } from "@jinn-network/benchmarking-records";
 import { verifyMatrix } from "@jinn-network/benchmarking-run";
 import { verifyReport } from "@jinn-network/benchmarking-aggregate";
+import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { refuse } from "../errors.js";
 import { ClaimPackageSchema } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
@@ -199,6 +200,10 @@ export async function verifyRunWorkspace(
       const claim = claimParsed.data;
 
       const previewLog = readPreviewLog(context.workspaceDir, input.draftId);
+      // anchor-evidence §7.4: the anchors section is re-derived from the sealed AnchorEvidence
+      // bytes, not read out of the claim under test — an unanchored claim that asserts an anchor,
+      // and an anchored claim whose section drifted from its own records, both fail below.
+      const carriage = readRunAnchorCarriage(context.workspaceDir, runState);
       assertClaimConsistency({
         claim,
         identities: {
@@ -226,6 +231,7 @@ export async function verifyRunWorkspace(
                 timestamps: previewLog.previews.map((preview) => preview.at),
               },
             }),
+        ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
       });
 
       checks.push("claim-consistency");
