@@ -1,4 +1,5 @@
 /** Two-axis official-suite comparability. Not Report v2 required fields. */
+import { SUPPORTED_INSPECT_VERSION } from "../inspect/manifest.js";
 
 export const SUITE_COVERAGE = ["one_task", "ten_task", "full", "custom"] as const;
 export type SuiteCoverage = (typeof SUITE_COVERAGE)[number];
@@ -9,6 +10,7 @@ export const SUITE_PROTOCOL_IDS = [
   "apex-agents",
   "apex-swe-dev",
   "deep-swe-v1.1",
+  "inspect-eval",
 ] as const;
 export type SuiteProtocolId = (typeof SUITE_PROTOCOL_IDS)[number];
 
@@ -19,6 +21,7 @@ const SUITE_PROTOCOL_DISPLAY_NAMES: Readonly<Record<SuiteProtocolId, string>> = 
   "apex-agents": "APEX-Agents",
   "apex-swe-dev": "APEX-SWE-dev",
   "deep-swe-v1.1": "DeepSWE v1.1",
+  "inspect-eval": "Inspect eval",
 };
 
 /** Human-facing suite name for refusal copy and Hub instructions. */
@@ -70,6 +73,9 @@ export const APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION =
 export const DEEPSWE_NOT_LEADERBOARD_READY_LIMITATION =
   "This run is not a DeepSWE v1.1 leaderboard submission: coverage is not the full official dataset, execution was not protocol-conforming, the Matrix does not account every dataset task × 4 as judged or Pier-error 0, or ATIF trajectories are missing from the retained Pier job.";
 
+export const INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION =
+  "This run is not eval complete for the sealed Inspect eval: coverage is not the full sample catalog, execution was not protocol-conforming, or the Matrix does not account every catalog sample × specified epochs as judged or unscorable. Colophon does not place an Inspect Hub row.";
+
 export const COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE =
   "Community submissions are currently closed for Terminal-Bench 2.1. Colophon does not place the leaderboard row.";
 
@@ -96,9 +102,20 @@ function minReplicates(protocol: SuiteProtocolId): number {
   return protocol === "deep-swe-v1.1" ? 4 : 5;
 }
 
+export const INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE =
+  "Colophon does not place an Inspect Hub row. An Inspect View bundle is a derived artifact, not the claim of record.";
+
 export function methodLeaderboardEligible(input: DeriveSuiteComparabilityInput): boolean {
   const protocol = protocolOf(input);
   if (protocol === "apex-swe-dev") return false;
+  if (protocol === "inspect-eval") {
+    return input.coverage === "full"
+      && input.executionConformance
+      && input.k >= 1
+      && input.selectedCount === input.datasetCount
+      && input.datasetCount > 0
+      && input.datasetRevisionMatchesLeaderboardPin !== false;
+  }
   if (protocol === "swe-bench-verified" || protocol === "apex-agents") {
     return input.coverage === "full"
       && input.executionConformance
@@ -128,7 +145,9 @@ export function deriveSuiteComparability(input: DeriveSuiteComparabilityInput): 
         ? input.cellsAccounted === true
           && input.atifOnRetainedJob === true
           && input.rewardOnRetainedJob === true
-        : input.cellsAccounted === true && input.atifOnRetainedJob === true;
+        : protocol === "inspect-eval"
+          ? input.cellsAccounted === true
+          : input.cellsAccounted === true && input.atifOnRetainedJob === true;
   return {
     executionConformance: input.executionConformance,
     coverage: input.coverage,
@@ -140,12 +159,20 @@ export function suiteLeaderboardLimitation(
   comparability: SuiteComparability,
   protocol: SuiteProtocolId = "terminal-bench-2.1",
 ): string | undefined {
-  if (comparability.leaderboardSubmitReady) return undefined;
+  if (comparability.leaderboardSubmitReady) {
+    // `suiteComparability` on the claim is three protocol-agnostic booleans written by every
+    // protocol, and the Inspect-named copy otherwise lives only in the NOT-ready limitation.
+    // Without this a ready Inspect eval claim carries no text naming Inspect anywhere, so it
+    // reads identically to a Terminal-Bench 2.1 leaderboard-ready claim. The other protocols
+    // keep returning undefined here — their closed-submissions copy rides on the export.
+    return protocol === "inspect-eval" ? INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE : undefined;
+  }
   if (protocol === "terminal-bench-3.0") return SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0;
   if (protocol === "swe-bench-verified") return SWE_BENCH_VERIFIED_NOT_LEADERBOARD_READY_LIMITATION;
   if (protocol === "apex-agents") return APEX_AGENTS_NOT_LEADERBOARD_READY_LIMITATION;
   if (protocol === "apex-swe-dev") return APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION;
   if (protocol === "deep-swe-v1.1") return DEEPSWE_NOT_LEADERBOARD_READY_LIMITATION;
+  if (protocol === "inspect-eval") return INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION;
   return SUITE_NOT_LEADERBOARD_READY_LIMITATION;
 }
 
@@ -277,4 +304,26 @@ export function officialApexSweDevConformance(input: {
   if (input.timeoutOverride || input.resourceOverride) return false;
   if (input.messageLimit !== undefined && input.messageLimit !== 250) return false;
   return input.evaluatorId === APEX_SWE_DEV_ADAPTER_ID;
+}
+
+export function officialInspectEvalConformance(input: {
+  readonly k: number;
+  readonly specifiedEpochs: number;
+  readonly inspectVersion: string;
+  readonly adapterId: string;
+  readonly solver: string;
+  readonly sampleLimit: number | null;
+  readonly epochsInRunOptions: boolean;
+}): boolean {
+  // Defense in depth: today every caller reaches here off an `inspect` adapter, so this is
+  // unreachable — it stays so a future third protocol cannot borrow Inspect conformance.
+  if (input.adapterId !== "inspect") return false;
+  if (input.inspectVersion !== SUPPORTED_INSPECT_VERSION) return false;
+  if (input.solver !== "task-default") return false;
+  if (input.sampleLimit !== null) return false;
+  // Defense in depth: the strict selection schema already refuses `epochs` in runOptions, so
+  // this cannot fire today — it stays as the conformance-side guard if that schema loosens.
+  if (input.epochsInRunOptions) return false;
+  if (!Number.isInteger(input.specifiedEpochs) || input.specifiedEpochs < 1) return false;
+  return input.k === input.specifiedEpochs;
 }

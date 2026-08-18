@@ -186,6 +186,7 @@ describe("DeepSWE v1.1 official-suite intake", () => {
     expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
     if (!quoted.ok) return;
     expect(quoted.result.presentation.suite).toEqual({
+      protocol: "deep-swe-v1.1",
       executionConformance: true,
       coverage: "one_task",
       leaderboardSubmitReady: false,

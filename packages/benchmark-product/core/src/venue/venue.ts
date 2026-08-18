@@ -106,8 +106,9 @@ import {
 import {
   assertInspectSelectionUndrifted,
   inspectWorkerPath,
+  readInspectEvalSelectionManifest,
   readInspectHostBinding,
-  readInspectSelectionManifest,
+  readInspectSelectionTemplate,
 } from "../runtime/inspect/host.js";
 import { makeInspectLauncher } from "../runtime/inspect/launcher.js";
 import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
@@ -504,7 +505,7 @@ function writeEvaluationDeploymentModule(
     readonly allowPublicNetwork: boolean;
   },
   inspect?: {
-    readonly manifest: ReturnType<typeof readInspectSelectionManifest>;
+    readonly manifest: ReturnType<typeof readInspectSelectionTemplate>;
     readonly selectionManifestSha256: string;
     readonly workerPath: string;
     readonly ociRunnerPath: string;
@@ -652,7 +653,10 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     refuse("venue-unavailable", "evaluationRuntime.adapterId", `unsupported evaluation runtime "${runtimeId}"`);
   }
   const inspectSelection = runtimeId === INSPECT_ADAPTER_ID
-    ? readInspectSelectionManifest(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
+    ? readInspectSelectionTemplate(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
+    : undefined;
+  const inspectEval = runtimeId === INSPECT_ADAPTER_ID
+    ? readInspectEvalSelectionManifest(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
     : undefined;
   const inspectHost = runtimeId === INSPECT_ADAPTER_ID
     ? readInspectHostBinding(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
@@ -759,6 +763,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
           selectionManifestSha256: options.evaluationRuntime!.selectionManifestSha256,
           manifest: inspectSelection,
           host: inspectHost,
+          ...(inspectEval === undefined ? {} : { inspectEval: inspectEval }),
           ...(inspectEvaluationStrategy === "embedded"
             ? { embeddedEvaluator: evaluators[0]! }
             : {}),

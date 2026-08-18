@@ -68,6 +68,17 @@ export {
   type SelectInspectEvaluationResult,
 } from "./inspect-runtime.js";
 export {
+  selectInspectEvalRuntime,
+  type SelectInspectEvalRuntimeInput,
+  type SelectInspectEvalRuntimeResult,
+} from "./inspect-eval.js";
+export {
+  exportInspectViewBundle,
+  type ExportInspectViewBundleInput,
+  type ExportInspectViewBundleResult,
+  type InspectViewExportMode,
+} from "./inspect-view-export.js";
+export {
   bindInspectBinaryJudge,
   type BindInspectBinaryJudgeInput,
   type BindInspectBinaryJudgeResult,

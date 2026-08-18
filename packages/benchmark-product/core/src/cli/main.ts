@@ -1,6 +1,6 @@
 /**
  * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
- * 50 parity operations over the operations facade, plus the path-oriented
+ * 54 parity operations over the operations facade, plus the path-oriented
  * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
@@ -65,6 +65,8 @@ import {
   runVerify,
   sampleInit,
   selectInspectEvaluation,
+  selectInspectEvalRuntime,
+  exportInspectViewBundle,
   selectHarborRuntime,
   selectTerminalBench2Runtime,
   selectTerminalBench21Runtime,
@@ -87,6 +89,7 @@ import {
   type QuotePresentation,
   type RunLaunchDeps,
   type SelectInspectEvaluationInput,
+  type SelectInspectEvalRuntimeInput,
   type SelectHarborRuntimeInput,
   type SelectTerminalBench2RuntimeInput,
   type SelectTerminalBench21RuntimeInput,
@@ -136,6 +139,9 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --file <admission-manifest.json>
   runtime inspect select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
+  runtime inspect eval select --workspace <dir> --principal <id> --draft <draftId>
+                   --file <selection.json>
+  runtime inspect eval export --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   runtime inspect bind-judge --workspace <dir> --principal <id> --draft <draftId>
                    --file <binding.json>
   runtime harbor select --workspace <dir> --principal <id> --draft <draftId>
@@ -224,6 +230,8 @@ const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "dra
 const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
 const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_INSPECT_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_INSPECT_EVAL_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_INSPECT_EVAL_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const RUNTIME_INSPECT_BIND_JUDGE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_HARBOR_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_2_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
@@ -617,6 +625,39 @@ async function handleInspectRuntimeSelect(
     result,
     jsonMode,
     (value) => `selected Inspect evaluation ${value.selectionManifestSha256} for draft ${draftId}\n`,
+  );
+}
+
+async function handleInspectEvalRuntimeSelect(
+  args: ParsedArgs,
+  context: CliContext,
+  jsonMode: boolean,
+): Promise<CliResult> {
+  assertKnownFlags(args, RUNTIME_INSPECT_EVAL_SELECT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
+    SelectInspectEvalRuntimeInput,
+    "draftId"
+  >;
+  const result = await selectInspectEvalRuntime(opContext, { draftId, ...configuration } as SelectInspectEvalRuntimeInput);
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `selected Inspect eval ${value.selectionManifestSha256} for draft ${draftId}\n`,
+  );
+}
+
+function handleInspectEvalExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, RUNTIME_INSPECT_EVAL_EXPORT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const armId = required(args, "arm");
+  const result = exportInspectViewBundle(opContext, { draftId, armId });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `exported Inspect View bundle (${value.mode}) for draft ${draftId} arm ${armId}\n${value.instructions}\n`,
   );
 }
 
@@ -1286,6 +1327,8 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["human-review response sign", handleHumanReviewResponseSign],
   ["human-review admit", handleHumanReviewAdmit],
   ["runtime inspect select", handleInspectRuntimeSelect],
+  ["runtime inspect eval select", handleInspectEvalRuntimeSelect],
+  ["runtime inspect eval export", handleInspectEvalExport],
   ["runtime inspect bind-judge", handleInspectRuntimeBindJudge],
   ["runtime harbor select", handleHarborRuntimeSelect],
   ["runtime terminal-bench-2 select", handleTerminalBench2RuntimeSelect],

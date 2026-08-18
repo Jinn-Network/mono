@@ -129,7 +129,7 @@ export interface InspectOciSelectionResolution {
 
 export interface InspectOciRunInput {
   readonly name: string;
-  readonly operation: "probe" | "run";
+  readonly operation: "probe" | "run" | "catalog";
   readonly inputDir?: string;
   readonly outputDir?: string;
   readonly network: "none" | string;
@@ -193,12 +193,14 @@ export function buildInspectOciRunArgs(
       "--mount", bindMount(input.outputDir, "/jinn/output"),
     );
   }
-  if (input.operation === "probe" && input.probeConfigDir !== undefined) {
+  if ((input.operation === "probe" || input.operation === "catalog") && input.probeConfigDir !== undefined) {
     args.push("--mount", bindMount(input.probeConfigDir, "/jinn/input", true));
   }
   args.push(binding.imageDigest, input.operation);
   if (input.operation === "run") args.push("/jinn/input/inspect-run.json");
-  if (input.operation === "probe" && input.probeConfigDir !== undefined) args.push("/jinn/input/inspect-probe.json");
+  if ((input.operation === "probe" || input.operation === "catalog") && input.probeConfigDir !== undefined) {
+    args.push("/jinn/input/inspect-probe.json");
+  }
   return args;
 }
 
@@ -560,4 +562,76 @@ export async function assertInspectOciBrokerConnectionReady(
     { LANG: "C.UTF-8", JINN_INSPECT_HOST_CONNECTION_DESCRIPTOR: hostConnectionDescriptor },
     true,
   );
+}
+
+const CatalogWorkerEnvelopeSchema = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    value: z.object({
+      sampleIds: z.array(z.union([z.string().min(1), z.number().int()])).min(1),
+      specifiedEpochs: z.number().int().positive(),
+      epochsReducer: z.string().nullable().optional(),
+      taskVersion: z.string().nullable().optional(),
+      datasetName: z.string().nullable(),
+      datasetLocation: z.string().nullable(),
+      datasetSampleCount: z.number().int().nonnegative(),
+    }).strict(),
+  }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+
+export async function catalogInspectOciSelection(input: {
+  readonly dockerPath: string;
+  readonly imageDigest: string;
+  readonly projectDir: string;
+  readonly datasetCacheDir: string;
+  readonly taskReference: string;
+  readonly taskArgs?: Readonly<Record<string, unknown>>;
+  readonly sandboxExecution?: InspectSandboxExecutionRequest;
+}, signal?: AbortSignal): Promise<{
+  readonly sampleIds: ReadonlyArray<string | number>;
+  readonly specifiedEpochs: number;
+  readonly epochsReducer?: string | null;
+  readonly taskVersion?: string | null;
+  readonly datasetName: string | null;
+  readonly datasetLocation: string | null;
+  readonly datasetSampleCount: number;
+}> {
+  const binding = InspectOciHostBindingSchema.parse({
+    kind: "oci",
+    dockerPath: resolveDockerCli(input.dockerPath),
+    imageDigest: input.imageDigest,
+    platform: SUPPORTED_OCI_PLATFORM,
+    projectDir: realpathSync(input.projectDir),
+    datasetCacheDir: realpathSync(input.datasetCacheDir),
+    user: `${process.getuid?.() ?? 65532}:${process.getgid?.() ?? 65532}`,
+    ...(input.sandboxExecution === undefined ? {} : { sandboxExecution: input.sandboxExecution }),
+  });
+  try {
+    await runBoundedProcess(binding.dockerPath, ["version", "--format", "{{json .Server}}"], undefined, signal);
+  } catch {
+    throw new InspectOciUnavailableError("Docker is required for this OCI arm, but Colophon could not reach a running Docker engine. Start Docker and retry the local check.");
+  }
+  const catalogName = `jinn-inspect-catalog-${randomUUID().replaceAll("-", "").slice(0, 20)}`;
+  const probeConfigDir = mkdtempSync(join(tmpdir(), "jinn-inspect-catalog-"));
+  writeFileSync(join(probeConfigDir, "inspect-probe.json"), JSON.stringify({
+    projectDir: "/jinn/project",
+    taskReference: input.taskReference,
+    taskArgs: input.taskArgs ?? {},
+  }), { mode: 0o600 });
+  const catalogArgs = buildInspectOciRunArgs(binding, {
+    name: catalogName,
+    operation: "catalog",
+    network: "none",
+    probeConfigDir,
+  });
+  let workerResult: ProcessResult;
+  try {
+    workerResult = await runBoundedProcess(binding.dockerPath, catalogArgs, undefined, signal);
+  } finally {
+    rmSync(probeConfigDir, { recursive: true, force: true });
+  }
+  const envelope = CatalogWorkerEnvelopeSchema.parse(JSON.parse(workerResult.stdout));
+  if (!envelope.ok) throw new Error("OCI Inspect worker catalog failed");
+  return envelope.value;
 }

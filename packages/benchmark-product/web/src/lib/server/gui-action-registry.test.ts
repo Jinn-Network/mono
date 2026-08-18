@@ -11,6 +11,10 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires a machine-local configured signer key; browser key custody is forbidden",
   admitHumanTruth:
     "requires local signed-review, roster, and licensed truth evidence files",
+  selectInspectEvalRuntime:
+    "requires machine-local Inspect host paths; browser-supplied paths are forbidden",
+  exportInspectViewBundle:
+    "copies machine-local Inspect .eval logs; browser path-based View export is forbidden",
   bindInspectBinaryJudge:
     "requires machine-local OCI runtime paths and pre-sealed instrument digests; browser-supplied paths are forbidden",
   selectHarborRuntime:
@@ -27,6 +31,8 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires server-configured APEX-Agents Archipelago paths; browser-supplied paths are forbidden",
   selectApexSweDevRuntime:
     "requires server-configured APEX-SWE-dev host paths; browser-supplied paths are forbidden",
+  selectDeepSweV11Runtime:
+    "requires server-configured DeepSWE v1.1 and Pier host paths; browser-supplied paths are forbidden",
   migrateTerminalBenchLegacyTask:
     "requires server-configured migration input paths; browser-supplied paths are forbidden",
   exportHarborHubPackage:
@@ -37,6 +43,8 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "copies machine-local Archipelago grades; browser path-based export is forbidden",
   exportApexSwePackage:
     "copies machine-local Mercor harness JSON; browser path-based export is forbidden",
+  exportDeepSwePackage:
+    "copies a machine-local Pier job directory; browser path-based job export is forbidden",
 } as const;
 
 describe("generated library / CLI / GUI parity", () => {

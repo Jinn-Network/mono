@@ -55,6 +55,8 @@ import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manife
 import { suiteQuoteFromApex } from "../runtime/suite-protocol/from-apex.js";
 import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
 import { suiteQuoteFromApexSweDev } from "../runtime/suite-protocol/from-apex-swe-dev.js";
+import { readInspectEvalSelectionManifest } from "../runtime/inspect/host.js";
+import { suiteQuoteFromInspect } from "../runtime/suite-protocol/from-inspect.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 
 export interface RunQuoteInput {
@@ -121,6 +123,7 @@ export interface QuotePresentation {
     readonly cellCount: string;
     readonly harborVersion?: string;
     readonly harnessVersion?: string;
+    readonly inspectVersion?: string;
     readonly selectedTaskCount: number;
     readonly armCount: number;
     readonly replicates: number;
@@ -361,7 +364,22 @@ export function runQuote(
               itemCount: compiled.benchmarkRecord.items.length,
               replicates: compiled.plannedRun.record.replicates,
             })
-            : undefined;
+            : document.spec.evaluationRuntime?.adapterId === "inspect"
+              ? (() => {
+                const manifest = readInspectEvalSelectionManifest(
+                  clockedContext.workspaceDir,
+                  document.spec.evaluationRuntime.selectionManifestSha256,
+                );
+                return manifest === undefined
+                  ? undefined
+                  : suiteQuoteFromInspect({
+                    manifest,
+                    armCount: compiled.plannedRun.record.arms.length,
+                    itemCount: compiled.benchmarkRecord.items.length,
+                    replicates: compiled.plannedRun.record.replicates,
+                  });
+              })()
+              : undefined;
       writeRunState(clockedContext.workspaceDir, input.draftId, {
         draftId: input.draftId,
         specSha256: specDigest(document.spec),

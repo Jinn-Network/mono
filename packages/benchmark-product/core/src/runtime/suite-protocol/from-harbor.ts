@@ -25,7 +25,7 @@ export function suiteSelectionFromHarbor(manifest: HarborSelectionManifest): Sui
   // profile and must fail loud — `runtime/adapter.ts` parses the same bytes and throws.
   const parsed = SuiteProtocolSelectionSchema.parse(value);
   // Only the Terminal-Bench protocols and DeepSWE v1.1 bind via Harbor/Pier profiles; Verified,
-  // APEX-Agents, and APEX-SWE-dev bind via their own selection manifests.
+  // APEX-Agents, APEX-SWE-dev, and Inspect eval bind via their own selection manifests.
   return parsed.protocol === "terminal-bench-2.1"
     || parsed.protocol === "terminal-bench-3.0"
     || parsed.protocol === "deep-swe-v1.1"
@@ -50,6 +50,8 @@ export interface SuiteQuotePresentation extends SuiteComparability {
   readonly harborVersion?: string;
   /** Protocols whose executor is not Harbor carry their harness version here. */
   readonly harnessVersion?: string;
+  /** Inspect eval only: the Inspect version this selection pinned. */
+  readonly inspectVersion?: string;
   readonly selectedTaskCount: number;
   readonly armCount: number;
   readonly replicates: number;

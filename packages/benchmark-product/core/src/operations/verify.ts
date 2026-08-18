@@ -66,6 +66,8 @@ import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/
 import { resolveSwebenchHarnessRunId, swebenchModelNameOrPathByArm } from "../runtime/swe-bench-verified/launcher.js";
 import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
 import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
+import { readInspectEvalSelectionManifest } from "../runtime/inspect/host.js";
+import { suiteFactsFromAccountedInspectRun } from "../runtime/suite-protocol/from-inspect.js";
 import { buildWorkspaceTrustDeps } from "../report/trust.js";
 import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receipts.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
@@ -262,7 +264,24 @@ export async function verifyRunWorkspace(
               armIds: document.spec.arms.map((arm) => arm.armId),
               reportRoot: apexSweDevReportRoot(artifactsDir(context.workspaceDir), input.draftId),
             })
-            : undefined;
+            : document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
+              ? (() => {
+                const manifest = readInspectEvalSelectionManifest(
+                  context.workspaceDir,
+                  document.spec.evaluationRuntime.selectionManifestSha256,
+                );
+                return manifest === undefined
+                  ? undefined
+                  : suiteFactsFromAccountedInspectRun({
+                    manifest,
+                    armCount: runRecord.arms.length,
+                    itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+                    replicates: runRecord.replicates,
+                    matrix: matrixRecord,
+                    armIds: document.spec.arms.map((arm) => arm.armId),
+                  });
+              })()
+              : undefined;
       const additionalLimitations = [
         ...inspectAdditional,
         ...(suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation]),

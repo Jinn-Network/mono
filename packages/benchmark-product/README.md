@@ -145,6 +145,17 @@ tree in CI and is not part of default `yarn test`. Procedure and the
 fail-closed `yarn deepswe-v1.1-one-task-qualify` gate:
 [docs/runbooks/deepswe-v1.1-official-one-task.md](../../docs/runbooks/deepswe-v1.1-official-one-task.md).
 
+## Inspect eval `one_task` operator qualify
+
+An operator-only campaign against an in-repo Inspect Task (`hermetic_eval`,
+samples `alpha` / `bravo`) with local Python and `inspect-ai==0.3.255`. It
+proves protocol identity (`one_task` = one sample, conforming, not eval
+complete, View export `inspection-upload`). It does not download GAIA, Cybench,
+or other large eval datasets, and is not part of default `yarn test`.
+Procedure, receipt checklist, and the fail-closed
+`yarn inspect-eval-one-task-qualify` gate:
+[docs/runbooks/inspect-eval-one-task.md](../../docs/runbooks/inspect-eval-one-task.md).
+
 ## Product surfaces
 
 - [Installable CLI](./cli/README.md) — the no-argument sample and local viewer.

@@ -1363,7 +1363,7 @@ is a named protocol Colophon wraps. Comparability is two-axis
 (`execution_conformance`, `coverage`, `leaderboard_submit_ready`) on a
 product-sealed selection artifact plus Report `limitations[]`. Hub export is
 a derived artifact, not the claim of record. One Harbor Job per arm spans
-planned trials; Inspect-as-specified remains a follow-on.
+planned trials; Inspect eval remains a follow-on.
 
 **Addendum — 2026-08-17, SWE-bench Verified official suite pointer ([DR-2026-08-17-e](../../../log/decisions/2026-08-17-swe-bench-verified-official-suite.md);
 no new Report v2 required fields, no new record kinds):** SWE-bench Verified
@@ -1398,6 +1398,15 @@ named protocol Colophon wraps (Pier 0.3.1.x + mini-swe-agent, git-pinned
 `tasks/`, k≥4). Comparability stays two-axis and protocol-specific. Pier
 export is a derived artifact for Datacurve email; Colophon does not place
 the row. Harbor 0.21 and Pier+native CLIs cannot wear the name.
+
+**Addendum — 2026-08-18, Inspect eval pointer ([DR-2026-08-18-e](../../../log/decisions/2026-08-18-inspect-as-specified.md);
+no new Report v2 required fields, no new record kinds, adapter id stays
+`inspect`):** Inspect eval is a named protocol. The operator
+picks an Inspect eval; Colophon locks it as specified. Coverage enums mean
+sample ids (`one_task` = one sample). Specified epochs are Jinn replicates;
+the worker stays `epochs: 1`. `leaderboard_submit_ready` means eval
+complete, not an Inspect Hub row. Inspect task `runtime inspect select` cannot wear
+the suite name. View export is a derived log bundle, not the claim of record.
 
 ## 13. Provenance
 

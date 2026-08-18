@@ -35,6 +35,7 @@ import { suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.
 import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
 import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
 import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
+import { readInspectEvalSelectionManifest } from "../runtime/inspect/host.js";
 import { runtimeRegistrationArtifacts } from "../runtime/adapter.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import type { OperationContext } from "./context.js";
@@ -145,6 +146,19 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
             "conflict",
             `runs.${input.draftId}.suiteQuote`,
             "full-suite APEX-SWE-dev lock requires a quote that recorded comparability bits",
+          );
+        }
+      }
+      if (document.spec.evaluationRuntime?.adapterId === "inspect") {
+        const inspectSuite = readInspectEvalSelectionManifest(
+          clockedContext.workspaceDir,
+          document.spec.evaluationRuntime.selectionManifestSha256,
+        );
+        if (inspectSuite?.coverage === "full" && runState.suiteQuote === undefined) {
+          refuse(
+            "conflict",
+            `runs.${input.draftId}.suiteQuote`,
+            "full-suite Inspect eval lock requires a quote that recorded comparability bits",
           );
         }
       }

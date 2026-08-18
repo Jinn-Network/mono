@@ -153,6 +153,16 @@
       }
     },
     {
+      "operation": "exportInspectViewBundle",
+      "cliVerb": "runtime inspect eval export",
+      "authorityGated": false,
+      "description": "Builds a derived Inspect View log bundle from correlated per-cell .eval logs without placing an Inspect Hub row.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "copies machine-local Inspect .eval logs; browser path-based View export is forbidden"
+      }
+    },
+    {
       "operation": "exportSwebenchPredictions",
       "cliVerb": "swebench export",
       "authorityGated": false,
@@ -450,6 +460,16 @@
       "gui": {
         "status": "unavailable",
         "reason": "requires server-configured Harbor host paths; browser-supplied paths are forbidden"
+      }
+    },
+    {
+      "operation": "selectInspectEvalRuntime",
+      "cliVerb": "runtime inspect eval select",
+      "authorityGated": false,
+      "description": "Selects an operator-chosen Inspect eval and locks it as the Inspect eval official suite.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires machine-local Inspect host paths; browser-supplied paths are forbidden"
       }
     },
     {

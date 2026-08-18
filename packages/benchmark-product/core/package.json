@@ -48,6 +48,7 @@
     "apex-agents-one-task-qualify": "node scripts/apex-agents-one-task-qualify.mjs",
     "apex-swe-dev-one-task-qualify": "node scripts/apex-swe-dev-one-task-qualify.mjs",
     "deepswe-v1.1-one-task-qualify": "node scripts/deepswe-v1.1-one-task-qualify.mjs",
+    "inspect-eval-one-task-qualify": "node scripts/inspect-eval-one-task-qualify.mjs",
     "t1:cold:lifecycle": "node ../../../.github/scripts/benchmark-product-packed-types.test.mjs --t1-cold-lifecycle",
     "generate:parity": "node scripts/generate-parity-matrix.mjs",
     "check:parity": "node scripts/generate-parity-matrix.mjs --check",

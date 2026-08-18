@@ -1,4 +1,4 @@
-/** Product-owned suite protocol selection. TB 2.1 and DeepSWE v1.1 bind via Harbor/Pier profiles; Verified and APEX-SWE-dev bind via their own selection manifests. */
+/** Product-owned suite protocol selection. TB 2.1, TB 3.0, and DeepSWE v1.1 bind via Harbor/Pier profiles; Verified, APEX-SWE-dev, and Inspect eval bind via their own selection manifests. */
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
 import { sha256Hex } from "../../workspace/sealed-store.js";
@@ -102,6 +102,17 @@ export const DeepSweV11SuiteProtocolSelectionSchema = z.object({
   atifRequired: z.literal(true),
 }).strict().superRefine(refineSuiteItems);
 
+// Inspect sample ids are not Terminal-Bench task directory names, so this member keeps the
+// shared shape but relaxes the `/`-free name constraint the Harbor-family protocols impose.
+export const InspectEvalSuiteProtocolSelectionSchema = z.object({
+  ...SuiteProtocolSelectionShared,
+  protocol: z.literal("inspect-eval"),
+  datasetRevision: Sha256,
+  selectedTaskNames: z.array(z.string().min(1)).min(1),
+  replicates: z.number().int().positive(),
+  atifRequired: z.literal(false),
+}).strict().superRefine(refineSuiteItems);
+
 export const SuiteProtocolSelectionSchema = z.discriminatedUnion("protocol", [
   TerminalBench21SuiteProtocolSelectionSchema,
   TerminalBench30SuiteProtocolSelectionSchema,
@@ -109,6 +120,7 @@ export const SuiteProtocolSelectionSchema = z.discriminatedUnion("protocol", [
   ApexAgentsSuiteProtocolSelectionSchema,
   ApexSweDevSuiteProtocolSelectionSchema,
   DeepSweV11SuiteProtocolSelectionSchema,
+  InspectEvalSuiteProtocolSelectionSchema,
 ]);
 export type SuiteProtocolSelection = z.infer<typeof SuiteProtocolSelectionSchema>;
 export type TerminalBench21SuiteProtocolSelection = z.infer<typeof TerminalBench21SuiteProtocolSelectionSchema>;
@@ -117,6 +129,7 @@ export type SwebenchVerifiedSuiteProtocolSelection = z.infer<typeof SwebenchVeri
 export type ApexAgentsSuiteProtocolSelection = z.infer<typeof ApexAgentsSuiteProtocolSelectionSchema>;
 export type ApexSweDevSuiteProtocolSelection = z.infer<typeof ApexSweDevSuiteProtocolSelectionSchema>;
 export type DeepSweV11SuiteProtocolSelection = z.infer<typeof DeepSweV11SuiteProtocolSelectionSchema>;
+export type InspectEvalSuiteProtocolSelection = z.infer<typeof InspectEvalSuiteProtocolSelectionSchema>;
 
 export function suiteProtocolSelectionBytes(value: SuiteProtocolSelection): Uint8Array {
   return canonicalJsonBytes(SuiteProtocolSelectionSchema.parse(value) as never);

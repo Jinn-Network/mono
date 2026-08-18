@@ -154,10 +154,12 @@ export const RunStateSchema = z.object({
     leaderboardSubmitReady: z.boolean(),
     methodLeaderboardEligible: z.boolean(),
     cellCount: z.string().min(1),
-    /** Harbor-family protocols write this; non-Harbor protocols write `harnessVersion` instead.
-     * Optional so run states persisted before that split (which all carry `harborVersion`) keep parsing. */
+    /** Harbor-family protocols write this; non-Harbor protocols write `harnessVersion` or
+     * `inspectVersion` instead. Optional so run states persisted before that split (which all
+     * carry `harborVersion`) keep parsing. */
     harborVersion: z.string().min(1).optional(),
     harnessVersion: z.string().min(1).optional(),
+    inspectVersion: z.string().min(1).optional(),
     selectedTaskCount: z.number().int().positive(),
     armCount: z.number().int().positive(),
     replicates: z.number().int().positive(),

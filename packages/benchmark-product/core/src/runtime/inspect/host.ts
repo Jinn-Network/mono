@@ -17,10 +17,18 @@ import {
   type InspectRunOptions,
   type InspectScoringSelectionRequest,
   type InspectSelectionManifest,
+  type InspectSelectionTemplate,
 } from "./manifest.js";
+import {
+  InspectEvalSelectionManifestSchema,
+  type InspectEvalSelectionManifest,
+} from "../inspect-eval/manifest.js";
+import { inspectCatalogSnapshotSha256 } from "../inspect-eval/catalog.js";
+import { stripInspectTemplateSampleId } from "../inspect-eval/overlay.js";
 import {
   InspectOciHostBindingSchema,
   assertInspectOciHostUndrifted,
+  catalogInspectOciSelection,
   probeInspectOciSelection,
 } from "./oci.js";
 
@@ -36,6 +44,18 @@ export const InspectLocalHostBindingSchema = z.object({
 }).strict();
 export const InspectHostBindingSchema = z.union([InspectLocalHostBindingSchema, InspectOciHostBindingSchema]);
 export type InspectHostBinding = z.infer<typeof InspectHostBindingSchema>;
+
+function inspectScoringRequest(inspect: InspectSelectionManifest): InspectScoringSelectionRequest {
+  if (isInspectMultiScorerSelection(inspect)) {
+    return {
+      scoring: {
+        projections: inspect.scoring.projections,
+        verdictRule: inspect.scoring.verdictRule,
+      },
+    };
+  }
+  return { scorer: { name: inspect.scorer.name, passValue: inspect.scorer.passValue } };
+}
 
 export type ProbeInspectSelectionInput = InspectScoringSelectionRequest & {
   readonly pythonPath: string;
@@ -56,7 +76,7 @@ export function inspectWorkerSha256(): string {
 
 async function callWorker(
   pythonPath: string,
-  operation: "probe" | "run",
+  operation: "probe" | "run" | "catalog",
   input: unknown,
   signal?: AbortSignal,
 ): Promise<unknown> {
@@ -158,6 +178,34 @@ export async function probeInspectSelection(input: ProbeInspectSelectionInput): 
   return manifest.data;
 }
 
+const InspectCatalogWorkerSchema = z.object({
+  sampleIds: z.array(z.union([z.string().min(1), z.number().int()])).min(1),
+  specifiedEpochs: z.number().int().positive(),
+  epochsReducer: z.string().nullable().optional(),
+  taskVersion: z.string().nullable().optional(),
+  datasetName: z.string().nullable(),
+  datasetLocation: z.string().nullable(),
+  datasetSampleCount: z.number().int().nonnegative(),
+}).strict();
+
+export async function catalogInspectSelection(input: {
+  readonly pythonPath: string;
+  readonly projectDir: string;
+  readonly taskReference: string;
+  readonly taskArgs?: Readonly<Record<string, unknown>>;
+}, signal?: AbortSignal): Promise<z.infer<typeof InspectCatalogWorkerSchema>> {
+  const probed = await callWorker(input.pythonPath, "catalog", {
+    projectDir: input.projectDir,
+    taskReference: input.taskReference,
+    taskArgs: input.taskArgs ?? {},
+  }, signal);
+  const parsed = InspectCatalogWorkerSchema.safeParse(probed);
+  if (!parsed.success) {
+    refuse("venue-unavailable", "inspect.catalog", "Inspect worker catalog probe did not return a sample catalog");
+  }
+  return parsed.data;
+}
+
 export function writeInspectHostBinding(
   workspaceDir: string,
   selectionManifestSha256: string,
@@ -178,6 +226,50 @@ export function readInspectHostBinding(workspaceDir: string, selectionManifestSh
   }
 }
 
+export function readInspectEvalSelectionManifest(
+  workspaceDir: string,
+  digest: string,
+): InspectEvalSelectionManifest | undefined {
+  const bytes = getSealedBytes(workspaceDir, digest);
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(bytes));
+  } catch {
+    return refuse("record-integrity", "inspect.selection", "the sealed Inspect selection manifest is not valid UTF-8 JSON");
+  }
+  const inspectEval = InspectEvalSelectionManifestSchema.safeParse(decoded);
+  return inspectEval.success ? inspectEval.data : undefined;
+}
+
+/**
+ * Both sealed shapes read at the fields they genuinely share. An Inspect eval selection
+ * carries a *template* — no single `runOptions.sampleId`, no `dataset.selectedSampleId`,
+ * because the per-cell sampleId is overlaid at dispatch — so it cannot honestly be typed as
+ * an `InspectSelectionManifest`. Use this for every consumer that must serve both protocols.
+ *
+ * The return type narrows the guarantee; it does not strip anything. A cousin Inspect-task
+ * selection is returned whole, sampleId included, because the provisioner forwards this
+ * object straight to the worker on that path and the worker needs its sampleId.
+ */
+export function readInspectSelectionTemplate(workspaceDir: string, digest: string): InspectSelectionTemplate {
+  const bytes = getSealedBytes(workspaceDir, digest);
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(bytes));
+  } catch {
+    return refuse("record-integrity", "inspect.selection", "the sealed Inspect selection manifest is not valid UTF-8 JSON");
+  }
+  const inspectEval = InspectEvalSelectionManifestSchema.safeParse(decoded);
+  if (inspectEval.success) return inspectEval.data.inspect;
+  const parsed = InspectSelectionManifestSchema.safeParse(decoded);
+  if (!parsed.success) {
+    const paths = parsed.error.issues.map((issue) => issue.path.join(".") || "(root)").join(", ");
+    return refuse("record-integrity", "inspect.selection", `the sealed Inspect selection manifest is invalid at ${paths}`);
+  }
+  return parsed.data;
+}
+
+/** The cousin Inspect-task shape only: a selection that really does pin one sampleId. */
 export function readInspectSelectionManifest(workspaceDir: string, digest: string): InspectSelectionManifest {
   const bytes = getSealedBytes(workspaceDir, digest);
   let decoded: unknown;
@@ -198,11 +290,71 @@ export async function assertInspectSelectionUndrifted(
   workspaceDir: string,
   selectionManifestSha256: string,
 ): Promise<void> {
-  const expected = readInspectSelectionManifest(workspaceDir, selectionManifestSha256);
+  const inspectEval = readInspectEvalSelectionManifest(workspaceDir, selectionManifestSha256);
   const host = readInspectHostBinding(workspaceDir, selectionManifestSha256);
-  const scoringRequest = isInspectMultiScorerSelection(expected)
-    ? { scoring: { projections: expected.scoring.projections, verdictRule: expected.scoring.verdictRule } }
-    : { scorer: { name: expected.scorer.name, passValue: expected.scorer.passValue } };
+  if (inspectEval !== undefined) {
+    const catalog = host.kind === "oci"
+      ? await catalogInspectOciSelection({
+        dockerPath: host.dockerPath,
+        imageDigest: host.imageDigest,
+        projectDir: host.projectDir,
+        datasetCacheDir: host.datasetCacheDir,
+        sandboxExecution: host.sandboxExecution,
+        taskReference: inspectEval.inspect.task.reference,
+        taskArgs: inspectEval.inspect.task.args as Readonly<Record<string, unknown>>,
+      })
+      : await catalogInspectSelection({
+        pythonPath: host.pythonPath,
+        projectDir: host.projectDir,
+        taskReference: inspectEval.inspect.task.reference,
+        taskArgs: inspectEval.inspect.task.args as Readonly<Record<string, unknown>>,
+      });
+    const snapshotSha256 = inspectCatalogSnapshotSha256({
+      sampleIds: catalog.sampleIds,
+      taskSourceDigest: inspectEval.inspect.task.source.sha256,
+      specifiedEpochs: catalog.specifiedEpochs,
+      epochsReducer: catalog.epochsReducer ?? null,
+      taskVersion: catalog.taskVersion ?? null,
+      datasetName: catalog.datasetName,
+      datasetLocation: catalog.datasetLocation,
+      datasetSampleCount: catalog.datasetSampleCount,
+    });
+    if (snapshotSha256 !== inspectEval.catalog.snapshotSha256) {
+      refuse("conflict", "inspect.selection", "Inspect eval sample catalog drifted after selection/lock");
+    }
+    const scoringRequest = inspectScoringRequest(inspectEval.inspect as InspectSelectionManifest);
+    const firstSample = inspectEval.selectedSamples[0]!.sampleId;
+    const probed = host.kind === "oci"
+      ? (await probeInspectOciSelection({
+        dockerPath: host.dockerPath,
+        imageDigest: host.imageDigest,
+        projectDir: host.projectDir,
+        datasetCacheDir: host.datasetCacheDir,
+        sandboxExecution: host.sandboxExecution,
+        taskReference: inspectEval.inspect.task.reference,
+        taskArgs: inspectEval.inspect.task.args as Readonly<Record<string, unknown>>,
+        arms: inspectEval.inspect.arms,
+        ...scoringRequest,
+        runOptions: { ...inspectEval.inspect.runOptions, sampleId: firstSample, maxSamples: 1 },
+      })).manifest
+      : await probeInspectSelection({
+        pythonPath: host.pythonPath,
+        projectDir: host.projectDir,
+        taskReference: inspectEval.inspect.task.reference,
+        taskArgs: inspectEval.inspect.task.args as Readonly<Record<string, unknown>>,
+        arms: inspectEval.inspect.arms,
+        ...scoringRequest,
+        runOptions: inspectEval.inspect.runOptions,
+      });
+    if (host.kind === "oci") await assertInspectOciHostUndrifted(host, probed);
+    const template = stripInspectTemplateSampleId(probed);
+    if (sha256Hex(canonicalJsonBytes(template as never)) !== sha256Hex(canonicalJsonBytes(inspectEval.inspect as never))) {
+      refuse("conflict", "inspect.selection", "Inspect task, source, Python, runtime, or material configuration drifted after selection/lock");
+    }
+    return;
+  }
+  const expected = readInspectSelectionManifest(workspaceDir, selectionManifestSha256);
+  const scoringRequest = inspectScoringRequest(expected);
   const actual = host.kind === "oci"
     ? (await probeInspectOciSelection({
       dockerPath: host.dockerPath,

@@ -174,8 +174,17 @@ export function buildInspectTaskProfile(): TaskProfileDocument {
       additionalProperties: false,
       properties: {
         selectionManifestSha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        sampleId: {
+          anyOf: [
+            { type: "string", minLength: 1 },
+            { type: "integer" },
+          ],
+        },
       },
-      required: ["selectionManifestSha256"],
+      anyOf: [
+        { required: ["selectionManifestSha256"] },
+        { required: ["sampleId"] },
+      ],
     },
     inputConventions: { slots: [] },
     outputConventions: {
@@ -188,6 +197,10 @@ export function buildInspectTaskProfile(): TaskProfileDocument {
     evaluationFamilies: ["deterministic-process"],
     requirementKeys: [],
   };
+}
+
+export function buildInspectEvaluationSpec(manifest: InspectSelectionManifest): EvaluationSpec {
+  return inspectEvaluationSpec(manifest);
 }
 
 function inspectEvaluationSpec(manifest: InspectSelectionManifest): EvaluationSpec {
