@@ -17,6 +17,7 @@ import {
   WORKSPACE_ENV,
 } from "@/lib/server/product-context";
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
+import { readAuditEntries } from "@colophon-claims/core";
 import { agentProfileArmAddAction } from "@/app/actions";
 import { executeOperation } from "@/lib/server/action-support";
 import { executeBackgroundOperation } from "@/lib/server/background-operation";
@@ -196,19 +197,48 @@ describe.sequential("server action layer against a real workspace", () => {
     const configured = await invoke("anchoring.configure", { endpoint: "https://attacker.example/tsr" });
     expect(configured).toMatchObject({
       status: "success",
-      result: {
-        anchoring: [{
-          providerProfile: "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
-          endpoint: "https://tsa.example/tsr",
-        }],
-      },
+      result: { providerProfiles: ["https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1"] },
     });
+    // Neither the browser-supplied endpoint nor the server-configured one reaches browser state:
+    // an endpoint is an operator-typed URL and can carry userinfo or a key.
     expect(JSON.stringify(configured)).not.toContain("attacker.example");
+    expect(JSON.stringify(configured)).not.toContain("tsa.example");
 
     // Turning anchoring off is the one anchoring decision the browser may make on its own.
     const cleared = await invoke("anchoring.configure", { clear: "clear-anchoring" });
-    expect(cleared).toMatchObject({ status: "success", result: { anchoring: [] } });
+    expect(cleared).toMatchObject({ status: "success", result: { providerProfiles: [] } });
   }, 120_000);
+
+  test("GUI lock runs the same anchor hook the CLI does, and renders identically either way", async () => {
+    const unconfigured = mkdtempSync(join(tmpdir(), "gui-lock-unanchored-"));
+    workspaces.push(unconfigured);
+    process.env[WORKSPACE_ENV] = unconfigured;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    await invoke("workspace.init");
+    await prepareLockedDraft("gui-lock-unanchored");
+    const control = await invoke("run.status", { draftId: "gui-lock-unanchored" });
+    expect(control).toMatchObject({ status: "success" });
+    expect(readAuditEntries(unconfigured).filter((entry) => entry.action === "anchor")).toEqual([]);
+
+    const configured = mkdtempSync(join(tmpdir(), "gui-lock-anchored-"));
+    workspaces.push(configured);
+    process.env[WORKSPACE_ENV] = configured;
+    process.env[ANCHOR_PROVIDERS_ENV] = JSON.stringify([
+      { providerProfile: "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1", endpoint: "https://tsa.invalid/tsr" },
+    ]);
+    await invoke("workspace.init");
+    expect(await invoke("anchoring.configure")).toMatchObject({ status: "success" });
+    // `prepareLockedDraft` ends in `run.lock`, which is the call under test: the endpoint is
+    // unroutable, so acquisition fails, and the lock must succeed exactly as it did above.
+    await prepareLockedDraft("gui-lock-anchored");
+
+    const anchorEntries = readAuditEntries(configured).filter((entry) => entry.action === "anchor");
+    expect(anchorEntries).toHaveLength(1);
+    expect(anchorEntries[0]?.outcome).not.toBe("ok");
+    expect(anchorEntries[0]?.subject).toBe("gui-lock-anchored");
+    expect(readAuditEntries(configured).filter((entry) => entry.action === "lock").map((entry) => entry.outcome))
+      .toEqual(["ok"]);
+  }, 180_000);
 
   test("GUI anchor refuses an unknown subject, and the typed venue refusal when nothing is configured", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "anchor-subject-"));

@@ -120,6 +120,22 @@ describe("anchoringConfigure (§7.3)", () => {
     expect(metadata()).not.toHaveProperty("anchoring");
   });
 
+  test("refuses a malformed entry as validation naming the index and field, never as execution", () => {
+    for (const [entries, path] of [
+      [[null], "anchoring.0"],
+      [[{ endpoint: "https://timestamp.invalid/tsr" }], "anchoring.0.providerProfile"],
+      [[{ providerProfile: RFC3161_TSA_ANCHOR_PROFILE, endpoint: 42 }], "anchoring.0.endpoint"],
+      [[{ providerProfile: RFC3161_TSA_ANCHOR_PROFILE, endpoint: "https://a.invalid" }, "nope"], "anchoring.1"],
+    ] as const) {
+      const refused = anchoringConfigure(contextFor(), { entries: entries as never });
+      expect(refused.ok, path).toBe(false);
+      if (refused.ok) throw new Error(`configure accepted ${JSON.stringify(entries)}`);
+      expect(refused.error.code, path).toBe("validation");
+      expect(refused.error.issues?.map((issue) => issue.path), path).toContain(path);
+    }
+    expect(metadata()).not.toHaveProperty("anchoring");
+  });
+
   test("refuses a second entry for one profile, which resolution would never reach", () => {
     const refused = anchoringConfigure(contextFor(), {
       entries: [

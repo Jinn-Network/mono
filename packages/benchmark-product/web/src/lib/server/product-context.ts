@@ -5,6 +5,7 @@ import {
   createDefaultBenchmarkRuntimeHost,
   normalizePublicArchiveBaseUrl,
   type OperationContext,
+  type WorkspaceAnchoringEntry,
 } from "@colophon-claims/core";
 
 export const WORKSPACE_ENV = "BENCHMARK_PRODUCT_WORKSPACE_DIR";
@@ -30,18 +31,13 @@ export class ProductContextConfigurationError extends Error {
   }
 }
 
-export interface AnchorProviderConfiguration {
-  readonly providerProfile: string;
-  readonly endpoint: string;
-}
-
 export interface ProductServerConfiguration {
   readonly workspaceDir: string;
   /** Non-secret OS user-data directory. This remains server-only. */
   readonly agentDataDir: string;
   readonly principal: string;
   readonly publicationPublicBaseUrl?: string;
-  readonly anchorProviders?: readonly AnchorProviderConfiguration[];
+  readonly anchorProviders?: readonly WorkspaceAnchoringEntry[];
 }
 
 /**
@@ -55,7 +51,7 @@ export interface ProductServerConfiguration {
  */
 export function configuredAnchorProviders(
   environment: Readonly<Record<string, string | undefined>> = process.env,
-): readonly AnchorProviderConfiguration[] | undefined {
+): readonly WorkspaceAnchoringEntry[] | undefined {
   const value = environment[ANCHOR_PROVIDERS_ENV]?.trim();
   if (!value) return undefined;
   let parsed: unknown;

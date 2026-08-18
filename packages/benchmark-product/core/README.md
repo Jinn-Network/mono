@@ -184,7 +184,7 @@ or hosted authentication.
 `anchoring.configure` is gated because configuring an endpoint is the consent
 that makes later locks contact a third party. A workspace initialized before
 that grant existed does not carry it; its sponsor adds it once with
-`colophon authority grant --grantee <sponsor> --operations anchoring.configure`,
+`colophon authority grant --workspace <dir> --principal <sponsor> --grantee <sponsor> --operations anchoring.configure`,
 which is always available because granting is role-gated, not grant-gated.
 
 `anchor` itself is not gated: it moves no funds, changes no lifecycle state, and
@@ -192,11 +192,14 @@ is reversible by never having happened. Nothing is configured by default, no
 endpoint ships in source, and an unconfigured workspace attempts nothing and
 prints nothing. Once a provider is configured, `lock` attempts one anchor over
 the sealed Run record after the lock transition has already completed; a draft
-opts out with a spec `anchoring` block whose `enabled` is `false`. Any anchor
-refusal or failure becomes a stdout note plus its own audit entry — the lock
-result and exit code are unchanged, and `--json` stdout stays exactly one
+opts out with a spec `anchoring` block whose `enabled` is `false`, and
+`lock --no-anchor` skips the errand for one invocation without touching
+configuration. Any anchor refusal or failure becomes a note plus its own audit
+entry — the lock result and exit code are unchanged. The note goes to stdout in
+human mode and to stderr under `--json`, where stdout stays exactly one
 envelope. Re-run `colophon anchor --draft <id> --subject lock` for the typed
-envelope, before launch.
+envelope, before launch. The private web app calls the same hook after its own
+lock, so both surfaces anchor or skip identically.
 
 Lock is irreversible. `launch` and `resume` use the real local backend;
 `resume` re-dispatches only outstanding cells. Cancellation is two-phase: a
@@ -229,7 +232,8 @@ There are **11 typed error codes**:
 
 In JSON mode success is one compact
 `{"ok":true,"result":...}` line on stdout; failure is one compact
-`{"ok":false,"error":...}` line on stdout. Stderr is empty. An error contains
+`{"ok":false,"error":...}` line on stdout. Stderr is empty, except for `lock`'s
+optional one-line anchoring note about its non-blocking side errand. An error contains
 `code`, `detail`, and optional structured `issues`; callers branch on the code
 and issue path, never prose.
 

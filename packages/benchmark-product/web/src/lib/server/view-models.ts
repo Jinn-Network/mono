@@ -114,6 +114,12 @@ export function loadWorkspaceView() {
       configuration: { principal: configuration.principal },
       drafts: drafts.ok ? drafts : { ...drafts, error: projectProductErrorForGui(drafts.error) },
       authority: authority.ok ? authority : { ...authority, error: projectProductErrorForGui(authority.error) },
+      // Profiles only, never endpoints: an endpoint is an operator-typed URL that can carry
+      // userinfo or a key in its path or query, and this projection is rendered into the browser.
+      anchoringConfiguration: {
+        available: configuration.anchorProviders !== undefined,
+        providerProfiles: (configuration.anchorProviders ?? []).map((entry) => entry.providerProfile),
+      },
     };
   } catch {
     return { ok: false as const, detail: safeFailureDetail() };

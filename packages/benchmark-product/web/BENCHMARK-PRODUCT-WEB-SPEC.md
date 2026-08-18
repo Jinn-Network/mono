@@ -140,10 +140,17 @@ endpoint on every later lock, so a form-supplied URL would be an
 outbound-request primitive; the deployment supplies its providers through
 `BENCHMARK_PRODUCT_ANCHOR_PROVIDERS`, and the form carries only the decision to
 apply them or to clear the block. With nothing configured server-side the
-action refuses `invalid-invocation` rather than accepting a browser value.
-Action states: `idle → applied | cleared`, with `failed` as the terminal
-alternative (typed `validation` for a profile or endpoint the product cannot
-use, `authority-denied` without the grant).
+action refuses `invalid-invocation` rather than accepting a browser value. Both
+the rendered configuration and the action's own success state name **provider
+profiles only** — an endpoint is an operator-typed URL that can carry userinfo
+or a key, and neither is worth serializing into a browser to state which
+providers are configured. Action states: `idle → applied | cleared`, with
+`failed` as the terminal alternative (typed `validation` for a profile or
+endpoint the product cannot use, `authority-denied` without the grant).
+
+Rendered at `/workspace` as the **Third-party time** card: the server-configured
+profiles, an *apply* control (disabled with nothing configured server-side) and
+a *turn anchoring off* control. Both are gated.
 
 ### 3.2 Benchmark draft
 
@@ -177,7 +184,18 @@ Covers the design spec §4.6 Benchmark-draft row. The **Quote** sub-surface
     evidence" marker (design spec §7.2, BP-20 addendum) so it cannot be
     mistaken for an official result
   - quote → `runQuote` / `quote`
-  - lock → `runLock` / `lock` — **gated**; irreversible once it succeeds
+  - lock → `runLock` / `lock` — **gated**; irreversible once it succeeds.
+    After the transition completes, **both surfaces** run the anchor-evidence
+    design's §7.2 hook through the same exported
+    `anchorAfterLockIfConfigured`: with a configured workspace the lock obtains
+    one anchor over the sealed Run record, and any refusal or failure is
+    swallowed — the CLI emits a note (stdout in human mode, stderr under
+    `--json`), the GUI discards the outcome entirely, and neither the lock
+    result nor the exit code moves. The durable record of the attempt is the
+    audit journal in both cases. The CLI additionally offers `--no-anchor` to
+    skip the errand for one invocation; the GUI has no such control, because a
+    browser lock that quietly skipped a configured anchor would be a second,
+    invisible policy.
   - inspect / read → `inspectDraft` / `inspect`, `getDraft` / `draft show`,
     `listDrafts` / `draft list`
 
@@ -233,6 +251,11 @@ close, and to upgrade a pending proof before publish. Action states:
 `venue-unavailable` when nothing resolves or the provider does not answer,
 `venue-unverifiable` when what came back does not hold, `conflict` on a
 re-anchor, `illegal-transition` for a lock anchor after dispatch began).
+
+Rendered at `/workspace/[draftId]/run` as the **Third-party time** card: one
+control per subject — the sealed Run record (enabled while `locked`) and the
+terminal Matrix (enabled once the run is closed, reported, or published).
+Neither form carries a provider or an endpoint.
 
 BP-32 renders these controls at `/workspace/[draftId]/run`. The monitor is a
 durable read: every refresh/poll calls `runStatus` against the sealed Run,

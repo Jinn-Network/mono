@@ -248,9 +248,10 @@ describe("lock chains the §7.2 anchor hook without changing what lock reports",
     const locked = await runCli(["lock", ...base(), "--draft", "anchor-draft", "--json"], failing);
 
     expect(locked.exitCode).toBe(0);
-    expect(locked.stderr).toBe("");
-    // Exactly one envelope on stdout: nothing was appended, streamed, or wrapped.
+    // Exactly one envelope on stdout: nothing was appended, streamed, or wrapped. The note about
+    // the side errand is on stderr, where a machine caller can ignore it.
     expect(locked.stdout.trimEnd().split("\n")).toHaveLength(1);
+    expect(locked.stderr).toContain("anchoring: no anchor was obtained (execution)");
     const body = parseJson<Record<string, unknown>>(locked.stdout);
     expect(body.ok).toBe(true);
     expect(Object.keys(body.result!).sort()).toEqual(controlKeys);
@@ -279,6 +280,27 @@ describe("lock chains the §7.2 anchor hook without changing what lock reports",
     expect(locked.stdout).toContain(
       `retry before launch with "${PRODUCT_BRANDING.commandName} anchor --draft anchor-draft --subject lock"`,
     );
+  });
+
+  test("--no-anchor skips the errand for one invocation without touching configuration", async () => {
+    const context = contextFor({ [RFC3161_TSA_ANCHOR_PROFILE]: explodingSource(RFC3161_TSA_ANCHOR_PROFILE) });
+    await setUpQuotedDraft(context);
+    await configureAnchoring(context);
+
+    const locked = await runCli(["lock", ...base(), "--draft", "anchor-draft", "--no-anchor"], context);
+
+    expect(locked.exitCode).toBe(0);
+    expect(locked.stdout).not.toContain("anchoring:");
+    expect(locked.stderr).toBe("");
+    expect(readAuditEntries(workspaceDir).filter((entry) => entry.action === "anchor")).toEqual([]);
+    // Configuration is untouched: a standalone anchor still resolves the configured provider, and
+    // fails on this workspace's exploding source rather than on "nothing configured".
+    const retried = await runCli(
+      ["anchor", ...base(), "--draft", "anchor-draft", "--subject", "lock", "--json"],
+      context,
+    );
+    expect(retried.exitCode).toBe(1);
+    expect(parseJson(retried.stdout).error?.code).toBe("execution");
   });
 
   test("a successful anchor is reported, and stays out of the JSON envelope", async () => {

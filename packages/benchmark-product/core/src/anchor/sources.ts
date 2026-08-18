@@ -120,7 +120,16 @@ function normalizeHttpEndpoint(value: string): string | undefined {
   return url.toString().replace(/\/$/, "");
 }
 
-function requireHttpsEndpoint(endpoint: string, path: string): string {
+/**
+ * The endpoint rule the *acquisition* path applies: an absolute http(s) URL.
+ *
+ * Named for what it enforces. It admits plain `http` as well as `https` — tightening acquisition to
+ * TLS is a deliberate deferral, not an oversight, because it would retroactively break an already
+ * stored configuration and a per-invocation `--endpoint` that works today. Durable configuration is
+ * held to the stricter rule below (`normalizeConfiguredAnchorEndpoint`), which is where a new
+ * endpoint enters the product.
+ */
+function requireAcquisitionEndpoint(endpoint: string, path: string): string {
   const normalized = normalizeHttpEndpoint(endpoint);
   if (normalized === undefined) {
     unavailable(path, `anchor endpoint "${endpoint}" is not an absolute http(s) URL`);
@@ -139,10 +148,10 @@ function endpointSegments(endpoint: string): readonly string[] {
  * error code while the endpoint spelling stays this module's fact.
  *
  * It reads the endpoint the way the named profile's own source will read it (one URL, or §6.2's
- * comma-separated calendars) and is deliberately **stricter on one axis**: a configured endpoint
- * must be `https`. Acquisition itself still admits a plain-`http` endpoint, so a per-invocation
- * `--endpoint` is unchanged; what an operator writes into a workspace once and then anchors
- * through automatically on every later lock is held to TLS.
+ * comma-separated calendars) and is deliberately **stricter on one axis** than
+ * `requireAcquisitionEndpoint` above: a configured endpoint must be `https`. What an operator
+ * writes into a workspace once, and then anchors through automatically on every later lock, is
+ * held to TLS; a per-invocation `--endpoint` keeps acquisition's looser rule.
  */
 export function normalizeConfiguredAnchorEndpoint(profile: string, endpoint: string): string | undefined {
   const segments = profile === OPENTIMESTAMPS_ANCHOR_PROFILE ? endpointSegments(endpoint) : [endpoint];
@@ -289,7 +298,7 @@ export function createRfc3161ProofSource(options: Rfc3161ProofSourceOptions = {}
     profile: RFC3161_TSA_ANCHOR_PROFILE,
     async obtainProof(request: AnchorProofRequest): Promise<Uint8Array> {
       const path = "anchor.rfc3161-tsa";
-      const url = requireHttpsEndpoint(request.endpoint, path);
+      const url = requireAcquisitionEndpoint(request.endpoint, path);
       const body = buildTimeStampRequest(subjectDigestBytes(request.subjectSha256, path));
       const signal = operationSignal(request.signal, timeoutMs);
 
@@ -329,7 +338,7 @@ const OPENTIMESTAMPS_MEDIA_TYPE = "application/vnd.opentimestamps.v1";
 function calendarBaseUrls(endpoint: string, path: string): readonly string[] {
   const entries = endpointSegments(endpoint);
   if (entries.length === 0) unavailable(path, "no OpenTimestamps calendar is configured");
-  return entries.map((entry) => requireHttpsEndpoint(entry, path));
+  return entries.map((entry) => requireAcquisitionEndpoint(entry, path));
 }
 
 export interface OpenTimestampsProofSourceOptions {

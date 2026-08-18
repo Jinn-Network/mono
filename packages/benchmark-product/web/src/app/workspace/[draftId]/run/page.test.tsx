@@ -14,6 +14,7 @@ vi.mock("@/lib/server/gui-action-registry", () => ({
     "run.resume": vi.fn(),
     "run.cancel": vi.fn(),
     "run.collect": vi.fn(),
+    "run.anchor": vi.fn(),
     "publication.configure": vi.fn(),
     "publication.register": vi.fn(),
     "publication.accounting": vi.fn(),
@@ -72,6 +73,25 @@ describe("durable run monitor cancellation language", () => {
     }));
     expect(markup).toContain("Cancellation finalized; run is cancelled.");
     expect(markup).not.toContain("Cancellation requested; driver is draining.");
+  });
+
+  test("renders one anchor control per subject, gated on the run's own state and free of endpoints", async () => {
+    loadRunViewMock.mockReturnValue(status("running", false));
+    const running = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(running).toContain("Anchor the sealed Run record");
+    expect(running).toContain("Anchor the terminal Matrix");
+    expect(running).toContain('name="subject" value="lock"');
+    expect(running).toContain('name="subject" value="matrix"');
+    // A lock anchor must precede dispatch, so a running draft cannot obtain one; the Matrix is not
+    // sealed yet either.
+    expect(running).toContain('<button disabled="">Anchor the sealed Run record');
+    expect(running).toContain('<button disabled="">Anchor the terminal Matrix');
+    expect(running).not.toContain('name="endpoint"');
+    expect(running).not.toContain('name="provider"');
+
+    loadRunViewMock.mockReturnValue(status("closed", false));
+    const closed = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(closed).not.toContain('<button disabled="">Anchor the terminal Matrix');
   });
 
   test("keeps local-first default while offering post-hoc accounting without a Report", async () => {

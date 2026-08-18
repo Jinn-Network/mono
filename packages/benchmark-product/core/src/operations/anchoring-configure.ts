@@ -24,10 +24,15 @@
  *   opt-in (§7.3).
  */
 
+import { z } from "zod";
 import { isProducibleAnchorProfile, PRODUCIBLE_ANCHOR_PROFILES } from "../anchor/profiles.js";
 import { normalizeConfiguredAnchorEndpoint } from "../anchor/sources.js";
-import { refuse } from "../errors.js";
-import { writeWorkspaceAnchoring, type WorkspaceAnchoringEntry } from "../workspace/workspace.js";
+import { refuse, refuseWithIssues } from "../errors.js";
+import {
+  WorkspaceAnchoringEntrySchema,
+  writeWorkspaceAnchoring,
+  type WorkspaceAnchoringEntry,
+} from "../workspace/workspace.js";
 import type { OperationContext } from "./context.js";
 import { operate } from "./operate.js";
 import type { OperationResult } from "./result.js";
@@ -46,9 +51,28 @@ export interface AnchoringConfigureResult {
   readonly anchoring: readonly WorkspaceAnchoringEntry[];
 }
 
+/**
+ * The list's own schema runs first, so a caller that hands over `[null]`, a missing field, or a
+ * number where a URI belongs refuses `validation` naming the entry index and field — not
+ * `execution` carrying whatever message a property read on `undefined` happened to produce. The
+ * CLI's `--file` and the GUI's server configuration both arrive here as parsed JSON that nothing
+ * has shape-checked yet, which is exactly the input this guards.
+ */
+const AnchoringEntriesSchema = z.array(WorkspaceAnchoringEntrySchema);
+
 function validateEntries(entries: readonly WorkspaceAnchoringEntry[]): WorkspaceAnchoringEntry[] {
+  const parsed = AnchoringEntriesSchema.safeParse(entries);
+  if (!parsed.success) {
+    refuseWithIssues(
+      "validation",
+      parsed.error.issues.map((issue) => ({
+        path: `anchoring.${issue.path.join(".")}`,
+        message: issue.message,
+      })),
+    );
+  }
   const seen = new Set<string>();
-  return entries.map((entry, index) => {
+  return parsed.data.map((entry, index) => {
     const at = `anchoring.${index}`;
     if (!isProducibleAnchorProfile(entry.providerProfile)) {
       refuse(

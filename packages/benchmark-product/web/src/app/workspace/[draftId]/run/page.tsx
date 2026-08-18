@@ -59,6 +59,14 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
         <ActionForm action={GUI_SERVER_ACTIONS["run.cancel"]} submitLabel="Request / finalize cancel" gated disabled={state !== "running" && !(state === "closed" && status?.cancelRequested === true)}><HiddenDraft draftId={draftId} /></ActionForm>
         <ActionForm action={GUI_SERVER_ACTIONS["run.collect"]} submitLabel="Collect" disabled={state !== "running" || status?.cancelRequested === true}><HiddenDraft draftId={draftId} /></ActionForm>
       </div></CardContent></Card>
+      <Card><CardHeader><CardTitle>Third-party time</CardTitle></CardHeader><CardContent className="grid min-w-0 gap-5 [&>*]:min-w-0">
+        <p className="text-sm text-muted-foreground">A configured lock anchors on its own. Anchor the sealed Run record here when a lock-time attempt did not succeed, or the terminal Matrix once the run is closed. Provider and endpoint come from this workspace&rsquo;s configuration; this form never accepts one.</p>
+        <p className="text-sm text-muted-foreground">A lock anchor must be obtained before dispatch begins; an anchor never proves a result is correct, only that these bytes existed by a time a third party attests.</p>
+        <div className="grid min-w-0 gap-5 md:grid-cols-2 [&>*]:min-w-0">
+          <ActionForm action={GUI_SERVER_ACTIONS["run.anchor"]} submitLabel="Anchor the sealed Run record" disabled={state !== "locked"}><HiddenDraft draftId={draftId} /><input type="hidden" name="subject" value="lock" /></ActionForm>
+          <ActionForm action={GUI_SERVER_ACTIONS["run.anchor"]} submitLabel="Anchor the terminal Matrix" disabled={!postHoc}><HiddenDraft draftId={draftId} /><input type="hidden" name="subject" value="matrix" /></ActionForm>
+        </div>
+      </CardContent></Card>
       <section aria-labelledby="publication-heading" className="grid gap-5 lg:grid-cols-2">
         <Card><CardHeader><CardTitle id="publication-heading">Publication status</CardTitle></CardHeader><CardContent className="space-y-4">
           {!publication ? <p role="status">Publication status becomes available after the Run is locked.</p> : <>

@@ -152,7 +152,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   quote            --workspace <dir> --principal <id> --draft <draftId>
                    [--ack-provider-network-costs]
   lock             --workspace <dir> --principal <id> --draft <draftId>
-                   [--ack-provider-network-costs]
+                   [--ack-provider-network-costs] [--no-anchor]
   anchor           --workspace <dir> --principal <id> --draft <draftId>
                    --subject lock|matrix [--provider <profileUri>] [--endpoint <url>]
   anchoring configure --workspace <dir> --principal <id>
@@ -219,7 +219,8 @@ const AUTHORITY_SHOW_FLAGS = ["workspace", "principal", "json"] as const;
 const PREVIEW_FLAGS = ["workspace", "principal", "json", "draft", "items"] as const;
 const PROVIDER_ACK_FLAG = "ack-provider-network-costs" as const;
 const QUOTE_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
-const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
+const NO_ANCHOR_FLAG = "no-anchor" as const;
+const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG, NO_ANCHOR_FLAG] as const;
 const ANCHOR_FLAGS = ["workspace", "principal", "json", "draft", "subject", "provider", "endpoint"] as const;
 const ANCHORING_CONFIGURE_FLAGS = ["workspace", "principal", "json", "provider", "endpoint", "file", "clear"] as const;
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
@@ -895,14 +896,16 @@ async function handleQuote(args: ParsedArgs, context: CliContext, jsonMode: bool
 }
 
 /**
- * The §7.2 note a completed lock prints about its anchor attempt, or `""` for the two cases that
- * print nothing: an unconfigured workspace (§7.3 — "absent any configuration nothing is attempted,
- * no warning prints"), and `--json` mode, whose stdout stays exactly one machine-parseable
- * envelope. A JSON caller reads the outcome from the audit journal, or re-runs `anchor` standalone
- * for a typed envelope.
+ * The §7.2 note a completed lock emits about its anchor attempt, or `""` for the one case that says
+ * nothing at all: an unconfigured workspace (§7.3 — "absent any configuration nothing is attempted,
+ * no warning prints").
+ *
+ * The note describes a side errand, never the lock's result, so `handleLock` routes it to stdout in
+ * human mode and to **stderr** under `--json`, where stdout stays exactly one machine-parseable
+ * envelope. A JSON caller that discards stderr still loses nothing durable — the operation audits
+ * itself either way, and `anchor` re-run standalone returns the typed envelope.
  */
-function anchorNote(outcome: AnchorAfterLockOutcome, jsonMode: boolean, draftId: string): string {
-  if (jsonMode) return "";
+function anchorNote(outcome: AnchorAfterLockOutcome, draftId: string): string {
   if (!outcome.attempted) {
     return outcome.reason === "disabled"
       ? "anchoring: disabled for this draft; no anchor was attempted\n"
@@ -922,10 +925,14 @@ function anchorNote(outcome: AnchorAfterLockOutcome, jsonMode: boolean, draftId:
  * `lock`, then the §7.2 anchor hook.
  *
  * The lock transition completes first and its result is what this verb reports: **any** anchor
- * failure or refusal becomes a note on stdout plus the operation's own audit entry, and neither the
- * envelope nor the exit code moves. The verb does spend up to the bounded acquisition timeout
- * before returning, which is the design's deliberate reading of the never-blocks criterion — the
- * lock itself was never blocked or delayed, only this process's return.
+ * failure or refusal becomes a note plus the operation's own audit entry, and neither the envelope
+ * nor the exit code moves. The verb does spend up to the bounded acquisition timeout before
+ * returning, which is the design's deliberate reading of the never-blocks criterion — the lock
+ * itself was never blocked or delayed, only this process's return.
+ *
+ * `--no-anchor` skips the errand for one invocation without touching configuration. It is the
+ * escape hatch for the operator who wants the lock back now and will anchor separately; a durable
+ * opt-out is the draft's own `anchoring.enabled: false`.
  */
 async function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, LOCK_FLAGS);
@@ -942,10 +949,13 @@ async function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boole
     jsonMode,
     (value) => `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
   );
-  if (!locked.ok) return rendered;
+  if (!locked.ok || present(args, NO_ANCHOR_FLAG)) return rendered;
 
   const outcome = await anchorAfterLockIfConfigured(opContext, draftId, context.anchorDeps ?? {});
-  return { ...rendered, stdout: `${rendered.stdout}${anchorNote(outcome, jsonMode, draftId)}` };
+  const note = anchorNote(outcome, draftId);
+  return jsonMode
+    ? { ...rendered, stderr: `${rendered.stderr}${note}` }
+    : { ...rendered, stdout: `${rendered.stdout}${note}` };
 }
 
 function assertAnchorSubject(value: string): AnchorSubject {
