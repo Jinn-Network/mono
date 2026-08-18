@@ -117,6 +117,10 @@ Official tasks often pin a registry tag in `task.toml`. Pull and inspect
 **before** select; select itself never talks to Docker. Put `repo@sha256:…`
 in `host.json` `environment.image`.
 
+`colophon method --help` lists per-suite `--host` keys; `--n` selects the
+first N registry ids (code-point order) and is mutually exclusive with
+`--slice` and `--ids`.
+
 ## 6. Built CLI and workspace
 
 Workspace lives **outside** the repo (for example

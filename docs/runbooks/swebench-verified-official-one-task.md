@@ -12,6 +12,10 @@ A human operator, on a machine with `swebench` 4.1.x and Docker, drives the
 **built Colophon CLI** (core `dist/cli/bin.js`) through method → quote →
 lock → export against:
 
+`colophon method --help` lists per-suite `--host` keys; `--n` selects the
+first N registry ids (code-point order) and is mutually exclusive with
+`--slice` and `--ids`.
+
 - Dataset id `princeton-nlp/SWE-bench_Verified`
 - Revision `c104f840cc67f8b6eec6f759ebc8b2693d585d4a`
   (`SWE_BENCH_VERIFIED_DATASET_REVISION` in
