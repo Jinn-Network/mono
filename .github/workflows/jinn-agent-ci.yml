@@ -262,13 +262,15 @@ jobs:
   cold-stock-e2e:
     name: Cold-stock Stage 1 product gate
     needs: changes
-    # `pull_request` is deliberately absent: this is a 60-minute cold product
-    # journey, and the fast PR lane moves it onto the merge group where the
-    # queue runs the full battery before anything lands (DR-2026-08-18-b D3).
-    # The nightly schedule, dispatch, and push lanes are unchanged.
+    # Queue-bound `pull_request` is deliberately absent: this is a 60-minute cold
+    # product journey, and the fast PR lane moves it onto the merge group where
+    # the queue runs the full battery before anything lands (DR-2026-08-18-b D3).
+    # PRs targeting `main` (the hotfix lane) keep it — main has no queue to
+    # backstop what the PR lane skips. Nightly schedule, dispatch, and push
+    # lanes are unchanged.
     if: >-
       needs.changes.outputs.run == 'true' &&
-      (github.event_name == 'push' || github.event_name == 'merge_group' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      (github.event_name == 'push' || github.event_name == 'merge_group' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'main'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -333,6 +335,9 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
+          # Empty on every event except pull_request; the cold-stock case below
+          # mirrors the job-level main-carve-out with it.
+          BASE_REF: ${{ github.base_ref }}
           SELECTED: ${{ needs.changes.outputs.run }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           GENERATE_RESULT: ${{ needs.generate.result }}
@@ -360,14 +365,21 @@ jobs:
           test "${GENERATE_RESULT}" = "${slice_expected}"
           test "${TEST_RESULT}" = "${slice_expected}"
           # The cold-stock gate runs on every event this workflow accepts EXCEPT
-          # pull_request, where the fast PR lane moves its 60-minute journey onto the
-          # merge group (DR-2026-08-18-b D3). On `schedule` and `workflow_dispatch` the
-          # changes job has no diff to read and selects conservatively, which is what
-          # keeps the nightly run running.
+          # queue-bound pull_request, where the fast PR lane moves its 60-minute
+          # journey onto the merge group (DR-2026-08-18-b D3). PRs targeting `main`
+          # (the hotfix lane) keep it: main has no queue to backstop the fast lane.
+          # On `schedule` and `workflow_dispatch` the changes job has no diff to
+          # read and selects conservatively, which is what keeps the nightly run
+          # running.
           cold_expected=skipped
           case "${EVENT_NAME}" in
             push|merge_group|schedule|workflow_dispatch)
               if [ "${SELECTED}" = true ]; then
+                cold_expected=success
+              fi
+              ;;
+            pull_request)
+              if [ "${SELECTED}" = true ] && [ "${BASE_REF}" = main ]; then
                 cold_expected=success
               fi
               ;;

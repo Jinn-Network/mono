@@ -333,6 +333,9 @@ report_partial_flip() {
     echo "    monotonically non-decreasing: nothing above can have left 'next'"
     echo "    unprotected. If (3) did not run, 'next' is covered by"
     echo "    '${BASE_RULESET_NAME}' — and, if (1) ran, by the new ruleset too."
+    echo "    One window to close promptly: if (1) applied but (2) did not, the"
+    echo "    queue rule is live on 'next' with no gh-readonly-queue/** guard, so"
+    echo "    queue-shaped refs are forgeable until (2) lands — recover now."
     echo
     echo "    TO RECOVER: re-run the same command. Every step resolves its"
     echo "    ruleset by name and updates in place, so completed steps re-apply"
