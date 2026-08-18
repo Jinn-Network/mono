@@ -2025,7 +2025,7 @@
       "decisionRecords": 5,
       "discoveredFirstPartySurfaces": 2995,
       "generatedOutputSources": 1391,
-      "generatorSources": 660,
+      "generatorSources": 662,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 6
@@ -19332,6 +19332,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmark-product/core/scripts/apex-agents-one-task-qualify.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmark-product/core/scripts/build.mjs"
       },
       {
@@ -19523,6 +19533,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/swebench-verified-one-task-qualify.mjs"
       },
       {
         "categories": [

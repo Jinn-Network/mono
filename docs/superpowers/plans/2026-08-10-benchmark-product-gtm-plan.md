@@ -1,7 +1,7 @@
 # Benchmark Product: High-Level Go-to-Market Plan
 
 **Status:** Working strategy draft  
-**Version:** 0.4 (2026-08-17 — TB 2.1 named protocol vs Inspect select-a-task per [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md); engine-wrap vs campaign-overlay copy per [DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md); 2026-08-10 — §6 discovery gate rewritten commitment-gated per [DR-2026-08-10](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md); §10 Phase 1 aligned; authority note routed through the DR. v0.1 circulated outside the repo.)  
+**Version:** 0.4 (2026-08-18 — APEX-Agents named protocol per [DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md); 2026-08-17 — TB 2.1 named protocol vs Inspect select-a-task per [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md); engine-wrap vs campaign-overlay copy per [DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md); 2026-08-10 — §6 discovery gate rewritten commitment-gated per [DR-2026-08-10](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md); §10 Phase 1 aligned; authority note routed through the DR. v0.1 circulated outside the repo.)  
 **Work shape:** `design`  
 **Date:** 2026-08-10  
 **Repository basis:** `integration/evidence-v1` is the canonical implementation branch. PR #2541 is the current standalone Benchmark Product candidate and remains open against that branch at the time of writing.
@@ -374,6 +374,18 @@ Terminal-Bench 2.1 is a different door: a **named official protocol** Colophon w
 > **Lock the official Terminal-Bench 2.1 method. Colophon runs Harbor under that lock, accounts every cell, and publishes a checkable bundle. Hub export is a derived artifact for their submit flow, not the claim of record.**
 
 A cousin method on TB tasks must not wear the suite name. A protocol-faithful slice is not a leaderboard-complete run. Copy must not claim Colophon placed a Hub row while community submissions are closed.
+
+SWE-bench Verified is a third door: a **named official evaluation protocol** Colophon wraps, not a rename of `import swebench` + swe-rebench ([DR-2026-08-17-e](../../../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)):
+
+> **Lock the official SWE-bench Verified method. Colophon solve arms emit patches; their harness grades. Predictions export is a derived artifact for their submit flow, not the claim of record.**
+
+A cousin swe-rebench run must not wear the Verified name. A protocol-faithful slice is not a leaderboard-complete run. Copy must not claim Colophon placed a swebench.com row.
+
+APEX-Agents is a fourth door: a **named official evaluation protocol** Colophon wraps, not Stirrup, not Harbor, and not Inspect on APEX tasks ([DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md)):
+
+> **Lock the official APEX-Agents method. Archipelago owns the cell. Inspection export is a derived artifact, not the claim of record. Colophon does not place the Mercor row.**
+
+A cousin Stirrup, Code, Harbor, Inspect, or k=8 run must not wear the APEX-Agents name. A protocol-faithful slice is not a leaderboard-complete run. Copy must not claim Colophon placed a Mercor row.
 
 Potential distribution surfaces include:
 

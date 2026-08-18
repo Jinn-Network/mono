@@ -19,10 +19,18 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires server-configured Terminal-Bench and Harbor host paths; browser-supplied paths are forbidden",
   selectTerminalBench21Runtime:
     "requires server-configured Terminal-Bench 2.1 and Harbor host paths; browser-supplied paths are forbidden",
+  selectSwebenchVerifiedRuntime:
+    "requires server-configured SWE-bench Verified harness paths; browser-supplied paths are forbidden",
+  selectApexAgentsRuntime:
+    "requires server-configured APEX-Agents Archipelago paths; browser-supplied paths are forbidden",
   migrateTerminalBenchLegacyTask:
     "requires server-configured migration input paths; browser-supplied paths are forbidden",
   exportHarborHubPackage:
     "copies a machine-local Harbor job directory; browser path-based job export is forbidden",
+  exportSwebenchPredictions:
+    "copies machine-local predictions and harness reports; browser path-based export is forbidden",
+  exportApexAgentsInspection:
+    "copies machine-local Archipelago grades; browser path-based export is forbidden",
 } as const;
 
 describe("generated library / CLI / GUI parity", () => {

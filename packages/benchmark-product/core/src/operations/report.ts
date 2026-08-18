@@ -76,6 +76,12 @@ import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
+import { suiteFactsFromAccountedSwebenchRun } from "../runtime/suite-protocol/from-swebench.js";
+import { suiteFactsFromAccountedApexRun } from "../runtime/suite-protocol/from-apex.js";
+import { resolveSwebenchHarnessRunId, swebenchModelNameOrPathByArm } from "../runtime/swe-bench-verified/launcher.js";
+import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
+import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
+import { artifactsDir } from "../workspace/layout.js";
 
 export interface RunReportInput {
   readonly draftId: string;
@@ -181,7 +187,29 @@ export function runReport(
             jobDir: join(harborArmJobsDir(clockedContext.workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId)),
           })),
         })
-        : undefined;
+        : document.spec.evaluationRuntime?.adapterId === "swebench-harness"
+          ? suiteFactsFromAccountedSwebenchRun({
+            manifest: SwebenchVerifiedSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+            armCount: runRecord.arms.length,
+            itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+            replicates: runRecord.replicates,
+            matrix: matrixRecord,
+            armIds: document.spec.arms.map((arm) => arm.armId),
+            reportRoot: join(artifactsDir(clockedContext.workspaceDir), "swebench-harness", input.draftId),
+            runId: resolveSwebenchHarnessRunId(join(artifactsDir(clockedContext.workspaceDir), "swebench-harness", input.draftId), runSha256),
+            modelNameOrPathByArm: swebenchModelNameOrPathByArm(document.spec.arms),
+          })
+          : document.spec.evaluationRuntime?.adapterId === "archipelago"
+            ? suiteFactsFromAccountedApexRun({
+              manifest: ApexAgentsSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+              armCount: runRecord.arms.length,
+              itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+              replicates: runRecord.replicates,
+              matrix: matrixRecord,
+              armIds: document.spec.arms.map((arm) => arm.armId),
+              reportRoot: join(artifactsDir(clockedContext.workspaceDir), "archipelago", input.draftId),
+            })
+            : undefined;
       const suiteLimits = suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation];
       let binaryLimits: readonly string[] = [];
       if (selected.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
