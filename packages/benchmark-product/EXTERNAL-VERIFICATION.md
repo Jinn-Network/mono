@@ -16,10 +16,11 @@ Read this table first. It is the whole point of the document.
 | Every content-addressed record's bytes hash to its own name | yes | | |
 | `report.json` is byte-identical to the signed DSSE payload | yes | | |
 | The report signature verifies (Ed25519, DSSE v1) against the bundle-carried key | yes | | |
-| The signed report pins the matrix by digest; matrix cells pin verdicts, submissions, and deliveries | yes | | |
+| The signed report pins the matrix by digest, and every matrix cell's verdict references resolve to cataloged records naming that cell | yes | | |
+| The full evidence graph closes (submissions, deliveries, evaluation tasks, roles) | | yes | |
 | Every verdict is a DSSE-signed in-toto statement verifying against its named evaluator key | yes | | |
 | `did:key` and evaluator key ids derive from the carried public keys | yes | | |
-| The claim package's stored headline mirrors the signed report's results | yes | | |
+| The claim package's stored headline mirrors the signed report's results (headline-shaped claims; a comparison-shaped claim has no headline to mirror and the check reports `skipped`) | yes | | |
 | The matrix is the correct aggregation of the evidence graph (re-derivation, byte-exact) | | yes | |
 | The report's statistics are the correct output of its named method (recompute) | | yes | |
 | The claim package is the exact projection of the verified records | | yes | |
@@ -115,7 +116,8 @@ Spot-check by hand — the manifest and one digest:
 python3 -c "import json,hashlib; m=json.load(open('bundle.json')); print(all(hashlib.sha256(open(f['path'],'rb').read()).hexdigest()==f['sha256'] for f in m['files']), len(m['files']))"
 ```
 
-Expected output: `True 42` (your file count may differ).
+Expected output for the conformance kit's golden bundle: `True 71` (your file
+count differs per bundle; `True` is the part that matters).
 
 The report signature with openssl alone:
 
@@ -123,10 +125,21 @@ The report signature with openssl alone:
 python3 -c "
 import base64, json
 e = json.load(open('report-envelope.json')); t = json.load(open('trust/public-keys.json'))
-p = base64.b64decode(e['payload']); pt = e['payloadType'].encode()
+key_id = t['report']['keyId']
+# Select the signature by keyid, never by position: a graft attack prepends a
+# signature, and signatures[0] would verify the wrong one.
+sig = next(s for s in e['signatures'] if s.get('keyid') == key_id)
+# validate=True plus the re-encode round trip is the strict-base64 rule: a
+# lenient decoder silently drops inserted whitespace and accepts a malleated
+# envelope whose bytes hash differently.
+def strict(field):
+    raw = base64.b64decode(field, validate=True)
+    assert base64.b64encode(raw).decode() == field, 'non-canonical base64'
+    return raw
+p = strict(e['payload']); pt = e['payloadType'].encode()
 open('/tmp/pae','wb').write(b'DSSEv1 %d %s %d %s' % (len(pt), pt, len(p), p))
-open('/tmp/key.der','wb').write(base64.b64decode(t['report']['spkiDerBase64']))
-open('/tmp/sig','wb').write(base64.b64decode(e['signatures'][0]['sig']))"
+open('/tmp/key.der','wb').write(strict(t['report']['spkiDerBase64']))
+open('/tmp/sig','wb').write(strict(sig['sig']))"
 openssl pkeyutl -verify -pubin -keyform DER -inkey /tmp/key.der -rawin -in /tmp/pae -sigfile /tmp/sig
 ```
 
@@ -161,16 +174,20 @@ nothing. Every bundle names its own compatible command in
 
 ## The conformance kit
 
-`fixtures/public-bundle-conformance-v1/` in this package is the self-test
-corpus for external implementations:
+The kit is the self-test corpus for external implementations. It lives in the
+source repository at `packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1/`;
+it is deliberately not in the npm tarball, because it is roughly 10 MB of bundle
+bytes that a reader verifying one bundle does not need.
 
 - `golden/` — a complete bundle that must verify;
-- `tampered/<case>/` — twelve full bundles that must each fail, covering
-  truncation, digest mismatch, record substitution, payload edits, signature
-  grafts, key swaps, re-canonicalized sealed bytes, claim tampering, and two
-  fully re-signed adversarial repairs;
-- `manifest.json` — machine-readable expectations per case: the failing check,
-  a stable failure-message pattern, and an `externallyDetectable` flag;
+- `tampered/<case>/` — fourteen full bundles that must each fail, covering
+  truncation, manifest length and digest seams, record digest mismatch and
+  substitution, payload edits, signature grafts, key swaps, base64 malleation,
+  re-canonicalized sealed bytes, claim tampering, and two fully re-signed
+  adversarial repairs;
+- `manifest.json` — machine-readable expectations per case: a stable
+  failure-message pattern (the behavioral pin), the reference check family
+  (advisory), and an `externallyDetectable` flag;
 - `keys/` — the test-only signing keys behind the golden, so the re-signed
   cases are reproducible and you can mint variants of your own.
 
@@ -181,6 +198,21 @@ documented boundary and must PASS an external-subset verifier:
 consistent and genuinely signed, and only the reference verifier's
 recomputation (claim rebuild, method recompute) catches them. A verifier that
 does not recompute the method must not claim it validated the statistics.
+
+Two rules the kit will fail you for skipping, both of which a naive
+implementation gets wrong:
+
+- **Decode base64 strictly.** Accept exactly one canonical spelling: decode with
+  validation and require that re-encoding reproduces the input byte for byte.
+  Permissive decoders (including Python's default `base64.b64decode`) silently
+  discard inserted whitespace, so a malleated envelope whose bytes hash
+  differently still verifies. `envelope-payload-malleated` covers this.
+- **Contain every path the bundle names.** Manifest paths and record digests are
+  attacker-controlled strings. Reject absolute paths, empty and `.` and `..`
+  segments, and backslashes; constrain record names to 64 lowercase hex; refuse
+  symlinks; and confirm the resolved path stays inside the bundle. Without this
+  a hostile bundle turns a verifier into a file-existence and digest oracle over
+  the host filesystem.
 
 ## Identifier note
 
