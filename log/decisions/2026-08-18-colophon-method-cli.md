@@ -83,8 +83,8 @@ which verb you typed.
    `method.export`). Existing select/export modules stay as internals;
    they are not re-exported from the operations facade. Catalog ids on
    this tree at ratification: `terminal-bench-2.1`, `terminal-bench-3.0`,
-   `swe-bench-verified`, `apex-agents`. Cousin / custom documents bind
-   through the file operand (Inspect, Harbor, TB 2.0).
+   `swe-bench-verified`, `apex-agents`, `apex-swe-dev`. Cousin / custom
+   documents bind through the file operand (Inspect, Harbor, TB 2.0).
 
 8. **Derived export reads the locked draft.** Hub job, predictions JSONL,
    APEX inspection, later View logs — or refuse (cousin / custom /
