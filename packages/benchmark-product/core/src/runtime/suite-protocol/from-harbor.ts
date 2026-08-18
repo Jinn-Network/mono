@@ -13,7 +13,8 @@ import { allArmsRunComplete, assessArmRunComplete, type MatrixCellAccount } from
 export function suiteSelectionFromHarbor(manifest: HarborSelectionManifest): SuiteProtocolSelection | undefined {
   const value = manifest.profiles?.[SUITE_PROTOCOL_PROFILE];
   if (value === undefined) return undefined;
-  return SuiteProtocolSelectionSchema.parse(value);
+  const parsed = SuiteProtocolSelectionSchema.parse(value);
+  return parsed.protocol === "terminal-bench-2.1" ? parsed : undefined;
 }
 
 export function taskNameByDigestFromSuite(suite: SuiteProtocolSelection): Readonly<Record<string, string>> {
@@ -23,7 +24,8 @@ export function taskNameByDigestFromSuite(suite: SuiteProtocolSelection): Readon
 export interface SuiteQuotePresentation extends SuiteComparability {
   readonly methodLeaderboardEligible: boolean;
   readonly cellCount: string;
-  readonly harborVersion: string;
+  readonly harborVersion?: string;
+  readonly harnessVersion?: string;
   readonly selectedTaskCount: number;
   readonly armCount: number;
   readonly replicates: number;

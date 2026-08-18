@@ -1,4 +1,4 @@
-# DR-2026-08-17-c — Official suite protocol (SWE-bench Verified)
+# DR-2026-08-17-e — Official suite protocol (SWE-bench Verified)
 
 - **Date:** 2026-08-17
 - **Status:** **Accepted 2026-08-17.** Ratified by operator instruction to

@@ -113,6 +113,16 @@
       }
     },
     {
+      "operation": "exportApexAgentsInspection",
+      "cliVerb": "apex-agents export",
+      "authorityGated": false,
+      "description": "Packages Archipelago grades for APEX-Agents inspection without placing the Mercor row.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "copies machine-local Archipelago grades; browser path-based export is forbidden"
+      }
+    },
+    {
       "operation": "exportHarborHubPackage",
       "cliVerb": "hub export",
       "authorityGated": false,
@@ -120,6 +130,16 @@
       "gui": {
         "status": "unavailable",
         "reason": "copies a machine-local Harbor job directory; browser path-based job export is forbidden"
+      }
+    },
+    {
+      "operation": "exportSwebenchPredictions",
+      "cliVerb": "swebench export",
+      "authorityGated": false,
+      "description": "Packages predictions.jsonl and harness reports for SWE-bench Verified without placing the swebench.com row.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "copies machine-local predictions and harness reports; browser path-based export is forbidden"
       }
     },
     {
@@ -373,6 +393,16 @@
       }
     },
     {
+      "operation": "selectApexAgentsRuntime",
+      "cliVerb": "runtime apex-agents select",
+      "authorityGated": false,
+      "description": "Resolves a named APEX-Agents slice and binds it to Archipelago.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires server-configured APEX-Agents Archipelago paths; browser-supplied paths are forbidden"
+      }
+    },
+    {
       "operation": "selectHarborRuntime",
       "cliVerb": "runtime harbor select",
       "authorityGated": false,
@@ -390,6 +420,16 @@
       "gui": {
         "status": "shipped",
         "action": "runtime.inspect.select"
+      }
+    },
+    {
+      "operation": "selectSwebenchVerifiedRuntime",
+      "cliVerb": "runtime swe-bench-verified select",
+      "authorityGated": false,
+      "description": "Resolves a named SWE-bench Verified slice and binds it to swebench.harness.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires server-configured SWE-bench Verified harness paths; browser-supplied paths are forbidden"
       }
     },
     {

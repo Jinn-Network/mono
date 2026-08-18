@@ -1,4 +1,4 @@
-/** Product-owned suite protocol selection bound via Harbor profiles + registration artifacts. */
+/** Product-owned suite protocol selection. TB 2.1 binds via Harbor profiles; Verified binds via its own selection manifest. */
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
 import { sha256Hex } from "../../workspace/sealed-store.js";
@@ -12,21 +12,15 @@ export const SUITE_PROTOCOL_SELECTION_SCHEMA = "jinn.network/benchmark-product/s
 
 const Sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
 
-export const SuiteProtocolSelectionSchema = z.object({
-  schema: z.literal(SUITE_PROTOCOL_SELECTION_SCHEMA),
-  protocol: z.literal("terminal-bench-2.1"),
-  coverage: z.enum(SUITE_COVERAGE),
-  datasetId: z.string().min(1),
-  datasetRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
-  selectedTaskNames: z.array(z.string().min(1).regex(/^[^/]+$/u)).min(1),
-  datasetTaskCount: z.number().int().positive(),
-  replicates: z.literal(5),
-  atifRequired: z.literal(true),
-  items: z.array(z.object({
-    taskName: z.string().min(1),
-    taskSha256: Sha256,
-  }).strict()).min(1),
-}).strict().superRefine((value, context) => {
+const SuiteItemSchema = z.object({
+  taskName: z.string().min(1),
+  taskSha256: Sha256,
+}).strict();
+
+function refineSuiteItems(
+  value: { readonly items: readonly { readonly taskName: string }[]; readonly selectedTaskNames: readonly string[] },
+  context: z.RefinementCtx,
+): void {
   if (value.items.length !== value.selectedTaskNames.length) {
     context.addIssue({ code: "custom", message: "suite items must match selected task names", path: ["items"] });
   }
@@ -34,8 +28,50 @@ export const SuiteProtocolSelectionSchema = z.object({
   if (names.join("\0") !== value.selectedTaskNames.join("\0")) {
     context.addIssue({ code: "custom", message: "suite item names must equal selectedTaskNames in order", path: ["items"] });
   }
-});
+}
+
+const SuiteProtocolSelectionShared = {
+  schema: z.literal(SUITE_PROTOCOL_SELECTION_SCHEMA),
+  coverage: z.enum(SUITE_COVERAGE),
+  datasetId: z.string().min(1),
+  selectedTaskNames: z.array(z.string().min(1).regex(/^[^/]+$/u)).min(1),
+  datasetTaskCount: z.number().int().positive(),
+  items: z.array(SuiteItemSchema).min(1),
+};
+
+export const TerminalBench21SuiteProtocolSelectionSchema = z.object({
+  ...SuiteProtocolSelectionShared,
+  protocol: z.literal("terminal-bench-2.1"),
+  datasetRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+  replicates: z.literal(5),
+  atifRequired: z.literal(true),
+}).strict().superRefine(refineSuiteItems);
+
+export const SwebenchVerifiedSuiteProtocolSelectionSchema = z.object({
+  ...SuiteProtocolSelectionShared,
+  protocol: z.literal("swe-bench-verified"),
+  datasetRevision: z.string().regex(/^[a-f0-9]{40}$/u),
+  replicates: z.literal(1),
+  atifRequired: z.literal(false),
+}).strict().superRefine(refineSuiteItems);
+
+export const ApexAgentsSuiteProtocolSelectionSchema = z.object({
+  ...SuiteProtocolSelectionShared,
+  protocol: z.literal("apex-agents"),
+  datasetRevision: z.string().regex(/^[a-f0-9]{40}$/u),
+  replicates: z.literal(1),
+  atifRequired: z.literal(false),
+}).strict().superRefine(refineSuiteItems);
+
+export const SuiteProtocolSelectionSchema = z.discriminatedUnion("protocol", [
+  TerminalBench21SuiteProtocolSelectionSchema,
+  SwebenchVerifiedSuiteProtocolSelectionSchema,
+  ApexAgentsSuiteProtocolSelectionSchema,
+]);
 export type SuiteProtocolSelection = z.infer<typeof SuiteProtocolSelectionSchema>;
+export type TerminalBench21SuiteProtocolSelection = z.infer<typeof TerminalBench21SuiteProtocolSelectionSchema>;
+export type SwebenchVerifiedSuiteProtocolSelection = z.infer<typeof SwebenchVerifiedSuiteProtocolSelectionSchema>;
+export type ApexAgentsSuiteProtocolSelection = z.infer<typeof ApexAgentsSuiteProtocolSelectionSchema>;
 
 export function suiteProtocolSelectionBytes(value: SuiteProtocolSelection): Uint8Array {
   return canonicalJsonBytes(SuiteProtocolSelectionSchema.parse(value) as never);
