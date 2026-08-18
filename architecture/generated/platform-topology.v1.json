@@ -2022,10 +2022,10 @@
       "catalogSchema": 2,
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
-      "decisionRecords": 5,
+      "decisionRecords": 6,
       "discoveredFirstPartySurfaces": 4157,
       "generatedOutputSources": 1391,
-      "generatorSources": 670,
+      "generatorSources": 673,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 6
@@ -2243,6 +2243,26 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/build-profile-root.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/colophon-publish-manifest.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/colophon-publish-manifest.test.mjs"
       },
       {
         "categories": [
@@ -3543,6 +3563,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": ".github/workflows/colophon-npm-publish.yml"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": ".github/workflows/contracts-ci.yml"
       },
       {
@@ -4603,6 +4633,16 @@
           "@ritsukai"
         ],
         "path": "log/decisions/2026-08-04-spec-origin-and-vocabulary.md"
+      },
+      {
+        "categories": [
+          "decisionRecords"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "log/decisions/2026-08-17-colophon-first-cut-canary-pin.md"
       },
       {
         "categories": [
@@ -55302,8 +55342,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "never",
-      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "independent",
+      "releaseGroup": "colophon-claims-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmark-product-ci"
@@ -67657,7 +67697,7 @@
         "name": "@colophon-claims/verify",
         "path": "packages/benchmark-product/verify",
         "profiles": [],
-        "releaseGroup": "transitional-or-private",
+        "releaseGroup": "colophon-claims-v1",
         "schemas": []
       },
       {
@@ -70001,6 +70041,29 @@
     }
   },
   "releaseGroups": {
+    "colophon-claims-v1": {
+      "allowedClassifications": [
+        "product"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "colophon-claims-v1",
+        "implementations-v1",
+        "sealed-platform-v1"
+      ],
+      "canary": false,
+      "expectedPackageCount": 1,
+      "packages": [
+        "@colophon-claims/verify"
+      ],
+      "publishPolicies": [
+        "independent"
+      ],
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "stable": false,
+      "stackPublished": false
+    },
     "experimental-lifecycle-notifications": {
       "allowedClassifications": [
         "platform"
@@ -70245,6 +70308,7 @@
         "transitional"
       ],
       "allowedDependencyReleaseGroups": [
+        "colophon-claims-v1",
         "experimental-lifecycle-notifications",
         "experimental-policy",
         "experimental-read-plane",
@@ -70254,11 +70318,10 @@
         "transitional-or-private"
       ],
       "canary": false,
-      "expectedPackageCount": 14,
+      "expectedPackageCount": 13,
       "packages": [
         "@colophon-claims/cli",
         "@colophon-claims/core",
-        "@colophon-claims/verify",
         "@colophon-claims/web",
         "@jinn-network/autopilot",
         "@jinn-network/broadcast-bot",
