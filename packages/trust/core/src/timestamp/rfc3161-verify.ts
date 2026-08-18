@@ -40,7 +40,7 @@
  *
  * - **Rule 6 is a requirement on v2, not a prohibition on v1.** A production
  *   token may carry the v1 `SigningCertificate` attribute *alongside* the v2
- *   one -- the committed DigiCert capture does -- and must still verify. What
+ *   one -- the committed RSA production capture does -- and must still verify. What
  *   refuses is the absence of a binding `SigningCertificateV2`, so the v1
  *   attribute is never read at all. `ESSCertIDv2.hashAlgorithm` absent means
  *   SHA-256 by ASN.1 DEFAULT, not "unspecified".

@@ -9,7 +9,7 @@
  * reversible by never having happened. Configuring an endpoint is the operator's consent to the
  * disclosure the design's §13 item 7 names.
  *
- * Four disciplines are the whole point of this module:
+ * Six disciplines are the whole point of this module:
  *
  * - **The lock anchor refuses after launch, and the check runs twice.** A lock anchor obtained
  *   after dispatch began does not support the claim this feature makes, so `launchedAt` refuses
@@ -22,6 +22,10 @@
  * - **Verify before storing.** The proof runs through the same rules the bundle path uses, with
  *   this package's own `node:crypto` ports, before any bytes are written. A stored anchor is never
  *   one nobody checked.
+ * - **Every rule the bundle verifier will apply is applied here first.** Verification runs after
+ *   the anchoring window has closed and after the records are append-only, so a rule enforced only
+ *   there turns a bad acquisition into an unfixable run. The §8 step-4 splice-catch is the case
+ *   that matters — see `assertWithinSpliceCatch`.
  * - **Write-once per (subject, provider), with one exception.** Anchoring again is a refusal, not
  *   an overwrite. The exception is §6.2's upgrade: the completed form of a pending OpenTimestamps
  *   proof is appended as a NEW record naming the pending one, which stays.
@@ -34,6 +38,7 @@ import {
   ANCHOR_EVIDENCE_KIND,
   OPENTIMESTAMPS_ANCHOR_PROFILE,
   RFC3161_TSA_ANCHOR_PROFILE,
+  compareCalendarStrictRfc3339Instants,
   createOpenTimestampsProofVerifier,
   createRfc3161AnchorProofVerifier,
   decodeAnchorProofContent,
@@ -166,11 +171,19 @@ function readConfiguration(context: OperationContext, draftId: string): {
 interface ResolvedSubject {
   readonly sha256: string;
   readonly kind: string;
+  /**
+   * Supplied for `lock` only: this run's own pre-registered close instant, which the §8 step-4
+   * splice-catch compares an `authority-time` token's `genTime` against. Its presence *is* the
+   * rule's scope — a matrix anchor carries none, and neither does any chain-time proof.
+   */
+  readonly spliceCatch?: { readonly closeAt: string };
 }
 
 /**
- * `subject: "lock"` requires `lockedAt` and `runSha256`, and refuses when `launchedAt` is set. A
- * cancelled run is already past launch and refuses by the same rule.
+ * `subject: "lock"` requires `lockedAt`, `runSha256`, and `closeAt`, and refuses when `launchedAt`
+ * is set. A cancelled run is already past launch and refuses by the same rule. All three lock
+ * fields are written together by `runLock`, so requiring `closeAt` here costs nothing and makes
+ * the splice-catch's comparison instant an established fact rather than an optional one.
  *
  * `subject: "matrix"` requires the run closed and `matrixSha256` set; launch state is irrelevant,
  * because a matrix anchor is about a terminal record and says nothing about dispatch order.
@@ -180,11 +193,11 @@ interface ResolvedSubject {
 function resolveSubject(state: RunState, subject: AnchorSubject, draftId: string): ResolvedSubject {
   assertNotReported(state, draftId);
   if (subject === "lock") {
-    if (state.lockedAt === undefined || state.runSha256 === undefined) {
+    if (state.lockedAt === undefined || state.runSha256 === undefined || state.closeAt === undefined) {
       refuse("illegal-transition", `runs.${draftId}.lockedAt`, "lock the run before anchoring its sealed Run record");
     }
     assertNotLaunched(state, draftId);
-    return { sha256: state.runSha256, kind: RUN_RECORD_KIND };
+    return { sha256: state.runSha256, kind: RUN_RECORD_KIND, spliceCatch: { closeAt: state.closeAt } };
   }
   if (state.closedAt === undefined || state.matrixSha256 === undefined) {
     refuse("illegal-transition", `runs.${draftId}.closedAt`, "close the run before anchoring its sealed Matrix record");
@@ -264,9 +277,56 @@ function verifyAcquiredProof(
     : createOpenTimestampsProofVerifier().verifyProof({ subjectSha256, proofBytes });
 }
 
+/**
+ * The §8 step-4 splice-catch, applied at acquisition rather than only at verification.
+ *
+ * The bundle verifier already refuses an `authority-time` lock anchor whose `genTime` is after the
+ * run's own pre-registered `closeAt`. Enforcing it *only* there is a one-way door: such a token
+ * stores cleanly, survives `report` — which closes the anchoring window — and then fails
+ * verification at `publish`, by which time the anchor cannot be replaced (records are append-only
+ * and the window has shut). The run is bricked by a refusal that arrives after the last moment
+ * anyone could act on it.
+ *
+ * So the same rule runs here, where the operator still has every option: refuse the acquisition,
+ * store nothing, and say which two instants disagree. This is §19.5's reasoning about the report
+ * window applied to the rule that the window makes irreversible.
+ *
+ * The comparison is deliberately the verifier's, byte for byte: `facts.genTime` (which both
+ * `present` and `verified` carry, so the default no-roots configuration does not silently skip it)
+ * against `closeAt`, through the calendar-strict comparator. A producer-side rule that disagreed
+ * with the verifier's would just move the brick, not remove it.
+ */
+function assertWithinSpliceCatch(
+  profile: ProducibleAnchorProfile,
+  result: AnchorProofResult,
+  spliceCatch: { readonly closeAt: string } | undefined,
+): void {
+  if (spliceCatch === undefined) return;
+  if (result.status !== "present" && result.status !== "verified") return;
+  // Chain-time proofs carry no time, so the rule does not reach them (§6.2).
+  if (result.timeBasis !== "authority-time") return;
+
+  const genTime = (result.facts as { readonly genTime?: unknown }).genTime;
+  const compared = typeof genTime === "string"
+    ? compareCalendarStrictRfc3339Instants(genTime, spliceCatch.closeAt)
+    : undefined;
+  if (compared !== undefined && compared <= 0) return;
+
+  refuse(
+    "venue-unverifiable",
+    `anchor.${profile}`,
+    typeof genTime === "string"
+      ? `the token's genTime ${genTime} is after this run's own pre-registered close instant `
+        + `${spliceCatch.closeAt}; a lock anchor stamped after the run closed does not support the `
+        + "claim it would be read as, and the bundle verifier would refuse it. Nothing is stored"
+      : "an authority-time lock anchor carries no comparable genTime; nothing is stored",
+  );
+}
+
 function requireVerifiable(
   profile: ProducibleAnchorProfile,
   result: AnchorProofResult,
+  spliceCatch: { readonly closeAt: string } | undefined,
 ): AnchorProofResult["status"] {
   if (!ADMITTED_ACQUISITION_STATUSES[profile].includes(result.status)) {
     refuse(
@@ -276,6 +336,7 @@ function requireVerifiable(
       + `${"reason" in result ? ` — ${result.reason}` : ""}; nothing is stored`,
     );
   }
+  assertWithinSpliceCatch(profile, result, spliceCatch);
   return result.status;
 }
 
@@ -408,6 +469,7 @@ export function runAnchor(
       const proofStatus = requireVerifiable(
         providerProfile,
         verifyAcquiredProof(providerProfile, subject.sha256, proofBytes),
+        subject.spliceCatch,
       );
 
       await deps.afterObtainBeforeStore?.();

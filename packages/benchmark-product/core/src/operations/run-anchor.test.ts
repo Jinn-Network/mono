@@ -16,10 +16,13 @@ import {
   ANCHOR_EVIDENCE_KIND,
   OPENTIMESTAMPS_ANCHOR_PROFILE,
   RFC3161_TSA_ANCHOR_PROFILE,
+  compareCalendarStrictRfc3339Instants,
+  createRfc3161AnchorProofVerifier,
   decodeAnchorProofContent,
   parseExactAnchorEvidence,
 } from "@jinn-network/trust-core";
 import type { AnchorProofSource } from "@jinn-network/trust-core";
+import { nodeCryptoAnchorPorts } from "@colophon-claims/verify";
 import {
   KIT_AUTHORITY_SEED,
   KIT_BITCOIN_BLOCK_HEIGHT,
@@ -94,13 +97,14 @@ const authority = createFixtureAuthority(KIT_AUTHORITY_SEED);
 
 function rfc3161SourceFor(
   subjectSha256: string,
-  options: { tampered?: boolean; tokenSerialHex?: string } = {},
+  options: { tampered?: boolean; tokenSerialHex?: string; genTime?: string } = {},
 ): AnchorProofSource {
   const minted = options.tampered === true
     ? authority.mintTimeStampToken({ subjectSha256, brokenSignature: true })
     : authority.mintTimeStampToken({
       subjectSha256,
       ...(options.tokenSerialHex === undefined ? {} : { tokenSerialHex: options.tokenSerialHex }),
+      ...(options.genTime === undefined ? {} : { genTime: options.genTime }),
     });
   return {
     profile: RFC3161_TSA_ANCHOR_PROFILE,
@@ -738,4 +742,105 @@ describe("the draft's own anchoring block", () => {
     expect(spec.anchoring).toBeUndefined();
     expect(Object.hasOwn(spec, "anchoring")).toBe(false);
   });
+});
+
+describe("the §8 step-4 splice-catch, enforced where the operator can still act", () => {
+  // The clock is 2026-08-17T00:00:0NZ and the default policy closes 24h later, so `closeAt` lands
+  // on 2026-08-18. Both instants are read from state rather than restated, so a policy change
+  // moves the fixture rather than silently defeating it.
+  const AFTER_CLOSE = "20260819000000Z";
+  const BEFORE_CLOSE = "20260817120000Z";
+
+  test("a lock token stamped after the run's own closeAt refuses, and stores nothing", async () => {
+    const clock = makeClock();
+    const runSha256 = await setUpLockedDraft(clock);
+    const closeAt = readRunState(workspaceDir, "draft-1")?.closeAt;
+    expect(closeAt).toBeDefined();
+
+    const outcome = await runAnchor(
+      contextFor(clock),
+      { draftId: "draft-1", subject: "lock", providerProfile: RFC3161_TSA_ANCHOR_PROFILE, endpoint: TSA_ENDPOINT },
+      { sources: { [RFC3161_TSA_ANCHOR_PROFILE]: rfc3161SourceFor(runSha256, { genTime: AFTER_CLOSE }) } },
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    // Refused at acquisition. Enforced only in the verifier, this token would store cleanly,
+    // survive `report` -- which shuts the anchoring window -- and then fail `publish`, with the
+    // records append-only and no anchor left to obtain.
+    expect(outcome.error.code).toBe("venue-unverifiable");
+    expect(outcome.error.detail).toContain("2026-08-19T00:00:00Z");
+    expect(outcome.error.detail).toContain(closeAt!);
+
+    expect(readRunState(workspaceDir, "draft-1")?.anchors).toBeUndefined();
+    // The audit entry attributes the refusal rather than swallowing the attempt.
+    expect(readAuditEntries(workspaceDir).at(-1)).toMatchObject({
+      action: "anchor", subject: "draft-1", outcome: "venue-unverifiable",
+    });
+  }, 60_000);
+
+  test("a lock token stamped before closeAt is unaffected", async () => {
+    const clock = makeClock();
+    const runSha256 = await setUpLockedDraft(clock);
+    const outcome = await runAnchor(
+      contextFor(clock),
+      { draftId: "draft-1", subject: "lock", providerProfile: RFC3161_TSA_ANCHOR_PROFILE, endpoint: TSA_ENDPOINT },
+      { sources: { [RFC3161_TSA_ANCHOR_PROFILE]: rfc3161SourceFor(runSha256, { genTime: BEFORE_CLOSE }) } },
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.proofStatus).toBe("present");
+    expect(readRunState(workspaceDir, "draft-1")?.anchors).toHaveLength(1);
+  }, 60_000);
+
+  test("the rule is scoped to lock: a matrix anchor with the same late token stores", async () => {
+    // The check's own scoping (§8 step 4): a matrix anchor is about a terminal record and says
+    // nothing about dispatch order, so a genTime after closeAt is expected rather than suspect.
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const matrixSha256 = putSealedBytes(workspaceDir, new TextEncoder().encode('{"kind":"matrix-stand-in"}'));
+    const state = readRunState(workspaceDir, "draft-1")!;
+    writeRunState(workspaceDir, "draft-1", {
+      ...state,
+      launchedAt: "2026-08-17T01:00:00Z",
+      closedAt: "2026-08-17T02:00:00Z",
+      matrixSha256,
+    });
+
+    const outcome = await runAnchor(
+      contextFor(clock),
+      { draftId: "draft-1", subject: "matrix", providerProfile: RFC3161_TSA_ANCHOR_PROFILE, endpoint: TSA_ENDPOINT },
+      { sources: { [RFC3161_TSA_ANCHOR_PROFILE]: rfc3161SourceFor(matrixSha256, { genTime: AFTER_CLOSE }) } },
+    );
+    expect(outcome.ok).toBe(true);
+  }, 60_000);
+
+  test("the rule is scoped to authority-time: a chain-time lock anchor is untouched", async () => {
+    // An OpenTimestamps proof carries no time at all, so there is nothing to compare and the
+    // producer must not invent one.
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const outcome = await runAnchor(
+      contextFor(clock),
+      { draftId: "draft-1", subject: "lock", providerProfile: OPENTIMESTAMPS_ANCHOR_PROFILE, endpoint: KIT_CALENDAR_URI },
+      { fetch: calendarTransport({ confirmed: false, calls: [] }) },
+    );
+    expect(outcome.ok).toBe(true);
+  }, 60_000);
+
+  test("the producer's verdict agrees with the verifier's on the same token", async () => {
+    // The point of applying it here is that it is the SAME rule, not a second opinion: a producer
+    // rule that disagreed would move the brick rather than remove it.
+    const clock = makeClock();
+    const runSha256 = await setUpLockedDraft(clock);
+    const closeAt = readRunState(workspaceDir, "draft-1")!.closeAt!;
+    const late = authority.mintTimeStampToken({ subjectSha256: runSha256, genTime: AFTER_CLOSE });
+    const result = createRfc3161AnchorProofVerifier(nodeCryptoAnchorPorts)
+      .verifyProof({ subjectSha256: runSha256, proofBytes: late.tokenDer });
+
+    expect(result.status).toBe("present");
+    if (result.status !== "present") return;
+    // The verifier would refuse this at bundle time on exactly this comparison.
+    expect(compareCalendarStrictRfc3339Instants(result.facts.genTime, closeAt)).toBeGreaterThan(0);
+  }, 60_000);
 });
