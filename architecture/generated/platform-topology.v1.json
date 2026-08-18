@@ -2025,7 +2025,7 @@
       "decisionRecords": 5,
       "discoveredFirstPartySurfaces": 2980,
       "generatedOutputSources": 1378,
-      "generatorSources": 658,
+      "generatorSources": 659,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 6
@@ -19533,6 +19533,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/scripts/tb21-one-task-qualify.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/tb30-one-task-qualify.mjs"
       },
       {
         "categories": [
