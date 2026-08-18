@@ -147,10 +147,17 @@ describe("anchored public bundle v6 — portable verification", () => {
   }, 180_000);
 
   test("a lock anchor spliced past the run's close instant fails the whole verification (family 8)", async () => {
-    // Acquisition does not know the run's close instant — the splice-catch is a verification rule
-    // (§8 step 4), so a token minted after `closeAt` stores and materializes normally and is caught
-    // here, loudly, by the reader.
-    const built = await fixture([{ kind: "rfc3161-lock", genTimeDer: V6_FIXTURE_SPLICED_GEN_TIME_DER }]);
+    // The splice-catch is enforced on BOTH sides. `runAnchor` applies it at acquisition (§19.5:
+    // enforcing it only at verification bricks a run whose anchoring window has already shut), and
+    // the reader applies it again because a producer cannot be trusted to have done so. That second
+    // half is what this case covers, so the bundle is built by simulating exactly such a producer:
+    // the record and its RunState entry are written directly, with no producer operation in the
+    // path. A conformant producer can no longer reach this state, which is the point.
+    const built = await fixture([{
+      kind: "rfc3161-lock",
+      genTimeDer: V6_FIXTURE_SPLICED_GEN_TIME_DER,
+      bypassProducerGuard: true,
+    }]);
     await expectRefusal(
       detach(built.bundle.bundleDir),
       "after this run's own pre-registered close instant",

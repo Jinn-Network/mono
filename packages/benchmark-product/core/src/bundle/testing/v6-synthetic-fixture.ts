@@ -14,11 +14,13 @@
  *   `AnchorProofSource`, so the write-once rule, the post-launch refusal, and the verify-before-
  *   store gate all run for real. Only the bytes a calendar or authority would have returned are
  *   supplied locally, by the trust conformance kit's own fixture authority and OTS builders. The
- *   kit is a devDependency and is imported only from this test-only module.
+ *   kit is a devDependency and is imported only from this test-only module. The one exception is
+ *   `bypassProducerGuard` (see the plan type), which writes the record and its RunState entry
+ *   directly — the only way to build a bundle a conformant producer now refuses to produce.
  *
  * The authority's `genTime` is fixed at a past instant so the §8 step-4 splice-catch
  * (`genTime <= run.closeAt`) is satisfied by construction against the real clock this fixture runs
- * on; a fixture wanting the violation asks for it explicitly.
+ * on; a fixture wanting the violation asks for it explicitly, and asks to bypass the producer too.
  */
 
 import { deriveEvaluationTask } from "@jinn-network/task-execution-profiles";
@@ -31,12 +33,15 @@ import type {
   SubmissionAck,
   SubmissionUri,
 } from "@jinn-network/task-execution-backend";
+import { RUN_RECORD_KIND } from "@jinn-network/benchmarking-records";
 import {
+  ANCHOR_EVIDENCE_KIND,
   OPENTIMESTAMPS_ANCHOR_PROFILE,
   RFC3161_TSA_ANCHOR_PROFILE,
   canonicalJsonBytes,
+  sealAnchorEvidence,
 } from "@jinn-network/trust-core";
-import type { AnchorProofSource } from "@jinn-network/trust-core";
+import type { AnchorEvidence, AnchorProofSource } from "@jinn-network/trust-core";
 import {
   createFixtureAuthority,
   createOpenTimestampsKitFixtures,
@@ -44,6 +49,7 @@ import {
   type OpenTimestampsKitFixtures,
 } from "@jinn-network/trust-testing";
 import type { OperationContext } from "../../operations/context.js";
+import { anchorProofMediaType, encodeAnchorProofContent } from "../../anchor/profiles.js";
 import { armAdd } from "../../operations/arms.js";
 import { createDraft, updateDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
@@ -54,7 +60,7 @@ import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { runReport } from "../../operations/report.js";
-import { readRunState, type RunState } from "../../run/state.js";
+import { readRunState, writeRunState, type RunState } from "../../run/state.js";
 import type { ProxiedBackend } from "../../run/drive.js";
 import {
   LEGACY_VERDICT_EVALUATOR_ID,
@@ -63,7 +69,7 @@ import {
   sealVerdictStatement,
 } from "../../venue/signing.js";
 import type { LocalVenue } from "../../venue/venue.js";
-import { sha256Hex } from "../../workspace/sealed-store.js";
+import { putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
 import { materializePublicBundle, type MaterializedBundle } from "../materialize.js";
 
 const DRAFT_ID = "anchored-publication";
@@ -81,8 +87,17 @@ export const V6_FIXTURE_SPLICED_GEN_TIME_DER = "20351231120000Z";
 /** What the fixture asks `runAnchor` to obtain, in the order given. Lock-subject plans run between
  * `lock` and `launch`; matrix-subject plans run after `collect`. */
 export type SyntheticV6AnchorPlan =
-  /** One conformant RFC 3161 token over the sealed Run digest. */
-  | { readonly kind: "rfc3161-lock"; readonly genTimeDer?: string }
+  /**
+   * One conformant RFC 3161 token over the sealed Run digest.
+   *
+   * `bypassProducerGuard` writes the sealed AnchorEvidence record and its RunState entry directly,
+   * with no producer operation in the path. It exists for exactly one case: `runAnchor` applies the
+   * §8 step-4 splice-catch at acquisition (§19.5), so a `genTimeDer` after this run's `closeAt` can
+   * no longer be obtained through it — and the reader-side rule that catches such a token is there
+   * precisely because a producer cannot be trusted to have applied it. Simulating that producer is
+   * the only way to build the bundle the reader must refuse.
+   */
+  | { readonly kind: "rfc3161-lock"; readonly genTimeDer?: string; readonly bypassProducerGuard?: true }
   /** One conformant RFC 3161 token over the sealed Matrix digest. */
   | { readonly kind: "rfc3161-matrix"; readonly genTimeDer?: string }
   /** A calendar-only OpenTimestamps promise over the sealed Run digest. */
@@ -403,12 +418,49 @@ const LOCK_PLANS: ReadonlySet<SyntheticV6AnchorPlan["kind"]> = new Set([
   "opentimestamps-lock-fabricated",
 ]);
 
+/**
+ * Stores one lock AnchorEvidence record and its RunState entry with no producer operation in the
+ * path — the whole point of `bypassProducerGuard` (see the plan type). Everything a real
+ * acquisition would have written is written here, by the same helpers `runAnchor` uses: the same
+ * minted token, the same record shape and media type, the same digest-addressed sealed store, and
+ * the same append-only RunState write. Only the acquisition-time rules are skipped.
+ */
+function storeLockAnchorDirectly(context: OperationContext, anchors: AnchorSources, genTimeDer: string): void {
+  const state = readRunState(context.workspaceDir, DRAFT_ID);
+  if (state?.runSha256 === undefined) {
+    throw new Error("anchored fixture: lock the run before writing a lock anchor");
+  }
+  const record: AnchorEvidence = {
+    kind: ANCHOR_EVIDENCE_KIND,
+    subject: { kind: RUN_RECORD_KIND, digest: { sha256: state.runSha256 } },
+    provider: RFC3161_TSA_ANCHOR_PROFILE,
+    proof: {
+      mediaType: anchorProofMediaType(RFC3161_TSA_ANCHOR_PROFILE),
+      content: encodeAnchorProofContent(
+        anchors.authority.mintTimeStampToken({ subjectSha256: state.runSha256, genTime: genTimeDer }).tokenDer,
+      ),
+    },
+  };
+  const recordSha256 = putSealedBytes(context.workspaceDir, sealAnchorEvidence(record).bytes);
+  writeRunState(context.workspaceDir, DRAFT_ID, {
+    ...state,
+    anchors: [
+      ...(state.anchors ?? []),
+      { subject: "lock", provider: RFC3161_TSA_ANCHOR_PROFILE, recordSha256 },
+    ],
+  });
+}
+
 async function applyPlan(
   context: OperationContext,
   plan: SyntheticV6AnchorPlan,
   anchors: AnchorSources,
 ): Promise<void> {
   const subject = LOCK_PLANS.has(plan.kind) ? "lock" as const : "matrix" as const;
+  if (plan.kind === "rfc3161-lock" && plan.bypassProducerGuard === true) {
+    storeLockAnchorDirectly(context, anchors, plan.genTimeDer ?? V6_FIXTURE_GEN_TIME_DER);
+    return;
+  }
   if (plan.kind === "rfc3161-lock" || plan.kind === "rfc3161-matrix") {
     anchors.setGenTimeDer(plan.genTimeDer ?? V6_FIXTURE_GEN_TIME_DER);
     requireOk(
