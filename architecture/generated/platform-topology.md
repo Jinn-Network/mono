@@ -795,12 +795,12 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/benchmarking-records | packages/benchmarking/records/fixtures/run/minimal.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-records | packages/benchmarking/records/fixtures/run/valid.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-records | packages/benchmarking/records/fixtures/run/valid.sha256 | — | — | — |
-| schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/benchmark-accounting.schema.json | — | — | — |
-| schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/benchmark.schema.json | — | — | — |
-| schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/matrix.schema.json | — | — | — |
-| schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/observation-archive.schema.json | — | — | — |
-| schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/report.schema.json | — | — | — |
-| schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/run.schema.json | — | — | — |
+| schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/benchmark-accounting.schema.json | — | — | https://spec.jinn.network/protocols/benchmarking/v1/schemas/benchmark-accounting.schema.json |
+| schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/benchmark.schema.json | — | — | https://spec.jinn.network/protocols/benchmarking/v1/schemas/benchmark.schema.json |
+| schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/matrix.schema.json | — | — | https://spec.jinn.network/protocols/benchmarking/v1/schemas/matrix.schema.json |
+| schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/observation-archive.schema.json | — | — | https://spec.jinn.network/protocols/benchmarking/v1/schemas/observation-archive.schema.json |
+| schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/report.schema.json | — | — | https://spec.jinn.network/protocols/benchmarking/v1/schemas/report.schema.json |
+| schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/run.schema.json | — | — | https://spec.jinn.network/protocols/benchmarking/v1/schemas/run.schema.json |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/exports/croissant.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/exports/eval-log.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/exports/matrix-projection.json | — | — | — |
@@ -1673,6 +1673,12 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | https://spec.jinn.network/profiles/task-execution/v1 | `profile` | profiles | @jinn-network/task-execution-protocol | packages/task-execution/protocol/profiles/task-execution/v1/profile.json |
 | https://spec.jinn.network/profiles/task-profile/v1 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profile/v1/profile.json |
 | https://spec.jinn.network/profiles/trace-vocabulary/v1 | `profile` | profiles | @jinn-network/evidence-trace | packages/evidence/trace/profiles/trace-vocabulary/v1/profile.json |
+| https://spec.jinn.network/protocols/benchmarking/v1/schemas/benchmark-accounting.schema.json | `$id` | schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/benchmark-accounting.schema.json |
+| https://spec.jinn.network/protocols/benchmarking/v1/schemas/benchmark.schema.json | `$id` | schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/benchmark.schema.json |
+| https://spec.jinn.network/protocols/benchmarking/v1/schemas/matrix.schema.json | `$id` | schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/matrix.schema.json |
+| https://spec.jinn.network/protocols/benchmarking/v1/schemas/observation-archive.schema.json | `$id` | schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/observation-archive.schema.json |
+| https://spec.jinn.network/protocols/benchmarking/v1/schemas/report.schema.json | `$id` | schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/report.schema.json |
+| https://spec.jinn.network/protocols/benchmarking/v1/schemas/run.schema.json | `$id` | schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/run.schema.json |
 | https://spec.jinn.network/schemas/chain-environment/v1 | `$id` | schemas | @jinn-network/chain-environment-record | packages/environments/chain-record/schemas/chain-environment.schema.json |
 | https://spec.jinn.network/schemas/crypto-environment/v1 | `$id` | schemas | @jinn-network/chain-environment-record | packages/environments/chain-record/schemas/crypto-environment.schema.json |
 | https://spec.jinn.network/schemas/environment/v1 | `$id` | schemas | @jinn-network/environment-record | packages/environments/record/schemas/environment.schema.json |

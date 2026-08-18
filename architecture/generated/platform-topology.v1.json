@@ -48084,7 +48084,11 @@
         "relativeSource": "fixtures/run/valid.sha256"
       },
       {
-        "claim": null,
+        "claim": {
+          "field": "$id",
+          "identifier": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/benchmark-accounting.schema.json",
+          "servedPath": "protocols/benchmarking/v1/schemas/benchmark-accounting.schema.json"
+        },
         "export": null,
         "kind": "schemas",
         "package": "@jinn-network/benchmarking-records",
@@ -48093,7 +48097,11 @@
         "relativeSource": "schemas/benchmark-accounting.schema.json"
       },
       {
-        "claim": null,
+        "claim": {
+          "field": "$id",
+          "identifier": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/benchmark.schema.json",
+          "servedPath": "protocols/benchmarking/v1/schemas/benchmark.schema.json"
+        },
         "export": null,
         "kind": "schemas",
         "package": "@jinn-network/benchmarking-records",
@@ -48102,7 +48110,11 @@
         "relativeSource": "schemas/benchmark.schema.json"
       },
       {
-        "claim": null,
+        "claim": {
+          "field": "$id",
+          "identifier": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/matrix.schema.json",
+          "servedPath": "protocols/benchmarking/v1/schemas/matrix.schema.json"
+        },
         "export": null,
         "kind": "schemas",
         "package": "@jinn-network/benchmarking-records",
@@ -48111,7 +48123,11 @@
         "relativeSource": "schemas/matrix.schema.json"
       },
       {
-        "claim": null,
+        "claim": {
+          "field": "$id",
+          "identifier": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/observation-archive.schema.json",
+          "servedPath": "protocols/benchmarking/v1/schemas/observation-archive.schema.json"
+        },
         "export": null,
         "kind": "schemas",
         "package": "@jinn-network/benchmarking-records",
@@ -48120,7 +48136,11 @@
         "relativeSource": "schemas/observation-archive.schema.json"
       },
       {
-        "claim": null,
+        "claim": {
+          "field": "$id",
+          "identifier": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/report.schema.json",
+          "servedPath": "protocols/benchmarking/v1/schemas/report.schema.json"
+        },
         "export": null,
         "kind": "schemas",
         "package": "@jinn-network/benchmarking-records",
@@ -48129,7 +48149,11 @@
         "relativeSource": "schemas/report.schema.json"
       },
       {
-        "claim": null,
+        "claim": {
+          "field": "$id",
+          "identifier": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/run.schema.json",
+          "servedPath": "protocols/benchmarking/v1/schemas/run.schema.json"
+        },
         "export": null,
         "kind": "schemas",
         "package": "@jinn-network/benchmarking-records",
@@ -57192,6 +57216,48 @@
         "kind": "profiles",
         "package": "@jinn-network/evidence-trace",
         "path": "packages/evidence/trace/profiles/trace-vocabulary/v1/profile.json"
+      },
+      {
+        "field": "$id",
+        "identifier": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/benchmark-accounting.schema.json",
+        "kind": "schemas",
+        "package": "@jinn-network/benchmarking-records",
+        "path": "packages/benchmarking/records/schemas/benchmark-accounting.schema.json"
+      },
+      {
+        "field": "$id",
+        "identifier": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/benchmark.schema.json",
+        "kind": "schemas",
+        "package": "@jinn-network/benchmarking-records",
+        "path": "packages/benchmarking/records/schemas/benchmark.schema.json"
+      },
+      {
+        "field": "$id",
+        "identifier": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/matrix.schema.json",
+        "kind": "schemas",
+        "package": "@jinn-network/benchmarking-records",
+        "path": "packages/benchmarking/records/schemas/matrix.schema.json"
+      },
+      {
+        "field": "$id",
+        "identifier": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/observation-archive.schema.json",
+        "kind": "schemas",
+        "package": "@jinn-network/benchmarking-records",
+        "path": "packages/benchmarking/records/schemas/observation-archive.schema.json"
+      },
+      {
+        "field": "$id",
+        "identifier": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/report.schema.json",
+        "kind": "schemas",
+        "package": "@jinn-network/benchmarking-records",
+        "path": "packages/benchmarking/records/schemas/report.schema.json"
+      },
+      {
+        "field": "$id",
+        "identifier": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/run.schema.json",
+        "kind": "schemas",
+        "package": "@jinn-network/benchmarking-records",
+        "path": "packages/benchmarking/records/schemas/run.schema.json"
       },
       {
         "field": "$id",

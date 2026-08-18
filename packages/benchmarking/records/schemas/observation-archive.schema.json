@@ -1187,5 +1187,6 @@
         }
       ]
     }
-  }
+  },
+  "$id": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/observation-archive.schema.json"
 }
