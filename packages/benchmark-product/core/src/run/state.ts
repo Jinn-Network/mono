@@ -20,6 +20,7 @@ import { inputsDigest } from "../audit/journal.js";
 import type { DraftSpec } from "../domain/draft.js";
 import { refuse, refuseWithIssues, type ProductIssue } from "../errors.js";
 import { atomicWriteFileSync, readFileIfExistsSync } from "../fs/atomic.js";
+import { SUITE_PROTOCOL_IDS } from "../runtime/suite-protocol/comparability.js";
 import { runStatePath } from "../workspace/layout.js";
 
 const Rfc3339Schema = z.string().regex(
@@ -147,7 +148,7 @@ export const RunStateSchema = z.object({
   ])).optional(),
   publishedAt: Rfc3339Schema.optional(),
   suiteQuote: z.object({
-    protocol: z.enum(["terminal-bench-2.1", "terminal-bench-3.0"]).optional(),
+    protocol: z.enum(SUITE_PROTOCOL_IDS).optional(),
     executionConformance: z.boolean(),
     coverage: z.enum(["one_task", "ten_task", "full", "custom"]),
     leaderboardSubmitReady: z.boolean(),

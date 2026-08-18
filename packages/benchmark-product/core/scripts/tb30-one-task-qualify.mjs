@@ -24,6 +24,10 @@ if (process.env.COLOPHON_TB30_ONE_TASK_QUALIFY !== "1") {
   fail("Refusing: set COLOPHON_TB30_ONE_TASK_QUALIFY=1 and supply operator paths. See docs/runbooks/tb30-official-one-task.md. This script never downloads Terminal-Bench 3.0.");
 }
 
+// Before the dynamic import — an unbuilt tree must get this message and exit 2, not
+// ERR_MODULE_NOT_FOUND from `../dist/index.js`.
+if (!existsSync(colophonBin)) fail("build the core package first: yarn --cwd packages/benchmark-product/core build");
+
 const {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0,
@@ -66,8 +70,6 @@ function parseEnvelope(stdout) {
   if (parsed.ok !== true) throw new Error(`Colophon refused: ${stdout}`);
   return parsed.result;
 }
-
-if (!existsSync(colophonBin)) fail("build the core package first: yarn --cwd packages/benchmark-product/core build");
 
 const harbor = realpathSync(requiredEnv("COLOPHON_TB30_HARBOR"));
 const registryMetadataPath = realpathSync(requiredEnv("COLOPHON_TB30_REGISTRY_METADATA"));
