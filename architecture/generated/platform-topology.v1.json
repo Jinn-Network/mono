@@ -2025,7 +2025,7 @@
       "decisionRecords": 5,
       "discoveredFirstPartySurfaces": 2995,
       "generatedOutputSources": 1391,
-      "generatorSources": 664,
+      "generatorSources": 666,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 6
@@ -19362,6 +19362,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmark-product/core/scripts/deepswe-v1.1-one-task-qualify.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmark-product/core/scripts/demo1-task-evidence-freeze.mjs"
       },
       {
@@ -19393,6 +19403,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/scripts/generate-parity-matrix.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/inspect-eval-one-task-qualify.mjs"
       },
       {
         "categories": [

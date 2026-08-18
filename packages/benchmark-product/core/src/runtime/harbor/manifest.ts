@@ -4,6 +4,17 @@ import { z } from "zod";
 import { sha256Hex } from "../../workspace/sealed-store.js";
 
 export const HARBOR_ADAPTER_ID = "harbor" as const;
+export const PIER_ADAPTER_ID = "pier" as const;
+export type HarborCompatibleAdapterId = typeof HARBOR_ADAPTER_ID | typeof PIER_ADAPTER_ID;
+export function isHarborCompatibleAdapterId(id: string): id is HarborCompatibleAdapterId {
+  return id === HARBOR_ADAPTER_ID || id === PIER_ADAPTER_ID;
+}
+
+export function isHarborCompatibleEvaluationRuntime<T extends { readonly adapterId: string }>(
+  runtime: T | undefined,
+): runtime is T & { readonly adapterId: HarborCompatibleAdapterId } {
+  return runtime !== undefined && isHarborCompatibleAdapterId(runtime.adapterId);
+}
 export const HARBOR_SELECTION_SCHEMA = "jinn.network/benchmark-product/harbor-selection/1" as const;
 export const HARBOR_RUNTIME_EVIDENCE_PROFILE = "https://product.jinn.network/profiles/harbor-evidence/v1" as const;
 export const HARBOR_RUNTIME_EXECUTABLE_ROLE = "https://product.jinn.network/artifact-roles/harbor/runtime-executable/v1" as const;
@@ -100,8 +111,8 @@ const ArmSelection = z.object({
 /** Harbor 0.21 JobConfig may cover planned trials (`n_attempts` = locked replicates). Inner retry is 0 or the TB 2.1 recipe 3. */
 export const HarborSelectionManifestSchema = z.object({
   schema: z.literal(HARBOR_SELECTION_SCHEMA),
-  adapter: z.object({ id: z.literal(HARBOR_ADAPTER_ID), version: z.literal("1") }).strict(),
-  harbor: z.object({ version: z.string().regex(/^0\.21\.\d+(?:[-+][0-9A-Za-z.-]+)?$/), executableSha256: Sha256 }).strict(),
+  adapter: z.object({ id: z.enum([HARBOR_ADAPTER_ID, PIER_ADAPTER_ID]), version: z.literal("1") }).strict(),
+  harbor: z.object({ version: z.string().min(1), executableSha256: Sha256 }).strict(),
   source: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("task"), input: TaskInput, jobInput: z.object({ path: z.literal(".jinn-harbor/task") }).strict(), resolved: ResolvedMaterial }).strict(),
     z.object({
@@ -124,7 +135,16 @@ export const HarborSelectionManifestSchema = z.object({
   /** Product-tier selection profiles may bind extra immutable resolution evidence without
    * teaching this reusable Harbor seam any benchmark-specific policy. */
   profiles: z.record(z.string().url(), Json).optional(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  const harborOk = /^0\.21\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(value.harbor.version);
+  const pierOk = /^0\.3\.1(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?$/u.test(value.harbor.version);
+  if (value.adapter.id === HARBOR_ADAPTER_ID && !harborOk) {
+    context.addIssue({ code: "custom", message: "managed Harbor adapter requires Harbor 0.21.x", path: ["harbor", "version"] });
+  }
+  if (value.adapter.id === PIER_ADAPTER_ID && !pierOk) {
+    context.addIssue({ code: "custom", message: "DeepSWE v1.1 Pier adapter requires Pier 0.3.1.x", path: ["harbor", "version"] });
+  }
+});
 
 const TaskNameList = z.array(z.string().min(1)).min(1);
 const DatasetTaskFilter = {

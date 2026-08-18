@@ -34,12 +34,13 @@ import {
 import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
-import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { HarborSelectionManifestSchema, isHarborCompatibleEvaluationRuntime } from "../runtime/harbor/manifest.js";
 import { suiteProtocolDisplayName } from "../runtime/suite-protocol/comparability.js";
 import { suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
 import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
 import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
 import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
+import { readInspectEvalSelectionManifest } from "../runtime/inspect/host.js";
 import { runtimeRegistrationArtifacts } from "../runtime/adapter.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import type { OperationContext } from "./context.js";
@@ -95,7 +96,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           "quote invalidated by edit — re-quote",
         );
       }
-      if (document.spec.evaluationRuntime?.adapterId === "harbor") {
+      if (isHarborCompatibleEvaluationRuntime(document.spec.evaluationRuntime)) {
         const harborSelection = HarborSelectionManifestSchema.parse(
           JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
         );
@@ -150,6 +151,19 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
             "conflict",
             `runs.${input.draftId}.suiteQuote`,
             "full-suite APEX-SWE-dev lock requires a quote that recorded comparability bits",
+          );
+        }
+      }
+      if (document.spec.evaluationRuntime?.adapterId === "inspect") {
+        const inspectSuite = readInspectEvalSelectionManifest(
+          clockedContext.workspaceDir,
+          document.spec.evaluationRuntime.selectionManifestSha256,
+        );
+        if (inspectSuite?.coverage === "full" && runState.suiteQuote === undefined) {
+          refuse(
+            "conflict",
+            `runs.${input.draftId}.suiteQuote`,
+            "full-suite Inspect eval lock requires a quote that recorded comparability bits",
           );
         }
       }
