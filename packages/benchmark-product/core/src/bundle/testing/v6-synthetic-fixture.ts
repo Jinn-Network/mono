@@ -43,6 +43,11 @@ import {
   type FixtureAuthority,
   type OpenTimestampsKitFixtures,
 } from "@jinn-network/trust-testing";
+import { RUN_RECORD_KIND } from "@jinn-network/benchmarking-records";
+import { ANCHOR_EVIDENCE_KIND, sealAnchorEvidence } from "@jinn-network/trust-core";
+import { anchorProofMediaType, encodeAnchorProofContent } from "../../anchor/profiles.js";
+import { putSealedBytes } from "../../workspace/sealed-store.js";
+import { requireRunState, writeRunState } from "../../run/state.js";
 import type { OperationContext } from "../../operations/context.js";
 import { armAdd } from "../../operations/arms.js";
 import { createDraft, updateDraft } from "../../operations/drafts.js";
@@ -81,8 +86,12 @@ export const V6_FIXTURE_SPLICED_GEN_TIME_DER = "20351231120000Z";
 /** What the fixture asks `runAnchor` to obtain, in the order given. Lock-subject plans run between
  * `lock` and `launch`; matrix-subject plans run after `collect`. */
 export type SyntheticV6AnchorPlan =
-  /** One conformant RFC 3161 token over the sealed Run digest. */
-  | { readonly kind: "rfc3161-lock"; readonly genTimeDer?: string }
+  /** One conformant RFC 3161 token over the sealed Run digest. `storeDirect` bypasses the
+   * `runAnchor` acquisition guards and writes the sealed record + RunState entry through the
+   * low-level store — the shape a nonconforming or pre-guard producer leaves behind, which is
+   * exactly what the §8 verification rules exist to catch (family 8's splice case needs it:
+   * the acquisition-side splice-catch now refuses such a token before it stores). */
+  | { readonly kind: "rfc3161-lock"; readonly genTimeDer?: string; readonly storeDirect?: true }
   /** One conformant RFC 3161 token over the sealed Matrix digest. */
   | { readonly kind: "rfc3161-matrix"; readonly genTimeDer?: string }
   /** A calendar-only OpenTimestamps promise over the sealed Run digest. */
@@ -409,6 +418,35 @@ async function applyPlan(
   anchors: AnchorSources,
 ): Promise<void> {
   const subject = LOCK_PLANS.has(plan.kind) ? "lock" as const : "matrix" as const;
+  if (plan.kind === "rfc3161-lock" && plan.storeDirect === true) {
+    // Deliberate low-level store: mint the proof from the fixture authority, then seal and
+    // record it without `runAnchor`'s guards, per the plan-type doc above.
+    anchors.setGenTimeDer(plan.genTimeDer ?? V6_FIXTURE_GEN_TIME_DER);
+    const state = requireRunState(context.workspaceDir, DRAFT_ID);
+    if (state.runSha256 === undefined) throw new Error("storeDirect: run is not locked");
+    const proofBytes = await anchors.sources[RFC3161_TSA_ANCHOR_PROFILE].obtainProof({
+      subjectSha256: state.runSha256,
+      endpoint: FIXTURE_ENDPOINT,
+    });
+    const sealed = sealAnchorEvidence({
+      kind: ANCHOR_EVIDENCE_KIND,
+      subject: { kind: RUN_RECORD_KIND, digest: { sha256: state.runSha256 } },
+      provider: RFC3161_TSA_ANCHOR_PROFILE,
+      proof: {
+        mediaType: anchorProofMediaType(RFC3161_TSA_ANCHOR_PROFILE),
+        content: encodeAnchorProofContent(proofBytes),
+      },
+    });
+    const recordSha256 = putSealedBytes(context.workspaceDir, sealed.bytes);
+    writeRunState(context.workspaceDir, DRAFT_ID, {
+      ...state,
+      anchors: [
+        ...(state.anchors ?? []),
+        { subject: "lock", provider: RFC3161_TSA_ANCHOR_PROFILE, recordSha256 },
+      ],
+    });
+    return;
+  }
   if (plan.kind === "rfc3161-lock" || plan.kind === "rfc3161-matrix") {
     anchors.setGenTimeDer(plan.genTimeDer ?? V6_FIXTURE_GEN_TIME_DER);
     requireOk(

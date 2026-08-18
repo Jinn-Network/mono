@@ -147,10 +147,12 @@ describe("anchored public bundle v6 — portable verification", () => {
   }, 180_000);
 
   test("a lock anchor spliced past the run's close instant fails the whole verification (family 8)", async () => {
-    // Acquisition does not know the run's close instant — the splice-catch is a verification rule
-    // (§8 step 4), so a token minted after `closeAt` stores and materializes normally and is caught
-    // here, loudly, by the reader.
-    const built = await fixture([{ kind: "rfc3161-lock", genTimeDer: V6_FIXTURE_SPLICED_GEN_TIME_DER }]);
+    // Acquisition now refuses a token minted after `closeAt` (the P9 splice-catch-at-store guard),
+    // so the fixture stores this one through the low-level path a nonconforming producer would
+    // use — the §8 step-4 verification rule must still catch it, loudly, by the reader.
+    const built = await fixture([
+      { kind: "rfc3161-lock", genTimeDer: V6_FIXTURE_SPLICED_GEN_TIME_DER, storeDirect: true },
+    ]);
     await expectRefusal(
       detach(built.bundle.bundleDir),
       "after this run's own pre-registered close instant",
