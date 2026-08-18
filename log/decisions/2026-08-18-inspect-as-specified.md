@@ -100,6 +100,17 @@ Two doors, one engine:
    `/` (for example `HumanEval/0`); do not loosen Terminal-Bench 2.1’s
    `^[^/]+$` rule.
 
+   The catalog snapshot digest covers the epochs configuration —
+   `specifiedEpochs`, the epoch reducer, and `task_version` — alongside the
+   ordered sample ids, task source digest, and dataset identity. The drift
+   re-probe before execution compares that digest and nothing else, so a
+   field outside it is a field that can move between select and lock without
+   refusing; declared epochs is the value execution conformance is judged
+   against, and an eval can change it without touching `eval.py`. The digest
+   seals the values the eval itself declares, never an operator
+   `--specified-epochs` override, because the re-probe recomputes it from a
+   fresh catalog where no override exists.
+
 7. **Per-cell sampleId overlay.** The shared selection is a template with no
    single `sampleId`. The launcher writes `inspect-run.json` with `sampleId`
    from the cell’s Task. OCI still requires exact `sampleId` per execution.

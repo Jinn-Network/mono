@@ -286,6 +286,9 @@ export async function assertInspectSelectionUndrifted(
     const snapshotSha256 = inspectCatalogSnapshotSha256({
       sampleIds: catalog.sampleIds,
       taskSourceDigest: inspectEval.inspect.task.source.sha256,
+      specifiedEpochs: catalog.specifiedEpochs,
+      epochsReducer: catalog.epochsReducer ?? null,
+      taskVersion: catalog.taskVersion ?? null,
       datasetName: catalog.datasetName,
       datasetLocation: catalog.datasetLocation,
       datasetSampleCount: catalog.datasetSampleCount,

@@ -176,9 +176,16 @@ export function selectInspectEvalRuntime(
       }
       const inspectTemplate = stripInspectTemplateSampleId(resolution.manifest);
       const sourceDigest = inspectTemplate.task.source.sha256;
+      // Every field here is the value the eval itself declared, never the operator's
+      // `input.specifiedEpochs` override: `assertInspectSelectionUndrifted` recomputes this
+      // digest from a fresh catalog probe, where no override exists. Sealing the override
+      // would make the re-probe mismatch on every overridden run and refuse it as drift.
       const snapshotSha256 = inspectCatalogSnapshotSha256({
         sampleIds: catalog.sampleIds,
         taskSourceDigest: sourceDigest,
+        specifiedEpochs: catalog.specifiedEpochs,
+        epochsReducer: catalog.epochsReducer ?? null,
+        taskVersion: catalog.taskVersion ?? null,
         datasetName: catalog.datasetName,
         datasetLocation: catalog.datasetLocation,
         datasetSampleCount: catalog.datasetSampleCount,

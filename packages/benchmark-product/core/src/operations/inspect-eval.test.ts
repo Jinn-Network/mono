@@ -456,6 +456,34 @@ describe("Inspect eval official-suite select", () => {
     expect(missing.limitation).toBe(INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION);
   });
 
+  test("the sealed catalog digest moves when the eval's declared epochs move", async () => {
+    // The drift re-probe compares only `catalog.snapshotSha256`, so this digest moving is
+    // exactly what makes a post-lock epochs change refuse("conflict"). Same samples, same
+    // task source, different declared epochs.
+    const digests: string[] = [];
+    for (const specifiedEpochs of [1, 3]) {
+      const draftId = `epochs-${specifiedEpochs}`;
+      const context = setup(draftId, specifiedEpochs);
+      const selected = await selectInspectEvalRuntime(context, {
+        draftId,
+        coverage: "full",
+        pythonPath: "/usr/bin/python3",
+        projectDir: "/tmp/inspect-project",
+        taskReference: "eval.py@hermetic",
+        arms: inspectManifest.arms,
+        scorer: { name: "match", passValue: "C" },
+      });
+      expect(selected.ok, JSON.stringify(selected)).toBe(true);
+      if (!selected.ok) return;
+      const manifest = InspectEvalSelectionManifestSchema.parse(
+        selectionJson(context.workspaceDir, selected.result.selectionManifestSha256),
+      );
+      expect(manifest.catalog.specifiedEpochs).toBe(specifiedEpochs);
+      digests.push(manifest.catalog.snapshotSha256);
+    }
+    expect(digests[0]).not.toBe(digests[1]);
+  });
+
   test("an under-run patched below specified epochs loses executionConformance at quote", async () => {
     const context = setup("under-run", 3);
     const selected = await selectInspectEvalRuntime(context, {
