@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { cellKey } from "@jinn-network/benchmarking-records";
-import { createDraft } from "./drafts.js";
+import { createDraft, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { selectInspectEvaluation } from "./inspect-runtime.js";
 import { CLI_VERB_NAMES } from "../cli/main.js";
@@ -451,6 +451,79 @@ describe("Inspect eval official-suite select", () => {
     });
     expect(missing.quote.leaderboardSubmitReady).toBe(false);
     expect(missing.limitation).toBe(INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION);
+  });
+
+  test("an under-run patched below specified epochs loses executionConformance at quote", async () => {
+    const context = setup("under-run", 3);
+    const selected = await selectInspectEvalRuntime(context, {
+      draftId: "under-run",
+      coverage: "full",
+      pythonPath: "/usr/bin/python3",
+      projectDir: "/tmp/inspect-project",
+      taskReference: "eval.py@hermetic",
+      arms: inspectManifest.arms,
+      scorer: { name: "match", passValue: "C" },
+    });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    expect(selected.result.draft.spec.replicates).toBe(3);
+    const conforming = await runQuote(context, { draftId: "under-run" }, { createVenue: () => quoteVenue() });
+    expect(conforming.ok, JSON.stringify(conforming)).toBe(true);
+    if (!conforming.ok) return;
+    expect(requireRunState(context.workspaceDir, "under-run").suiteQuote?.executionConformance).toBe(true);
+
+    // `draft update` can move planned k after select; the sealed selection cannot see it.
+    expect(updateDraft(context, { draftId: "under-run", patch: { replicates: 1 } }).ok).toBe(true);
+    const patched = await runQuote(context, { draftId: "under-run" }, { createVenue: () => quoteVenue() });
+    expect(patched.ok, JSON.stringify(patched)).toBe(true);
+    if (!patched.ok) return;
+    const quote = requireRunState(context.workspaceDir, "under-run").suiteQuote;
+    expect(quote?.replicates).toBe(1);
+    expect(quote?.executionConformance).toBe(false);
+    expect(quote?.leaderboardSubmitReady).toBe(false);
+  });
+
+  test("an over-run with every sealed cell judged still refuses leaderboard-ready", async () => {
+    const context = setup("over-run", 3);
+    const selected = await selectInspectEvalRuntime(context, {
+      draftId: "over-run",
+      coverage: "full",
+      pythonPath: "/usr/bin/python3",
+      projectDir: "/tmp/inspect-project",
+      taskReference: "eval.py@hermetic",
+      arms: inspectManifest.arms,
+      scorer: { name: "match", passValue: "C" },
+    });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    const manifest = InspectEvalSelectionManifestSchema.parse(
+      selectionJson(context.workspaceDir, selected.result.selectionManifestSha256),
+    );
+    expect(manifest.suite.replicates).toBe(3);
+    // Every cell the sealed selection accounts for (replicates 1..3) is judged, so
+    // `cellsAccounted` is true — only the planned-k check can refuse this run.
+    const sealedCells = manifest.suite.items.flatMap((item) => (
+      ["control", "candidate"].flatMap((armId) => (
+        [1, 2, 3].map((replicate) => ({
+          cellKey: cellKey(item.taskSha256, armId, replicate),
+          taskDigest: item.taskSha256,
+          armId,
+          replicate,
+          outcome: "judged" as const,
+        }))
+      ))
+    ));
+    const overRun = suiteFactsFromAccountedInspectRun({
+      manifest,
+      armCount: 2,
+      itemCount: 12,
+      replicates: 5,
+      matrix: { cells: sealedCells },
+      armIds: ["control", "candidate"],
+    });
+    expect(overRun.quote.executionConformance).toBe(false);
+    expect(overRun.quote.leaderboardSubmitReady).toBe(false);
+    expect(overRun.limitation).toBe(INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION);
   });
 
   test("named-slice View export is inspection-only; custom and non-conforming refuse", async () => {

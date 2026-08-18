@@ -1,5 +1,5 @@
 /** Derived Inspect View bundle from correlated per-cell .eval logs. Not Hub. Not the claim of record. */
-import { parseCellKey, parseMatrix } from "@jinn-network/benchmarking-records";
+import { parseCellKey, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { refuse } from "../errors.js";
@@ -93,12 +93,17 @@ export function exportInspectViewBundle(
       }
       const quote = runState.suiteQuote;
       if (quote === undefined) {
-        refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named Inspect View export requires an Inspect eval protocol selection");
+        refuse("conflict", `runs.${input.draftId}.suiteQuote`, "Inspect View export requires a quoted run; this draft carries no suite quote");
       }
+      // The PLANNED k of the sealed Run, not the sealed selection's `suite.replicates` — an
+      // over- or under-run must not be judged against its own replicate count (see
+      // methodBitsFromInspect).
+      const runRecord = parseRun(getSealedBytes(context.workspaceDir, runState.runSha256));
       const assessed = runState.matrixSha256 === undefined
         ? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false }
         : suiteComparabilityForInspectArm({
           manifest,
+          replicates: runRecord.replicates,
           matrix: parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256)),
           armId: input.armId,
         });

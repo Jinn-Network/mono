@@ -10,7 +10,14 @@ import type { SuiteQuotePresentation } from "./from-harbor.js";
 import { allArmsRunComplete, accountSuiteArmCells, type MatrixCellAccount } from "./run-complete.js";
 import type { InspectEvalSelectionManifest } from "../inspect-eval/manifest.js";
 
-function methodBitsFromInspect(manifest: InspectEvalSelectionManifest): {
+/**
+ * `replicates` is the PLANNED k of the run being judged, never the sealed `suite.replicates`.
+ * The manifest's own superRefine forces `suite.replicates === catalog.specifiedEpochs`, so
+ * feeding the sealed value back into the conformance predicate would make its
+ * `k === specifiedEpochs` check tautological — and `draft update` can move the planned
+ * `replicates` after select. Planned k is what actually ran; that is what must be judged.
+ */
+function methodBitsFromInspect(manifest: InspectEvalSelectionManifest, replicates: number): {
   readonly protocol: "inspect-eval";
   readonly coverage: InspectEvalSelectionManifest["coverage"];
   readonly executionConformance: boolean;
@@ -25,7 +32,7 @@ function methodBitsFromInspect(manifest: InspectEvalSelectionManifest): {
     protocol: "inspect-eval",
     coverage: suite.coverage,
     executionConformance: officialInspectEvalConformance({
-      k: suite.replicates,
+      k: replicates,
       specifiedEpochs: manifest.catalog.specifiedEpochs,
       inspectVersion: manifest.inspect.runtime.inspectVersion,
       adapterId: "inspect",
@@ -33,7 +40,7 @@ function methodBitsFromInspect(manifest: InspectEvalSelectionManifest): {
       sampleLimit: manifest.sampleLimit,
       epochsInRunOptions: Object.prototype.hasOwnProperty.call(manifest.inspect.runOptions, "epochs"),
     }),
-    k: suite.replicates,
+    k: replicates,
     selectedCount: suite.selectedTaskNames.length,
     datasetCount: suite.datasetTaskCount,
     atifPresent: false,
@@ -69,7 +76,7 @@ export function suiteQuoteFromInspect(input: {
   readonly itemCount: number;
   readonly replicates: number;
 }): SuiteQuotePresentation {
-  const method = methodBitsFromInspect(input.manifest);
+  const method = methodBitsFromInspect(input.manifest, input.replicates);
   return presentInspectQuote(input, input.manifest, deriveSuiteComparability(method), methodLeaderboardEligible(method));
 }
 
@@ -91,7 +98,7 @@ export function suiteFactsFromAccountedInspectRun(input: {
   readonly matrix: { readonly cells: readonly MatrixCellAccount[] };
   readonly armIds: readonly string[];
 }): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
-  const method = methodBitsFromInspect(input.manifest);
+  const method = methodBitsFromInspect(input.manifest, input.replicates);
   const complete = allArmsRunComplete(input.armIds.map((armId) => ({
     cellsAccounted: accountSuiteArmCells(input.matrix, input.manifest.suite, armId),
     atifOnRetainedJob: false,
@@ -106,10 +113,11 @@ export function suiteFactsFromAccountedInspectRun(input: {
 
 export function suiteComparabilityForInspectArm(input: {
   readonly manifest: InspectEvalSelectionManifest;
+  readonly replicates: number;
   readonly matrix: { readonly cells: readonly MatrixCellAccount[] };
   readonly armId: string;
 }): SuiteComparability {
-  const method = methodBitsFromInspect(input.manifest);
+  const method = methodBitsFromInspect(input.manifest, input.replicates);
   return deriveSuiteComparability({
     ...method,
     cellsAccounted: accountSuiteArmCells(input.matrix, input.manifest.suite, input.armId),
