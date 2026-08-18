@@ -55,9 +55,11 @@ process.exit(64);
   return path;
 }
 
+/** `hubVersion: null` writes a snapshot that omits the optional `version` key entirely. */
 function writeFixture(
   datasetId: string = TERMINAL_BENCH_3_0_DATASET_ID,
   datasetRevision: string = TERMINAL_BENCH_3_0_DATASET_REF,
+  hubVersion: string | null = TERMINAL_BENCH_3_0_HUB_VERSION,
 ): void {
   mkdirSync(materialPath, { recursive: true });
   for (const name of names) {
@@ -67,7 +69,7 @@ function writeFixture(
   }
   writeFileSync(metadataPath, JSON.stringify({
     name: datasetId,
-    version: TERMINAL_BENCH_3_0_HUB_VERSION,
+    ...(hubVersion === null ? {} : { version: hubVersion }),
     dataset_version_content_hash: datasetRevision,
     task_ids: names.map((name) => ({
       org: "terminal-bench",
@@ -133,10 +135,35 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("Terminal-Bench 3.0 official-suite intake", () => {
-  test("refuses @latest and a drifted content hash", () => {
+  test("refuses @latest, a non-official revision, and a drifted content hash", () => {
     expect(() => resolveTerminalBench30Selection(workspaceDir, { ...request("one_task"), datasetRevision: "@latest" as never })).toThrow(/@latest/u);
     expect(() => resolveTerminalBench30Selection(workspaceDir, { ...request("one_task"), datasetRevision: "latest" as never })).toThrow(/@latest|immutable sha256/u);
-    expect(() => resolveTerminalBench30Selection(workspaceDir, { ...request("one_task"), datasetRevision: `sha256:${"d".repeat(64)}` })).toThrow(/drifted/u);
+    expect(() => resolveTerminalBench30Selection(workspaceDir, { ...request("one_task"), datasetRevision: `sha256:${"d".repeat(64)}` })).toThrow(/selects only the official pin/u);
+    // Correct pin string, but the snapshot on disk is a different dataset version.
+    writeFixture(TERMINAL_BENCH_3_0_DATASET_ID, `sha256:${"d".repeat(64)}`);
+    expect(() => resolveTerminalBench30Selection(workspaceDir, request("one_task"))).toThrow(/drifted/u);
+  });
+
+  test("a later Hub snapshot on the rolling dataset id cannot be stamped terminal-bench-3.0", () => {
+    // DR-2026-08-18 decision 1. The 3.0 dataset id is rolling, so this snapshot is structurally
+    // perfect — same id, self-consistent content hash, Packager-exact task refs — and without
+    // the pin binding it would select and be stamped `terminal-bench-3.0`.
+    const laterRevision = `sha256:${"e".repeat(64)}` as const;
+    writeFixture(TERMINAL_BENCH_3_0_DATASET_ID, laterRevision, "3.1.0");
+    expect(() => resolveTerminalBench30Selection(workspaceDir, { ...request("one_task"), datasetRevision: laterRevision }))
+      .toThrow(new RegExp(`selects only the official pin ${TERMINAL_BENCH_3_0_DATASET_REF}`, "u"));
+
+    // Claims the official pin but names a different Hub version: also refused, never copied
+    // verbatim into the sealed profile.
+    writeFixture(TERMINAL_BENCH_3_0_DATASET_ID, TERMINAL_BENCH_3_0_DATASET_REF, "3.1.0");
+    expect(() => resolveTerminalBench30Selection(workspaceDir, request("one_task")))
+      .toThrow(/names Hub version 3\.1\.0/u);
+
+    // A snapshot that omits `version` still selects, stamped from the pin constant.
+    writeFixture(TERMINAL_BENCH_3_0_DATASET_ID, TERMINAL_BENCH_3_0_DATASET_REF, null);
+    const resolved = resolveTerminalBench30Selection(workspaceDir, request("one_task"));
+    expect(resolved.profile.dataset.revision).toBe(TERMINAL_BENCH_3_0_DATASET_REF);
+    expect(resolved.profile.dataset.hubVersion).toBe(TERMINAL_BENCH_3_0_HUB_VERSION);
   });
 
   test("named slices are lexicographic first 1 / first 10 / all from this 12-task fixture, not 2.1 names", () => {
@@ -150,7 +177,10 @@ describe("Terminal-Bench 3.0 official-suite intake", () => {
     expect(one.profile.dataset.hubVersion).toBe(TERMINAL_BENCH_3_0_HUB_VERSION);
     expect(one.profile.execution.maxRetries).toBe(3);
     expect(one.harbor.retryPolicy).toEqual({ nAttempts: 5, nConcurrent: 1, maxRetries: 3 });
-    expect(one.selectedTaskNames).not.toContain("adaptive-rejection-sampler");
+    expect(one.profile.dataset.taskCount).toBe(names.length);
+    expect(one.profile.selectedTasks).toHaveLength(1);
+    expect(one.profile.selectedTasks[0]?.package.name).toBe("terminal-bench/t00");
+    expect(one.profile.selectedTasks[0]?.package.ref).toBe(`sha256:${computeHarbor021TaskContentHash(join(materialPath, "t00")).contentHash}`);
     const ten = resolveTerminalBench30Selection(workspaceDir, request("ten_task"));
     expect(ten.coverage).toBe("ten_task");
     expect(ten.selectedTaskNames).toEqual(["t00", "t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08", "t09"]);
@@ -216,6 +246,10 @@ describe("Terminal-Bench 3.0 official-suite intake", () => {
     writeRunState(workspaceDir, "full-refuse", withoutQuote);
     const refused = runLock(refuseContext, { draftId: "full-refuse" });
     expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    // The shared refusal names the protocol that is actually locked, not 2.1 unconditionally.
+    expect(refused.error.detail).toMatch(/full-suite Terminal-Bench 3\.0 lock/u);
+    expect(refused.error.detail).not.toMatch(/Terminal-Bench 2\.1/u);
   }, 120_000);
 
   test("2.1 select cannot emit 3.0; 3.0 select cannot emit 2.1", async () => {
@@ -252,7 +286,7 @@ describe("Terminal-Bench 3.0 official-suite intake", () => {
       workspaceDir,
       now: () => "2026-08-18T00:00:00.000Z",
       evaluationRuntime: { adapterId: INSPECT_ADAPTER_ID, selectionManifestSha256: selected.result.selectionManifestSha256 },
-    })).toThrow();
+    })).toThrow(/sealed Inspect selection manifest is invalid/u);
   }, 60_000);
 
   test("qualify script exits non-zero without COLOPHON_TB30_ONE_TASK_QUALIFY=1", () => {

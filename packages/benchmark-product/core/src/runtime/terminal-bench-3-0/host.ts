@@ -1,6 +1,6 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { getSealedBytes, putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
+import { putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
 import type { HarborSelectionManifest } from "../harbor/manifest.js";
 import { resolveHarborMaterial, type HarborRuntimeSelectionRequest } from "../harbor/host.js";
 import { computeHarbor021TaskContentHash } from "../terminal-bench-2/host.js";
@@ -12,6 +12,7 @@ import {
 } from "../suite-protocol/manifest.js";
 import {
   TERMINAL_BENCH_3_0_DATASET_ID,
+  TERMINAL_BENCH_3_0_DATASET_REF,
   TERMINAL_BENCH_3_0_HUB_VERSION,
   TERMINAL_BENCH_3_0_PROFILE,
   TerminalBench30RegistryMetadataSchema,
@@ -23,7 +24,7 @@ import {
 export interface TerminalBench30SelectionRequest {
   readonly executable: string;
   readonly registryMetadataPath: string;
-  readonly datasetRevision: `sha256:${string}` | string;
+  readonly datasetRevision: `sha256:${string}`;
   readonly taskMaterialPath: string;
   readonly coverage?: Exclude<SuiteCoverage, "custom">;
   readonly taskNames?: readonly string[];
@@ -59,11 +60,21 @@ export function resolveTerminalBench30Selection(workspaceDir: string, input: Ter
   if (!/^sha256:[a-f0-9]{64}$/u.test(revision)) {
     throw new TypeError("Terminal-Bench 3.0 dataset revision must be an immutable sha256 registry revision");
   }
+  // DR-2026-08-18 decision 1: the 3.0 dataset id is ROLLING (`terminal-bench/terminal-bench`,
+  // not a version-scoped id like 2.1's), so a later Hub snapshot satisfies every structural
+  // gate below. Only the sealed official pin may wear `terminal-bench-3.0`; a later Hub
+  // version is a new pin (Issue + constant bump), never a silent select.
+  if (revision !== TERMINAL_BENCH_3_0_DATASET_REF) {
+    throw new TypeError(`Terminal-Bench 3.0 selects only the official pin ${TERMINAL_BENCH_3_0_DATASET_REF} (Hub version ${TERMINAL_BENCH_3_0_HUB_VERSION}); got ${revision}. The dataset id ${TERMINAL_BENCH_3_0_DATASET_ID} is rolling, so a later Hub version is a new pin (Issue + constant bump), never a silent select`);
+  }
   const registryBytes = new Uint8Array(readFileSync(realpathSync(input.registryMetadataPath)));
   let metadata: unknown;
   try { metadata = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(registryBytes)); }
   catch { throw new TypeError("Terminal-Bench 3.0 registry snapshot must be UTF-8 JSON"); }
   const parsed = TerminalBench30RegistryMetadataSchema.parse(metadata);
+  if (parsed.version !== undefined && parsed.version !== TERMINAL_BENCH_3_0_HUB_VERSION) {
+    throw new TypeError(`Terminal-Bench 3.0 registry snapshot names Hub version ${parsed.version}; the official pin ${TERMINAL_BENCH_3_0_DATASET_REF} is Hub version ${TERMINAL_BENCH_3_0_HUB_VERSION}`);
+  }
   const contentHash = parsed.dataset_version_content_hash.replace(/^sha256:/u, "");
   if (`sha256:${contentHash}` !== revision) throw new TypeError("Terminal-Bench 3.0 registry revision drifted from the selected immutable dataset revision");
   const datasetNames = parsed.task_ids.map((task) => task.name);
@@ -125,7 +136,11 @@ export function resolveTerminalBench30Selection(workspaceDir: string, input: Ter
     dataset: {
       id: TERMINAL_BENCH_3_0_DATASET_ID,
       revision,
-      hubVersion: parsed.version ?? TERMINAL_BENCH_3_0_HUB_VERSION,
+      // Not a fallback: the two checks above proved `revision` IS the official pin and that
+      // any `version` the snapshot carries equals the constant. The pin constant is defined
+      // as the Hub content hash of version 3.0.0, so stamping the constant here records a
+      // fact about the selected dataset rather than copying a foreign snapshot's claim.
+      hubVersion: TERMINAL_BENCH_3_0_HUB_VERSION,
       registrySnapshotSha256,
       registrySnapshotBytes: registryBytes.byteLength,
       taskCount: parsed.task_ids.length,
@@ -152,8 +167,4 @@ export function resolveTerminalBench30Selection(workspaceDir: string, input: Ter
       profiles: { [TERMINAL_BENCH_3_0_PROFILE]: profile },
     },
   };
-}
-
-export function readSealedTerminalBench30Profile(workspaceDir: string, profileSha256: string): TerminalBench30SelectionManifest {
-  return TerminalBench30SelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(workspaceDir, profileSha256))));
 }

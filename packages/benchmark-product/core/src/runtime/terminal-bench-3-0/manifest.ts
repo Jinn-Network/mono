@@ -1,7 +1,6 @@
 /** Product-owned Terminal-Bench 3.0 selection. TB 2.1 / 2.0 / Verified cannot claim this id. */
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
-import { sha256Hex } from "../../workspace/sealed-store.js";
 import { HARBOR_021_PACKAGER_ALGORITHM, TerminalBenchMaterialSchema } from "../terminal-bench-2/manifest.js";
 import { SUITE_COVERAGE } from "../suite-protocol/comparability.js";
 
@@ -62,8 +61,4 @@ export type TerminalBench30SelectionManifest = z.infer<typeof TerminalBench30Sel
 
 export function terminalBench30SelectionBytes(value: TerminalBench30SelectionManifest): Uint8Array {
   return canonicalJsonBytes(TerminalBench30SelectionManifestSchema.parse(value) as never);
-}
-
-export function terminalBench30SelectionSha256(value: TerminalBench30SelectionManifest): string {
-  return sha256Hex(terminalBench30SelectionBytes(value));
 }

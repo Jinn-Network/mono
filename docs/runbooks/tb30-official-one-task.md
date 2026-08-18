@@ -17,7 +17,10 @@ collect → Hub export against:
 - Revision `sha256:a32a61879ea94eb9dc16fa1fbeb398759f0c07ca633d9d1f6aec760207036da3`
   (`TERMINAL_BENCH_3_0_DATASET_REF` in
   `packages/benchmark-product/core/src/runtime/terminal-bench-3-0/manifest.ts`),
-  Hub version string `3.0.0`. Never `@latest`.
+  Hub version string `3.0.0`. Never `@latest`. Select refuses every other
+  revision, and refuses a snapshot that names a different Hub version: the
+  dataset id is rolling, so bumping the pin is an Issue plus a constant bump,
+  never a silent select.
 - Coverage `one_task` = lexicographic first name from **that registry
   snapshot**, not from GitHub `v3.0.0` or `main/tasks/`
 - Real Harbor `0.21.x` on `PATH`, local Docker, Harbor's built-in **oracle**
