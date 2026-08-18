@@ -111,6 +111,16 @@ part of default `yarn test`. Procedure, receipt checklist, and the fail-closed
 `yarn tb21-one-task-qualify` gate:
 [docs/runbooks/tb21-official-one-task.md](../../docs/runbooks/tb21-official-one-task.md).
 
+## DeepSWE v1.1 `one_task` operator qualify
+
+An operator-only campaign against the git-pinned DeepSWE v1.1 `tasks/` tree
+with real Pier 0.3.1.x, Docker or Modal, and two `mini-swe-agent` arms. It
+proves protocol identity (`one_task`, conforming, not leaderboard-ready,
+Datacurve email export is inspection-only). It does not download the 113-task
+tree in CI and is not part of default `yarn test`. Procedure and the
+fail-closed `yarn deepswe-v1.1-one-task-qualify` gate:
+[docs/runbooks/deepswe-v1.1-official-one-task.md](../../docs/runbooks/deepswe-v1.1-official-one-task.md).
+
 ## Product surfaces
 
 - [Installable CLI](./cli/README.md) — the no-argument sample and local viewer.

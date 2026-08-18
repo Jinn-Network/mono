@@ -103,7 +103,7 @@ export {
   harborTrialAttemptNumber,
   harborTrialTaskName,
 } from "./runtime/harbor/manifest.js";
-export { HARBOR_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./runtime/harbor/manifest.js";
+export { HARBOR_ADAPTER_ID, PIER_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./runtime/harbor/manifest.js";
 export {
   HARBOR_SELECTION_ROLE,
   HARBOR_CORRELATION_ROLE,
@@ -173,11 +173,31 @@ export type {
   TerminalBench21SelectionResolution,
 } from "./runtime/terminal-bench-2-1/host.js";
 export {
+  DEEP_SWE_V11_AGENT_ID,
+  DEEP_SWE_V11_DATASET_ID,
+  DEEP_SWE_V11_DEFAULT_REPLICATES,
+  DEEP_SWE_V11_GIT_SHA,
+  DEEP_SWE_V11_PROFILE,
+  DEEP_SWE_V11_SELECTION_ROLE,
+  DEEP_SWE_V11_TASKS_TREE_SHA,
+  DeepSweV11SelectionManifestSchema,
+  deepSweV11SelectionBytes,
+} from "./runtime/deep-swe-v1.1/manifest.js";
+export type { DeepSweV11SelectionManifest } from "./runtime/deep-swe-v1.1/manifest.js";
+export { resolveDeepSweV11Selection } from "./runtime/deep-swe-v1.1/host.js";
+export type {
+  DeepSweV11SelectionRequest,
+  DeepSweV11SelectionResolution,
+} from "./runtime/deep-swe-v1.1/host.js";
+export {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
+  DEEPSWE_CLOSED_SUBMIT_SENTENCE,
+  DEEPSWE_NOT_LEADERBOARD_READY_LIMITATION,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION,
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
+  officialPierExecutionConformance,
   suiteLeaderboardLimitation,
 } from "./runtime/suite-protocol/comparability.js";
 export type { SuiteComparability, SuiteCoverage } from "./runtime/suite-protocol/comparability.js";
@@ -503,8 +523,10 @@ export {
   selectHarborRuntime,
   selectTerminalBench2Runtime,
   selectTerminalBench21Runtime,
+  selectDeepSweV11Runtime,
   migrateTerminalBenchLegacyTask,
   exportHarborHubPackage,
+  exportDeepSwePackage,
   updateDraft,
 } from "./operations/index.js";
 export type {
@@ -586,9 +608,14 @@ export type {
   SelectTerminalBench2RuntimeResult,
   SelectTerminalBench21RuntimeInput,
   SelectTerminalBench21RuntimeResult,
+  SelectDeepSweV11RuntimeInput,
+  SelectDeepSweV11RuntimeResult,
   ExportHarborHubPackageInput,
   ExportHarborHubPackageResult,
   HarborHubExportMode,
+  ExportDeepSwePackageInput,
+  ExportDeepSwePackageResult,
+  DeepSweExportMode,
   RunStatusCounts,
   RunDriverStatus,
   RunStatusResult,

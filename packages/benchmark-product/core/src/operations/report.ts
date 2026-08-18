@@ -71,7 +71,7 @@ import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 import { binaryInstrumentReportLimitations } from "../run/binary-instrument-profile.js";
-import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { HarborSelectionManifestSchema, isHarborCompatibleEvaluationRuntime } from "../runtime/harbor/manifest.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
@@ -168,7 +168,7 @@ export function runReport(
         && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
         ? INSPECT_SEPARATE_ASSURANCE_LIMITATIONS
         : [];
-      const suiteFacts = document.spec.evaluationRuntime?.adapterId === "harbor"
+      const suiteFacts = isHarborCompatibleEvaluationRuntime(document.spec.evaluationRuntime)
         ? suiteFactsFromAccountedRun({
           manifest: HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
           armCount: runRecord.arms.length,

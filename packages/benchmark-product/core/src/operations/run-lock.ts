@@ -29,7 +29,7 @@ import {
 import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
-import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { HarborSelectionManifestSchema, isHarborCompatibleEvaluationRuntime } from "../runtime/harbor/manifest.js";
 import { suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
 import { runtimeRegistrationArtifacts } from "../runtime/adapter.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
@@ -86,7 +86,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           "quote invalidated by edit — re-quote",
         );
       }
-      if (document.spec.evaluationRuntime?.adapterId === "harbor") {
+      if (isHarborCompatibleEvaluationRuntime(document.spec.evaluationRuntime)) {
         const harborSelection = HarborSelectionManifestSchema.parse(
           JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
         );
@@ -95,7 +95,9 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           refuse(
             "conflict",
             `runs.${input.draftId}.suiteQuote`,
-            "full-suite Terminal-Bench 2.1 lock requires a quote that recorded comparability bits",
+            suite.protocol === "deep-swe-v1.1"
+              ? "full-suite DeepSWE v1.1 lock requires a quote that recorded comparability bits"
+              : "full-suite Terminal-Bench 2.1 lock requires a quote that recorded comparability bits",
           );
         }
       }

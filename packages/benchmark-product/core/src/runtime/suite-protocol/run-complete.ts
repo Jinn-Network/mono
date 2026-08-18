@@ -46,6 +46,10 @@ function trialHasAtif(trialDir: string): boolean {
   ));
 }
 
+function trialHasRewardJson(trialDir: string): boolean {
+  return existsSync(join(trialDir, "verifier", "reward.json")) || existsSync(join(trialDir, "reward.json"));
+}
+
 function uniqueTrialDir(jobDir: string, taskName: string, attempt: number): string | undefined {
   let entries;
   try { entries = readdirSync(jobDir, { withFileTypes: true }); }
@@ -100,9 +104,28 @@ export function atifOnRetainedJob(
   return true;
 }
 
+export function rewardJsonOnRetainedJob(
+  jobDir: string,
+  suite: SuiteProtocolSelection,
+  matrix: { readonly cells: readonly MatrixCellAccount[] },
+  armId: string,
+): boolean {
+  const byKey = new Map(matrix.cells.map((cell) => [cell.cellKey, cell]));
+  for (const item of suite.items) {
+    for (let replicate = 1; replicate <= suite.replicates; replicate += 1) {
+      const cell = byKey.get(cellKey(item.taskSha256, armId, replicate));
+      if (cell === undefined || cell.outcome !== "judged") continue;
+      const trialDir = uniqueTrialDir(jobDir, item.taskName, replicate);
+      if (trialDir === undefined || !trialHasRewardJson(trialDir)) return false;
+    }
+  }
+  return true;
+}
+
 export interface ArmRunComplete {
   readonly cellsAccounted: boolean;
   readonly atifOnRetainedJob: boolean;
+  readonly rewardOnRetainedJob: boolean;
 }
 
 export function assessArmRunComplete(input: {
@@ -112,19 +135,23 @@ export function assessArmRunComplete(input: {
   readonly jobDir: string;
 }): ArmRunComplete {
   const cellsAccounted = accountSuiteArmCells(input.matrix, input.suite, input.armId);
-  if (!cellsAccounted) return { cellsAccounted: false, atifOnRetainedJob: false };
+  if (!cellsAccounted) return { cellsAccounted: false, atifOnRetainedJob: false, rewardOnRetainedJob: false };
   return {
     cellsAccounted: true,
     atifOnRetainedJob: atifOnRetainedJob(input.jobDir, input.suite, input.matrix, input.armId),
+    rewardOnRetainedJob: input.suite.protocol === "deep-swe-v1.1"
+      ? rewardJsonOnRetainedJob(input.jobDir, input.suite, input.matrix, input.armId)
+      : true,
   };
 }
 
 export function allArmsRunComplete(
   arms: readonly ArmRunComplete[],
-): { readonly cellsAccounted: boolean; readonly atifOnRetainedJob: boolean } {
-  if (arms.length === 0) return { cellsAccounted: false, atifOnRetainedJob: false };
+): { readonly cellsAccounted: boolean; readonly atifOnRetainedJob: boolean; readonly rewardOnRetainedJob: boolean } {
+  if (arms.length === 0) return { cellsAccounted: false, atifOnRetainedJob: false, rewardOnRetainedJob: false };
   return {
     cellsAccounted: arms.every((arm) => arm.cellsAccounted),
     atifOnRetainedJob: arms.every((arm) => arm.atifOnRetainedJob),
+    rewardOnRetainedJob: arms.every((arm) => arm.rewardOnRetainedJob),
   };
 }

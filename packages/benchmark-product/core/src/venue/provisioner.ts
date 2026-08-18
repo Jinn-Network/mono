@@ -72,8 +72,8 @@ import type {
   InspectBinaryJudgeHostBinding,
   InspectBinaryJudgeSelectionManifest,
 } from "../runtime/inspect/binary-judge-manifest.js";
-import { assertHarborTrialMatchesCell, assertSingleHarborTrial, HarborJobConfigSchema, harborFollowUpJobSource, harborJobSource, harborSelectedTaskNames, harborTrialTaskName, normalizeHarborSavedJobConfig, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
-import { harborArmFollowUpJobName, harborArmJobName, harborJobName, harborPlannedJobWaitMs, harborPredictionFromVerifierReward } from "../runtime/harbor/launcher.js";
+import { assertHarborTrialMatchesCell, assertSingleHarborTrial, HarborJobConfigSchema, harborFollowUpJobSource, harborJobSource, harborSelectedTaskNames, harborTrialTaskName, isHarborCompatibleAdapterId, normalizeHarborSavedJobConfig, PIER_ADAPTER_ID, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
+import { harborArmFollowUpJobName, harborArmJobName, harborJobName, harborPlannedJobWaitMs, harborPredictionFromVerifierReward, pierPlannedJobWaitMs } from "../runtime/harbor/launcher.js";
 import {
   claimHarborArmJobLeadership,
   harborArmJobsDir,
@@ -663,6 +663,12 @@ export interface HarborProvisionerOptions {
   readonly taskNameByDigest?: Readonly<Record<string, string>>;
 }
 
+function plannedJobWaitMs(manifest: HarborSelectionManifest): number {
+  return manifest.adapter.id === PIER_ADAPTER_ID
+    ? pierPlannedJobWaitMs(manifest.retryPolicy.nAttempts)
+    : harborPlannedJobWaitMs(manifest.retryPolicy.nAttempts);
+}
+
 function harborRole(relativePath: string): string {
   if (relativePath === "invocation/harbor-job.json") return HARBOR_INVOCATION_CONFIG_ROLE;
   if (relativePath === "config.json") return HARBOR_JOB_CONFIG_ROLE;
@@ -795,7 +801,7 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
         followUp = (await waitForHarborArmReplacementGrain({
           plannedRoot: join(jobsDir, plannedJobName),
           mappingPath,
-          timeoutMs: harborPlannedJobWaitMs(options.manifest.retryPolicy.nAttempts),
+          timeoutMs: plannedJobWaitMs(options.manifest),
         })) === "follow-up";
       }
       jobName = followUp
@@ -839,7 +845,7 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
             jobRoot: join(jobsDir, jobName),
             fallbackTaskDigest: parseCellKey(cellKey).taskDigest,
             taskNameByDigest: options.taskNameByDigest,
-            timeoutMs: harborPlannedJobWaitMs(options.manifest.retryPolicy.nAttempts),
+            timeoutMs: plannedJobWaitMs(options.manifest),
           }).catch((cause) => {
             const detail = cause instanceof Error ? cause.stack ?? cause.message : String(cause);
             void writeFile(join(jobsDir, `${jobName}.observer-error`), detail).catch(() => undefined);
@@ -972,11 +978,30 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
           try {
             bytes = new Uint8Array(await readFile(source));
           } catch (cause) {
-            const rewardPath = join(harvestRoot, trialDirectory, "verifier", "reward.txt");
-            if (!existsSync(rewardPath)) throw cause;
-            const rewardText = new TextDecoder("utf8").decode(await readFile(rewardPath));
+            const rewardTxt = join(harvestRoot, trialDirectory, "verifier", "reward.txt");
+            const rewardJson = join(harvestRoot, trialDirectory, "verifier", "reward.json");
+            const rewardAlt = join(harvestRoot, trialDirectory, "reward.json");
+            const rewardPath = existsSync(rewardTxt)
+              ? rewardTxt
+              : existsSync(rewardJson)
+                ? rewardJson
+                : existsSync(rewardAlt)
+                  ? rewardAlt
+                  : undefined;
             const submittedAt = typeof trialResult.finished_at === "string" ? trialResult.finished_at : new Date().toISOString();
-            bytes = harborPredictionFromVerifierReward(rewardText, submittedAt);
+            if (rewardPath !== undefined) {
+              const rewardText = new TextDecoder("utf8").decode(await readFile(rewardPath));
+              bytes = harborPredictionFromVerifierReward(rewardText, submittedAt);
+            } else if (options.manifest.adapter.id === PIER_ADAPTER_ID) {
+              await writeHarborRetryUnscorableMarker(options.workspaceDir, input.attempt.attemptUri, {
+                cellKey,
+                dispatch,
+                missingReward: true,
+              });
+              bytes = harborPredictionFromVerifierReward("0\n", submittedAt);
+            } else {
+              throw cause;
+            }
           }
           await writeFile(join(paths.out, output.name), bytes, { flag: "wx", mode: 0o600 });
         }
@@ -1302,7 +1327,8 @@ export function createLocalProvisioner(
         contract: inspectBinaryJudgeProvisionerContract(input, options.inspectBinaryJudge),
       };
     }
-    if ((input.submission.requirements?.harness as { id?: unknown } | undefined)?.id === "harbor" && options.harbor !== undefined) {
+    const harnessId = (input.submission.requirements?.harness as { id?: unknown } | undefined)?.id;
+    if (typeof harnessId === "string" && isHarborCompatibleAdapterId(harnessId) && options.harbor !== undefined) {
       return { id: "benchmark-product-harbor-dir-v1", contract: harborProvisionerContract(input, options.harbor) };
     }
     if (profileUri === PREDICTION_FORECAST_PROFILE_URI) {

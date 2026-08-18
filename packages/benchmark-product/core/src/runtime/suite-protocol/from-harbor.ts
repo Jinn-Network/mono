@@ -1,9 +1,14 @@
 import type { HarborSelectionManifest } from "../harbor/manifest.js";
+import {
+  DEEP_SWE_V11_GIT_SHA,
+  DEEP_SWE_V11_TASKS_TREE_SHA,
+} from "../deep-swe-v1.1/manifest.js";
 import { TERMINAL_BENCH_2_1_DATASET_REF } from "../terminal-bench-2-1/manifest.js";
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
+  officialPierExecutionConformance,
   suiteLeaderboardLimitation,
   type SuiteComparability,
 } from "./comparability.js";
@@ -33,6 +38,7 @@ function methodBitsFromHarbor(input: {
   readonly manifest: HarborSelectionManifest;
   readonly suite: SuiteProtocolSelection;
 }): {
+  readonly protocol: SuiteProtocolSelection["protocol"];
   readonly coverage: SuiteProtocolSelection["coverage"];
   readonly executionConformance: boolean;
   readonly k: number;
@@ -41,20 +47,37 @@ function methodBitsFromHarbor(input: {
   readonly atifPresent: boolean;
   readonly datasetRevisionMatchesLeaderboardPin: boolean;
 } {
-  return {
-    coverage: input.suite.coverage,
-    executionConformance: officialHarborExecutionConformance({
+  const pin = input.suite.protocol === "deep-swe-v1.1"
+    ? input.suite.datasetRevision === DEEP_SWE_V11_GIT_SHA
+      && input.suite.tasksTreeSha === DEEP_SWE_V11_TASKS_TREE_SHA
+    : input.suite.datasetRevision === TERMINAL_BENCH_2_1_DATASET_REF;
+  const executionConformance = input.suite.protocol === "deep-swe-v1.1"
+    ? officialPierExecutionConformance({
+      k: input.manifest.retryPolicy.nAttempts,
+      maxRetries: input.manifest.retryPolicy.maxRetries,
+      jobGrain: input.manifest.jobGrain ?? "per-dispatch",
+      environmentConfiguration: input.manifest.environment.configuration as Readonly<Record<string, unknown>>,
+      pierVersion: input.manifest.harbor.version,
+      adapterId: input.manifest.adapter.id,
+      environmentType: input.manifest.environment.type,
+      agentNames: input.manifest.arms.map((arm) => arm.jobAgent.name),
+    })
+    : officialHarborExecutionConformance({
       k: input.manifest.retryPolicy.nAttempts,
       maxRetries: input.manifest.retryPolicy.maxRetries,
       jobGrain: input.manifest.jobGrain ?? "per-dispatch",
       environmentConfiguration: input.manifest.environment.configuration as Readonly<Record<string, unknown>>,
       harborVersion: input.manifest.harbor.version,
-    }),
+    });
+  return {
+    protocol: input.suite.protocol,
+    coverage: input.suite.coverage,
+    executionConformance,
     k: input.suite.replicates,
     selectedCount: input.suite.selectedTaskNames.length,
     datasetCount: input.suite.datasetTaskCount,
     atifPresent: input.suite.atifRequired,
-    datasetRevisionMatchesLeaderboardPin: input.suite.datasetRevision === TERMINAL_BENCH_2_1_DATASET_REF,
+    datasetRevisionMatchesLeaderboardPin: pin,
   };
 }
 
@@ -102,7 +125,7 @@ export function suiteFactsFromHarborManifest(input: {
   if (quote === undefined) return undefined;
   return {
     quote,
-    limitation: suiteLeaderboardLimitation(quote),
+    limitation: suiteLeaderboardLimitation(quote, suiteSelectionFromHarbor(input.manifest)?.protocol),
   };
 }
 
@@ -125,7 +148,7 @@ export function suiteFactsFromAccountedRun(input: {
   })));
   const bits = deriveSuiteComparability({ ...method, ...complete });
   const quote = presentSuiteQuote(input, suite, bits, methodLeaderboardEligible(method));
-  return { quote, limitation: suiteLeaderboardLimitation(quote) };
+  return { quote, limitation: suiteLeaderboardLimitation(quote, suite.protocol) };
 }
 
 export function suiteComparabilityForArm(input: {
@@ -144,4 +167,9 @@ export function suiteComparabilityForArm(input: {
     jobDir: input.jobDir,
   });
   return deriveSuiteComparability({ ...method, ...complete });
+}
+
+export function suiteLimitationFromHarbor(manifest: HarborSelectionManifest, comparability: SuiteComparability): string | undefined {
+  const suite = suiteSelectionFromHarbor(manifest);
+  return suiteLeaderboardLimitation(comparability, suite?.protocol);
 }

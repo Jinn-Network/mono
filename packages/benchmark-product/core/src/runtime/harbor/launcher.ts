@@ -6,10 +6,11 @@ import { join } from "node:path";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { LauncherCapabilities, LauncherContract, LaunchPlan } from "@jinn-network/task-execution-launchers";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
-import { HARBOR_ADAPTER_ID, type HarborSelectionManifest } from "./manifest.js";
+import { PIER_ADAPTER_ID, type HarborSelectionManifest } from "./manifest.js";
 import type { HarborHostBinding } from "./host.js";
 
 export const HARBOR_LAUNCHER_ID = "harbor";
+export const PIER_LAUNCHER_ID = "pier";
 
 export function harborJobName(submissionSha256: string, dispatch: number): string {
   if (!/^[a-f0-9]{64}$/.test(submissionSha256) || !Number.isInteger(dispatch) || dispatch < 1) throw new TypeError("Harbor Job naming requires a Submission digest and positive dispatch index");
@@ -34,6 +35,12 @@ export function harborPlannedJobChildEnv(env: NodeJS.ProcessEnv, tempDir: string
 export function harborPlannedJobWaitMs(nAttempts: number): number {
   const attempts = Number.isInteger(nAttempts) && nAttempts >= 1 ? nAttempts : 1;
   return Math.max(120_000, attempts * 900_000 + 120_000);
+}
+
+/** Planned Pier jobs run k sequential trials; DeepSWE v1.1 wall-clock bound is 9000s per trial. */
+export function pierPlannedJobWaitMs(nAttempts: number): number {
+  const attempts = Number.isInteger(nAttempts) && nAttempts >= 1 ? nAttempts : 1;
+  return Math.max(120_000, attempts * 9_000_000 + 120_000);
 }
 
 export function harborArmFollowUpJobName(
@@ -62,14 +69,23 @@ export function harborTrialResultTerminal(result: Readonly<Record<string, unknow
 /** Official Harbor oracle does not write the rehearsal prediction.json; reward.txt is the native score. */
 export function harborPredictionFromVerifierReward(rewardText: string, submittedAt: string): Uint8Array {
   const trimmed = rewardText.trim();
-  const probabilityYes = trimmed === "1" || trimmed === "1.0" ? "1.0" : trimmed === "0" || trimmed === "0.0" ? "0.0" : trimmed;
+  let numeric = trimmed;
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(trimmed) as { reward?: unknown };
+      if (parsed.reward !== undefined) numeric = String(parsed.reward);
+    } catch {
+      numeric = trimmed;
+    }
+  }
+  const probabilityYes = numeric === "1" || numeric === "1.0" ? "1.0" : numeric === "0" || numeric === "0.0" ? "0.0" : numeric;
   return new TextEncoder().encode(JSON.stringify({ probabilityYes, submittedAt }));
 }
 
 function requirePinnedHarbor(view: TaskView, manifest: HarborSelectionManifest): void {
   const requirements = view.effectiveRequirements as Record<string, unknown>;
   const harness = requirements.harness as { id?: unknown; version?: unknown } | undefined;
-  if (harness?.id !== HARBOR_LAUNCHER_ID || harness.version !== manifest.harbor.version) {
+  if (harness?.id !== manifest.adapter.id || harness.version !== manifest.harbor.version) {
     throw new TypeError("Harbor Submission does not carry the exact selected Harbor harness/version pin");
   }
   const model = requirements.model as { id?: unknown } | undefined;
@@ -95,7 +111,7 @@ function harborInvocationPlan(argv: readonly string[], paths: WorkspacePaths): L
   };
 }
 
-function harborArmDispatchPlan(executable: string, paths: WorkspacePaths): LaunchPlan {
+function harborArmDispatchPlan(executable: string, paths: WorkspacePaths, trialTimeoutMs: number): LaunchPlan {
   const rolePath = join(paths.meta, "harbor-arm-role");
   const jobPath = join(paths.input, "harbor-job.json");
   const waitPath = join(paths.meta, "harbor-arm-wait.json");
@@ -122,7 +138,7 @@ const resultPath = join(job.jobs_dir, job.job_name, "result.json");
 const harborTmp = join(job.jobs_dir, job.job_name + ".tmpdir");
 const harborEnv = Object.assign({}, process.env, { TMPDIR: harborTmp, TMP: harborTmp, TEMP: harborTmp });
 const runDeadline = wait.kind === "planned"
-  ? Date.now() + Math.max(120000, (Number.isInteger(Number(job.n_attempts)) && Number(job.n_attempts) >= 1 ? Number(job.n_attempts) : 1) * 900000 + 120000)
+  ? Date.now() + Math.max(120000, (Number.isInteger(Number(job.n_attempts)) && Number(job.n_attempts) >= 1 ? Number(job.n_attempts) : 1) * ${trialTimeoutMs} + 120000)
   : deadline;
 function jobFinished() {
   try {
@@ -200,14 +216,16 @@ export function makeHarborLauncher(input: { readonly manifest: HarborSelectionMa
   const executable = input.host.executable;
   const executableDigest = createHash("sha256").update(readFileSync(executable)).digest("hex");
   if (executableDigest !== input.manifest.harbor.executableSha256) throw new TypeError("Harbor executable bytes drifted from the sealed selection manifest");
+  const launcherId = input.manifest.adapter.id === PIER_ADAPTER_ID ? PIER_LAUNCHER_ID : HARBOR_LAUNCHER_ID;
+  const trialTimeoutMs = input.manifest.adapter.id === PIER_ADAPTER_ID ? 9_000_000 : 900_000;
   return {
-    id: HARBOR_LAUNCHER_ID,
+    id: launcherId,
     capabilities: (): LauncherCapabilities => ({
       taskProfiles: ["https://spec.jinn.network/task-profiles/prediction-forecast/1.0", "https://spec.jinn.network/task-profiles/repository-work/1.0"],
       inputMediaTypes: ["application/json", "text/plain"], outputMediaTypes: ["application/json"], structuredOutput: true,
       resume: false, interruptionBehaviorDefault: "nonrepeatable", secretForwards: [],
       runPinning: { keys: [
-        { key: "harness", inventory: [HARBOR_LAUNCHER_ID], posture: "enforced" },
+        { key: "harness", inventory: [launcherId], posture: "enforced" },
         { key: "agent", inventory: input.manifest.arms.map((arm) => arm.agent.id), posture: "enforced" },
         { key: "model", inventory: input.manifest.arms.map((arm) => arm.model.id), posture: "enforced" },
         { key: "isolationPolicy", inventory: ["unrestricted"], posture: "enforced" },
@@ -217,17 +235,17 @@ export function makeHarborLauncher(input: { readonly manifest: HarborSelectionMa
       const actual = createHash("sha256").update(readFileSync(executable)).digest("hex");
       if (actual !== input.manifest.harbor.executableSha256) return { ready: false, detail: "Harbor executable bytes drifted from selection" };
       let version: string;
-      try { version = execFileSync(executable, ["--version"], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1" } }).trim().replace(/^harbor\s+/iu, ""); }
-      catch { return { ready: false, detail: "Harbor version probe failed" }; }
+      try { version = execFileSync(executable, ["--version"], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1" } }).trim().replace(/^(?:harbor|pier)\s+/iu, ""); }
+      catch { return { ready: false, detail: `${launcherId} version probe failed` }; }
       return version === input.manifest.harbor.version
         ? { ready: true }
-        : { ready: false, detail: `Harbor version drifted: expected ${input.manifest.harbor.version}, got ${version}` };
+        : { ready: false, detail: `${launcherId} version drifted: expected ${input.manifest.harbor.version}, got ${version}` };
     },
     plan(view: TaskView, paths: WorkspacePaths, attempt: AttemptIdentity): LaunchPlan {
       void attempt;
       requirePinnedHarbor(view, input.manifest);
       const grain = input.manifest.jobGrain ?? "per-dispatch";
-      if (grain === "per-arm") return harborArmDispatchPlan(executable, paths);
+      if (grain === "per-arm") return harborArmDispatchPlan(executable, paths, trialTimeoutMs);
       return harborInvocationPlan([executable, "run", "-c", join(paths.input, "harbor-job.json")], paths);
     },
   };

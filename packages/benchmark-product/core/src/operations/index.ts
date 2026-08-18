@@ -92,6 +92,17 @@ export {
   type ExportHarborHubPackageResult,
   type HarborHubExportMode,
 } from "./hub-export.js";
+export {
+  selectDeepSweV11Runtime,
+  type SelectDeepSweV11RuntimeInput,
+  type SelectDeepSweV11RuntimeResult,
+} from "./deep-swe-v1.1.js";
+export {
+  exportDeepSwePackage,
+  type DeepSweExportMode,
+  type ExportDeepSwePackageInput,
+  type ExportDeepSwePackageResult,
+} from "./deepswe-export.js";
 
 export {
   armAdd,
