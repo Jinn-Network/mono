@@ -9,13 +9,14 @@ import {
   INSPECT_SANDBOX_SELECTION_SCHEMA,
   INSPECT_SELECTION_SCHEMA,
 } from "../runtime/inspect/manifest.js";
-import { APEX_AGENTS_SELECTION_SCHEMA } from "../runtime/apex-agents/manifest.js";
-import { APEX_SWE_DEV_SELECTION_SCHEMA } from "../runtime/apex-swe-dev/manifest.js";
-import { SWE_BENCH_VERIFIED_SELECTION_SCHEMA } from "../runtime/swe-bench-verified/manifest.js";
+import { APEX_AGENTS_SELECTION_SCHEMA, ApexAgentsRegistryMetadataSchema } from "../runtime/apex-agents/manifest.js";
+import { APEX_SWE_DEV_SELECTION_SCHEMA, ApexSweDevRegistryMetadataSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { SWE_BENCH_VERIFIED_SELECTION_SCHEMA, SwebenchVerifiedRegistryMetadataSchema } from "../runtime/swe-bench-verified/manifest.js";
 import { TERMINAL_BENCH_2_SELECTION_SCHEMA } from "../runtime/terminal-bench-2/manifest.js";
-import { TERMINAL_BENCH_2_1_SELECTION_SCHEMA } from "../runtime/terminal-bench-2-1/manifest.js";
-import { TERMINAL_BENCH_3_0_SELECTION_SCHEMA } from "../runtime/terminal-bench-3-0/manifest.js";
+import { TERMINAL_BENCH_2_1_SELECTION_SCHEMA, TerminalBench21RegistryMetadataSchema } from "../runtime/terminal-bench-2-1/manifest.js";
+import { TERMINAL_BENCH_3_0_SELECTION_SCHEMA, TerminalBench30RegistryMetadataSchema } from "../runtime/terminal-bench-3-0/manifest.js";
 import type { SuiteCoverage, SuiteProtocolId } from "../runtime/suite-protocol/comparability.js";
+import { coverageFromSelectedNames, namedSliceTaskNames } from "../runtime/suite-protocol/manifest.js";
 
 export {
   APEX_AGENTS_SELECTION_SCHEMA,
@@ -46,6 +47,7 @@ export interface MethodCatalogRow {
   readonly protocol: SuiteProtocolId;
   readonly framework: MethodFramework;
   readonly derivedExport: MethodDerivedExport;
+  readonly hostKeys: readonly string[];
 }
 
 export const METHOD_CATALOG = {
@@ -53,26 +55,31 @@ export const METHOD_CATALOG = {
     protocol: "terminal-bench-2.1",
     framework: "harbor",
     derivedExport: "harbor-hub",
+    hostKeys: ["executable", "registryMetadataPath", "datasetRevision", "taskMaterialPath", "arms", "environment", "outputs"],
   },
   "terminal-bench-3.0": {
     protocol: "terminal-bench-3.0",
     framework: "harbor",
     derivedExport: "harbor-hub",
+    hostKeys: ["executable", "registryMetadataPath", "datasetRevision", "taskMaterialPath", "arms", "environment", "outputs"],
   },
   "swe-bench-verified": {
     protocol: "swe-bench-verified",
     framework: "swebench-harness",
     derivedExport: "swebench-predictions",
+    hostKeys: ["executable", "registryMetadataPath", "arms"],
   },
   "apex-agents": {
     protocol: "apex-agents",
     framework: "archipelago",
     derivedExport: "apex-inspection",
+    hostKeys: ["executable", "registryMetadataPath", "arms"],
   },
   "apex-swe-dev": {
     protocol: "apex-swe-dev",
     framework: "apex-swe-dev",
     derivedExport: "apex-swe-package",
+    hostKeys: ["apxExecutable", "pythonExecutable", "registryMetadataPath", "integrationTasksDir", "observabilityProjectDir", "arms"],
   },
 } as const satisfies Record<string, MethodCatalogRow>;
 
@@ -95,6 +102,7 @@ export interface ResolveMethodOperandInput {
   readonly cwd: string;
   readonly slice?: string;
   readonly ids?: string;
+  readonly n?: string;
   readonly hostPath?: string;
 }
 
@@ -116,6 +124,14 @@ export type ResolvedMethod =
 
 export function isMethodCatalogId(value: string): value is MethodCatalogId {
   return Object.hasOwn(METHOD_CATALOG, value);
+}
+
+export function listMethodCatalog(): ReadonlyArray<{ id: MethodCatalogId } & MethodCatalogRow> {
+  return (Object.keys(METHOD_CATALOG) as MethodCatalogId[]).map((id) => ({ id, ...METHOD_CATALOG[id] }));
+}
+
+export function knownCatalogIds(): string {
+  return (Object.keys(METHOD_CATALOG) as MethodCatalogId[]).join(", ");
 }
 
 export function coverageFromSlice(slice: HumanSlice): Exclude<SuiteCoverage, "custom"> {
@@ -178,18 +194,63 @@ function parseIds(ids: string): readonly string[] {
   return selected;
 }
 
+function parseN(n: string): number {
+  if (!/^[1-9][0-9]*$/u.test(n)) refuse("invalid-invocation", "--n", "--n must be a positive integer");
+  return Number.parseInt(n, 10);
+}
+
+function unknownMethodRef(ref: string): never {
+  refuse("invalid-invocation", "method.ref", `"${ref}" is not a suite and not a file; known catalog ids: ${knownCatalogIds()}`);
+}
+
+function registryIds(catalogId: MethodCatalogId, metadata: Record<string, unknown>): readonly string[] {
+  try {
+    switch (catalogId) {
+      case "terminal-bench-2.1":
+        return TerminalBench21RegistryMetadataSchema.parse(metadata).task_ids.map((task) => task.name);
+      case "terminal-bench-3.0":
+        return TerminalBench30RegistryMetadataSchema.parse(metadata).task_ids.map((task) => task.name);
+      case "swe-bench-verified":
+        return SwebenchVerifiedRegistryMetadataSchema.parse(metadata).instance_ids;
+      case "apex-agents":
+        return ApexAgentsRegistryMetadataSchema.parse(metadata).task_ids;
+      case "apex-swe-dev":
+        return ApexSweDevRegistryMetadataSchema.parse(metadata).tasks.map((task) => task.taskId);
+    }
+  } catch {
+    refuse("validation", "--host", "host.registryMetadataPath is not valid registry metadata for this suite");
+  }
+}
+
+function selectedFromRegistry(
+  catalogId: MethodCatalogId,
+  host: Record<string, unknown>,
+  cwd: string,
+  n: number,
+): { readonly coverage: SuiteCoverage; readonly selectedIds: readonly string[] } {
+  const registryMetadataPath = host.registryMetadataPath;
+  if (typeof registryMetadataPath !== "string" || registryMetadataPath.length === 0) {
+    refuse("invalid-invocation", "--host", "host.registryMetadataPath must be a string path");
+  }
+  const inventory = registryIds(catalogId, readJsonObject(resolvePath(cwd, registryMetadataPath), "--host"));
+  if (n > inventory.length) {
+    refuse("invalid-invocation", "--n", `--n ${n} is larger than the registry inventory (${inventory.length})`);
+  }
+  const selectedIds = namedSliceTaskNames(inventory, "full").slice(0, n);
+  return { coverage: coverageFromSelectedNames(inventory, selectedIds), selectedIds };
+}
+
 export function resolveMethodOperand(input: ResolveMethodOperandInput): ResolvedMethod {
   const catalog = isMethodCatalogId(input.ref);
   const file = isExistingFile(input.cwd, input.ref);
   if (catalog && file) {
     refuse("invalid-invocation", "method.ref", `"${input.ref}" is both a catalog id and a file`);
   }
-  if (!catalog && !file) {
-    refuse("invalid-invocation", "method.ref", `"${input.ref}" is not a suite and not a file`);
-  }
+  if (!catalog && !file) unknownMethodRef(input.ref);
   if (file) {
     if (input.slice !== undefined) refuse("invalid-invocation", "--slice", "--slice is only valid with a catalog id");
     if (input.ids !== undefined) refuse("invalid-invocation", "--ids", "--ids is only valid with a catalog id");
+    if (input.n !== undefined) refuse("invalid-invocation", "--n", "--n is only valid with a catalog id");
     if (input.hostPath !== undefined) refuse("invalid-invocation", "--host", "--host is only valid with a catalog id");
     const path = resolvePath(input.cwd, input.ref);
     const raw = readJsonObject(path, "method.ref");
@@ -198,18 +259,20 @@ export function resolveMethodOperand(input: ResolveMethodOperandInput): Resolved
     return { kind: "file", documentKind, official, document };
   }
   const catalogId = input.ref;
-  if (!isMethodCatalogId(catalogId)) {
-    refuse("invalid-invocation", "method.ref", `"${input.ref}" is not a suite and not a file`);
-  }
+  if (!isMethodCatalogId(catalogId)) unknownMethodRef(input.ref);
   if (input.hostPath === undefined || input.hostPath === "") {
     refuse("invalid-invocation", "--host", "--host is required for a catalog id");
+  }
+  if (input.n !== undefined && (input.slice !== undefined || input.ids !== undefined)) {
+    refuse("invalid-invocation", "--n", "pass --slice, --ids, or --n, not more than one");
   }
   if (input.slice !== undefined && input.ids !== undefined) {
     refuse("invalid-invocation", "--ids", "pass --slice or --ids, not both");
   }
-  if (input.slice === undefined && input.ids === undefined) {
-    refuse("invalid-invocation", "--slice", "--slice or --ids is required for a catalog id");
+  if (input.slice === undefined && input.ids === undefined && input.n === undefined) {
+    refuse("invalid-invocation", "--slice", "--slice, --ids, or --n is required for a catalog id");
   }
+  const n = input.n === undefined ? undefined : parseN(input.n);
   const row = METHOD_CATALOG[catalogId];
   const host = readJsonObject(resolvePath(input.cwd, input.hostPath), "--host");
   if (input.ids !== undefined) {
@@ -222,11 +285,34 @@ export function resolveMethodOperand(input: ResolveMethodOperandInput): Resolved
       host,
     };
   }
+  if (input.slice !== undefined) {
+    return {
+      kind: "catalog",
+      catalogId,
+      protocol: row.protocol,
+      coverage: coverageFromSlice(parseHumanSlice(input.slice)),
+      host,
+    };
+  }
+  if (n === undefined) {
+    refuse("invalid-invocation", "--slice", "--slice, --ids, or --n is required for a catalog id");
+  }
+  const sliced = selectedFromRegistry(catalogId, host, input.cwd, n);
+  if (sliced.coverage === "custom") {
+    return {
+      kind: "catalog",
+      catalogId,
+      protocol: row.protocol,
+      coverage: "custom",
+      selectedIds: sliced.selectedIds,
+      host,
+    };
+  }
   return {
     kind: "catalog",
     catalogId,
     protocol: row.protocol,
-    coverage: coverageFromSlice(parseHumanSlice(input.slice!)),
+    coverage: sliced.coverage,
     host,
   };
 }
