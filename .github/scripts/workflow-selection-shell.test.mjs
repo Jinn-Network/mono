@@ -237,8 +237,8 @@ test('the selection scripts read the changed list from a file, not a pipe', () =
     );
     assert.match(
       script,
-      /git -c core\.quotePath=false diff --name-only/u,
-      `${lane.workflow}: the diff must run with core.quotePath=false, or git quotes and escapes non-ASCII paths and the ^-anchored patterns stop matching them`,
+      /git -c core\.quotePath=false diff --no-renames --name-only/u,
+      `${lane.workflow}: the diff must run with core.quotePath=false (git otherwise quotes non-ASCII paths and the ^-anchored patterns stop matching) and --no-renames (a rename otherwise prints only its new path, so a file renamed out of a selected tree stops selecting the lane, and rename scoring faults blobs back in under blob:none)`,
     );
   }
 });
