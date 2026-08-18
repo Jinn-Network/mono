@@ -1,4 +1,4 @@
-# DR-2026-08-18 — Official suite protocol (APEX-SWE-dev)
+# DR-2026-08-18-c — Official suite protocol (APEX-SWE-dev)
 
 - **Date:** 2026-08-18
 - **Status:** **Accepted 2026-08-18.** Ratified by operator instruction to

@@ -742,7 +742,7 @@ describe("runReport — analysis method selection (P4b Task 3)", () => {
     30_000,
   );
 
-  /** APEX-SWE-dev is never `leaderboardSubmitReady` (DR-2026-08-18 §5), so its protocol-named
+  /** APEX-SWE-dev is never `leaderboardSubmitReady` (DR-2026-08-18-c §5), so its protocol-named
    * limitation must reach `limitations[]` through the real `report` operation, not only through a
    * direct `suiteFactsFromAccountedApexSweDevRun` call in a unit test. Their harnesses run on the
    * operator host (`run launch` refuses the adapter outright), so this binds a genuinely

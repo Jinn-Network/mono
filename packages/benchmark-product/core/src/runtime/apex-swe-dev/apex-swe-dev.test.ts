@@ -15,7 +15,7 @@ import { selectApexSweDevRuntime } from "../../operations/apex-swe-dev.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { namedSliceTaskNames } from "../suite-protocol/manifest.js";
-import { suiteFactsFromAccountedApexSweDevRun } from "../suite-protocol/from-apex.js";
+import { suiteFactsFromAccountedApexSweDevRun } from "../suite-protocol/from-apex-swe-dev.js";
 import { isGitLfsPointerBytes, resolveApexSweDevSelection } from "./host.js";
 import { apexSweDevReportRoot, collectApexSweDevCells, launchApexSweDev } from "./launcher.js";
 import {

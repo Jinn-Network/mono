@@ -13,7 +13,7 @@ import {
   APEX_SWE_DEV_SUBMIT_CLOSED_SENTENCE,
   type SuiteCoverage,
 } from "../runtime/suite-protocol/comparability.js";
-import { suiteComparabilityForApexSweDevArm } from "../runtime/suite-protocol/from-apex.js";
+import { suiteComparabilityForApexSweDevArm } from "../runtime/suite-protocol/from-apex-swe-dev.js";
 import { artifactsDir } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";

@@ -46,9 +46,15 @@ import {
   readRunJournalEntries,
 } from "../run/journal.js";
 import { requireRunState, writeRunState } from "../run/state.js";
+import { resolveSwebenchHarnessRunId, swebenchModelNameOrPathByArm } from "../runtime/swe-bench-verified/launcher.js";
+import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
+import { suiteFactsFromAccountedSwebenchRun } from "../runtime/suite-protocol/from-swebench.js";
+import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
+import { suiteFactsFromAccountedApexRun } from "../runtime/suite-protocol/from-apex.js";
 import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
 import { apexSweDevReportRoot } from "../runtime/apex-swe-dev/launcher.js";
-import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex.js";
+import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex-swe-dev.js";
+import { join } from "node:path";
 import { artifactsDir, draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
@@ -154,6 +160,40 @@ export function runCollect(
       const matrixSha256 = putSealedBytes(clockedContext.workspaceDir, assembled.bytes);
 
       const nextState = { ...runState, matrixSha256, closedAt: at };
+      if (document.spec.evaluationRuntime?.adapterId === "swebench-harness") {
+        const verified = SwebenchVerifiedSelectionManifestSchema.parse(
+          JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
+        );
+        const reportRoot = join(artifactsDir(clockedContext.workspaceDir), "swebench-harness", input.draftId);
+        const facts = suiteFactsFromAccountedSwebenchRun({
+          manifest: verified,
+          armCount: runRecord.arms.length,
+          itemCount: new Set(assembled.record.cells.map((cell) => cell.taskDigest)).size,
+          replicates: runRecord.replicates,
+          matrix: assembled.record,
+          armIds: document.spec.arms.map((arm) => arm.armId),
+          reportRoot,
+          runId: resolveSwebenchHarnessRunId(reportRoot, runState.runSha256),
+          modelNameOrPathByArm: swebenchModelNameOrPathByArm(document.spec.arms),
+        });
+        nextState.suiteQuote = facts.quote;
+      }
+      if (document.spec.evaluationRuntime?.adapterId === "archipelago") {
+        const apex = ApexAgentsSelectionManifestSchema.parse(
+          JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
+        );
+        const reportRoot = join(artifactsDir(clockedContext.workspaceDir), "archipelago", input.draftId);
+        const facts = suiteFactsFromAccountedApexRun({
+          manifest: apex,
+          armCount: runRecord.arms.length,
+          itemCount: new Set(assembled.record.cells.map((cell) => cell.taskDigest)).size,
+          replicates: runRecord.replicates,
+          matrix: assembled.record,
+          armIds: document.spec.arms.map((arm) => arm.armId),
+          reportRoot,
+        });
+        nextState.suiteQuote = facts.quote;
+      }
       if (document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID) {
         const apex = ApexSweDevSelectionManifestSchema.parse(
           JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),

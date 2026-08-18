@@ -20,6 +20,7 @@ import { inputsDigest } from "../audit/journal.js";
 import type { DraftSpec } from "../domain/draft.js";
 import { refuse, refuseWithIssues, type ProductIssue } from "../errors.js";
 import { atomicWriteFileSync, readFileIfExistsSync } from "../fs/atomic.js";
+import { SUITE_PROTOCOL_IDS } from "../runtime/suite-protocol/comparability.js";
 import { runStatePath } from "../workspace/layout.js";
 
 const Rfc3339Schema = z.string().regex(
@@ -147,13 +148,14 @@ export const RunStateSchema = z.object({
   ])).optional(),
   publishedAt: Rfc3339Schema.optional(),
   suiteQuote: z.object({
+    protocol: z.enum(SUITE_PROTOCOL_IDS).optional(),
     executionConformance: z.boolean(),
     coverage: z.enum(["one_task", "ten_task", "full", "custom"]),
     leaderboardSubmitReady: z.boolean(),
     methodLeaderboardEligible: z.boolean(),
     cellCount: z.string().min(1),
-    /** Terminal-Bench 2.1 writes this; APEX-SWE-dev writes `harnessVersion` instead. Optional so
-     * run states persisted before APEX-SWE-dev (which all carry `harborVersion`) keep parsing. */
+    /** Harbor-family protocols write this; non-Harbor protocols write `harnessVersion` instead.
+     * Optional so run states persisted before that split (which all carry `harborVersion`) keep parsing. */
     harborVersion: z.string().min(1).optional(),
     harnessVersion: z.string().min(1).optional(),
     selectedTaskCount: z.number().int().positive(),

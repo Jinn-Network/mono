@@ -156,7 +156,7 @@ const APEX_SWE_DEV_OPERATOR_HOST_REFUSAL =
   + " docs/runbooks/apex-swe-dev-official-one-task.md), then `apex-swe export`.";
 
 /** APEX-SWE-dev seals arms against a harness id the local venue registers no launcher for, by
- * design (DR-2026-08-18: their harnesses run, unmodified, on the operator host). Refuse the
+ * design (DR-2026-08-18-c: their harnesses run, unmodified, on the operator host). Refuse the
  * launch verb outright rather than dead-ending inside dispatch with an opaque venue error. */
 function assertLaunchableRuntime(document: DraftDocument, draftId: string): void {
   if (document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID) {

@@ -131,7 +131,7 @@ export function selectApexSweDevRuntime(
         spec: parseDraftSpec({
           ...attached.spec,
           replicates: 1,
-          // Pass@1 is the protocol: each task maps onto exactly one cell (DR-2026-08-18 §4), so a
+          // Pass@1 is the protocol: each task maps onto exactly one cell (DR-2026-08-18-c §4), so a
           // replaced cell would be a second attempt wearing the same k=1 conformance claim.
           policy: { ...attached.spec.policy, replacement: { allowed: false } },
           arms: attached.spec.arms.map((arm) => {

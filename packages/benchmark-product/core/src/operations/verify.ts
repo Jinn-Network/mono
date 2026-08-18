@@ -58,9 +58,14 @@ import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
+import { suiteFactsFromAccountedSwebenchRun } from "../runtime/suite-protocol/from-swebench.js";
+import { suiteFactsFromAccountedApexRun } from "../runtime/suite-protocol/from-apex.js";
 import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
 import { apexSweDevReportRoot } from "../runtime/apex-swe-dev/launcher.js";
-import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex.js";
+import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex-swe-dev.js";
+import { resolveSwebenchHarnessRunId, swebenchModelNameOrPathByArm } from "../runtime/swe-bench-verified/launcher.js";
+import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
+import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
 import { buildWorkspaceTrustDeps } from "../report/trust.js";
 import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receipts.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
@@ -225,17 +230,39 @@ export async function verifyRunWorkspace(
             jobDir: join(harborArmJobsDir(context.workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId)),
           })),
         })
-        : document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID
-          ? suiteFactsFromAccountedApexSweDevRun({
-            manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+        : document.spec.evaluationRuntime?.adapterId === "swebench-harness"
+          ? suiteFactsFromAccountedSwebenchRun({
+            manifest: SwebenchVerifiedSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
             armCount: runRecord.arms.length,
             itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
             replicates: runRecord.replicates,
             matrix: matrixRecord,
             armIds: document.spec.arms.map((arm) => arm.armId),
-            reportRoot: apexSweDevReportRoot(artifactsDir(context.workspaceDir), input.draftId),
+            reportRoot: join(artifactsDir(context.workspaceDir), "swebench-harness", input.draftId),
+            runId: resolveSwebenchHarnessRunId(join(artifactsDir(context.workspaceDir), "swebench-harness", input.draftId), runSha256),
+            modelNameOrPathByArm: swebenchModelNameOrPathByArm(document.spec.arms),
           })
-        : undefined;
+          : document.spec.evaluationRuntime?.adapterId === "archipelago"
+            ? suiteFactsFromAccountedApexRun({
+              manifest: ApexAgentsSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+              armCount: runRecord.arms.length,
+              itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+              replicates: runRecord.replicates,
+              matrix: matrixRecord,
+              armIds: document.spec.arms.map((arm) => arm.armId),
+              reportRoot: join(artifactsDir(context.workspaceDir), "archipelago", input.draftId),
+            })
+          : document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID
+            ? suiteFactsFromAccountedApexSweDevRun({
+              manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+              armCount: runRecord.arms.length,
+              itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+              replicates: runRecord.replicates,
+              matrix: matrixRecord,
+              armIds: document.spec.arms.map((arm) => arm.armId),
+              reportRoot: apexSweDevReportRoot(artifactsDir(context.workspaceDir), input.draftId),
+            })
+            : undefined;
       const additionalLimitations = [
         ...inspectAdditional,
         ...(suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation]),

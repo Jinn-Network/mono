@@ -1,117 +1,146 @@
-import type { ApexSweDevSelectionManifest } from "../apex-swe-dev/manifest.js";
-import { harnessReportsPresent } from "../apex-swe-dev/reports.js";
+import {
+  APEX_AGENTS_DATASET_REVISION,
+  APEX_AGENTS_DATASET_TASK_COUNT,
+  type ApexAgentsSelectionManifest,
+} from "../apex-agents/manifest.js";
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
-  officialApexSweDevConformance,
+  officialArchipelagoConformance,
   suiteLeaderboardLimitation,
   type SuiteComparability,
 } from "./comparability.js";
-import type { SuiteQuotePresentation } from "./from-harbor.js";
-import type { ApexSweDevSuiteProtocolSelection } from "./manifest.js";
+import type { SuiteProtocolSelection } from "./manifest.js";
 import { accountSuiteArmCells, type MatrixCellAccount } from "./run-complete.js";
+import { archipelagoGradesPresent } from "../apex-agents/grades.js";
+import type { SuiteQuotePresentation } from "./from-harbor.js";
 
-export function suiteSelectionFromApexSweDev(manifest: ApexSweDevSelectionManifest): ApexSweDevSuiteProtocolSelection {
+export function suiteSelectionFromApex(manifest: ApexAgentsSelectionManifest): SuiteProtocolSelection {
   return manifest.suite;
 }
 
-function methodBitsFromApex(manifest: ApexSweDevSelectionManifest): {
-  readonly protocol: "apex-swe-dev";
-  readonly coverage: ApexSweDevSuiteProtocolSelection["coverage"];
+/**
+ * Test seam only. Production callers leave it unset so the sealed 480-task size applies;
+ * a fixture dataset passes its own size to exercise the eligible branch without 480 tasks.
+ */
+export interface OfficialApexDatasetSize {
+  readonly officialDatasetTaskCount?: number;
+}
+
+function methodBitsFromApex(
+  manifest: ApexAgentsSelectionManifest,
+  officialDatasetTaskCount: number = APEX_AGENTS_DATASET_TASK_COUNT,
+): {
+  readonly protocol: "apex-agents";
+  readonly coverage: SuiteProtocolSelection["coverage"];
   readonly executionConformance: boolean;
   readonly k: number;
   readonly selectedCount: number;
   readonly datasetCount: number;
   readonly atifPresent: boolean;
   readonly datasetRevisionMatchesLeaderboardPin: boolean;
+  readonly datasetCountMatchesLeaderboardPin: boolean;
 } {
   const suite = manifest.suite;
   return {
-    protocol: "apex-swe-dev",
+    protocol: "apex-agents",
     coverage: suite.coverage,
-    // Defense in depth, not a runtime check: every input below is already a `z.literal` in
-    // `ApexSweDevSelectionManifestSchema`, so a parsed manifest cannot reach here non-conforming.
-    // Re-deriving the bit keeps the published conformance claim independent of the schema pins.
-    executionConformance: officialApexSweDevConformance({
+    executionConformance: officialArchipelagoConformance({
       k: suite.replicates,
-      nTrials: manifest.harness.nTrials,
-      timeoutSeconds: manifest.harness.timeoutSeconds,
-      timeoutOverride: manifest.harness.timeoutOverride,
-      resourceOverride: manifest.harness.resourceOverride,
-      evaluatorId: manifest.harness.adapterId,
-      messageLimit: manifest.harness.messageLimit,
+      archipelagoCommit: manifest.archipelago.commit,
+      agentId: manifest.archipelago.agentId,
+      maxSteps: manifest.archipelago.maxSteps,
+      timeoutSeconds: manifest.archipelago.timeoutSeconds,
+      judgeModel: manifest.archipelago.judgeModel,
+      judgeThinking: manifest.archipelago.judgeThinking,
+      webSearch: manifest.archipelago.webSearch,
+      timeoutOverride: manifest.archipelago.timeoutOverride,
+      resourceOverride: manifest.archipelago.resourceOverride,
+      evaluatorId: manifest.archipelago.adapterId,
     }),
     k: suite.replicates,
     selectedCount: suite.selectedTaskNames.length,
     datasetCount: suite.datasetTaskCount,
     atifPresent: suite.atifRequired,
-    datasetRevisionMatchesLeaderboardPin: suite.datasetRevision === manifest.dataset.revision,
+    datasetRevisionMatchesLeaderboardPin: suite.datasetRevision === APEX_AGENTS_DATASET_REVISION,
+    datasetCountMatchesLeaderboardPin: suite.datasetTaskCount === officialDatasetTaskCount,
   };
 }
 
 function presentSuiteQuote(
   input: { readonly armCount: number; readonly itemCount: number; readonly replicates: number },
-  suite: ApexSweDevSuiteProtocolSelection,
+  suite: SuiteProtocolSelection,
   bits: SuiteComparability,
   eligible: boolean,
-  apxVersion: string,
+  harnessVersion: string,
 ): SuiteQuotePresentation {
   return {
     ...bits,
+    protocol: suite.protocol,
     methodLeaderboardEligible: eligible,
     cellCount: `${input.itemCount} × ${input.armCount} × ${input.replicates}`,
-    harnessVersion: apxVersion,
+    harnessVersion,
     selectedTaskCount: suite.selectedTaskNames.length,
     armCount: input.armCount,
     replicates: input.replicates,
   };
 }
 
-export function suiteQuoteFromApexSweDev(input: {
-  readonly manifest: ApexSweDevSelectionManifest;
+export function suiteQuoteFromApex(input: {
+  readonly manifest: ApexAgentsSelectionManifest;
   readonly armCount: number;
   readonly itemCount: number;
   readonly replicates: number;
-}): SuiteQuotePresentation {
-  const suite = suiteSelectionFromApexSweDev(input.manifest);
-  const method = methodBitsFromApex(input.manifest);
-  return presentSuiteQuote(input, suite, deriveSuiteComparability(method), methodLeaderboardEligible(method), input.manifest.harness.apxVersion);
+} & OfficialApexDatasetSize): SuiteQuotePresentation {
+  const suite = suiteSelectionFromApex(input.manifest);
+  const method = methodBitsFromApex(input.manifest, input.officialDatasetTaskCount);
+  return presentSuiteQuote(input, suite, deriveSuiteComparability(method), methodLeaderboardEligible(method), input.manifest.archipelago.commit);
 }
 
-export function suiteFactsFromAccountedApexSweDevRun(input: {
-  readonly manifest: ApexSweDevSelectionManifest;
+export function suiteFactsFromApexManifest(input: {
+  readonly manifest: ApexAgentsSelectionManifest;
+  readonly armCount: number;
+  readonly itemCount: number;
+  readonly replicates: number;
+} & OfficialApexDatasetSize): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
+  const quote = suiteQuoteFromApex(input);
+  return { quote, limitation: suiteLeaderboardLimitation(quote, "apex-agents") };
+}
+
+export function suiteFactsFromAccountedApexRun(input: {
+  readonly manifest: ApexAgentsSelectionManifest;
   readonly armCount: number;
   readonly itemCount: number;
   readonly replicates: number;
   readonly matrix: { readonly cells: readonly MatrixCellAccount[] };
   readonly armIds: readonly string[];
   readonly reportRoot: string;
-}): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
-  const suite = suiteSelectionFromApexSweDev(input.manifest);
-  const method = methodBitsFromApex(input.manifest);
+} & OfficialApexDatasetSize): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
+  const suite = suiteSelectionFromApex(input.manifest);
+  const method = methodBitsFromApex(input.manifest, input.officialDatasetTaskCount);
   const cellsAccounted = input.armIds.length > 0
     && input.armIds.every((armId) => accountSuiteArmCells(input.matrix, suite, armId));
-  const reports = harnessReportsPresent({
+  const grades = archipelagoGradesPresent({
     reportRoot: input.reportRoot,
-    tasks: input.manifest.selectedTasks,
+    taskIds: suite.selectedTaskNames,
   });
-  const bits = deriveSuiteComparability({ ...method, cellsAccounted, harnessReportsPresent: reports });
-  const quote = presentSuiteQuote(input, suite, bits, methodLeaderboardEligible(method), input.manifest.harness.apxVersion);
-  return { quote, limitation: suiteLeaderboardLimitation(quote, "apex-swe-dev") };
+  const bits = deriveSuiteComparability({ ...method, cellsAccounted, archipelagoGradesPresent: grades });
+  const quote = presentSuiteQuote(input, suite, bits, methodLeaderboardEligible(method), input.manifest.archipelago.commit);
+  return { quote, limitation: suiteLeaderboardLimitation(quote, "apex-agents") };
 }
 
-export function suiteComparabilityForApexSweDevArm(input: {
-  readonly manifest: ApexSweDevSelectionManifest;
+export function suiteComparabilityForApexArm(input: {
+  readonly manifest: ApexAgentsSelectionManifest;
   readonly matrix: { readonly cells: readonly MatrixCellAccount[] };
   readonly armId: string;
   readonly reportRoot: string;
-}): SuiteComparability {
-  const suite = suiteSelectionFromApexSweDev(input.manifest);
-  const method = methodBitsFromApex(input.manifest);
+} & OfficialApexDatasetSize): SuiteComparability {
+  const suite = suiteSelectionFromApex(input.manifest);
+  const method = methodBitsFromApex(input.manifest, input.officialDatasetTaskCount);
   const cellsAccounted = accountSuiteArmCells(input.matrix, suite, input.armId);
-  const reports = harnessReportsPresent({
+  const grades = archipelagoGradesPresent({
     reportRoot: input.reportRoot,
-    tasks: input.manifest.selectedTasks,
+    taskIds: suite.selectedTaskNames,
   });
-  return deriveSuiteComparability({ ...method, cellsAccounted, harnessReportsPresent: reports });
+  return deriveSuiteComparability({ ...method, cellsAccounted, archipelagoGradesPresent: grades });
 }

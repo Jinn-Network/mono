@@ -77,6 +77,24 @@ describe("createLocalVenue evaluators", () => {
     });
   });
 
+  it("accepts the official SWE-bench Verified harness adapter", () => {
+    venue = createLocalVenue({
+      workspaceDir,
+      now: NOW,
+      evaluationRuntime: { adapterId: "swebench-harness", selectionManifestSha256: "a".repeat(64) },
+    });
+    expect(venue.evaluators).toHaveLength(1);
+  });
+
+  it("accepts the official APEX-Agents Archipelago adapter", () => {
+    venue = createLocalVenue({
+      workspaceDir,
+      now: NOW,
+      evaluationRuntime: { adapterId: "archipelago", selectionManifestSha256: "a".repeat(64) },
+    });
+    expect(venue.evaluators).toHaveLength(1);
+  });
+
   it("accepts the official APEX-SWE-dev dual-harness adapter", () => {
     venue = createLocalVenue({
       workspaceDir,

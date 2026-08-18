@@ -63,7 +63,7 @@ import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
 import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
 import { requireRunState, writeRunState } from "../run/state.js";
-import { artifactsDir, draftPath } from "../workspace/layout.js";
+import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
@@ -75,9 +75,15 @@ import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
+import { suiteFactsFromAccountedSwebenchRun } from "../runtime/suite-protocol/from-swebench.js";
+import { suiteFactsFromAccountedApexRun } from "../runtime/suite-protocol/from-apex.js";
 import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
 import { apexSweDevReportRoot } from "../runtime/apex-swe-dev/launcher.js";
-import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex.js";
+import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex-swe-dev.js";
+import { resolveSwebenchHarnessRunId, swebenchModelNameOrPathByArm } from "../runtime/swe-bench-verified/launcher.js";
+import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
+import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
+import { artifactsDir } from "../workspace/layout.js";
 
 export interface RunReportInput {
   readonly draftId: string;
@@ -183,17 +189,39 @@ export function runReport(
             jobDir: join(harborArmJobsDir(clockedContext.workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId)),
           })),
         })
-        : document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID
-          ? suiteFactsFromAccountedApexSweDevRun({
-            manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+        : document.spec.evaluationRuntime?.adapterId === "swebench-harness"
+          ? suiteFactsFromAccountedSwebenchRun({
+            manifest: SwebenchVerifiedSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
             armCount: runRecord.arms.length,
             itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
             replicates: runRecord.replicates,
             matrix: matrixRecord,
             armIds: document.spec.arms.map((arm) => arm.armId),
-            reportRoot: apexSweDevReportRoot(artifactsDir(clockedContext.workspaceDir), input.draftId),
+            reportRoot: join(artifactsDir(clockedContext.workspaceDir), "swebench-harness", input.draftId),
+            runId: resolveSwebenchHarnessRunId(join(artifactsDir(clockedContext.workspaceDir), "swebench-harness", input.draftId), runSha256),
+            modelNameOrPathByArm: swebenchModelNameOrPathByArm(document.spec.arms),
           })
-        : undefined;
+          : document.spec.evaluationRuntime?.adapterId === "archipelago"
+            ? suiteFactsFromAccountedApexRun({
+              manifest: ApexAgentsSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+              armCount: runRecord.arms.length,
+              itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+              replicates: runRecord.replicates,
+              matrix: matrixRecord,
+              armIds: document.spec.arms.map((arm) => arm.armId),
+              reportRoot: join(artifactsDir(clockedContext.workspaceDir), "archipelago", input.draftId),
+            })
+          : document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID
+            ? suiteFactsFromAccountedApexSweDevRun({
+              manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+              armCount: runRecord.arms.length,
+              itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+              replicates: runRecord.replicates,
+              matrix: matrixRecord,
+              armIds: document.spec.arms.map((arm) => arm.armId),
+              reportRoot: apexSweDevReportRoot(artifactsDir(clockedContext.workspaceDir), input.draftId),
+            })
+            : undefined;
       const suiteLimits = suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation];
       let binaryLimits: readonly string[] = [];
       if (selected.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {

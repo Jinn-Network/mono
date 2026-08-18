@@ -309,6 +309,27 @@ describe("SWE-rebench grading on the product local venue", () => {
     }
   }, 60_000);
 
+  it("refuses the swe-rebench evaluator when the run is locked to archipelago", async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), "apex-refuses-swe-rebench-"));
+    const venue = createLocalVenue({
+      workspaceDir,
+      now: NOW,
+      evaluationRuntime: { adapterId: "archipelago", selectionManifestSha256: "a".repeat(64) },
+    });
+    try {
+      const { deliveryBytes, evaluationSpec, patchBytes, task } = gradingFixture();
+      await expect(venue.prepareEvaluationCell({
+        subjectTaskBytes: task.bytes,
+        subjectDeliveryBytes: deliveryBytes,
+        resultArtifacts: [{ name: "patch", bytes: patchBytes }],
+        evaluationSpecBytes: evaluationSpec.bytes,
+      })).rejects.toThrow(/APEX-Agents official suite refuses the swe-rebench evaluator/u);
+    } finally {
+      await venue.shutdown();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("refuses the swe-rebench evaluator when the run is locked to apex-swe-dev", async () => {
     const workspaceDir = await mkdtemp(join(tmpdir(), "apex-swe-dev-refuses-swe-rebench-"));
     const venue = createLocalVenue({
@@ -324,6 +345,27 @@ describe("SWE-rebench grading on the product local venue", () => {
         resultArtifacts: [{ name: "patch", bytes: patchBytes }],
         evaluationSpecBytes: evaluationSpec.bytes,
       })).rejects.toThrow(/APEX-SWE-dev official suite refuses the swe-rebench evaluator/u);
+    } finally {
+      await venue.shutdown();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses the swe-rebench evaluator when the run is locked to swebench-harness", async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), "verified-refuses-swe-rebench-"));
+    const venue = createLocalVenue({
+      workspaceDir,
+      now: NOW,
+      evaluationRuntime: { adapterId: "swebench-harness", selectionManifestSha256: "a".repeat(64) },
+    });
+    try {
+      const { deliveryBytes, evaluationSpec, patchBytes, task } = gradingFixture();
+      await expect(venue.prepareEvaluationCell({
+        subjectTaskBytes: task.bytes,
+        subjectDeliveryBytes: deliveryBytes,
+        resultArtifacts: [{ name: "patch", bytes: patchBytes }],
+        evaluationSpecBytes: evaluationSpec.bytes,
+      })).rejects.toThrow(/SWE-bench Verified official suite refuses the swe-rebench evaluator/u);
     } finally {
       await venue.shutdown();
       await rm(workspaceDir, { recursive: true, force: true });

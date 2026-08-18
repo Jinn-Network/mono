@@ -1,11 +1,13 @@
 import type { HarborSelectionManifest } from "../harbor/manifest.js";
 import { TERMINAL_BENCH_2_1_DATASET_REF } from "../terminal-bench-2-1/manifest.js";
+import { TERMINAL_BENCH_3_0_DATASET_REF } from "../terminal-bench-3-0/manifest.js";
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
   suiteLeaderboardLimitation,
   type SuiteComparability,
+  type SuiteProtocolId,
 } from "./comparability.js";
 import { SUITE_PROTOCOL_PROFILE, SuiteProtocolSelectionSchema, type SuiteProtocolSelection } from "./manifest.js";
 import { allArmsRunComplete, assessArmRunComplete, type MatrixCellAccount } from "./run-complete.js";
@@ -13,8 +15,17 @@ import { allArmsRunComplete, assessArmRunComplete, type MatrixCellAccount } from
 export function suiteSelectionFromHarbor(manifest: HarborSelectionManifest): SuiteProtocolSelection | undefined {
   const value = manifest.profiles?.[SUITE_PROTOCOL_PROFILE];
   if (value === undefined) return undefined;
+  // Absent means "not a suite run". Present-but-invalid means a tampered or forged sealed
+  // profile and must fail loud — `runtime/adapter.ts` parses the same bytes and throws.
   const parsed = SuiteProtocolSelectionSchema.parse(value);
-  return parsed.protocol === "terminal-bench-2.1" ? parsed : undefined;
+  // Only the Terminal-Bench protocols bind via Harbor profiles; Verified, APEX-Agents, and
+  // APEX-SWE-dev bind via their own selection manifests.
+  return parsed.protocol === "terminal-bench-2.1" || parsed.protocol === "terminal-bench-3.0" ? parsed : undefined;
+}
+
+function officialPinFor(protocol: SuiteProtocolId): string {
+  if (protocol === "terminal-bench-3.0") return TERMINAL_BENCH_3_0_DATASET_REF;
+  return TERMINAL_BENCH_2_1_DATASET_REF;
 }
 
 export function taskNameByDigestFromSuite(suite: SuiteProtocolSelection): Readonly<Record<string, string>> {
@@ -22,11 +33,12 @@ export function taskNameByDigestFromSuite(suite: SuiteProtocolSelection): Readon
 }
 
 export interface SuiteQuotePresentation extends SuiteComparability {
+  readonly protocol: SuiteProtocolId;
   readonly methodLeaderboardEligible: boolean;
   readonly cellCount: string;
-  /** Terminal-Bench 2.1 only: the Harbor version this selection pinned. */
+  /** Harbor-family protocols only: the Harbor version this selection pinned. */
   readonly harborVersion?: string;
-  /** Protocols whose executor is not Harbor: APEX-SWE-dev carries the `apx` version here. */
+  /** Protocols whose executor is not Harbor carry their harness version here. */
   readonly harnessVersion?: string;
   readonly selectedTaskCount: number;
   readonly armCount: number;
@@ -58,7 +70,7 @@ function methodBitsFromHarbor(input: {
     selectedCount: input.suite.selectedTaskNames.length,
     datasetCount: input.suite.datasetTaskCount,
     atifPresent: input.suite.atifRequired,
-    datasetRevisionMatchesLeaderboardPin: input.suite.datasetRevision === TERMINAL_BENCH_2_1_DATASET_REF,
+    datasetRevisionMatchesLeaderboardPin: input.suite.datasetRevision === officialPinFor(input.suite.protocol),
   };
 }
 
@@ -75,6 +87,7 @@ function presentSuiteQuote(
 ): SuiteQuotePresentation {
   return {
     ...bits,
+    protocol: suite.protocol,
     methodLeaderboardEligible: eligible,
     cellCount: `${input.itemCount} × ${input.armCount} × ${input.replicates}`,
     harborVersion: input.manifest.harbor.version,
@@ -106,7 +119,7 @@ export function suiteFactsFromHarborManifest(input: {
   if (quote === undefined) return undefined;
   return {
     quote,
-    limitation: suiteLeaderboardLimitation(quote),
+    limitation: suiteLeaderboardLimitation(quote, quote.protocol),
   };
 }
 
@@ -129,7 +142,7 @@ export function suiteFactsFromAccountedRun(input: {
   })));
   const bits = deriveSuiteComparability({ ...method, ...complete });
   const quote = presentSuiteQuote(input, suite, bits, methodLeaderboardEligible(method));
-  return { quote, limitation: suiteLeaderboardLimitation(quote) };
+  return { quote, limitation: suiteLeaderboardLimitation(quote, quote.protocol) };
 }
 
 export function suiteComparabilityForArm(input: {
