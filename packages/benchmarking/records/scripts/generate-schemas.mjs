@@ -143,6 +143,9 @@ function postProcess(filename, schema) {
   if (filename === "benchmark.schema.json" && schema.properties.reveal?.properties?.notBefore !== undefined) {
     schema.properties.reveal.properties.notBefore.format = "date-time";
   }
+  // Canonical identifier claim, last member per the execution-evidence schema precedent.
+  // The public-surface builder maps this $id to its served path under the spec origin.
+  schema.$id = `https://spec.jinn.network/protocols/benchmarking/v1/schemas/${filename}`;
   return schema;
 }
 

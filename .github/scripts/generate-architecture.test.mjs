@@ -142,7 +142,11 @@ test('release, public-surface, ownership, and transition views reuse their canon
       path === 'packages/benchmarking/records/schemas/benchmark.schema.json'
     )),
     {
-      claim: null,
+      claim: {
+        field: '$id',
+        identifier: 'https://spec.jinn.network/protocols/benchmarking/v1/schemas/benchmark.schema.json',
+        servedPath: 'protocols/benchmarking/v1/schemas/benchmark.schema.json',
+      },
       export: null,
       kind: 'schemas',
       package: '@jinn-network/benchmarking-records',
