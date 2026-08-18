@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { canonicalJsonBytes, parseDsseEnvelope, type DsseSigner } from "@jinn-network/trust-core";
 import {
   EVALUATION_TASK_PROFILE_URI,
+  PREDICTION_FORECAST_PROFILE_URI,
   REPOSITORY_WORK_PROFILE_URI,
 } from "@jinn-network/task-execution-profiles";
 import type { LocalProvisionerInput } from "@jinn-network/task-execution-backend-local";
@@ -134,6 +135,46 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(workspaceRoot, { recursive: true, force: true });
+});
+
+describe("createLocalProvisioner Harbor/Pier selection", () => {
+  const harbor = {
+    workspaceDir: "/tmp",
+    selectionManifestSha256: "a".repeat(64),
+    manifest: {} as never,
+    host: {} as never,
+  };
+
+  it("selects the Harbor job provisioner for both harbor and pier harness pins", () => {
+    const selector = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      harbor,
+    });
+    const task = { profile: { uri: PREDICTION_FORECAST_PROFILE_URI } };
+    const attempt = { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 };
+    expect(selector({
+      task,
+      sealedTaskBytes: encode("{}"),
+      dispatchContextBytes: encode("{}"),
+      submission: { requirements: { harness: { id: "pier", version: "0.3.1" } } },
+      attempt,
+    } as never).id).toBe("benchmark-product-harbor-dir-v1");
+    expect(selector({
+      task,
+      sealedTaskBytes: encode("{}"),
+      dispatchContextBytes: encode("{}"),
+      submission: { requirements: { harness: { id: "harbor", version: "0.21.4" } } },
+      attempt,
+    } as never).id).toBe("benchmark-product-harbor-dir-v1");
+    expect(selector({
+      task,
+      sealedTaskBytes: encode("{}"),
+      dispatchContextBytes: encode("{}"),
+      submission: { requirements: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } },
+      attempt,
+    } as never).id).toBe("benchmark-product-solve-dir-v1");
+  });
 });
 
 describe("createLocalProvisioner evaluator selection", () => {

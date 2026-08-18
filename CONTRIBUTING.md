@@ -110,12 +110,14 @@ If a PR doesn't fit one of these shapes, it's mis-scoped. Split it.
 
 ## Review policy
 
-**Agent PR review parity** (handbook rule 4): Codex / Opus / Sonnet / Claude PRs go through the same review gate as human PRs. No agent self-merge. The one allowed relaxation is `fix(incident)` with documented reviewer justification.
+**Reviewed, then queued** (handbook rule 4, rewritten by [DR-2026-08-18-b](log/decisions/2026-08-18-merge-queue-on-next.md)): review is a pipeline stage, not an identity ritual. Every PR receives an agent review pass and carries an approving review from the operator credential set before it can enqueue; CODEOWNERS paths require a code-owner credential. Which operator credential reviews is immaterial — GitHub simply will not record the authoring account's own approval, so approvals land under a non-author credential as platform plumbing, not an independence claim. Self-enqueue is permitted once review and required checks are green, and the merge queue on `next` is the only merger of ordinary PRs. *From the flip ([#2799](https://github.com/Jinn-Network/mono/issues/2799)); until then the pre-queue rule 4(b) ordinary-merge carve-out (#1735) remains in force.* Exceptions: `fix(incident)` reviewer relaxation with documented justification; mechanical conflict resolution via the children ladder.
 
-Canonical-doc changes (`SPEC.md`, `BRAND.md`, `THESIS.md`, `GROWTH.md`, `GLOSSARY.md`, `CLAUDE.md`, `README.md`) require:
+Canonical-doc changes (`SPEC.md`, `BRAND.md`, `THESIS.md`, `GROWTH.md`, `GLOSSARY.md`) require:
 - A linked GitHub Discussion proposing the change.
 - CODEOWNERS approval (see [`.github/CODEOWNERS`](.github/CODEOWNERS)).
 - Downstream-doc review per [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).
+
+`CLAUDE.md` and `README.md` are root-level capitalised files but are treated as **meta** per [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md): they describe the repo and the agent contract, and are **exempt from the spec-proposal / linked-Discussion requirement** — still CODEOWNERS-reviewed, and still subject to downstream-doc review.
 
 ## Prediction-freeze guardrail
 
@@ -130,7 +132,7 @@ Full text in [`docs/engineering/handbook.md`](docs/engineering/handbook.md#ai-wo
 1. Worktree-for-multi-agent — multi-agent or speculative subagent work uses a separate git worktree (current convention: `git worktree add ../jinn-mono_worktrees/<name>`).
 2. Issues frame problems, not solutions — GitHub Issue body = context + impact + acceptance criteria; solutions live in design sessions or implementation plans.
 3. GitHub Issues are the single SoR for engineering work — per DR-2026-05-18, `bd` retires; all new engineering work originates as a GitHub Issue on `Jinn-Network/mono`.
-4. Agent PR review parity — Codex / Opus / Sonnet / Claude PRs reviewed like human PRs. No agent self-merge. Exception: `fix(incident)` with documented reviewer justification.
+4. Reviewed, then queued — every PR carries an agent review pass and an approving review from the operator credential set before it can enqueue; CODEOWNERS paths need a code-owner credential; self-enqueue is permitted once review and required checks are green, and the merge queue on `next` is the only merger of ordinary PRs. *From the flip ([#2799](https://github.com/Jinn-Network/mono/issues/2799)); until then the pre-queue rule 4(b) ordinary-merge carve-out (#1735) remains in force.* Exceptions: `fix(incident)` reviewer relaxation with documented justification; mechanical conflict resolution via the children ladder.
 5. _(Deferred — see [`jinn-mono-8qbc`](https://github.com/Jinn-Network/mono/issues?q=jinn-mono-8qbc))_
 6. Integration tests > mocks for migration / contract surfaces.
 7. TDD for new features, regression test for fixes.

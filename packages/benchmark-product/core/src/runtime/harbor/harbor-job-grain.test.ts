@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { recordHarborDispatchMapping } from "../../venue/provisioner.js";
-import { harborArmFollowUpJobName, harborArmJobName, harborJobResultFinished, harborJobScopedTempDir, harborPlannedJobChildEnv, harborPlannedJobWaitMs, harborPredictionFromVerifierReward, harborTrialResultTerminal } from "./launcher.js";
+import { harborArmFollowUpJobName, harborArmJobName, harborJobResultFinished, harborJobScopedTempDir, harborPlannedJobChildEnv, harborPlannedJobWaitMs, harborPredictionFromVerifierReward, harborTrialResultTerminal, pierPlannedJobWaitMs } from "./launcher.js";
 import {
   HarborJobConfigSchema,
   assertHarborRetryPinnedOff,
@@ -105,6 +105,8 @@ describe("Harbor planned-trial grain", () => {
     expect(harborPlannedJobWaitMs(1)).toBe(1_020_000);
     expect(harborPlannedJobWaitMs(5)).toBe(4_620_000);
     expect(harborPlannedJobWaitMs(0)).toBe(1_020_000);
+    expect(pierPlannedJobWaitMs(4)).toBe(36_120_000);
+    expect(pierPlannedJobWaitMs(1)).toBe(9_120_000);
     expect(harborJobResultFinished({ finished_at: null })).toBe(false);
     expect(harborJobResultFinished({ finished_at: "2026-01-01T00:00:00Z" })).toBe(true);
     expect(harborJobResultFinished({ id: "job", n_total_trials: 1 })).toBe(true);
@@ -114,6 +116,10 @@ describe("Harbor planned-trial grain", () => {
     expect(harborTrialResultTerminal({ finished_at: null })).toBe(false);
     expect(harborTrialResultTerminal({ finished_at: "2026-01-01T00:00:00Z" })).toBe(true);
     expect(JSON.parse(new TextDecoder().decode(harborPredictionFromVerifierReward("1\n", "2026-01-01T00:00:00Z")))).toEqual({
+      probabilityYes: "1.0",
+      submittedAt: "2026-01-01T00:00:00Z",
+    });
+    expect(JSON.parse(new TextDecoder().decode(harborPredictionFromVerifierReward(JSON.stringify({ reward: 1 }), "2026-01-01T00:00:00Z")))).toEqual({
       probabilityYes: "1.0",
       submittedAt: "2026-01-01T00:00:00Z",
     });

@@ -106,8 +106,9 @@ import {
 import {
   assertInspectSelectionUndrifted,
   inspectWorkerPath,
+  readInspectEvalSelectionManifest,
   readInspectHostBinding,
-  readInspectSelectionManifest,
+  readInspectSelectionTemplate,
 } from "../runtime/inspect/host.js";
 import { makeInspectLauncher } from "../runtime/inspect/launcher.js";
 import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
@@ -128,11 +129,11 @@ import {
   inspectLogVerifierMethod,
   type InspectEvaluationStrategy,
 } from "../runtime/inspect/assurance.js";
-import { HARBOR_ADAPTER_ID, HarborSelectionManifestSchema, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
+import { HarborSelectionManifestSchema, isHarborCompatibleAdapterId, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
 import { APEX_SWE_DEV_ADAPTER_ID } from "../runtime/apex-swe-dev/manifest.js";
 import { ARCHIPELAGO_ADAPTER_ID, SWE_BENCH_HARNESS_ADAPTER_ID } from "../runtime/suite-protocol/comparability.js";
 import { readHarborHostBinding } from "../runtime/harbor/host.js";
-import { makeHarborLauncher, HARBOR_LAUNCHER_ID } from "../runtime/harbor/launcher.js";
+import { makeHarborLauncher } from "../runtime/harbor/launcher.js";
 import { suiteSelectionFromHarbor, taskNameByDigestFromSuite } from "../runtime/suite-protocol/from-harbor.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
@@ -504,7 +505,7 @@ function writeEvaluationDeploymentModule(
     readonly allowPublicNetwork: boolean;
   },
   inspect?: {
-    readonly manifest: ReturnType<typeof readInspectSelectionManifest>;
+    readonly manifest: ReturnType<typeof readInspectSelectionTemplate>;
     readonly selectionManifestSha256: string;
     readonly workerPath: string;
     readonly ociRunnerPath: string;
@@ -644,7 +645,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     runtimeId !== "jinn-native"
     && runtimeId !== INSPECT_ADAPTER_ID
     && runtimeId !== INSPECT_BINARY_JUDGE_ADAPTER_ID
-    && runtimeId !== HARBOR_ADAPTER_ID
+    && !isHarborCompatibleAdapterId(runtimeId)
     && runtimeId !== SWE_BENCH_HARNESS_ADAPTER_ID
     && runtimeId !== ARCHIPELAGO_ADAPTER_ID
     && runtimeId !== APEX_SWE_DEV_ADAPTER_ID
@@ -652,7 +653,10 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     refuse("venue-unavailable", "evaluationRuntime.adapterId", `unsupported evaluation runtime "${runtimeId}"`);
   }
   const inspectSelection = runtimeId === INSPECT_ADAPTER_ID
-    ? readInspectSelectionManifest(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
+    ? readInspectSelectionTemplate(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
+    : undefined;
+  const inspectEval = runtimeId === INSPECT_ADAPTER_ID
+    ? readInspectEvalSelectionManifest(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
     : undefined;
   const inspectHost = runtimeId === INSPECT_ADAPTER_ID
     ? readInspectHostBinding(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
@@ -672,10 +676,10 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const inspectEvaluationStrategy = inspectSelection === undefined
     ? undefined
     : options.inspectEvaluationStrategy ?? "embedded";
-  const harborSelection: HarborSelectionManifest | undefined = runtimeId === HARBOR_ADAPTER_ID
+  const harborSelection: HarborSelectionManifest | undefined = isHarborCompatibleAdapterId(runtimeId)
     ? HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256))))
     : undefined;
-  const harborHost = runtimeId === HARBOR_ADAPTER_ID
+  const harborHost = isHarborCompatibleAdapterId(runtimeId)
     ? readHarborHostBinding(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
     : undefined;
 
@@ -759,6 +763,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
           selectionManifestSha256: options.evaluationRuntime!.selectionManifestSha256,
           manifest: inspectSelection,
           host: inspectHost,
+          ...(inspectEval === undefined ? {} : { inspectEval: inspectEval }),
           ...(inspectEvaluationStrategy === "embedded"
             ? { embeddedEvaluator: evaluators[0]! }
             : {}),
@@ -1155,7 +1160,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     };
   }
   if (harborLauncher !== undefined && harborSelection !== undefined && harborHost !== undefined) {
-    launcherDeployments[HARBOR_LAUNCHER_ID] = {
+    launcherDeployments[harborLauncher.id] = {
       executable: { path: harborHost.executable, digest: harborSelection.harbor.executableSha256 },
       async probe() {
         const ready = await harborLauncher.probe?.();

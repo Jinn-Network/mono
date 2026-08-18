@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Record-kind URIs follow the platform grammar `https://spec.jinn.network/records/<segment>/<major>.<minor>`.
+ * Record-kind URIs follow the platform grammar `https://spec.jinn.network/records/<segment>/v<major>`
+ * (major-only versioning per DR-2026-08-04 Decision 4; a breaking change is a new name, never a
+ * minor segment — enforced by `CANONICAL_VERSION_GRAMMAR` in record-discovery-protocol).
  * Media types follow `application/vnd.jinn.<segment>.v<major>+json`.
  */
 export const TRACE_PROTOCOL =

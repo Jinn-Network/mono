@@ -1341,5 +1341,6 @@
       }
     ]
   },
-  "$comment": "Runtime checks: canonical byte equality, deterministic accounting order, comparable registration boundaries, and delegate authorization effective no later than close."
+  "$comment": "Runtime checks: canonical byte equality, deterministic accounting order, comparable registration boundaries, and delegate authorization effective no later than close.",
+  "$id": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/benchmark-accounting.schema.json"
 }

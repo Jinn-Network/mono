@@ -1,7 +1,7 @@
 import type { VerdictRule } from "@jinn-network/task-execution-profiles";
 import type { EvaluationRuntimeBinding, ResolvedAssurance } from "../../domain/draft.js";
 import { deriveInspectEvaluationStrategy } from "./assurance.js";
-import { readInspectSelectionManifest } from "./host.js";
+import { readInspectSelectionTemplate } from "./host.js";
 import {
   INSPECT_ADAPTER_ID,
   isInspectMultiScorerSelection,
@@ -94,7 +94,7 @@ export function inspectRuntimeMethodForBinding(
 ): InspectRuntimeMethodDisclosure | undefined {
   if (binding?.adapterId !== INSPECT_ADAPTER_ID) return undefined;
   return describeInspectRuntimeMethod(
-    readInspectSelectionManifest(workspaceDir, binding.selectionManifestSha256),
+    readInspectSelectionTemplate(workspaceDir, binding.selectionManifestSha256),
     binding.selectionManifestSha256,
     assurance,
   );

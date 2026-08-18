@@ -1,10 +1,16 @@
 import type { HarborSelectionManifest } from "../harbor/manifest.js";
+import {
+  DEEP_SWE_V11_GIT_SHA,
+  DEEP_SWE_V11_TASK_COUNT,
+  DEEP_SWE_V11_TASKS_TREE_SHA,
+} from "../deep-swe-v1.1/manifest.js";
 import { TERMINAL_BENCH_2_1_DATASET_REF } from "../terminal-bench-2-1/manifest.js";
 import { TERMINAL_BENCH_3_0_DATASET_REF } from "../terminal-bench-3-0/manifest.js";
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
+  officialPierExecutionConformance,
   suiteLeaderboardLimitation,
   type SuiteComparability,
   type SuiteProtocolId,
@@ -18,9 +24,13 @@ export function suiteSelectionFromHarbor(manifest: HarborSelectionManifest): Sui
   // Absent means "not a suite run". Present-but-invalid means a tampered or forged sealed
   // profile and must fail loud — `runtime/adapter.ts` parses the same bytes and throws.
   const parsed = SuiteProtocolSelectionSchema.parse(value);
-  // Only the Terminal-Bench protocols bind via Harbor profiles; Verified, APEX-Agents, and
-  // APEX-SWE-dev bind via their own selection manifests.
-  return parsed.protocol === "terminal-bench-2.1" || parsed.protocol === "terminal-bench-3.0" ? parsed : undefined;
+  // Only the Terminal-Bench protocols and DeepSWE v1.1 bind via Harbor/Pier profiles; Verified,
+  // APEX-Agents, APEX-SWE-dev, and Inspect eval bind via their own selection manifests.
+  return parsed.protocol === "terminal-bench-2.1"
+    || parsed.protocol === "terminal-bench-3.0"
+    || parsed.protocol === "deep-swe-v1.1"
+    ? parsed
+    : undefined;
 }
 
 function officialPinFor(protocol: SuiteProtocolId): string {
@@ -40,6 +50,8 @@ export interface SuiteQuotePresentation extends SuiteComparability {
   readonly harborVersion?: string;
   /** Protocols whose executor is not Harbor carry their harness version here. */
   readonly harnessVersion?: string;
+  /** Inspect eval only: the Inspect version this selection pinned. */
+  readonly inspectVersion?: string;
   readonly selectedTaskCount: number;
   readonly armCount: number;
   readonly replicates: number;
@@ -49,6 +61,7 @@ function methodBitsFromHarbor(input: {
   readonly manifest: HarborSelectionManifest;
   readonly suite: SuiteProtocolSelection;
 }): {
+  readonly protocol: SuiteProtocolSelection["protocol"];
   readonly coverage: SuiteProtocolSelection["coverage"];
   readonly executionConformance: boolean;
   readonly k: number;
@@ -57,20 +70,40 @@ function methodBitsFromHarbor(input: {
   readonly atifPresent: boolean;
   readonly datasetRevisionMatchesLeaderboardPin: boolean;
 } {
-  return {
-    coverage: input.suite.coverage,
-    executionConformance: officialHarborExecutionConformance({
+  // `tasksTreeSha` is recomputed from the operator's task material at select, so this compares
+  // sealed bytes against the official pin rather than a constant against itself.
+  const pin = input.suite.protocol === "deep-swe-v1.1"
+    ? input.suite.datasetRevision === DEEP_SWE_V11_GIT_SHA
+      && input.suite.tasksTreeSha === DEEP_SWE_V11_TASKS_TREE_SHA
+      && input.suite.datasetTaskCount === DEEP_SWE_V11_TASK_COUNT
+    : input.suite.datasetRevision === officialPinFor(input.suite.protocol);
+  const executionConformance = input.suite.protocol === "deep-swe-v1.1"
+    ? officialPierExecutionConformance({
+      k: input.manifest.retryPolicy.nAttempts,
+      maxRetries: input.manifest.retryPolicy.maxRetries,
+      jobGrain: input.manifest.jobGrain ?? "per-dispatch",
+      environmentConfiguration: input.manifest.environment.configuration as Readonly<Record<string, unknown>>,
+      pierVersion: input.manifest.harbor.version,
+      adapterId: input.manifest.adapter.id,
+      environmentType: input.manifest.environment.type,
+      agentNames: input.manifest.arms.map((arm) => arm.jobAgent.name),
+    })
+    : officialHarborExecutionConformance({
       k: input.manifest.retryPolicy.nAttempts,
       maxRetries: input.manifest.retryPolicy.maxRetries,
       jobGrain: input.manifest.jobGrain ?? "per-dispatch",
       environmentConfiguration: input.manifest.environment.configuration as Readonly<Record<string, unknown>>,
       harborVersion: input.manifest.harbor.version,
-    }),
+    });
+  return {
+    protocol: input.suite.protocol,
+    coverage: input.suite.coverage,
+    executionConformance,
     k: input.suite.replicates,
     selectedCount: input.suite.selectedTaskNames.length,
     datasetCount: input.suite.datasetTaskCount,
     atifPresent: input.suite.atifRequired,
-    datasetRevisionMatchesLeaderboardPin: input.suite.datasetRevision === officialPinFor(input.suite.protocol),
+    datasetRevisionMatchesLeaderboardPin: pin,
   };
 }
 
