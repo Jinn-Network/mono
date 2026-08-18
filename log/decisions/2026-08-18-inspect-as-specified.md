@@ -69,12 +69,17 @@ Two doors, one engine:
    present, else `1`; the operator may set explicitly; seal whatever ran).
    No `inspect eval-set` orchestration and no Harbor Job overlay this train.
 
-4. **Aggregation is two-stage Inspect analysis, not Matrix votes.** Epoch-
-   reduce per sample (default `mean`; Task may set `pass_at_k` / `mode` / …)
-   then sample-aggregate (`accuracy` / `mean`). That reconstructed Inspect
-   number is the suite metric. Boolean `passValue` projections stay the cell
-   vote. Do not report the Boolean rate as the official Inspect score.
-   `inspectMetrics` and `inspectEpochReducers` remain pinned native analysis.
+4. **Aggregation is two-stage Inspect analysis, not Matrix votes — deferred
+   this train.** The intended suite metric is epoch-reduce per sample
+   (default `mean`; Task may set `pass_at_k` / `mode` / …) then
+   sample-aggregate (`accuracy` / `mean`). That reconstructed Inspect number
+   is not computed yet: the epoch reducer is probed and sealed with the
+   selection but never read, and the headline stays wilson@1 over the Boolean
+   cells. Boolean `passValue` projections stay the cell vote. Do not report
+   the Boolean rate as the official Inspect score. `inspectMetrics` and
+   `inspectEpochReducers` remain pinned native analysis. Computing the
+   two-stage number is a follow-up, alongside the rescoring, configurable
+   epochs, and eval-set orchestration already deferred.
 
 5. **Comparability stays two-axis.** Report v2 gains no new required fields.
    Reuse `leaderboardSubmitReady` with Inspect-eval copy: it means

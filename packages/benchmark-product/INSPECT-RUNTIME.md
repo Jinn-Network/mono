@@ -500,8 +500,10 @@ values, answers, explanations, metrics, and reductions only in the native log.
 An Inspect `multi_scorer()` remains one native scorer: its own reduction runs
 once inside Inspect and Jinn never reapplies it. Inspect metrics and epoch
 reducers are pinned native analysis configuration, not per-cell Jinn
-measurements. The suite metric for Inspect eval is epoch-reduce per
-sample, then sample-aggregate — not the Boolean cell-vote rate.
+measurements. A suite metric of epoch-reduce per sample then sample-aggregate
+remains deferred: the reducer is sealed with the selection but nothing computes
+that number yet, and the headline stays wilson@1 over the Boolean cells. Do not
+read the Boolean cell-vote rate as the official Inspect score.
 
 Jinn projections are narrower. Each selected output becomes one Boolean
 measurement by type-strict comparison with its sealed `passValue`; the sealed
