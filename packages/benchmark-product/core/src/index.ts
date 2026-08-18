@@ -173,11 +173,33 @@ export type {
   TerminalBench21SelectionResolution,
 } from "./runtime/terminal-bench-2-1/host.js";
 export {
+  APEX_SWE_DEV_ADAPTER_ID,
+  APEX_SWE_DEV_DATASET_ID,
+  APEX_SWE_DEV_DATASET_REVISION,
+  APEX_SWE_DEV_DATASET_TASK_COUNT,
+  APEX_SWE_HARNESS_REVISION,
+  APEX_SWE_DEV_PROFILE,
+  APEX_SWE_DEV_SELECTION_ROLE,
+  ApexSweDevSelectionManifestSchema,
+  apexSweDevSelectionBytes,
+} from "./runtime/apex-swe-dev/manifest.js";
+export type { ApexSweDevSelectionManifest } from "./runtime/apex-swe-dev/manifest.js";
+export { resolveApexSweDevSelection, isGitLfsPointerBytes, readApexSweDevHostBinding } from "./runtime/apex-swe-dev/host.js";
+export type {
+  ApexSweDevSelectionRequest,
+  ApexSweDevSelectionResolution,
+} from "./runtime/apex-swe-dev/host.js";
+export { launchApexSweDev, collectApexSweDevCells, apexSweDevReportRoot } from "./runtime/apex-swe-dev/launcher.js";
+export { harnessReportsPresent, harnessReportPath, readHarnessReport } from "./runtime/apex-swe-dev/reports.js";
+export {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
+  APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION,
+  APEX_SWE_DEV_SUBMIT_CLOSED_SENTENCE,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION,
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
+  officialApexSweDevConformance,
   suiteLeaderboardLimitation,
 } from "./runtime/suite-protocol/comparability.js";
 export type { SuiteComparability, SuiteCoverage } from "./runtime/suite-protocol/comparability.js";
@@ -503,8 +525,10 @@ export {
   selectHarborRuntime,
   selectTerminalBench2Runtime,
   selectTerminalBench21Runtime,
+  selectApexSweDevRuntime,
   migrateTerminalBenchLegacyTask,
   exportHarborHubPackage,
+  exportApexSwePackage,
   updateDraft,
 } from "./operations/index.js";
 export type {
@@ -586,9 +610,14 @@ export type {
   SelectTerminalBench2RuntimeResult,
   SelectTerminalBench21RuntimeInput,
   SelectTerminalBench21RuntimeResult,
+  SelectApexSweDevRuntimeInput,
+  SelectApexSweDevRuntimeResult,
   ExportHarborHubPackageInput,
   ExportHarborHubPackageResult,
   HarborHubExportMode,
+  ExportApexSwePackageInput,
+  ExportApexSwePackageResult,
+  ApexSweExportMode,
   RunStatusCounts,
   RunDriverStatus,
   RunStatusResult,

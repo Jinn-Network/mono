@@ -18,7 +18,7 @@ function parseTask(bytes: Uint8Array) {
 export function deriveWorkspaceAuthoredTask(input: {
   readonly sourceBytes: Uint8Array;
   readonly author: string;
-  readonly sourceKind: "bundled-sample" | "swe-bench-import" | "terminal-bench-2-1";
+  readonly sourceKind: "bundled-sample" | "swe-bench-import" | "terminal-bench-2-1" | "apex-swe-dev";
   readonly sourceReceiptSha256?: string;
 }): AuthoredExactRecord {
   const sourceSha256 = sha256Hex(input.sourceBytes);

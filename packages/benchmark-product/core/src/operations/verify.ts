@@ -58,13 +58,16 @@ import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
+import { ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { apexSweDevReportRoot } from "../runtime/apex-swe-dev/launcher.js";
+import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex.js";
 import { buildWorkspaceTrustDeps } from "../report/trust.js";
 import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receipts.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
 import { foldRunJournal, readRunJournalEntries } from "../run/journal.js";
 import { readPreviewLog } from "../run/preview-log.js";
 import { requireRunState } from "../run/state.js";
-import { claimPackageArtifactPath } from "../workspace/layout.js";
+import { artifactsDir, claimPackageArtifactPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { assertClaimConsistency } from "../verification/claim-consistency.js";
 import type { OperationContext } from "./context.js";
@@ -222,6 +225,16 @@ export async function verifyRunWorkspace(
             jobDir: join(harborArmJobsDir(context.workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId)),
           })),
         })
+        : document.spec.evaluationRuntime?.adapterId === "apex-swe-dev"
+          ? suiteFactsFromAccountedApexSweDevRun({
+            manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+            armCount: runRecord.arms.length,
+            itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+            replicates: runRecord.replicates,
+            matrix: matrixRecord,
+            armIds: document.spec.arms.map((arm) => arm.armId),
+            reportRoot: apexSweDevReportRoot(artifactsDir(context.workspaceDir), input.draftId),
+          })
         : undefined;
       const additionalLimitations = [
         ...inspectAdditional,

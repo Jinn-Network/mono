@@ -643,6 +643,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     && runtimeId !== INSPECT_ADAPTER_ID
     && runtimeId !== INSPECT_BINARY_JUDGE_ADAPTER_ID
     && runtimeId !== HARBOR_ADAPTER_ID
+    && runtimeId !== "apex-swe-dev"
   ) {
     refuse("venue-unavailable", "evaluationRuntime.adapterId", `unsupported evaluation runtime "${runtimeId}"`);
   }
@@ -1284,7 +1285,13 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     const adapterKind: EvaluationAdapterKind = parserKey === parserAllowlistKey(PREDICTION_PARSER)
       ? "prediction"
       : parserKey === parserAllowlistKey(SWE_REBENCH_PARSER)
-        ? "swe-rebench"
+        ? runtimeId === "apex-swe-dev"
+          ? refuse(
+            "validation",
+            "evaluationSpecBytes.familyBlock.parser",
+            "APEX-SWE-dev official suite refuses the swe-rebench evaluator",
+          )
+          : "swe-rebench"
         : parserKey === parserAllowlistKey(BINARY_JUDGMENT_PARSER)
           ? "binary-judgment"
           : inspectVerifier !== undefined && parserKey === inspectVerifier.parserAllowlistKey

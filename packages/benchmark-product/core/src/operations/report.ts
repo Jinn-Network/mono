@@ -63,7 +63,7 @@ import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
 import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
 import { requireRunState, writeRunState } from "../run/state.js";
-import { draftPath } from "../workspace/layout.js";
+import { artifactsDir, draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
@@ -75,6 +75,9 @@ import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
+import { ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { apexSweDevReportRoot } from "../runtime/apex-swe-dev/launcher.js";
+import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex.js";
 
 export interface RunReportInput {
   readonly draftId: string;
@@ -180,6 +183,16 @@ export function runReport(
             jobDir: join(harborArmJobsDir(clockedContext.workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId)),
           })),
         })
+        : document.spec.evaluationRuntime?.adapterId === "apex-swe-dev"
+          ? suiteFactsFromAccountedApexSweDevRun({
+            manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+            armCount: runRecord.arms.length,
+            itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+            replicates: runRecord.replicates,
+            matrix: matrixRecord,
+            armIds: document.spec.arms.map((arm) => arm.armId),
+            reportRoot: apexSweDevReportRoot(artifactsDir(clockedContext.workspaceDir), input.draftId),
+          })
         : undefined;
       const suiteLimits = suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation];
       let binaryLimits: readonly string[] = [];

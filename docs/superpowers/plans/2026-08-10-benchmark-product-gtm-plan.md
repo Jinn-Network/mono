@@ -1,7 +1,7 @@
 # Benchmark Product: High-Level Go-to-Market Plan
 
 **Status:** Working strategy draft  
-**Version:** 0.4 (2026-08-17 — TB 2.1 named protocol vs Inspect select-a-task per [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md); engine-wrap vs campaign-overlay copy per [DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md); 2026-08-10 — §6 discovery gate rewritten commitment-gated per [DR-2026-08-10](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md); §10 Phase 1 aligned; authority note routed through the DR. v0.1 circulated outside the repo.)  
+**Version:** 0.4 (2026-08-18 — APEX-SWE-dev third named protocol per [DR-2026-08-18](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md); 2026-08-17 — TB 2.1 named protocol vs Inspect select-a-task per [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md); engine-wrap vs campaign-overlay copy per [DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md); 2026-08-10 — §6 discovery gate rewritten commitment-gated per [DR-2026-08-10](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md); §10 Phase 1 aligned; authority note routed through the DR. v0.1 circulated outside the repo.)  
 **Work shape:** `design`  
 **Date:** 2026-08-10  
 **Repository basis:** `integration/evidence-v1` is the canonical implementation branch. PR #2541 is the current standalone Benchmark Product candidate and remains open against that branch at the time of writing.
@@ -375,6 +375,10 @@ Terminal-Bench 2.1 is a different door: a **named official protocol** Colophon w
 
 A cousin method on TB tasks must not wear the suite name. A protocol-faithful slice is not a leaderboard-complete run. Copy must not claim Colophon placed a Hub row while community submissions are closed.
 
+APEX-SWE-dev is a third named protocol: wrap both Mercor harnesses on the public 50, Pass@1, never a Mercor leaderboard row ([DR-2026-08-18](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md)):
+
+> **Lock the official APEX-SWE-dev method. Colophon wraps Mercor's apx and run_e2e under that lock. The public 50 cannot wear the 200-task APEX-SWE leaderboard.**
+
 Potential distribution surfaces include:
 
 - integration guides;
@@ -633,6 +637,6 @@ Each campaign creates the foundation for Jinn Data and the later query product.
 
 ## Authority note
 
-Engine-wrap vs campaign-overlay copy in §3, §8.1, §8.3, and §15 is governed by [DR-2026-08-17 — Runtime engine direct mode](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md). TB 2.1 named-protocol copy in §8.3 is governed by [DR-2026-08-17-b — Official suite protocol](../../../log/decisions/2026-08-17-official-suite-protocol.md). `GROWTH.md` is unchanged.
+Engine-wrap vs campaign-overlay copy in §3, §8.1, §8.3, and §15 is governed by [DR-2026-08-17 — Runtime engine direct mode](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md). TB 2.1 named-protocol copy in §8.3 is governed by [DR-2026-08-17-b — Official suite protocol](../../../log/decisions/2026-08-17-official-suite-protocol.md). APEX-SWE-dev named-protocol copy in §8.3 is governed by [DR-2026-08-18 — Official suite protocol (APEX-SWE-dev)](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md). `GROWTH.md` is unchanged.
 
 The current `integration/evidence-v1` version of `GROWTH.md` encodes a harness-first strategy, and the standalone product design lineage (charter §5, program plan §3, PR #2541) fixes coding-agent builders as the first market. This draft departs from both. The departures are proposed — not silently applied — through [DR-2026-08-10 — Product-Led GTM and Default First Market](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md): the GROWTH.md strategy-layer revision routes through the canonical-doc process (linked GitHub Discussion + CODEOWNERS approval per `spec/2026-04-28-canonical-docs.md`), and the first-market amendment lands as a dated addendum on the program plan at ratification. Until the DR ratifies, GROWTH.md and the program plan remain authoritative as written.

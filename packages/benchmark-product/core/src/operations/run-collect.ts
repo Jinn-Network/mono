@@ -46,7 +46,10 @@ import {
   readRunJournalEntries,
 } from "../run/journal.js";
 import { requireRunState, writeRunState } from "../run/state.js";
-import { draftPath } from "../workspace/layout.js";
+import { ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { apexSweDevReportRoot } from "../runtime/apex-swe-dev/launcher.js";
+import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex.js";
+import { artifactsDir, draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
@@ -150,7 +153,23 @@ export function runCollect(
 
       const matrixSha256 = putSealedBytes(clockedContext.workspaceDir, assembled.bytes);
 
-      writeRunState(clockedContext.workspaceDir, input.draftId, { ...runState, matrixSha256, closedAt: at });
+      const nextState = { ...runState, matrixSha256, closedAt: at };
+      if (document.spec.evaluationRuntime?.adapterId === "apex-swe-dev") {
+        const apex = ApexSweDevSelectionManifestSchema.parse(
+          JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
+        );
+        const facts = suiteFactsFromAccountedApexSweDevRun({
+          manifest: apex,
+          armCount: runRecord.arms.length,
+          itemCount: new Set(assembled.record.cells.map((cell) => cell.taskDigest)).size,
+          replicates: runRecord.replicates,
+          matrix: assembled.record,
+          armIds: document.spec.arms.map((arm) => arm.armId),
+          reportRoot: apexSweDevReportRoot(artifactsDir(clockedContext.workspaceDir), input.draftId),
+        });
+        nextState.suiteQuote = facts.quote;
+      }
+      writeRunState(clockedContext.workspaceDir, input.draftId, nextState);
 
       const transitioned = transition("running", "close-boundary");
       if (!transitioned.ok) {

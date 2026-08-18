@@ -7,6 +7,7 @@ import {
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
+  officialApexSweDevConformance,
   officialHarborExecutionConformance,
   suiteLeaderboardLimitation,
 } from "./comparability.js";
@@ -95,5 +96,106 @@ describe("suite comparability", () => {
       atifRequired: true,
       items: [{ taskName: "t00", taskSha256: "b".repeat(64) }],
     })).not.toThrow();
+  });
+
+  test("apex-swe-dev is a distinct protocol: k=1, no ATIF, never leaderboard-ready, cannot wear apex-swe", () => {
+    expect(() => SuiteProtocolSelectionSchema.parse({
+      schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
+      protocol: "apex-swe",
+      coverage: "full",
+      datasetId: "mercor/APEX-SWE",
+      datasetRevision: "a".repeat(40),
+      selectedTaskNames: ["0xpolygon-bor-1710-observability"],
+      datasetTaskCount: 50,
+      replicates: 1,
+      atifRequired: false,
+      items: [{
+        taskName: "0xpolygon-bor-1710-observability",
+        taskSha256: "b".repeat(64),
+        taskType: "observability",
+      }],
+    })).toThrow();
+    const suite = SuiteProtocolSelectionSchema.parse({
+      schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
+      protocol: "apex-swe-dev",
+      coverage: "one_task",
+      datasetId: "mercor/APEX-SWE",
+      datasetRevision: "a".repeat(40),
+      selectedTaskNames: ["0xpolygon-bor-1710-observability"],
+      datasetTaskCount: 50,
+      replicates: 1,
+      atifRequired: false,
+      items: [{
+        taskName: "0xpolygon-bor-1710-observability",
+        taskSha256: "b".repeat(64),
+        taskType: "observability",
+      }],
+    });
+    expect(suite.protocol).toBe("apex-swe-dev");
+    expect(suite.replicates).toBe(1);
+    expect(suite.atifRequired).toBe(false);
+    const method = {
+      protocol: "apex-swe-dev" as const,
+      coverage: "full" as const,
+      executionConformance: true,
+      k: 1,
+      selectedCount: 50,
+      datasetCount: 50,
+      atifPresent: false,
+      datasetRevisionMatchesLeaderboardPin: true,
+    };
+    expect(methodLeaderboardEligible(method)).toBe(false);
+    expect(deriveSuiteComparability(method).leaderboardSubmitReady).toBe(false);
+    expect(deriveSuiteComparability({
+      ...method,
+      cellsAccounted: true,
+      harnessReportsPresent: true,
+    }).leaderboardSubmitReady).toBe(false);
+    const bits = deriveSuiteComparability({
+      protocol: "apex-swe-dev",
+      coverage: "one_task",
+      executionConformance: true,
+      k: 1,
+      selectedCount: 1,
+      datasetCount: 50,
+      atifPresent: false,
+    });
+    expect(bits).toEqual({ executionConformance: true, coverage: "one_task", leaderboardSubmitReady: false });
+    expect(suiteLeaderboardLimitation(bits, "apex-swe-dev")).toMatch(/APEX-SWE-dev/u);
+    expect(suiteLeaderboardLimitation(bits, "apex-swe-dev")).toMatch(/200-task APEX-SWE leaderboard/u);
+    expect(suiteLeaderboardLimitation(bits, "apex-swe-dev")).not.toMatch(/Terminal-Bench/u);
+    expect(officialApexSweDevConformance({
+      k: 1,
+      nTrials: 1,
+      timeoutSeconds: 3600,
+      timeoutOverride: false,
+      resourceOverride: false,
+      evaluatorId: "apex-swe-dev",
+      messageLimit: 250,
+    })).toBe(true);
+    expect(officialApexSweDevConformance({
+      k: 1,
+      nTrials: 3,
+      timeoutSeconds: 3600,
+      timeoutOverride: false,
+      resourceOverride: false,
+      evaluatorId: "apex-swe-dev",
+    })).toBe(false);
+    expect(officialApexSweDevConformance({
+      k: 1,
+      nTrials: 1,
+      timeoutSeconds: 900,
+      timeoutOverride: false,
+      resourceOverride: false,
+      evaluatorId: "apex-swe-dev",
+    })).toBe(false);
+    expect(officialApexSweDevConformance({
+      k: 1,
+      nTrials: 1,
+      timeoutSeconds: 3600,
+      timeoutOverride: false,
+      resourceOverride: false,
+      evaluatorId: "inspect",
+    })).toBe(false);
   });
 });
