@@ -32,7 +32,12 @@
 // test module that throws at import or collection time, so no suite ever runs. Setup files have
 // already executed by then, so the listener is installed. The second `rmSync` is a no-op
 // (`force: true` on a missing path), which is why the redundancy is free.
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+//
+// The sweep repairs permissions before giving up — see `unsealTree` below. The same repair is
+// carried by the two package-level copies of this seam
+// (`packages/task-execution/evaluator-adapters` and `packages/benchmark-product/core`,
+// `src/test-support/isolate-tmp.ts`), so all three sweeps behave identically.
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -62,11 +67,53 @@ process.env['TEMP'] = isolatedTmp;
 /** The temp directory every `mkdtemp(join(tmpdir(), …))` in this test file lands inside. */
 process.env['JINN_TEST_TMPDIR'] = isolatedTmp;
 
+// Restores write and traverse permission on the throwaway tree this file owns. `rmSync` cannot
+// remove a read-only directory — `unlink` needs the write bit on the *parent* directory, and
+// `force: true` only suppresses ENOENT, never EACCES — and the local workspace provisioner seals
+// each attempt's `input/` exactly that way (directories 0o500, files 0o400) to protect a live
+// attempt's dispatch context from the solver process. That seal is a runtime integrity property,
+// not a durability guarantee about test scratch space: it holds for the whole life of every test,
+// and this runs only after the last assertion. Symlinks are skipped — `chmod` follows them, which
+// would reach outside the tree, and `rmSync` unlinks them without needing the target's permission.
+function unsealTree(directory: string): void {
+  let entries;
+  try {
+    chmodSync(directory, 0o700);
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return; // Let the retry below report whatever actually blocks removal.
+  }
+  for (const entry of entries) {
+    const child = join(directory, entry.name);
+    if (entry.isSymbolicLink()) continue;
+    if (entry.isDirectory()) unsealTree(child);
+    else {
+      try {
+        chmodSync(child, 0o600);
+      } catch {
+        // Same: the retry's error is the useful one.
+      }
+    }
+  }
+}
+
 // Named rather than an inline arrow so `test/config/tmp-isolation.test.ts` can find it in
 // `process.listeners('exit')` and go red if the teardown is dropped. Registered before the guard
 // below so a guard throw does not itself leak the home.
 function jinnTestHomeSweep(): void {
-  rmSync(isolatedHome, { recursive: true, force: true });
+  try {
+    rmSync(isolatedHome, { recursive: true, force: true });
+  } catch {
+    // Almost always a sealed `input/`. Unseal the tree we own, then retry.
+    unsealTree(isolatedHome);
+    try {
+      rmSync(isolatedHome, { recursive: true, force: true });
+    } catch (error) {
+      // Loud but not fatal. A cleanup failure is an operational problem that has to be visible,
+      // yet throwing here would fabricate a failure in a test file whose assertions all passed.
+      console.warn(`[jinn-test] could not sweep isolated home ${isolatedHome}:`, error);
+    }
+  }
 }
 
 afterAll(jinnTestHomeSweep);

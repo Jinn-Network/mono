@@ -22,9 +22,9 @@
 // could not detect the wiring being removed. The path is published as an environment variable
 // instead — see `tmp-isolation.test.ts` next to this file.
 //
-// This file is duplicated verbatim in `packages/benchmark-product/core`. Two ~60-line copies are
-// deliberately cheaper than a shared workspace package with its own build, portal resolutions and
-// publish surface. Graduate it to one at a third consumer.
+// This file is duplicated verbatim in `packages/task-execution/evaluator-adapters`. Two ~60-line
+// copies are deliberately cheaper than a shared workspace package with its own build, portal
+// resolutions and publish surface. Graduate it to one at a third consumer.
 import { chmodSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
