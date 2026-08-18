@@ -22,7 +22,12 @@ export const BUNDLE_V5_FORMAT = "benchmark-product-public-bundle/5" as const;
  * lists, byte shapes, and values; the `anchors/` member and the `integrity-anchors` check exist
  * only here. */
 export const BUNDLE_V6_FORMAT = "benchmark-product-public-bundle/6" as const;
-export const SUPPORTED_BUNDLE_FORMATS = [BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT] as const;
+export const SUPPORTED_BUNDLE_FORMATS = [
+  BUNDLE_FORMAT,
+  BUNDLE_V4_FORMAT,
+  BUNDLE_V5_FORMAT,
+  BUNDLE_V6_FORMAT,
+] as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -34,7 +39,11 @@ export const BundleManifestFileSchema = z.object({
 });
 
 const LegacyBundleManifestSchema = z.object({
-  format: z.union([z.literal(BUNDLE_FORMAT), z.literal(BUNDLE_V4_FORMAT)]),
+  format: z.union([
+    z.literal(BUNDLE_FORMAT),
+    z.literal(BUNDLE_V4_FORMAT),
+    z.literal(BUNDLE_V6_FORMAT),
+  ]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
 
@@ -63,7 +72,7 @@ export interface VerifyBundleSnapshotDeps {
 
 export interface BuildBundleManifestOptions {
   /** Defaults to v2 so existing producer and golden bytes remain immutable. */
-  readonly format?: typeof BUNDLE_FORMAT | typeof BUNDLE_V4_FORMAT;
+  readonly format?: typeof BUNDLE_FORMAT | typeof BUNDLE_V4_FORMAT | typeof BUNDLE_V6_FORMAT;
 }
 
 function sha256(bytes: Uint8Array): string {

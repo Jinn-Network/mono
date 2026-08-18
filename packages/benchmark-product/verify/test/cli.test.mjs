@@ -31,7 +31,12 @@ test("a missing bundle exits 1 with machine-readable invalid-bundle output", asy
   assert.deepEqual(JSON.parse(result.stdout), {
     ok: false,
     verifierVersion: "2.0.0",
-    supportedFormats: ["benchmark-product-public-bundle/2", "benchmark-product-public-bundle/4", "benchmark-product-public-bundle/5"],
+    supportedFormats: [
+      "benchmark-product-public-bundle/2",
+      "benchmark-product-public-bundle/4",
+      "benchmark-product-public-bundle/5",
+      "benchmark-product-public-bundle/6",
+    ],
     code: "record-integrity",
     message: "bundle directory is missing",
   });

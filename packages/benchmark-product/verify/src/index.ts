@@ -27,6 +27,18 @@ export {
   anchorSignatureVerifier,
   nodeCryptoAnchorPorts,
 } from "./anchor/ports.js";
+// The `integrity-anchors` check (anchor-evidence design §8), shared by `bundle verify` and the
+// workspace-side `run.verify` so the two cannot become two implementations.
+export { evaluateIntegrityAnchors } from "./anchor/check.js";
+export type {
+  AnchorProofStatus,
+  AnchorSubjectOutcome,
+  AnchorSubjectReport,
+  AnchorVerificationEntry,
+  EvaluateIntegrityAnchorsInput,
+  IntegrityAnchorsReport,
+  PublicBundleAnchorTrustMaterial,
+} from "./anchor/check.js";
 export type {
   InspectRuntimeMethodDisclosure,
   InspectScoringProjectionDisclosure,

@@ -167,6 +167,9 @@ export const RunStateSchema = z.object({
     "matrix-rederivation",
     "report-verification",
     "claim-consistency",
+    /** Recorded only by an anchored publication (anchor-evidence design §8). Additive: a receipt
+     * written before this closure existed keeps exactly the six names it already had. */
+    "integrity-anchors",
   ])).optional(),
   publishedAt: Rfc3339Schema.optional(),
   /** Append-only; absent on every workspace that has never anchored (anchor-evidence §7.1). */
