@@ -27,8 +27,10 @@ import { fileURLToPath } from "node:url";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const REPO_ROOT = resolve(PACKAGE_ROOT, "../../..");
-const CACHE = resolve(REPO_ROOT, ".skillsbench-cache");
-const OUT = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/E1-arm-cells.v1.json");
+// Overridable so the same runner works on a droplet with no repo checkout: point DEMO1_CACHE_DIR
+// at a shipped blob cache and DEMO1_CELLS_OUT at a local results file.
+const CACHE = process.env.DEMO1_CACHE_DIR ?? resolve(REPO_ROOT, ".skillsbench-cache");
+const OUT = process.env.DEMO1_CELLS_OUT ?? resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/E1-arm-cells.v1.json");
 const COMMIT = "b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af";
 const MODEL = process.env.DEMO1_MODEL ?? "claude-haiku-4-5-20251001";
 
@@ -130,7 +132,15 @@ const pinnedTokens = [...fromTokens];
 pinnedTokens[referenceIndex] = baseDigest;
 writeFileSync(join(pkg, "environment", "Dockerfile.pinned"), dockerText.replace(/^FROM\s+.+$/mu, `FROM ${pinnedTokens.join(" ")}`));
 const tag = `jinn-demo1/${taskId}:cell`;
-sh(`docker build -q -f ${join(pkg, "environment", "Dockerfile.pinned")} -t ${tag} ${join(pkg, "environment")}`, { timeout: 1_800_000 });
+sh(`docker build -q -f ${join(pkg, "environment", "Dockerfile.pinned")} -t ${tag} ${join(pkg, "environment")}`, { timeout: 3_600_000 });
+
+// Population probe: prove the environment builds on this host, record nothing, run no agent.
+if (argv.includes("--probe-build")) {
+  console.log(`BUILD OK ${taskId} base=${baseDigest}`);
+  try { sh(`docker rmi -f ${tag}`); } catch { /* fine */ }
+  rmSync(pkg, { recursive: true, force: true });
+  process.exit(0);
+}
 
 const results = existsSync(OUT) ? JSON.parse(readFileSync(OUT, "utf8")) : {
   schema: "jinn.demo1.arm-cells.v1",

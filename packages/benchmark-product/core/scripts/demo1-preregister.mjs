@@ -16,7 +16,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { recordDigest } from "@jinn-network/evidence-protocol";
-import { SKILLSBENCH_DEMO1_PILOT_DECLARATION } from "../dist/method/skillsbench-demo1-current.js";
+import { SKILLSBENCH_DEMO1_FINAL_DECLARATION, SKILLSBENCH_DEMO1_PILOT_DECLARATION } from "../dist/method/skillsbench-demo1-current.js";
 import {
   demo1DeclaredCellCount,
   sealDemo1Definition,
@@ -28,7 +28,7 @@ const REPO_ROOT = resolve(PACKAGE_ROOT, "../../..");
 const OUT = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/E1-demo1-preregistration.v1.json");
 
 const stage = process.env.SKILLSBENCH_DEMO1_STAGE === "final" ? "final" : "pilot";
-const declaration = SKILLSBENCH_DEMO1_PILOT_DECLARATION;
+const declaration = stage === "final" ? SKILLSBENCH_DEMO1_FINAL_DECLARATION : SKILLSBENCH_DEMO1_PILOT_DECLARATION;
 
 const benchmark = sealDemo1Definition(declaration);
 const manifest = sealDemo1Manifest(declaration, stage);

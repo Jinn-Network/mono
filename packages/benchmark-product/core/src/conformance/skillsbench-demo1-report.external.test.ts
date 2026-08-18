@@ -31,7 +31,7 @@ import {
   verifyEvidenceMatrix,
   verifyEvidenceNativeReport,
 } from "@jinn-network/benchmarking-evidence";
-import { SKILLSBENCH_DEMO1_PILOT_DECLARATION } from "../method/skillsbench-demo1-current.js";
+import { SKILLSBENCH_DEMO1_FINAL_DECLARATION, SKILLSBENCH_DEMO1_PILOT_DECLARATION } from "../method/skillsbench-demo1-current.js";
 import {
   demo1Capture,
   demo1MethodBytes,
@@ -67,7 +67,12 @@ import {
  */
 const ENABLED = process.env.SKILLSBENCH_DEMO1_REPORT === "1";
 const REPO_ROOT = resolve(import.meta.dirname, "../../../../..");
-const CELLS = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/E1-arm-cells.v1.json");
+const FINAL_STAGE = process.env.SKILLSBENCH_DEMO1_STAGE === "final";
+// The confirmatory document is separate from the exploration cells by design: merging them would
+// collide replicate indices and let pre-lock cells leak into the confirmatory denominator.
+const CELLS = resolve(REPO_ROOT, FINAL_STAGE
+  ? "docs/superpowers/plans/demo-report-1/E1-demo1-confirmatory-cells.v1.json"
+  : "docs/superpowers/plans/demo-report-1/E1-arm-cells.v1.json");
 const BUNDLE_OUT = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/E1-demo1-evidence-bundle.v1.json");
 const REPORT_OUT = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/demo1-report.v1.json");
 
@@ -217,8 +222,8 @@ function evaluation(taskDigest: `sha256:${string}`, resultDigest: `sha256:${stri
 
 describe.skipIf(!ENABLED)("Demo-1 evidence-native report", () => {
   it("seals and verifies the report from admitted arm cells", { timeout: 600_000 }, async () => {
-    const stage = process.env.SKILLSBENCH_DEMO1_STAGE === "final" ? "final" : "pilot";
-    const declaration = SKILLSBENCH_DEMO1_PILOT_DECLARATION;
+    const stage = FINAL_STAGE ? "final" : "pilot";
+    const declaration = FINAL_STAGE ? SKILLSBENCH_DEMO1_FINAL_DECLARATION : SKILLSBENCH_DEMO1_PILOT_DECLARATION;
     const document = JSON.parse(readFileSync(CELLS, "utf8")) as { cells: Record<string, SkillsBenchDemo1CellRecord> };
 
     // Fail-closed admission: any missing, unparseable, or wrong-model declared cell throws here.

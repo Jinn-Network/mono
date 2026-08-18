@@ -45,7 +45,10 @@ const BASE = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1");
 
 const bundle = JSON.parse(readFileSync(resolve(BASE, "E1-demo1-evidence-bundle.v1.json"), "utf8"));
 const summary = JSON.parse(readFileSync(resolve(BASE, "demo1-report.v1.json"), "utf8"));
-const cellsDocument = JSON.parse(readFileSync(resolve(BASE, "E1-arm-cells.v1.json"), "utf8"));
+const cellsDocument = JSON.parse(readFileSync(
+  resolve(BASE, bundle.stage === "final" ? "E1-demo1-confirmatory-cells.v1.json" : "E1-arm-cells.v1.json"),
+  "utf8",
+));
 
 const failures = [];
 const check = (ok, label) => {

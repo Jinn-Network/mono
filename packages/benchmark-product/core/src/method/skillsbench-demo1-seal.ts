@@ -129,7 +129,7 @@ export function sealDemo1Manifest(
     },
     analysisPlan: [
       { id: "jinn.benchmarking.method/manipulation-check", version: "1", parameters: { control: "C-no-instructions", population: "slate" } },
-      { id: "jinn.benchmarking.method/paired-delta", version: "1", parameters: { pairedBy: "task", arms: ["A-native-skill", "B-flat-claude-md"], population: "slate" } },
+      { id: "jinn.benchmarking.method/paired-delta", version: "1", parameters: { pairedBy: "task", arms: ["A-native-skill", "B-flat-claude-md"], population: "informative-subset", informativeRule: "C-no-instructions equals zero in every replicate AND max(mean A, mean B) greater than zero", equivalenceMarginPpm: 150000 } },
       { id: "jinn.benchmarking.method/variance-decomposition", version: "1", parameters: { components: ["replicate-noise", "task-heterogeneity"], population: "slate" } },
     ],
     closeAt: SKILLSBENCH_DEMO1_SEALED_AT,
