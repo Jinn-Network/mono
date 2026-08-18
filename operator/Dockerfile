@@ -68,6 +68,14 @@ COPY packages/discovery/transport-http/package.json packages/discovery/transport
 COPY packages/discovery/testing/package.json packages/discovery/testing/yarn.lock packages/discovery/testing/.yarnrc.yml ./packages/discovery/testing/
 COPY packages/lifecycle-notifications/package.json packages/lifecycle-notifications/yarn.lock packages/lifecycle-notifications/.yarnrc.yml ./packages/lifecycle-notifications/
 COPY packages/read-plane/package.json packages/read-plane/yarn.lock packages/read-plane/.yarnrc.yml ./packages/read-plane/
+
+# Nested portal targets. build:stack runs each stack package's own
+# `yarn install --immutable`, which resolves that package's portal
+# resolutions; these two are named there and nowhere in operator/package.json.
+# They are never installed or built themselves, so the resolver needs the
+# manifest and nothing else (#2809).
+COPY packages/discovery/sources/evidence-journal/package.json ./packages/discovery/sources/evidence-journal/
+COPY packages/task-execution/testing/package.json ./packages/task-execution/testing/
 RUN corepack enable && cd operator && yarn install --immutable
 
 # Copy portal-package sources before the client build; `yarn build` builds them
