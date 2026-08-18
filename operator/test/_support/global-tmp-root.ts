@@ -57,18 +57,35 @@ export default function setup(): () => void {
     sweepManagedTree(registry, 'per-run temp registry');
   }
 
-  // `vitest run` installs no SIGINT handler of its own: Ctrl-C mid-run kills this process under
-  // the default disposition and the teardown below never runs — measured, not assumed. One `once`
-  // listener closes that gap. It sweeps and then exits with the same 130 the default disposition
-  // would have produced, and because it is `once`, a second Ctrl-C still terminates by default.
-  const sweepOnInterrupt = (): void => {
-    sweepRegisteredRoots();
-    process.exit(130);
-  };
-  process.once('SIGINT', sweepOnInterrupt);
+  // `vitest run` installs no handler for any of these, so each one kills this process under the
+  // default disposition and the teardown below never runs — measured, not assumed: a SIGTERM
+  // mid-run left the per-run registry holding every record written so far and every root it named
+  // unswept. SIGINT is Ctrl-C; SIGTERM is what a CI cancellation, `timeout(1)` and process
+  // supervisors send, which is the common case on a build runner; SIGHUP is a closed terminal.
+  // SIGKILL cannot be caught at all and stays outside what this can cover.
+  //
+  // One `once` listener per signal closes the gap. Each sweeps and then exits with the same
+  // `128 + signum` the default disposition would have produced, and because each is `once`, a
+  // second identical signal still terminates by default.
+  const interruptHandlers = (
+    [
+      ['SIGHUP', 1],
+      ['SIGINT', 2],
+      ['SIGTERM', 15],
+    ] as const
+  ).map(([signal, signum]) => {
+    const sweepOnInterrupt = (): void => {
+      sweepRegisteredRoots();
+      process.exit(128 + signum);
+    };
+    process.once(signal, sweepOnInterrupt);
+    return { signal, sweepOnInterrupt };
+  });
 
   return () => {
-    process.off('SIGINT', sweepOnInterrupt);
+    for (const { signal, sweepOnInterrupt } of interruptHandlers) {
+      process.off(signal, sweepOnInterrupt);
+    }
     sweepRegisteredRoots();
   };
 }
