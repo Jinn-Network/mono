@@ -160,11 +160,11 @@ test("the guided own-work journey imports tasks, selects two agents, and enforce
   const draftUrl = new URL(page.url());
   const draftId = draftUrl.pathname.split("/").filter(Boolean).at(-1);
   expect(draftId).toMatch(/^local-[a-f0-9-]+$/u);
-  const importForm = actionForm(page, "Import this SWE-bench file");
+  const importForm = actionForm(page, "Import homemade SWE-bench rows");
   await importForm.getByLabel("SWE-bench rows JSON file").setInputFiles(
     resolve(process.cwd(), "../../benchmarking/interop/fixtures/swebench/rows.multi-repo.json"),
   );
-  await submitAction(page, "Import this SWE-bench file", /taskSha256s/u);
+  await submitAction(page, "Import homemade SWE-bench rows", /taskSha256s/u);
   await expect(page.getByText(/Claude Code claude-low/u).first()).toBeVisible();
   await expect(page.getByText(/Codex codex-low/u).first()).toBeVisible();
 

@@ -173,7 +173,9 @@ mkdir -p "$WS"
 ```
 
 `host.json` is the incomplete catalog host document (paths, arms, image).
-Coverage is `--slice 1`, which seals `one_task`:
+Coverage is `--slice 1`, which seals `one_task`. `colophon method --help`
+lists per-suite `--host` keys; `--n` selects the first N registry ids
+(code-point order) and is mutually exclusive with `--slice` and `--ids`.
 
 ```json
 {
