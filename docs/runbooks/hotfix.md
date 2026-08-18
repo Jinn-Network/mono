@@ -64,7 +64,7 @@ The Monday cadence opens a standing **release-review PR** (`base: main`, `head: 
 
 ## Break-glass (wedged queue)
 
-If the merge queue on `next` is wedged, meaning a GitHub incident has taken it down or every entry is failing for a reason unrelated to the entries, and a critical fix must land on `next`. This procedure is not hotfix-specific — it applies to any critical fix that must land on `next` while the queue is wedged, and lives here because the hotfix back-merge is the case that most often needs it.
+If the merge queue on `next` is wedged, meaning a GitHub incident has taken it down or every entry is failing for a reason unrelated to the entries, and a critical fix must land on `next`, use the procedure below. It is not hotfix-specific — it applies to any critical fix that must land on `next` while the queue is wedged, and lives here because the hotfix back-merge is the case that most often needs it.
 
 **The Captain acts, under a repo-admin credential** (ruleset writes require admin). The flip script `.github/scripts/enable-next-merge-queue.sh` (shipping with [#2799](https://github.com/Jinn-Network/mono/issues/2799)) is apply-only — its sole mode switch is `DRY_RUN=1`, and it has no disable or re-enable affordance — so break-glass is a direct ruleset edit, which is auditable in the repository's ruleset history.
 
