@@ -1,4 +1,4 @@
-# DR-2026-08-18 — Official suite protocol (Terminal-Bench 3.0)
+# DR-2026-08-18-b — Official suite protocol (Terminal-Bench 3.0)
 
 - **Date:** 2026-08-18
 - **Status:** **Accepted 2026-08-18.** Ratified by operator instruction to

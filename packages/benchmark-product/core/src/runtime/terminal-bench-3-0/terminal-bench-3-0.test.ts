@@ -145,7 +145,7 @@ describe("Terminal-Bench 3.0 official-suite intake", () => {
   });
 
   test("a later Hub snapshot on the rolling dataset id cannot be stamped terminal-bench-3.0", () => {
-    // DR-2026-08-18 decision 1. The 3.0 dataset id is rolling, so this snapshot is structurally
+    // DR-2026-08-18-b decision 1. The 3.0 dataset id is rolling, so this snapshot is structurally
     // perfect — same id, self-consistent content hash, Packager-exact task refs — and without
     // the pin binding it would select and be stamped `terminal-bench-3.0`.
     const laterRevision = `sha256:${"e".repeat(64)}` as const;

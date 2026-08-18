@@ -1363,11 +1363,23 @@ is a named protocol Colophon wraps. Comparability is two-axis
 (`execution_conformance`, `coverage`, `leaderboard_submit_ready`) on a
 product-sealed selection artifact plus Report `limitations[]`. Hub export is
 a derived artifact, not the claim of record. One Harbor Job per arm spans
-planned trials; Inspect-as-specified and official SWE-bench Verified are
-follow-ons.
+planned trials; Inspect-as-specified remains a follow-on.
+
+**Addendum — 2026-08-17, SWE-bench Verified official suite pointer ([DR-2026-08-17-e](../../../log/decisions/2026-08-17-swe-bench-verified-official-suite.md);
+no new Report v2 required fields, no new record kinds):** SWE-bench Verified
+is a second named protocol: pinned `princeton-nlp/SWE-bench_Verified`, k=1,
+`swebench.harness.run_evaluation`. The cousin swe-rebench path cannot wear
+the name. Predictions export is a derived artifact, not the claim of record.
+
+**Addendum — 2026-08-18, APEX-Agents official suite pointer ([DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md);
+no new Report v2 required fields, no new record kinds):** APEX-Agents is a
+third named protocol: pinned `mercor/apex-agents`, k=1, Archipelago
+end-to-end (ReAct `react_toolbelt_agent` + snapshot grader). Cousin
+Stirrup / Code / Harbor / Inspect / k=8 cannot wear the name. Inspection
+export is a derived artifact, not the claim of record.
 
 **Addendum — 2026-08-18, Terminal-Bench 3.0 official suite pointer
-([DR-2026-08-18](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md);
+([DR-2026-08-18-b](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md);
 no new Report v2 required fields):** Terminal-Bench 3.0 is a second named
 Harbor-family protocol (`terminal-bench/terminal-bench` at a content-hash
 pin, never `@latest`). TB 2.1, TB 2.0, Verified, and Inspect cannot wear

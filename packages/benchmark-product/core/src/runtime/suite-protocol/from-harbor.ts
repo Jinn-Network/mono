@@ -17,7 +17,10 @@ export function suiteSelectionFromHarbor(manifest: HarborSelectionManifest): Sui
   if (value === undefined) return undefined;
   // Absent means "not a suite run". Present-but-invalid means a tampered or forged sealed
   // profile and must fail loud — `runtime/adapter.ts` parses the same bytes and throws.
-  return SuiteProtocolSelectionSchema.parse(value);
+  const parsed = SuiteProtocolSelectionSchema.parse(value);
+  // Only the Terminal-Bench protocols bind via Harbor profiles; Verified and APEX-Agents
+  // bind via their own selection manifests.
+  return parsed.protocol === "terminal-bench-2.1" || parsed.protocol === "terminal-bench-3.0" ? parsed : undefined;
 }
 
 function officialPinFor(protocol: SuiteProtocolId): string {
@@ -33,7 +36,8 @@ export interface SuiteQuotePresentation extends SuiteComparability {
   readonly protocol: SuiteProtocolId;
   readonly methodLeaderboardEligible: boolean;
   readonly cellCount: string;
-  readonly harborVersion: string;
+  readonly harborVersion?: string;
+  readonly harnessVersion?: string;
   readonly selectedTaskCount: number;
   readonly armCount: number;
   readonly replicates: number;

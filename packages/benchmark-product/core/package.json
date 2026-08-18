@@ -44,6 +44,8 @@
     "publication-release-rehearsal": "COLOPHON_PUBLICATION_RELEASE_REHEARSAL=1 vitest run src/conformance/publication-release-rehearsal.external.test.ts --reporter=verbose",
     "tb21-one-task-qualify": "node scripts/tb21-one-task-qualify.mjs",
     "tb30-one-task-qualify": "node scripts/tb30-one-task-qualify.mjs",
+    "swebench-verified-one-task-qualify": "node scripts/swebench-verified-one-task-qualify.mjs",
+    "apex-agents-one-task-qualify": "node scripts/apex-agents-one-task-qualify.mjs",
     "t1:cold:lifecycle": "node ../../../.github/scripts/benchmark-product-packed-types.test.mjs --t1-cold-lifecycle",
     "generate:parity": "node scripts/generate-parity-matrix.mjs",
     "check:parity": "node scripts/generate-parity-matrix.mjs --check",

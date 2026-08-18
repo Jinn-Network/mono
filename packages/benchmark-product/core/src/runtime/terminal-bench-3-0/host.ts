@@ -60,7 +60,7 @@ export function resolveTerminalBench30Selection(workspaceDir: string, input: Ter
   if (!/^sha256:[a-f0-9]{64}$/u.test(revision)) {
     throw new TypeError("Terminal-Bench 3.0 dataset revision must be an immutable sha256 registry revision");
   }
-  // DR-2026-08-18 decision 1: the 3.0 dataset id is ROLLING (`terminal-bench/terminal-bench`,
+  // DR-2026-08-18-b decision 1: the 3.0 dataset id is ROLLING (`terminal-bench/terminal-bench`,
   // not a version-scoped id like 2.1's), so a later Hub snapshot satisfies every structural
   // gate below. Only the sealed official pin may wear `terminal-bench-3.0`; a later Hub
   // version is a new pin (Issue + constant bump), never a silent select.

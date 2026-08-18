@@ -5,7 +5,7 @@ score. Default CI and `yarn test` never download the dataset and never invoke
 real Harbor.
 
 Issue: [#2769](https://github.com/Jinn-Network/mono/issues/2769). Decision:
-[DR-2026-08-18](../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md).
+[DR-2026-08-18-b](../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md).
 
 ## What this proves
 

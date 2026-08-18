@@ -97,6 +97,28 @@ export {
   type ExportHarborHubPackageResult,
   type HarborHubExportMode,
 } from "./hub-export.js";
+export {
+  selectSwebenchVerifiedRuntime,
+  type SelectSwebenchVerifiedRuntimeInput,
+  type SelectSwebenchVerifiedRuntimeResult,
+} from "./swe-bench-verified.js";
+export {
+  exportSwebenchPredictions,
+  type ExportSwebenchPredictionsInput,
+  type ExportSwebenchPredictionsResult,
+  type SwebenchPredictionsExportMode,
+} from "./swebench-export.js";
+export {
+  selectApexAgentsRuntime,
+  type SelectApexAgentsRuntimeInput,
+  type SelectApexAgentsRuntimeResult,
+} from "./apex-agents.js";
+export {
+  exportApexAgentsInspection,
+  type ExportApexAgentsInput,
+  type ExportApexAgentsResult,
+  type ApexAgentsExportMode,
+} from "./apex-agents-export.js";
 
 export {
   armAdd,
