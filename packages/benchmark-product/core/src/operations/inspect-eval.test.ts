@@ -27,7 +27,10 @@ import {
 } from "../runtime/inspect/manifest.js";
 import { InspectEvalSelectionManifestSchema } from "../runtime/inspect-eval/manifest.js";
 import { suiteFactsFromAccountedInspectRun } from "../runtime/suite-protocol/from-inspect.js";
-import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import { INSPECT_TASK_PROFILE_URI } from "../runtime/inspect/artifacts.js";
+import type { LocalProvisionerInput } from "@jinn-network/task-execution-backend-local";
+import { createEvaluationCellRegistry, createLocalProvisioner } from "../venue/provisioner.js";
 import type { OperationContext } from "./context.js";
 import type { LocalVenue } from "../venue/venue.js";
 import {
@@ -481,6 +484,83 @@ describe("Inspect eval official-suite select", () => {
     expect(quote?.replicates).toBe(1);
     expect(quote?.executionConformance).toBe(false);
     expect(quote?.leaderboardSubmitReady).toBe(false);
+  });
+
+  test("the venue binds the executed Task bytes to the sealed selection's Task documents", async () => {
+    const context = setup("venue-binding");
+    const selected = await selectInspectEvalRuntime(context, {
+      draftId: "venue-binding",
+      coverage: "one_task",
+      pythonPath: "/usr/bin/python3",
+      projectDir: "/tmp/inspect-project",
+      taskReference: "eval.py@hermetic",
+      arms: inspectManifest.arms,
+      scorer: { name: "match", passValue: "C" },
+    });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    const manifest = InspectEvalSelectionManifestSchema.parse(
+      selectionJson(context.workspaceDir, selected.result.selectionManifestSha256),
+    );
+    const sealedTaskSha256 = manifest.suite.items[0]!.taskSha256;
+    const sealedTaskBytes = getSealedBytes(context.workspaceDir, sealedTaskSha256);
+
+    const provisionerRoot = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-eval-venue-"));
+    workspaces.push(provisionerRoot);
+    const select = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      inspect: {
+        selectionManifestSha256: selected.result.selectionManifestSha256,
+        manifest: manifest.inspect,
+        host: { kind: "local-python", pythonPath: "/usr/bin/python3", projectDir: "/tmp/inspect-project" },
+        inspectEval: manifest,
+      },
+    });
+    const provisionerInput = (taskBytes: Uint8Array): LocalProvisionerInput => ({
+      sealedTaskBytes: taskBytes,
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      task: {
+        profile: { uri: INSPECT_TASK_PROFILE_URI },
+        payload: { sampleId: "HumanEval/0" },
+      } as unknown as LocalProvisionerInput["task"],
+      submission: {
+        nonce: `x:${cellKey(sealedTaskSha256, "control", 1)}:1`,
+      } as unknown as LocalProvisionerInput["submission"],
+      attempt: {
+        attemptUri: "urn:uuid:00000000-0000-4000-8000-000000000009",
+        nonce: "inspect-eval-venue-test",
+        attemptNumber: 1,
+      } as unknown as LocalProvisionerInput["attempt"],
+    });
+    const paths = (root: string) => ({
+      root,
+      input: join(root, "input"),
+      work: join(root, "work"),
+      out: join(root, "out"),
+      logs: join(root, "logs"),
+      harnessState: join(root, "harness-state"),
+      secrets: join(root, "secrets"),
+      tmp: join(root, "tmp"),
+      meta: join(root, "meta"),
+    });
+
+    const honest = select(provisionerInput(sealedTaskBytes));
+    await expect(honest.contract.setup(
+      undefined as never,
+      paths(join(provisionerRoot, "honest")) as never,
+      [],
+    )).resolves.toBeUndefined();
+
+    // Same sampleId, same sealed selection, but Task documents this selection never sealed.
+    const swapped = new TextEncoder().encode(`${new TextDecoder().decode(sealedTaskBytes)} `);
+    expect(sha256Hex(swapped)).not.toBe(sealedTaskSha256);
+    const tampered = select(provisionerInput(swapped));
+    await expect(tampered.contract.setup(
+      undefined as never,
+      paths(join(provisionerRoot, "tampered")) as never,
+      [],
+    )).rejects.toThrow(/not one of the sealed selection's Task documents/u);
   });
 
   test("an over-run with every sealed cell judged still refuses leaderboard-ready", async () => {

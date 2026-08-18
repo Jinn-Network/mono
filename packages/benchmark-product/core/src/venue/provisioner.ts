@@ -1066,6 +1066,15 @@ function inspectProvisionerContract(
         if (typeof payload?.sampleId !== "string" && typeof payload?.sampleId !== "number") {
           throw new Error("Inspect eval Task payload must carry the cell sampleId");
         }
+        // The Inspect eval Task carries no `selectionManifestSha256` (the shared template has
+        // no single sampleId), so the cousin path's digest equality cannot be reused. Bind the
+        // exact Task bytes instead: without this a hand-built Task with different instructions
+        // or evaluation digest would execute the sealed cell while the bundle records the
+        // swapped Task documents.
+        const taskSha256 = sha256Hex(input.sealedTaskBytes);
+        if (!options.inspectEval.suite.items.some((item) => item.taskSha256 === taskSha256)) {
+          throw new Error("Inspect eval Task bytes are not one of the sealed selection's Task documents");
+        }
         cellManifest = overlayInspectEvalCell(options.inspectEval, payload.sampleId);
       } else if (payload?.selectionManifestSha256 !== options.selectionManifestSha256) {
         throw new Error("Inspect Task selection digest does not match the venue's sealed manifest");
