@@ -260,3 +260,116 @@ describe("specDigest", () => {
     expect(a).not.toBe(b);
   });
 });
+
+describe("anchors — append-only (anchor-evidence design §5 rule 6, §7.1)", () => {
+  // The one profile whose lifecycle admits an upgraded form; everything else is write-once flat.
+  const OTS = "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1";
+  const TSA = "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1";
+  const first = { subject: "lock" as const, provider: OTS, recordSha256: "1".repeat(64) };
+  const second = { subject: "matrix" as const, provider: TSA, recordSha256: "2".repeat(64) };
+  const upgraded = {
+    subject: "lock" as const,
+    provider: OTS,
+    recordSha256: "3".repeat(64),
+    upgradesRecordSha256: first.recordSha256,
+  };
+
+  test("absent by default — a workspace that never anchored carries no field", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState());
+    expect(readRunState(workspaceDir, "draft-1")?.anchors).toBeUndefined();
+  });
+
+  test("entries may be appended", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first] }));
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first, second] }));
+    expect(readRunState(workspaceDir, "draft-1")?.anchors).toEqual([first, second]);
+  });
+
+  test("a recorded anchor cannot be removed", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first, second] }));
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first] })))
+      .toThrowError(/cannot be removed/);
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState()))
+      .toThrowError(/cannot be removed/);
+  });
+
+  test("a recorded anchor cannot be changed or reordered", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first, second] }));
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({
+      anchors: [{ ...first, recordSha256: "9".repeat(64) }, second],
+    }))).toThrowError(/cannot be changed or reordered/);
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [second, first] })))
+      .toThrowError(/cannot be changed or reordered/);
+  });
+
+  test("the upgraded form of a pending proof is appended beside the record it upgrades", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first] }));
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first, upgraded] }));
+    expect(readRunState(workspaceDir, "draft-1")?.anchors).toEqual([first, upgraded]);
+  });
+
+  test("an upgrade must name an earlier recorded anchor, and never itself", () => {
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [upgraded] })))
+      .toThrowError(/must name an earlier recorded anchor/);
+    expect(() => writeRunState(workspaceDir, "draft-2", minimalState({
+      anchors: [{ ...first, upgradesRecordSha256: first.recordSha256 }],
+    }))).toThrowError(/cannot upgrade itself/);
+  });
+
+  // --- write-once per (subject, provider) — the durable half of §7.1 rule 1 ----------------
+
+  test("a second anchor of the same (subject, provider) pair is refused", () => {
+    // The rule the operation's pre-acquisition check cannot enforce on its own: two concurrent
+    // `anchor` calls both pass that check and both reach the store, and this is what stops the
+    // second one whatever the interleaving.
+    const sibling = { ...first, recordSha256: "4".repeat(64) };
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first, sibling] })))
+      .toThrowError(/already carries a lock anchor/);
+
+    // Also when the first is already durable and the second arrives as an append.
+    writeRunState(workspaceDir, "draft-2", minimalState({ anchors: [first] }));
+    expect(() => writeRunState(workspaceDir, "draft-2", minimalState({ anchors: [first, sibling] })))
+      .toThrowError(/already carries a lock anchor/);
+  });
+
+  test("a different subject or a different provider is not the same pair", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState({
+      anchors: [
+        first,
+        { ...first, subject: "matrix" as const, recordSha256: "5".repeat(64) },
+        { ...first, provider: TSA, recordSha256: "6".repeat(64) },
+      ],
+    }));
+    expect(readRunState(workspaceDir, "draft-1")?.anchors).toHaveLength(3);
+  });
+
+  test("an upgrade must name a predecessor of its OWN pair, not merely an earlier anchor", () => {
+    // N3: without the same-pair requirement, a second anchor could wear the exception's clothes by
+    // pointing at any earlier record in the run.
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({
+      anchors: [second, { ...first, recordSha256: "7".repeat(64), upgradesRecordSha256: second.recordSha256 }],
+    }))).toThrowError(/same subject from the same provider/);
+  });
+
+  test("only an upgrade-capable provider can have an upgraded form", () => {
+    const tsaFirst = { subject: "lock" as const, provider: TSA, recordSha256: "8".repeat(64) };
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({
+      anchors: [tsaFirst, { ...tsaFirst, recordSha256: "9".repeat(64), upgradesRecordSha256: tsaFirst.recordSha256 }],
+    }))).toThrowError(/have no upgraded form/);
+  });
+
+  test("a third anchor of a pair is refused even after a legitimate upgrade", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first, upgraded] }));
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({
+      anchors: [first, upgraded, { ...first, recordSha256: "a".repeat(64) }],
+    }))).toThrowError(/already carries a lock anchor/);
+  });
+
+  test("the same anchor record is never recorded twice", () => {
+    // Two different pairs naming one record: isolates the duplicate-digest rule from the
+    // write-once-per-pair rule, which would otherwise be the issue that reports.
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({
+      anchors: [first, { ...second, recordSha256: first.recordSha256 }],
+    }))).toThrowError(/recorded twice/);
+  });
+});

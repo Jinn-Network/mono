@@ -19,17 +19,20 @@ const PRIVATE_RUNTIME_IDENTIFIERS = [
   'jinn.network/profiles/inspect-evaluation/1',
 ];
 const CORE_JINN = [
-  '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evaluation', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-native-capture', '@jinn-network/benchmarking-protocol', '@jinn-network/benchmarking-publication', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run', '@jinn-network/evidence-protocol', '@jinn-network/execution-evidence-builder', '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve', '@jinn-network/record-discovery-transport-http', '@jinn-network/record-publication', '@jinn-network/task-admission', '@jinn-network/task-execution-backend', '@jinn-network/task-execution-backend-local', '@jinn-network/task-execution-evaluation-harness', '@jinn-network/task-execution-evaluator-adapters', '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-oci-grader', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace', '@jinn-network/trust-core',
+  '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evaluation', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-native-capture', '@jinn-network/benchmarking-protocol', '@jinn-network/benchmarking-publication', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run', '@jinn-network/evidence-protocol', '@jinn-network/execution-evidence-builder', '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve', '@jinn-network/record-discovery-transport-http', '@jinn-network/record-publication', '@jinn-network/task-admission', '@jinn-network/task-execution-backend', '@jinn-network/task-execution-backend-local', '@jinn-network/task-execution-evaluation-harness', '@jinn-network/task-execution-evaluator-adapters', '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-oci-grader', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace', '@jinn-network/trust-core', '@jinn-network/trust-testing',
 ];
 const VERIFY_JINN = [
   '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-protocol', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run', '@jinn-network/task-admission', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/trust-core', '@jinn-network/trust-testing',
 ];
 // `@jinn-network/trust-testing` is the Trust layer's conformance kit and a
-// devDependency only: verify runs the anchor-proof contract suite (anchor-evidence
-// design §11) against its own `node:crypto` ports. It is admitted above so the
-// live-imports sweep sees it, and pinned to test sources below so it can never
-// reach the published `dist/` -- `tsconfig.build.json` excludes `src/**/*.test.ts`,
-// and this guard is what keeps that exclusion load-bearing.
+// devDependency only, in BOTH `verify` and `core`: verify runs the anchor-proof
+// contract suite (anchor-evidence design §11) against its own `node:crypto` ports,
+// and core pins its producer-side `.ots` serializer against the kit's byte-verified
+// builder and committed real-calendar capture (§6.2). It is admitted in both member
+// lists above so the live-imports sweep sees it, and pinned to test sources below so
+// it can never reach either published `dist/` -- each package's `tsconfig.build.json`
+// excludes `src/**/*.test.ts`, and this guard is what keeps that exclusion
+// load-bearing.
 const TEST_ONLY_JINN = ['@jinn-network/trust-testing'];
 const MEMBER_ALLOWED = new Map([
   ['core', [...CORE_JINN, '@colophon-claims/verify']],
