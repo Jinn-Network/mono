@@ -94,9 +94,14 @@ which verb you typed.
 9. **GUI.** The shipped Inspect form maps to `method.bind` with an
    Inspect-shaped document. Catalog presets stay unavailable (machine host
    paths). Derived export stays unavailable (local job/log copy).
+   **Superseded for catalog GUI by
+   [DR-2026-08-19](./2026-08-19-colophon-method-cli-discover.md)
+   Decision 8** — catalog bind is available with the same machine-path trust
+   as the Inspect textarea; derived export stays unavailable.
 
 ## Out of this train
 
-Renaming sealed `one_task`; GUI catalog picker; folding `import swebench`
-into `method`; inspect-harbor as a way to wear TB 2.1; renaming the
-`lock` verb.
+Renaming sealed `one_task`; folding `import swebench` into `method`;
+inspect-harbor as a way to wear TB 2.1; renaming the `lock` verb. GUI
+catalog picker and `--n` / list / verb help moved to
+[DR-2026-08-19](./2026-08-19-colophon-method-cli-discover.md).
