@@ -64,7 +64,29 @@ test("every golden assembly row validates against assembly-row.schema.json", () 
   }
 });
 
-test("schema discriminators match the literals the current producer emits", () => {
+test("schema discriminators are pinned to the verifier's own exported literals", async () => {
+  // Anti-drift: assert against the BUILT package exports, not string copies, so
+  // renaming a format constant in src/ breaks this test rather than silently
+  // leaving the published schemas describing a format nobody emits.
+  const {
+    BUNDLE_FORMAT, BUNDLE_EVIDENCE_FORMAT, BUNDLE_VERDICTS_FORMAT,
+    BUNDLE_TRUST_FORMAT, BUNDLE_ASSEMBLY_FORMAT,
+  } = await import("../dist/index.js");
+  assert.equal(loadSchema("bundle-manifest.schema.json").properties.format.const, BUNDLE_FORMAT);
+  assert.equal(loadSchema("evidence-catalog.schema.json").properties.format.const, BUNDLE_EVIDENCE_FORMAT);
+  assert.equal(loadSchema("verdict-catalog.schema.json").properties.format.const, BUNDLE_VERDICTS_FORMAT);
+  assert.equal(loadSchema("public-trust.schema.json").properties.format.const, BUNDLE_TRUST_FORMAT);
+  assert.equal(loadSchema("assembly-row.schema.json").$defs.header.properties.format.const, BUNDLE_ASSEMBLY_FORMAT);
+
+  const { CLAIM_PACKAGE_SCHEMA_ID, BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID } =
+    await import("../dist/profile/claim.js");
+  assert.deepEqual(
+    loadSchema("claim-package.schema.json").properties.claimSchema.enum,
+    [CLAIM_PACKAGE_SCHEMA_ID, BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID],
+  );
+});
+
+test("the golden bundle is an instance of the formats those literals name", () => {
   assert.equal(loadSchema("bundle-manifest.schema.json").properties.format.const, loadGolden("bundle.json").format);
   assert.equal(loadSchema("evidence-catalog.schema.json").properties.format.const, loadGolden("evidence.json").format);
   assert.equal(loadSchema("verdict-catalog.schema.json").properties.format.const, loadGolden("verdicts.json").format);
