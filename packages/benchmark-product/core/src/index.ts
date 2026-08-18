@@ -516,8 +516,8 @@ export type {
 } from "./venue/demo1-claude.js";
 
 // Workspace metadata and the sealed-bytes store (spec §4.5): exact bytes, digest-addressed.
-export { WORKSPACE_STORAGE_VERSION, WorkspaceMetadataSchema } from "./workspace/workspace.js";
-export type { WorkspaceMetadata } from "./workspace/workspace.js";
+export { WORKSPACE_STORAGE_VERSION, WorkspaceAnchoringEntrySchema, WorkspaceMetadataSchema } from "./workspace/workspace.js";
+export type { WorkspaceAnchoringEntry, WorkspaceMetadata } from "./workspace/workspace.js";
 export { getSealedBytes, hasSealedBytes, putSealedBytes, sha256Hex } from "./workspace/sealed-store.js";
 
 // Publication readiness is an explicit projection over durable state/journal capture. It does
@@ -556,6 +556,7 @@ export type { AuthorityPolicy, GatedOperation, Principal } from "./authority/pol
 
 // The operations facade (spec §5.1) — the boundary every surface calls.
 export {
+  anchoringConfigure,
   armAdd,
   armList,
   armRemove,
@@ -580,6 +581,7 @@ export {
   publicationRegister,
   publicationReport,
   publicationStatus,
+  runAnchor,
   runCancel,
   runCollect,
   runLaunch,
@@ -609,6 +611,9 @@ export {
   updateDraft,
 } from "./operations/index.js";
 export type {
+  AnchoringConfigureInput,
+  AnchoringConfigureResult,
+  AnchorSubject,
   ArmAddInput,
   ArmInspection,
   ArmRemoveInput,
@@ -655,6 +660,9 @@ export type {
   QuoteCoverageRefusal,
   QuoteEstimatedWallTime,
   QuotePresentation,
+  RunAnchorDeps,
+  RunAnchorInput,
+  RunAnchorResult,
   RunCancelDeps,
   RunCancelInput,
   RunCancelResult,
@@ -722,6 +730,16 @@ export type {
   VenueHonesty,
 } from "./operations/index.js";
 export { LOCAL_VENUE_LIMITS } from "./operations/index.js";
+
+// The `lock` verb's own anchor hook (anchor-evidence design §7.2), exported from its module rather
+// than through the operations facade — deliberately, and permanently. The facade's inventory is
+// exactly the operations, which is the invariant `./cli/parity-map.ts` and `./cli/parity.test.ts`
+// depend on; this is a surface helper, like the workspace and journal readers above it. Both
+// shipped surfaces call it after a successful lock so neither can drift into a lock that quietly
+// skips the errand the other performs. It never throws: every anchor outcome is typed, and the
+// operation audits itself.
+export { anchorAfterLockIfConfigured } from "./operations/run-anchor.js";
+export type { AnchorAfterLockOutcome } from "./operations/run-anchor.js";
 
 // BP-40: deletion-portable public bundle verification uses only bundle-carried bytes/public keys.
 export { verifyPublicBundle } from "./bundle/verify.js";

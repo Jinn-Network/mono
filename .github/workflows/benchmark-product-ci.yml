@@ -38,6 +38,7 @@ on:
       - "packages/task-execution/profiles/**"
       - "packages/task-execution/protocol/**"
       - "packages/trust/core/**"
+      - "packages/trust/testing/**"
       - ".github/scripts/benchmark-product-package-inventory.test.mjs"
       - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
       - ".github/scripts/benchmark-product-packed-types.test.mjs"
@@ -88,6 +89,7 @@ on:
       - "packages/task-execution/profiles/**"
       - "packages/task-execution/protocol/**"
       - "packages/trust/core/**"
+      - "packages/trust/testing/**"
       - ".github/scripts/benchmark-product-package-inventory.test.mjs"
       - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
       - ".github/scripts/benchmark-product-packed-types.test.mjs"
@@ -153,6 +155,12 @@ jobs:
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
+          # The Trust conformance kit -- a devDependency of verify AND core, never a runtime
+          # dependency of either. Verify runs the anchor-proof contract suite against its own
+          # node:crypto ports (anchor-evidence design §11); core pins its producer-side `.ots`
+          # serializer against the kit's byte-verified builder and its committed real-calendar
+          # capture (§6.2). Built here because a portal dependency resolves through its `dist/`.
+          (cd packages/trust/testing && yarn install --immutable && yarn build)
           (cd packages/discovery/protocol && yarn install --immutable && yarn build)
           (cd packages/discovery/client && yarn install --immutable && yarn build)
           (cd packages/discovery/serve && yarn install --immutable && yarn build)

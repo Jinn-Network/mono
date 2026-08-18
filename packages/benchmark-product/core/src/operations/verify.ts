@@ -39,8 +39,10 @@ import {
   parseMatrix,
   parseRun,
 } from "@jinn-network/benchmarking-records";
+import { evaluateIntegrityAnchors } from "@colophon-claims/verify";
 import { verifyMatrix } from "@jinn-network/benchmarking-run";
 import { verifyReport } from "@jinn-network/benchmarking-aggregate";
+import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { refuse } from "../errors.js";
 import { ClaimPackageSchema } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
@@ -84,7 +86,14 @@ export interface RunVerifyInput {
   readonly draftId: string;
 }
 
-export type RunVerifyCheck = "matrix-rederivation" | "report-verification" | "claim-consistency";
+export type RunVerifyCheck =
+  | "matrix-rederivation"
+  | "report-verification"
+  | "claim-consistency"
+  /** Only for a run on the anchored closure — one that carries an anchor, or whose sealed Run
+   * declared anchoring intent (anchor-evidence design §8). The same shared implementation the
+   * portable reader runs, over this workspace's own sealed anchor bytes. */
+  | "integrity-anchors";
 
 export interface RunVerifyResult {
   readonly draftId: string;
@@ -214,6 +223,31 @@ export async function verifyRunWorkspace(
       const claim = claimParsed.data;
 
       const previewLog = readPreviewLog(context.workspaceDir, input.draftId);
+      // anchor-evidence §7.4: the anchors section is re-derived from the sealed AnchorEvidence
+      // bytes, not read out of the claim under test — an unanchored claim that asserts an anchor,
+      // and an anchored claim whose section drifted from its own records, both fail below.
+      const carriage = readRunAnchorCarriage(context.workspaceDir, runState);
+      // The same shared check the portable reader runs, over the workspace's own sealed bytes and
+      // with no trust material — roots and headers are verifier-side configuration, and a producer
+      // that supplied its own here would be grading its own homework. `invalid` refuses; every
+      // other status, including a declared-but-absent subject, is a disclosed fact.
+      if (carriage.anchoredClosure) {
+        const anchorReport = evaluateIntegrityAnchors({
+          records: carriage.records,
+          runSha256: runState.runSha256,
+          matrixSha256: runState.matrixSha256,
+          closeAt: runRecord.closeAt,
+          declaredProfiles: carriage.declaredProfiles,
+        });
+        const firstInvalid = anchorReport.invalid[0];
+        if (firstInvalid !== undefined) {
+          refuse(
+            "record-integrity",
+            `anchors/${firstInvalid.recordSha256}.bin`,
+            `carried anchor is invalid: ${firstInvalid.reason ?? "the proof does not verify"}`,
+          );
+        }
+      }
       const inspectAdditional = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
         && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
         ? [...INSPECT_SEPARATE_ASSURANCE_LIMITATIONS]
@@ -290,6 +324,7 @@ export async function verifyRunWorkspace(
             leaderboardSubmitReady: suiteFacts.quote.leaderboardSubmitReady,
           },
         }),
+        ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
         ...(previewLog === undefined
           ? {}
           : {
@@ -298,9 +333,11 @@ export async function verifyRunWorkspace(
                 timestamps: previewLog.previews.map((preview) => preview.at),
               },
             }),
+        ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
       });
 
       checks.push("claim-consistency");
+      if (carriage.anchoredClosure) checks.push("integrity-anchors");
 
       return {
         draftId: input.draftId,

@@ -20,6 +20,19 @@ try {
   ]) {
     if (!listing.includes(required)) throw new Error(`packed verifier is missing ${required}`);
   }
+  if (!listing.includes("package/dist/anchor/ports.js")) {
+    throw new Error("packed verifier is missing the RFC 3161 anchor ports");
+  }
+  // The anchor conformance suite and the port unit tests live in
+  // `src/**/*.test.ts` and import the Trust conformance kit, a devDependency.
+  // `tsconfig.build.json` excludes those files from `dist/`; this turns that
+  // exclusion into a checked promise rather than a comment, so a published
+  // verifier can never carry a module importing a package the tarball does not
+  // depend on.
+  const packedTests = listing.filter((entry) => /^package\/dist\/.*\.test\.[cm]?js$/.test(entry));
+  if (packedTests.length > 0) {
+    throw new Error(`packed verifier carries test modules: ${packedTests.join(", ")}`);
+  }
   const manifest = JSON.parse((await run("tar", ["-xOzf", archive, "package/package.json"])).stdout);
   if (manifest.name !== "@colophon-claims/verify" || manifest.version !== "2.0.0") {
     throw new Error("packed verifier identity/version drifted");

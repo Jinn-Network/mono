@@ -39,6 +39,13 @@ export const BENCHMARK_OBSERVATION_ARCHIVE_PROFILE =
   "https://spec.jinn.network/profiles/benchmark-observation-archive/v1";
 export const BENCHMARK_PUBLICATION_EXTENSION =
   "https://spec.jinn.network/extensions/benchmark-publication/v1";
+/**
+ * Declared anchoring intent, sealed into the Run record (anchor-evidence design §7.3). The value
+ * lists intended anchor-provider profiles and NEVER endpoints: an endpoint is machine-local
+ * configuration, and sealing one would make the record depend on where it was produced.
+ */
+export const ANCHOR_INTENT_EXTENSION =
+  "https://spec.jinn.network/extensions/anchor-intent/v1";
 
 export const ASSEMBLY_PROCEDURE = "jinn.benchmarking.assembly";
 export const ASSEMBLY_PROCEDURE_VERSION = "1.0";
