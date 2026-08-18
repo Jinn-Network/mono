@@ -7,8 +7,9 @@ name: Stack fixture immutability
 # enforced against the registry in the stable publish lane.
 on:
   pull_request:
+  merge_group:
   push:
-    branches: [integration/evidence-v1, next]
+    branches: [next]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -32,11 +33,36 @@ jobs:
         run: node .github/scripts/fixture-manifest.mjs --check
       - name: Verify fixture immutability against the base
         env:
-          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.before }}
         run: |
           set -euo pipefail
           if [ -z "${BASE_REF}" ] || [ "${BASE_REF}" = "0000000000000000000000000000000000000000" ]; then
             echo "::notice::No base commit to compare against; skipping."
             exit 0
           fi
+          # Prove the base is actually in this checkout before comparing against it.
+          # fixture-immutability.mjs treats a failed `git show <ref>:<path>` as "no
+          # baseline for this package" and returns null, so an unreachable BASE_REF
+          # does not error — it silently yields "holds across 0 packages" and exits 0.
+          # A vacuous green on an immutability gate is worse than a red, so fail loud.
+          if ! git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null; then
+            echo "::error::Base commit ${BASE_REF} is not present in this checkout; the immutability comparison would be vacuous."
+            exit 1
+          fi
           node .github/scripts/fixture-immutability.mjs --base "${BASE_REF}"
+  stack-fixture-gate:
+    # The check-run name GitHub reports is this job's display `name:` below, and that
+    # string is the required-status-check context registered on the `next` ruleset
+    # (DR-2026-08-18-b D3) — keep them in sync.
+    name: stack-fixture-gate
+    needs: [fixtures]
+    if: always()
+    runs-on: ubuntu-latest
+    # One `test` against an upstream result. The bound keeps a wedged runner from
+    # holding the required context open for the 360-minute default.
+    timeout-minutes: 5
+    steps:
+      - name: Require exact fixture-gate success
+        env:
+          FIXTURES_RESULT: ${{ needs.fixtures.result }}
+        run: test "${FIXTURES_RESULT}" = success
