@@ -174,6 +174,17 @@ export const RunStateSchema = z.object({
   publishedAt: Rfc3339Schema.optional(),
   /** Append-only; absent on every workspace that has never anchored (anchor-evidence §7.1). */
   anchors: z.array(RunAnchorSchema).optional(),
+  suiteQuote: z.object({
+    executionConformance: z.boolean(),
+    coverage: z.enum(["one_task", "ten_task", "full", "custom"]),
+    leaderboardSubmitReady: z.boolean(),
+    methodLeaderboardEligible: z.boolean(),
+    cellCount: z.string().min(1),
+    harborVersion: z.string().min(1),
+    selectedTaskCount: z.number().int().positive(),
+    armCount: z.number().int().positive(),
+    replicates: z.number().int().positive(),
+  }).strict().optional(),
 }).superRefine((state, context) => {
   // Write-once per (subject, provider), with §6.2's upgrade as the single exception — the durable
   // half of the rule the `anchor` operation enforces (anchor-evidence design §7.1 rule 1).

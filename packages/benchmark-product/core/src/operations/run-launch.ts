@@ -32,7 +32,7 @@ import {
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
 import { randomUUID } from "node:crypto";
-import { launchAndWatch, resumeRun } from "@jinn-network/benchmarking-run";
+import { launchAndWatch, resumeRun, type LaunchOptions } from "@jinn-network/benchmarking-run";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse, toErrorEnvelope } from "../errors.js";
@@ -60,6 +60,7 @@ import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
 import { createRuntimeVenue } from "../runtime/adapter.js";
+import { harborRetryUnscorableFacts } from "../runtime/harbor/retry-bind.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
@@ -79,6 +80,8 @@ export interface RunLaunchDeps {
   readonly solveStartDelayMsForTesting?: number;
   /** TEST-ONLY deterministic generation source. Production uses a core-owned random UUID. */
   readonly driverGenerationForTesting?: () => string;
+  /** TEST-ONLY §7.4 host classifier. Production launch never supplies host facts. */
+  readonly hostTerminalFacts?: LaunchOptions["hostTerminalFacts"];
 }
 
 export interface RunLaunchInput {
@@ -147,6 +150,17 @@ function loadLockedOrRunningRun(workspaceDir: string, draftId: string, expectedS
 
 function taskBytesForFactory(workspaceDir: string): (taskDigestHex: string) => Uint8Array {
   return (taskDigestHex) => getSealedBytes(workspaceDir, taskDigestHex);
+}
+
+function composeHostTerminalFacts(
+  workspaceDir: string,
+  override: RunLaunchDeps["hostTerminalFacts"],
+): NonNullable<LaunchOptions["hostTerminalFacts"]> {
+  return async (input) => {
+    const fromOverride = await override?.(input);
+    if (fromOverride !== undefined) return fromOverride;
+    return harborRetryUnscorableFacts(workspaceDir, input.attempt);
+  };
 }
 
 function assertVenueOwnership(venue: LocalVenue): void {
@@ -358,6 +372,7 @@ export function runLaunch(
                   return cancellation!.earlyClose;
                 },
                 capture,
+                hostTerminalFacts: composeHostTerminalFacts(clockedContext.workspaceDir, deps.hostTerminalFacts),
               });
               await driveCellEvents(driveDeps, events);
               return { draft };
@@ -509,6 +524,7 @@ export function runResume(
                     },
                   },
                   capture,
+                  hostTerminalFacts: composeHostTerminalFacts(clockedContext.workspaceDir, deps.hostTerminalFacts),
                 });
                 await driveCellEvents(driveDeps, events);
               }

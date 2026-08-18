@@ -101,6 +101,16 @@ by publication. The first run may fetch the pinned container image. Set
 `COLOPHON_PUBLICATION_RELEASE_DOCKER` only when `docker` is not on `PATH`.
 Because this is an explicit local release gate, it is skipped by ordinary CI.
 
+## Terminal-Bench 2.1 `one_task` operator qualify
+
+An operator-only campaign against the official Terminal-Bench 2.1 leaderboard
+pin with real Harbor 0.21, Docker, and two oracle arms. It proves protocol
+identity (`one_task`, conforming, not leaderboard-ready, Hub
+`inspection-upload`). It does not download the 89-task tree in CI and is not
+part of default `yarn test`. Procedure, receipt checklist, and the fail-closed
+`yarn tb21-one-task-qualify` gate:
+[docs/runbooks/tb21-official-one-task.md](../../docs/runbooks/tb21-official-one-task.md).
+
 ## Product surfaces
 
 - [Installable CLI](./cli/README.md) — the no-argument sample and local viewer.

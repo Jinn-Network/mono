@@ -68,6 +68,11 @@ export function assertClaimConsistency(input: {
    * verification path authenticated, never read out of the claim being checked. Empty rebuilds the
    * unanchored claim, so a stored claim asserting an anchor nobody carries fails here. */
   readonly anchors?: readonly ClaimAnchor[];
+  readonly suiteComparability?: {
+    readonly executionConformance: boolean;
+    readonly coverage: "one_task" | "ten_task" | "full" | "custom";
+    readonly leaderboardSubmitReady: boolean;
+  };
 }): void {
   const { claim, identities, runRecord, matrixRecord, reportRecord } = input;
   if (identities.reportSha256 === undefined) {
@@ -110,6 +115,7 @@ export function assertClaimConsistency(input: {
     },
     ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }),
     ...(input.anchors === undefined ? {} : { anchors: input.anchors }),
+    ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   });
   if (!bytesEqual(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) {
     const field = firstDifference(claim, expected) ?? "claim";

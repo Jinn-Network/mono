@@ -1,7 +1,7 @@
 # Platform stack npm publishing runbook
 
 **Scope:** the catalog-derived stack-published release groups `sealed-platform-v1` (13 packages)
-and `implementations-v1` (59 packages). Their exact package sets, runtime waves,
+and `implementations-v1` (60 packages). Their exact package sets, runtime waves,
 trusted-publisher inputs, and policy are generated in the
 [live platform topology](../../architecture/generated/platform-topology.md#release-and-trusted-publishers).
 Workflow: `.github/workflows/stack-npm-publish.yml`. Verified publisher:
@@ -10,15 +10,18 @@ Workflow: `.github/workflows/stack-npm-publish.yml`. Verified publisher:
 ## Current release policy
 
 - Both stack-published groups are catalog-permitted for receipt-gated canary and for a later
-  stable cut (`canary-and-stable`, `stable: true`). That is policy permission, not an operating
-  publisher. A push to `integration/evidence-v1` or `next` still uses the `canary` dist-tag and
-  the `npm-publish` GitHub environment, and the canary job is a matrix over both groups.
-- Canary publication remains **not operationally enabled**. Do not set
-  `PLATFORM_CANARY_PUBLISH_ENABLED=true` from this runbook; the flag stays unset until the
-  trusted-publisher checklist below is complete.
-- The trusted-publisher set is the union of both groups: **72** rows, one registration each,
+  stable cut (`canary-and-stable`, `stable: true`). A push to `integration/evidence-v1` or `next`
+  uses the `canary` dist-tag and the `npm-publish` GitHub environment, and the canary job is a
+  matrix over both groups.
+- Canary publication is **operationally enabled** as of 2026-08-17
+  ([DR-2026-08-17-d](../../log/decisions/2026-08-17-platform-canary-publish-enabled.md)):
+  repository variable `PLATFORM_CANARY_PUBLISH_ENABLED=true`. The next push to `next` or
+  `integration/evidence-v1` whose same-run verification succeeds will publish
+  `0.1.0-canary.sha.<fullSha>` under dist-tag `canary`. That is not `latest` and not a
+  `stack-v*` cut.
+- The trusted-publisher set is the union of both groups: **73** rows, one registration each,
   bound to `stack-npm-publish.yml` and `npm-publish`. Per-group publication receipts are a subset
-  of that list.
+  of that list. The generated topology is authoritative for membership.
 - The two `experimental-policy` packages remain disabled and are not part of either
   stack-published set. Native-role closure is test evidence, not a canary publication promise.
 - Stable publication is still mechanically disabled. A stable event may run read-only tag
@@ -89,14 +92,14 @@ stable publisher job.
 
 An npm scope owner must complete this once for every generated registration:
 
-- [ ] Confirm the operator belongs to a team in the `@jinn-network` npm organization.
-- [ ] Regenerate the list and compare it with the generated release view.
-- [ ] Add every registration using the exact fields above, including Environment `npm-publish`.
-- [ ] Protect the `npm-publish` GitHub environment with required reviewers and allowed branches.
-- [ ] Add no `NODE_AUTH_TOKEN` or other long-lived npm credential.
-- [ ] Run the full hosted verifier and record its exact successful source SHA.
-- [ ] Set repository variable `PLATFORM_CANARY_PUBLISH_ENABLED=true` only after every preceding item is recorded.
-- [ ] Record the operator and completion date in the operational change record.
+- [x] Confirm the operator belongs to a team in the `@jinn-network` npm organization. (`ritsukai` / `@jinn-network:developers`)
+- [x] Regenerate the list and compare it with the generated release view. (73 names; topology union)
+- [x] Add every registration using the exact fields above, including Environment `npm-publish`.
+- [ ] Protect the `npm-publish` GitHub environment with required reviewers and allowed branches. **Explicitly skipped 2026-08-17** — shared with operator/client canary; see [DR-2026-08-17-d](../../log/decisions/2026-08-17-platform-canary-publish-enabled.md).
+- [x] Add no `NODE_AUTH_TOKEN` or other long-lived npm credential.
+- [x] Run the full hosted verifier and record its exact successful source SHA. (`b546aa40fe82aab95552bbb7270846f0500fdf10`, [run 32065136927](https://github.com/Jinn-Network/mono/actions/runs/32065136927))
+- [x] Set repository variable `PLATFORM_CANARY_PUBLISH_ENABLED=true` only after every preceding item is recorded.
+- [x] Record the operator and completion date in the operational change record. ([DR-2026-08-17-d](../../log/decisions/2026-08-17-platform-canary-publish-enabled.md))
 
 ## Recovery
 

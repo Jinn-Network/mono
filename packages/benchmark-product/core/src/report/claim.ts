@@ -216,6 +216,12 @@ const ClaimPackageWireSchema = z.object({
    * claim-package/4 — the schema-level refine below refuses it on /1 and /2, so an unanchored claim
    * cannot grow an anchors section and an anchored one cannot be published without it. */
   anchors: z.array(ClaimAnchorSchema).optional(),
+  /** Optional Colophon suite-protocol bits. Not Report v2 required fields. */
+  suiteComparability: z.object({
+    executionConformance: z.boolean(),
+    coverage: z.enum(["one_task", "ten_task", "full", "custom"]),
+    leaderboardSubmitReady: z.boolean(),
+  }).strict().optional(),
 }).superRefine((claim, ctx) => {
   if (claim.claimSchema !== ANCHORED_CLAIM_PACKAGE_SCHEMA_ID && claim.anchors !== undefined) {
     ctx.addIssue({
@@ -426,6 +432,12 @@ export interface BuildClaimPackageInput {
    * here: this builder is pure, and the derivation needs the record bytes the caller already
    * authenticated. */
   readonly anchors?: readonly ClaimAnchor[];
+  /** Optional two-axis official-suite comparability. Absent unless a suite protocol is bound. */
+  readonly suiteComparability?: {
+    readonly executionConformance: boolean;
+    readonly coverage: "one_task" | "ten_task" | "full" | "custom";
+    readonly leaderboardSubmitReady: boolean;
+  };
 }
 
 type Comparison = z.infer<typeof ComparisonSchema>;
@@ -703,6 +715,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
         }
       : {}),
     ...(projection.comparison !== undefined ? { comparison: projection.comparison } : {}),
+    ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   };
 }
 

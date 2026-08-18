@@ -17,8 +17,12 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires server-configured Harbor host paths; browser-supplied paths are forbidden",
   selectTerminalBench2Runtime:
     "requires server-configured Terminal-Bench and Harbor host paths; browser-supplied paths are forbidden",
+  selectTerminalBench21Runtime:
+    "requires server-configured Terminal-Bench 2.1 and Harbor host paths; browser-supplied paths are forbidden",
   migrateTerminalBenchLegacyTask:
     "requires server-configured migration input paths; browser-supplied paths are forbidden",
+  exportHarborHubPackage:
+    "copies a machine-local Harbor job directory; browser path-based job export is forbidden",
 } as const;
 
 describe("generated library / CLI / GUI parity", () => {

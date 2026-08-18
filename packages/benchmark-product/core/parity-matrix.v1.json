@@ -123,6 +123,16 @@
       }
     },
     {
+      "operation": "exportHarborHubPackage",
+      "cliVerb": "hub export",
+      "authorityGated": false,
+      "description": "Packages a retained Harbor Job for Terminal-Bench 2.1 Hub upload without placing the leaderboard row.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "copies a machine-local Harbor job directory; browser path-based job export is forbidden"
+      }
+    },
+    {
       "operation": "getDraft",
       "cliVerb": "draft show",
       "authorityGated": false,
@@ -400,6 +410,16 @@
       "gui": {
         "status": "shipped",
         "action": "runtime.inspect.select"
+      }
+    },
+    {
+      "operation": "selectTerminalBench21Runtime",
+      "cliVerb": "runtime terminal-bench-2-1 select",
+      "authorityGated": false,
+      "description": "Resolves a named Terminal-Bench 2.1 slice and binds it to the managed Harbor runtime.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires server-configured Terminal-Bench 2.1 and Harbor host paths; browser-supplied paths are forbidden"
       }
     },
     {

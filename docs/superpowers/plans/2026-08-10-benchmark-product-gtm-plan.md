@@ -1,7 +1,7 @@
 # Benchmark Product: High-Level Go-to-Market Plan
 
 **Status:** Working strategy draft  
-**Version:** 0.2 (2026-08-10 — §6 discovery gate rewritten commitment-gated per [DR-2026-08-10](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md); §10 Phase 1 aligned; authority note routed through the DR. v0.1 circulated outside the repo.)  
+**Version:** 0.4 (2026-08-17 — TB 2.1 named protocol vs Inspect select-a-task per [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md); engine-wrap vs campaign-overlay copy per [DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md); 2026-08-10 — §6 discovery gate rewritten commitment-gated per [DR-2026-08-10](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md); §10 Phase 1 aligned; authority note routed through the DR. v0.1 circulated outside the repo.)  
 **Work shape:** `design`  
 **Date:** 2026-08-10  
 **Repository basis:** `integration/evidence-v1` is the canonical implementation branch. PR #2541 is the current standalone Benchmark Product candidate and remains open against that branch at the time of writing.
@@ -82,7 +82,7 @@ The Benchmark Product's opening is the space between them:
 
 > **Self-serve like an evaluation tool, credible like an independent benchmark, with managed expertise and stronger external assurance available when needed.**
 
-It should integrate with established evaluation frameworks rather than replace them. Jinn's differentiated role is the evidence, assurance, completeness, verification, and eventual open provider market around the evaluation.
+Established evaluation frameworks run each **trial**. Colophon locks the comparison, accounts every cell, and publishes a checkable Jinn bundle. It does not run the framework's campaign, import a finished job, or replace Inspect, Harbor, or Braintrust as an authoring tool. Jinn's differentiated role remains evidence, assurance, completeness, verification, and the eventual open provider market.
 
 ## 4. Positioning
 
@@ -347,7 +347,7 @@ Search for visible moments when a benchmark claim is being prepared or scrutiniz
 
 The outreach should be specific to the claim:
 
-> “We saw the comparison behind your release. We are building a way to lock the method, account for every result, and publish evidence that customers can independently inspect, without replacing your existing eval stack.”
+> “We saw the comparison behind your release. We are building a way to lock the method, account for every result, and publish evidence that customers can independently inspect.”
 
 ### 8.2 Design-partner campaigns
 
@@ -365,9 +365,17 @@ The success event is not account creation. It is:
 
 A first-class Inspect integration can be a major acquisition channel:
 
-> **Bring an existing Inspect evaluation and turn it into a publishable, verifiable benchmark claim.**
+> **Select a supported Inspect task. Colophon expands it into a locked multi-arm comparison and runs each cell through Inspect.**
 
-The product should complement the open-source evaluation ecosystem rather than ask users to abandon it. Potential distribution surfaces include:
+The product should complement the open-source evaluation ecosystem by keeping Inspect as the trial engine, not by pretending the Inspect eval-set is the published claim.
+
+Terminal-Bench 2.1 is a different door: a **named official protocol** Colophon wraps, not a select-a-task overlay and not Hub-as-the-claim ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)):
+
+> **Lock the official Terminal-Bench 2.1 method. Colophon runs Harbor under that lock, accounts every cell, and publishes a checkable bundle. Hub export is a derived artifact for their submit flow, not the claim of record.**
+
+A cousin method on TB tasks must not wear the suite name. A protocol-faithful slice is not a leaderboard-complete run. Copy must not claim Colophon placed a Hub row while community submissions are closed.
+
+Potential distribution surfaces include:
 
 - integration guides;
 - a CLI workflow;
@@ -457,7 +465,7 @@ Run real campaigns wherever committed design partners pull them (§6 discovery g
 
 ### Phase 2: private self-serve beta
 
-Invite technically capable users who can bring an existing evaluation, task set, or benchmark question.
+Invite technically capable users who can lock a named suite protocol, select a supported Inspect task, or bring their own task set.
 
 Offer self-serve, assisted setup, and managed modes side by side.
 
@@ -596,7 +604,7 @@ The product sits at the center.
 
 The managed service wraps it.
 
-Established evaluation frameworks run beneath it.
+Established evaluation frameworks run the trial beneath it.
 
 Jinn supplies the evidence and future open assurance market.
 
@@ -614,6 +622,7 @@ Each campaign creates the foundation for Jinn Data and the later query product.
 - [PR #2541: standalone Benchmark Product](https://github.com/Jinn-Network/mono/pull/2541)
 - [`2026-08-05-benchmark-product-design.md`](../specs/2026-08-05-benchmark-product-design.md)
 - [DR-2026-08-10 — Product-Led GTM and Default First Market](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md)
+- [DR-2026-08-17 — Runtime engine direct mode](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)
 
 ### Market reference points
 
@@ -623,5 +632,7 @@ Each campaign creates the foundation for Jinn Data and the later query product.
 - [Vals methodology](https://www.vals.ai/methodology)
 
 ## Authority note
+
+Engine-wrap vs campaign-overlay copy in §3, §8.1, §8.3, and §15 is governed by [DR-2026-08-17 — Runtime engine direct mode](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md). TB 2.1 named-protocol copy in §8.3 is governed by [DR-2026-08-17-b — Official suite protocol](../../../log/decisions/2026-08-17-official-suite-protocol.md). `GROWTH.md` is unchanged.
 
 The current `integration/evidence-v1` version of `GROWTH.md` encodes a harness-first strategy, and the standalone product design lineage (charter §5, program plan §3, PR #2541) fixes coding-agent builders as the first market. This draft departs from both. The departures are proposed — not silently applied — through [DR-2026-08-10 — Product-Led GTM and Default First Market](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md): the GROWTH.md strategy-layer revision routes through the canonical-doc process (linked GitHub Discussion + CODEOWNERS approval per `spec/2026-04-28-canonical-docs.md`), and the first-market amendment lands as a dated addendum on the program plan at ratification. Until the DR ratifies, GROWTH.md and the program plan remain authoritative as written.

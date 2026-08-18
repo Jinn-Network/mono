@@ -33,7 +33,9 @@ import {
 } from "../runtime/inspect/disclosure.js";
 import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
-import { putSealedBytes } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
+import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
 import { runtimeRegistrationArtifacts } from "../runtime/adapter.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import type { OperationContext } from "./context.js";
@@ -88,6 +90,19 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           `drafts.${input.draftId}.spec`,
           "quote invalidated by edit — re-quote",
         );
+      }
+      if (document.spec.evaluationRuntime?.adapterId === "harbor") {
+        const harborSelection = HarborSelectionManifestSchema.parse(
+          JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
+        );
+        const suite = suiteSelectionFromHarbor(harborSelection);
+        if (suite?.coverage === "full" && runState.suiteQuote === undefined) {
+          refuse(
+            "conflict",
+            `runs.${input.draftId}.suiteQuote`,
+            "full-suite Terminal-Bench 2.1 lock requires a quote that recorded comparability bits",
+          );
+        }
       }
 
       const unreadyAgent = context.runtimeHost?.assessAgentReadiness(
