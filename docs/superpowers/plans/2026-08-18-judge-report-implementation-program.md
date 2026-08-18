@@ -246,12 +246,18 @@ Parent #2833 remains the umbrella; all children get native Issue Types, native s
 | Issue | Action | Maps to |
 |---|---|---|
 | #2833 | Re-body → this document; native sub-issues attached | Program parent |
-| #2834 (F3) | **Close** — shipped and registered on `next` (adapter + venue registration) | — |
-| #2835 (F1) | **Close** — importer + CLI shipped; residuals are P2/P4 (new issues) | — |
-| #2836 (F2) | Re-scope + re-title | P1 |
-| #2837 (F4) | Re-scope + re-title | P5 |
-| #2838 (F6) | Re-scope + re-title | P6 |
-| #2839 (F7) | Keep; body updated with verified seams | S1/S2 |
-| New | `design` P0; `feat` P2, P3, P4; `fix` P7; `test` P8; `docs` P9; `feat` R1, R2; `test` R3 | As named |
+| #2834 (F3) | **Closed** — shipped and registered on `next` (adapter + venue registration) | — |
+| #2835 (F1) | **Closed** — importer + CLI shipped; residuals are #2843/#2845 | — |
+| #2836 (F2) | Re-scoped + re-titled | P1 |
+| #2837 (F4) | Re-scoped + re-titled | P5 |
+| #2838 (F6) | Re-scoped + re-titled | P6 |
+| #2839 (F7) | Kept; body updated with verified seams | S1/S2 |
+| #2842 | New (`design`) | P0 |
+| #2843, #2844, #2845 | New (`feat`) | P2, P3, P4 |
+| #2846 | New (`fix`) | P7 |
+| #2847 | New (`test`) | P8 |
+| #2848 | New (`docs`) | P9 |
+| #2849, #2850 | New (`feat`) | R1, R2 |
+| #2851 | New (`test`) | R3 |
 
 Adjacent hygiene surfaced by recon, parked for the operator (not this program's scope): demo-1 issues #2611/#2613 still target the deleted `integration/evidence-v1` branch; PR #2729 is conflicted and unreviewed; the merge-queue flip (#2798/#2799) operational steps remain open.
