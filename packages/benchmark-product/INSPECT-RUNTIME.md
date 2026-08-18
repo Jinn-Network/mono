@@ -1,5 +1,13 @@
 # Inspect runtime adapter
 
+Inspect is a **framework a sealed method may name**, not a Colophon product
+mode and not an alternative to Harbor
+([DR-2026-08-18-f](../../log/decisions/2026-08-18-colophon-method-cli.md)).
+They compose in the world. Colophon `adapterId` is how a cell is spawned.
+`colophon inspect` is **draft inspect** (resolve arms, benchmark, and
+assurance). Binding an Inspect-shaped document is `colophon method` with a
+file operand, not a rival `runtime inspect` product.
+
 Inspect is an optional evaluation runtime for the Benchmark Product. It is not
 a dependency of the native runtime and it is not a second product lifecycle.
 Both runtimes use the same draft, quote, lock, launch, accounting, Report,
@@ -339,18 +347,21 @@ preflight validates Docker, the digest-pinned image, dataset bytes, runtime
 identity, broker health, and credential-file metadata without making a model
 request. Preview and official launch make real calls.
 
-Then select it on a mutable draft:
+Then bind it on a mutable draft (`method` takes a complete Inspect document;
+`--slice` / `--host` are catalog-id flags and are refused on a file):
 
 ```bash
-benchmark-product runtime inspect select \
+benchmark-product method \
   --workspace /absolute/path/to/workspace \
   --principal sponsor-1 \
   --draft my-draft \
-  --file /absolute/path/to/inspect-selection.json
+  /absolute/path/to/inspect-selection.json
 ```
 
-The web product exposes the same `selectInspectEvaluation` operation as a raw
-selection form. It does not provide a task, solver, scorer, or sandbox editor.
+The web product exposes `method.bind` as a raw Inspect-document form. It does
+not provide a task, solver, scorer, or sandbox editor. Catalog suite presets
+and derived export stay unavailable in the browser (machine host paths / local
+job copy).
 
 An unmodified task with parallel Inspect scorers uses the mutually exclusive
 `scoring` form. Each projection selects one scorer value, or one exact top-level
