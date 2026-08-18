@@ -443,7 +443,10 @@ describe("Inspect eval official-suite select", () => {
       armIds: ["control", "candidate"],
     });
     expect(ready.quote.leaderboardSubmitReady).toBe(true);
-    expect(ready.limitation).toBeUndefined();
+    // A ready claim still has to name Inspect somewhere — `suiteComparability` is three
+    // protocol-agnostic booleans, so without this the claim is indistinguishable from a
+    // Terminal-Bench 2.1 leaderboard-ready one.
+    expect(ready.limitation).toBe(INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE);
     const missing = suiteFactsFromAccountedInspectRun({
       manifest,
       armCount: 2,

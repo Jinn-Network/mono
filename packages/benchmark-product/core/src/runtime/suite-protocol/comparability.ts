@@ -71,7 +71,14 @@ export function suiteLeaderboardLimitation(
   comparability: SuiteComparability,
   protocol: SuiteProtocolId = "terminal-bench-2.1",
 ): string | undefined {
-  if (comparability.leaderboardSubmitReady) return undefined;
+  if (comparability.leaderboardSubmitReady) {
+    // `suiteComparability` on the claim is three protocol-agnostic booleans written by both
+    // protocols, and the Inspect-named copy otherwise lives only in the NOT-ready limitation.
+    // Without this a ready Inspect eval claim carries no text naming Inspect anywhere, so it
+    // reads identically to a Terminal-Bench 2.1 leaderboard-ready claim. TB 2.1 keeps
+    // returning undefined here — its closed-submissions copy rides on the Hub export.
+    return protocol === "inspect-eval" ? INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE : undefined;
+  }
   return protocol === "inspect-eval"
     ? INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION
     : SUITE_NOT_LEADERBOARD_READY_LIMITATION;

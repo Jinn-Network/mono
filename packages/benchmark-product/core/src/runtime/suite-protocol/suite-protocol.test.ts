@@ -7,6 +7,7 @@ import {
 import {
   deriveSuiteComparability,
   INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION,
+  INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
   officialInspectEvalConformance,
@@ -186,6 +187,27 @@ describe("inspect-eval suite protocol", () => {
       cellsAccounted: true,
       atifOnRetainedJob: true,
     }).leaderboardSubmitReady).toBe(true);
+  });
+
+  test("a ready inspect-eval run still carries the Inspect-named closed-submissions sentence", () => {
+    // `suiteComparability` on the claim is three protocol-agnostic booleans written by both
+    // protocols. If the ready path emitted no limitation, a ready Inspect eval claim would
+    // name Inspect nowhere and read as a Terminal-Bench 2.1 leaderboard-ready claim.
+    const ready = deriveSuiteComparability({
+      protocol: "inspect-eval",
+      coverage: "full",
+      executionConformance: true,
+      k: 3,
+      selectedCount: 12,
+      datasetCount: 12,
+      atifPresent: false,
+      datasetRevisionMatchesLeaderboardPin: true,
+      cellsAccounted: true,
+    });
+    expect(ready.leaderboardSubmitReady).toBe(true);
+    expect(suiteLeaderboardLimitation(ready, "inspect-eval")).toBe(INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE);
+    // TB 2.1's ready path is unchanged — its closed-submissions copy rides on the Hub export.
+    expect(suiteLeaderboardLimitation(ready, "terminal-bench-2.1")).toBeUndefined();
   });
 
   test("solver override, --limit, epochs in runOptions, or k mismatch break inspect conformance", () => {
