@@ -22,8 +22,15 @@ const CORE_JINN = [
   '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evaluation', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-native-capture', '@jinn-network/benchmarking-protocol', '@jinn-network/benchmarking-publication', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run', '@jinn-network/evidence-protocol', '@jinn-network/execution-evidence-builder', '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve', '@jinn-network/record-discovery-transport-http', '@jinn-network/record-publication', '@jinn-network/task-admission', '@jinn-network/task-execution-backend', '@jinn-network/task-execution-backend-local', '@jinn-network/task-execution-evaluation-harness', '@jinn-network/task-execution-evaluator-adapters', '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-oci-grader', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace', '@jinn-network/trust-core',
 ];
 const VERIFY_JINN = [
-  '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-protocol', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run', '@jinn-network/task-admission', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/trust-core',
+  '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-protocol', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run', '@jinn-network/task-admission', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/trust-core', '@jinn-network/trust-testing',
 ];
+// `@jinn-network/trust-testing` is the Trust layer's conformance kit and a
+// devDependency only: verify runs the anchor-proof contract suite (anchor-evidence
+// design §11) against its own `node:crypto` ports. It is admitted above so the
+// live-imports sweep sees it, and pinned to test sources below so it can never
+// reach the published `dist/` -- `tsconfig.build.json` excludes `src/**/*.test.ts`,
+// and this guard is what keeps that exclusion load-bearing.
+const TEST_ONLY_JINN = ['@jinn-network/trust-testing'];
 const MEMBER_ALLOWED = new Map([
   ['core', [...CORE_JINN, '@colophon-claims/verify']],
   ['cli', ['@colophon-claims/core', '@colophon-claims/verify']],
@@ -130,6 +137,20 @@ test('the declared source boundaries have live imports', () => {
     for (const name of MEMBER_ALLOWED.get(member)) {
       assert.ok(imported.some((specifier) => matches(specifier, name)), `${member} does not import approved dependency ${name}`);
     }
+  }
+});
+
+test('test-only dependencies are imported only from test sources', () => {
+  const offenders = sourceRoots().flatMap((directory) => files(directory)
+    .filter((file) => !/\.test\.[cm]?[jt]sx?$/.test(file))
+    .flatMap((file) => specifiers(readFileSync(file, 'utf8'))
+      .filter((specifier) => TEST_ONLY_JINN.some((name) => matches(specifier, name)))
+      .map((specifier) => `${relative(root, file)} -> ${specifier}`)));
+  assert.deepEqual(offenders.sort(), [], 'a test-only dependency is imported from shipped source');
+  const live = sourceRoots().flatMap((directory) => files(directory)
+    .flatMap((file) => specifiers(readFileSync(file, 'utf8'))));
+  for (const name of TEST_ONLY_JINN) {
+    assert.ok(live.some((specifier) => matches(specifier, name)), `test-only guard is vacuous for ${name}`);
   }
 });
 
