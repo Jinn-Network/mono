@@ -1,0 +1,58 @@
+name: Colophon npm Publish
+
+# Demand-gated Increment 1 publisher for @colophon-claims/verify.
+# The npm trusted-publisher workflow field is this filename. Do not rename it.
+# Do not run this on push. Do not add a registry token.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type publish-verify to publish @colophon-claims/verify Increment 1'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: colophon-npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish-verify:
+    name: publish-verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Require explicit confirmation
+        if: ${{ github.event.inputs.confirm != 'publish-verify' }}
+        run: |
+          echo "Refusing to publish. Type publish-verify to continue."
+          exit 1
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install npm 11.19.0
+        run: npm install -g npm@11.19.0
+
+      - name: Pin platform dependencies to the first-cut receipt
+        run: node .github/scripts/colophon-publish-manifest.mjs --apply packages/benchmark-product/verify/package.json
+
+      - name: Install, build, and publish from the public registry
+        working-directory: packages/benchmark-product/verify
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm install
+          npm run build
+          npm publish --access public

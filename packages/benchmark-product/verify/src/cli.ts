@@ -34,7 +34,8 @@ function usage(): string {
     + "  --ots-headers  Bitcoin block headers, one \"<height>:<80-byte-hex>\" per line. Repeatable.\n"
     + "Trust material is yours, not the bundle's: with none supplied a well-formed anchor reports\n"
     + "present rather than verified, and none ships with this tool.\n"
-    + "Exit 0: valid bundle; 1: invalid bundle; 2: usage or operational failure.\n";
+    + "Exit 0: valid bundle; 1: invalid bundle; 2: usage or operational failure.\n"
+    + "Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet. Verification uses exact platform bytes from npm.\n";
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +126,8 @@ This checks the bundle's integrity, evidence closure, calculations, report,
 and claim consistency. It does not prove that the machine that produced the
 bundle was honest or that the compared identities are independent parties.${anchorLimits}
 No files were uploaded.
+Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.
+Verification uses the exact platform bytes installed from npm.
 `;
 }
 

@@ -32,6 +32,7 @@ jobs:
           mkdir -p .architecture-control
           node --test \
             .github/scripts/platform-catalog.test.mjs \
+            .github/scripts/colophon-publish-manifest.test.mjs \
             .github/scripts/transition-manifest.test.mjs \
             .github/scripts/phase-d-transition-deletion.test.mjs \
             .github/scripts/observation-reader-gate-boundary.test.mjs \
@@ -149,6 +150,7 @@ jobs:
             .github/scripts/stack-publish-workflow.test.mjs \
             .github/scripts/stack-publication-surface.test.mjs \
             .github/scripts/stack-trusted-publishers.test.mjs \
+            .github/scripts/colophon-publish-manifest.test.mjs \
             .github/scripts/generate-architecture.test.mjs
       # The publication surface's other half: that the deploy bundle is actually servable,
       # and that the live-host gate passes over a real socket rather than an injected
