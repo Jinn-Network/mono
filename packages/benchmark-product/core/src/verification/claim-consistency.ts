@@ -1,4 +1,5 @@
 import type { BenchmarkRecord, MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
+import type { ClaimAnchor } from "@colophon-claims/verify";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";
@@ -63,6 +64,10 @@ export function assertClaimConsistency(input: {
    * Run schema (for example, the bundled Inspect task/selection closure). */
   readonly additionalLimitations?: readonly string[];
   readonly rehearsal?: { readonly previewCount: number; readonly timestamps: readonly string[] };
+  /** anchor-evidence §7.4: the anchors section re-derived from the AnchorEvidence bytes this
+   * verification path authenticated, never read out of the claim being checked. Empty rebuilds the
+   * unanchored claim, so a stored claim asserting an anchor nobody carries fails here. */
+  readonly anchors?: readonly ClaimAnchor[];
 }): void {
   const { claim, identities, runRecord, matrixRecord, reportRecord } = input;
   if (identities.reportSha256 === undefined) {
@@ -92,7 +97,7 @@ export function assertClaimConsistency(input: {
     reportRecord,
     reportSha256: identities.reportSha256,
     reportEnvelopeSha256: identities.reportEnvelopeSha256,
-    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord),
+    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, input.anchors ?? []),
     verificationCommandVerb: "bundle verify",
     assurance: {
       preset: input.assurancePreset,
@@ -104,6 +109,7 @@ export function assertClaimConsistency(input: {
       },
     },
     ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }),
+    ...(input.anchors === undefined ? {} : { anchors: input.anchors }),
   });
   if (!bytesEqual(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) {
     const field = firstDifference(claim, expected) ?? "claim";

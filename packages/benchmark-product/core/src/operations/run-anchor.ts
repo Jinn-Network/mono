@@ -16,6 +16,9 @@
  *   the operation — and because acquisition does network I/O, a launch that interleaves with it
  *   turns the *store* into the same refusal. Checking once would let a race store a weaker fact
  *   silently, which is exactly worse than refusing.
+ * - **The window closes at `report`, for both subjects, and that check runs twice too.** The claim
+ *   package's anchors section is sealed at report time, so an anchor obtained afterwards could
+ *   never be projected into any claim and would only brick publication. See `assertNotReported`.
  * - **Verify before storing.** The proof runs through the same rules the bundle path uses, with
  *   this package's own `node:crypto` ports, before any bytes are written. A stored anchor is never
  *   one nobody checked.
@@ -171,8 +174,11 @@ interface ResolvedSubject {
  *
  * `subject: "matrix"` requires the run closed and `matrixSha256` set; launch state is irrelevant,
  * because a matrix anchor is about a terminal record and says nothing about dispatch order.
+ *
+ * Both subjects additionally close at `report` — see `assertNotReported`.
  */
 function resolveSubject(state: RunState, subject: AnchorSubject, draftId: string): ResolvedSubject {
+  assertNotReported(state, draftId);
   if (subject === "lock") {
     if (state.lockedAt === undefined || state.runSha256 === undefined) {
       refuse("illegal-transition", `runs.${draftId}.lockedAt`, "lock the run before anchoring its sealed Run record");
@@ -192,6 +198,31 @@ function assertNotLaunched(state: RunState, draftId: string): void {
       "illegal-transition",
       `runs.${draftId}.launchedAt`,
       "a lock anchor obtained after dispatch began does not support the claim it would be read as; anchor before launch",
+    );
+  }
+}
+
+/**
+ * The anchoring window closes at `report`, for BOTH subjects.
+ *
+ * The claim package's `anchors` section is a report-time projection of the anchors this run had
+ * obtained, and `report` runs once — it admits only a `closed` draft. An anchor appended afterwards
+ * could therefore never enter any claim, and because publication byte-compares the sealed claim
+ * against the anchors the bundle carries, storing one would silently brick `publish` for a run that
+ * has done nothing wrong. Refusing at acquisition puts that in front of the operator while they can
+ * still act on it, rather than at the moment they cannot.
+ *
+ * The window is wide enough for everything the design asks of it: a lock anchor precedes launch by
+ * rule (§7.1), and a matrix anchor or an OpenTimestamps upgrade (§6.2, §7.2) is available from
+ * `closed` on — which is the whole interval before `report`.
+ */
+function assertNotReported(state: RunState, draftId: string): void {
+  if (state.reportedAt !== undefined) {
+    refuse(
+      "illegal-transition",
+      `runs.${draftId}.reportedAt`,
+      "this run is already reported and its sealed claim states the anchors it had then; an anchor"
+      + " obtained now could never enter that claim — anchor before reporting",
     );
   }
 }
@@ -384,6 +415,7 @@ export function runAnchor(
       // Acquisition did network I/O, so every fence that guarded the decision to acquire is
       // re-read against durable state rather than against the copy this call started with.
       const current = requireRunState(context.workspaceDir, input.draftId);
+      assertNotReported(current, input.draftId);
       if (input.subject === "lock") assertNotLaunched(current, input.draftId);
 
       // The write-once fence is one of them. Resolving it once, before acquisition, decides

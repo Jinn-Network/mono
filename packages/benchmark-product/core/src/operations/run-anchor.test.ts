@@ -394,6 +394,61 @@ describe("runAnchor — subject matrix", () => {
   }, 60_000);
 });
 
+describe("runAnchor — the window closes at report", () => {
+  /**
+   * The claim package's anchors section is sealed at `report`, and `report` admits only a closed
+   * draft, so an anchor obtained afterwards could never be projected into any claim. Storing one
+   * would leave publication byte-comparing a sealed claim against a bundle that carries more than
+   * it names — a run that did nothing wrong, unable to publish. Both subjects refuse.
+   */
+  test.each(["lock", "matrix"] as const)("refuses illegal-transition for subject %s once reported", async (subject) => {
+    const clock = makeClock();
+    const runSha256 = await setUpLockedDraft(clock);
+    const matrixSha256 = putSealedBytes(workspaceDir, new TextEncoder().encode('{"kind":"matrix-stand-in"}'));
+    const state = readRunState(workspaceDir, "draft-1")!;
+    writeRunState(workspaceDir, "draft-1", {
+      ...state,
+      closedAt: "2026-08-17T02:00:00Z",
+      matrixSha256,
+      reportedAt: "2026-08-17T03:00:00Z",
+    });
+
+    const outcome = await runAnchor(
+      contextFor(clock),
+      { draftId: "draft-1", subject, providerProfile: RFC3161_TSA_ANCHOR_PROFILE, endpoint: TSA_ENDPOINT },
+      { sources: { [RFC3161_TSA_ANCHOR_PROFILE]: rfc3161SourceFor(subject === "lock" ? runSha256 : matrixSha256) } },
+    );
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("illegal-transition");
+    expect(outcome.error.detail).toContain("anchor before reporting");
+    // Nothing was stored: the refusal is a decision, not a rollback.
+    expect(readRunState(workspaceDir, "draft-1")?.anchors ?? []).toEqual([]);
+  }, 60_000);
+
+  test("a report that interleaves with acquisition turns the store into the same refusal", async () => {
+    const clock = makeClock();
+    const runSha256 = await setUpLockedDraft(clock);
+
+    const outcome = await runAnchor(
+      contextFor(clock),
+      { draftId: "draft-1", subject: "lock", providerProfile: RFC3161_TSA_ANCHOR_PROFILE, endpoint: TSA_ENDPOINT },
+      {
+        sources: { [RFC3161_TSA_ANCHOR_PROFILE]: rfc3161SourceFor(runSha256) },
+        // The window is open when the request goes out and closed when the answer comes back.
+        afterObtainBeforeStore: async () => {
+          const state = readRunState(workspaceDir, "draft-1")!;
+          writeRunState(workspaceDir, "draft-1", { ...state, reportedAt: "2026-08-17T03:00:00Z" });
+        },
+      },
+    );
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("illegal-transition");
+    expect(readRunState(workspaceDir, "draft-1")?.anchors ?? []).toEqual([]);
+  }, 60_000);
+});
+
 describe("runAnchor — refusal matrix", () => {
   test("refuses venue-unavailable when nothing is configured", async () => {
     const clock = makeClock();

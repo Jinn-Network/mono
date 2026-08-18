@@ -31,9 +31,15 @@ const VERIFY_JINN = [
 // builder and committed real-calendar capture (§6.2). It is admitted in both member
 // lists above so the live-imports sweep sees it, and pinned to test sources below so
 // it can never reach either published `dist/` -- each package's `tsconfig.build.json`
-// excludes `src/**/*.test.ts`, and this guard is what keeps that exclusion
-// load-bearing.
+// excludes `src/**/*.test.ts` and `src/**/testing/**`, and this guard is what keeps
+// that exclusion load-bearing.
+//
+// A `testing/` directory is a test source for this purpose: it holds synthetic bundle
+// fixtures that drive real operations, which no consumer of a published `dist/` may
+// reach, and which several sibling test files share -- so they cannot be named
+// `*.test.ts` without a test runner collecting them.
 const TEST_ONLY_JINN = ['@jinn-network/trust-testing'];
+const isTestSource = (file) => /\.test\.[cm]?[jt]sx?$/.test(file) || /(?:^|\/)testing\//.test(file);
 const MEMBER_ALLOWED = new Map([
   ['core', [...CORE_JINN, '@colophon-claims/verify']],
   ['cli', ['@colophon-claims/core', '@colophon-claims/verify']],
@@ -145,7 +151,7 @@ test('the declared source boundaries have live imports', () => {
 
 test('test-only dependencies are imported only from test sources', () => {
   const offenders = sourceRoots().flatMap((directory) => files(directory)
-    .filter((file) => !/\.test\.[cm]?[jt]sx?$/.test(file))
+    .filter((file) => !isTestSource(file))
     .flatMap((file) => specifiers(readFileSync(file, 'utf8'))
       .filter((specifier) => TEST_ONLY_JINN.some((name) => matches(specifier, name)))
       .map((specifier) => `${relative(root, file)} -> ${specifier}`)));

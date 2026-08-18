@@ -23,6 +23,12 @@ export const BUNDLE_FORMAT = "benchmark-product-public-bundle/2" as const;
 export const BUNDLE_V3_FORMAT = "benchmark-product-public-bundle/3" as const;
 /** Binary-instrument qualification bundle. V2 and the unrelated accounting-only v3 stay frozen. */
 export const BUNDLE_V4_FORMAT = "benchmark-product-public-bundle/4" as const;
+/**
+ * The anchored closure (anchor-evidence design §7.4). A bundle emits this version exactly when its
+ * run carries at least one AnchorEvidence record; every other bundle keeps the version it already
+ * had, byte for byte. The evidence-native v5 is unrelated and untouched.
+ */
+export const BUNDLE_V6_FORMAT = "benchmark-product-public-bundle/6" as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -34,7 +40,12 @@ export const BundleManifestFileSchema = z.object({
 });
 
 export const BundleManifestSchema = z.object({
-  format: z.union([z.literal(BUNDLE_FORMAT), z.literal(BUNDLE_V3_FORMAT), z.literal(BUNDLE_V4_FORMAT)]),
+  format: z.union([
+    z.literal(BUNDLE_FORMAT),
+    z.literal(BUNDLE_V3_FORMAT),
+    z.literal(BUNDLE_V4_FORMAT),
+    z.literal(BUNDLE_V6_FORMAT),
+  ]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
 
@@ -58,7 +69,11 @@ export interface VerifyBundleSnapshotDeps {
 
 export interface BuildBundleManifestOptions {
   /** Defaults to v2 so every existing materializer keeps byte-identical behavior. */
-  readonly format?: typeof BUNDLE_FORMAT | typeof BUNDLE_V3_FORMAT | typeof BUNDLE_V4_FORMAT;
+  readonly format?:
+    | typeof BUNDLE_FORMAT
+    | typeof BUNDLE_V3_FORMAT
+    | typeof BUNDLE_V4_FORMAT
+    | typeof BUNDLE_V6_FORMAT;
 }
 
 function sha256(bytes: Uint8Array): string {
