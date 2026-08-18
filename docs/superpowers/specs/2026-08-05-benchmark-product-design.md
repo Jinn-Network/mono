@@ -1392,6 +1392,13 @@ Mercor harness wrap, k=1, `leaderboard_submit_ready` always false. Comparability
 is the same two-axis bits as TB 2.1 with a protocol-specific limitations
 sentence. Inspect-as-specified and APEX-Agents remain follow-ons.
 
+**Addendum — 2026-08-18, DeepSWE v1.1 official suite pointer ([DR-2026-08-18-d](../../../log/decisions/2026-08-18-deep-swe-v1.1-official-suite.md);
+no new Report v2 required fields, no new record kinds):** DeepSWE v1.1 is a
+named protocol Colophon wraps (Pier 0.3.1.x + mini-swe-agent, git-pinned
+`tasks/`, k≥4). Comparability stays two-axis and protocol-specific. Pier
+export is a derived artifact for Datacurve email; Colophon does not place
+the row. Harbor 0.21 and Pier+native CLIs cannot wear the name.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

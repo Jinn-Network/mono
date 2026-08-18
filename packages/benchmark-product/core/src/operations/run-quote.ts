@@ -46,7 +46,7 @@ import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
-import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { HarborSelectionManifestSchema, isHarborCompatibleEvaluationRuntime } from "../runtime/harbor/manifest.js";
 import { suiteQuoteFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
 import type { SuiteProtocolId } from "../runtime/suite-protocol/comparability.js";
 import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
@@ -333,7 +333,7 @@ export function runQuote(
       const previousPublication = readRunState(clockedContext.workspaceDir, input.draftId)?.publication;
       const minVerdicts = resolveAssurance(document.spec.assurance).minVerdicts;
       const previewLog = readPreviewLog(clockedContext.workspaceDir, input.draftId);
-      const suite = document.spec.evaluationRuntime?.adapterId === "harbor"
+      const suite = isHarborCompatibleEvaluationRuntime(document.spec.evaluationRuntime)
         ? suiteQuoteFromHarbor({
           manifest: HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
           armCount: compiled.plannedRun.record.arms.length,

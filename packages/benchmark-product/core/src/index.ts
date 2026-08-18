@@ -103,7 +103,7 @@ export {
   harborTrialAttemptNumber,
   harborTrialTaskName,
 } from "./runtime/harbor/manifest.js";
-export { HARBOR_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./runtime/harbor/manifest.js";
+export { HARBOR_ADAPTER_ID, PIER_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./runtime/harbor/manifest.js";
 export {
   HARBOR_SELECTION_ROLE,
   HARBOR_CORRELATION_ROLE,
@@ -257,14 +257,36 @@ export {
   readHarnessReport as readApexSweDevHarnessReport,
 } from "./runtime/apex-swe-dev/reports.js";
 export {
+  DEEP_SWE_V11_AGENT_ID,
+  DEEP_SWE_V11_DATASET_ID,
+  DEEP_SWE_V11_DEFAULT_REPLICATES,
+  DEEP_SWE_V11_GIT_SHA,
+  DEEP_SWE_V11_PROFILE,
+  DEEP_SWE_V11_SELECTION_ROLE,
+  DEEP_SWE_V11_TASK_COUNT,
+  DEEP_SWE_V11_TASKS_TREE_SHA,
+  DeepSweV11SelectionManifestSchema,
+  deepSweV11SelectionBytes,
+} from "./runtime/deep-swe-v1.1/manifest.js";
+export type { DeepSweV11SelectionManifest } from "./runtime/deep-swe-v1.1/manifest.js";
+export { computeGitTreeSha } from "./runtime/deep-swe-v1.1/git-tree-sha.js";
+export { resolveDeepSweV11Selection } from "./runtime/deep-swe-v1.1/host.js";
+export type {
+  DeepSweV11SelectionRequest,
+  DeepSweV11SelectionResolution,
+} from "./runtime/deep-swe-v1.1/host.js";
+export {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
   APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION,
   APEX_SWE_DEV_SUBMIT_CLOSED_SENTENCE,
+  DEEPSWE_CLOSED_SUBMIT_SENTENCE,
+  DEEPSWE_NOT_LEADERBOARD_READY_LIMITATION,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0,
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
+  officialPierExecutionConformance,
   officialSwebenchHarnessConformance,
   SWE_BENCH_VERIFIED_NOT_LEADERBOARD_READY_LIMITATION,
   SWE_BENCH_VERIFIED_SUBMIT_CLOSED_SENTENCE,
@@ -601,11 +623,13 @@ export {
   selectSwebenchVerifiedRuntime,
   selectApexAgentsRuntime,
   selectApexSweDevRuntime,
+  selectDeepSweV11Runtime,
   migrateTerminalBenchLegacyTask,
   exportHarborHubPackage,
   exportSwebenchPredictions,
   exportApexAgentsInspection,
   exportApexSwePackage,
+  exportDeepSwePackage,
   updateDraft,
 } from "./operations/index.js";
 export type {
@@ -695,6 +719,8 @@ export type {
   SelectApexAgentsRuntimeResult,
   SelectApexSweDevRuntimeInput,
   SelectApexSweDevRuntimeResult,
+  SelectDeepSweV11RuntimeInput,
+  SelectDeepSweV11RuntimeResult,
   ExportHarborHubPackageInput,
   ExportHarborHubPackageResult,
   HarborHubExportMode,
@@ -707,6 +733,9 @@ export type {
   ExportApexSwePackageInput,
   ExportApexSwePackageResult,
   ApexSweExportMode,
+  ExportDeepSwePackageInput,
+  ExportDeepSwePackageResult,
+  DeepSweExportMode,
   RunStatusCounts,
   RunDriverStatus,
   RunStatusResult,

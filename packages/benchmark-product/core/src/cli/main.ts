@@ -72,11 +72,13 @@ import {
   selectSwebenchVerifiedRuntime,
   selectApexAgentsRuntime,
   selectApexSweDevRuntime,
+  selectDeepSweV11Runtime,
   migrateTerminalBenchLegacyTask,
   exportHarborHubPackage,
   exportSwebenchPredictions,
   exportApexAgentsInspection,
   exportApexSwePackage,
+  exportDeepSwePackage,
   updateDraft,
   type ArmWarning,
   type BindInspectBinaryJudgeInput,
@@ -92,6 +94,7 @@ import {
   type SelectSwebenchVerifiedRuntimeInput,
   type SelectApexAgentsRuntimeInput,
   type SelectApexSweDevRuntimeInput,
+  type SelectDeepSweV11RuntimeInput,
   type MigrateTerminalBenchLegacyTaskInput,
   type AdmitHumanTruthInput,
   type CreateHumanReviewPacketsInput,
@@ -148,11 +151,14 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --file <selection.json>
   runtime apex-swe-dev select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
+  runtime deep-swe-v1.1 select --workspace <dir> --principal <id> --draft <draftId>
+                   --file <selection.json>
   runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
   hub export       --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   swebench export  --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   apex-agents export --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   apex-swe export  --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
+  deepswe export   --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   arm add          --workspace <dir> --principal <id> --draft <draftId>
                    --arm <armId> (--pinning <json> | --agent <agentId>) [--notes <text>]
   arm update       --workspace <dir> --principal <id> --draft <draftId>
@@ -226,11 +232,13 @@ const RUNTIME_TERMINAL_BENCH_30_SELECT_FLAGS = ["workspace", "principal", "json"
 const RUNTIME_SWE_BENCH_VERIFIED_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_APEX_AGENTS_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_APEX_SWE_DEV_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_DEEP_SWE_V11_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
 const HUB_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const SWEBENCH_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const APEX_AGENTS_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const APEX_SWE_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
+const DEEPSWE_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "agent", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -695,6 +703,16 @@ function handleApexSweExport(args: ParsedArgs, context: CliContext, jsonMode: bo
     (value) => `exported APEX-SWE-dev package (${value.mode}) for draft ${draftId} arm ${armId}\n${value.instructions}\n`,
   );
 }
+
+async function handleDeepSweV11RuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, RUNTIME_DEEP_SWE_V11_SELECT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectDeepSweV11RuntimeInput, "draftId">;
+  const result = await selectDeepSweV11Runtime(opContext, { draftId, ...configuration } as SelectDeepSweV11RuntimeInput);
+  return renderResult(result, jsonMode, (value) => `selected DeepSWE v1.1 profile ${value.deepSweV11ProfileSha256} for draft ${draftId}\n`);
+}
+
 async function handleHarborRuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, RUNTIME_HARBOR_SELECT_FLAGS);
   const opContext = buildOperationContext(args, context);
@@ -748,6 +766,19 @@ function handleApexAgentsExport(args: ParsedArgs, context: CliContext, jsonMode:
     result,
     jsonMode,
     (value) => `exported APEX-Agents inspection (${value.mode}) for draft ${draftId} arm ${armId}\n${value.instructions}\n`,
+  );
+}
+
+function handleDeepSweExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, DEEPSWE_EXPORT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const armId = required(args, "arm");
+  const result = exportDeepSwePackage(opContext, { draftId, armId });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `exported DeepSWE Pier package (${value.mode}) for draft ${draftId} arm ${armId}\n${value.instructions}\n`,
   );
 }
 
@@ -1263,11 +1294,13 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["runtime swe-bench-verified select", handleSwebenchVerifiedRuntimeSelect],
   ["runtime apex-agents select", handleApexAgentsRuntimeSelect],
   ["runtime apex-swe-dev select", handleApexSweDevRuntimeSelect],
+  ["runtime deep-swe-v1.1 select", handleDeepSweV11RuntimeSelect],
   ["runtime terminal-bench migrate", handleTerminalBenchMigration],
   ["hub export", handleHubExport],
   ["swebench export", handleSwebenchExport],
   ["apex-agents export", handleApexAgentsExport],
   ["apex-swe export", handleApexSweExport],
+  ["deepswe export", handleDeepSweExport],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],

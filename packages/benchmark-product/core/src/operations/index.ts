@@ -130,6 +130,17 @@ export {
   type ExportApexAgentsResult,
   type ApexAgentsExportMode,
 } from "./apex-agents-export.js";
+export {
+  selectDeepSweV11Runtime,
+  type SelectDeepSweV11RuntimeInput,
+  type SelectDeepSweV11RuntimeResult,
+} from "./deep-swe-v1.1.js";
+export {
+  exportDeepSwePackage,
+  type DeepSweExportMode,
+  type ExportDeepSwePackageInput,
+  type ExportDeepSwePackageResult,
+} from "./deepswe-export.js";
 
 export {
   armAdd,

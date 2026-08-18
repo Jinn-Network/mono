@@ -29,7 +29,7 @@ import {
 import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
-import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { HarborSelectionManifestSchema, isHarborCompatibleEvaluationRuntime } from "../runtime/harbor/manifest.js";
 import { suiteProtocolDisplayName } from "../runtime/suite-protocol/comparability.js";
 import { suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
 import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
@@ -90,7 +90,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           "quote invalidated by edit — re-quote",
         );
       }
-      if (document.spec.evaluationRuntime?.adapterId === "harbor") {
+      if (isHarborCompatibleEvaluationRuntime(document.spec.evaluationRuntime)) {
         const harborSelection = HarborSelectionManifestSchema.parse(
           JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
         );

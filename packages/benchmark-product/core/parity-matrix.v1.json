@@ -133,6 +133,16 @@
       }
     },
     {
+      "operation": "exportDeepSwePackage",
+      "cliVerb": "deepswe export",
+      "authorityGated": false,
+      "description": "Packages a retained Pier Job for DeepSWE v1.1 Datacurve email without placing the leaderboard row.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "copies a machine-local Pier job directory; browser path-based job export is forbidden"
+      }
+    },
+    {
       "operation": "exportHarborHubPackage",
       "cliVerb": "hub export",
       "authorityGated": false,
@@ -420,6 +430,16 @@
       "gui": {
         "status": "unavailable",
         "reason": "requires server-configured APEX-SWE-dev host paths; browser-supplied paths are forbidden"
+      }
+    },
+    {
+      "operation": "selectDeepSweV11Runtime",
+      "cliVerb": "runtime deep-swe-v1.1 select",
+      "authorityGated": false,
+      "description": "Resolves a named DeepSWE v1.1 slice and binds it to the managed Pier runtime.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires server-configured DeepSWE v1.1 and Pier host paths; browser-supplied paths are forbidden"
       }
     },
     {

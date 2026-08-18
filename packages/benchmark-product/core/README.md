@@ -96,10 +96,12 @@ with an explicit shipped/deferred GUI disposition:
 | `selectSwebenchVerifiedRuntime` | `colophon runtime swe-bench-verified select` | Resolve and bind a named SWE-bench Verified slice to swebench.harness. |
 | `selectApexAgentsRuntime` | `colophon runtime apex-agents select` | Resolve and bind a named APEX-Agents slice to Archipelago. |
 | `selectApexSweDevRuntime` | `colophon runtime apex-swe-dev select` | Resolve and bind a named APEX-SWE-dev slice to both Mercor harnesses. |
+| `selectDeepSweV11Runtime` | `colophon runtime deep-swe-v1.1 select` | Resolve and bind a named DeepSWE v1.1 slice through Pier. |
 | `exportHarborHubPackage` | `colophon hub export` | Package a retained Harbor Job for Terminal-Bench Hub upload without placing the row. |
 | `exportSwebenchPredictions` | `colophon swebench export` | Package predictions.jsonl and harness reports without placing the swebench.com row. |
 | `exportApexAgentsInspection` | `colophon apex-agents export` | Package Archipelago grades without placing the Mercor APEX-Agents row. |
 | `exportApexSwePackage` | `colophon apex-swe export` | Package Mercor harness JSON for APEX-SWE-dev without placing a Mercor leaderboard row. |
+| `exportDeepSwePackage` | `colophon deepswe export` | Package a retained Pier Job for DeepSWE v1.1 Datacurve email without placing the row. |
 | `updateDraft` | `colophon draft update` | Apply a validated JSON draft patch. |
 
 The path-oriented portable verifier is intentionally outside workspace/GUI

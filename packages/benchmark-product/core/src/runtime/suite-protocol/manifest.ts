@@ -1,4 +1,4 @@
-/** Product-owned suite protocol selection. TB 2.1 binds via Harbor profiles; Verified and APEX-SWE-dev bind via their own selection manifests. */
+/** Product-owned suite protocol selection. TB 2.1 and DeepSWE v1.1 bind via Harbor/Pier profiles; Verified and APEX-SWE-dev bind via their own selection manifests. */
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
 import { sha256Hex } from "../../workspace/sealed-store.js";
@@ -11,11 +11,15 @@ export const SUITE_PROTOCOL_SELECTION_ROLE = "https://product.jinn.network/artif
 export const SUITE_PROTOCOL_SELECTION_SCHEMA = "jinn.network/benchmark-product/suite-protocol-selection/1" as const;
 
 const Sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
+const GitSha = z.string().regex(/^[a-f0-9]{40}$/u);
+const SelectedTaskNames = z.array(z.string().min(1).regex(/^[^/]+$/u)).min(1);
 
 const SuiteItemSchema = z.object({
   taskName: z.string().min(1),
   taskSha256: Sha256,
 }).strict();
+
+const SuiteItems = z.array(SuiteItemSchema).min(1);
 
 const ApexSweDevSuiteItemSchema = z.object({
   taskName: z.string().min(1),
@@ -41,9 +45,9 @@ const SuiteProtocolSelectionShared = {
   schema: z.literal(SUITE_PROTOCOL_SELECTION_SCHEMA),
   coverage: z.enum(SUITE_COVERAGE),
   datasetId: z.string().min(1),
-  selectedTaskNames: z.array(z.string().min(1).regex(/^[^/]+$/u)).min(1),
+  selectedTaskNames: SelectedTaskNames,
   datasetTaskCount: z.number().int().positive(),
-  items: z.array(SuiteItemSchema).min(1),
+  items: SuiteItems,
 };
 
 export const TerminalBench21SuiteProtocolSelectionSchema = z.object({
@@ -89,12 +93,22 @@ export const ApexSweDevSuiteProtocolSelectionSchema = z.object({
   items: z.array(ApexSweDevSuiteItemSchema).min(1),
 }).strict().superRefine(refineSuiteItems);
 
+export const DeepSweV11SuiteProtocolSelectionSchema = z.object({
+  ...SuiteProtocolSelectionShared,
+  protocol: z.literal("deep-swe-v1.1"),
+  datasetRevision: GitSha,
+  tasksTreeSha: GitSha,
+  replicates: z.number().int().min(4),
+  atifRequired: z.literal(true),
+}).strict().superRefine(refineSuiteItems);
+
 export const SuiteProtocolSelectionSchema = z.discriminatedUnion("protocol", [
   TerminalBench21SuiteProtocolSelectionSchema,
   TerminalBench30SuiteProtocolSelectionSchema,
   SwebenchVerifiedSuiteProtocolSelectionSchema,
   ApexAgentsSuiteProtocolSelectionSchema,
   ApexSweDevSuiteProtocolSelectionSchema,
+  DeepSweV11SuiteProtocolSelectionSchema,
 ]);
 export type SuiteProtocolSelection = z.infer<typeof SuiteProtocolSelectionSchema>;
 export type TerminalBench21SuiteProtocolSelection = z.infer<typeof TerminalBench21SuiteProtocolSelectionSchema>;
@@ -102,6 +116,7 @@ export type TerminalBench30SuiteProtocolSelection = z.infer<typeof TerminalBench
 export type SwebenchVerifiedSuiteProtocolSelection = z.infer<typeof SwebenchVerifiedSuiteProtocolSelectionSchema>;
 export type ApexAgentsSuiteProtocolSelection = z.infer<typeof ApexAgentsSuiteProtocolSelectionSchema>;
 export type ApexSweDevSuiteProtocolSelection = z.infer<typeof ApexSweDevSuiteProtocolSelectionSchema>;
+export type DeepSweV11SuiteProtocolSelection = z.infer<typeof DeepSweV11SuiteProtocolSelectionSchema>;
 
 export function suiteProtocolSelectionBytes(value: SuiteProtocolSelection): Uint8Array {
   return canonicalJsonBytes(SuiteProtocolSelectionSchema.parse(value) as never);
