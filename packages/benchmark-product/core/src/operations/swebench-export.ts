@@ -71,7 +71,14 @@ export function exportSwebenchPredictions(
     action: "runtime.swebench.predictions-export",
     subject: input.draftId,
     inputs: input,
-    run: () => {
+    run: () => executeExportSwebenchPredictions(context, input),
+  });
+}
+
+export function executeExportSwebenchPredictions(
+  context: OperationContext,
+  input: ExportSwebenchPredictionsInput,
+): ExportSwebenchPredictionsResult {
       const document = readDraftDocument(context.workspaceDir, input.draftId);
       if (!document.spec.arms.some((arm) => arm.armId === input.armId)) {
         refuse("not-found", `drafts.${input.draftId}.spec.arms.${input.armId}`, "draft has no such arm");
@@ -126,6 +133,4 @@ export function exportSwebenchPredictions(
       const instructions = swebenchPredictionsExportInstructions(mode, exportDir);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, exportDir };
-    },
-  });
 }

@@ -13,16 +13,6 @@
       }
     },
     {
-      "operation": "anchoringConfigure",
-      "cliVerb": "anchoring configure",
-      "authorityGated": true,
-      "description": "Replaces or clears the workspace's ordered anchor provider and endpoint configuration, which is what makes later locks anchor automatically (authority-gated).",
-      "gui": {
-        "status": "shipped",
-        "action": "anchoring.configure"
-      }
-    },
-    {
       "operation": "armAdd",
       "cliVerb": "arm add",
       "authorityGated": false,
@@ -123,63 +113,13 @@
       }
     },
     {
-      "operation": "exportApexAgentsInspection",
-      "cliVerb": "apex-agents export",
+      "operation": "exportDerivedBundle",
+      "cliVerb": "export",
       "authorityGated": false,
-      "description": "Packages Archipelago grades for APEX-Agents inspection without placing the Mercor row.",
+      "description": "Packages the locked method's suite-named derived bundle, or refuses when the method has none.",
       "gui": {
         "status": "unavailable",
-        "reason": "copies machine-local Archipelago grades; browser path-based export is forbidden"
-      }
-    },
-    {
-      "operation": "exportApexSwePackage",
-      "cliVerb": "apex-swe export",
-      "authorityGated": false,
-      "description": "Packages Mercor harness JSON for APEX-SWE-dev without placing a Mercor leaderboard row.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "copies machine-local Mercor harness JSON; browser path-based export is forbidden"
-      }
-    },
-    {
-      "operation": "exportDeepSwePackage",
-      "cliVerb": "deepswe export",
-      "authorityGated": false,
-      "description": "Packages a retained Pier Job for DeepSWE v1.1 Datacurve email without placing the leaderboard row.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "copies a machine-local Pier job directory; browser path-based job export is forbidden"
-      }
-    },
-    {
-      "operation": "exportHarborHubPackage",
-      "cliVerb": "hub export",
-      "authorityGated": false,
-      "description": "Packages a retained Harbor Job for Terminal-Bench 2.1 Hub upload without placing the leaderboard row.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "copies a machine-local Harbor job directory; browser path-based job export is forbidden"
-      }
-    },
-    {
-      "operation": "exportInspectViewBundle",
-      "cliVerb": "runtime inspect eval export",
-      "authorityGated": false,
-      "description": "Builds a derived Inspect View log bundle from correlated per-cell .eval logs without placing an Inspect Hub row.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "copies machine-local Inspect .eval logs; browser path-based View export is forbidden"
-      }
-    },
-    {
-      "operation": "exportSwebenchPredictions",
-      "cliVerb": "swebench export",
-      "authorityGated": false,
-      "description": "Packages predictions.jsonl and harness reports for SWE-bench Verified without placing the swebench.com row.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "copies machine-local predictions and harness reports; browser path-based export is forbidden"
+        "reason": "copies a machine-local job or log directory; browser path-based export is forbidden"
       }
     },
     {
@@ -300,16 +240,6 @@
       "gui": {
         "status": "shipped",
         "action": "publication.status"
-      }
-    },
-    {
-      "operation": "runAnchor",
-      "cliVerb": "anchor",
-      "authorityGated": false,
-      "description": "Obtains third-party time evidence over the run's own sealed Run or Matrix digest from a configured provider, verifies it, and stores it as an AnchorEvidence record.",
-      "gui": {
-        "status": "shipped",
-        "action": "run.anchor"
       }
     },
     {
@@ -443,103 +373,13 @@
       }
     },
     {
-      "operation": "selectApexAgentsRuntime",
-      "cliVerb": "runtime apex-agents select",
+      "operation": "selectMethod",
+      "cliVerb": "method",
       "authorityGated": false,
-      "description": "Resolves a named APEX-Agents slice and binds it to Archipelago.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured APEX-Agents Archipelago paths; browser-supplied paths are forbidden"
-      }
-    },
-    {
-      "operation": "selectApexSweDevRuntime",
-      "cliVerb": "runtime apex-swe-dev select",
-      "authorityGated": false,
-      "description": "Resolves a named APEX-SWE-dev slice and binds both Mercor harnesses.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured APEX-SWE-dev host paths; browser-supplied paths are forbidden"
-      }
-    },
-    {
-      "operation": "selectDeepSweV11Runtime",
-      "cliVerb": "runtime deep-swe-v1.1 select",
-      "authorityGated": false,
-      "description": "Resolves a named DeepSWE v1.1 slice and binds it to the managed Pier runtime.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured DeepSWE v1.1 and Pier host paths; browser-supplied paths are forbidden"
-      }
-    },
-    {
-      "operation": "selectHarborRuntime",
-      "cliVerb": "runtime harbor select",
-      "authorityGated": false,
-      "description": "Selects and digest-binds a managed Harbor runtime.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured Harbor host paths; browser-supplied paths are forbidden"
-      }
-    },
-    {
-      "operation": "selectInspectEvalRuntime",
-      "cliVerb": "runtime inspect eval select",
-      "authorityGated": false,
-      "description": "Selects an operator-chosen Inspect eval and locks it as the Inspect eval official suite.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires machine-local Inspect host paths; browser-supplied paths are forbidden"
-      }
-    },
-    {
-      "operation": "selectInspectEvaluation",
-      "cliVerb": "runtime inspect select",
-      "authorityGated": false,
-      "description": "Selects, probes, and digest-binds an unmodified Inspect evaluation and its runtime configuration.",
+      "description": "Binds a catalog suite or a complete method document onto a draft.",
       "gui": {
         "status": "shipped",
-        "action": "runtime.inspect.select"
-      }
-    },
-    {
-      "operation": "selectSwebenchVerifiedRuntime",
-      "cliVerb": "runtime swe-bench-verified select",
-      "authorityGated": false,
-      "description": "Resolves a named SWE-bench Verified slice and binds it to swebench.harness.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured SWE-bench Verified harness paths; browser-supplied paths are forbidden"
-      }
-    },
-    {
-      "operation": "selectTerminalBench21Runtime",
-      "cliVerb": "runtime terminal-bench-2-1 select",
-      "authorityGated": false,
-      "description": "Resolves a named Terminal-Bench 2.1 slice and binds it to the managed Harbor runtime.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured Terminal-Bench 2.1 and Harbor host paths; browser-supplied paths are forbidden"
-      }
-    },
-    {
-      "operation": "selectTerminalBench2Runtime",
-      "cliVerb": "runtime terminal-bench-2 select",
-      "authorityGated": false,
-      "description": "Resolves one immutable Terminal-Bench 2 task and binds it to the managed Harbor runtime.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured Terminal-Bench and Harbor host paths; browser-supplied paths are forbidden"
-      }
-    },
-    {
-      "operation": "selectTerminalBench30Runtime",
-      "cliVerb": "runtime terminal-bench-3-0 select",
-      "authorityGated": false,
-      "description": "Resolves a named Terminal-Bench 3.0 slice and binds it to the managed Harbor runtime.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured Terminal-Bench 3.0 and Harbor host paths; browser-supplied paths are forbidden"
+        "action": "method.bind"
       }
     },
     {

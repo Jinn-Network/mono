@@ -51,8 +51,16 @@ export function selectApexAgentsRuntime(
     action: "runtime.apex-agents.select",
     subject: input.draftId,
     inputs: input,
-    run: async () => {
-      const current = readDraftDocument(context.workspaceDir, input.draftId);
+    run: () => executeSelectApexAgentsRuntime(clocked, input),
+  });
+}
+
+export async function executeSelectApexAgentsRuntime(
+  context: OperationContext,
+  input: SelectApexAgentsRuntimeInput,
+): Promise<SelectApexAgentsRuntimeResult> {
+  const at = context.clock();
+  const current = readDraftDocument(context.workspaceDir, input.draftId);
       if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse APEX-Agents selection");
       if (current.spec.analysis?.method === "jinn.benchmarking.method/binary-instrument") {
         refuse("validation", `drafts.${input.draftId}.spec.analysis`, "APEX-Agents official suite refuses binary-instrument majority-k; use wilson@1 over judged cells");
@@ -151,6 +159,4 @@ export function selectApexAgentsRuntime(
       };
       atomicWriteFileSync(draftPath(context.workspaceDir, input.draftId), JSON.stringify(draft, null, 2));
       return { draft, selectionManifestSha256, suiteProtocolSha256, benchmarkSha256 };
-    },
-  });
 }

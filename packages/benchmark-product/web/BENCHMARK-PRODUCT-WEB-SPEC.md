@@ -176,9 +176,10 @@ Covers the design spec §4.6 Benchmark-draft row. The **Quote** sub-surface
     `armRemove` / `arm remove`, `armUpdate` / `arm update`
   - task intake → `importSweBenchRows` / `import swebench`,
     `sampleInit` / `sample init`
-  - evaluation runtime selection → `selectInspectEvaluation` /
-    `runtime inspect select`; the form selects an existing task and runtime
-    configuration and is not an authoring environment
+  - evaluation runtime selection → `selectMethod` / `method`; the shipped
+    form binds an Inspect-shaped method document and is not an authoring
+    environment. Catalog suite presets and derived export stay unavailable
+    (machine host paths / local job copy)
   - preview → `runPreview` / `preview` — ungated, non-advancing; every
     rendered preview artifact leads with the "rehearsal — not official
     evidence" marker (design spec §7.2, BP-20 addendum) so it cannot be

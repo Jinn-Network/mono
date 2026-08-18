@@ -10,9 +10,9 @@ identity: [#2774](https://github.com/Jinn-Network/mono/issues/2774).
 ## What this proves
 
 A human operator, on a machine with Mercor's `apex-swe` harness, Docker, and
-the **built Colophon CLI** (core `dist/cli/bin.js`) drives select → quote →
+the **built Colophon CLI** (core `dist/cli/bin.js`) drives method → quote →
 lock → dual-Mercor grade (`apx` or `run_e2e.py` for the lexicographic first
-task) → inspection export against:
+task) → export against:
 
 - Dataset id `mercor/APEX-SWE`
 - Revision `4d7aeb2b829ca348c224992da803bca6502235f4`
@@ -31,7 +31,7 @@ claim a Mercor APEX-SWE leaderboard row. The public 50 cannot wear the
 
 ## Where execution happens
 
-Colophon owns select, quote, lock, and export. It does **not** drive the
+Colophon owns method bind, quote, lock, and export. It does **not** drive the
 Mercor harnesses. The `apx` and `run_e2e.py` wrap runs on this operator host,
 between lock and export, driven by `yarn apex-swe-dev-one-task-qualify` (or by
 hand with the same pinned arguments). `run launch` refuses a locked

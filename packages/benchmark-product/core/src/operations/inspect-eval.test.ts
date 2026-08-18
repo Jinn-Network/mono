@@ -195,16 +195,18 @@ describe("decideInspectViewExportMode", () => {
 });
 
 describe("Inspect eval official-suite select", () => {
-  test("Inspect task and Inspect eval CLI verbs are distinct", () => {
-    expect(OPERATION_TO_VERB.selectInspectEvaluation).toBe("runtime inspect select");
-    expect(OPERATION_TO_VERB.selectInspectEvalRuntime).toBe("runtime inspect eval select");
-    expect(OPERATION_TO_VERB.exportInspectViewBundle).toBe("runtime inspect eval export");
-    expect(OPERATION_TO_ACTION.selectInspectEvaluation).toBe("runtime.inspect.select");
-    expect(OPERATION_TO_ACTION.selectInspectEvalRuntime).toBe("runtime.inspect.eval.select");
-    expect(OPERATION_TO_ACTION.exportInspectViewBundle).toBe("runtime.inspect.eval.export");
-    expect(CLI_VERB_NAMES).toContain("runtime inspect select");
-    expect(CLI_VERB_NAMES).toContain("runtime inspect eval select");
-    expect(CLI_VERB_NAMES).toContain("runtime inspect eval export");
+  test("Inspect task and Inspect eval CLI verbs retire behind method", () => {
+    expect(OPERATION_TO_VERB.selectInspectEvaluation).toBeUndefined();
+    expect(OPERATION_TO_VERB.selectInspectEvalRuntime).toBeUndefined();
+    expect(OPERATION_TO_VERB.exportInspectViewBundle).toBeUndefined();
+    expect(OPERATION_TO_ACTION.selectInspectEvaluation).toBeUndefined();
+    expect(OPERATION_TO_ACTION.selectInspectEvalRuntime).toBeUndefined();
+    expect(OPERATION_TO_ACTION.exportInspectViewBundle).toBeUndefined();
+    expect(CLI_VERB_NAMES).not.toContain("runtime inspect select");
+    expect(CLI_VERB_NAMES).not.toContain("runtime inspect eval select");
+    expect(CLI_VERB_NAMES).not.toContain("runtime inspect eval export");
+    expect(OPERATION_TO_VERB.selectMethod).toBe("method");
+    expect(OPERATION_TO_VERB.exportDerivedBundle).toBe("export");
   });
 
   test("named slices are lexicographic first 1 / first 10 / all; custom cannot be full", async () => {
