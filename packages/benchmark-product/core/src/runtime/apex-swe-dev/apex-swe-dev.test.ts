@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { cellKey, parseBenchmark } from "@jinn-network/benchmarking-records";
 import { armAdd } from "../../operations/arms.js";
-import { createDraft } from "../../operations/drafts.js";
+import { createDraft, readDraftDocument, updateDraft } from "../../operations/drafts.js";
 import { exportApexSwePackage, decideApexSweExportMode } from "../../operations/apex-swe-export.js";
 import { initWorkspace } from "../../operations/init.js";
 import { runLock } from "../../operations/run-lock.js";
@@ -17,7 +17,7 @@ import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { namedSliceTaskNames } from "../suite-protocol/manifest.js";
 import { suiteFactsFromAccountedApexSweDevRun } from "../suite-protocol/from-apex.js";
 import { isGitLfsPointerBytes, resolveApexSweDevSelection } from "./host.js";
-import { collectApexSweDevCells, launchApexSweDev } from "./launcher.js";
+import { apexSweDevReportRoot, collectApexSweDevCells, launchApexSweDev } from "./launcher.js";
 import {
   APEX_SWE_DEV_ADAPTER_ID,
   APEX_SWE_DEV_DATASET_ID,
@@ -25,6 +25,8 @@ import {
   ApexSweDevSelectionManifestSchema,
 } from "./manifest.js";
 import { harnessReportPath } from "./reports.js";
+import { runLaunch } from "../../operations/run-launch.js";
+import { artifactsDir } from "../../workspace/layout.js";
 
 function officialFifty(): { taskId: string; taskType: "integration" | "observability" }[] {
   const observability = Array.from({ length: 25 }, (_, index) => ({
@@ -70,8 +72,9 @@ process.exit(0);
   return path;
 }
 
-function writeFakePython(): string {
-  const path = join(root, "python");
+function writeFakePython(directory = join(observabilityProjectDir, "venv", "bin")): string {
+  mkdirSync(directory, { recursive: true });
+  const path = join(directory, "python");
   writeFileSync(path, `#!/usr/bin/env node
 const { mkdirSync, writeFileSync } = require("node:fs");
 const { dirname } = require("node:path");
@@ -91,11 +94,11 @@ process.exit(0);
   return path;
 }
 
-function writeFixture(): void {
+function writeFixture(tasks: readonly { taskId: string; taskType: string }[] = fifty, revision: string = APEX_SWE_DEV_DATASET_REVISION): void {
   writeFileSync(metadataPath, JSON.stringify({
     name: APEX_SWE_DEV_DATASET_ID,
-    revision: APEX_SWE_DEV_DATASET_REVISION,
-    tasks: fifty,
+    revision,
+    tasks,
   }));
   mkdirSync(integrationTasksDir, { recursive: true });
   mkdirSync(observabilityProjectDir, { recursive: true });
@@ -137,12 +140,13 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "apex-swe-dev-"));
   workspaceDir = join(root, "workspace");
   mkdirSync(workspaceDir);
-  apx = writeFakeApx();
-  python = writeFakePython();
   metadataPath = join(root, "dataset-metadata.json");
   integrationTasksDir = join(root, "Integration");
   observabilityProjectDir = join(root, "observability");
   writeFixture();
+  apx = writeFakeApx();
+  // Mercor's observability interpreter lives inside their own project tree; select requires that.
+  python = writeFakePython();
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -187,6 +191,40 @@ process.stdout.write("0.3.255\\n");
     expect(() => resolveApexSweDevSelection(workspaceDir, { ...request("one_task"), pythonExecutable: inspect })).toThrow(/Inspect/u);
   });
 
+  test("a registry snapshot off the sealed HuggingFace pin is refused", () => {
+    writeFixture(fifty, "0".repeat(40));
+    expect(() => resolveApexSweDevSelection(workspaceDir, request("one_task")))
+      .toThrow(/registry revision drifted from the sealed HuggingFace pin/u);
+  });
+
+  test("a 24 / 26 integration-observability split is refused even at the sealed revision", () => {
+    const skewed = [
+      ...Array.from({ length: 26 }, (_, index) => ({
+        taskId: `0xobs-${String(index).padStart(2, "0")}`,
+        taskType: "observability" as const,
+      })),
+      ...Array.from({ length: 24 }, (_, index) => ({
+        taskId: `1-int-${String(index).padStart(2, "0")}`,
+        taskType: "integration" as const,
+      })),
+    ];
+    expect(skewed).toHaveLength(50);
+    writeFixture(skewed);
+    expect(() => resolveApexSweDevSelection(workspaceDir, request("one_task")))
+      .toThrow(/exactly 25 integration and 25 observability/u);
+  });
+
+  test("a duplicated custom task id is refused rather than sealing a degenerate manifest", () => {
+    expect(() => resolveApexSweDevSelection(workspaceDir, request(undefined, ["1-int-00", "1-int-00"])))
+      .toThrow(/duplicate task ids/u);
+  });
+
+  test("an observability interpreter outside the Mercor project tree is refused", () => {
+    const outside = writeFakePython(join(root, "elsewhere", "bin"));
+    expect(() => resolveApexSweDevSelection(workspaceDir, { ...request("one_task"), pythonExecutable: outside }))
+      .toThrow(/must resolve inside the Mercor observability project directory/u);
+  });
+
   test("select seals replicates=1 and apex-swe-dev; quote shows 1 × 2 × 1 and never leaderboard-ready", async () => {
     const context = await prepareDraft("one");
     const selected = await selectApexSweDevRuntime(context, { draftId: "one", ...request("one_task") });
@@ -205,12 +243,34 @@ process.stdout.write("0.3.255\\n");
       leaderboardSubmitReady: false,
       methodLeaderboardEligible: false,
       cellCount: "1 × 2 × 1",
-      harborVersion: "0.0.0-test",
+      harnessVersion: "0.0.0-test",
       selectedTaskCount: 1,
       armCount: 2,
       replicates: 1,
     });
     expect(requireRunState(workspaceDir, "one").suiteQuote?.leaderboardSubmitReady).toBe(false);
+  }, 60_000);
+
+  test("select pins replacement closed, and lock refuses a spec re-patched off the sealed replicates", async () => {
+    const context = await prepareDraft("pinned");
+    const opened = updateDraft(context, { draftId: "pinned", patch: {
+      policy: { completenessFloor: "1", cellWindowMs: 3_600_000, replacement: { allowed: true, maxPerCell: 3 }, closeAfterMs: 86_400_000 },
+    } });
+    expect(opened.ok, JSON.stringify(opened)).toBe(true);
+    const selected = await selectApexSweDevRuntime(context, { draftId: "pinned", ...request("one_task") });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    // Pass@1: each task maps onto exactly one cell, so a replaced cell cannot wear k=1 conformance.
+    expect(selected.result.draft.spec.policy.replacement).toEqual({ allowed: false });
+
+    const repatched = updateDraft(context, { draftId: "pinned", patch: { replicates: 5 } });
+    expect(repatched.ok, JSON.stringify(repatched)).toBe(true);
+    expect((await runQuote(context, { draftId: "pinned" })).ok).toBe(true);
+    const locked = runLock(context, { draftId: "pinned" });
+    expect(locked.ok).toBe(false);
+    if (locked.ok) return;
+    expect(locked.error.code).toBe("conflict");
+    expect(locked.error.detail).toMatch(/sealed replicates 1 at select; the draft now says 5/u);
   }, 60_000);
 
   test("full coverage quote is never method-eligible; lock without quote bits refuses", async () => {
@@ -322,6 +382,22 @@ describe("APEX-SWE-dev dual harness and export", () => {
     expect(namedSelected.ok, JSON.stringify(namedSelected)).toBe(true);
     if (!namedSelected.ok) return;
     expect((await runQuote(namedContext, { draftId: "named-export" })).ok).toBe(true);
+    const namedManifest = ApexSweDevSelectionManifestSchema.parse(
+      JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(workspaceDir, namedSelected.result.selectionManifestSha256))),
+    );
+    // An export with no Mercor JSON under the draft's own report root is refused (it would ship
+    // INSTRUCTIONS.txt asserting conformance over nothing).
+    const ungraded = exportApexSwePackage(namedContext, { draftId: "named-export", armId: "one" });
+    expect(ungraded.ok).toBe(false);
+    if (ungraded.ok) return;
+    expect(ungraded.error.detail).toMatch(/Mercor harness JSON for every selected task/u);
+
+    launchApexSweDev({
+      manifest: namedManifest,
+      binding: { apxExecutable: apx, pythonExecutable: python, integrationTasksDir, observabilityProjectDir },
+      reportRoot: apexSweDevReportRoot(artifactsDir(workspaceDir), "named-export"),
+      modelNameOrPath: "one",
+    });
     const exported = exportApexSwePackage(namedContext, { draftId: "named-export", armId: "one" });
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
@@ -331,6 +407,26 @@ describe("APEX-SWE-dev dual harness and export", () => {
     const customExport = exportApexSwePackage(context, { draftId: "grade", armId: "one" });
     expect(customExport.ok).toBe(false);
   }, 120_000);
+
+  test("a locked APEX-SWE-dev draft refuses `run launch` and names the operator-host path", async () => {
+    const context = await prepareDraft("no-launch");
+    const selected = await selectApexSweDevRuntime(context, { draftId: "no-launch", ...request("one_task") });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    expect((await runQuote(context, { draftId: "no-launch" })).ok).toBe(true);
+    expect(runLock(context, { draftId: "no-launch" }).ok).toBe(true);
+
+    const launched = await runLaunch(context, { draftId: "no-launch" });
+    expect(launched.ok).toBe(false);
+    if (launched.ok) return;
+    expect(launched.error.code).toBe("venue-unavailable");
+    expect(launched.error.detail).toMatch(/executes on the operator host/u);
+    expect(launched.error.detail).toMatch(/apex-swe-dev-one-task-qualify/u);
+    expect(launched.error.detail).toMatch(/docs\/runbooks\/apex-swe-dev-official-one-task\.md/u);
+    expect(launched.error.detail).toMatch(/`run launch` does not drive this protocol/u);
+    // The refusal precedes the locked -> running transition, so nothing is half-launched.
+    expect(readDraftDocument(workspaceDir, "no-launch").state).toBe("locked");
+  }, 60_000);
 
   test("operator qualify script fails closed without COLOPHON_APEX_SWE_DEV_ONE_TASK_QUALIFY=1", () => {
     const script = join(dirname(fileURLToPath(import.meta.url)), "../../../scripts/apex-swe-dev-one-task-qualify.mjs");

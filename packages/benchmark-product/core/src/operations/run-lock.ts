@@ -31,7 +31,7 @@ import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
-import { ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
 import { runtimeRegistrationArtifacts } from "../runtime/adapter.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import type { OperationContext } from "./context.js";
@@ -100,10 +100,19 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           );
         }
       }
-      if (document.spec.evaluationRuntime?.adapterId === "apex-swe-dev") {
+      if (document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID) {
         const apex = ApexSweDevSelectionManifestSchema.parse(
           JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
         );
+        // Select seals replicates into the suite; the draft spec stays patchable until lock, so a
+        // post-select `replicates: 5` would otherwise lock and quote as protocol-conforming k=1.
+        if (document.spec.replicates !== apex.suite.replicates) {
+          refuse(
+            "conflict",
+            `drafts.${input.draftId}.spec.replicates`,
+            `APEX-SWE-dev sealed replicates ${apex.suite.replicates} at select; the draft now says ${document.spec.replicates} — re-run "runtime apex-swe-dev select"`,
+          );
+        }
         if (apex.coverage === "full" && runState.suiteQuote === undefined) {
           refuse(
             "conflict",

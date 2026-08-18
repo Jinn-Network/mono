@@ -29,6 +29,9 @@ function methodBitsFromApex(manifest: ApexSweDevSelectionManifest): {
   return {
     protocol: "apex-swe-dev",
     coverage: suite.coverage,
+    // Defense in depth, not a runtime check: every input below is already a `z.literal` in
+    // `ApexSweDevSelectionManifestSchema`, so a parsed manifest cannot reach here non-conforming.
+    // Re-deriving the bit keeps the published conformance claim independent of the schema pins.
     executionConformance: officialApexSweDevConformance({
       k: suite.replicates,
       nTrials: manifest.harness.nTrials,
@@ -57,7 +60,7 @@ function presentSuiteQuote(
     ...bits,
     methodLeaderboardEligible: eligible,
     cellCount: `${input.itemCount} × ${input.armCount} × ${input.replicates}`,
-    harborVersion: apxVersion,
+    harnessVersion: apxVersion,
     selectedTaskCount: suite.selectedTaskNames.length,
     armCount: input.armCount,
     replicates: input.replicates,
@@ -73,16 +76,6 @@ export function suiteQuoteFromApexSweDev(input: {
   const suite = suiteSelectionFromApexSweDev(input.manifest);
   const method = methodBitsFromApex(input.manifest);
   return presentSuiteQuote(input, suite, deriveSuiteComparability(method), methodLeaderboardEligible(method), input.manifest.harness.apxVersion);
-}
-
-export function suiteFactsFromApexSweDevManifest(input: {
-  readonly manifest: ApexSweDevSelectionManifest;
-  readonly armCount: number;
-  readonly itemCount: number;
-  readonly replicates: number;
-}): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
-  const quote = suiteQuoteFromApexSweDev(input);
-  return { quote, limitation: suiteLeaderboardLimitation(quote, "apex-swe-dev") };
 }
 
 export function suiteFactsFromAccountedApexSweDevRun(input: {

@@ -48,7 +48,7 @@ import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { suiteQuoteFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
-import { ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
 import { suiteQuoteFromApexSweDev } from "../runtime/suite-protocol/from-apex.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 
@@ -113,7 +113,8 @@ export interface QuotePresentation {
     readonly leaderboardSubmitReady: boolean;
     readonly methodLeaderboardEligible: boolean;
     readonly cellCount: string;
-    readonly harborVersion: string;
+    readonly harborVersion?: string;
+    readonly harnessVersion?: string;
     readonly selectedTaskCount: number;
     readonly armCount: number;
     readonly replicates: number;
@@ -333,7 +334,7 @@ export function runQuote(
           itemCount: compiled.benchmarkRecord.items.length,
           replicates: compiled.plannedRun.record.replicates,
         })
-        : document.spec.evaluationRuntime?.adapterId === "apex-swe-dev"
+        : document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID
           ? suiteQuoteFromApexSweDev({
             manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
             armCount: compiled.plannedRun.record.arms.length,

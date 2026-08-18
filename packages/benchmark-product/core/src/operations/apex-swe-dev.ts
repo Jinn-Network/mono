@@ -60,7 +60,6 @@ export function selectApexSweDevRuntime(
       const selected = resolveApexSweDevSelection(context.workspaceDir, input);
       putSealedBytes(context.workspaceDir, sealTaskProfile(buildPredictionForecastProfile()).bytes);
       const built = await buildApexSweDevTasks(selected.selectedTasks.map((task) => task.taskId));
-      void built.evaluationSpec.sha256;
       const author = loadOrCreateReportSigningKey(context.workspaceDir).keyId;
       const authoredTasks: Array<{ taskName: string; taskSha256: string; bytes: Uint8Array }> = [];
       for (const task of built.tasks) {
@@ -132,6 +131,9 @@ export function selectApexSweDevRuntime(
         spec: parseDraftSpec({
           ...attached.spec,
           replicates: 1,
+          // Pass@1 is the protocol: each task maps onto exactly one cell (DR-2026-08-18 §4), so a
+          // replaced cell would be a second attempt wearing the same k=1 conformance claim.
+          policy: { ...attached.spec.policy, replacement: { allowed: false } },
           arms: attached.spec.arms.map((arm) => {
             const mapped = input.arms.find((candidate) => candidate.armId === arm.armId);
             if (mapped === undefined) {

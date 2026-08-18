@@ -8,6 +8,7 @@ import {
   APEX_SWE_DEV_ADAPTER_ID,
   ApexSweDevSelectionManifestSchema,
 } from "../runtime/apex-swe-dev/manifest.js";
+import { harnessReportsPresent } from "../runtime/apex-swe-dev/reports.js";
 import {
   APEX_SWE_DEV_SUBMIT_CLOSED_SENTENCE,
   type SuiteCoverage,
@@ -98,6 +99,15 @@ export function exportApexSwePackage(
           quote.coverage === "custom"
             ? "custom coverage cannot wear the APEX-SWE-dev suite name"
             : "execution was not protocol-conforming, or this package tried to wear APEX-SWE leaderboard-submit; suite-named export is refused",
+        );
+      }
+      // An inspection-upload package whose only content is INSTRUCTIONS.txt asserts conformance
+      // over nothing inspectable. Mercor's own JSON, for every selected task, IS the package.
+      if (!harnessReportsPresent({ reportRoot, tasks: manifest.selectedTasks })) {
+        refuse(
+          "conflict",
+          `runs.${input.draftId}.artifacts.apex-swe-dev`,
+          "APEX-SWE-dev export requires Mercor harness JSON for every selected task; grade the locked slice on the operator host first",
         );
       }
       const exportDir = join(artifactsDir(context.workspaceDir), "apex-swe-export", input.draftId, input.armId);

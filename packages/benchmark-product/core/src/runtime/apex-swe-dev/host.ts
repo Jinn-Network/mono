@@ -1,4 +1,4 @@
-import { basename, join } from "node:path";
+import { basename, join, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
@@ -70,12 +70,23 @@ function probeApxVersion(executable: string): string {
   return stdout.replace(/^apx\s+/iu, "");
 }
 
-function probeInspectAiVersion(python: string): string {
+/** `python` and `observabilityProjectDir` are already realpaths (`resolveApexSweDevSelection`). */
+function isContainedIn(candidate: string, root: string): boolean {
+  return candidate === root || candidate.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+}
+
+function probeInspectAiVersion(python: string, observabilityProjectDir: string): string {
   const base = basename(python);
   if (base === "inspect" || base === "inspect-ai" || base === "harbor" || base === "swebench") {
     throw new TypeError("APEX-SWE-dev observability python must be Mercor's venv interpreter, not Inspect/Harbor/swebench");
   }
-  const stdout = execFileSync(realpathSync(python), ["-c", "import inspect_ai; print(inspect_ai.__version__)"], {
+  // Containment, not a version/name blocklist: Mercor's observability venv lives inside their own
+  // project tree, so any interpreter resolving outside it is by construction a cousin runtime
+  // (Colophon's Inspect 0.3.255, a system python, another harness's venv) whatever it is named.
+  if (!isContainedIn(python, observabilityProjectDir)) {
+    throw new TypeError("APEX-SWE-dev observability python must resolve inside the Mercor observability project directory");
+  }
+  const stdout = execFileSync(python, ["-c", "import inspect_ai; print(inspect_ai.__version__)"], {
     encoding: "utf8",
     env: { PATH: process.env.PATH ?? "" },
   }).trim();
@@ -117,7 +128,7 @@ export function resolveApexSweDevSelection(
   const integrationTasksDir = realpathSync(input.integrationTasksDir);
   const observabilityProjectDir = realpathSync(input.observabilityProjectDir);
   const apxVersion = probeApxVersion(apxExecutable);
-  const inspectAiVersion = probeInspectAiVersion(pythonExecutable);
+  const inspectAiVersion = probeInspectAiVersion(pythonExecutable, observabilityProjectDir);
   const runE2e = join(observabilityProjectDir, "run_e2e.py");
   if (!existsSync(runE2e)) {
     throw new TypeError("APEX-SWE-dev observability project must contain their run_e2e.py, not Colophon Inspect");
@@ -137,6 +148,9 @@ export function resolveApexSweDevSelection(
   if (input.taskIds !== undefined) {
     if (input.taskIds.length === 0) throw new TypeError("APEX-SWE-dev custom task list must not be empty");
     selectedTaskIds = [...input.taskIds];
+    if (new Set(selectedTaskIds).size !== selectedTaskIds.length) {
+      throw new TypeError("APEX-SWE-dev custom task list has duplicate task ids; each task maps onto exactly one cell");
+    }
     if (input.coverage !== undefined && coverageFromSelectedNames(datasetNames, selectedTaskIds) !== input.coverage) {
       throw new TypeError("APEX-SWE-dev task list does not match the named coverage slice");
     }

@@ -48,7 +48,13 @@ set. Colophon locks the public 50 as **APEX-SWE-dev**.
    is `apx` (tmux terminal, files, MCP). Observability agent is **their**
    Inspect AI tree (`observability/agent/` + `run_e2e.py`), then
    `unified_scorer()`. Injecting Claude Code / Codex / Colophon
-   `inspect-ai==0.3.255` into those worlds is a cousin.
+   `inspect-ai==0.3.255` into those worlds is a cousin. Unlike Harbor, the
+   wrap executes **on the operator host**, not through the Colophon venue:
+   Colophon owns select / quote / lock / export, the operator runs `apx` and
+   `run_e2e.py` between lock and export (`yarn apex-swe-dev-one-task-qualify`,
+   [`docs/runbooks/apex-swe-dev-official-one-task.md`](../../docs/runbooks/apex-swe-dev-official-one-task.md)),
+   and `run launch` refuses the `apex-swe-dev` adapter outright rather than
+   dead-ending in a venue that registers no launcher for it.
 
 3. **Official trial settings.** k = 1 (Pass@1 = first attempt). Integration
    CLI default `--n-trials 3` is **not** the protocol; force `--n-trials 1`.

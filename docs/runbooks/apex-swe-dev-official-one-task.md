@@ -29,6 +29,17 @@ Quote must show `executionConformance: true`, `coverage: "one_task"`,
 claim a Mercor APEX-SWE leaderboard row. The public 50 cannot wear the
 200-task board.
 
+## Where execution happens
+
+Colophon owns select, quote, lock, and export. It does **not** drive the
+Mercor harnesses. The `apx` and `run_e2e.py` wrap runs on this operator host,
+between lock and export, driven by `yarn apex-swe-dev-one-task-qualify` (or by
+hand with the same pinned arguments). `run launch` refuses a locked
+`apex-swe-dev` draft with a typed `venue-unavailable` error pointing back
+here: the local venue registers no launcher for this adapter, by design, and a
+launcher that re-entered their agent loop would be the cousin this protocol
+exists to refuse.
+
 ## Out of scope
 
 - Full 200 / Mercor holdout / `leaderboard_submit_ready`

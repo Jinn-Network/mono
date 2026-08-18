@@ -24,7 +24,10 @@ export function taskNameByDigestFromSuite(suite: SuiteProtocolSelection): Readon
 export interface SuiteQuotePresentation extends SuiteComparability {
   readonly methodLeaderboardEligible: boolean;
   readonly cellCount: string;
-  readonly harborVersion: string;
+  /** Terminal-Bench 2.1 only: the Harbor version this selection pinned. */
+  readonly harborVersion?: string;
+  /** Protocols whose executor is not Harbor: APEX-SWE-dev carries the `apx` version here. */
+  readonly harnessVersion?: string;
   readonly selectedTaskCount: number;
   readonly armCount: number;
   readonly replicates: number;

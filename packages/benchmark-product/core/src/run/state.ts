@@ -152,7 +152,10 @@ export const RunStateSchema = z.object({
     leaderboardSubmitReady: z.boolean(),
     methodLeaderboardEligible: z.boolean(),
     cellCount: z.string().min(1),
-    harborVersion: z.string().min(1),
+    /** Terminal-Bench 2.1 writes this; APEX-SWE-dev writes `harnessVersion` instead. Optional so
+     * run states persisted before APEX-SWE-dev (which all carry `harborVersion`) keep parsing. */
+    harborVersion: z.string().min(1).optional(),
+    harnessVersion: z.string().min(1).optional(),
     selectedTaskCount: z.number().int().positive(),
     armCount: z.number().int().positive(),
     replicates: z.number().int().positive(),
