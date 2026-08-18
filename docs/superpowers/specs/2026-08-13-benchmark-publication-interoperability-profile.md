@@ -4,9 +4,9 @@
 |---|---|
 | **Version** | 0.4 |
 | **Date** | 2026-08-13 |
-| **Amended** | 2026-08-18 — APEX-Agents official suite ([DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md)); Terminal-Bench 3.0 as a second named Harbor-family protocol ([DR-2026-08-18-b](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)); 2026-08-17 — direct-mode job grain ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); official suite protocol and one Job per arm ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)); SWE-bench Verified official suite ([DR-2026-08-17-e](../../../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)); no §8.4 marketplace rewrite |
+| **Amended** | 2026-08-18 — APEX-SWE-dev official suite ([DR-2026-08-18-c](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md)); APEX-Agents official suite ([DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md)); Terminal-Bench 3.0 as a second named Harbor-family protocol ([DR-2026-08-18-b](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)); 2026-08-17 — direct-mode job grain ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); official suite protocol and one Job per arm ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)); SWE-bench Verified official suite ([DR-2026-08-17-e](../../../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)); no §8.4 marketplace rewrite |
 | **Shape** | interoperability profile and design amendment |
-| **Status** | draft; revised after independent design review; §8.3 grain note added 2026-08-17; §8.3 suite protocol added 2026-08-17; §8.3 Verified protocol added 2026-08-17; §8.3 APEX-Agents protocol added 2026-08-18 |
+| **Status** | draft; revised after independent design review; §8.3 grain note added 2026-08-17; §8.3 suite protocol added 2026-08-17; §8.3 Verified protocol added 2026-08-17; §8.3 APEX-Agents protocol added 2026-08-18; §8.3 APEX-SWE-dev protocol added 2026-08-18 |
 | **Applies to** | any benchmarking product publishing through Jinn, including Colophon |
 | **Depends on** | [stack design principles](./2026-07-30-stack-design-principles.md), [benchmarking application](./2026-07-28-benchmarking-application-design.md), [record discovery](./2026-07-27-record-discovery-protocol-design.md), [evidence publication](./2026-07-25-evidence-publication-design.md), and [execution evidence](./2026-07-23-jinn-execution-evidence-protocol-design.md) |
 | **Companion research** | [Colophon, Harbor, and marketplace publication spike](../../spikes/2026-08-13-colophon-harbor-marketplace-publication.md) |
@@ -676,6 +676,15 @@ Terminal-Bench or SWE-bench. Inspection export is a derived artifact, not
 the claim of record. Colophon does not place the Mercor row.
 Inspect-as-specified remains out of this protocol. Terminal-Bench 2.1 and
 SWE-bench Verified are unchanged.
+
+**Third named protocol — APEX-SWE-dev** (added 2026-08-18, [DR-2026-08-18-c](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md)):
+
+The public HuggingFace 50 (`mercor/APEX-SWE`) is **APEX-SWE-dev**, not the 200-task APEX-SWE
+leaderboard. Bind `protocol: "apex-swe-dev"` with k=1, dual Mercor harness wrap (`apx` + their
+`run_e2e.py`), timeout 3600s, and `leaderboard_submit_ready` always false. Report v2 gains no new
+required fields. Export is inspection-upload for named slices with execution conformance; never
+leaderboard-submit. Inspect-as-specified, swe-rebench, Harbor, Pass@3, protocol id `apex-swe`,
+and rubric LM-judge cannot wear this name.
 
 ### 8.4 Jinn marketplace composition
 

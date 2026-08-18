@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { GATED_OPERATIONS } from "./authority/policy.js";
-import { BUNDLE_FORMAT, BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_MANIFEST_FILENAME, BUNDLE_V6_FORMAT } from "./bundle/manifest.js";
 import { PUBLIC_BUNDLE_FILES } from "./bundle/materialize.js";
 import { PRODUCT_ERROR_CODES } from "./errors.js";
 import { PRODUCT_BRANDING } from "./branding.js";
@@ -80,7 +80,7 @@ describe("product documentation consistency", () => {
     };
     const coreReadme = read(coreReadmePath);
 
-    expect(parity.entries).toHaveLength(48);
+    expect(parity.entries).toHaveLength(52);
     for (const entry of parity.entries) {
       expect(coreReadme, entry.operation).toContain(`\`${entry.operation}\``);
       expect(coreReadme, entry.cliVerb).toContain(`\`${PRODUCT_BRANDING.commandName} ${entry.cliVerb}`);
@@ -90,8 +90,8 @@ describe("product documentation consistency", () => {
 
     for (const operation of GATED_OPERATIONS) expect(coreReadme).toContain(`\`${operation}\``);
     for (const code of PRODUCT_ERROR_CODES) expect(coreReadme).toContain(`\`${code}\``);
-    expect(coreReadme).toContain("48 generated operations");
-    expect(coreReadme).toContain("nine gated operations");
+    expect(coreReadme).toContain("52 generated operations");
+    expect(coreReadme).toContain("ten gated operations");
     expect(coreReadme).toContain("11 typed error codes");
     expect(coreReadme).toContain("`{\"ok\":true,\"result\":...}`");
     expect(coreReadme).toContain("`{\"ok\":false,\"error\":...}`");
@@ -147,6 +147,38 @@ describe("product documentation consistency", () => {
     expect(guide).toContain("six checks");
     expect(guide).toMatch(/not confidential|non-confidential/i);
     expect(guide).toMatch(/local immutable emission.*not hosting/is);
+  });
+
+  it("pins the anchored bundle guide to its own closure version, member, and seven checks", () => {
+    const guide = read(bundleReadmePath);
+    const security = read(securityPath);
+    expect(guide).toContain(`\`${BUNDLE_V6_FORMAT}\``);
+    expect(guide).toContain("`benchmark-product.claim-package/4`");
+    expect(guide).toContain("`anchors/<sha256>.bin`");
+    // The seventh check is scoped to v6; v2 and v4 keep their frozen six above.
+    expect(guide).toContain("`integrity-anchors`");
+    expect(guide).toContain("seven checks");
+    expect(guide).toContain("`structural-and-append-order-only`");
+    expect(guide).toContain("`structural-append-order-and-anchored-time`");
+    for (const fact of ["genTime", "policyOid", "serialNumber", "signerCertificateSha256"]) {
+      expect(guide, fact).toContain(`\`${fact}\``);
+    }
+    expect(guide).toMatch(/selected by digest, never by label/i);
+    expect(guide).toMatch(/declared.*anchoring intent is on this\s+closure too/is);
+    expect(guide).toContain("declared-but-absent");
+    expect(guide).toMatch(/verifier ships with\s+none/is);
+    expect(guide).toMatch(/existed no later than the anchored\s+time.*not that results were produced after it/is);
+    // The default surface discloses the statuses too, so the guide may not promise less than the
+    // reader actually prints.
+    expect(guide).toContain("`--tsa-root`");
+    expect(guide).toContain("`--ots-headers`");
+    expect(guide).toMatch(/Both output modes print the anchor detail; neither\s+summarizes it away/is);
+    expect(guide).toContain("time basis not evaluated: no trust material supplied");
+    expect(guide).toMatch(/an anchor dates the bytes it\s+covers/is);
+    expect(security).toMatch(/Requesting a time anchor tells the anchor provider/i);
+    expect(security).toMatch(/reveals nothing about the record's content beyond the digest itself/is);
+    expect(security).toMatch(/configuring an\s+endpoint is the operator's consent/is);
+    expect(security).toMatch(/Verification never contacts an anchor provider/i);
   });
 
   it("documents the exact private web configuration and package commands", () => {

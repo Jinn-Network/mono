@@ -13,6 +13,16 @@
       }
     },
     {
+      "operation": "anchoringConfigure",
+      "cliVerb": "anchoring configure",
+      "authorityGated": true,
+      "description": "Replaces or clears the workspace's ordered anchor provider and endpoint configuration, which is what makes later locks anchor automatically (authority-gated).",
+      "gui": {
+        "status": "shipped",
+        "action": "anchoring.configure"
+      }
+    },
+    {
       "operation": "armAdd",
       "cliVerb": "arm add",
       "authorityGated": false,
@@ -120,6 +130,16 @@
       "gui": {
         "status": "unavailable",
         "reason": "copies machine-local Archipelago grades; browser path-based export is forbidden"
+      }
+    },
+    {
+      "operation": "exportApexSwePackage",
+      "cliVerb": "apex-swe export",
+      "authorityGated": false,
+      "description": "Packages Mercor harness JSON for APEX-SWE-dev without placing a Mercor leaderboard row.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "copies machine-local Mercor harness JSON; browser path-based export is forbidden"
       }
     },
     {
@@ -263,6 +283,16 @@
       }
     },
     {
+      "operation": "runAnchor",
+      "cliVerb": "anchor",
+      "authorityGated": false,
+      "description": "Obtains third-party time evidence over the run's own sealed Run or Matrix digest from a configured provider, verifies it, and stores it as an AnchorEvidence record.",
+      "gui": {
+        "status": "shipped",
+        "action": "run.anchor"
+      }
+    },
+    {
       "operation": "runCancel",
       "cliVerb": "cancel",
       "authorityGated": true,
@@ -400,6 +430,16 @@
       "gui": {
         "status": "unavailable",
         "reason": "requires server-configured APEX-Agents Archipelago paths; browser-supplied paths are forbidden"
+      }
+    },
+    {
+      "operation": "selectApexSweDevRuntime",
+      "cliVerb": "runtime apex-swe-dev select",
+      "authorityGated": false,
+      "description": "Resolves a named APEX-SWE-dev slice and binds both Mercor harnesses.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires server-configured APEX-SWE-dev host paths; browser-supplied paths are forbidden"
       }
     },
     {

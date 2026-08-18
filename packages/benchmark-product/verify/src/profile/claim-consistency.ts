@@ -2,6 +2,7 @@ import { BENCHMARKING_METHOD_IDS, type BenchmarkRecord, type MatrixRecord, type 
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "./errors.js";
 import { buildClaimPackage, type ClaimPackage } from "./claim.js";
+import type { ClaimAnchor } from "./anchor-claims.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 import { previewDisclosureSummaryLine } from "./preview-log.js";
 import { venueIsolationPostureForPolicy } from "./isolation.js";
@@ -19,7 +20,7 @@ function firstDifference(actual: unknown, expected: unknown, path = "claim"): st
   return path;
 }
 
-export function assertClaimConsistency(input: { readonly claim: ClaimPackage; readonly identities: ClaimRecordIdentities; readonly benchmarkRecord: BenchmarkRecord; readonly runRecord: RunRecord; readonly matrixRecord: MatrixRecord; readonly reportRecord: ReportRecord; readonly draftId: string; readonly assurancePreset: string; readonly additionalLimitations?: readonly string[]; readonly rehearsal?: { readonly previewCount: number; readonly timestamps: readonly string[] }; }): void {
+export function assertClaimConsistency(input: { readonly claim: ClaimPackage; readonly identities: ClaimRecordIdentities; readonly benchmarkRecord: BenchmarkRecord; readonly runRecord: RunRecord; readonly matrixRecord: MatrixRecord; readonly reportRecord: ReportRecord; readonly draftId: string; readonly assurancePreset: string; readonly additionalLimitations?: readonly string[]; readonly rehearsal?: { readonly previewCount: number; readonly timestamps: readonly string[] }; /** anchor-evidence §7.4: the anchors section re-derived from the carried AnchorEvidence bytes, never read from the claim under test. */ readonly anchors?: readonly ClaimAnchor[]; }): void {
   const { claim, identities, runRecord, matrixRecord, reportRecord } = input;
   if (identities.reportSha256 === undefined) refuse("record-integrity", "claim-consistency", "verified Report identity is absent");
   const plan = runRecord.analysisPlan?.find((entry) => entry.method === reportRecord.method.id && entry.version === reportRecord.method.version);
@@ -27,7 +28,10 @@ export function assertClaimConsistency(input: { readonly claim: ClaimPackage; re
   const minVerdicts = runRecord.policy.evaluation.minVerdicts;
   const distinctEvaluator = runRecord.policy.evaluation.distinctEvaluator;
   if ((verdictRule !== "sole" && verdictRule !== "majority" && verdictRule !== "unanimous") || minVerdicts === undefined || distinctEvaluator === undefined) refuse("record-integrity", "claim-consistency", "sealed Run carries no complete supported evaluation assurance primitives");
-  const expected = buildClaimPackage({ draftId: input.draftId, benchmarkSha256: identities.benchmarkSha256, runRecord, runSha256: identities.runSha256, matrixRecord, matrixSha256: identities.matrixSha256, reportRecord, reportSha256: identities.reportSha256, reportEnvelopeSha256: identities.reportEnvelopeSha256, venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord), verificationCommandVerb: "bundle verify", assurance: { preset: input.assurancePreset, resolved: { independence: runRecord.policy.independence, minVerdicts, distinctEvaluator, verdictRule } }, ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }) });
+  // Presence, not emptiness: an empty section belongs to the anchored closure's declared-but-absent
+  // bundle, and an omitted one to every unanchored bundle.
+  const anchors = input.anchors;
+  const expected = buildClaimPackage({ draftId: input.draftId, benchmarkSha256: identities.benchmarkSha256, runRecord, runSha256: identities.runSha256, matrixRecord, matrixSha256: identities.matrixSha256, reportRecord, reportSha256: identities.reportSha256, reportEnvelopeSha256: identities.reportEnvelopeSha256, venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, anchors ?? []), verificationCommandVerb: "bundle verify", assurance: { preset: input.assurancePreset, resolved: { independence: runRecord.policy.independence, minVerdicts, distinctEvaluator, verdictRule } }, ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }), ...(anchors === undefined ? {} : { anchors }) });
   if (!equal(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) refuse("record-integrity", "claim-consistency", `claim package ${firstDifference(claim, expected)} is not the exact projection of verified facts`);
   const rehearsalLine = input.rehearsal === undefined ? undefined : previewDisclosureSummaryLine(input.rehearsal);
   const binaryLimitations = reportRecord.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument

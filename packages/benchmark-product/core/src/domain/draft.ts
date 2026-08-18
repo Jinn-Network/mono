@@ -185,6 +185,32 @@ export const AnalysisSchema = z.object({
 
 export type Analysis = z.infer<typeof AnalysisSchema>;
 
+/**
+ * Per-draft anchoring policy (anchor-evidence design §7.3). Optional and additive: an absent block
+ * means "whatever the workspace is configured for", exactly the behavior every draft had before
+ * this field existed, so — like `analysis` and `budget` — no entry is added to
+ * `DRAFT_SPEC_DEFAULTS` and no stored draft needs migrating. Adding a default would also move
+ * every existing draft's `specSha256`, invalidating live quotes for a field nobody set.
+ *
+ * `enabled: false` is the draft's explicit opt-out from a workspace default (§7.3: "once
+ * configured at the workspace level, every subsequent lock attempts anchoring automatically; a
+ * draft can explicitly disable it").
+ *
+ * `declaredProviders` is the §7.3 declared intent, sealed into the Run record. It lists profile
+ * URIs and never endpoints, and it is the draft's own statement rather than something derived from
+ * local configuration: deriving it would make the sealed Run bytes depend on the machine that
+ * produced them. The declaration is intent, not proof — the anchor necessarily postdates sealing.
+ *
+ * Patch semantics are the spec-wide shallow merge (`operations/drafts.ts`): a patch carrying
+ * `anchoring` replaces the whole block rather than merging into it.
+ */
+export const DraftAnchoringSchema = z.object({
+  enabled: z.boolean().optional(),
+  declaredProviders: z.array(z.string().min(1)).min(1).optional(),
+});
+
+export type DraftAnchoring = z.infer<typeof DraftAnchoringSchema>;
+
 export const DraftSpecSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
@@ -198,6 +224,7 @@ export const DraftSpecSchema = z.object({
   venue: VenueSchema,
   evaluationRuntime: EvaluationRuntimeBindingSchema.optional(),
   analysis: AnalysisSchema.optional(),
+  anchoring: DraftAnchoringSchema.optional(),
 });
 
 export type DraftSpec = z.infer<typeof DraftSpecSchema>;

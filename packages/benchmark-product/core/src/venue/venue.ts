@@ -129,6 +129,7 @@ import {
   type InspectEvaluationStrategy,
 } from "../runtime/inspect/assurance.js";
 import { HARBOR_ADAPTER_ID, HarborSelectionManifestSchema, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
+import { APEX_SWE_DEV_ADAPTER_ID } from "../runtime/apex-swe-dev/manifest.js";
 import { ARCHIPELAGO_ADAPTER_ID, SWE_BENCH_HARNESS_ADAPTER_ID } from "../runtime/suite-protocol/comparability.js";
 import { readHarborHostBinding } from "../runtime/harbor/host.js";
 import { makeHarborLauncher, HARBOR_LAUNCHER_ID } from "../runtime/harbor/launcher.js";
@@ -646,6 +647,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     && runtimeId !== HARBOR_ADAPTER_ID
     && runtimeId !== SWE_BENCH_HARNESS_ADAPTER_ID
     && runtimeId !== ARCHIPELAGO_ADAPTER_ID
+    && runtimeId !== APEX_SWE_DEV_ADAPTER_ID
   ) {
     refuse("venue-unavailable", "evaluationRuntime.adapterId", `unsupported evaluation runtime "${runtimeId}"`);
   }
@@ -1287,13 +1289,15 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     const adapterKind: EvaluationAdapterKind = parserKey === parserAllowlistKey(PREDICTION_PARSER)
       ? "prediction"
       : parserKey === parserAllowlistKey(SWE_REBENCH_PARSER)
-        ? runtimeId === SWE_BENCH_HARNESS_ADAPTER_ID || runtimeId === ARCHIPELAGO_ADAPTER_ID
+        ? runtimeId === SWE_BENCH_HARNESS_ADAPTER_ID || runtimeId === ARCHIPELAGO_ADAPTER_ID || runtimeId === APEX_SWE_DEV_ADAPTER_ID
           ? refuse(
             "validation",
             "evaluationSpecBytes.familyBlock.parser",
             runtimeId === ARCHIPELAGO_ADAPTER_ID
               ? "APEX-Agents official suite refuses the swe-rebench evaluator"
-              : "SWE-bench Verified official suite refuses the swe-rebench evaluator",
+              : runtimeId === APEX_SWE_DEV_ADAPTER_ID
+                ? "APEX-SWE-dev official suite refuses the swe-rebench evaluator"
+                : "SWE-bench Verified official suite refuses the swe-rebench evaluator",
           )
           : "swe-rebench"
         : parserKey === parserAllowlistKey(BINARY_JUDGMENT_PARSER)

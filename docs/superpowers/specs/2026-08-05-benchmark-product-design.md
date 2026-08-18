@@ -1385,6 +1385,13 @@ Harbor-family protocol (`terminal-bench/terminal-bench` at a content-hash
 pin, never `@latest`). TB 2.1, TB 2.0, Verified, and Inspect cannot wear
 that name.
 
+**Addendum — 2026-08-18, APEX-SWE-dev official suite pointer ([DR-2026-08-18-c](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md);
+no new Report v2 required fields, no new record kinds):** APEX-SWE-dev is a
+named protocol Colophon wraps on the public 50-task HuggingFace set. Dual
+Mercor harness wrap, k=1, `leaderboard_submit_ready` always false. Comparability
+is the same two-axis bits as TB 2.1 with a protocol-specific limitations
+sentence. Inspect-as-specified and APEX-Agents remain follow-ons.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product
