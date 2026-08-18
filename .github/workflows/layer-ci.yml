@@ -3,34 +3,17 @@ name: Layer CI
 permissions:
   contents: read
 
+# The workflow-level `paths:` filters this workflow used to carry moved into the
+# `changes` job below. A required merge-queue context must not sit behind a
+# workflow-level filter: a filtered-out workflow never reports on the merge group
+# at all, and the entry hangs until the check-response timeout ejects it. A
+# filtered-out *job* reports success, which is what the queue needs
+# (DR-2026-08-18-b D3/D6).
 on:
   pull_request:
-    paths:
-      - 'packages/layer/**'
-      - 'packages/core/**'
-      - 'packages/plugin/**'
-      - 'operator/**'
-      - '.github/workflows/layer-ci.yml'
-      - '.github/workflows/layer-npm-publish.yml'
-      - '.github/scripts/layer-publish-workflow.test.mjs'
-      - '.github/scripts/publish-layer-stable.mjs'
-      - '.github/scripts/publish-layer-stable.test.mjs'
-      - '.github/scripts/verify-layer-stable-version.mjs'
-      - 'docs/runbooks/layer-npm-publishing.md'
+  merge_group:
   push:
     branches: [main, next]
-    paths:
-      - 'packages/layer/**'
-      - 'packages/core/**'
-      - 'packages/plugin/**'
-      - 'operator/**'
-      - '.github/workflows/layer-ci.yml'
-      - '.github/workflows/layer-npm-publish.yml'
-      - '.github/scripts/layer-publish-workflow.test.mjs'
-      - '.github/scripts/publish-layer-stable.mjs'
-      - '.github/scripts/publish-layer-stable.test.mjs'
-      - '.github/scripts/verify-layer-stable-version.mjs'
-      - 'docs/runbooks/layer-npm-publishing.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -43,8 +26,84 @@ env:
   ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Select the layer lane from the diff
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "${EVENT_NAME}" in
+            pull_request)
+              diff_base="${PR_BASE_SHA}"
+              diff_head="${PR_HEAD_SHA}"
+              ;;
+            merge_group)
+              diff_base="${MG_BASE_SHA}"
+              diff_head="${MG_HEAD_SHA}"
+              ;;
+            push)
+              diff_base="${PUSH_BEFORE_SHA}"
+              diff_head="${PUSH_HEAD_SHA}"
+              ;;
+            *)
+              echo "${EVENT_NAME} carries no diff; selecting the layer lane"
+              echo 'run=true' >> "${GITHUB_OUTPUT}"
+              exit 0
+              ;;
+          esac
+          # A branch creation sends all-zeros, and a force-push can send a base that
+          # is no longer reachable. Neither can be diffed, so select conservatively
+          # rather than failing a required context.
+          if [ -z "${diff_base}" ] \
+            || [ "${diff_base}" = '0000000000000000000000000000000000000000' ] \
+            || ! git cat-file -e "${diff_base}^{commit}" 2>/dev/null; then
+            echo "no usable diff base (${diff_base:-empty}); selecting the layer lane"
+            echo 'run=true' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # One extended regular expression per path this workflow used to filter on,
+          # translated faithfully from the deleted globs: `**` is a prefix match, and a
+          # literal path is anchored at both ends.
+          patterns=(
+            '^packages/layer/'
+            '^packages/core/'
+            '^packages/plugin/'
+            '^operator/'
+            '^\.github/workflows/layer-ci\.yml$'
+            '^\.github/workflows/layer-npm-publish\.yml$'
+            '^\.github/scripts/layer-publish-workflow\.test\.mjs$'
+            '^\.github/scripts/publish-layer-stable\.mjs$'
+            '^\.github/scripts/publish-layer-stable\.test\.mjs$'
+            '^\.github/scripts/verify-layer-stable-version\.mjs$'
+            '^docs/runbooks/layer-npm-publishing\.md$'
+          )
+          printf '%s\n' "${patterns[@]}" > "${RUNNER_TEMP}/selection.ere"
+          changed="$(git diff --name-only "${diff_base}...${diff_head}")"
+          echo "${changed}"
+          if printf '%s\n' "${changed}" | grep -qE -f "${RUNNER_TEMP}/selection.ere"; then
+            echo 'run=true' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'run=false' >> "${GITHUB_OUTPUT}"
+          fi
+
   check:
     name: Typecheck, Test, Build & Pack Smoke
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -77,6 +136,8 @@ jobs:
 
   client-compat:
     name: Client Compatibility
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -105,3 +166,33 @@ jobs:
             test/scripts/pack-workflows.test.ts \
             test/solver-types/swe-rebench-v2-verifier-facts.test.ts \
             test/solver-types/task-creator-mineable-store.test.ts
+
+  layer-ci-gate:
+    # The check-run name GitHub reports is this job's display `name:` below, and that
+    # string is the required-status-check context registered on the `next` ruleset
+    # (DR-2026-08-18-b D3) — keep them in sync.
+    name: layer-ci-gate
+    needs: [changes, check, client-compat]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require exact success from every selected layer-CI job
+        env:
+          SELECTED: ${{ needs.changes.outputs.run }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          CHECK_RESULT: ${{ needs.check.result }}
+          CLIENT_COMPAT_RESULT: ${{ needs.client-compat.result }}
+        run: |
+          set -euo pipefail
+          echo "selected=${SELECTED} changes=${CHANGES_RESULT}"
+          echo "check=${CHECK_RESULT} client-compat=${CLIENT_COMPAT_RESULT}"
+          test "${CHANGES_RESULT}" = success
+          # When the layer lane is selected the bar is unchanged: exact success. When it
+          # is not, each job must be exactly `skipped` — a failed or cancelled job still
+          # fails this gate, so unselection can never launder a red.
+          expected=success
+          if [ "${SELECTED}" != true ]; then
+            expected=skipped
+          fi
+          test "${CHECK_RESULT}" = "${expected}"
+          test "${CLIENT_COMPAT_RESULT}" = "${expected}"

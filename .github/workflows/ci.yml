@@ -1,31 +1,16 @@
 name: CI
 
+# The workflow-level `paths:` filters this workflow used to carry moved into the
+# `changes` job below. A required merge-queue context must not sit behind a
+# workflow-level filter: a filtered-out workflow never reports on the merge group
+# at all, and the entry hangs until the check-response timeout ejects it. A
+# filtered-out *job* reports success, which is what the queue needs
+# (DR-2026-08-18-b D3/D6).
 on:
   pull_request:
-    paths:
-      - 'operator/**'
-      - 'apps/operator-console/**'
-      - 'packages/lifecycle-notifications/**'
-      - 'packages/sdk/**'
-      - 'packages/core/**'
-      - 'packages/plugin/**'
-      - '.github/workflows/ci.yml'
-      - '.github/workflows/npm-publish.yml'
-      - '.github/scripts/npm-publish-workflow.test.mjs'
-      - '.github/scripts/operator-*.test.mjs'
+  merge_group:
   push:
     branches: [main]
-    paths:
-      - 'operator/**'
-      - 'apps/operator-console/**'
-      - 'packages/lifecycle-notifications/**'
-      - 'packages/sdk/**'
-      - 'packages/core/**'
-      - 'packages/plugin/**'
-      - '.github/workflows/ci.yml'
-      - '.github/workflows/npm-publish.yml'
-      - '.github/scripts/npm-publish-workflow.test.mjs'
-      - '.github/scripts/operator-*.test.mjs'
   # Manual trigger for the soft-gate e2e jobs (task-creator-marketplace-e2e).
   # Deliberately NOT wired to `schedule:` — a cron trigger on this workflow
   # would run every other job nightly too; dispatch keeps the soft gate
@@ -48,8 +33,89 @@ env:
   ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # This job runs no operator command, and the workflow-level `operator`
+        # default would send its `git` calls into a subdirectory of the checkout.
+        working-directory: .
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Select the operator lane from the diff
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "${EVENT_NAME}" in
+            pull_request)
+              diff_base="${PR_BASE_SHA}"
+              diff_head="${PR_HEAD_SHA}"
+              ;;
+            merge_group)
+              diff_base="${MG_BASE_SHA}"
+              diff_head="${MG_HEAD_SHA}"
+              ;;
+            push)
+              diff_base="${PUSH_BEFORE_SHA}"
+              diff_head="${PUSH_HEAD_SHA}"
+              ;;
+            *)
+              echo "${EVENT_NAME} carries no diff; selecting the operator lane"
+              echo 'run=true' >> "${GITHUB_OUTPUT}"
+              exit 0
+              ;;
+          esac
+          # A branch creation sends all-zeros, and a force-push can send a base that
+          # is no longer reachable. Neither can be diffed, so select conservatively
+          # rather than failing a required context.
+          if [ -z "${diff_base}" ] \
+            || [ "${diff_base}" = '0000000000000000000000000000000000000000' ] \
+            || ! git cat-file -e "${diff_base}^{commit}" 2>/dev/null; then
+            echo "no usable diff base (${diff_base:-empty}); selecting the operator lane"
+            echo 'run=true' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # One extended regular expression per path this workflow used to filter on,
+          # translated faithfully from the deleted globs: `**` is a prefix match, a
+          # single `*` matches within one path segment, and a literal path is anchored
+          # at both ends.
+          patterns=(
+            '^operator/'
+            '^apps/operator-console/'
+            '^packages/lifecycle-notifications/'
+            '^packages/sdk/'
+            '^packages/core/'
+            '^packages/plugin/'
+            '^\.github/workflows/ci\.yml$'
+            '^\.github/workflows/npm-publish\.yml$'
+            '^\.github/scripts/npm-publish-workflow\.test\.mjs$'
+            '^\.github/scripts/operator-[^/]*\.test\.mjs$'
+          )
+          printf '%s\n' "${patterns[@]}" > "${RUNNER_TEMP}/selection.ere"
+          changed="$(git diff --name-only "${diff_base}...${diff_head}")"
+          echo "${changed}"
+          if printf '%s\n' "${changed}" | grep -qE -f "${RUNNER_TEMP}/selection.ere"; then
+            echo 'run=true' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'run=false' >> "${GITHUB_OUTPUT}"
+          fi
+
   architecture:
     name: Operator tree architecture
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -75,6 +141,8 @@ jobs:
 
   check:
     name: Typecheck & Test
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -135,7 +203,8 @@ jobs:
 
   pack-smoke:
     name: Pack & Smoke Test
-    needs: check
+    needs: [changes, check]
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -182,7 +251,8 @@ jobs:
     # and funding-sequence against a mocked daemon API. The daemon origin has
     # no human surface after Stage 6.
     name: Operator console E2E (Playwright)
-    needs: check
+    needs: [changes, check]
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -227,7 +297,8 @@ jobs:
     # via `yarn e2e:degraded-daemon-guard` itself, same pattern as
     # `funding-sequence-e2e` above.
     name: Degraded Daemon Guard E2E
-    needs: check
+    needs: [changes, check]
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -244,6 +315,10 @@ jobs:
     # fork of Base + two FleetBootstrapper cycles + full post → guarded claim
     # → deliver → grade → exemplar-pair loop; needs internet for the fork RPC.
     name: Task Creator marketplace e2e (soft gate)
+    # Deliberately NOT gated on `changes`: a manual dispatch is the soft gate's only
+    # lane, and it must run whatever the diff says (a dispatch may carry no diff at
+    # all). `operator-ci-gate` asserts this job is exactly `skipped` on every other
+    # event, which is the property that keeps it off the PR and merge-group paths.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -269,7 +344,8 @@ jobs:
     # Task Creator v0 AC #1 — native amd64 Docker gold eval through RoutingTaskRowFetcher.
     # ubuntu-latest is linux/amd64; arm64 Mac dev cannot satisfy this gate.
     name: Task Creator AC1 (amd64 gold proof)
-    needs: check
+    needs: [changes, check]
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -298,3 +374,75 @@ jobs:
         run: yarn task-creator:amd64-gold-proof
         env:
           HOME: ${{ runner.temp }}
+
+  operator-ci-gate:
+    # The check-run name GitHub reports is this job's display `name:` below, and that
+    # string is the required-status-check context registered on the `next` ruleset
+    # (DR-2026-08-18-b D3) — keep them in sync.
+    name: operator-ci-gate
+    needs:
+      - changes
+      - architecture
+      - check
+      - pack-smoke
+      - dashboard-e2e
+      - degraded-daemon-guard-e2e
+      - task-creator-marketplace-e2e
+      - task-creator-amd64-gold-proof
+    if: always()
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # This job never checks out, so the workflow-level `operator` default would
+        # point every `run:` step at a directory that does not exist.
+        working-directory: .
+    steps:
+      - name: Require exact success from every selected operator-CI job
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SELECTED: ${{ needs.changes.outputs.run }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          CHECK_RESULT: ${{ needs.check.result }}
+          PACK_SMOKE_RESULT: ${{ needs.pack-smoke.result }}
+          DASHBOARD_E2E_RESULT: ${{ needs.dashboard-e2e.result }}
+          DEGRADED_DAEMON_GUARD_RESULT: ${{ needs.degraded-daemon-guard-e2e.result }}
+          MARKETPLACE_E2E_RESULT: ${{ needs.task-creator-marketplace-e2e.result }}
+          GOLD_PROOF_RESULT: ${{ needs.task-creator-amd64-gold-proof.result }}
+        run: |
+          set -euo pipefail
+          echo "event=${EVENT_NAME} selected=${SELECTED} changes=${CHANGES_RESULT}"
+          echo "architecture=${ARCHITECTURE_RESULT} check=${CHECK_RESULT}"
+          echo "pack-smoke=${PACK_SMOKE_RESULT} dashboard-e2e=${DASHBOARD_E2E_RESULT}"
+          echo "degraded-daemon-guard-e2e=${DEGRADED_DAEMON_GUARD_RESULT}"
+          echo "task-creator-marketplace-e2e=${MARKETPLACE_E2E_RESULT}"
+          echo "task-creator-amd64-gold-proof=${GOLD_PROOF_RESULT}"
+          test "${CHANGES_RESULT}" = success
+          # When the operator lane is selected the bar is unchanged: exact success. When
+          # it is not, each job must be exactly `skipped` — a failed or cancelled job
+          # still fails this gate, so unselection can never launder a red.
+          expected=success
+          if [ "${SELECTED}" != true ]; then
+            expected=skipped
+          fi
+          test "${ARCHITECTURE_RESULT}" = "${expected}"
+          test "${CHECK_RESULT}" = "${expected}"
+          test "${PACK_SMOKE_RESULT}" = "${expected}"
+          test "${DASHBOARD_E2E_RESULT}" = "${expected}"
+          test "${DEGRADED_DAEMON_GUARD_RESULT}" = "${expected}"
+          test "${GOLD_PROOF_RESULT}" = "${expected}"
+          # The marketplace e2e is dispatch-only. On every other event it must be
+          # exactly `skipped`, which is what keeps a 45-minute soft gate off the PR and
+          # merge-group paths. On a dispatch it may have run or been skipped; either is
+          # accepted, since the dispatch lane gates nothing.
+          if [ "${EVENT_NAME}" = workflow_dispatch ]; then
+            case "${MARKETPLACE_E2E_RESULT}" in
+              success|skipped) ;;
+              *)
+                echo "::error::task-creator-marketplace-e2e result was ${MARKETPLACE_E2E_RESULT}"
+                exit 1
+                ;;
+            esac
+          else
+            test "${MARKETPLACE_E2E_RESULT}" = skipped
+          fi
