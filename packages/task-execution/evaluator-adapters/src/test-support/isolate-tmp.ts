@@ -12,26 +12,57 @@
 // captures in test files. Vitest re-evaluates setup files per test file (default
 // `isolate: true`), so each file gets its own root.
 //
-// The sweep is registered twice on purpose. `afterAll` is the normal path and runs whether the
-// file passed or failed; the `process.on("exit")` listener covers what `afterAll` cannot — a test
-// module that throws at import or collection time, so no suite ever runs. The second `rmSync` is
-// a no-op (`force: true` on a missing path), which is why the redundancy is free.
+// The sweep is registered twice, and the two registrations cover measured cases:
+//
+//   file passes        `afterAll` fires, `exit` does not
+//   file fails         `afterAll` fires, `exit` does not
+//   file fully skipped NEITHER fires — Vitest runs no suite, so there is no `afterAll`, and the
+//                      worker is torn down rather than exiting
+//   file throws at     `afterAll` cannot fire; `exit` fires when the worker exits normally, which
+//   import time        it does reliably when the file runs alone and only sometimes when other
+//                      files share the pool
+//
+// So `afterAll` is the normal path, the `exit` listener is a best-effort extra for the
+// import-time-throw case, and NEITHER covers a fully-skipped file. `global-tmp-root.ts` is what
+// closes the remaining cases: this file records its root there, and the per-run teardown removes
+// every recorded root from the main process once the workers are gone. The second `rmSync` here
+// is a no-op (`force: true` on a missing path), which is why keeping the partial backstop is free.
 //
 // This module exports NOTHING on purpose. The isolation must come from the `setupFiles` wiring,
 // not from an import: a test that imported this module would trigger the redirect itself and so
 // could not detect the wiring being removed. The path is published as an environment variable
 // instead — see `tmp-isolation.test.ts` next to this file.
 //
-// This file is duplicated verbatim in `packages/benchmark-product/core`. Two ~60-line copies are
+// This file is duplicated verbatim in `packages/benchmark-product/core`, alongside the other two
+// files of this seam (`global-tmp-root.ts` and `sweep-tree.ts`). Three small copies are
 // deliberately cheaper than a shared workspace package with its own build, portal resolutions and
-// publish surface. Graduate it to one at a third consumer.
-import { chmodSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+// publish surface. Graduate the set to one at a third consumer.
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { afterAll } from "vitest";
 
+import { sweepManagedTree } from "./sweep-tree.js";
+
 const managedRoot = mkdtempSync(join(tmpdir(), "jinn-vitest-tmp-"));
+
+// Record this root with the per-run teardown in `global-tmp-root.ts`, which removes every recorded
+// tree once the workers are gone — the only thing that cleans up after a file whose tests are all
+// skipped, since such a file never fires the `afterAll` below. Written immediately after the root
+// exists, so the unrecorded window is as short as it can be. Registering rather than nesting keeps
+// `$TMPDIR` at its current length, which spawned-subprocess tests depend on; `global-tmp-root.ts`
+// explains why that matters. Best-effort by design: a single file run under a config with no
+// `globalSetup` entry has nowhere to record, and still works.
+const runRegistry = process.env["JINN_TEST_RUN_TMPDIR"];
+if (runRegistry !== undefined) {
+  try {
+    writeFileSync(join(runRegistry, basename(managedRoot)), managedRoot);
+  } catch {
+    // A missing or stale registry is not worth failing a test file over; the `afterAll` below is
+    // still the normal path, and an unswept empty root is the pre-existing behaviour.
+  }
+}
 
 // No trailing separator: `os.tmpdir()` strips one on POSIX, and the exact string equality is what
 // `tmp-isolation.test.ts` asserts on. `TMP`/`TEMP` are set alongside `TMPDIR` for Windows parity.
@@ -42,52 +73,10 @@ process.env["TEMP"] = managedRoot;
 /** The temp directory every `mkdtemp(join(tmpdir(), …))` in this test file lands inside. */
 process.env["JINN_TEST_TMPDIR"] = managedRoot;
 
-// Restores write and traverse permission on the throwaway tree this file owns. `rmSync` cannot
-// remove a read-only directory — `unlink` needs the write bit on the *parent* directory, and
-// `force: true` only suppresses ENOENT, never EACCES — and the local workspace provisioner seals
-// each attempt's `input/` exactly that way (directories 0o500, files 0o400) to protect a live
-// attempt's dispatch context from the solver process. That seal is a runtime integrity property,
-// not a durability guarantee about test scratch space: it holds for the whole life of every test,
-// and this runs only after the last assertion. Symlinks are skipped — `chmod` follows them, which
-// would reach outside the tree, and `rmSync` unlinks them without needing the target's permission.
-function unsealTree(directory: string): void {
-  let entries;
-  try {
-    chmodSync(directory, 0o700);
-    entries = readdirSync(directory, { withFileTypes: true });
-  } catch {
-    return; // Let the retry below report whatever actually blocks removal.
-  }
-  for (const entry of entries) {
-    const child = join(directory, entry.name);
-    if (entry.isSymbolicLink()) continue;
-    if (entry.isDirectory()) unsealTree(child);
-    else {
-      try {
-        chmodSync(child, 0o600);
-      } catch {
-        // Same: the retry's error is the useful one.
-      }
-    }
-  }
-}
-
 // Named rather than an inline arrow so `tmp-isolation.test.ts` can find it in
 // `process.listeners("exit")` and go red if the teardown is dropped.
 function jinnTestTmpdirSweep(): void {
-  try {
-    rmSync(managedRoot, { recursive: true, force: true });
-  } catch {
-    // Almost always a sealed `input/`. Unseal the tree we own, then retry.
-    unsealTree(managedRoot);
-    try {
-      rmSync(managedRoot, { recursive: true, force: true });
-    } catch (error) {
-      // Loud but not fatal. A cleanup failure is an operational problem that has to be visible,
-      // yet throwing here would fabricate a failure in a test file whose assertions all passed.
-      console.warn(`[jinn-test] could not sweep managed temp root ${managedRoot}:`, error);
-    }
-  }
+  sweepManagedTree(managedRoot, "managed temp root");
 }
 
 afterAll(jinnTestTmpdirSweep);

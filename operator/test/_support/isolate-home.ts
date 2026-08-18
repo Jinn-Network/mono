@@ -27,24 +27,53 @@
 // isolated home by construction. Removing the home therefore removes every temp directory the
 // test file created, without a per-call-site cleanup that a failing test would skip anyway.
 //
-// The sweep is registered twice on purpose. `afterAll` is the normal path and runs whether the
-// file passed or failed; the `process.on('exit')` listener covers what `afterAll` cannot — a
-// test module that throws at import or collection time, so no suite ever runs. Setup files have
-// already executed by then, so the listener is installed. The second `rmSync` is a no-op
-// (`force: true` on a missing path), which is why the redundancy is free.
+// The sweep is registered twice, and the two registrations cover measured cases:
 //
-// The sweep repairs permissions before giving up — see `unsealTree` below. The same repair is
-// carried by the two package-level copies of this seam
+//   file passes        `afterAll` fires, `exit` does not
+//   file fails         `afterAll` fires, `exit` does not
+//   file fully skipped NEITHER fires — Vitest runs no suite, so there is no `afterAll`, and the
+//                      worker is torn down rather than exiting
+//   file throws at     `afterAll` cannot fire; `exit` fires when the worker exits normally, which
+//   import time        it does reliably when the file runs alone and only sometimes when other
+//                      files share the pool
+//
+// So `afterAll` is the normal path, the `exit` listener is a best-effort extra for the
+// import-time-throw case, and NEITHER covers a fully-skipped file. `global-tmp-root.ts` is what
+// closes the remaining cases: this file records its home there, and the per-run teardown removes
+// every recorded home from the main process once the workers are gone. The second `rmSync` here
+// is a no-op (`force: true` on a missing path), which is why keeping the partial backstop is free.
+//
+// The sweep repairs permissions before giving up — see `sweep-tree.ts`. The same repair is carried
+// by the two package-level copies of this seam
 // (`packages/task-execution/evaluator-adapters` and `packages/benchmark-product/core`,
 // `src/test-support/isolate-tmp.ts`), so all three sweeps behave identically.
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { afterAll } from 'vitest';
 
+import { sweepManagedTree } from './sweep-tree.js';
+
 const realHome = homedir();
 const isolatedHome = mkdtempSync(join(tmpdir(), 'jinn-test-home-'));
+
+// Record this home with the per-run teardown in `global-tmp-root.ts`, which removes every
+// recorded tree once the workers are gone — the only thing that cleans up after a file whose
+// tests are all skipped, since such a file never fires the `afterAll` below. Written immediately
+// after the home exists, so the unrecorded window is as short as it can be. Registering rather
+// than nesting keeps `$TMPDIR` at its current length, which the spawned-subprocess tests depend
+// on; `global-tmp-root.ts` explains why that matters. Best-effort by design: a single file run
+// under a config with no `globalSetup` entry has nowhere to record, and still works.
+const runRegistry = process.env['JINN_TEST_RUN_TMPDIR'];
+if (runRegistry !== undefined) {
+  try {
+    writeFileSync(join(runRegistry, basename(isolatedHome)), isolatedHome);
+  } catch {
+    // A missing or stale registry is not worth failing a test file over; the `afterAll` below is
+    // still the normal path, and an unswept empty home is the pre-existing behaviour.
+  }
+}
 
 process.env['HOME'] = isolatedHome;
 process.env['USERPROFILE'] = isolatedHome;
@@ -67,53 +96,11 @@ process.env['TEMP'] = isolatedTmp;
 /** The temp directory every `mkdtemp(join(tmpdir(), …))` in this test file lands inside. */
 process.env['JINN_TEST_TMPDIR'] = isolatedTmp;
 
-// Restores write and traverse permission on the throwaway tree this file owns. `rmSync` cannot
-// remove a read-only directory — `unlink` needs the write bit on the *parent* directory, and
-// `force: true` only suppresses ENOENT, never EACCES — and the local workspace provisioner seals
-// each attempt's `input/` exactly that way (directories 0o500, files 0o400) to protect a live
-// attempt's dispatch context from the solver process. That seal is a runtime integrity property,
-// not a durability guarantee about test scratch space: it holds for the whole life of every test,
-// and this runs only after the last assertion. Symlinks are skipped — `chmod` follows them, which
-// would reach outside the tree, and `rmSync` unlinks them without needing the target's permission.
-function unsealTree(directory: string): void {
-  let entries;
-  try {
-    chmodSync(directory, 0o700);
-    entries = readdirSync(directory, { withFileTypes: true });
-  } catch {
-    return; // Let the retry below report whatever actually blocks removal.
-  }
-  for (const entry of entries) {
-    const child = join(directory, entry.name);
-    if (entry.isSymbolicLink()) continue;
-    if (entry.isDirectory()) unsealTree(child);
-    else {
-      try {
-        chmodSync(child, 0o600);
-      } catch {
-        // Same: the retry's error is the useful one.
-      }
-    }
-  }
-}
-
 // Named rather than an inline arrow so `test/config/tmp-isolation.test.ts` can find it in
 // `process.listeners('exit')` and go red if the teardown is dropped. Registered before the guard
 // below so a guard throw does not itself leak the home.
 function jinnTestHomeSweep(): void {
-  try {
-    rmSync(isolatedHome, { recursive: true, force: true });
-  } catch {
-    // Almost always a sealed `input/`. Unseal the tree we own, then retry.
-    unsealTree(isolatedHome);
-    try {
-      rmSync(isolatedHome, { recursive: true, force: true });
-    } catch (error) {
-      // Loud but not fatal. A cleanup failure is an operational problem that has to be visible,
-      // yet throwing here would fabricate a failure in a test file whose assertions all passed.
-      console.warn(`[jinn-test] could not sweep isolated home ${isolatedHome}:`, error);
-    }
-  }
+  sweepManagedTree(isolatedHome, 'isolated home');
 }
 
 afterAll(jinnTestHomeSweep);
