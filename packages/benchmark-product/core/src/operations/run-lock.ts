@@ -101,11 +101,13 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
         );
         const suite = suiteSelectionFromHarbor(harborSelection);
+        // Select seals replicates into the suite; the draft spec stays patchable until lock, so a
+        // post-select `replicates: 1` would otherwise lock and quote as protocol-conforming k=5.
         if (suite !== undefined && document.spec.replicates !== suite.replicates) {
           refuse(
             "conflict",
             `drafts.${input.draftId}.spec.replicates`,
-            `Terminal-Bench 2.1 lock requires spec.replicates ${suite.replicates} to match the sealed suite selection — the draft's replicates was edited to ${document.spec.replicates} after select`,
+            `Terminal-Bench 2.1 sealed replicates ${suite.replicates} at select; the draft now says ${document.spec.replicates} — re-run "runtime terminal-bench-2-1 select"`,
           );
         }
         if (suite?.coverage === "full" && runState.suiteQuote === undefined) {
