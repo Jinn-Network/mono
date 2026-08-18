@@ -129,6 +129,7 @@ import {
   type InspectEvaluationStrategy,
 } from "../runtime/inspect/assurance.js";
 import { HARBOR_ADAPTER_ID, HarborSelectionManifestSchema, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
+import { APEX_SWE_DEV_ADAPTER_ID } from "../runtime/apex-swe-dev/manifest.js";
 import { readHarborHostBinding } from "../runtime/harbor/host.js";
 import { makeHarborLauncher, HARBOR_LAUNCHER_ID } from "../runtime/harbor/launcher.js";
 import { suiteSelectionFromHarbor, taskNameByDigestFromSuite } from "../runtime/suite-protocol/from-harbor.js";
@@ -643,7 +644,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     && runtimeId !== INSPECT_ADAPTER_ID
     && runtimeId !== INSPECT_BINARY_JUDGE_ADAPTER_ID
     && runtimeId !== HARBOR_ADAPTER_ID
-    && runtimeId !== "apex-swe-dev"
+    && runtimeId !== APEX_SWE_DEV_ADAPTER_ID
   ) {
     refuse("venue-unavailable", "evaluationRuntime.adapterId", `unsupported evaluation runtime "${runtimeId}"`);
   }
@@ -1285,7 +1286,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     const adapterKind: EvaluationAdapterKind = parserKey === parserAllowlistKey(PREDICTION_PARSER)
       ? "prediction"
       : parserKey === parserAllowlistKey(SWE_REBENCH_PARSER)
-        ? runtimeId === "apex-swe-dev"
+        ? runtimeId === APEX_SWE_DEV_ADAPTER_ID
           ? refuse(
             "validation",
             "evaluationSpecBytes.familyBlock.parser",

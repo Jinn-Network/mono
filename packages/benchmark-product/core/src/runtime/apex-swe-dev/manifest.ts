@@ -1,7 +1,6 @@
 /** Product-owned APEX-SWE-dev selection. The 200-task APEX-SWE leaderboard cannot wear this id. */
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
-import { sha256Hex } from "../../workspace/sealed-store.js";
 import {
   APEX_SWE_DEV_ADAPTER_ID,
   APEX_SWE_DEV_DEFAULT_TIMEOUT_SECONDS,
@@ -21,7 +20,6 @@ export const APEX_SWE_DEV_OBSERVABILITY_COUNT = 25 as const;
 export const APEX_SWE_HARNESS_REVISION = "7cfa580dd59704ff15cf558bda80257c23b6cb04" as const;
 export const APEX_SWE_DEV_N_TRIALS = 1 as const;
 export const APEX_SWE_DEV_MESSAGE_LIMIT = 250 as const;
-export const APEX_SWE_DEV_PROFILE = "https://product.jinn.network/profiles/apex-swe-dev-selection/v1" as const;
 export const APEX_SWE_DEV_SELECTION_ROLE = "https://product.jinn.network/artifact-roles/apex-swe-dev/selection/v1" as const;
 export const APEX_SWE_DEV_SELECTION_SCHEMA = "jinn.network/benchmark-product/apex-swe-dev-selection/1" as const;
 export const APEX_SWE_DEV_RUNTIME_EVIDENCE_PROFILE = "https://product.jinn.network/profiles/apex-swe-dev-evidence/v1" as const;
@@ -87,10 +85,6 @@ export type ApexSweDevSelectionManifest = z.infer<typeof ApexSweDevSelectionMani
 
 export function apexSweDevSelectionBytes(value: ApexSweDevSelectionManifest): Uint8Array {
   return canonicalJsonBytes(ApexSweDevSelectionManifestSchema.parse(value) as never);
-}
-
-export function apexSweDevSelectionSha256(value: ApexSweDevSelectionManifest): string {
-  return sha256Hex(apexSweDevSelectionBytes(value));
 }
 
 export function assertOfficialApexSweDevRegistry(parsed: ApexSweDevRegistryMetadata): void {

@@ -75,7 +75,7 @@ import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
-import { ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
 import { apexSweDevReportRoot } from "../runtime/apex-swe-dev/launcher.js";
 import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex.js";
 
@@ -183,7 +183,7 @@ export function runReport(
             jobDir: join(harborArmJobsDir(clockedContext.workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId)),
           })),
         })
-        : document.spec.evaluationRuntime?.adapterId === "apex-swe-dev"
+        : document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID
           ? suiteFactsFromAccountedApexSweDevRun({
             manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
             armCount: runRecord.arms.length,

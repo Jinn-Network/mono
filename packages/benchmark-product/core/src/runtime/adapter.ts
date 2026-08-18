@@ -723,9 +723,9 @@ function createPublicationAdapter(
           ? HARBOR_SELECTION_ROLE
           : adapterId === APEX_SWE_DEV_ADAPTER_ID
             ? APEX_SWE_DEV_SELECTION_ROLE
-          : isInspectRuntimeAdapterId(adapterId)
-            ? INSPECT_SELECTION_CORRELATION_ROLE
-            : undefined;
+            : isInspectRuntimeAdapterId(adapterId)
+              ? INSPECT_SELECTION_CORRELATION_ROLE
+              : undefined;
         return role === undefined ? [] : [{
           id: selection.id ?? "runtime-selection-manifest.json",
           role,

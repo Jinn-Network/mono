@@ -91,7 +91,3 @@ export function harnessReportsPresent(input: {
     return report !== undefined && report.taskId === task.taskId;
   });
 }
-
-export function mapHarnessReportToOutcome(path: string, taskId: string, taskType: ApexSweDevTaskType): "judged" | "unscorable" {
-  return readHarnessReport(path, taskId, taskType) === undefined ? "unscorable" : "judged";
-}

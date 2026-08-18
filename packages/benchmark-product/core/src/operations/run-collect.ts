@@ -46,7 +46,7 @@ import {
   readRunJournalEntries,
 } from "../run/journal.js";
 import { requireRunState, writeRunState } from "../run/state.js";
-import { ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
 import { apexSweDevReportRoot } from "../runtime/apex-swe-dev/launcher.js";
 import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex.js";
 import { artifactsDir, draftPath } from "../workspace/layout.js";
@@ -154,7 +154,7 @@ export function runCollect(
       const matrixSha256 = putSealedBytes(clockedContext.workspaceDir, assembled.bytes);
 
       const nextState = { ...runState, matrixSha256, closedAt: at };
-      if (document.spec.evaluationRuntime?.adapterId === "apex-swe-dev") {
+      if (document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID) {
         const apex = ApexSweDevSelectionManifestSchema.parse(
           JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
         );

@@ -13,20 +13,6 @@ import {
 } from "./manifest.js";
 import { harnessReportPath, readHarnessReport } from "./reports.js";
 
-export function apexSweDevModelNameOrPath(arm: { readonly armId: string; readonly pinning: Readonly<Record<string, unknown>> }): string {
-  const model = arm.pinning.model;
-  if (model !== null && typeof model === "object" && "id" in model && typeof model.id === "string" && model.id.length > 0) {
-    return model.id;
-  }
-  return arm.armId;
-}
-
-export function apexSweDevModelNameOrPathByArm(
-  arms: readonly { readonly armId: string; readonly pinning: Readonly<Record<string, unknown>> }[],
-): Record<string, string> {
-  return Object.fromEntries(arms.map((arm) => [arm.armId, apexSweDevModelNameOrPath(arm)]));
-}
-
 export function apexSweDevReportRoot(artifactsRoot: string, draftId: string): string {
   return join(artifactsRoot, "apex-swe-dev", draftId);
 }
