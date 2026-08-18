@@ -48,6 +48,7 @@ import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { suiteQuoteFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
+import type { SuiteProtocolId } from "../runtime/suite-protocol/comparability.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 
 export interface RunQuoteInput {
@@ -106,6 +107,7 @@ export interface QuotePresentation {
   };
   readonly estimatedWallTime?: QuoteEstimatedWallTime;
   readonly suite?: {
+    readonly protocol: SuiteProtocolId;
     readonly executionConformance: boolean;
     readonly coverage: "one_task" | "ten_task" | "full" | "custom";
     readonly leaderboardSubmitReady: boolean;

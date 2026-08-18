@@ -77,6 +77,12 @@ import {
   terminalBench21SelectionBytes,
 } from "./terminal-bench-2-1/manifest.js";
 import {
+  TERMINAL_BENCH_3_0_PROFILE,
+  TERMINAL_BENCH_3_0_SELECTION_ROLE,
+  TerminalBench30SelectionManifestSchema,
+  terminalBench30SelectionBytes,
+} from "./terminal-bench-3-0/manifest.js";
+import {
   SUITE_PROTOCOL_PROFILE,
   SUITE_PROTOCOL_SELECTION_ROLE,
   SuiteProtocolSelectionSchema,
@@ -532,6 +538,14 @@ export function runtimeRegistrationArtifacts(workspaceDir: string, binding: Eval
     const profileSha256 = sha256Hex(profileBytes);
     if (!Buffer.from(getSealedBytes(workspaceDir, profileSha256)).equals(Buffer.from(profileBytes))) throw new TypeError("Terminal-Bench 2.1 profile CAS bytes do not match the Harbor selection");
     result.push({ role: TERMINAL_BENCH_2_1_SELECTION_ROLE, artifact: { digest: { sha256: profileSha256 }, mediaType: "application/json" } });
+  }
+  const tb30 = manifest.profiles?.[TERMINAL_BENCH_3_0_PROFILE];
+  if (tb30 !== undefined) {
+    const profile = TerminalBench30SelectionManifestSchema.parse(tb30);
+    const profileBytes = terminalBench30SelectionBytes(profile);
+    const profileSha256 = sha256Hex(profileBytes);
+    if (!Buffer.from(getSealedBytes(workspaceDir, profileSha256)).equals(Buffer.from(profileBytes))) throw new TypeError("Terminal-Bench 3.0 profile CAS bytes do not match the Harbor selection");
+    result.push({ role: TERMINAL_BENCH_3_0_SELECTION_ROLE, artifact: { digest: { sha256: profileSha256 }, mediaType: "application/json" } });
   }
   const suiteValue = manifest.profiles?.[SUITE_PROTOCOL_PROFILE];
   if (suiteValue !== undefined) {

@@ -12,11 +12,9 @@ export const SUITE_PROTOCOL_SELECTION_SCHEMA = "jinn.network/benchmark-product/s
 
 const Sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
 
-export const SuiteProtocolSelectionSchema = z.object({
+const SuiteProtocolSelectionShared = {
   schema: z.literal(SUITE_PROTOCOL_SELECTION_SCHEMA),
-  protocol: z.literal("terminal-bench-2.1"),
   coverage: z.enum(SUITE_COVERAGE),
-  datasetId: z.string().min(1),
   datasetRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
   selectedTaskNames: z.array(z.string().min(1).regex(/^[^/]+$/u)).min(1),
   datasetTaskCount: z.number().int().positive(),
@@ -26,7 +24,12 @@ export const SuiteProtocolSelectionSchema = z.object({
     taskName: z.string().min(1),
     taskSha256: Sha256,
   }).strict()).min(1),
-}).strict().superRefine((value, context) => {
+} as const;
+
+function refineSuiteSelection(
+  value: { readonly items: readonly { readonly taskName: string }[]; readonly selectedTaskNames: readonly string[] },
+  context: z.RefinementCtx,
+): void {
   if (value.items.length !== value.selectedTaskNames.length) {
     context.addIssue({ code: "custom", message: "suite items must match selected task names", path: ["items"] });
   }
@@ -34,7 +37,24 @@ export const SuiteProtocolSelectionSchema = z.object({
   if (names.join("\0") !== value.selectedTaskNames.join("\0")) {
     context.addIssue({ code: "custom", message: "suite item names must equal selectedTaskNames in order", path: ["items"] });
   }
-});
+}
+
+export const TerminalBench21SuiteProtocolSelectionSchema = z.object({
+  ...SuiteProtocolSelectionShared,
+  protocol: z.literal("terminal-bench-2.1"),
+  datasetId: z.literal("terminal-bench/terminal-bench-2-1"),
+}).strict();
+
+export const TerminalBench30SuiteProtocolSelectionSchema = z.object({
+  ...SuiteProtocolSelectionShared,
+  protocol: z.literal("terminal-bench-3.0"),
+  datasetId: z.literal("terminal-bench/terminal-bench"),
+}).strict();
+
+export const SuiteProtocolSelectionSchema = z.discriminatedUnion("protocol", [
+  TerminalBench21SuiteProtocolSelectionSchema,
+  TerminalBench30SuiteProtocolSelectionSchema,
+]).superRefine(refineSuiteSelection);
 export type SuiteProtocolSelection = z.infer<typeof SuiteProtocolSelectionSchema>;
 
 export function suiteProtocolSelectionBytes(value: SuiteProtocolSelection): Uint8Array {

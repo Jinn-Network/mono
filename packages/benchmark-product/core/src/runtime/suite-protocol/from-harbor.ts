@@ -1,11 +1,13 @@
 import type { HarborSelectionManifest } from "../harbor/manifest.js";
 import { TERMINAL_BENCH_2_1_DATASET_REF } from "../terminal-bench-2-1/manifest.js";
+import { TERMINAL_BENCH_3_0_DATASET_REF } from "../terminal-bench-3-0/manifest.js";
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
   suiteLeaderboardLimitation,
   type SuiteComparability,
+  type SuiteProtocolId,
 } from "./comparability.js";
 import { SUITE_PROTOCOL_PROFILE, SuiteProtocolSelectionSchema, type SuiteProtocolSelection } from "./manifest.js";
 import { allArmsRunComplete, assessArmRunComplete, type MatrixCellAccount } from "./run-complete.js";
@@ -13,7 +15,14 @@ import { allArmsRunComplete, assessArmRunComplete, type MatrixCellAccount } from
 export function suiteSelectionFromHarbor(manifest: HarborSelectionManifest): SuiteProtocolSelection | undefined {
   const value = manifest.profiles?.[SUITE_PROTOCOL_PROFILE];
   if (value === undefined) return undefined;
-  return SuiteProtocolSelectionSchema.parse(value);
+  const parsed = SuiteProtocolSelectionSchema.safeParse(value);
+  if (!parsed.success) return undefined;
+  return parsed.data;
+}
+
+function officialPinFor(protocol: SuiteProtocolId): string {
+  if (protocol === "terminal-bench-3.0") return TERMINAL_BENCH_3_0_DATASET_REF;
+  return TERMINAL_BENCH_2_1_DATASET_REF;
 }
 
 export function taskNameByDigestFromSuite(suite: SuiteProtocolSelection): Readonly<Record<string, string>> {
@@ -21,6 +30,7 @@ export function taskNameByDigestFromSuite(suite: SuiteProtocolSelection): Readon
 }
 
 export interface SuiteQuotePresentation extends SuiteComparability {
+  readonly protocol: SuiteProtocolId;
   readonly methodLeaderboardEligible: boolean;
   readonly cellCount: string;
   readonly harborVersion: string;
@@ -54,7 +64,7 @@ function methodBitsFromHarbor(input: {
     selectedCount: input.suite.selectedTaskNames.length,
     datasetCount: input.suite.datasetTaskCount,
     atifPresent: input.suite.atifRequired,
-    datasetRevisionMatchesLeaderboardPin: input.suite.datasetRevision === TERMINAL_BENCH_2_1_DATASET_REF,
+    datasetRevisionMatchesLeaderboardPin: input.suite.datasetRevision === officialPinFor(input.suite.protocol),
   };
 }
 
@@ -71,6 +81,7 @@ function presentSuiteQuote(
 ): SuiteQuotePresentation {
   return {
     ...bits,
+    protocol: suite.protocol,
     methodLeaderboardEligible: eligible,
     cellCount: `${input.itemCount} × ${input.armCount} × ${input.replicates}`,
     harborVersion: input.manifest.harbor.version,
@@ -102,7 +113,7 @@ export function suiteFactsFromHarborManifest(input: {
   if (quote === undefined) return undefined;
   return {
     quote,
-    limitation: suiteLeaderboardLimitation(quote),
+    limitation: suiteLeaderboardLimitation(quote, quote.protocol),
   };
 }
 
@@ -125,7 +136,7 @@ export function suiteFactsFromAccountedRun(input: {
   })));
   const bits = deriveSuiteComparability({ ...method, ...complete });
   const quote = presentSuiteQuote(input, suite, bits, methodLeaderboardEligible(method));
-  return { quote, limitation: suiteLeaderboardLimitation(quote) };
+  return { quote, limitation: suiteLeaderboardLimitation(quote, quote.protocol) };
 }
 
 export function suiteComparabilityForArm(input: {

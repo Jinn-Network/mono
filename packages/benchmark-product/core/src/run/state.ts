@@ -147,6 +147,7 @@ export const RunStateSchema = z.object({
   ])).optional(),
   publishedAt: Rfc3339Schema.optional(),
   suiteQuote: z.object({
+    protocol: z.enum(["terminal-bench-2.1", "terminal-bench-3.0"]).optional(),
     executionConformance: z.boolean(),
     coverage: z.enum(["one_task", "ten_task", "full", "custom"]),
     leaderboardSubmitReady: z.boolean(),

@@ -3,6 +3,9 @@
 export const SUITE_COVERAGE = ["one_task", "ten_task", "full", "custom"] as const;
 export type SuiteCoverage = (typeof SUITE_COVERAGE)[number];
 
+export const SUITE_PROTOCOL_IDS = ["terminal-bench-2.1", "terminal-bench-3.0"] as const;
+export type SuiteProtocolId = (typeof SUITE_PROTOCOL_IDS)[number];
+
 export interface SuiteComparability {
   readonly executionConformance: boolean;
   readonly coverage: SuiteCoverage;
@@ -21,10 +24,14 @@ export interface DeriveSuiteComparabilityInput {
   readonly cellsAccounted?: boolean;
   /** ATIF bytes on the retained Harbor job, not quote-time `atifRequired`. */
   readonly atifOnRetainedJob?: boolean;
+  readonly protocol?: SuiteProtocolId;
 }
 
 export const SUITE_NOT_LEADERBOARD_READY_LIMITATION =
   "This run is not a Terminal-Bench 2.1 leaderboard submission: coverage is not the full official dataset, execution was not protocol-conforming, the Matrix does not account every dataset task × 5 as judged or Harbor-error 0, or ATIF trajectories are missing from the retained Harbor job.";
+
+export const SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0 =
+  "This run is not a Terminal-Bench 3.0 leaderboard submission: coverage is not the full official dataset, execution was not protocol-conforming, the Matrix does not account every dataset task × 5 as judged or Harbor-error 0, or ATIF trajectories are missing from the retained Harbor job.";
 
 export const COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE =
   "Community submissions are currently closed for Terminal-Bench 2.1. Colophon does not place the leaderboard row.";
@@ -49,9 +56,14 @@ export function deriveSuiteComparability(input: DeriveSuiteComparabilityInput): 
   };
 }
 
-export function suiteLeaderboardLimitation(comparability: SuiteComparability): string | undefined {
+export function suiteLeaderboardLimitation(
+  comparability: SuiteComparability,
+  protocol: SuiteProtocolId = "terminal-bench-2.1",
+): string | undefined {
   if (comparability.leaderboardSubmitReady) return undefined;
-  return SUITE_NOT_LEADERBOARD_READY_LIMITATION;
+  return protocol === "terminal-bench-3.0"
+    ? SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0
+    : SUITE_NOT_LEADERBOARD_READY_LIMITATION;
 }
 
 const OFFICIAL_ENV_FORBIDDEN = new Set([

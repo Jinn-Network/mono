@@ -4,7 +4,7 @@
 |---|---|
 | **Version** | 0.4 |
 | **Date** | 2026-08-13 |
-| **Amended** | 2026-08-17 — direct-mode job grain ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); official suite protocol and one Job per arm ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)); no §8.4 marketplace rewrite |
+| **Amended** | 2026-08-17 — direct-mode job grain ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); official suite protocol and one Job per arm ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)); 2026-08-18 — Terminal-Bench 3.0 as a second named Harbor-family protocol ([DR-2026-08-18](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)); no §8.4 marketplace rewrite |
 | **Shape** | interoperability profile and design amendment |
 | **Status** | draft; revised after independent design review; §8.3 grain note added 2026-08-17; §8.3 suite protocol added 2026-08-17 |
 | **Applies to** | any benchmarking product publishing through Jinn, including Colophon |
@@ -591,12 +591,18 @@ and [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.
   completed job; folding a Job or eval-set into one Execution Evidence record; wearing an official
   suite name on a custom or cousin method.
 
-**Official suite protocol** (added 2026-08-17, [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)):
+**Official suite protocol** (added 2026-08-17, [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md); Terminal-Bench 3.0 added 2026-08-18, [DR-2026-08-18](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)):
 
 A publisher who wants to wear a suite name must lock that suite's protocol, not a Colophon-flavored
-cousin on the same tasks. The first named protocol is Terminal-Bench 2.1:
+cousin on the same tasks. Named Harbor-family protocols:
 
-- dataset `terminal-bench/terminal-bench-2-1` at the leaderboard content-hash revision;
+- Terminal-Bench 2.1 — dataset `terminal-bench/terminal-bench-2-1` at the leaderboard content-hash revision;
+- Terminal-Bench 3.0 — dataset `terminal-bench/terminal-bench` at the sealed Hub content-hash pin
+  (never `@latest`; Hub version string recorded beside the hash). TB 2.1, TB 2.0, SWE-bench Verified,
+  Inspect, and Frontier-Bench cannot wear `terminal-bench-3.0`.
+
+Both Harbor-family protocols share:
+
 - planned k ≥ 5 trials per selected task as visible replicates, not Harbor inner retry;
 - official env (timeout_multiplier unset or 1.0; no agent/verifier timeout or resource overrides);
 - ATIF trajectories required for Hub packaging.
@@ -620,7 +626,9 @@ record. The bundle remains what a third party checks. `leaderboard_submit_ready`
 uploadable job plus submit instructions. A named slice may retain or upload the job for inspection
 and must not be packaged as a leaderboard submission. Custom or unverifiable runs refuse
 suite-named Hub export. A foreign completed Hub job still cannot be imported as a synthesized TEP
-run. Copy must not claim Colophon placed a leaderboard row while community submissions are closed.
+run. Copy must not claim Colophon placed a leaderboard row. Terminal-Bench 2.1 Hub copy may name
+that community submissions are currently closed; Terminal-Bench 3.0 uses `harbor upload` and must
+not copy that 2.1 sentence.
 
 ### 8.4 Jinn marketplace composition
 

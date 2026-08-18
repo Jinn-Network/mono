@@ -413,6 +413,16 @@
       }
     },
     {
+      "operation": "selectTerminalBench30Runtime",
+      "cliVerb": "runtime terminal-bench-3-0 select",
+      "authorityGated": false,
+      "description": "Resolves a named Terminal-Bench 3.0 slice and binds it to the managed Harbor runtime.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires server-configured Terminal-Bench 3.0 and Harbor host paths; browser-supplied paths are forbidden"
+      }
+    },
+    {
       "operation": "signHumanReviewResponse",
       "cliVerb": "human-review response sign",
       "authorityGated": false,

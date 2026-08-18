@@ -96,4 +96,43 @@ describe("suite comparability", () => {
       items: [{ taskName: "t00", taskSha256: "b".repeat(64) }],
     })).not.toThrow();
   });
+
+  test("Terminal-Bench 3.0 is a distinct protocol with 3.0 limitation copy", () => {
+    expect(() => SuiteProtocolSelectionSchema.parse({
+      schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
+      protocol: "terminal-bench-3.0",
+      coverage: "one_task",
+      datasetId: "terminal-bench/terminal-bench",
+      datasetRevision: `sha256:${"a".repeat(64)}`,
+      selectedTaskNames: ["t00"],
+      datasetTaskCount: 12,
+      replicates: 5,
+      atifRequired: true,
+      items: [{ taskName: "t00", taskSha256: "b".repeat(64) }],
+    })).not.toThrow();
+    expect(() => SuiteProtocolSelectionSchema.parse({
+      schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
+      protocol: "terminal-bench-3.0",
+      coverage: "one_task",
+      datasetId: "terminal-bench/terminal-bench-2-1",
+      datasetRevision: `sha256:${"a".repeat(64)}`,
+      selectedTaskNames: ["t00"],
+      datasetTaskCount: 12,
+      replicates: 5,
+      atifRequired: true,
+      items: [{ taskName: "t00", taskSha256: "b".repeat(64) }],
+    })).toThrow();
+    const bits = deriveSuiteComparability({
+      protocol: "terminal-bench-3.0",
+      coverage: "one_task",
+      executionConformance: true,
+      k: 5,
+      selectedCount: 1,
+      datasetCount: 12,
+      atifPresent: true,
+    });
+    expect(bits.leaderboardSubmitReady).toBe(false);
+    expect(suiteLeaderboardLimitation(bits, "terminal-bench-3.0")).toMatch(/not a Terminal-Bench 3\.0 leaderboard submission/u);
+    expect(suiteLeaderboardLimitation(bits, "terminal-bench-3.0")).not.toMatch(/Terminal-Bench 2\.1/u);
+  });
 });
