@@ -240,6 +240,7 @@ process.stdout.write("0.3.255\\n");
     expect(quoted.result.presentation.suite).toEqual({
       executionConformance: true,
       coverage: "one_task",
+      protocol: "apex-swe-dev",
       leaderboardSubmitReady: false,
       methodLeaderboardEligible: false,
       cellCount: "1 × 2 × 1",

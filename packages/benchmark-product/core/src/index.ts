@@ -251,7 +251,11 @@ export type {
   ApexSweDevSelectionResolution,
 } from "./runtime/apex-swe-dev/host.js";
 export { launchApexSweDev, collectApexSweDevCells, apexSweDevReportRoot } from "./runtime/apex-swe-dev/launcher.js";
-export { harnessReportsPresent, harnessReportPath, readHarnessReport } from "./runtime/apex-swe-dev/reports.js";
+export {
+  harnessReportsPresent as apexSweDevHarnessReportsPresent,
+  harnessReportPath as apexSweDevHarnessReportPath,
+  readHarnessReport as readApexSweDevHarnessReport,
+} from "./runtime/apex-swe-dev/reports.js";
 export {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
   APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION,

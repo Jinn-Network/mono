@@ -46,7 +46,7 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **48 generated operations**, all shipped through the library and CLI
+contains **50 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |

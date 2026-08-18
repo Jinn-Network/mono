@@ -2025,7 +2025,7 @@
       "decisionRecords": 5,
       "discoveredFirstPartySurfaces": 2980,
       "generatedOutputSources": 1378,
-      "generatorSources": 659,
+      "generatorSources": 662,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 6
@@ -19332,6 +19332,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmark-product/core/scripts/apex-agents-one-task-qualify.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmark-product/core/scripts/apex-swe-dev-one-task-qualify.mjs"
       },
       {
@@ -19542,7 +19552,27 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmark-product/core/scripts/swebench-verified-one-task-qualify.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmark-product/core/scripts/tb21-one-task-qualify.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/tb30-one-task-qualify.mjs"
       },
       {
         "categories": [
