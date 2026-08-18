@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Describes bundle.json, the benchmark-product-public-bundle/2 file manifest. Source of truth: BundleManifestSchema in @colophon-claims/verify src/manifest.ts (an open object there, so unknown members are permitted here). Structural validity only: the verifier additionally requires canonical JSON bytes, entries sorted strictly by path, per-file byte and digest equality, and two-way tree closure. bundle.json never lists itself; the bundle identity is the SHA-256 of bundle.json's own bytes.",
+  "description": "File manifest of a benchmark-product public bundle (format benchmark-product-public-bundle/2).",
+  "type": "object",
+  "properties": {
+    "format": { "const": "benchmark-product-public-bundle/2" },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "bytes": { "type": "integer", "minimum": 0 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        },
+        "required": ["bytes", "path", "sha256"]
+      }
+    }
+  },
+  "required": ["format", "files"]
+}

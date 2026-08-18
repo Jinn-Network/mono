@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Describes verdicts.json, format benchmark-product-verdict-catalog/2. Source of truth: BundleVerdictCatalogSchema in @colophon-claims/verify src/schema.ts (an open object there, so unknown members are permitted here). Each sha256 names a records/<sha256>.bin DSSE envelope (payloadType application/vnd.in-toto+json) whose signature verifies against the trust file's evaluator key with the matching keyId; cellKeys name the matrix cells the verdict judges. The verifier additionally requires canonical JSON bytes and exact closure against the matrix's verdict references.",
+  "description": "Verdict catalog of a benchmark-product public bundle (format benchmark-product-verdict-catalog/2).",
+  "type": "object",
+  "properties": {
+    "format": { "const": "benchmark-product-verdict-catalog/2" },
+    "verdicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "evaluator": { "type": "string", "minLength": 1 },
+          "keyId": { "type": "string", "minLength": 1 },
+          "cellKeys": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "minItems": 1
+          }
+        },
+        "required": ["sha256", "evaluator", "keyId", "cellKeys"]
+      }
+    }
+  },
+  "required": ["format", "verdicts"]
+}
