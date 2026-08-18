@@ -753,6 +753,8 @@ the deterministic tiebreak and for time-less chain anchors), and each
 additional lock anchor adds one neutral line ("The lock digest additionally
 carries a `<class>` anchor of `<genTime|height>`."), ordered by record digest.
 
+[Superseded — the ratified neutral line is recorded in §19.6.]
+
 **The trust-root sentence** — replaced:
 
 > Signatures verify against the bundle-carried public keys minted by this
