@@ -166,3 +166,18 @@ export { runPreview, type PreviewArtifact, type RunPreviewDeps, type RunPreviewI
 // BP-22: cancellation (spec §4.1 running --cancel--> closed, GATED) — `cancel` stops dispatch,
 // drains outstanding cells to a boundary, and seals the Matrix with the cancellation accounted.
 export { runCancel, type RunCancelDeps, type RunCancelInput, type RunCancelResult } from "./run-cancel.js";
+
+// Anchor evidence (anchor-evidence design §7.1/§7.3) — `anchor` obtains third-party time evidence
+// over one of a run's own sealed records; `anchoring configure` is the gated workspace setting that
+// decides whether the lock flow does so automatically.
+//
+// `./run-anchor.ts`'s other two exports are deliberately NOT re-exported here.
+// `anchorAfterLockIfConfigured` is the `lock` verb's own hook, not an operation a caller invokes,
+// and `resolveAnchorConfiguration` is a pure resolution rule; the facade's inventory is exactly the
+// operations, which is what `../cli/parity-map.ts` is allowed to assume.
+export { runAnchor, type AnchorSubject, type RunAnchorDeps, type RunAnchorInput, type RunAnchorResult } from "./run-anchor.js";
+export {
+  anchoringConfigure,
+  type AnchoringConfigureInput,
+  type AnchoringConfigureResult,
+} from "./anchoring-configure.js";

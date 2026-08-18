@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  anchoringConfigureAction,
   armAddAction,
   armListAction,
   armRemoveAction,
@@ -16,6 +17,7 @@ import {
   intakeSampleAction,
   intakeSweBenchAction,
   inspectRuntimeSelectAction,
+  runAnchorAction,
   runLockAction,
   publicationAccountingAction,
   publicationConfigureAction,
@@ -56,6 +58,8 @@ export const GUI_SERVER_ACTIONS = {
   "run.preview": runPreviewAction,
   "run.quote": runQuoteAction,
   "run.lock": runLockAction,
+  "run.anchor": runAnchorAction,
+  "anchoring.configure": anchoringConfigureAction,
   "publication.configure": publicationConfigureAction,
   "publication.register": publicationRegisterAction,
   "publication.status": publicationStatusAction,

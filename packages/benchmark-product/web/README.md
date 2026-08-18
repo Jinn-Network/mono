@@ -77,6 +77,13 @@ locator: configure/register consent and exact-byte probes remain core operation 
 The GUI displays and uses this server-owned exact archive mount; it never accepts a browser URL.
 The CLI retains `--public-base-url` for deliberate remote/archive operation outside the GUI.
 
+Set `BENCHMARK_PRODUCT_ANCHOR_PROVIDERS` to a JSON array of
+`{ "providerProfile": "...", "endpoint": "https://..." }` entries to make the GUI's anchoring
+action available. Anchoring is off until configured, and the endpoint is server-owned for the same
+reason the archive mount is: this server contacts it on every later lock. The browser can apply the
+server's configured providers or clear the block, never name one. The CLI retains
+`--provider`/`--endpoint` for deliberate configuration outside the GUI.
+
 All displayed facts and action receipts come from public core operations.
 Known failures preserve their typed recovery category. Unexpected errors,
 runtime diagnostics, absolute paths, identifiers that are not deliberate

@@ -46,11 +46,12 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **41 generated operations**, all shipped through the library and CLI
+contains **43 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
 |---|---|---|
+| `anchoringConfigure` | `colophon anchoring configure` | Replace or clear the workspace anchor provider and endpoint configuration. |
 | `armAdd` | `colophon arm add` | Add a pinned solver arm. |
 | `armList` | `colophon arm list` | List a draft's arms. |
 | `armRemove` | `colophon arm remove` | Remove an arm. |
@@ -75,6 +76,7 @@ with an explicit shipped/deferred GUI disposition:
 | `publicationStatus` | `colophon publication status` | Read timing assurance, stage receipts, compatibility, and recovery guidance without backend calls. |
 | `publicationAccounting` | `colophon publication accounting` | Publish retained complete or partial accounting and Matrix v2 without a Report or rerun. |
 | `publicationReport` | `colophon publication report` | Produce, verify, and publish the signed Report v2 envelope from the accounting closure. |
+| `runAnchor` | `colophon anchor` | Obtain, verify, and store third-party time evidence over the sealed Run or Matrix digest. |
 | `runCancel` | `colophon cancel` | Durably request or finalize cancellation. |
 | `runCollect` | `colophon collect` | Seal the terminal Matrix. |
 | `runLaunch` | `colophon launch` | Drive the real local venue. |
@@ -171,13 +173,33 @@ candidate truth.
 
 ## Authority and lifecycle behavior
 
-The **nine gated operations** are `lock`, `launch`, `cancel`, `report`,
+The **ten gated operations** are `lock`, `launch`, `cancel`, `report`,
 `publish`, `publication.configure`, `publication.register`,
-`publication.accounting`, and `publication.report`. The founding sponsor receives all nine grants. A delegated agent may perform any of them
+`publication.accounting`, `publication.report`, and `anchoring.configure`. The founding sponsor receives all ten grants. A delegated agent may perform any of them
 only after a sponsor grants it. `authority grant` and
 `authority revoke` are separately sponsor-only, so a delegated agent cannot
 self-escalate. This is local-process policy and attribution, not operating-system
 or hosted authentication.
+
+`anchoring.configure` is gated because configuring an endpoint is the consent
+that makes later locks contact a third party. A workspace initialized before
+that grant existed does not carry it; its sponsor adds it once with
+`colophon authority grant --workspace <dir> --principal <sponsor> --grantee <sponsor> --operations anchoring.configure`,
+which is always available because granting is role-gated, not grant-gated.
+
+`anchor` itself is not gated: it moves no funds, changes no lifecycle state, and
+is reversible by never having happened. Nothing is configured by default, no
+endpoint ships in source, and an unconfigured workspace attempts nothing and
+prints nothing. Once a provider is configured, `lock` attempts one anchor over
+the sealed Run record after the lock transition has already completed; a draft
+opts out with a spec `anchoring` block whose `enabled` is `false`, and
+`lock --no-anchor` skips the errand for one invocation without touching
+configuration. Any anchor refusal or failure becomes a note plus its own audit
+entry — the lock result and exit code are unchanged. The note goes to stdout in
+human mode and to stderr under `--json`, where stdout stays exactly one
+envelope. Re-run `colophon anchor --draft <id> --subject lock` for the typed
+envelope, before launch. The private web app calls the same hook after its own
+lock, so both surfaces anchor or skip identically.
 
 Lock is irreversible. `launch` and `resume` use the real local backend;
 `resume` re-dispatches only outstanding cells. Cancellation is two-phase: a
@@ -210,7 +232,8 @@ There are **11 typed error codes**:
 
 In JSON mode success is one compact
 `{"ok":true,"result":...}` line on stdout; failure is one compact
-`{"ok":false,"error":...}` line on stdout. Stderr is empty. An error contains
+`{"ok":false,"error":...}` line on stdout. Stderr is empty, except for `lock`'s
+optional one-line anchoring note about its non-blocking side errand. An error contains
 `code`, `detail`, and optional structured `issues`; callers branch on the code
 and issue path, never prose.
 

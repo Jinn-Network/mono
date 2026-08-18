@@ -25,6 +25,13 @@ import { authorityPath } from "../workspace/layout.js";
  * is listed "approval-gated"). Publication intent and registration are irreversible public
  * disclosure boundaries, so they receive their own granular grants rather than inheriting a
  * broader lifecycle permission.
+ *
+ * `anchoring.configure` joins them for the same reason `publication.configure` is here, and not
+ * because anchoring itself is gated: the anchor-evidence design's §7.1 states plainly that `anchor`
+ * is "audited like every operation but is **not** approval-gated", while "configuring an endpoint
+ * is the operator's consent to the disclosure in §13 item 7". Configuration is the consent
+ * boundary — and, once written, every later lock contacts a third party automatically — so the
+ * grant sits on the durable decision rather than on each of its consequences.
  */
 export const GATED_OPERATIONS = [
   "lock",
@@ -36,6 +43,7 @@ export const GATED_OPERATIONS = [
   "publication.register",
   "publication.accounting",
   "publication.report",
+  "anchoring.configure",
 ] as const;
 
 export type GatedOperation = (typeof GATED_OPERATIONS)[number];
