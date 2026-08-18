@@ -48,6 +48,10 @@ import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { suiteQuoteFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
+import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
+import { suiteQuoteFromSwebench } from "../runtime/suite-protocol/from-swebench.js";
+import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
+import { suiteQuoteFromApex } from "../runtime/suite-protocol/from-apex.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 
 export interface RunQuoteInput {
@@ -111,7 +115,8 @@ export interface QuotePresentation {
     readonly leaderboardSubmitReady: boolean;
     readonly methodLeaderboardEligible: boolean;
     readonly cellCount: string;
-    readonly harborVersion: string;
+    readonly harborVersion?: string;
+    readonly harnessVersion?: string;
     readonly selectedTaskCount: number;
     readonly armCount: number;
     readonly replicates: number;
@@ -331,7 +336,21 @@ export function runQuote(
           itemCount: compiled.benchmarkRecord.items.length,
           replicates: compiled.plannedRun.record.replicates,
         })
-        : undefined;
+        : document.spec.evaluationRuntime?.adapterId === "swebench-harness"
+          ? suiteQuoteFromSwebench({
+            manifest: SwebenchVerifiedSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+            armCount: compiled.plannedRun.record.arms.length,
+            itemCount: compiled.benchmarkRecord.items.length,
+            replicates: compiled.plannedRun.record.replicates,
+          })
+          : document.spec.evaluationRuntime?.adapterId === "archipelago"
+            ? suiteQuoteFromApex({
+              manifest: ApexAgentsSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+              armCount: compiled.plannedRun.record.arms.length,
+              itemCount: compiled.benchmarkRecord.items.length,
+              replicates: compiled.plannedRun.record.replicates,
+            })
+            : undefined;
       writeRunState(clockedContext.workspaceDir, input.draftId, {
         draftId: input.draftId,
         specSha256: specDigest(document.spec),
