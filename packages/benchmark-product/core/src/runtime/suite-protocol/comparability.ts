@@ -6,6 +6,11 @@ export type SuiteCoverage = (typeof SUITE_COVERAGE)[number];
 export const SUITE_PROTOCOL_IDS = ["terminal-bench-2.1", "terminal-bench-3.0"] as const;
 export type SuiteProtocolId = (typeof SUITE_PROTOCOL_IDS)[number];
 
+/** Human-facing suite name for refusal copy and Hub instructions. */
+export function suiteProtocolDisplayName(protocol: SuiteProtocolId): string {
+  return protocol === "terminal-bench-3.0" ? "Terminal-Bench 3.0" : "Terminal-Bench 2.1";
+}
+
 export interface SuiteComparability {
   readonly executionConformance: boolean;
   readonly coverage: SuiteCoverage;
@@ -24,7 +29,6 @@ export interface DeriveSuiteComparabilityInput {
   readonly cellsAccounted?: boolean;
   /** ATIF bytes on the retained Harbor job, not quote-time `atifRequired`. */
   readonly atifOnRetainedJob?: boolean;
-  readonly protocol?: SuiteProtocolId;
 }
 
 export const SUITE_NOT_LEADERBOARD_READY_LIMITATION =

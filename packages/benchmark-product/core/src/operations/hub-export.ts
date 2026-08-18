@@ -8,6 +8,7 @@ import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
+  suiteProtocolDisplayName,
   type SuiteCoverage,
   type SuiteProtocolId,
 } from "../runtime/suite-protocol/comparability.js";
@@ -42,10 +43,6 @@ export function decideHarborHubExportMode(input: {
   if (!input.executionConformance || input.coverage === "custom") return "refused";
   if (input.leaderboardSubmitReady) return "leaderboard-submit";
   return "inspection-upload";
-}
-
-function suiteHubName(protocol: SuiteProtocolId): string {
-  return protocol === "terminal-bench-3.0" ? "Terminal-Bench 3.0" : "Terminal-Bench 2.1";
 }
 
 export function harborHubExportInstructions(
@@ -132,7 +129,7 @@ export function exportHarborHubPackage(
           "conflict",
           `runs.${input.draftId}.suiteQuote`,
           quote.coverage === "custom"
-            ? `custom coverage cannot wear the ${suiteHubName(protocol)} Hub suite name`
+            ? `custom coverage cannot wear the ${suiteProtocolDisplayName(protocol)} Hub suite name`
             : "execution was not protocol-conforming; suite-named Hub export is refused",
         );
       }

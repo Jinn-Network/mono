@@ -9,6 +9,8 @@ import {
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
   suiteLeaderboardLimitation,
+  suiteProtocolDisplayName,
+  SUITE_PROTOCOL_IDS,
 } from "./comparability.js";
 
 const twelve = ["t00", "t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08", "t09", "t10", "t11"];
@@ -123,7 +125,6 @@ describe("suite comparability", () => {
       items: [{ taskName: "t00", taskSha256: "b".repeat(64) }],
     })).toThrow();
     const bits = deriveSuiteComparability({
-      protocol: "terminal-bench-3.0",
       coverage: "one_task",
       executionConformance: true,
       k: 5,
@@ -134,5 +135,11 @@ describe("suite comparability", () => {
     expect(bits.leaderboardSubmitReady).toBe(false);
     expect(suiteLeaderboardLimitation(bits, "terminal-bench-3.0")).toMatch(/not a Terminal-Bench 3\.0 leaderboard submission/u);
     expect(suiteLeaderboardLimitation(bits, "terminal-bench-3.0")).not.toMatch(/Terminal-Bench 2\.1/u);
+  });
+
+  test("every suite protocol id has its own display name for shared refusal copy", () => {
+    expect(suiteProtocolDisplayName("terminal-bench-2.1")).toBe("Terminal-Bench 2.1");
+    expect(suiteProtocolDisplayName("terminal-bench-3.0")).toBe("Terminal-Bench 3.0");
+    expect(new Set(SUITE_PROTOCOL_IDS.map(suiteProtocolDisplayName)).size).toBe(SUITE_PROTOCOL_IDS.length);
   });
 });
