@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Version** | 0.2 |
-| **Date** | 2026-08-17 |
+| **Version** | 0.3 |
+| **Date** | 2026-08-17 (v0.2 approved and committed 2026-08-17; §19 implementation addendum 2026-08-18) |
 | **Shape** | `design` |
-| **Status** | draft; material questions approved by the product owner in-session; revised after two independent reviews (§17); pending owner approval |
+| **Status** | approved by the product owner (2026-08-17); implemented on `integration/anchor-evidence` with per-packet independent reviews; §19 records the ratified implementation findings |
 | **Issue** | [#2756](https://github.com/Jinn-Network/mono/issues/2756) (first provider implementation) |
 | **Depends on** | [stack design principles](./2026-07-30-stack-design-principles.md), [trust and identity layer](./2026-07-27-trust-and-identity-layer-design.md) §7.3/§17/§20, [TEP](./2026-07-27-task-execution-protocol-and-stack-design.md) §4/§6, [benchmarking application](./2026-07-28-benchmarking-application-design.md) §7.2/§8.4, [benchmark product](./2026-08-05-benchmark-product-design.md) §7, [evidence-first amendment](./2026-08-16-evidence-first-benchmarking-design-amendment.md) §7, [publication interoperability profile](./2026-08-13-benchmark-publication-interoperability-profile.md) §9.3, [TEE scope](./2026-04-23-jinn-execution-envelope-tee-scope.md) |
 | **Amends** | the trust design's §7.3 anchor-surface taxonomy, by carried amendment (§4.1): proof-carrying `authority-time` surfaces are a new anchor class that is **not** a conforming binding-anchor surface |
@@ -1094,3 +1094,155 @@ by environment while cryptographic validity is still enforced loudly
 as governing the lock transition, which always completes before any anchor
 attempt begins — the CLI verb may then spend a bounded timeout acquiring the
 anchor (§7.2).
+
+## 19. Implementation addendum — 2026-08-18
+
+The design was implemented as nine packets on `integration/anchor-evidence`
+(issues #2758, #2759, #2760), each with an independent review before merge;
+every review round produced findings, and every finding was resolved before
+its packet merged. This section records the ratified dispositions — each is a
+small clarification of, or precision on, the sections named, made under the
+designs-are-law rule with the deviation surfaced at the time. Where a rule
+below tightens the body text, this addendum governs.
+
+### 19.1 The record (§5)
+
+- **Base64 is canonical, padded, standard-alphabet only** — the encoding is
+  part of record identity, so one proof has exactly one spelling; URL-safe,
+  unpadded, and non-canonical trailing bits are refused. Empty
+  `proof.content` is refused. The 64 KiB cap is inclusive.
+- **Exactness is `parseExactAnchorEvidence`'s job**: schema validation of
+  decoded JSON accepts spellings (BOM, pretty-print, duplicate keys) that are
+  not the record; any consumer selecting or identifying an anchor uses the
+  exact parser, and proof content is decoded only by the exported canonical
+  decoder.
+
+### 19.2 The provider contract (§4.3, §6.1 ports)
+
+- The signature port carries `digestAlgorithmOid`, set from the SignerInfo
+  digest algorithm; the port derives its hash from it and never from a
+  platform default (bare `rsaEncryption` names no digest; the SHA-256-family
+  floor binds through this field). The signature-algorithm allowlist admits
+  bare `rsaEncryption` and `ecdsa-with-SHA512` — both observed in production
+  tokens.
+- The certificate port's `sid` is plural: every identifier form the
+  certificate supports, matched any-of by rule 7 (a singular field is not
+  implementable).
+- A third injected port, the chain verifier, is required for `verified`
+  (chain-to-caller-roots exceeds the two sketched ports without parsing
+  X.509 in core). Issuers must be CA-marked; a leaf byte-identical to a
+  supplied root is an RFC 5280 zero-length path, validity-checked.
+  Revocation, path-length, and name constraints are disclosed as unchecked
+  (issue #2761's family). Verifiers additionally declare their class,
+  posture, and time basis; `present` results carry facts but never `time`.
+
+### 19.3 RFC 3161 profile (§6.1)
+
+- Rule 5's floor binds through the SignerInfo digest algorithm when the
+  signature algorithm names no digest; for RSASSA-PSS the parameters'
+  hash is extracted, floored, and must equal the SignerInfo digest
+  algorithm (RFC 4056 §3), with salt and trailer carried to the port.
+- Rule 6, precisely: `SigningCertificateV2` is required and binding; a v1
+  `SigningCertificate` attribute *alongside* it is ignored (production
+  tokens carry both); v1 *instead of* v2 refuses. An absent
+  `ESSCertIDv2.hashAlgorithm` is SHA-256 by ASN.1 DEFAULT; the explicit
+  SHA-256-family spelling is accepted; an explicit non-family algorithm
+  refuses.
+- Rule 12 requires a SHA-256 imprint outright: §5 admits only sha256
+  subjects, so any other imprint is incomparable and refuses.
+- Extracted `serialNumber` is the lowercase hex of the DER INTEGER content
+  octets (sign octet preserved) — the only rendering that survives
+  byte-comparison across implementations.
+- A chain that does not reach the caller's roots — including a supplied but
+  non-matching root set, or a throwing chain port — yields `present`, never
+  `invalid`: authority acceptability is consumer policy; cryptographic
+  failure of the token itself remains `invalid`.
+
+### 19.4 OpenTimestamps profile (§6.2)
+
+- Replay walks the full forked tree; a complete branch governs over pending
+  siblings. Attestation classes this profile does not know are walked and
+  contribute nothing (a proof with only unknown classes is `pending` with a
+  reason); hash operations outside the floor (SHA-1, RIPEMD-160) refuse the
+  proof, while foreign-chain commitment operations (Keccak-256) are walked
+  as scope, not refused as weakness.
+- Among several Bitcoin attestations the earliest *evaluated* height
+  governs; a proof carrying any fabricated commitment beside a matching one
+  is `invalid` — a poisoned artifact, not a partially good one.
+- Headers are supplied per height; a supplied set lacking the attested
+  height, and malformed supplied material, both read as
+  material-not-supplied → `present`. On `verified`, `time` is the supplied
+  header's timestamp (block precision). The extracted byte-fact is
+  `blockHeight`. Non-minimal varuints are accepted (reference-compatible),
+  bounded at nine septets.
+
+### 19.5 Producer operations (§7)
+
+- The acquisition floor is per profile: `rfc3161-tsa/v1` stores `present` or
+  better; `opentimestamps/v1` additionally stores `pending` (the upgrade
+  lifecycle requires it). `invalid` is never stored. Acquisition transport
+  failures and rejections are `venue-unavailable`.
+- Write-once per `(subject, provider)` is enforced durably in the state
+  schema — a second entry requires `upgradesRecordSha256` naming an earlier
+  entry of the same pair (only upgrade-capable profiles admit one) — and
+  re-checked at the pre-store boundary beside the launch fence, closing the
+  acquisition-window race.
+- **The anchoring window closes at `report`**, for both subjects: the claim
+  is sealed then, and a later anchor could never be projected. The sealed
+  Report's `limitations` stay unconditional; the anchored copy lives in
+  `venueHonesty` and the trust-root statement, so a post-close upgrade
+  cannot drift a sealed record.
+- The calendar upgrade endpoint is derived from the pending node's
+  commitment; upgrade responses are fetched only from the configured
+  calendar list (a URI inside proof bytes is never dereferenced
+  unvalidated), under one per-operation time bound. Multi-calendar
+  endpoints are a comma-separated list. Per-draft disable governs the
+  automatic path only; a per-invocation `--no-anchor` skips one lock's
+  attempt. Configured endpoints are https-only; the per-invocation override
+  admits http as a documented deferral.
+- The anchor-intent extension admits only URIs under
+  `https://spec.jinn.network/trust/anchor-profiles/` — an endpoint cannot
+  be smuggled structurally. `anchoring.configure` is approval-gated
+  (configuring an endpoint is the §13 consent); `anchor` itself is not.
+  §7.2's chaining applies to every lock surface, GUI included.
+
+### 19.6 Bundle and verification (§7.4, §8, §9.2)
+
+- The anchored closure is selected by **anchors carried OR intent
+  declared** — a declared-but-absent bundle must ride `/6` or the
+  disclosure could never run. `claim-package/4` requires the `anchors`
+  section to be present (possibly empty); `/1` and `/2` forbid it.
+- `upgradesRecordSha256` in the claim section is derived from the carried
+  set (emitted only where a subject-provider group holds exactly one
+  pending and one completed proof), never stored in a record — §5 rule 3's
+  nothing-derivable discipline.
+- Multi-anchor ordering: timed anchors sort by their byte-embedded time and
+  precede time-less chain anchors, which sort by record digest; `<class>`
+  renders as the time basis. The neutral line reads: "The lock digest
+  carries an additional `<class>` anchor of `<genTime|height>`." (§9.2's
+  original template mis-declined the article; `/4` was unpublished, so the
+  string is corrected here rather than versioned around.)
+- The default (human) reader output prints each carried anchor's status,
+  time basis, byte-embedded time, and whether trust material evaluated it,
+  plus each subject's context outcome — absence and declared-but-absent are
+  named on the surface the claim pins, not only in JSON. The reader CLI
+  accepts verifier-side trust material (`--tsa-root`, `--ots-headers`);
+  none ships.
+- Malformed anchor-intent extension values refuse as `record-integrity`
+  (typed), never as an environment error.
+
+### 19.7 Open edges (deliberate refusals, future allocations)
+
+- An anchored run with binary qualification refuses at materialize: no
+  closure version expresses both; a later allocation may.
+- Retro-anchoring a reported run refuses (§19.5); anchoring evidence for
+  already-published historical bundles is future work.
+- The evidence-native closures (`claim-package/3`, `public-bundle/5`) adopt
+  the anchor surface in their own later allocation, per §7.4.
+
+Provenance: packet PRs #2764, #2765, #2767, #2772, #2773, #2780, #2781,
+#2783; conformance fixtures include two captured production tokens and a
+Bitcoin-attested real proof (block 962949) whose verification was
+independently re-derived during review. Follow-ups filed: #2761 (criticality
+port), #2762, #2763 (design stubs), #2766 and #2782 (pre-existing CI flakes
+surfaced by the program).
