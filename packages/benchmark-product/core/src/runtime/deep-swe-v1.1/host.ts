@@ -9,6 +9,7 @@ import {
   namedSliceTaskNames,
   type SuiteCoverage,
 } from "../suite-protocol/manifest.js";
+import { computeGitTreeSha } from "./git-tree-sha.js";
 import {
   DEEP_SWE_V11_AGENT_ID,
   DEEP_SWE_V11_DATASET_ID,
@@ -16,6 +17,7 @@ import {
   DEEP_SWE_V11_GIT_SHA,
   DEEP_SWE_V11_PROFILE,
   DEEP_SWE_V11_SELECTION_SCHEMA,
+  DEEP_SWE_V11_TASK_COUNT,
   DEEP_SWE_V11_TASKS_TREE_SHA,
   DeepSweV11SelectionManifestSchema,
   deepSweV11SelectionBytes,
@@ -26,6 +28,12 @@ export interface DeepSweV11SelectionRequest {
   readonly executable: string;
   readonly gitSha: string;
   readonly taskMaterialPath: string;
+  /**
+   * Git tree SHA the caller claims `taskMaterialPath` carries. Selection recomputes the SHA from the
+   * bytes and refuses on mismatch. Omit when supplying a sub-slice of the official tree: the computed
+   * SHA is sealed as-is and, not being DEEP_SWE_V11_TASKS_TREE_SHA, never wears the leaderboard pin.
+   */
+  readonly expectedTasksTreeSha?: string;
   readonly coverage?: Exclude<SuiteCoverage, "custom">;
   readonly taskNames?: readonly string[];
   readonly nConcurrent?: number;
@@ -72,6 +80,10 @@ export function resolveDeepSweV11Selection(workspaceDir: string, input: DeepSweV
   }
   const datasetNames = listTaskDirectoryNames(input.taskMaterialPath);
   if (datasetNames.length === 0) throw new TypeError("DeepSWE v1.1 material must contain at least one task directory with task.toml");
+  const tasksTreeSha = computeGitTreeSha(input.taskMaterialPath);
+  if (input.expectedTasksTreeSha !== undefined && input.expectedTasksTreeSha !== tasksTreeSha) {
+    throw new TypeError(`DeepSWE v1.1 material git tree SHA is ${tasksTreeSha}, not the declared ${input.expectedTasksTreeSha}; the official tasks/ pin is ${DEEP_SWE_V11_TASKS_TREE_SHA}`);
+  }
   let selectedTaskNames: string[];
   if (input.taskNames !== undefined) {
     if (input.taskNames.length === 0) throw new TypeError("DeepSWE v1.1 custom task list must not be empty");
@@ -87,6 +99,12 @@ export function resolveDeepSweV11Selection(workspaceDir: string, input: DeepSweV
   const coverage = input.taskNames === undefined && input.coverage !== undefined
     ? input.coverage
     : coverageFromSelectedNames(datasetNames, selectedTaskNames);
+  if (coverage === "full" && datasetNames.length !== DEEP_SWE_V11_TASK_COUNT) {
+    throw new TypeError(`DeepSWE v1.1 full coverage is the official ${DEEP_SWE_V11_TASK_COUNT}-task tree ${DEEP_SWE_V11_TASKS_TREE_SHA}; this material has ${datasetNames.length} task directories`);
+  }
+  if (coverage === "full" && tasksTreeSha !== DEEP_SWE_V11_TASKS_TREE_SHA) {
+    throw new TypeError(`DeepSWE v1.1 full coverage requires the official tasks/ pin ${DEEP_SWE_V11_TASKS_TREE_SHA}; this material hashes to ${tasksTreeSha}`);
+  }
   for (const name of selectedTaskNames) {
     if (!datasetNames.includes(name)) throw new TypeError(`DeepSWE v1.1 selected task ${name} is not in the resolved tasks tree`);
   }
@@ -117,7 +135,7 @@ export function resolveDeepSweV11Selection(workspaceDir: string, input: DeepSweV
     dataset: {
       id: DEEP_SWE_V11_DATASET_ID,
       gitSha: DEEP_SWE_V11_GIT_SHA,
-      tasksTreeSha: DEEP_SWE_V11_TASKS_TREE_SHA,
+      tasksTreeSha,
       taskCount: datasetNames.length,
     },
     coverage,

@@ -179,11 +179,13 @@ export {
   DEEP_SWE_V11_GIT_SHA,
   DEEP_SWE_V11_PROFILE,
   DEEP_SWE_V11_SELECTION_ROLE,
+  DEEP_SWE_V11_TASK_COUNT,
   DEEP_SWE_V11_TASKS_TREE_SHA,
   DeepSweV11SelectionManifestSchema,
   deepSweV11SelectionBytes,
 } from "./runtime/deep-swe-v1.1/manifest.js";
 export type { DeepSweV11SelectionManifest } from "./runtime/deep-swe-v1.1/manifest.js";
+export { computeGitTreeSha } from "./runtime/deep-swe-v1.1/git-tree-sha.js";
 export { resolveDeepSweV11Selection } from "./runtime/deep-swe-v1.1/host.js";
 export type {
   DeepSweV11SelectionRequest,

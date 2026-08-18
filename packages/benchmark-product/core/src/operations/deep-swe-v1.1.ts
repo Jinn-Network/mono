@@ -25,7 +25,6 @@ import {
   DEEP_SWE_V11_DATASET_ID,
   DEEP_SWE_V11_GIT_SHA,
   DEEP_SWE_V11_PROFILE,
-  DEEP_SWE_V11_TASKS_TREE_SHA,
   DeepSweV11SelectionManifestSchema,
   deepSweV11SelectionBytes,
 } from "../runtime/deep-swe-v1.1/manifest.js";
@@ -107,7 +106,7 @@ export function selectDeepSweV11Runtime(context: OperationContext, input: Select
       coverage: selected.coverage,
       datasetId: DEEP_SWE_V11_DATASET_ID,
       datasetRevision: DEEP_SWE_V11_GIT_SHA,
-      tasksTreeSha: DEEP_SWE_V11_TASKS_TREE_SHA,
+      tasksTreeSha: selected.profile.dataset.tasksTreeSha,
       selectedTaskNames: [...selected.selectedTaskNames],
       datasetTaskCount: selected.profile.dataset.taskCount,
       replicates: selected.profile.execution.nAttempts,

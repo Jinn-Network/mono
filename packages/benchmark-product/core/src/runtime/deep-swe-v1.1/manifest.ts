@@ -7,8 +7,10 @@ import { SUITE_COVERAGE } from "../suite-protocol/comparability.js";
 export const DEEP_SWE_V11_DATASET_ID = "datacurve-ai/deep-swe" as const;
 /** Git commit of datacurve-ai/deep-swe at implementation (not @latest). */
 export const DEEP_SWE_V11_GIT_SHA = "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9" as const;
-/** Git tree SHA of `tasks/` at DEEP_SWE_V11_GIT_SHA. */
+/** Git tree SHA of `tasks/` at DEEP_SWE_V11_GIT_SHA. Recomputed from the operator's bytes at select. */
 export const DEEP_SWE_V11_TASKS_TREE_SHA = "66df25a1b382017d0ae014d94cadb2698baaed48" as const;
+/** Task directories in `tasks/` at DEEP_SWE_V11_TASKS_TREE_SHA. `full` coverage means exactly these. */
+export const DEEP_SWE_V11_TASK_COUNT = 113 as const;
 export const DEEP_SWE_V11_AGENT_ID = "mini-swe-agent" as const;
 export const DEEP_SWE_V11_DEFAULT_REPLICATES = 4 as const;
 export const DEEP_SWE_V11_TRIAL_TIMEOUT_SECONDS = 9_000 as const;
@@ -25,7 +27,8 @@ export const DeepSweV11SelectionManifestSchema = z.object({
   dataset: z.object({
     id: z.literal(DEEP_SWE_V11_DATASET_ID),
     gitSha: z.literal(DEEP_SWE_V11_GIT_SHA),
-    tasksTreeSha: z.literal(DEEP_SWE_V11_TASKS_TREE_SHA),
+    /** Computed over the sealed material, so a subtree seals its own SHA rather than wearing the official pin. */
+    tasksTreeSha: GitSha,
     taskCount: z.number().int().positive(),
   }).strict(),
   coverage: z.enum(SUITE_COVERAGE),

@@ -1,6 +1,7 @@
 import type { HarborSelectionManifest } from "../harbor/manifest.js";
 import {
   DEEP_SWE_V11_GIT_SHA,
+  DEEP_SWE_V11_TASK_COUNT,
   DEEP_SWE_V11_TASKS_TREE_SHA,
 } from "../deep-swe-v1.1/manifest.js";
 import { TERMINAL_BENCH_2_1_DATASET_REF } from "../terminal-bench-2-1/manifest.js";
@@ -47,9 +48,12 @@ function methodBitsFromHarbor(input: {
   readonly atifPresent: boolean;
   readonly datasetRevisionMatchesLeaderboardPin: boolean;
 } {
+  // `tasksTreeSha` is recomputed from the operator's task material at select, so this compares
+  // sealed bytes against the official pin rather than a constant against itself.
   const pin = input.suite.protocol === "deep-swe-v1.1"
     ? input.suite.datasetRevision === DEEP_SWE_V11_GIT_SHA
       && input.suite.tasksTreeSha === DEEP_SWE_V11_TASKS_TREE_SHA
+      && input.suite.datasetTaskCount === DEEP_SWE_V11_TASK_COUNT
     : input.suite.datasetRevision === TERMINAL_BENCH_2_1_DATASET_REF;
   const executionConformance = input.suite.protocol === "deep-swe-v1.1"
     ? officialPierExecutionConformance({
@@ -167,9 +171,4 @@ export function suiteComparabilityForArm(input: {
     jobDir: input.jobDir,
   });
   return deriveSuiteComparability({ ...method, ...complete });
-}
-
-export function suiteLimitationFromHarbor(manifest: HarborSelectionManifest, comparability: SuiteComparability): string | undefined {
-  const suite = suiteSelectionFromHarbor(manifest);
-  return suiteLeaderboardLimitation(comparability, suite?.protocol);
 }

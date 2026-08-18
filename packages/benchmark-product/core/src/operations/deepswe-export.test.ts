@@ -1,5 +1,5 @@
 import { parseMatrix } from "@jinn-network/benchmarking-records";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -256,9 +256,9 @@ describe("DeepSWE v1.1 Pier export", () => {
     expect(absent.error.code).toBe("not-found");
   }, 60_000);
 
-  test("full coverage plus stubbed result.json without collect is inspection", async () => {
+  test("named-slice coverage plus stubbed result.json without collect is inspection", async () => {
     const context = await prepareDraft("full");
-    expect((await selectDeepSweV11Runtime(context, { draftId: "full", ...request("full") })).ok).toBe(true);
+    expect((await selectDeepSweV11Runtime(context, { draftId: "full", ...request("ten_task") })).ok).toBe(true);
     expect((await runQuote(context, { draftId: "full" })).ok).toBe(true);
     expect(runLock(context, { draftId: "full" }).ok).toBe(true);
     stubArmJob("full", "two");
@@ -270,7 +270,7 @@ describe("DeepSWE v1.1 Pier export", () => {
     expect(exported.result.instructions).toContain(DEEPSWE_CLOSED_SUBMIT_SENTENCE);
   }, 120_000);
 
-  test("collect of a 1-task full snapshot with reward.json and ATIF is ready; one Pier job per arm", async () => {
+  test("a 1-task snapshot cannot claim full coverage; collected with reward.json and ATIF it is inspection, not ready", async () => {
     materialPath = join(root, "one-task");
     mkdirSync(join(materialPath, "t00"), { recursive: true });
     writeFileSync(join(materialPath, "t00", "task.toml"), `[task]\nname = "t00"\n[environment]\ndocker_image = "${image}"\n`);
@@ -281,14 +281,18 @@ describe("DeepSWE v1.1 Pier export", () => {
     expect(createDraft(context, { draftId: "ready", name: "ready" }).ok).toBe(true);
     expect(armAdd(context, { draftId: "ready", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
     expect(armAdd(context, { draftId: "ready", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
-    const selected = await selectDeepSweV11Runtime(context, { draftId: "ready", ...request("full") });
+    const claimedFull = await selectDeepSweV11Runtime(context, { draftId: "ready", ...request("full") });
+    expect(claimedFull.ok).toBe(false);
+    if (claimedFull.ok) return;
+    expect(claimedFull.error.detail).toMatch(/113-task tree/u);
+    const selected = await selectDeepSweV11Runtime(context, { draftId: "ready", ...request("one_task") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     const quoted = await runQuote(context, { draftId: "ready" });
     expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
     expect(requireRunState(workspaceDir, "ready").suiteQuote).toMatchObject({
-      coverage: "full",
+      coverage: "one_task",
       leaderboardSubmitReady: false,
-      methodLeaderboardEligible: true,
+      methodLeaderboardEligible: false,
       replicates: 4,
       harborVersion: "0.3.1",
     });
@@ -317,9 +321,11 @@ describe("DeepSWE v1.1 Pier export", () => {
     const exported = exportDeepSwePackage(context, { draftId: "ready", armId: "two" });
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
-    expect(exported.result.mode).toBe("ready");
-    expect(exported.result.instructions).toContain("serena@datacurve.ai");
+    // Every completeness bit is present; only the official 113-task pin is missing, so this is never ready.
+    expect(exported.result.mode).toBe("inspection");
+    expect(exported.result.instructions).toContain("Do not email this package as a Datacurve leaderboard submission");
     expect(exported.result.instructions).not.toMatch(/lb submit/u);
     expect(exported.result.instructions).toContain(DEEPSWE_CLOSED_SUBMIT_SENTENCE);
+    expect(statSync(join(exported.result.exportDir, "INSTRUCTIONS.txt")).mode & 0o777).toBe(0o600);
   }, 120_000);
 });
