@@ -6,11 +6,14 @@ import { join } from "node:path";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { LauncherCapabilities, LauncherContract, LaunchPlan } from "@jinn-network/task-execution-launchers";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
+import { DEEP_SWE_V11_TRIAL_TIMEOUT_SECONDS } from "../deep-swe-v1.1/manifest.js";
 import { PIER_ADAPTER_ID, type HarborSelectionManifest } from "./manifest.js";
 import type { HarborHostBinding } from "./host.js";
 
 export const HARBOR_LAUNCHER_ID = "harbor";
 export const PIER_LAUNCHER_ID = "pier";
+
+const PIER_TRIAL_TIMEOUT_MS = DEEP_SWE_V11_TRIAL_TIMEOUT_SECONDS * 1_000;
 
 export function harborJobName(submissionSha256: string, dispatch: number): string {
   if (!/^[a-f0-9]{64}$/.test(submissionSha256) || !Number.isInteger(dispatch) || dispatch < 1) throw new TypeError("Harbor Job naming requires a Submission digest and positive dispatch index");
@@ -37,10 +40,10 @@ export function harborPlannedJobWaitMs(nAttempts: number): number {
   return Math.max(120_000, attempts * 900_000 + 120_000);
 }
 
-/** Planned Pier jobs run k sequential trials; DeepSWE v1.1 wall-clock bound is 9000s per trial. */
+/** Planned Pier jobs run k sequential trials, each bounded by DEEP_SWE_V11_TRIAL_TIMEOUT_SECONDS. */
 export function pierPlannedJobWaitMs(nAttempts: number): number {
   const attempts = Number.isInteger(nAttempts) && nAttempts >= 1 ? nAttempts : 1;
-  return Math.max(120_000, attempts * 9_000_000 + 120_000);
+  return Math.max(120_000, attempts * PIER_TRIAL_TIMEOUT_MS + 120_000);
 }
 
 export function harborArmFollowUpJobName(
@@ -217,7 +220,7 @@ export function makeHarborLauncher(input: { readonly manifest: HarborSelectionMa
   const executableDigest = createHash("sha256").update(readFileSync(executable)).digest("hex");
   if (executableDigest !== input.manifest.harbor.executableSha256) throw new TypeError("Harbor executable bytes drifted from the sealed selection manifest");
   const launcherId = input.manifest.adapter.id === PIER_ADAPTER_ID ? PIER_LAUNCHER_ID : HARBOR_LAUNCHER_ID;
-  const trialTimeoutMs = input.manifest.adapter.id === PIER_ADAPTER_ID ? 9_000_000 : 900_000;
+  const trialTimeoutMs = input.manifest.adapter.id === PIER_ADAPTER_ID ? PIER_TRIAL_TIMEOUT_MS : 900_000;
   return {
     id: launcherId,
     capabilities: (): LauncherCapabilities => ({

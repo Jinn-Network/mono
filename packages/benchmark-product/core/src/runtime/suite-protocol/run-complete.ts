@@ -46,6 +46,11 @@ function trialHasAtif(trialDir: string): boolean {
   ));
 }
 
+/**
+ * `reward.json` only. Pier trials that scored into `reward.txt` are still judged and still collected;
+ * they are deliberately never DeepSWE-leaderboard-ready, because the Datacurve package requires the
+ * structured per-trial reward. Fail closed here rather than widen the accepted file set.
+ */
 function trialHasRewardJson(trialDir: string): boolean {
   return existsSync(join(trialDir, "verifier", "reward.json")) || existsSync(join(trialDir, "reward.json"));
 }

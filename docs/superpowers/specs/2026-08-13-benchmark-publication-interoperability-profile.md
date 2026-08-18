@@ -613,7 +613,8 @@ cousin on the same tasks. Named protocols:
 - planned k ≥ 4 trials per selected task as visible replicates, not Pier inner retry;
 - official env (docker or modal; no resource or timeout overrides; 9000s wall-clock sanity bound);
 - ATIF trajectories and per-trial `reward.json` required for Datacurve-ready packaging.
-  Harbor 0.21, Pier+Claude Code/Codex/gemini-cli/opencode, DeepSWE v1, and k=1 cannot wear this name.
+
+Harbor 0.21, Pier+Claude Code/Codex/gemini-cli/opencode, DeepSWE v1, and k=1 cannot wear this name.
 
 Comparability is two-axis and must not be collapsed into one bit. Report v2 gains no new required
 fields. Bind a product-sealed `SuiteProtocolSelection` through the existing Run publication
