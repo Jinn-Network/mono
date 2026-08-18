@@ -131,9 +131,13 @@ def test_stage1_gate_is_blocking_for_every_product_boundary():
     assert not _selects(patterns, "docs/press/2026-08-18-note.md")
     assert gate["name"] == "Cold-stock Stage 1 product gate"
     assert gate.get("continue-on-error") is not True
-    assert "pull_request" in gate["if"]
+    # The gate blocks on the merge group, not on the pull request: under the fast
+    # PR lane (DR-2026-08-18-b D3) this 60-minute journey is a queue-time cost,
+    # and the queue is the only path onto `next`, so nothing lands unblocked.
+    assert "github.event_name == 'pull_request'" not in gate["if"]
     assert "push" in gate["if"]
     assert "merge_group" in gate["if"]
+    assert "schedule" in gate["if"]
     assert "needs.changes.outputs.run == 'true'" in gate["if"]
     rendered_steps = "\n".join(
         f"{step.get('working-directory', '')} {step.get('run', '')}"

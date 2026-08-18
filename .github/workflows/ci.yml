@@ -204,7 +204,10 @@ jobs:
   pack-smoke:
     name: Pack & Smoke Test
     needs: [changes, check]
-    if: needs.changes.outputs.run == 'true'
+    # Fast PR lane (DR-2026-08-18-b D3): pack smokes and e2e are a merge-group
+    # cost. The PR lane keeps `architecture` and `check` — per-area typecheck and
+    # unit suites — and the queue runs the full battery before anything lands.
+    if: needs.changes.outputs.run == 'true' && github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -252,7 +255,8 @@ jobs:
     # no human surface after Stage 6.
     name: Operator console E2E (Playwright)
     needs: [changes, check]
-    if: needs.changes.outputs.run == 'true'
+    # Merge-group only — see pack-smoke above.
+    if: needs.changes.outputs.run == 'true' && github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -298,7 +302,8 @@ jobs:
     # `funding-sequence-e2e` above.
     name: Degraded Daemon Guard E2E
     needs: [changes, check]
-    if: needs.changes.outputs.run == 'true'
+    # Merge-group only — see pack-smoke above.
+    if: needs.changes.outputs.run == 'true' && github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -345,7 +350,9 @@ jobs:
     # ubuntu-latest is linux/amd64; arm64 Mac dev cannot satisfy this gate.
     name: Task Creator AC1 (amd64 gold proof)
     needs: [changes, check]
-    if: needs.changes.outputs.run == 'true'
+    # Merge-group only — see pack-smoke above. This is the workflow's 90-minute
+    # tail, so it is the single biggest saving the fast PR lane buys.
+    if: needs.changes.outputs.run == 'true' && github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -427,10 +434,20 @@ jobs:
           fi
           test "${ARCHITECTURE_RESULT}" = "${expected}"
           test "${CHECK_RESULT}" = "${expected}"
-          test "${PACK_SMOKE_RESULT}" = "${expected}"
-          test "${DASHBOARD_E2E_RESULT}" = "${expected}"
-          test "${DEGRADED_DAEMON_GUARD_RESULT}" = "${expected}"
-          test "${GOLD_PROOF_RESULT}" = "${expected}"
+          # The four heavy jobs are merge-group only under the fast PR lane
+          # (DR-2026-08-18-b D3). Mirror their `if:` exactly: exactly `skipped`
+          # on every other event — including the whole PR lane — and, on a merge
+          # group, the same success-when-selected bar as everything else. A
+          # failed or cancelled job never reads as skipped, so the fast lane
+          # cannot launder a red either.
+          heavy_expected=skipped
+          if [ "${EVENT_NAME}" = merge_group ] && [ "${SELECTED}" = true ]; then
+            heavy_expected=success
+          fi
+          test "${PACK_SMOKE_RESULT}" = "${heavy_expected}"
+          test "${DASHBOARD_E2E_RESULT}" = "${heavy_expected}"
+          test "${DEGRADED_DAEMON_GUARD_RESULT}" = "${heavy_expected}"
+          test "${GOLD_PROOF_RESULT}" = "${heavy_expected}"
           # The marketplace e2e is dispatch-only. On every other event it must be
           # exactly `skipped`, which is what keeps a 45-minute soft gate off the PR and
           # merge-group paths. On a dispatch it may have run or been skipped; either is

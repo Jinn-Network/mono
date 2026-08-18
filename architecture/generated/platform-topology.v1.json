@@ -2282,17 +2282,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": ".github/scripts/enable-hermetic-gate-required.sh"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": ".github/scripts/enable-main-base-guard.sh"
+        "path": ".github/scripts/enable-next-merge-queue.sh"
       },
       {
         "categories": [
@@ -3405,6 +3395,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/upsert-changelog-section.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/verify-land-one-at-a-time.sh"
       },
       {
         "categories": [

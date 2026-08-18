@@ -76,21 +76,25 @@ jobs:
         id: select
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-        # A merge group carries its own base/head pair, so the same changed-package
-        # closure the pull_request lane already trusts applies to the speculative
-        # merge commit (DR-2026-08-18-b D3). Without this a merge group bypassed
-        # selection and paid the full battery (observed 11-43 min) for every entry,
-        # however narrow. The selector itself is event-agnostic — it consumes a path
-        # list on stdin — so only the diff endpoints differ between the two lanes.
+        # Tiered lanes (DR-2026-08-18-b D3). The PULL_REQUEST lane runs fast mode:
+        # verification is not selected at all, because the merge group is where the
+        # full battery runs and the queue is now the only path onto `next`. Nothing
+        # is laundered by this — the `platform-verification` gate below demands an
+        # exact `skipped` when verification is unselected, so a failed or cancelled
+        # run still reddens the context.
+        #
+        # The MERGE_GROUP lane carries its own base/head pair, so the changed-package
+        # closure applies to the speculative merge commit and a narrow entry stops
+        # paying the full battery (observed 11-43 min). The selector itself is
+        # event-agnostic — it consumes a path list on stdin.
         run: |
           case "${EVENT_NAME}" in
             pull_request)
-              diff_base="${BASE_SHA}"
-              diff_head="${HEAD_SHA}"
+              echo 'pr-fast-lane: full verification runs on the merge group'
+              echo 'run=false' >> "${GITHUB_OUTPUT}"
+              exit 0
               ;;
             merge_group)
               diff_base="${MG_BASE_SHA}"

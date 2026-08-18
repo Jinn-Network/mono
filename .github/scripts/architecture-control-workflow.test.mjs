@@ -30,20 +30,23 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   assert.match(source, /needs: verification-selection\n\s+if: needs\.verification-selection\.outputs\.run == 'true'/u);
   assert.match(source, /test "\$\{SELECTION_RESULT\}" = success/u);
   assert.match(source, /test "\$\{VERIFICATION_RESULT\}" = skipped/u);
-  // Selection is diff-driven on both lanes: the pull_request branch keeps the base/head
-  // pair it has always used, and the merge_group branch reads the equivalent pair off the
-  // merge-group payload so a narrow queue entry stops paying the full battery. Any other
-  // event still verifies in full. The three-dot diff needs unshallow history on both.
+  // Tiered lanes (DR-2026-08-18-b D3). The pull_request lane runs fast mode: it unselects
+  // verification outright rather than diffing, because the merge group now carries the full
+  // battery and the queue is the only path onto `next`. The merge_group lane reads its
+  // base/head pair off the merge-group payload so a narrow queue entry stops paying the
+  // full battery. Any other event still verifies in full; the three-dot diff needs
+  // unshallow history.
   const selectionJob = source.slice(
     source.indexOf('  verification-selection:'),
     source.indexOf('  platform-release-surface:'),
   );
   assert.match(selectionJob, /fetch-depth: 0/u);
-  assert.match(selectionJob, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/u);
-  assert.match(selectionJob, /HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/u);
   assert.match(selectionJob, /MG_BASE_SHA: \$\{\{ github\.event\.merge_group\.base_sha \}\}/u);
   assert.match(selectionJob, /MG_HEAD_SHA: \$\{\{ github\.event\.merge_group\.head_sha \}\}/u);
-  assert.match(selectionJob, /^\s+pull_request\)\n\s+diff_base="\$\{BASE_SHA\}"\n\s+diff_head="\$\{HEAD_SHA\}"/mu);
+  assert.match(selectionJob, /^\s+pull_request\)\n\s+echo 'pr-fast-lane: full verification runs on the merge group'\n\s+echo 'run=false' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0/mu);
+  // The PR lane must not diff at all — a surviving pull_request base/head pair would mean
+  // fast mode was only half-applied and the PR lane still paid for selection.
+  assert.doesNotMatch(selectionJob, /github\.event\.pull_request\.base\.sha/u);
   assert.match(selectionJob, /^\s+merge_group\)\n\s+diff_base="\$\{MG_BASE_SHA\}"\n\s+diff_head="\$\{MG_HEAD_SHA\}"/mu);
   assert.match(selectionJob, /git diff --name-only "\$\{diff_base\}\.\.\.\$\{diff_head\}"/u);
   assert.match(selectionJob, /non-PR, non-merge-group event verifies in full/u);

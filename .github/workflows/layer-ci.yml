@@ -127,7 +127,11 @@ jobs:
         working-directory: packages/layer
       - run: yarn build
         working-directory: packages/layer
-      - run: yarn pack:smoke
+      # Fast PR lane (DR-2026-08-18-b D3): the pack smoke is a merge-group cost.
+      # This is step-level, not job-level — the job still typechecks, tests, and
+      # builds the layer on both lanes, so the PR keeps its fast feedback.
+      - if: github.event_name == 'merge_group'
+        run: yarn pack:smoke
         working-directory: packages/layer
       - name: Test layer workflow contracts
         run: node --test .github/scripts/layer-publish-workflow.test.mjs
