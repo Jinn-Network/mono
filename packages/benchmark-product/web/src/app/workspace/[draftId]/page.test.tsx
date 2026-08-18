@@ -95,4 +95,24 @@ describe("guided own-work draft surface", () => {
     expect(markup).toContain("<button disabled=\"\">Quote</button>");
     expect(markup).not.toContain(privateSentinel);
   });
+
+  test("renders catalog and Inspect method bind forms and homemade SWE-bench intake", async () => {
+    loadDraftViewMock.mockReturnValue({
+      ok: true,
+      draft: { ok: true, result: { draft: { state: "draft" } } },
+      inspection: { ok: true, result: {} },
+      arms: { ok: true, result: { arms: [] } },
+      agentProfiles: { status: "available", profiles: [] },
+      agentReadiness: { required: false, ready: true, findings: [] },
+    });
+
+    const markup = renderToStaticMarkup(await DraftPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+
+    expect(markup).toContain("Bind catalog suite");
+    expect(markup).toContain("Bind Inspect method");
+    expect(markup).toContain("name=\"ref\"");
+    expect(markup).toContain("terminal-bench-2.1");
+    expect(markup).toContain("Import homemade SWE-bench rows");
+    expect(markup).not.toContain("Select Inspect evaluation");
+  });
 });

@@ -14,6 +14,10 @@ the **built Colophon CLI** (core `dist/cli/bin.js`) drives method → quote →
 lock → dual-Mercor grade (`apx` or `run_e2e.py` for the lexicographic first
 task) → export against:
 
+`colophon method --help` lists per-suite `--host` keys; `--n` selects the
+first N registry ids (code-point order) and is mutually exclusive with
+`--slice` and `--ids`.
+
 - Dataset id `mercor/APEX-SWE`
 - Revision `4d7aeb2b829ca348c224992da803bca6502235f4`
   (`APEX_SWE_DEV_DATASET_REVISION` in
