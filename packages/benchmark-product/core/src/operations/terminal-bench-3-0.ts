@@ -48,8 +48,12 @@ export interface SelectTerminalBench30RuntimeResult {
 export function selectTerminalBench30Runtime(context: OperationContext, input: SelectTerminalBench30RuntimeInput): Promise<OperationResult<SelectTerminalBench30RuntimeResult>> {
   const at = context.clock();
   const clocked = { ...context, clock: () => at };
-  return operateAsync({ context: clocked, action: "runtime.terminal-bench-3-0.select", subject: input.draftId, inputs: input, run: async () => {
-    const current = readDraftDocument(context.workspaceDir, input.draftId);
+  return operateAsync({ context: clocked, action: "runtime.terminal-bench-3-0.select", subject: input.draftId, inputs: input, run: () => executeSelectTerminalBench30Runtime(clocked, input) });
+}
+
+export async function executeSelectTerminalBench30Runtime(context: OperationContext, input: SelectTerminalBench30RuntimeInput): Promise<SelectTerminalBench30RuntimeResult> {
+  const at = context.clock();
+  const current = readDraftDocument(context.workspaceDir, input.draftId);
     if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse Terminal-Bench 3.0 selection");
     if (current.spec.analysis?.method === "jinn.benchmarking.method/binary-instrument") {
       refuse("validation", `drafts.${input.draftId}.spec.analysis`, "Terminal-Bench 3.0 official suite refuses binary-instrument majority-k; use wilson@1 over judged replicates");
@@ -160,5 +164,4 @@ export function selectTerminalBench30Runtime(context: OperationContext, input: S
     }) };
     atomicWriteFileSync(draftPath(context.workspaceDir, input.draftId), JSON.stringify(draft, null, 2));
     return { draft, selectionManifestSha256, terminalBench30ProfileSha256: selected.profileSha256, suiteProtocolSha256, benchmarkSha256 };
-  } });
 }

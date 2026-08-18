@@ -1,7 +1,6 @@
 import "server-only";
 
 import {
-  anchoringConfigureAction,
   armAddAction,
   armListAction,
   armRemoveAction,
@@ -16,7 +15,8 @@ import {
   draftUpdateAction,
   intakeSampleAction,
   intakeSweBenchAction,
-  inspectRuntimeSelectAction,
+  methodBindAction,
+  anchoringConfigureAction,
   runAnchorAction,
   runLockAction,
   publicationAccountingAction,
@@ -47,7 +47,7 @@ export const GUI_SERVER_ACTIONS = {
   "draft.inspect": draftInspectAction,
   "intake.sample": intakeSampleAction,
   "intake.swebench": intakeSweBenchAction,
-  "runtime.inspect.select": inspectRuntimeSelectAction,
+  "method.bind": methodBindAction,
   "arm.add": armAddAction,
   "arm.update": armUpdateAction,
   "arm.remove": armRemoveAction,

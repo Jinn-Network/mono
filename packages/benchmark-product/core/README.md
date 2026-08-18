@@ -46,12 +46,11 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **56 generated operations**, all shipped through the library and CLI
+contains **42 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
 |---|---|---|
-| `anchoringConfigure` | `colophon anchoring configure` | Replace or clear the workspace anchor provider and endpoint configuration. |
 | `armAdd` | `colophon arm add` | Add a pinned solver arm. |
 | `armList` | `colophon arm list` | List a draft's arms. |
 | `armRemove` | `colophon arm remove` | Remove an arm. |
@@ -59,6 +58,7 @@ with an explicit shipped/deferred GUI disposition:
 | `authorityGrant` | `colophon authority grant` | Sponsor-only membership or grant change. |
 | `authorityRevoke` | `colophon authority revoke` | Sponsor-only grant or membership revocation. |
 | `authorityShow` | `colophon authority show` | Read the authority policy. |
+| `anchoringConfigure` | `colophon anchoring configure` | Replace or clear the workspace anchor provider and endpoint configuration. |
 | `bindInspectBinaryJudge` | `colophon runtime inspect bind-judge` | Bind sealed binary-judge instruments to exact Run-arm requirements. |
 | `createDraft` | `colophon draft create` | Create a draft, optionally from JSON. |
 | `getDraft` | `colophon draft show` | Read one draft. |
@@ -76,11 +76,11 @@ with an explicit shipped/deferred GUI disposition:
 | `publicationStatus` | `colophon publication status` | Read timing assurance, stage receipts, compatibility, and recovery guidance without backend calls. |
 | `publicationAccounting` | `colophon publication accounting` | Publish retained complete or partial accounting and Matrix v2 without a Report or rerun. |
 | `publicationReport` | `colophon publication report` | Produce, verify, and publish the signed Report v2 envelope from the accounting closure. |
-| `runAnchor` | `colophon anchor` | Obtain, verify, and store third-party time evidence over the sealed Run or Matrix digest. |
 | `runCancel` | `colophon cancel` | Durably request or finalize cancellation. |
 | `runCollect` | `colophon collect` | Seal the terminal Matrix. |
 | `runLaunch` | `colophon launch` | Drive the real local venue. |
 | `runLock` | `colophon lock` | Seal the preregistered Run. |
+| `runAnchor` | `colophon anchor` | Obtain, verify, and store third-party time evidence over the sealed Run or Matrix digest. |
 | `runPreview` | `colophon preview` | Run a disclosed, non-official rehearsal. |
 | `runPublish` | `colophon publish` | Verify and emit one immutable local bundle. |
 | `runQuote` | `colophon quote` | Present size, coverage, cap, and honest estimates. |
@@ -90,22 +90,8 @@ with an explicit shipped/deferred GUI disposition:
 | `runStatus` | `colophon status` | Read durable per-cell and driver status. |
 | `runVerify` | `colophon verify` | Re-derive Matrix, Report, and claim consistency. |
 | `sampleInit` | `colophon sample init` | Attach the bundled three-task benchmark. |
-| `selectInspectEvaluation` | `colophon runtime inspect select` | Select and bind a real Inspect evaluation. |
-| `selectInspectEvalRuntime` | `colophon runtime inspect eval select` | Lock an operator-chosen Inspect eval as the Inspect eval official suite. |
-| `selectHarborRuntime` | `colophon runtime harbor select` | Select and bind the managed Harbor runtime. |
-| `selectTerminalBench2Runtime` | `colophon runtime terminal-bench-2 select` | Resolve and bind one immutable Terminal-Bench 2 task through Harbor. |
-| `selectTerminalBench21Runtime` | `colophon runtime terminal-bench-2-1 select` | Resolve and bind a named Terminal-Bench 2.1 slice through Harbor. |
-| `selectTerminalBench30Runtime` | `colophon runtime terminal-bench-3-0 select` | Resolve and bind a named Terminal-Bench 3.0 slice through Harbor. |
-| `selectSwebenchVerifiedRuntime` | `colophon runtime swe-bench-verified select` | Resolve and bind a named SWE-bench Verified slice to swebench.harness. |
-| `selectApexAgentsRuntime` | `colophon runtime apex-agents select` | Resolve and bind a named APEX-Agents slice to Archipelago. |
-| `selectApexSweDevRuntime` | `colophon runtime apex-swe-dev select` | Resolve and bind a named APEX-SWE-dev slice to both Mercor harnesses. |
-| `selectDeepSweV11Runtime` | `colophon runtime deep-swe-v1.1 select` | Resolve and bind a named DeepSWE v1.1 slice through Pier. |
-| `exportHarborHubPackage` | `colophon hub export` | Package a retained Harbor Job for Terminal-Bench Hub upload without placing the row. |
-| `exportSwebenchPredictions` | `colophon swebench export` | Package predictions.jsonl and harness reports without placing the swebench.com row. |
-| `exportApexAgentsInspection` | `colophon apex-agents export` | Package Archipelago grades without placing the Mercor APEX-Agents row. |
-| `exportApexSwePackage` | `colophon apex-swe export` | Package Mercor harness JSON for APEX-SWE-dev without placing a Mercor leaderboard row. |
-| `exportDeepSwePackage` | `colophon deepswe export` | Package a retained Pier Job for DeepSWE v1.1 Datacurve email without placing the row. |
-| `exportInspectViewBundle` | `colophon runtime inspect eval export` | Build a derived Inspect View log bundle without placing an Inspect Hub row. |
+| `selectMethod` | `colophon method` | Bind a catalog suite or a method-document file onto a draft. |
+| `exportDerivedBundle` | `colophon export` | Package the locked method's suite-named derived bundle, or refuse. |
 | `updateDraft` | `colophon draft update` | Apply a validated JSON draft patch. |
 
 The path-oriented portable verifier is intentionally outside workspace/GUI
@@ -194,26 +180,6 @@ only after a sponsor grants it. `authority grant` and
 self-escalate. This is local-process policy and attribution, not operating-system
 or hosted authentication.
 
-`anchoring.configure` is gated because configuring an endpoint is the consent
-that makes later locks contact a third party. A workspace initialized before
-that grant existed does not carry it; its sponsor adds it once with
-`colophon authority grant --workspace <dir> --principal <sponsor> --grantee <sponsor> --operations anchoring.configure`,
-which is always available because granting is role-gated, not grant-gated.
-
-`anchor` itself is not gated: it moves no funds, changes no lifecycle state, and
-is reversible by never having happened. Nothing is configured by default, no
-endpoint ships in source, and an unconfigured workspace attempts nothing and
-prints nothing. Once a provider is configured, `lock` attempts one anchor over
-the sealed Run record after the lock transition has already completed; a draft
-opts out with a spec `anchoring` block whose `enabled` is `false`, and
-`lock --no-anchor` skips the errand for one invocation without touching
-configuration. Any anchor refusal or failure becomes a note plus its own audit
-entry — the lock result and exit code are unchanged. The note goes to stdout in
-human mode and to stderr under `--json`, where stdout stays exactly one
-envelope. Re-run `colophon anchor --draft <id> --subject lock` for the typed
-envelope, before launch. The private web app calls the same hook after its own
-lock, so both surfaces anchor or skip identically.
-
 Lock is irreversible. `launch` and `resume` use the real local backend;
 `resume` re-dispatches only outstanding cells. Cancellation is two-phase: a
 successful call may return `requested` while the active driver drains, and a
@@ -245,8 +211,7 @@ There are **11 typed error codes**:
 
 In JSON mode success is one compact
 `{"ok":true,"result":...}` line on stdout; failure is one compact
-`{"ok":false,"error":...}` line on stdout. Stderr is empty, except for `lock`'s
-optional one-line anchoring note about its non-blocking side errand. An error contains
+`{"ok":false,"error":...}` line on stdout. Stderr is empty. An error contains
 `code`, `detail`, and optional structured `issues`; callers branch on the code
 and issue path, never prose.
 

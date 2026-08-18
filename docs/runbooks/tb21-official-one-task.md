@@ -11,8 +11,8 @@ the Harbor retry-bind work in [#2752](https://github.com/Jinn-Network/mono/issue
 
 A human operator, on a machine with Harbor 0.21 and Docker, drives the **built
 Colophon CLI** (core `dist/cli/bin.js`, the same advanced verb surface as the
-installable `colophon` command) through select → quote → lock → launch →
-collect → Hub export against:
+installable `colophon` command) through method → quote → lock → launch →
+collect → export against:
 
 - Dataset id `terminal-bench/terminal-bench-2-1`
 - Revision `sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a`
@@ -40,7 +40,7 @@ Quote and collect must show `executionConformance: true`, `coverage:
 ```bash
 uv tool install harbor
 harbor --version   # must print 0.21.x
-command -v harbor  # keep this realpath for selection.json
+command -v harbor  # keep this realpath for host.json
 ```
 
 Use the same byte-pinned binary later used for publication rehearsal if you
@@ -151,7 +151,7 @@ docker image inspect alexgshaw/adaptive-rejection-sampler:20251031 \
   --format '{{index .RepoDigests 0}}'
 ```
 
-Put that `repo@sha256:…` in `selection.json` `environment.image`. The
+Put that `repo@sha256:…` in `host.json` `environment.image`. The
 repository name must match `task.toml`; the digest is the operator's pin of
 the same image.
 
@@ -172,7 +172,8 @@ WS=/tmp/colophon-tb21-one-task
 mkdir -p "$WS"
 ```
 
-`selection.json` is `SelectTerminalBench21RuntimeInput` minus `draftId`:
+`host.json` is the incomplete catalog host document (paths, arms, image).
+Coverage is `--slice 1`, which seals `one_task`:
 
 ```json
 {
@@ -180,7 +181,6 @@ mkdir -p "$WS"
   "registryMetadataPath": "/tmp/colophon-tb21-one-task/registry-metadata.json",
   "datasetRevision": "sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a",
   "taskMaterialPath": "/tmp/colophon-tb21-one-task/task-material",
-  "coverage": "one_task",
   "nConcurrent": 1,
   "arms": [
     {
@@ -212,7 +212,7 @@ mkdir -p "$WS"
 }
 ```
 
-Replace `executable`, paths, and the digest. Keep `coverage: "one_task"` and
+Replace `executable`, paths, and the digest. Keep `--slice 1` and
 empty `configuration`.
 
 ```bash
@@ -222,14 +222,14 @@ node "$COLOPHON" arm add --workspace "$WS" --principal operator --draft tb21-one
   --arm oracle-a --pinning '{"harness":{"id":"harbor-oracle-a","version":"1.0.0"}}'
 node "$COLOPHON" arm add --workspace "$WS" --principal operator --draft tb21-one \
   --arm oracle-b --pinning '{"harness":{"id":"harbor-oracle-b","version":"1.0.0"}}'
-node "$COLOPHON" runtime terminal-bench-2-1 select --workspace "$WS" --principal operator \
-  --draft tb21-one --file "$WS/selection.json" --json
+node "$COLOPHON" method terminal-bench-2.1 --workspace "$WS" --principal operator \
+  --draft tb21-one --slice 1 --host "$WS/host.json" --json
 node "$COLOPHON" quote --workspace "$WS" --principal operator --draft tb21-one --json
 node "$COLOPHON" lock --workspace "$WS" --principal operator --draft tb21-one
 node "$COLOPHON" launch --workspace "$WS" --principal operator --draft tb21-one
 node "$COLOPHON" collect --workspace "$WS" --principal operator --draft tb21-one --json
-node "$COLOPHON" hub export --workspace "$WS" --principal operator --draft tb21-one --arm oracle-a --json
-node "$COLOPHON" hub export --workspace "$WS" --principal operator --draft tb21-one --arm oracle-b --json
+node "$COLOPHON" export --workspace "$WS" --principal operator --draft tb21-one --arm oracle-a --json
+node "$COLOPHON" export --workspace "$WS" --principal operator --draft tb21-one --arm oracle-b --json
 node "$COLOPHON" report --workspace "$WS" --principal operator --draft tb21-one --json
 ```
 

@@ -103,7 +103,7 @@ export {
   harborTrialAttemptNumber,
   harborTrialTaskName,
 } from "./runtime/harbor/manifest.js";
-export { HARBOR_ADAPTER_ID, PIER_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./runtime/harbor/manifest.js";
+export { HARBOR_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./runtime/harbor/manifest.js";
 export {
   HARBOR_SELECTION_ROLE,
   HARBOR_CORRELATION_ROLE,
@@ -257,39 +257,14 @@ export {
   readHarnessReport as readApexSweDevHarnessReport,
 } from "./runtime/apex-swe-dev/reports.js";
 export {
-  DEEP_SWE_V11_AGENT_ID,
-  DEEP_SWE_V11_DATASET_ID,
-  DEEP_SWE_V11_DEFAULT_REPLICATES,
-  DEEP_SWE_V11_GIT_SHA,
-  DEEP_SWE_V11_PROFILE,
-  DEEP_SWE_V11_SELECTION_ROLE,
-  DEEP_SWE_V11_TASK_COUNT,
-  DEEP_SWE_V11_TASKS_TREE_SHA,
-  DeepSweV11SelectionManifestSchema,
-  deepSweV11SelectionBytes,
-} from "./runtime/deep-swe-v1.1/manifest.js";
-export type { DeepSweV11SelectionManifest } from "./runtime/deep-swe-v1.1/manifest.js";
-export { computeGitTreeSha } from "./runtime/deep-swe-v1.1/git-tree-sha.js";
-export { resolveDeepSweV11Selection } from "./runtime/deep-swe-v1.1/host.js";
-export type {
-  DeepSweV11SelectionRequest,
-  DeepSweV11SelectionResolution,
-} from "./runtime/deep-swe-v1.1/host.js";
-export {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
   APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION,
   APEX_SWE_DEV_SUBMIT_CLOSED_SENTENCE,
-  DEEPSWE_CLOSED_SUBMIT_SENTENCE,
-  DEEPSWE_NOT_LEADERBOARD_READY_LIMITATION,
-  INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION,
-  INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0,
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
-  officialInspectEvalConformance,
-  officialPierExecutionConformance,
   officialSwebenchHarnessConformance,
   SWE_BENCH_VERIFIED_NOT_LEADERBOARD_READY_LIMITATION,
   SWE_BENCH_VERIFIED_SUBMIT_CLOSED_SENTENCE,
@@ -541,8 +516,8 @@ export type {
 } from "./venue/demo1-claude.js";
 
 // Workspace metadata and the sealed-bytes store (spec §4.5): exact bytes, digest-addressed.
-export { WORKSPACE_STORAGE_VERSION, WorkspaceAnchoringEntrySchema, WorkspaceMetadataSchema } from "./workspace/workspace.js";
-export type { WorkspaceAnchoringEntry, WorkspaceMetadata } from "./workspace/workspace.js";
+export { WORKSPACE_STORAGE_VERSION, WorkspaceMetadataSchema } from "./workspace/workspace.js";
+export type { WorkspaceMetadata } from "./workspace/workspace.js";
 export { getSealedBytes, hasSealedBytes, putSealedBytes, sha256Hex } from "./workspace/sealed-store.js";
 
 // Publication readiness is an explicit projection over durable state/journal capture. It does
@@ -581,7 +556,6 @@ export type { AuthorityPolicy, GatedOperation, Principal } from "./authority/pol
 
 // The operations facade (spec §5.1) — the boundary every surface calls.
 export {
-  anchoringConfigure,
   armAdd,
   armList,
   armRemove,
@@ -606,11 +580,12 @@ export {
   publicationRegister,
   publicationReport,
   publicationStatus,
-  runAnchor,
   runCancel,
   runCollect,
   runLaunch,
   runLock,
+  runAnchor,
+  anchoringConfigure,
   runPreview,
   runPublish,
   runQuote,
@@ -620,29 +595,12 @@ export {
   runStatus,
   runVerify,
   sampleInit,
-  selectInspectEvaluation,
-  selectInspectEvalRuntime,
-  exportInspectViewBundle,
-  selectHarborRuntime,
-  selectTerminalBench2Runtime,
-  selectTerminalBench21Runtime,
-  selectTerminalBench30Runtime,
-  selectSwebenchVerifiedRuntime,
-  selectApexAgentsRuntime,
-  selectApexSweDevRuntime,
-  selectDeepSweV11Runtime,
+  selectMethod,
+  exportDerivedBundle,
   migrateTerminalBenchLegacyTask,
-  exportHarborHubPackage,
-  exportSwebenchPredictions,
-  exportApexAgentsInspection,
-  exportApexSwePackage,
-  exportDeepSwePackage,
   updateDraft,
 } from "./operations/index.js";
 export type {
-  AnchoringConfigureInput,
-  AnchoringConfigureResult,
-  AnchorSubject,
   ArmAddInput,
   ArmInspection,
   ArmRemoveInput,
@@ -689,9 +647,6 @@ export type {
   QuoteCoverageRefusal,
   QuoteEstimatedWallTime,
   QuotePresentation,
-  RunAnchorDeps,
-  RunAnchorInput,
-  RunAnchorResult,
   RunCancelDeps,
   RunCancelInput,
   RunCancelResult,
@@ -701,6 +656,11 @@ export type {
   RunLaunchInput,
   RunLaunchResult,
   RunLockInput,
+  RunAnchorInput,
+  RunAnchorResult,
+  AnchorSubject,
+  AnchoringConfigureInput,
+  AnchoringConfigureResult,
   RunLockResult,
   RunPreviewDeps,
   RunPreviewInput,
@@ -720,35 +680,10 @@ export type {
   RunResumeInput,
   RunResumeResult,
   RunStatusCell,
-  SelectTerminalBench2RuntimeInput,
-  SelectTerminalBench2RuntimeResult,
-  SelectTerminalBench21RuntimeInput,
-  SelectTerminalBench21RuntimeResult,
-  SelectTerminalBench30RuntimeInput,
-  SelectTerminalBench30RuntimeResult,
-  SelectSwebenchVerifiedRuntimeInput,
-  SelectSwebenchVerifiedRuntimeResult,
-  SelectApexAgentsRuntimeInput,
-  SelectApexAgentsRuntimeResult,
-  SelectApexSweDevRuntimeInput,
-  SelectApexSweDevRuntimeResult,
-  SelectDeepSweV11RuntimeInput,
-  SelectDeepSweV11RuntimeResult,
-  ExportHarborHubPackageInput,
-  ExportHarborHubPackageResult,
-  HarborHubExportMode,
-  ExportSwebenchPredictionsInput,
-  ExportSwebenchPredictionsResult,
-  SwebenchPredictionsExportMode,
-  ExportApexAgentsInput,
-  ExportApexAgentsResult,
-  ApexAgentsExportMode,
-  ExportApexSwePackageInput,
-  ExportApexSwePackageResult,
-  ApexSweExportMode,
-  ExportDeepSwePackageInput,
-  ExportDeepSwePackageResult,
-  DeepSweExportMode,
+  SelectMethodInput,
+  SelectMethodResult,
+  ExportDerivedBundleInput,
+  ExportDerivedBundleResult,
   RunStatusCounts,
   RunDriverStatus,
   RunStatusResult,
@@ -758,27 +693,10 @@ export type {
   SampleInitInput,
   SampleInitResult,
   SampleInitTaskSummary,
-  SelectInspectEvaluationInput,
-  SelectInspectEvaluationResult,
-  SelectInspectEvalRuntimeInput,
-  SelectInspectEvalRuntimeResult,
-  ExportInspectViewBundleInput,
-  ExportInspectViewBundleResult,
-  InspectViewExportMode,
   UpdateDraftInput,
   VenueHonesty,
 } from "./operations/index.js";
 export { LOCAL_VENUE_LIMITS } from "./operations/index.js";
-
-// The `lock` verb's own anchor hook (anchor-evidence design §7.2), exported from its module rather
-// than through the operations facade — deliberately, and permanently. The facade's inventory is
-// exactly the operations, which is the invariant `./cli/parity-map.ts` and `./cli/parity.test.ts`
-// depend on; this is a surface helper, like the workspace and journal readers above it. Both
-// shipped surfaces call it after a successful lock so neither can drift into a lock that quietly
-// skips the errand the other performs. It never throws: every anchor outcome is typed, and the
-// operation audits itself.
-export { anchorAfterLockIfConfigured } from "./operations/run-anchor.js";
-export type { AnchorAfterLockOutcome } from "./operations/run-anchor.js";
 
 // BP-40: deletion-portable public bundle verification uses only bundle-carried bytes/public keys.
 export { verifyPublicBundle } from "./bundle/verify.js";

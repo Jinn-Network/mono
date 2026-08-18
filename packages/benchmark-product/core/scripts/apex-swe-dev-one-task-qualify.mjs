@@ -98,17 +98,16 @@ parseEnvelope(await colophon(["init", ...common, "--json"]));
 parseEnvelope(await colophon(["draft", "create", ...common, "--id", draftId, "--name", draftId, "--json"]));
 parseEnvelope(await colophon(["arm", "add", ...common, "--draft", draftId, "--arm", "one", "--pinning", JSON.stringify({ harness: { id: "placeholder", version: "1" } }), "--json"]));
 
-const selectionPath = join(workspace, "selection.json");
-writeFileSync(selectionPath, JSON.stringify({
+const hostPath = join(workspace, "host.json");
+writeFileSync(hostPath, JSON.stringify({
   apxExecutable: apx,
   pythonExecutable: python,
   registryMetadataPath,
   integrationTasksDir,
   observabilityProjectDir,
-  coverage: "one_task",
   arms: [{ armId: "one", modelNameOrPath: "one" }],
 }, null, 2));
-const selected = parseEnvelope(await colophon(["runtime", "apex-swe-dev", "select", ...common, "--draft", draftId, "--file", selectionPath, "--json"]));
+const selected = parseEnvelope(await colophon(["method", "apex-swe-dev", ...common, "--draft", draftId, "--slice", "1", "--host", hostPath, "--json"]));
 const quoted = parseEnvelope(await colophon(["quote", ...common, "--draft", draftId, "--json"]));
 if (quoted.presentation?.suite?.coverage !== "one_task") fail(`expected one_task, got ${quoted.presentation?.suite?.coverage}`);
 if (quoted.presentation?.suite?.executionConformance !== true) fail("expected executionConformance true");
@@ -127,7 +126,7 @@ launchApexSweDev({
 const cells = collectApexSweDevCells({ reportRoot, tasks: manifest.selectedTasks });
 if (cells.length !== 1) fail(`one_task must map onto one cell, got ${cells.length}`);
 if (cells[0].outcome !== "judged") fail("missing Mercor JSON after grade is unscorable, not skip");
-const exported = parseEnvelope(await colophon(["apex-swe", "export", ...common, "--draft", draftId, "--arm", "one", "--json"]));
+const exported = parseEnvelope(await colophon(["export", ...common, "--draft", draftId, "--arm", "one", "--json"]));
 if (exported.mode !== "inspection-upload") fail(`expected inspection-upload, got ${exported.mode}`);
 if (!String(exported.instructions).includes(APEX_SWE_DEV_SUBMIT_CLOSED_SENTENCE)) {
   fail("export instructions must say Colophon does not place a Mercor APEX-SWE leaderboard row");

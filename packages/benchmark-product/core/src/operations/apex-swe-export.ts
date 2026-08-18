@@ -63,7 +63,14 @@ export function exportApexSwePackage(
     action: "runtime.apex-swe.export",
     subject: input.draftId,
     inputs: input,
-    run: () => {
+    run: () => executeExportApexSwePackage(context, input),
+  });
+}
+
+export function executeExportApexSwePackage(
+  context: OperationContext,
+  input: ExportApexSwePackageInput,
+): ExportApexSwePackageResult {
       const document = readDraftDocument(context.workspaceDir, input.draftId);
       if (!document.spec.arms.some((arm) => arm.armId === input.armId)) {
         refuse("not-found", `drafts.${input.draftId}.spec.arms.${input.armId}`, "draft has no such arm");
@@ -117,6 +124,4 @@ export function exportApexSwePackage(
       const instructions = apexSweExportInstructions(exportDir);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, exportDir };
-    },
-  });
 }
