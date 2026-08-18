@@ -91,6 +91,13 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
         );
         const suite = suiteSelectionFromHarbor(harborSelection);
+        if (suite !== undefined && document.spec.replicates !== suite.replicates) {
+          refuse(
+            "conflict",
+            `drafts.${input.draftId}.spec.replicates`,
+            `Terminal-Bench 2.1 lock requires spec.replicates ${suite.replicates} to match the sealed suite selection — the draft's replicates was edited to ${document.spec.replicates} after select`,
+          );
+        }
         if (suite?.coverage === "full" && runState.suiteQuote === undefined) {
           refuse(
             "conflict",
