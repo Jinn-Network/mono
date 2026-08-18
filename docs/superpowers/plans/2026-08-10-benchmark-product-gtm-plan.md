@@ -369,7 +369,7 @@ A first-class Inspect integration can be a major acquisition channel:
 
 That Inspect-task door stays. It does not wear the Inspect eval suite name.
 
-Inspect eval is a different Inspect door: a **named official protocol** Colophon wraps, not Hub-as-the-claim ([DR-2026-08-18](../../../log/decisions/2026-08-18-inspect-as-specified.md)):
+Inspect eval is a different Inspect door: a **named official protocol** Colophon wraps, not Hub-as-the-claim ([DR-2026-08-18-e](../../../log/decisions/2026-08-18-inspect-as-specified.md)):
 
 > **Lock this Inspect eval as specified. Colophon runs each sample × specified epochs as Jinn cells, accounts every cell, and publishes a checkable bundle. An Inspect View log bundle is a derived artifact, not an Inspect Hub row and not the claim of record.**
 
