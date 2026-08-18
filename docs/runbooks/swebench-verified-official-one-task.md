@@ -10,7 +10,7 @@ Issue: [#2744](https://github.com/Jinn-Network/mono/issues/2744).
 
 A human operator, on a machine with `swebench` 4.1.x and Docker, drives the
 **built Colophon CLI** (core `dist/cli/bin.js`) through select → quote →
-lock → grade → export against:
+lock → export against:
 
 - Dataset id `princeton-nlp/SWE-bench_Verified`
 - Revision `c104f840cc67f8b6eec6f759ebc8b2693d585d4a`
@@ -18,12 +18,16 @@ lock → grade → export against:
   `packages/benchmark-product/core/src/runtime/swe-bench-verified/manifest.ts`)
 - Coverage `one_task` = lexicographic first `instance_id` from **that
   snapshot**, not from a hand-picked JSON
-- Real `python -m swebench.harness.run_evaluation`, local Docker
+- The real `swebench` 4.1.x install behind
+  `python -m swebench.harness.run_evaluation`, sealed by module version
 
 Quote must show `executionConformance: true`, `coverage: "one_task"`,
 `leaderboardSubmitReady: false`. Predictions export mode is
-`inspection-upload`. Do not run `sb submit`. An empty or wrong patch is
-allowed if the harness ran and the cell is accounted.
+`inspection-upload`. Do not run `sb submit`. This qualify does not launch
+the swebench harness: grading evidence arrives when the operator runs
+`python -m swebench.harness.run_evaluation` themselves and `collect` reads
+the resulting `report.json`. An empty or wrong patch is allowed if the
+harness ran and the cell is accounted.
 
 ## Out of scope
 
@@ -36,8 +40,8 @@ allowed if the harness ran and the cell is accounted.
 
 ```bash
 python3 -m pip install 'swebench==4.1.0'
-python3 -m swebench --version   # or: python3 -c "import swebench; print(swebench.__version__)"
-command -v python3              # keep this realpath for selection.json
+python3 -c "import swebench; print(swebench.__version__)"   # what select probes
+command -v python3                                         # keep this realpath for selection.json
 ```
 
 The selection executable is the Python that can run
