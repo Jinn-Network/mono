@@ -125,6 +125,18 @@ test("the default human surface discloses every carried anchor and every subject
           facts: { blockHeight: 880017 },
           trustMaterial: "supplied",
         },
+        // Material was supplied for this profile and still did not carry the anchor to `verified`
+        // — a root that does not chain, say. Disclosing "no trust material supplied" here would
+        // state the opposite of what this reader did.
+        {
+          recordSha256: "4".repeat(64),
+          status: "present",
+          provider: "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+          subject: "lock",
+          timeBasis: "authority-time",
+          facts: { genTime: "2026-02-02T12:00:00Z", policyOid: "2.999.1", serialNumber: "0b", signerCertificateSha256: "8".repeat(64) },
+          trustMaterial: "supplied",
+        },
       ],
       subjects: [
         { subject: "lock", outcome: "anchored" },
@@ -138,6 +150,9 @@ test("the default human surface discloses every carried anchor and every subject
   // Each carried anchor: subject, time basis, status, and its byte-embedded time or height.
   assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
   assert.match(output, /time basis not evaluated: no trust material supplied/);
+  // Supplied-but-unverifying is disclosed as itself, never as "no trust material supplied".
+  assert.match(output, /lock anchor · authority-time · present · 2026-02-02T12:00:00Z/);
+  assert.match(output, /time basis not evaluated: the trust material you supplied does not verify this anchor/);
   assert.match(output, /matrix anchor · chain-time · verified · block 880017/);
   assert.match(output, /time basis evaluated against trust material you supplied — 2026-08-17T12:00:00Z/);
   // An authority-time proof whose evaluated instant is the genTime already on the head line does

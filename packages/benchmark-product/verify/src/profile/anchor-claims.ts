@@ -175,6 +175,9 @@ function factsFor(
   if (result.status === "invalid") {
     throw new ClaimAnchorProjectionError(recordSha256, `the carried proof does not verify: ${result.reason}`);
   }
+  // Exhaustive over the four proof statuses: everything below reads one of these three shapes. A
+  // fifth member of ANCHOR_PROOF_STATUSES fails here rather than being projected as a fact.
+  result.status satisfies "verified" | "present" | "pending";
   if (provider === RFC3161_TSA_ANCHOR_PROFILE) {
     if (result.status === "pending") {
       // Structurally unreachable: an RFC 3161 token is complete when it is issued. Refusing rather

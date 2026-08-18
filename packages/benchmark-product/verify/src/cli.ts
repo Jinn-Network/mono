@@ -64,7 +64,14 @@ function evaluationNote(entry: AnchorVerificationEntry): string {
   }
   if (entry.status === "pending") return entry.reason ?? "no chain attestation yet";
   if (entry.status === "invalid") return entry.reason ?? "the proof does not verify";
-  return "time basis not evaluated: no trust material supplied";
+  // Exhaustive over the four proof statuses: `present` is the only one left. A fifth member of
+  // ANCHOR_PROOF_STATUSES fails here rather than silently inheriting this note.
+  entry.status satisfies "present";
+  // `present` with material supplied is a different disclosure from `present` with none: this
+  // reader did have material for the profile, and it did not carry this anchor to `verified`.
+  return entry.trustMaterial === "supplied"
+    ? "time basis not evaluated: the trust material you supplied does not verify this anchor"
+    : "time basis not evaluated: no trust material supplied";
 }
 
 function renderAnchor(entry: AnchorVerificationEntry): string {

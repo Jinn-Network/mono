@@ -175,9 +175,10 @@ status is a disclosed fact that prints and passes.
 Both output modes print the anchor detail; neither summarizes it away. Under the
 check list the default human output names every carried anchor — its subject,
 time basis, status, and the `genTime` or block height embedded in its own bytes
-— followed by whether this reader's own trust material evaluated the time basis
-or none was supplied, and then each subject's outcome, with an absent anchor and
-a declared-but-absent one named as the different facts they are:
+— followed by what this reader's own trust material did about the time basis:
+evaluated it, was supplied and did not verify this anchor, or was never
+supplied. Then each subject's outcome, with an absent anchor and a
+declared-but-absent one named as the different facts they are:
 
 ```
 Anchors

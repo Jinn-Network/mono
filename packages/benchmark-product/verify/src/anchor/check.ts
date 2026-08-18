@@ -215,6 +215,10 @@ export function evaluateIntegrityAnchors(input: EvaluateIntegrityAnchorsInput): 
       if (result.status === "pending") {
         return { ...base, status: "pending", timeBasis: result.timeBasis, reason: result.reason };
       }
+      // Exhaustive over the four proof statuses: `verified` and `present` are what remains, and the
+      // rest of this walk reads the `facts` only they carry. A fifth member of ANCHOR_PROOF_STATUSES
+      // fails here rather than arriving at the splice-catch as an unhandled shape.
+      result.status satisfies "verified" | "present";
 
       // 4. The splice-catch, on `facts.genTime` so it survives the default no-roots configuration.
       if (subject === "lock" && result.timeBasis === "authority-time") {
