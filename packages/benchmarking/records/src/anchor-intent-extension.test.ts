@@ -1,17 +1,22 @@
 import { describe, expect, test } from "vitest";
 import {
+  OPENTIMESTAMPS_ANCHOR_PROFILE,
+  RFC3161_TSA_ANCHOR_PROFILE,
+} from "@jinn-network/trust-core";
+import {
   ANCHOR_INTENT_EXTENSION,
   BENCHMARK_PUBLICATION_EXTENSION,
 } from "./identifiers.js";
 import {
+  ANCHOR_PROFILE_NAMESPACE,
   RunAnchorIntentExtensionSchema,
   readRunAnchorIntentExtension,
   runAnchorIntentExtension,
   withRunAnchorIntentExtension,
 } from "./anchor-intent-extension.js";
 
-const RFC3161 = "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1";
-const OPENTIMESTAMPS = "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1";
+const RFC3161 = RFC3161_TSA_ANCHOR_PROFILE;
+const OPENTIMESTAMPS = OPENTIMESTAMPS_ANCHOR_PROFILE;
 
 describe("the anchor-intent extension key", () => {
   test("is the design §7.3 URI and is distinct from the publication extension", () => {
@@ -35,8 +40,19 @@ describe("RunAnchorIntentExtensionSchema", () => {
     expect(RunAnchorIntentExtensionSchema.safeParse({ providers: [RFC3161, RFC3161] }).success).toBe(false);
   });
 
-  test("refuses a provider that is not an absolute IRI", () => {
+  test("the mirrored namespace is the one trust-core's own profile URIs live under", () => {
+    // Non-vacuous: if either side ever moves, this fails rather than the schema silently
+    // refusing every real profile.
+    for (const profile of [RFC3161_TSA_ANCHOR_PROFILE, OPENTIMESTAMPS_ANCHOR_PROFILE]) {
+      expect(profile.startsWith(ANCHOR_PROFILE_NAMESPACE)).toBe(true);
+      expect(profile.length).toBeGreaterThan(ANCHOR_PROFILE_NAMESPACE.length);
+    }
+  });
+
+  test("refuses a provider that is not a profile URI", () => {
     expect(RunAnchorIntentExtensionSchema.safeParse({ providers: ["rfc3161-tsa"] }).success).toBe(false);
+    // The bare namespace names no profile.
+    expect(RunAnchorIntentExtensionSchema.safeParse({ providers: [ANCHOR_PROFILE_NAMESPACE] }).success).toBe(false);
   });
 
   test("refuses an endpoint smuggled in beside the providers", () => {
@@ -44,6 +60,21 @@ describe("RunAnchorIntentExtensionSchema", () => {
     // assertion is that nothing survives, not that the parse throws.
     const parsed = runAnchorIntentExtension({ providers: [RFC3161], endpoint: "https://tsa.example/tsr" });
     expect(Object.keys(parsed)).toEqual(["providers"]);
+  });
+
+  test("refuses an endpoint smuggled INSIDE the providers list", () => {
+    // The rule that matters: an endpoint is a perfectly good absolute IRI, so an absolute-IRI
+    // check would have sealed this vendor URL into the public record forever.
+    for (const smuggled of [
+      "https://timestamp.example/tsr",
+      "https://alice.btc.calendar.example",
+      "http://192.0.2.7:8080/digest",
+      "https://spec.jinn.network/trust/anchor-locators/base-sepolia-calldata-v1",
+    ]) {
+      expect(RunAnchorIntentExtensionSchema.safeParse({ providers: [smuggled] }).success).toBe(false);
+      // Nor beside a legitimate profile, where a per-item check is what catches it.
+      expect(RunAnchorIntentExtensionSchema.safeParse({ providers: [smuggled, RFC3161].sort() }).success).toBe(false);
+    }
   });
 });
 

@@ -92,10 +92,16 @@ function configureWorkspaceAnchoring(entries: readonly { providerProfile: string
 
 const authority = createFixtureAuthority(KIT_AUTHORITY_SEED);
 
-function rfc3161SourceFor(subjectSha256: string, options: { tampered?: boolean } = {}): AnchorProofSource {
+function rfc3161SourceFor(
+  subjectSha256: string,
+  options: { tampered?: boolean; tokenSerialHex?: string } = {},
+): AnchorProofSource {
   const minted = options.tampered === true
     ? authority.mintTimeStampToken({ subjectSha256, brokenSignature: true })
-    : authority.mintTimeStampToken({ subjectSha256 });
+    : authority.mintTimeStampToken({
+      subjectSha256,
+      ...(options.tokenSerialHex === undefined ? {} : { tokenSerialHex: options.tokenSerialHex }),
+    });
   return {
     profile: RFC3161_TSA_ANCHOR_PROFILE,
     async obtainProof() {
@@ -294,6 +300,61 @@ describe("runAnchor — subject lock", () => {
     expect(outcome.error.code).toBe("illegal-transition");
     // Nothing was stored: the refusal happens before the record is sealed.
     expect(readRunState(workspaceDir, "draft-1")?.anchors).toBeUndefined();
+  }, 60_000);
+
+  test("TOCTOU: a same-pair anchor that lands during acquisition turns the store into a conflict", async () => {
+    // The write-once fence has the same shape as the launch fence: resolving it once, before
+    // acquisition, decides against a snapshot another call can invalidate while this one waits on
+    // a network. Two DISTINCT valid tokens, so nothing here is masked by the duplicate-record
+    // rule — without the fix both land and the run carries two lock anchors from one provider.
+    const clock = makeClock();
+    const runSha256 = await setUpLockedDraft(clock);
+    const input = {
+      draftId: "draft-1", subject: "lock" as const,
+      providerProfile: RFC3161_TSA_ANCHOR_PROFILE, endpoint: TSA_ENDPOINT,
+    };
+
+    let interloperRecordSha256 = "";
+    const outcome = await runAnchor(contextFor(clock), input, {
+      sources: { [RFC3161_TSA_ANCHOR_PROFILE]: rfc3161SourceFor(runSha256, { tokenSerialHex: "0a" }) },
+      afterObtainBeforeStore: async () => {
+        // A second `anchor` call that started later and finished first.
+        const interloper = await runAnchor(contextFor(clock), input, {
+          sources: { [RFC3161_TSA_ANCHOR_PROFILE]: rfc3161SourceFor(runSha256, { tokenSerialHex: "0b" }) },
+        });
+        expect(interloper.ok).toBe(true);
+        if (interloper.ok) interloperRecordSha256 = interloper.result.recordSha256;
+      },
+    });
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("conflict");
+
+    // Exactly one anchor of the pair survives, and it is the one that actually landed.
+    const anchors = readRunState(workspaceDir, "draft-1")?.anchors ?? [];
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0]?.recordSha256).toBe(interloperRecordSha256);
+  }, 60_000);
+
+  test("the durable invariant refuses a same-pair second anchor even if the operation is bypassed", async () => {
+    const clock = makeClock();
+    const runSha256 = await setUpLockedDraft(clock);
+    const first = await runAnchor(
+      contextFor(clock),
+      { draftId: "draft-1", subject: "lock", providerProfile: RFC3161_TSA_ANCHOR_PROFILE, endpoint: TSA_ENDPOINT },
+      { sources: { [RFC3161_TSA_ANCHOR_PROFILE]: rfc3161SourceFor(runSha256, { tokenSerialHex: "0a" }) } },
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(() => writeRunState(workspaceDir, "draft-1", {
+      ...state,
+      anchors: [...(state.anchors ?? []), {
+        subject: "lock", provider: RFC3161_TSA_ANCHOR_PROFILE, recordSha256: "c".repeat(64),
+      }],
+    })).toThrowError(/already carries a lock anchor/);
   }, 60_000);
 });
 

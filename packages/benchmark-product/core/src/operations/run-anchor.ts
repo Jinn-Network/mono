@@ -369,6 +369,9 @@ export function runAnchor(
         : await asUpgradeCapable(source).upgradeProof({
           subjectSha256: subject.sha256,
           proofBytes: upgrade.proofBytes,
+          // The resolved configuration, so the calendar named inside the stored proof is checked
+          // against what this workspace actually configured before any request is sent.
+          endpoint,
         });
 
       const proofStatus = requireVerifiable(
@@ -378,10 +381,31 @@ export function runAnchor(
 
       await deps.afterObtainBeforeStore?.();
 
-      // Acquisition did network I/O, so the launch fence is re-read against durable state rather
-      // than against the copy this call started with.
+      // Acquisition did network I/O, so every fence that guarded the decision to acquire is
+      // re-read against durable state rather than against the copy this call started with.
       const current = requireRunState(context.workspaceDir, input.draftId);
       if (input.subject === "lock") assertNotLaunched(current, input.draftId);
+
+      // The write-once fence is one of them. Resolving it once, before acquisition, decides
+      // against a snapshot that another `anchor` call can invalidate while this one is waiting on
+      // a network: re-running it here refuses `conflict` rather than appending a second anchor of
+      // the same pair. The resolution must also land on the SAME upgrade target it started with —
+      // an upgrade that silently retargeted mid-flight would name a predecessor it never read.
+      const upgradeAtStore = resolveUpgradeTarget(
+        context,
+        current,
+        input.subject,
+        providerProfile,
+        subject.sha256,
+        input.draftId,
+      );
+      if (upgradeAtStore?.recordSha256 !== upgrade?.recordSha256) {
+        refuse(
+          "conflict",
+          `runs.${input.draftId}.anchors`,
+          "another anchor over this subject from this provider landed while this proof was being acquired",
+        );
+      }
 
       const record: AnchorEvidence = {
         kind: ANCHOR_EVIDENCE_KIND,

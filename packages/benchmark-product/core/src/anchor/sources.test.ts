@@ -272,7 +272,7 @@ describe("createOpenTimestampsProofSource — upgrading", () => {
     const transport = recorder(async () => ({ status: 200, bytes: upgradeFrom(KIT_BITCOIN_BLOCK_HEIGHT) }));
     const source = createOpenTimestampsProofSource({ fetch: transport.fetch });
 
-    const upgraded = await source.upgradeProof({ subjectSha256: SUBJECT, proofBytes });
+    const upgraded = await source.upgradeProof({ subjectSha256: SUBJECT, proofBytes, endpoint: KIT_CALENDAR_URI });
 
     const request = transport.requests.at(-1)!;
     expect(request.method).toBe("GET");
@@ -301,12 +301,12 @@ describe("createOpenTimestampsProofSource — upgrading", () => {
       },
     });
 
-    await expect(source.upgradeProof({ subjectSha256: SUBJECT, proofBytes }))
+    await expect(source.upgradeProof({ subjectSha256: SUBJECT, proofBytes, endpoint: KIT_CALENDAR_URI }))
       .rejects.toMatchObject({ code: "venue-unavailable" });
 
     // Nothing about the 404 is durable, so the very same call succeeds once the calendar confirms.
     confirmed = true;
-    const upgraded = await source.upgradeProof({ subjectSha256: SUBJECT, proofBytes });
+    const upgraded = await source.upgradeProof({ subjectSha256: SUBJECT, proofBytes, endpoint: KIT_CALENDAR_URI });
     expect(seen).toHaveLength(2);
     expect(seen[0]).toBe(seen[1]);
     expect(createOpenTimestampsProofVerifier().verifyProof({ subjectSha256: SUBJECT, proofBytes: upgraded }).status)
@@ -322,14 +322,14 @@ describe("createOpenTimestampsProofSource — upgrading", () => {
         bytes: bodyFrom([{ kind: "sha256" }], [{ kind: "pending", uri: KIT_SECOND_CALENDAR_URI }]),
       }),
     });
-    await expect(source.upgradeProof({ subjectSha256: SUBJECT, proofBytes }))
+    await expect(source.upgradeProof({ subjectSha256: SUBJECT, proofBytes, endpoint: KIT_CALENDAR_URI }))
       .rejects.toMatchObject({ code: "venue-unavailable" });
   });
 
   test("refuses to upgrade a proof detached from a different subject", async () => {
     const proofBytes = await pendingProof();
     const source = createOpenTimestampsProofSource({ fetch: async () => ({ status: 200, bytes: new Uint8Array(0) }) });
-    await expect(source.upgradeProof({ subjectSha256: `${"0".repeat(63)}1`, proofBytes }))
+    await expect(source.upgradeProof({ subjectSha256: `${"0".repeat(63)}1`, proofBytes, endpoint: KIT_CALENDAR_URI }))
       .rejects.toMatchObject({ code: "venue-unavailable" });
   });
 
@@ -340,7 +340,7 @@ describe("createOpenTimestampsProofSource — upgrading", () => {
       attestations: [{ kind: "bitcoin", height: KIT_BITCOIN_BLOCK_HEIGHT }],
     });
     const source = createOpenTimestampsProofSource({ fetch: async () => ({ status: 200, bytes: new Uint8Array(0) }) });
-    await expect(source.upgradeProof({ subjectSha256: SUBJECT, proofBytes: complete }))
+    await expect(source.upgradeProof({ subjectSha256: SUBJECT, proofBytes: complete, endpoint: KIT_CALENDAR_URI }))
       .rejects.toMatchObject({ code: "venue-unavailable" });
   });
 });
@@ -363,3 +363,186 @@ function bodyFrom(
 function upgradeFrom(height: number): Uint8Array {
   return bodyFrom([{ kind: "sha256" }], [{ kind: "bitcoin", height }]);
 }
+
+// --- N1: the calendar a stored promise names is foreign input --------------
+
+describe("createOpenTimestampsProofSource — the upgrade allowlist", () => {
+  /** A pending proof whose promise names `uri`, built through the kit so the bytes are real. */
+  function pendingProofPromising(uri: string): Uint8Array {
+    return buildLinearOtsProof({
+      fileDigest,
+      operations: FIRST_CALENDAR_PATH,
+      attestations: [{ kind: "pending", uri }],
+    });
+  }
+
+  test("never sends a request to a calendar this workspace did not configure", async () => {
+    // The attestation is foreign input. Following it would make the upgrade path a request
+    // primitive aimed wherever the bytes say, with the response status echoed in the refusal.
+    const proofBytes = pendingProofPromising("https://attacker.invalid/internal-scan");
+    const transport = recorder(async () => ({ status: 200, bytes: upgradeFrom(KIT_BITCOIN_BLOCK_HEIGHT) }));
+    const source = createOpenTimestampsProofSource({ fetch: transport.fetch });
+
+    await expect(source.upgradeProof({ subjectSha256: SUBJECT, proofBytes, endpoint: KIT_CALENDAR_URI }))
+      .rejects.toMatchObject({ code: "venue-unavailable" });
+    expect(transport.requests).toEqual([]);
+  });
+
+  test("refuses a promise naming a non-http scheme without sending anything", async () => {
+    for (const hostile of ["file:///etc/passwd", "gopher://calendar.invalid", "not a url at all"]) {
+      const transport = recorder(async () => ({ status: 200, bytes: upgradeFrom(KIT_BITCOIN_BLOCK_HEIGHT) }));
+      const source = createOpenTimestampsProofSource({ fetch: transport.fetch });
+      await expect(source.upgradeProof({
+        subjectSha256: SUBJECT,
+        proofBytes: pendingProofPromising(hostile),
+        endpoint: KIT_CALENDAR_URI,
+      })).rejects.toMatchObject({ code: "venue-unavailable" });
+      expect(transport.requests).toEqual([]);
+    }
+  });
+
+  test("reports an unconfigured calendar as permanent, never as a transient not-yet", async () => {
+    const source = createOpenTimestampsProofSource({
+      fetch: async () => ({ status: 200, bytes: upgradeFrom(KIT_BITCOIN_BLOCK_HEIGHT) }),
+    });
+    await expect(source.upgradeProof({
+      subjectSha256: SUBJECT,
+      proofBytes: pendingProofPromising("https://attacker.invalid/scan"),
+      endpoint: KIT_CALENDAR_URI,
+    })).rejects.toThrowError(/can never be upgraded/);
+  });
+
+  test("upgrades a configured calendar whose promise differs only by a trailing slash", async () => {
+    const proofBytes = pendingProofPromising(`${KIT_CALENDAR_URI}/`);
+    const transport = recorder(async () => ({ status: 200, bytes: upgradeFrom(KIT_BITCOIN_BLOCK_HEIGHT) }));
+    const source = createOpenTimestampsProofSource({ fetch: transport.fetch });
+    const upgraded = await source.upgradeProof({ subjectSha256: SUBJECT, proofBytes, endpoint: `${KIT_CALENDAR_URI}/` });
+    expect(transport.requests).toHaveLength(1);
+    expect(createOpenTimestampsProofVerifier().verifyProof({ subjectSha256: SUBJECT, proofBytes: upgraded }).status)
+      .toBe("present");
+  });
+
+  test("follows only the configured branch of a mixed proof, and still upgrades it", async () => {
+    const proofBytes = buildLinearOtsProof({
+      fileDigest,
+      operations: FIRST_CALENDAR_PATH,
+      attestations: [
+        { kind: "pending", uri: KIT_CALENDAR_URI },
+        { kind: "pending", uri: "https://attacker.invalid/scan" },
+      ],
+    });
+    const transport = recorder(async () => ({ status: 200, bytes: upgradeFrom(KIT_BITCOIN_BLOCK_HEIGHT) }));
+    const source = createOpenTimestampsProofSource({ fetch: transport.fetch });
+    const upgraded = await source.upgradeProof({ subjectSha256: SUBJECT, proofBytes, endpoint: KIT_CALENDAR_URI });
+    expect(transport.requests).toHaveLength(1);
+    expect(transport.requests[0]!.url.startsWith(KIT_CALENDAR_URI)).toBe(true);
+    expect(createOpenTimestampsProofVerifier().verifyProof({ subjectSha256: SUBJECT, proofBytes: upgraded }).status)
+      .toBe("present");
+  });
+});
+
+// --- N5: permanent conditions never wear a transient headline --------------
+
+describe("createOpenTimestampsProofSource — permanent versus transient", () => {
+  async function pendingProof(): Promise<Uint8Array> {
+    const source = createOpenTimestampsProofSource({
+      fetch: async () => ({
+        status: 200,
+        bytes: calendarBody(FIRST_CALENDAR_PATH, [{ kind: "pending", uri: KIT_CALENDAR_URI }]),
+      }),
+    });
+    return source.obtainProof({ subjectSha256: SUBJECT, endpoint: KIT_CALENDAR_URI });
+  }
+
+  test("an unknown attestation class in a calendar's answer is reported as permanent", async () => {
+    const proofBytes = await pendingProof();
+    // A class this producer cannot re-serialize. Waiting does not change that, so calling it
+    // "no calendar has published the attestation yet" would invite retrying forever.
+    const unknownClass = Uint8Array.of(0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x00);
+    const source = createOpenTimestampsProofSource({
+      fetch: async () => ({ status: 200, bytes: unknownClass }),
+    });
+    await expect(source.upgradeProof({ subjectSha256: SUBJECT, proofBytes, endpoint: KIT_CALENDAR_URI }))
+      .rejects.toMatchObject({ code: "venue-unavailable" });
+    // The refusal names the class, so the operator can see WHY it is permanent.
+    await expect(source.upgradeProof({ subjectSha256: SUBJECT, proofBytes, endpoint: KIT_CALENDAR_URI }))
+      .rejects.toThrowError(/can never be upgraded[\s\S]*1122334455667788/);
+  });
+
+  test("a 404 keeps the transient headline", async () => {
+    const proofBytes = await pendingProof();
+    const source = createOpenTimestampsProofSource({
+      fetch: async () => ({ status: 404, bytes: new TextEncoder().encode("Pending confirmation") }),
+    });
+    await expect(source.upgradeProof({ subjectSha256: SUBJECT, proofBytes, endpoint: KIT_CALENDAR_URI }))
+      .rejects.toThrowError(/no calendar has published/);
+  });
+
+  test("one permanent branch beside one still-waiting branch stays transient", async () => {
+    // Something can still change, so the honest headline is the transient one.
+    const proofBytes = buildLinearOtsProof({
+      fileDigest,
+      operations: FIRST_CALENDAR_PATH,
+      attestations: [
+        { kind: "pending", uri: KIT_CALENDAR_URI },
+        { kind: "pending", uri: "https://attacker.invalid/scan" },
+      ],
+    });
+    const source = createOpenTimestampsProofSource({
+      fetch: async () => ({ status: 404, bytes: new Uint8Array(0) }),
+    });
+    await expect(source.upgradeProof({ subjectSha256: SUBJECT, proofBytes, endpoint: KIT_CALENDAR_URI }))
+      .rejects.toThrowError(/no calendar has published/);
+  });
+});
+
+// --- N4: the bound is on the operation, not on each request ----------------
+
+describe("the acquisition bound covers the whole operation", () => {
+  /** Honours the signal, so a bound that is never passed through simply hangs the test. */
+  function slowTransport(delayMs: number): AnchorHttpFetch {
+    return (request) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve({ status: 200, bytes: new Uint8Array(0) }), delayMs);
+      request.signal?.addEventListener("abort", () => {
+        clearTimeout(timer);
+        reject(new Error("aborted"));
+      });
+    });
+  }
+
+  test("every request of one stamp shares a single deadline", async () => {
+    // Three calendars at 40ms each against a 60ms operation bound: a per-request bound would let
+    // all three through, and the lock verb's worst case would grow with configuration.
+    const source = createOpenTimestampsProofSource({ fetch: slowTransport(40), timeoutMs: 60 });
+    const started = Date.now();
+    await expect(source.obtainProof({
+      subjectSha256: SUBJECT,
+      endpoint: `${KIT_CALENDAR_URI},${KIT_SECOND_CALENDAR_URI},https://third-calendar.invalid`,
+    })).rejects.toMatchObject({ code: "venue-unavailable" });
+    expect(Date.now() - started).toBeLessThan(120);
+  });
+
+  test("the RFC 3161 source is bounded the same way", async () => {
+    const source = createRfc3161ProofSource({ fetch: slowTransport(5_000), timeoutMs: 30 });
+    await expect(source.obtainProof({ subjectSha256: SUBJECT, endpoint: TSA_ENDPOINT }))
+      .rejects.toMatchObject({ code: "venue-unavailable" });
+  });
+
+  test("a caller's own signal still aborts, alongside the deadline", async () => {
+    const controller = new AbortController();
+    const source = createRfc3161ProofSource({ fetch: slowTransport(5_000), timeoutMs: 60_000 });
+    const pending = source.obtainProof({ subjectSha256: SUBJECT, endpoint: TSA_ENDPOINT, signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: "venue-unavailable" });
+  });
+
+  test("every request carries a signal, so no transport call is unbounded", async () => {
+    const transport = recorder(async () => ({
+      status: 200,
+      bytes: calendarBody(FIRST_CALENDAR_PATH, [{ kind: "pending", uri: KIT_CALENDAR_URI }]),
+    }));
+    const source = createOpenTimestampsProofSource({ fetch: transport.fetch });
+    await source.obtainProof({ subjectSha256: SUBJECT, endpoint: KIT_CALENDAR_URI });
+    expect(transport.requests.every((request) => request.signal !== undefined)).toBe(true);
+  });
+});

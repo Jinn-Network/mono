@@ -57,9 +57,24 @@ export interface AnchorHttpResponse {
 
 export type AnchorHttpFetch = (request: AnchorHttpRequest) => Promise<AnchorHttpResponse>;
 
-/** Bounded by construction: an acquisition that never returns would hold the lock-time attempt
- * open for as long as the far side felt like it. */
+/**
+ * Bounded by construction: an acquisition that never returns would hold the lock-time attempt open
+ * for as long as the far side felt like it.
+ *
+ * This is the bound on the **whole operation**, not on each request. A source that stamps through
+ * several calendars issues several requests in sequence, so a per-request bound would multiply by
+ * the number of configured calendars and the lock verb's worst case would grow with configuration
+ * rather than stay where the design put it. Each source therefore opens one deadline per
+ * `obtainProof` / `upgradeProof` call and every request it makes shares it; the default transport
+ * keeps a per-request bound of its own only as a backstop for a caller that supplies no signal.
+ */
 export const DEFAULT_ANCHOR_TIMEOUT_MS = 30_000;
+
+/** One deadline for a whole acquisition, combined with whatever the caller supplied. */
+function operationSignal(caller: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const deadline = AbortSignal.timeout(timeoutMs);
+  return caller === undefined ? deadline : AbortSignal.any([caller, deadline]);
+}
 
 /** The `globalThis.fetch`-backed default. Injected like every other transport rather than reached
  * for inside the sources, so a caller can replace it without patching a global. */
@@ -89,17 +104,28 @@ function unavailable(path: string, detail: string): never {
   refuse("venue-unavailable", path, detail);
 }
 
-function requireHttpsEndpoint(endpoint: string, path: string): URL {
+/**
+ * One canonical spelling for an http(s) endpoint, or `undefined` for anything that is not one.
+ * Non-throwing because it is used on two different kinds of input: configuration, where a bad
+ * value is a refusal, and foreign bytes, where a bad value is one branch to skip.
+ */
+function normalizeHttpEndpoint(value: string): string | undefined {
   let url: URL;
   try {
-    url = new URL(endpoint);
+    url = new URL(value);
   } catch {
-    return unavailable(path, `anchor endpoint "${endpoint}" is not an absolute URL`);
+    return undefined;
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    unavailable(path, `anchor endpoint "${endpoint}" must be an http(s) URL`);
+  if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+  return url.toString().replace(/\/$/, "");
+}
+
+function requireHttpsEndpoint(endpoint: string, path: string): string {
+  const normalized = normalizeHttpEndpoint(endpoint);
+  if (normalized === undefined) {
+    unavailable(path, `anchor endpoint "${endpoint}" is not an absolute http(s) URL`);
   }
-  return url;
+  return normalized;
 }
 
 const SUBJECT_PATTERN = /^[0-9a-f]{64}$/;
@@ -220,6 +246,8 @@ function describe(cause: unknown): string {
 
 export interface Rfc3161ProofSourceOptions {
   readonly fetch?: AnchorHttpFetch;
+  /** Bound on the whole acquisition. See `DEFAULT_ANCHOR_TIMEOUT_MS`. */
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -228,21 +256,23 @@ export interface Rfc3161ProofSourceOptions {
  */
 export function createRfc3161ProofSource(options: Rfc3161ProofSourceOptions = {}): AnchorProofSource {
   const transport = options.fetch ?? createGlobalAnchorHttpFetch();
+  const timeoutMs = options.timeoutMs ?? DEFAULT_ANCHOR_TIMEOUT_MS;
   return {
     profile: RFC3161_TSA_ANCHOR_PROFILE,
     async obtainProof(request: AnchorProofRequest): Promise<Uint8Array> {
       const path = "anchor.rfc3161-tsa";
       const url = requireHttpsEndpoint(request.endpoint, path);
       const body = buildTimeStampRequest(subjectDigestBytes(request.subjectSha256, path));
+      const signal = operationSignal(request.signal, timeoutMs);
 
       let response: AnchorHttpResponse;
       try {
         response = await transport({
-          url: url.toString(),
+          url,
           method: "POST",
           headers: { "content-type": TIMESTAMP_QUERY_MEDIA_TYPE, accept: TIMESTAMP_REPLY_MEDIA_TYPE },
           body,
-          ...(request.signal === undefined ? {} : { signal: request.signal }),
+          signal,
         });
       } catch (cause) {
         return unavailable(path, `the timestamp authority was unreachable: ${describe(cause)}`);
@@ -271,11 +301,21 @@ const OPENTIMESTAMPS_MEDIA_TYPE = "application/vnd.opentimestamps.v1";
 function calendarBaseUrls(endpoint: string, path: string): readonly string[] {
   const entries = endpoint.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0);
   if (entries.length === 0) unavailable(path, "no OpenTimestamps calendar is configured");
-  return entries.map((entry) => requireHttpsEndpoint(entry, path).toString().replace(/\/$/, ""));
+  return entries.map((entry) => requireHttpsEndpoint(entry, path));
 }
 
 export interface OpenTimestampsProofSourceOptions {
   readonly fetch?: AnchorHttpFetch;
+  /** Bound on the whole acquisition. See `DEFAULT_ANCHOR_TIMEOUT_MS`. */
+  readonly timeoutMs?: number;
+}
+
+/** A branch that will never upgrade however long anyone waits, kept apart from a branch that has
+ * simply not confirmed yet (§6.2). Reporting the first as the second would describe a permanent
+ * condition with a transient headline and invite an operator to keep retrying forever. */
+interface UpgradeAttemptReport {
+  readonly transient: string[];
+  readonly permanent: string[];
 }
 
 /**
@@ -296,6 +336,17 @@ export interface OpenTimestampsProofSource extends AnchorProofSource {
   upgradeProof(request: {
     readonly subjectSha256: string;
     readonly proofBytes: Uint8Array;
+    /**
+     * The configured calendars, in the same comma-separated spelling `obtainProof` takes.
+     *
+     * Required, and it is an allowlist rather than a hint. The calendar a promise names comes out
+     * of the stored proof, which is foreign bytes: a hostile or substituted attestation can name
+     * any URI it likes, and following it would turn the upgrade path into a request primitive
+     * pointed wherever the attestation says — with the response status echoed back in the refusal
+     * detail. A promise from a calendar this operator never configured is not upgraded. The
+     * reference client applies a calendar whitelist for exactly this reason.
+     */
+    readonly endpoint: string;
     readonly signal?: AbortSignal;
   }): Promise<Uint8Array>;
 }
@@ -304,6 +355,7 @@ export function createOpenTimestampsProofSource(
   options: OpenTimestampsProofSourceOptions = {},
 ): OpenTimestampsProofSource {
   const transport = options.fetch ?? createGlobalAnchorHttpFetch();
+  const timeoutMs = options.timeoutMs ?? DEFAULT_ANCHOR_TIMEOUT_MS;
   const path = "anchor.opentimestamps";
 
   return {
@@ -312,6 +364,7 @@ export function createOpenTimestampsProofSource(
     async obtainProof(request: AnchorProofRequest): Promise<Uint8Array> {
       const digest = subjectDigestBytes(request.subjectSha256, path);
       const calendars = calendarBaseUrls(request.endpoint, path);
+      const signal = operationSignal(request.signal, timeoutMs);
 
       const branches = [];
       const failures: string[] = [];
@@ -323,7 +376,7 @@ export function createOpenTimestampsProofSource(
             method: "POST",
             headers: { "content-type": "application/octet-stream", accept: OPENTIMESTAMPS_MEDIA_TYPE },
             body: digest,
-            ...(request.signal === undefined ? {} : { signal: request.signal }),
+            signal,
           });
         } catch (cause) {
           failures.push(`${calendar}: unreachable (${describe(cause)})`);
@@ -367,27 +420,38 @@ export function createOpenTimestampsProofSource(
         unavailable(path, "the stored proof carries no calendar promise to upgrade");
       }
 
+      const configured = new Set(calendarBaseUrls(request.endpoint, path));
+      const signal = operationSignal(request.signal, timeoutMs);
       let spliced = 0;
-      const notYet: string[] = [];
+      const report: UpgradeAttemptReport = { transient: [], permanent: [] };
+
       for (const site of parsed.pendingSites) {
         // The calendar to ask is the one that made *this* promise, named inside the attestation
-        // itself -- not a configured endpoint. The commitment is the message at that node, which
-        // is not the file digest (44 bytes in the program's real capture).
-        const url = `${site.uri.replace(/\/$/, "")}/timestamp/${site.commitmentHex}`;
+        // itself. Those are foreign bytes, so the URI is normalized and checked against the
+        // configured calendars before anything is sent: an attestation naming an unconfigured host
+        // is refused rather than fetched. The commitment is the message at that node, which is not
+        // the file digest (44 bytes in the program's real capture).
+        const calendar = normalizeHttpEndpoint(site.uri);
+        if (calendar === undefined || !configured.has(calendar)) {
+          report.permanent.push(
+            `${site.uri}: not one of this workspace's configured calendars, so its promise is never followed`,
+          );
+          continue;
+        }
         let response: AnchorHttpResponse;
         try {
           response = await transport({
-            url,
+            url: `${calendar}/timestamp/${site.commitmentHex}`,
             method: "GET",
             headers: { accept: OPENTIMESTAMPS_MEDIA_TYPE },
-            ...(request.signal === undefined ? {} : { signal: request.signal }),
+            signal,
           });
         } catch (cause) {
-          notYet.push(`${site.uri}: unreachable (${describe(cause)})`);
+          report.transient.push(`${calendar}: unreachable (${describe(cause)})`);
           continue;
         }
         if (response.status < 200 || response.status > 299) {
-          notYet.push(`${site.uri}: HTTP ${response.status}`);
+          report.transient.push(`${calendar}: HTTP ${response.status}`);
           continue;
         }
         try {
@@ -395,12 +459,24 @@ export function createOpenTimestampsProofSource(
           spliced += 1;
         } catch (cause) {
           if (!(cause instanceof OpenTimestampsFormatError)) throw cause;
-          notYet.push(`${site.uri}: ${cause.message}`);
+          // The calendar answered, and its answer is one this producer cannot re-serialize -- an
+          // attestation class it does not know, or a shape the splice cannot merge. Waiting does
+          // not change any of that.
+          report.permanent.push(`${calendar}: ${cause.message}`);
         }
       }
 
       if (spliced === 0) {
-        unavailable(path, `no calendar has published the attestation yet — ${notYet.join("; ")}`);
+        if (report.transient.length === 0) {
+          unavailable(
+            path,
+            `this proof can never be upgraded by this workspace — ${report.permanent.join("; ")}`,
+          );
+        }
+        unavailable(
+          path,
+          `no calendar has published the attestation yet — ${[...report.transient, ...report.permanent].join("; ")}`,
+        );
       }
       if (!hasBitcoinAttestation(parsed.root)) {
         // A calendar answered with more path but still no chain attestation. Storing that as an

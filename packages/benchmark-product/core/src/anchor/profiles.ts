@@ -38,6 +38,22 @@ export function isProducibleAnchorProfile(profile: string): profile is Producibl
   return (PRODUCIBLE_ANCHOR_PROFILES as readonly string[]).includes(profile);
 }
 
+/**
+ * Profiles whose acquisition has a second step, and therefore the only profiles for which an
+ * upgraded form of an earlier record can exist (§6.2). An RFC 3161 token is complete when it is
+ * issued — there is no later state for it to reach — so a second `rfc3161-tsa/v1` anchor over one
+ * subject is always a re-anchor and never an upgrade.
+ *
+ * This is what keeps the §7.1 rule 1 write-once exception narrow rather than a general escape
+ * hatch, so it is stated once here and read by both the operation and the durable RunState
+ * invariant.
+ */
+export const UPGRADEABLE_ANCHOR_PROFILES = [OPENTIMESTAMPS_ANCHOR_PROFILE] as const;
+
+export function isUpgradeableAnchorProfile(profile: string): boolean {
+  return (UPGRADEABLE_ANCHOR_PROFILES as readonly string[]).includes(profile);
+}
+
 /** The media type the record labels this profile's carried proof bytes with. */
 export function anchorProofMediaType(profile: ProducibleAnchorProfile): string {
   return profile === RFC3161_TSA_ANCHOR_PROFILE

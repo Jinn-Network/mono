@@ -20,6 +20,7 @@ import { inputsDigest } from "../audit/journal.js";
 import type { DraftSpec } from "../domain/draft.js";
 import { refuse, refuseWithIssues, type ProductIssue } from "../errors.js";
 import { atomicWriteFileSync, readFileIfExistsSync } from "../fs/atomic.js";
+import { UPGRADEABLE_ANCHOR_PROFILES, isUpgradeableAnchorProfile } from "../anchor/profiles.js";
 import { runStatePath } from "../workspace/layout.js";
 
 const Rfc3339Schema = z.string().regex(
@@ -171,25 +172,50 @@ export const RunStateSchema = z.object({
   /** Append-only; absent on every workspace that has never anchored (anchor-evidence §7.1). */
   anchors: z.array(RunAnchorSchema).optional(),
 }).superRefine((state, context) => {
+  // Write-once per (subject, provider), with §6.2's upgrade as the single exception — the durable
+  // half of the rule the `anchor` operation enforces (anchor-evidence design §7.1 rule 1).
+  //
+  // It lives here rather than only in the operation because the operation's check necessarily runs
+  // against a snapshot: acquisition does network I/O, so two concurrent `anchor` calls can both
+  // pass it and both reach the store. This invariant is what makes the second one impossible
+  // whatever the interleaving, and it holds for any writer rather than only for `runAnchor`.
   const anchorDigests = new Set<string>();
+  const digestsByPair = new Map<string, Set<string>>();
   (state.anchors ?? []).forEach((anchor, index) => {
+    const pairKey = `${anchor.subject}${anchor.provider}`;
+    const earlierOfPair = digestsByPair.get(pairKey) ?? new Set<string>();
+
     if (anchor.upgradesRecordSha256 !== undefined) {
-      if (anchor.upgradesRecordSha256 === anchor.recordSha256) {
+      if (!isUpgradeableAnchorProfile(anchor.provider)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["anchors", index, "upgradesRecordSha256"],
+          message: `anchors from ${anchor.provider} have no upgraded form; only ${UPGRADEABLE_ANCHOR_PROFILES.join(", ")} do`,
+        });
+      } else if (anchor.upgradesRecordSha256 === anchor.recordSha256) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["anchors", index, "upgradesRecordSha256"],
           message: "an anchor cannot upgrade itself",
         });
-      } else if (!anchorDigests.has(anchor.upgradesRecordSha256)) {
-        // The upgraded form is appended after the record it supersedes, never before it: the
-        // pending record is the thing being upgraded and must already be recorded.
+      } else if (!earlierOfPair.has(anchor.upgradesRecordSha256)) {
+        // The upgraded form is appended after the record it supersedes, and supersedes a record
+        // over the SAME subject from the SAME provider. An upgrade naming a different pair would
+        // be a second anchor wearing the exception's clothes.
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["anchors", index, "upgradesRecordSha256"],
-          message: "an upgraded anchor must name an earlier recorded anchor of this run",
+          message: "an upgraded anchor must name an earlier recorded anchor over the same subject from the same provider",
         });
       }
+    } else if (earlierOfPair.size > 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["anchors", index, "provider"],
+        message: `this run already carries a ${anchor.subject} anchor from ${anchor.provider}; a second one is admitted only as the upgraded form of an earlier pending proof`,
+      });
     }
+
     if (anchorDigests.has(anchor.recordSha256)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -198,6 +224,8 @@ export const RunStateSchema = z.object({
       });
     }
     anchorDigests.add(anchor.recordSha256);
+    earlierOfPair.add(anchor.recordSha256);
+    digestsByPair.set(pairKey, earlierOfPair);
   });
   if ((state.reportPayloadSha256 === undefined) !== (state.reportRecordSha256 === undefined)) {
     context.addIssue({
@@ -290,6 +318,11 @@ export function writeRunState(workspaceDir: string, draftId: string, state: RunS
     // exact bytes, so removing or editing a recorded one would silently unsay a fact the workspace
     // already obtained. Anchoring again -- a second provider, an upgraded proof, a re-anchor -- is
     // always a new entry appended after the ones already there.
+    //
+    // What may be appended is decided by the schema's own write-once-per-(subject, provider) rule
+    // above, which every write goes through: this block governs the entries already recorded, that
+    // one governs the entries being added. Together they are why no interleaving of two concurrent
+    // `anchor` calls can leave two anchors of one pair on disk.
     const recordedAnchors = current?.anchors ?? [];
     if (recordedAnchors.length > 0) {
       const proposedAnchors = result.data.anchors ?? [];

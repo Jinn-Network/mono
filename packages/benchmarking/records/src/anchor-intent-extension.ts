@@ -9,8 +9,10 @@
  * Three rules are load-bearing and each is enforced structurally rather than by convention:
  *
  * - **Profiles only, never endpoints.** An endpoint is machine-local configuration; sealing one
- *   would make the record depend on where it was produced, and would leak the operator's provider
- *   choice as a durable public fact about a run.
+ *   would make the record depend on where it was produced, and would leak the operator's vendor
+ *   choice as a durable public fact about a run. The rule is the profile *namespace*, not merely
+ *   "an absolute IRI": `https://timestamp.example/tsr` is a perfectly good absolute IRI and is
+ *   exactly the value this must refuse.
  * - **The declaration is intent, not proof.** An anchor necessarily postdates sealing, since it
  *   covers the sealed bytes. Nothing here asserts an anchor exists.
  * - **Sorted and unique.** The record is sealed to exact bytes, so two spellings of the same
@@ -21,14 +23,21 @@
 import { z } from "zod";
 import { ANCHOR_INTENT_EXTENSION } from "./identifiers.js";
 
-const AbsoluteIriSchema = z.string().refine(
-  (value) => /^[A-Za-z][A-Za-z0-9+.-]*:[^\s]+$/u.test(value),
-  "must be an absolute IRI",
+/**
+ * The anchor-provider profile namespace (anchor-evidence design §6). Mirrored locally rather than
+ * imported, the same way this package mirrors discovery's record-kind grammar, and pinned by test
+ * against the profile URIs `trust-core` publishes.
+ */
+export const ANCHOR_PROFILE_NAMESPACE = "https://spec.jinn.network/trust/anchor-profiles/";
+
+const AnchorProfileUriSchema = z.string().refine(
+  (value) => value.startsWith(ANCHOR_PROFILE_NAMESPACE) && value.length > ANCHOR_PROFILE_NAMESPACE.length,
+  `must be an anchor-provider profile URI under ${ANCHOR_PROFILE_NAMESPACE}`,
 );
 
 export const RunAnchorIntentExtensionSchema = z.object({
   /** The anchor-provider profile URIs this run intends to anchor through. */
-  providers: z.array(AbsoluteIriSchema).min(1, "declared anchoring intent must name at least one provider profile"),
+  providers: z.array(AnchorProfileUriSchema).min(1, "declared anchoring intent must name at least one provider profile"),
 }).superRefine((extension, ctx) => {
   for (let index = 1; index < extension.providers.length; index += 1) {
     if (extension.providers[index - 1]! >= extension.providers[index]!) {

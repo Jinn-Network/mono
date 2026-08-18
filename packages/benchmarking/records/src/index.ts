@@ -77,6 +77,7 @@ export {
 } from "./publication-extension.js";
 // --- anchor-intent/v1 extension helpers (anchor-evidence design §7.3) ---
 export {
+  ANCHOR_PROFILE_NAMESPACE,
   RunAnchorIntentExtensionSchema,
   readRunAnchorIntentExtension,
   runAnchorIntentExtension,
