@@ -106,7 +106,9 @@ process.exit(64);
     const suite = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, selected.result.suiteProtocolSha256!))) as { protocol: string; coverage: string };
     expect(suite.protocol).toBe("terminal-bench-2.1");
     expect(suite.coverage).toBe("one_task");
-    expect(readAuditEntries(workspaceDir).some((entry) => entry.action === "method.bind")).toBe(true);
+    const actions = readAuditEntries(workspaceDir).map((entry) => entry.action);
+    expect(actions).toContain("method.bind");
+    expect(actions).not.toContain("runtime.terminal-bench-2-1.select");
   });
 
   test("custom Inspect file does not wear a suite id; derived export refuses a suite-named bundle", async () => {

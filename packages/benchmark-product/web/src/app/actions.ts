@@ -1,7 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { redirect } from "next/navigation";
@@ -248,11 +248,15 @@ export async function methodBindAction(
   const draftId = field(formData, "draftId");
   const configuration = jsonField(formData, "configuration");
   return executeOperation(
-    (context) => {
+    async (context) => {
       const dir = mkdtempSync(join(tmpdir(), "colophon-method-"));
-      const filePath = join(dir, "inspect.json");
-      writeFileSync(filePath, JSON.stringify(configuration));
-      return selectMethod(context, { draftId, ref: filePath, cwd: dir });
+      try {
+        const filePath = join(dir, "inspect.json");
+        writeFileSync(filePath, JSON.stringify(configuration));
+        return await selectMethod(context, { draftId, ref: filePath, cwd: dir });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     },
     { revalidate: ["/workspace", `/workspace/${draftId}`] },
   );
