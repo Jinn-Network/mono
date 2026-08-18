@@ -7,13 +7,19 @@ import {
   suiteLeaderboardLimitation,
   type SuiteComparability,
 } from "./comparability.js";
-import { SUITE_PROTOCOL_PROFILE, SuiteProtocolSelectionSchema, type SuiteProtocolSelection } from "./manifest.js";
+import {
+  SUITE_PROTOCOL_PROFILE,
+  SuiteProtocolSelectionSchema,
+  type SuiteProtocolSelection,
+  type TerminalBench21SuiteProtocolSelection,
+} from "./manifest.js";
 import { allArmsRunComplete, assessArmRunComplete, type MatrixCellAccount } from "./run-complete.js";
 
-export function suiteSelectionFromHarbor(manifest: HarborSelectionManifest): SuiteProtocolSelection | undefined {
+export function suiteSelectionFromHarbor(manifest: HarborSelectionManifest): TerminalBench21SuiteProtocolSelection | undefined {
   const value = manifest.profiles?.[SUITE_PROTOCOL_PROFILE];
   if (value === undefined) return undefined;
-  return SuiteProtocolSelectionSchema.parse(value);
+  const parsed = SuiteProtocolSelectionSchema.parse(value);
+  return parsed.protocol === "terminal-bench-2.1" ? parsed : undefined;
 }
 
 export function taskNameByDigestFromSuite(suite: SuiteProtocolSelection): Readonly<Record<string, string>> {
@@ -23,7 +29,8 @@ export function taskNameByDigestFromSuite(suite: SuiteProtocolSelection): Readon
 export interface SuiteQuotePresentation extends SuiteComparability {
   readonly methodLeaderboardEligible: boolean;
   readonly cellCount: string;
-  readonly harborVersion: string;
+  readonly harborVersion?: string;
+  readonly inspectVersion?: string;
   readonly selectedTaskCount: number;
   readonly armCount: number;
   readonly replicates: number;
@@ -31,8 +38,9 @@ export interface SuiteQuotePresentation extends SuiteComparability {
 
 function methodBitsFromHarbor(input: {
   readonly manifest: HarborSelectionManifest;
-  readonly suite: SuiteProtocolSelection;
+  readonly suite: TerminalBench21SuiteProtocolSelection;
 }): {
+  readonly protocol: "terminal-bench-2.1";
   readonly coverage: SuiteProtocolSelection["coverage"];
   readonly executionConformance: boolean;
   readonly k: number;
@@ -42,6 +50,7 @@ function methodBitsFromHarbor(input: {
   readonly datasetRevisionMatchesLeaderboardPin: boolean;
 } {
   return {
+    protocol: "terminal-bench-2.1" as const,
     coverage: input.suite.coverage,
     executionConformance: officialHarborExecutionConformance({
       k: input.manifest.retryPolicy.nAttempts,
@@ -65,7 +74,7 @@ function presentSuiteQuote(
     readonly itemCount: number;
     readonly replicates: number;
   },
-  suite: SuiteProtocolSelection,
+  suite: TerminalBench21SuiteProtocolSelection,
   bits: SuiteComparability,
   eligible: boolean,
 ): SuiteQuotePresentation {
@@ -102,7 +111,7 @@ export function suiteFactsFromHarborManifest(input: {
   if (quote === undefined) return undefined;
   return {
     quote,
-    limitation: suiteLeaderboardLimitation(quote),
+    limitation: suiteLeaderboardLimitation(quote, "terminal-bench-2.1"),
   };
 }
 
@@ -125,7 +134,7 @@ export function suiteFactsFromAccountedRun(input: {
   })));
   const bits = deriveSuiteComparability({ ...method, ...complete });
   const quote = presentSuiteQuote(input, suite, bits, methodLeaderboardEligible(method));
-  return { quote, limitation: suiteLeaderboardLimitation(quote) };
+  return { quote, limitation: suiteLeaderboardLimitation(quote, "terminal-bench-2.1") };
 }
 
 export function suiteComparabilityForArm(input: {

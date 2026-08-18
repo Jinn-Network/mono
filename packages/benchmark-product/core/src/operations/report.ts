@@ -75,6 +75,8 @@ import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
+import { readInspectAsSpecifiedSelectionManifest } from "../runtime/inspect/host.js";
+import { suiteFactsFromAccountedInspectRun } from "../runtime/suite-protocol/from-inspect.js";
 
 export interface RunReportInput {
   readonly draftId: string;
@@ -180,7 +182,24 @@ export function runReport(
             jobDir: join(harborArmJobsDir(clockedContext.workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId)),
           })),
         })
-        : undefined;
+        : document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
+          ? (() => {
+            const manifest = readInspectAsSpecifiedSelectionManifest(
+              clockedContext.workspaceDir,
+              document.spec.evaluationRuntime.selectionManifestSha256,
+            );
+            return manifest === undefined
+              ? undefined
+              : suiteFactsFromAccountedInspectRun({
+                manifest,
+                armCount: runRecord.arms.length,
+                itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+                replicates: runRecord.replicates,
+                matrix: matrixRecord,
+                armIds: document.spec.arms.map((arm) => arm.armId),
+              });
+          })()
+          : undefined;
       const suiteLimits = suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation];
       let binaryLimits: readonly string[] = [];
       if (selected.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {

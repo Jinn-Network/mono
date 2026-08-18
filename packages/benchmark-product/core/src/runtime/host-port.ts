@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLocalVenue, type LocalVenue, type LocalVenueOptions } from "../venue/venue.js";
-import { probeInspectSelection, type InspectHostBinding } from "./inspect/host.js";
-import { probeInspectOciSelection } from "./inspect/oci.js";
+import { catalogInspectSelection, probeInspectSelection, type InspectHostBinding } from "./inspect/host.js";
+import type { InspectCatalog } from "./inspect-as-specified/catalog.js";
+import { catalogInspectOciSelection, probeInspectOciSelection } from "./inspect/oci.js";
 import type { InspectSandboxExecutionRequest } from "./inspect/oci.js";
 import type {
   InspectArmConfiguration,
@@ -51,6 +52,7 @@ export interface InspectRuntimeSelectionResolution {
 /** Process-owning boundary. Product operations carry state; the injected host owns execution. */
 export interface BenchmarkRuntimeHost {
   resolveInspectSelection(input: InspectRuntimeSelectionRequest, signal?: AbortSignal): Promise<InspectRuntimeSelectionResolution>;
+  catalogInspectTask(input: InspectRuntimeSelectionRequest, signal?: AbortSignal): Promise<InspectCatalog>;
   resolveHarborSelection(input: HarborRuntimeSelectionRequest, signal?: AbortSignal): Promise<HarborRuntimeSelectionResolution>;
   createVenue(
     binding: EvaluationRuntimeBinding | undefined,
@@ -144,6 +146,25 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
       return assessAgentRuntimeReadiness(hostOptions.agentDataDir, requests);
     },
     resolveHarborSelection,
+    async catalogInspectTask(input, signal) {
+      if (input.execution === "oci") {
+        return catalogInspectOciSelection({
+          dockerPath: resolve(input.dockerPath),
+          imageDigest: input.imageDigest,
+          projectDir: resolve(input.projectDir),
+          datasetCacheDir: resolve(input.datasetCacheDir),
+          sandboxExecution: input.sandboxExecution,
+          taskReference: input.taskReference,
+          taskArgs: input.taskArgs,
+        }, signal);
+      }
+      return catalogInspectSelection({
+        pythonPath: resolve(input.pythonPath),
+        projectDir: resolve(input.projectDir),
+        taskReference: input.taskReference,
+        taskArgs: input.taskArgs,
+      }, signal);
+    },
     async resolveInspectSelection(input, signal) {
       if (input.execution === "oci") {
         return probeInspectOciSelection({

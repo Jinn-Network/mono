@@ -125,6 +125,30 @@ describe("suite run-complete assessor", () => {
     expect(atifOnRetainedJob(jobDir, suite, matrix, "one")).toBe(false);
   });
 
+  test("accountSuiteArmCells loops inspect-as-specified replicates when k>1", () => {
+    const inspectSuite: SuiteProtocolSelection = {
+      schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
+      protocol: "inspect-as-specified",
+      coverage: "one_task",
+      datasetId: "hermetic",
+      datasetRevision: "c".repeat(64),
+      selectedTaskNames: ["HumanEval/0"],
+      datasetTaskCount: 2,
+      replicates: 3,
+      atifRequired: false,
+      items: [{ taskName: "HumanEval/0", taskSha256: digestA }],
+    };
+    const complete = [1, 2, 3].map((replicate) => ({
+      cellKey: cellKey(digestA, "one", replicate),
+      taskDigest: digestA,
+      armId: "one",
+      replicate,
+      outcome: "judged" as const,
+    }));
+    expect(accountSuiteArmCells({ cells: complete }, inspectSuite, "one")).toBe(true);
+    expect(accountSuiteArmCells({ cells: complete.slice(0, 2) }, inspectSuite, "one")).toBe(false);
+  });
+
   test("job result.json only is not ATIF", () => {
     root = mkdtempSync(join(tmpdir(), "suite-complete-"));
     const jobDir = join(root, "job");

@@ -338,7 +338,20 @@ const MultiScorerInspectSelectionManifestSchema = z.object({
 export const InspectSelectionManifestSchema = z.union([
   LegacyInspectSelectionManifestSchema,
   MultiScorerInspectSelectionManifestSchema,
-]).superRefine((manifest, context) => {
+]).superRefine((manifest, context) => refineInspectSelection(manifest, context, true));
+
+/** Shared Inspect pin without a single sampleId. Used by Inspect-as-specified until per-cell overlay. */
+export const InspectSelectionTemplateSchema = z.union([
+  LegacyInspectSelectionManifestSchema,
+  MultiScorerInspectSelectionManifestSchema,
+]).superRefine((manifest, context) => refineInspectSelection(manifest, context, false));
+export type InspectSelectionTemplate = z.infer<typeof InspectSelectionTemplateSchema>;
+
+function refineInspectSelection(
+  manifest: z.infer<typeof LegacyInspectSelectionManifestSchema> | z.infer<typeof MultiScorerInspectSelectionManifestSchema>,
+  context: z.RefinementCtx,
+  requireExactSample: boolean,
+): void {
   const providerBacked = manifest.arms.some((arm) => arm.provider !== undefined);
   const sandboxed = manifest.runtime.execution?.sandbox !== undefined;
   const sandboxSchema = manifest.schema === INSPECT_SANDBOX_SELECTION_SCHEMA
@@ -368,14 +381,16 @@ export const InspectSelectionManifestSchema = z.union([
     }
     return;
   }
-  if (manifest.runOptions.sampleId === undefined) {
-    context.addIssue({ code: "custom", path: ["runOptions", "sampleId"], message: "OCI execution requires one exact sampleId" });
-  }
-  if (manifest.task.dataset.selectedSampleId !== manifest.runOptions.sampleId) {
-    context.addIssue({ code: "custom", path: ["task", "dataset", "selectedSampleId"], message: "selected dataset sample must match runOptions.sampleId" });
-  }
-  if (manifest.task.dataset.orderedSampleSha256 === undefined) {
-    context.addIssue({ code: "custom", path: ["task", "dataset", "orderedSampleSha256"], message: "OCI execution requires an ordered selected-sample digest" });
+  if (requireExactSample) {
+    if (manifest.runOptions.sampleId === undefined) {
+      context.addIssue({ code: "custom", path: ["runOptions", "sampleId"], message: "OCI execution requires one exact sampleId" });
+    }
+    if (manifest.task.dataset.selectedSampleId !== manifest.runOptions.sampleId) {
+      context.addIssue({ code: "custom", path: ["task", "dataset", "selectedSampleId"], message: "selected dataset sample must match runOptions.sampleId" });
+    }
+    if (manifest.task.dataset.orderedSampleSha256 === undefined) {
+      context.addIssue({ code: "custom", path: ["task", "dataset", "orderedSampleSha256"], message: "OCI execution requires an ordered selected-sample digest" });
+    }
   }
   if (providerBacked && manifest.runtime.execution.isolation.network !== "broker-only") {
     context.addIssue({ code: "custom", path: ["runtime", "execution", "isolation", "network"], message: "provider-backed arms require the broker-only OCI network" });
@@ -392,7 +407,7 @@ export const InspectSelectionManifestSchema = z.union([
   if (providerBacked && manifest.runOptions.retryOnError !== 0) {
     context.addIssue({ code: "custom", path: ["runOptions", "retryOnError"], message: "provider-backed arms require retryOnError: 0" });
   }
-});
+}
 
 export type InspectArmConfiguration = z.infer<typeof InspectArmConfigurationSchema>;
 export type InspectRunOptions = z.infer<typeof InspectRunOptionsSchema>;

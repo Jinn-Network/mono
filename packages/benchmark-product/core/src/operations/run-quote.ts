@@ -48,6 +48,8 @@ import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { suiteQuoteFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
+import { readInspectAsSpecifiedSelectionManifest } from "../runtime/inspect/host.js";
+import { suiteQuoteFromInspect } from "../runtime/suite-protocol/from-inspect.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 
 export interface RunQuoteInput {
@@ -111,7 +113,8 @@ export interface QuotePresentation {
     readonly leaderboardSubmitReady: boolean;
     readonly methodLeaderboardEligible: boolean;
     readonly cellCount: string;
-    readonly harborVersion: string;
+    readonly harborVersion?: string;
+    readonly inspectVersion?: string;
     readonly selectedTaskCount: number;
     readonly armCount: number;
     readonly replicates: number;
@@ -324,14 +327,30 @@ export function runQuote(
       const previousPublication = readRunState(clockedContext.workspaceDir, input.draftId)?.publication;
       const minVerdicts = resolveAssurance(document.spec.assurance).minVerdicts;
       const previewLog = readPreviewLog(clockedContext.workspaceDir, input.draftId);
-      const suite = document.spec.evaluationRuntime?.adapterId === "harbor"
+      const evaluationRuntime = document.spec.evaluationRuntime;
+      const suite = evaluationRuntime?.adapterId === "harbor"
         ? suiteQuoteFromHarbor({
-          manifest: HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+          manifest: HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, evaluationRuntime.selectionManifestSha256)))),
           armCount: compiled.plannedRun.record.arms.length,
           itemCount: compiled.benchmarkRecord.items.length,
           replicates: compiled.plannedRun.record.replicates,
         })
-        : undefined;
+        : evaluationRuntime?.adapterId === "inspect"
+          ? (() => {
+            const manifest = readInspectAsSpecifiedSelectionManifest(
+              clockedContext.workspaceDir,
+              evaluationRuntime.selectionManifestSha256,
+            );
+            return manifest === undefined
+              ? undefined
+              : suiteQuoteFromInspect({
+                manifest,
+                armCount: compiled.plannedRun.record.arms.length,
+                itemCount: compiled.benchmarkRecord.items.length,
+                replicates: compiled.plannedRun.record.replicates,
+              });
+          })()
+          : undefined;
       writeRunState(clockedContext.workspaceDir, input.draftId, {
         draftId: input.draftId,
         specSha256: specDigest(document.spec),

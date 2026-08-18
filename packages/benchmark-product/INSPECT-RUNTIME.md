@@ -29,6 +29,27 @@ Batching many samples into one Inspect eval waits on a specified per-sample
 artifact rule (or an honest shared-log Collection-input rule) and is not
 scheduled here.
 
+## Official suite protocol (Inspect-as-specified)
+
+Cousin `colophon runtime inspect select` stays the first-slice integration:
+select a supported Inspect task, lock a comparison, run one cell. It does not
+write `protocol: "inspect-as-specified"` and cannot become
+`leaderboardSubmitReady` under that name.
+
+Inspect-as-specified is a named official-suite protocol
+([DR-2026-08-18](../../log/decisions/2026-08-18-inspect-as-specified.md),
+issue [#2745](https://github.com/Jinn-Network/mono/issues/2745)). The operator
+picks the eval; Colophon locks pin, sample catalog, specified epochs, Task-
+default solver, scorers, and native analysis. Wearing the name is not wearing
+GAIA, Cybench, or SWE-bench Verified. Claim of record remains the Colophon
+bundle. Colophon does not place an Inspect Hub row.
+
+Coverage enums are reused: `one_task` | `ten_task` | `full` | `custom` mean
+lexicographic first 1 / first 10 / all / custom **sample ids** from the sealed
+catalog. For this protocol `one_task` is one sample. Specified Inspect epochs
+map onto Jinn replicates; Inspect `--epochs` stays refused inside the worker.
+Eval-set batching remains deferred. Adapter id stays `"inspect"`.
+
 The optional OCI host narrows this further to Python `3.11.9`, Inspect Evals
 `0.16.0`, OpenAI SDK `2.53.0`, `linux/amd64`, and one exact `sampleId`. It can
 also host the narrow task-level `sandbox="docker"` shape through the product's
@@ -468,15 +489,18 @@ arbitrary sandbox providers, and runtime-supplied sandbox configuration are
 refused rather than coerced. A task that does not declare the supported Docker
 sandbox cannot opt into it merely through selection JSON.
 
-Inspect epochs are intentionally not configurable. One Jinn repetition is one
-expected cell and invokes Inspect with one epoch. This prevents one sample from
-being counted once as an Inspect epoch and again as a Jinn repetition.
-Parallel Inspect scorers are supported when their resolved public names are
-distinct. Inspect executes them unchanged and retains their raw values,
-answers, explanations, metrics, and reductions only in the native log. An
-Inspect `multi_scorer()` remains one native scorer: its own reduction runs once
-inside Inspect and Jinn never reapplies it. Inspect metrics and epoch reducers
-are pinned native analysis configuration, not per-cell Jinn measurements.
+Inspect epochs are intentionally not configurable **inside Inspect**. One Jinn
+repetition is one expected cell and invokes Inspect with one epoch. Specified
+Inspect-as-specified epochs are Jinn `replicates`, not an Inspect inner loop.
+This prevents one sample from being counted once as an Inspect epoch and again
+as a Jinn repetition. Parallel Inspect scorers are supported when their resolved
+public names are distinct. Inspect executes them unchanged and retains their raw
+values, answers, explanations, metrics, and reductions only in the native log.
+An Inspect `multi_scorer()` remains one native scorer: its own reduction runs
+once inside Inspect and Jinn never reapplies it. Inspect metrics and epoch
+reducers are pinned native analysis configuration, not per-cell Jinn
+measurements. The suite metric for Inspect-as-specified is epoch-reduce per
+sample, then sample-aggregate — not the Boolean cell-vote rate.
 
 Jinn projections are narrower. Each selected output becomes one Boolean
 measurement by type-strict comparison with its sealed `passValue`; the sealed

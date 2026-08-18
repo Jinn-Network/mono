@@ -58,6 +58,8 @@ import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
+import { readInspectAsSpecifiedSelectionManifest } from "../runtime/inspect/host.js";
+import { suiteFactsFromAccountedInspectRun } from "../runtime/suite-protocol/from-inspect.js";
 import { buildWorkspaceTrustDeps } from "../report/trust.js";
 import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receipts.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
@@ -222,7 +224,24 @@ export async function verifyRunWorkspace(
             jobDir: join(harborArmJobsDir(context.workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId)),
           })),
         })
-        : undefined;
+        : document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
+          ? (() => {
+            const manifest = readInspectAsSpecifiedSelectionManifest(
+              context.workspaceDir,
+              document.spec.evaluationRuntime.selectionManifestSha256,
+            );
+            return manifest === undefined
+              ? undefined
+              : suiteFactsFromAccountedInspectRun({
+                manifest,
+                armCount: runRecord.arms.length,
+                itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+                replicates: runRecord.replicates,
+                matrix: matrixRecord,
+                armIds: document.spec.arms.map((arm) => arm.armId),
+              });
+          })()
+          : undefined;
       const additionalLimitations = [
         ...inspectAdditional,
         ...(suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation]),

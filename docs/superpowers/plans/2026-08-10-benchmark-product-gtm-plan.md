@@ -1,7 +1,7 @@
 # Benchmark Product: High-Level Go-to-Market Plan
 
 **Status:** Working strategy draft  
-**Version:** 0.4 (2026-08-17 — TB 2.1 named protocol vs Inspect select-a-task per [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md); engine-wrap vs campaign-overlay copy per [DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md); 2026-08-10 — §6 discovery gate rewritten commitment-gated per [DR-2026-08-10](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md); §10 Phase 1 aligned; authority note routed through the DR. v0.1 circulated outside the repo.)  
+**Version:** 0.5 (2026-08-18 — Inspect-as-specified named protocol vs cousin select-a-task per [DR-2026-08-18](../../../log/decisions/2026-08-18-inspect-as-specified.md); 2026-08-17 — TB 2.1 named protocol vs Inspect select-a-task per [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md); engine-wrap vs campaign-overlay copy per [DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md); 2026-08-10 — §6 discovery gate rewritten commitment-gated per [DR-2026-08-10](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md); §10 Phase 1 aligned; authority note routed through the DR. v0.1 circulated outside the repo.)  
 **Work shape:** `design`  
 **Date:** 2026-08-10  
 **Repository basis:** `integration/evidence-v1` is the canonical implementation branch. PR #2541 is the current standalone Benchmark Product candidate and remains open against that branch at the time of writing.
@@ -367,6 +367,12 @@ A first-class Inspect integration can be a major acquisition channel:
 
 > **Select a supported Inspect task. Colophon expands it into a locked multi-arm comparison and runs each cell through Inspect.**
 
+That cousin door stays. It does not wear the Inspect-as-specified suite name.
+
+Inspect-as-specified is a different Inspect door: a **named official protocol** Colophon wraps, not Hub-as-the-claim ([DR-2026-08-18](../../../log/decisions/2026-08-18-inspect-as-specified.md)):
+
+> **Lock this Inspect eval as specified. Colophon runs each sample × specified epochs as Jinn cells, accounts every cell, and publishes a checkable bundle. An Inspect View log bundle is a derived artifact, not an Inspect Hub row and not the claim of record.**
+
 The product should complement the open-source evaluation ecosystem by keeping Inspect as the trial engine, not by pretending the Inspect eval-set is the published claim.
 
 Terminal-Bench 2.1 is a different door: a **named official protocol** Colophon wraps, not a select-a-task overlay and not Hub-as-the-claim ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)):
@@ -633,6 +639,6 @@ Each campaign creates the foundation for Jinn Data and the later query product.
 
 ## Authority note
 
-Engine-wrap vs campaign-overlay copy in §3, §8.1, §8.3, and §15 is governed by [DR-2026-08-17 — Runtime engine direct mode](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md). TB 2.1 named-protocol copy in §8.3 is governed by [DR-2026-08-17-b — Official suite protocol](../../../log/decisions/2026-08-17-official-suite-protocol.md). `GROWTH.md` is unchanged.
+Engine-wrap vs campaign-overlay copy in §3, §8.1, §8.3, and §15 is governed by [DR-2026-08-17 — Runtime engine direct mode](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md). TB 2.1 named-protocol copy in §8.3 is governed by [DR-2026-08-17-b — Official suite protocol](../../../log/decisions/2026-08-17-official-suite-protocol.md). Inspect-as-specified named-protocol copy in §8.3 is governed by [DR-2026-08-18 — Inspect-as-specified](../../../log/decisions/2026-08-18-inspect-as-specified.md). `GROWTH.md` is unchanged.
 
 The current `integration/evidence-v1` version of `GROWTH.md` encodes a harness-first strategy, and the standalone product design lineage (charter §5, program plan §3, PR #2541) fixes coding-agent builders as the first market. This draft departs from both. The departures are proposed — not silently applied — through [DR-2026-08-10 — Product-Led GTM and Default First Market](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md): the GROWTH.md strategy-layer revision routes through the canonical-doc process (linked GitHub Discussion + CODEOWNERS approval per `spec/2026-04-28-canonical-docs.md`), and the first-market amendment lands as a dated addendum on the program plan at ratification. Until the DR ratifies, GROWTH.md and the program plan remain authoritative as written.

@@ -1,4 +1,4 @@
-/** Product-owned suite protocol selection bound via Harbor profiles + registration artifacts. */
+/** Product-owned suite protocol selection. TB 2.1 binds via Harbor profiles; Inspect-as-specified binds via its own selection manifest. */
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
 import { sha256Hex } from "../../workspace/sealed-store.js";
@@ -12,7 +12,25 @@ export const SUITE_PROTOCOL_SELECTION_SCHEMA = "jinn.network/benchmark-product/s
 
 const Sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
 
-export const SuiteProtocolSelectionSchema = z.object({
+const SuiteItemSchema = z.object({
+  taskName: z.string().min(1),
+  taskSha256: Sha256,
+}).strict();
+
+function refineSuiteItems(
+  value: { readonly items: readonly { readonly taskName: string }[]; readonly selectedTaskNames: readonly string[] },
+  context: z.RefinementCtx,
+): void {
+  if (value.items.length !== value.selectedTaskNames.length) {
+    context.addIssue({ code: "custom", message: "suite items must match selected task names", path: ["items"] });
+  }
+  const names = value.items.map((item) => item.taskName);
+  if (names.join("\0") !== value.selectedTaskNames.join("\0")) {
+    context.addIssue({ code: "custom", message: "suite item names must equal selectedTaskNames in order", path: ["items"] });
+  }
+}
+
+export const TerminalBench21SuiteProtocolSelectionSchema = z.object({
   schema: z.literal(SUITE_PROTOCOL_SELECTION_SCHEMA),
   protocol: z.literal("terminal-bench-2.1"),
   coverage: z.enum(SUITE_COVERAGE),
@@ -22,20 +40,29 @@ export const SuiteProtocolSelectionSchema = z.object({
   datasetTaskCount: z.number().int().positive(),
   replicates: z.literal(5),
   atifRequired: z.literal(true),
-  items: z.array(z.object({
-    taskName: z.string().min(1),
-    taskSha256: Sha256,
-  }).strict()).min(1),
-}).strict().superRefine((value, context) => {
-  if (value.items.length !== value.selectedTaskNames.length) {
-    context.addIssue({ code: "custom", message: "suite items must match selected task names", path: ["items"] });
-  }
-  const names = value.items.map((item) => item.taskName);
-  if (names.join("\0") !== value.selectedTaskNames.join("\0")) {
-    context.addIssue({ code: "custom", message: "suite item names must equal selectedTaskNames in order", path: ["items"] });
-  }
-});
+  items: z.array(SuiteItemSchema).min(1),
+}).strict().superRefine(refineSuiteItems);
+
+export const InspectAsSpecifiedSuiteProtocolSelectionSchema = z.object({
+  schema: z.literal(SUITE_PROTOCOL_SELECTION_SCHEMA),
+  protocol: z.literal("inspect-as-specified"),
+  coverage: z.enum(SUITE_COVERAGE),
+  datasetId: z.string().min(1),
+  datasetRevision: Sha256,
+  selectedTaskNames: z.array(z.string().min(1)).min(1),
+  datasetTaskCount: z.number().int().positive(),
+  replicates: z.number().int().positive(),
+  atifRequired: z.literal(false),
+  items: z.array(SuiteItemSchema).min(1),
+}).strict().superRefine(refineSuiteItems);
+
+export const SuiteProtocolSelectionSchema = z.discriminatedUnion("protocol", [
+  TerminalBench21SuiteProtocolSelectionSchema,
+  InspectAsSpecifiedSuiteProtocolSelectionSchema,
+]);
 export type SuiteProtocolSelection = z.infer<typeof SuiteProtocolSelectionSchema>;
+export type TerminalBench21SuiteProtocolSelection = z.infer<typeof TerminalBench21SuiteProtocolSelectionSchema>;
+export type InspectAsSpecifiedSuiteProtocolSelection = z.infer<typeof InspectAsSpecifiedSuiteProtocolSelectionSchema>;
 
 export function suiteProtocolSelectionBytes(value: SuiteProtocolSelection): Uint8Array {
   return canonicalJsonBytes(SuiteProtocolSelectionSchema.parse(value) as never);

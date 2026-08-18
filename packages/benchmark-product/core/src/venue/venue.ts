@@ -106,6 +106,7 @@ import {
 import {
   assertInspectSelectionUndrifted,
   inspectWorkerPath,
+  readInspectAsSpecifiedSelectionManifest,
   readInspectHostBinding,
   readInspectSelectionManifest,
 } from "../runtime/inspect/host.js";
@@ -649,6 +650,9 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const inspectSelection = runtimeId === INSPECT_ADAPTER_ID
     ? readInspectSelectionManifest(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
     : undefined;
+  const inspectAsSpecified = runtimeId === INSPECT_ADAPTER_ID
+    ? readInspectAsSpecifiedSelectionManifest(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
+    : undefined;
   const inspectHost = runtimeId === INSPECT_ADAPTER_ID
     ? readInspectHostBinding(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
     : undefined;
@@ -754,6 +758,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
           selectionManifestSha256: options.evaluationRuntime!.selectionManifestSha256,
           manifest: inspectSelection,
           host: inspectHost,
+          ...(inspectAsSpecified === undefined ? {} : { asSpecified: inspectAsSpecified }),
           ...(inspectEvaluationStrategy === "embedded"
             ? { embeddedEvaluator: evaluators[0]! }
             : {}),

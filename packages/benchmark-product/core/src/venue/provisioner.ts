@@ -58,7 +58,9 @@ import {
 } from "../runtime/inspect/artifacts.js";
 import type { InspectHostBinding } from "../runtime/inspect/host.js";
 import { resolveHarborMaterial, type HarborHostBinding } from "../runtime/harbor/host.js";
-import type { InspectSelectionManifest } from "../runtime/inspect/manifest.js";
+import { InspectSelectionManifestSchema, type InspectSelectionManifest } from "../runtime/inspect/manifest.js";
+import type { InspectAsSpecifiedSelectionManifest } from "../runtime/inspect-as-specified/manifest.js";
+import { overlayInspectAsSpecifiedCell } from "../runtime/inspect-as-specified/overlay.js";
 import {
   INSPECT_BINARY_JUDGE_CONFIG_FILENAME,
   INSPECT_BINARY_JUDGE_INSTRUMENT_FILENAME,
@@ -644,6 +646,7 @@ export interface InspectProvisionerOptions {
   readonly selectionManifestSha256: string;
   readonly manifest: InspectSelectionManifest;
   readonly host: InspectHostBinding;
+  readonly asSpecified?: InspectAsSpecifiedSelectionManifest;
   /** Present only for the exact embedded direct-check strategy. */
   readonly embeddedEvaluator?: VenueEvaluatorSigner;
 }
@@ -1057,14 +1060,20 @@ function inspectProvisionerContract(
       const coordinate = parseCellKey(cellKey);
       const arm = options.manifest.arms.find((candidate) => candidate.armId === coordinate.armId);
       if (arm === undefined) throw new Error(`Inspect selection carries no configuration for arm ${coordinate.armId}`);
-      const taskSelection = (input.task.payload as { selectionManifestSha256?: unknown } | undefined)?.selectionManifestSha256;
-      if (taskSelection !== options.selectionManifestSha256) {
+      const payload = input.task.payload as { selectionManifestSha256?: unknown; sampleId?: unknown } | undefined;
+      let cellManifest = options.manifest;
+      if (options.asSpecified !== undefined) {
+        if (typeof payload?.sampleId !== "string" && typeof payload?.sampleId !== "number") {
+          throw new Error("Inspect-as-specified Task payload must carry the cell sampleId");
+        }
+        cellManifest = overlayInspectAsSpecifiedCell(options.asSpecified, payload.sampleId);
+      } else if (payload?.selectionManifestSha256 !== options.selectionManifestSha256) {
         throw new Error("Inspect Task selection digest does not match the venue's sealed manifest");
       }
       const workerInput = {
         projectDir: options.host.kind === "oci" ? "/jinn/project" : options.host.projectDir,
         outputDir: options.host.kind === "oci" ? "/jinn/output" : paths.out,
-        manifest: options.manifest,
+        manifest: cellManifest,
         arm,
         selectionManifestSha256: options.selectionManifestSha256,
         cellKey,
@@ -1082,10 +1091,12 @@ function inspectProvisionerContract(
       const nativeBytes = new Uint8Array(await readFile(nativeSource));
       const summaryBytes = new Uint8Array(await readFile(summarySource));
       const observedSummary = InspectCellSummarySchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(summaryBytes)));
+      const workerInput = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(paths.input, "inspect-run.json")))) as { manifest?: unknown };
+      const scoringManifest = InspectSelectionManifestSchema.parse(workerInput.manifest);
       const summary = observedSummary.schema === "jinn.network/benchmark-product/inspect-cell-summary/2"
         ? {
           ...observedSummary,
-          verdict: projectInspectCellVerdict(observedSummary, options.manifest),
+          verdict: projectInspectCellVerdict(observedSummary, scoringManifest),
         }
         : observedSummary;
       if (observedSummary.schema === "jinn.network/benchmark-product/inspect-cell-summary/2") {

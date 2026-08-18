@@ -31,6 +31,7 @@ import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
+import { readInspectAsSpecifiedSelectionManifest } from "../runtime/inspect/host.js";
 import { runtimeRegistrationArtifacts } from "../runtime/adapter.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import type { OperationContext } from "./context.js";
@@ -96,6 +97,19 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
             "conflict",
             `runs.${input.draftId}.suiteQuote`,
             "full-suite Terminal-Bench 2.1 lock requires a quote that recorded comparability bits",
+          );
+        }
+      }
+      if (document.spec.evaluationRuntime?.adapterId === "inspect") {
+        const inspectSuite = readInspectAsSpecifiedSelectionManifest(
+          clockedContext.workspaceDir,
+          document.spec.evaluationRuntime.selectionManifestSha256,
+        );
+        if (inspectSuite?.coverage === "full" && runState.suiteQuote === undefined) {
+          refuse(
+            "conflict",
+            `runs.${input.draftId}.suiteQuote`,
+            "full-suite Inspect-as-specified lock requires a quote that recorded comparability bits",
           );
         }
       }
