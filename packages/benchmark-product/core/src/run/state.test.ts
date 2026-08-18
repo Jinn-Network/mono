@@ -260,3 +260,61 @@ describe("specDigest", () => {
     expect(a).not.toBe(b);
   });
 });
+
+describe("anchors — append-only (anchor-evidence design §5 rule 6, §7.1)", () => {
+  const first = { subject: "lock" as const, provider: "https://p/1", recordSha256: "1".repeat(64) };
+  const second = { subject: "matrix" as const, provider: "https://p/2", recordSha256: "2".repeat(64) };
+  const upgraded = {
+    subject: "lock" as const,
+    provider: "https://p/1",
+    recordSha256: "3".repeat(64),
+    upgradesRecordSha256: first.recordSha256,
+  };
+
+  test("absent by default — a workspace that never anchored carries no field", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState());
+    expect(readRunState(workspaceDir, "draft-1")?.anchors).toBeUndefined();
+  });
+
+  test("entries may be appended", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first] }));
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first, second] }));
+    expect(readRunState(workspaceDir, "draft-1")?.anchors).toEqual([first, second]);
+  });
+
+  test("a recorded anchor cannot be removed", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first, second] }));
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first] })))
+      .toThrowError(/cannot be removed/);
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState()))
+      .toThrowError(/cannot be removed/);
+  });
+
+  test("a recorded anchor cannot be changed or reordered", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first, second] }));
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({
+      anchors: [{ ...first, recordSha256: "9".repeat(64) }, second],
+    }))).toThrowError(/cannot be changed or reordered/);
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [second, first] })))
+      .toThrowError(/cannot be changed or reordered/);
+  });
+
+  test("the upgraded form of a pending proof is appended beside the record it upgrades", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first] }));
+    writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first, upgraded] }));
+    expect(readRunState(workspaceDir, "draft-1")?.anchors).toEqual([first, upgraded]);
+  });
+
+  test("an upgrade must name an earlier recorded anchor, and never itself", () => {
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [upgraded] })))
+      .toThrowError(/must name an earlier recorded anchor/);
+    expect(() => writeRunState(workspaceDir, "draft-2", minimalState({
+      anchors: [{ ...first, upgradesRecordSha256: first.recordSha256 }],
+    }))).toThrowError(/cannot upgrade itself/);
+  });
+
+  test("the same anchor record is never recorded twice", () => {
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ anchors: [first, first] })))
+      .toThrowError(/recorded twice/);
+  });
+});

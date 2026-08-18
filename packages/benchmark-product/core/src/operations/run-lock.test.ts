@@ -2,7 +2,12 @@ import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { parseRun } from "@jinn-network/benchmarking-records";
+import {
+  ANCHOR_INTENT_EXTENSION,
+  parseRun,
+  readRunAnchorIntentExtension,
+  sealRun,
+} from "@jinn-network/benchmarking-records";
 import { PREDICTION_FORECAST_PROFILE_DIGEST_HEX } from "@jinn-network/task-execution-profiles";
 import { readAuditEntries } from "../audit/journal.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
@@ -228,4 +233,75 @@ describe("runLock — draft immutability after lock", () => {
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("illegal-transition");
   }, 30_000);
+});
+
+describe("declared anchoring intent (anchor-evidence design §7.3)", () => {
+  /** Two drafts, one workspace, one lock instant. Same owner, same benchmark, same arms, same
+   * closeAt — so anything that differs in the sealed bytes differs because of the draft's own
+   * `anchoring` block and nothing else. */
+  async function lockTwoDrafts(declaring: unknown): Promise<{ plain: Uint8Array; declared: Uint8Array }> {
+    const setupClock = makeClock();
+    await setUpQuotedDraft(setupClock, "plain-draft");
+
+    // `setUpQuotedDraft` already created the workspace; the second draft joins it.
+    createDraft(contextFor(setupClock), { draftId: "declaring-draft", name: "Lock Test" });
+    await sampleInit(contextFor(setupClock), { draftId: "declaring-draft" });
+    armAdd(contextFor(setupClock), { draftId: "declaring-draft", armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
+    armAdd(contextFor(setupClock), { draftId: "declaring-draft", armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+    if (declaring !== undefined) {
+      updateDraft(contextFor(setupClock), { draftId: "declaring-draft", patch: { anchoring: declaring } });
+    }
+    expect((await runQuote(contextFor(setupClock), { draftId: "declaring-draft" })).ok).toBe(true);
+
+    // One frozen instant for both locks, so `closeAt` is identical in both records.
+    const lockClock = () => "2026-08-05T09:00:00Z";
+    const plain = runLock(contextFor(lockClock), { draftId: "plain-draft" });
+    const declared = runLock(contextFor(lockClock), { draftId: "declaring-draft" });
+    expect(plain.ok && declared.ok).toBe(true);
+    if (!plain.ok || !declared.ok) throw new Error("lock failed");
+    return {
+      plain: getSealedBytes(workspaceDir, plain.result.runSha256),
+      declared: getSealedBytes(workspaceDir, declared.result.runSha256),
+    };
+  }
+
+  test("a draft that declares nothing seals byte-identical Run records", async () => {
+    const { plain, declared } = await lockTwoDrafts(undefined);
+    expect(Buffer.from(declared).toString("hex")).toBe(Buffer.from(plain).toString("hex"));
+    expect(Object.hasOwn(JSON.parse(new TextDecoder().decode(plain)), ANCHOR_INTENT_EXTENSION)).toBe(false);
+  }, 60_000);
+
+  test("a draft that only disables anchoring still seals byte-identical Run records", async () => {
+    // The disable is producer-side policy. Sealing it would leak local policy into a public record.
+    const { plain, declared } = await lockTwoDrafts({ enabled: false });
+    expect(Buffer.from(declared).toString("hex")).toBe(Buffer.from(plain).toString("hex"));
+  }, 60_000);
+
+  test("a declared intent adds exactly the one namespaced key and changes the digest", async () => {
+    const providers = [
+      "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+      "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+    ];
+    const { plain, declared } = await lockTwoDrafts({ declaredProviders: providers });
+    expect(Buffer.from(declared).toString("hex")).not.toBe(Buffer.from(plain).toString("hex"));
+
+    const record = JSON.parse(new TextDecoder().decode(declared)) as Record<string, unknown>;
+    // Sorted and unique, never in the order the draft happened to list them.
+    expect(record[ANCHOR_INTENT_EXTENSION]).toEqual({ providers: [...providers].sort() });
+    expect(readRunAnchorIntentExtension(record)).toEqual({ providers: [...providers].sort() });
+    // Endpoints never travel: the declaration names profiles only.
+    expect(new TextDecoder().decode(declared)).not.toContain("timestamp.invalid");
+
+    // Removing the one key and re-sealing reproduces the unanchored bytes exactly: the extension
+    // is the only difference, not a re-shaping of the record.
+    delete record[ANCHOR_INTENT_EXTENSION];
+    expect(Buffer.from(sealRun(record).bytes).toString("hex")).toBe(Buffer.from(plain).toString("hex"));
+  }, 60_000);
+
+  test("a duplicated declaration is deduplicated rather than sealed twice", async () => {
+    const profile = "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1";
+    const { declared } = await lockTwoDrafts({ declaredProviders: [profile, profile] });
+    const record = JSON.parse(new TextDecoder().decode(declared)) as Record<string, unknown>;
+    expect(record[ANCHOR_INTENT_EXTENSION]).toEqual({ providers: [profile] });
+  }, 60_000);
 });

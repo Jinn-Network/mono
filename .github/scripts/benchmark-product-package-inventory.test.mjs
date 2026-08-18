@@ -43,6 +43,12 @@ const CORE_JINN = [
   '@jinn-network/task-execution-oci-grader', '@jinn-network/task-execution-profiles',
   '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-supervisor',
   '@jinn-network/task-execution-workspace', '@jinn-network/trust-core',
+  // `trust-testing` is the Trust layer's conformance kit and a devDependency only: core pins its
+  // producer-side `.ots` serializer (anchor-evidence design §6.2) against the kit's byte-verified
+  // builder and its committed real-calendar capture. The source-boundaries guard pins it to
+  // `src/**/*.test.ts`, which `tsconfig.build.json` excludes from `dist/`, so it never reaches the
+  // published package.
+  '@jinn-network/trust-testing',
 ];
 const VERIFY_JINN = [
   '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop',
@@ -95,6 +101,10 @@ const APPROVED = new Map([
     '@jinn-network/evidence-protocol',
     '@jinn-network/evidence-repository', '@jinn-network/execution-recorder',
     '@jinn-network/record-discovery-client',
+    // As in `verify`: `trust-resolve` is imported nowhere in core, and arrives only as a declared
+    // dependency of the `trust-testing` devDependency. A portal resolution is what keeps it
+    // pointed at the live tree rather than at a registry version that does not exist.
+    '@jinn-network/trust-resolve',
   ] }],
   ['cli', { colophon: ['@colophon-claims/core', '@colophon-claims/verify'], jinn: [], portals: [
     '@colophon-claims/core', '@colophon-claims/verify', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
