@@ -64,7 +64,7 @@ export function buildInspectEvalTasks(input: {
     tasks.map((task) => ({ bytes: task.bytes, digest: `sha256:${task.sha256}` as const })),
     {
       name: `inspect-eval:${input.resolvedName}`,
-      description: "Inspect eval: one unmodified Inspect sample invocation per benchmark cell; specified epochs are Jinn replicates.",
+      description: "Inspect eval: one unmodified Inspect sample invocation per benchmark cell; specified epochs are the protocol's replicates.",
       version: "1.0.0",
     },
   );
