@@ -39,7 +39,8 @@ jobs:
             .github/scripts/branch-protection-audit.test.mjs \
             .github/scripts/benchmark-product-source-boundaries.test.mjs \
             .github/scripts/architecture-control-workflow.test.mjs \
-            .github/scripts/platform-verification-selection.test.mjs
+            .github/scripts/platform-verification-selection.test.mjs \
+            .github/scripts/required-check-set.test.mjs
           node .github/scripts/architecture-control.mjs \
             --out .architecture-control/coverage.json
           node .github/scripts/generate-architecture.mjs --check

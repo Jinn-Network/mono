@@ -2025,7 +2025,7 @@
       "decisionRecords": 5,
       "discoveredFirstPartySurfaces": 2980,
       "generatedOutputSources": 1378,
-      "generatorSources": 660,
+      "generatorSources": 662,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 6
@@ -3092,6 +3092,26 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/repository-gitlinks.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/required-check-set.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/required-check-set.test.mjs"
       },
       {
         "categories": [
