@@ -124,7 +124,7 @@ jobs:
           # and the gate reports green having run nothing.
           # `core.quotePath=false` keeps a non-ASCII path unquoted and unescaped, so
           # the `^`-anchored patterns see the real path.
-          git -c core.quotePath=false diff --name-only "${diff_base}...${diff_head}" \
+          git -c core.quotePath=false diff --no-renames --name-only "${diff_base}...${diff_head}" \
             > "${RUNNER_TEMP}/changed.txt"
           echo "changed files: $(wc -l < "${RUNNER_TEMP}/changed.txt")"
           head -200 "${RUNNER_TEMP}/changed.txt"
