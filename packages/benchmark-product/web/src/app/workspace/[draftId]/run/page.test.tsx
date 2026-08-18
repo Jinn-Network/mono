@@ -92,6 +92,17 @@ describe("durable run monitor cancellation language", () => {
     loadRunViewMock.mockReturnValue(status("closed", false));
     const closed = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
     expect(closed).not.toContain('<button disabled="">Anchor the terminal Matrix');
+    // The lock window shut at launch, so the lock control stays disabled here.
+    expect(closed).toContain('<button disabled="">Anchor the sealed Run record');
+
+    // The anchoring window closes at `report` (§19.5): past it the operation always refuses, so
+    // offering the control would be an enabled button whose only outcome is a refusal.
+    for (const past of ["reported", "published-bundle"] as const) {
+      loadRunViewMock.mockReturnValue(status(past, true));
+      const afterReport = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+      expect(afterReport).toContain('<button disabled="">Anchor the terminal Matrix');
+      expect(afterReport).toContain('<button disabled="">Anchor the sealed Run record');
+    }
   });
 
   test("keeps local-first default while offering post-hoc accounting without a Report", async () => {

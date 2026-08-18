@@ -16,7 +16,7 @@
  * - **The verification hash never comes from a platform default.** Real
  *   authorities emit bare `rsaEncryption` as the SignerInfo `signatureAlgorithm`
  *   and leave the hash to the SignerInfo `digestAlgorithm` (the committed
- *   DigiCert capture does exactly this). `crypto.verify` falls back to SHA-256
+ *   RSA production capture does exactly this). `crypto.verify` falls back to SHA-256
  *   when the algorithm pins no digest, so a conformant SHA-384 token would be
  *   verified under the wrong hash -- and the design's SHA-256-family floor would
  *   bind by accident of that default rather than by rule. The hash is therefore

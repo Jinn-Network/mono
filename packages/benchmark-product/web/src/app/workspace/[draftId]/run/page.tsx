@@ -64,7 +64,7 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
         <p className="text-sm text-muted-foreground">A lock anchor must be obtained before dispatch begins; an anchor never proves a result is correct, only that these bytes existed by a time a third party attests.</p>
         <div className="grid min-w-0 gap-5 md:grid-cols-2 [&>*]:min-w-0">
           <ActionForm action={GUI_SERVER_ACTIONS["run.anchor"]} submitLabel="Anchor the sealed Run record" disabled={state !== "locked"}><HiddenDraft draftId={draftId} /><input type="hidden" name="subject" value="lock" /></ActionForm>
-          <ActionForm action={GUI_SERVER_ACTIONS["run.anchor"]} submitLabel="Anchor the terminal Matrix" disabled={!postHoc}><HiddenDraft draftId={draftId} /><input type="hidden" name="subject" value="matrix" /></ActionForm>
+          <ActionForm action={GUI_SERVER_ACTIONS["run.anchor"]} submitLabel="Anchor the terminal Matrix" disabled={state !== "closed"}><HiddenDraft draftId={draftId} /><input type="hidden" name="subject" value="matrix" /></ActionForm>
         </div>
       </CardContent></Card>
       <section aria-labelledby="publication-heading" className="grid gap-5 lg:grid-cols-2">
