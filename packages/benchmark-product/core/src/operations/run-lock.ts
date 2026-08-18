@@ -35,6 +35,7 @@ import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { suiteProtocolDisplayName } from "../runtime/suite-protocol/comparability.js";
 import { suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
 import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
 import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
@@ -102,7 +103,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           refuse(
             "conflict",
             `runs.${input.draftId}.suiteQuote`,
-            "full-suite Terminal-Bench 2.1 lock requires a quote that recorded comparability bits",
+            `full-suite ${suiteProtocolDisplayName(suite.protocol)} lock requires a quote that recorded comparability bits`,
           );
         }
       }

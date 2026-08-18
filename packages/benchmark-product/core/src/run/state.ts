@@ -21,6 +21,7 @@ import type { DraftSpec } from "../domain/draft.js";
 import { refuse, refuseWithIssues, type ProductIssue } from "../errors.js";
 import { atomicWriteFileSync, readFileIfExistsSync } from "../fs/atomic.js";
 import { UPGRADEABLE_ANCHOR_PROFILES, isUpgradeableAnchorProfile } from "../anchor/profiles.js";
+import { SUITE_PROTOCOL_IDS } from "../runtime/suite-protocol/comparability.js";
 import { runStatePath } from "../workspace/layout.js";
 
 const Rfc3339Schema = z.string().regex(
@@ -175,6 +176,7 @@ export const RunStateSchema = z.object({
   /** Append-only; absent on every workspace that has never anchored (anchor-evidence §7.1). */
   anchors: z.array(RunAnchorSchema).optional(),
   suiteQuote: z.object({
+    protocol: z.enum(SUITE_PROTOCOL_IDS).optional(),
     executionConformance: z.boolean(),
     coverage: z.enum(["one_task", "ten_task", "full", "custom"]),
     leaderboardSubmitReady: z.boolean(),

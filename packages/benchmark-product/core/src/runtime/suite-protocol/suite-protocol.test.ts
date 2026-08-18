@@ -13,6 +13,8 @@ import {
   officialSwebenchHarnessConformance,
   SWE_BENCH_VERIFIED_NOT_LEADERBOARD_READY_LIMITATION,
   suiteLeaderboardLimitation,
+  suiteProtocolDisplayName,
+  SUITE_PROTOCOL_IDS,
 } from "./comparability.js";
 
 const twelve = ["t00", "t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08", "t09", "t10", "t11"];
@@ -99,6 +101,50 @@ describe("suite comparability", () => {
       atifRequired: true,
       items: [{ taskName: "t00", taskSha256: "b".repeat(64) }],
     })).not.toThrow();
+  });
+
+  test("Terminal-Bench 3.0 is a distinct protocol with 3.0 limitation copy", () => {
+    expect(() => SuiteProtocolSelectionSchema.parse({
+      schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
+      protocol: "terminal-bench-3.0",
+      coverage: "one_task",
+      datasetId: "terminal-bench/terminal-bench",
+      datasetRevision: `sha256:${"a".repeat(64)}`,
+      selectedTaskNames: ["t00"],
+      datasetTaskCount: 12,
+      replicates: 5,
+      atifRequired: true,
+      items: [{ taskName: "t00", taskSha256: "b".repeat(64) }],
+    })).not.toThrow();
+    expect(() => SuiteProtocolSelectionSchema.parse({
+      schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
+      protocol: "terminal-bench-3.0",
+      coverage: "one_task",
+      datasetId: "terminal-bench/terminal-bench-2-1",
+      datasetRevision: `sha256:${"a".repeat(64)}`,
+      selectedTaskNames: ["t00"],
+      datasetTaskCount: 12,
+      replicates: 5,
+      atifRequired: true,
+      items: [{ taskName: "t00", taskSha256: "b".repeat(64) }],
+    })).toThrow();
+    const bits = deriveSuiteComparability({
+      coverage: "one_task",
+      executionConformance: true,
+      k: 5,
+      selectedCount: 1,
+      datasetCount: 12,
+      atifPresent: true,
+    });
+    expect(bits.leaderboardSubmitReady).toBe(false);
+    expect(suiteLeaderboardLimitation(bits, "terminal-bench-3.0")).toMatch(/not a Terminal-Bench 3\.0 leaderboard submission/u);
+    expect(suiteLeaderboardLimitation(bits, "terminal-bench-3.0")).not.toMatch(/Terminal-Bench 2\.1/u);
+  });
+
+  test("every suite protocol id has its own display name for shared refusal copy", () => {
+    expect(suiteProtocolDisplayName("terminal-bench-2.1")).toBe("Terminal-Bench 2.1");
+    expect(suiteProtocolDisplayName("terminal-bench-3.0")).toBe("Terminal-Bench 3.0");
+    expect(new Set(SUITE_PROTOCOL_IDS.map(suiteProtocolDisplayName)).size).toBe(SUITE_PROTOCOL_IDS.length);
   });
 });
 

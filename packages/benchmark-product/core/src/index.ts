@@ -220,8 +220,24 @@ export type {
   TerminalBench21SelectionResolution,
 } from "./runtime/terminal-bench-2-1/host.js";
 export {
+  TERMINAL_BENCH_3_0_DATASET_ID,
+  TERMINAL_BENCH_3_0_DATASET_REF,
+  TERMINAL_BENCH_3_0_HUB_VERSION,
+  TERMINAL_BENCH_3_0_PROFILE,
+  TERMINAL_BENCH_3_0_SELECTION_ROLE,
+  TerminalBench30SelectionManifestSchema,
+  terminalBench30SelectionBytes,
+} from "./runtime/terminal-bench-3-0/manifest.js";
+export type { TerminalBench30SelectionManifest } from "./runtime/terminal-bench-3-0/manifest.js";
+export { resolveTerminalBench30Selection } from "./runtime/terminal-bench-3-0/host.js";
+export type {
+  TerminalBench30SelectionRequest,
+  TerminalBench30SelectionResolution,
+} from "./runtime/terminal-bench-3-0/host.js";
+export {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION,
+  SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0,
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
@@ -233,7 +249,7 @@ export {
   officialArchipelagoConformance,
   suiteLeaderboardLimitation,
 } from "./runtime/suite-protocol/comparability.js";
-export type { SuiteComparability, SuiteCoverage } from "./runtime/suite-protocol/comparability.js";
+export type { SuiteComparability, SuiteCoverage, SuiteProtocolId } from "./runtime/suite-protocol/comparability.js";
 export {
   SUITE_PROTOCOL_PROFILE,
   SUITE_PROTOCOL_SELECTION_ROLE,
@@ -558,6 +574,7 @@ export {
   selectHarborRuntime,
   selectTerminalBench2Runtime,
   selectTerminalBench21Runtime,
+  selectTerminalBench30Runtime,
   selectSwebenchVerifiedRuntime,
   selectApexAgentsRuntime,
   migrateTerminalBenchLegacyTask,
@@ -651,6 +668,8 @@ export type {
   SelectTerminalBench2RuntimeResult,
   SelectTerminalBench21RuntimeInput,
   SelectTerminalBench21RuntimeResult,
+  SelectTerminalBench30RuntimeInput,
+  SelectTerminalBench30RuntimeResult,
   SelectSwebenchVerifiedRuntimeInput,
   SelectSwebenchVerifiedRuntimeResult,
   SelectApexAgentsRuntimeInput,

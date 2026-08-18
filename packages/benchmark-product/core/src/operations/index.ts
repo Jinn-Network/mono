@@ -87,6 +87,11 @@ export {
   type SelectTerminalBench21RuntimeResult,
 } from "./terminal-bench-2-1.js";
 export {
+  selectTerminalBench30Runtime,
+  type SelectTerminalBench30RuntimeInput,
+  type SelectTerminalBench30RuntimeResult,
+} from "./terminal-bench-3-0.js";
+export {
   exportHarborHubPackage,
   type ExportHarborHubPackageInput,
   type ExportHarborHubPackageResult,

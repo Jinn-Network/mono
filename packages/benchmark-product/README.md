@@ -111,6 +111,16 @@ part of default `yarn test`. Procedure, receipt checklist, and the fail-closed
 `yarn tb21-one-task-qualify` gate:
 [docs/runbooks/tb21-official-one-task.md](../../docs/runbooks/tb21-official-one-task.md).
 
+## Terminal-Bench 3.0 `one_task` operator qualify
+
+An operator-only campaign against the official Terminal-Bench 3.0 Hub pin
+with real Harbor 0.21, Docker, and two oracle arms. It proves protocol
+identity (`terminal-bench-3.0`, `one_task`, conforming, not
+leaderboard-ready, Hub `inspection-upload`). It does not download the full
+dataset in CI and is not part of default `yarn test`. Procedure and the
+fail-closed `yarn tb30-one-task-qualify` gate:
+[docs/runbooks/tb30-official-one-task.md](../../docs/runbooks/tb30-official-one-task.md).
+
 ## Product surfaces
 
 - [Installable CLI](./cli/README.md) — the no-argument sample and local viewer.

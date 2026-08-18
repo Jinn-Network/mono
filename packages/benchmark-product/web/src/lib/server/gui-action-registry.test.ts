@@ -19,6 +19,8 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires server-configured Terminal-Bench and Harbor host paths; browser-supplied paths are forbidden",
   selectTerminalBench21Runtime:
     "requires server-configured Terminal-Bench 2.1 and Harbor host paths; browser-supplied paths are forbidden",
+  selectTerminalBench30Runtime:
+    "requires server-configured Terminal-Bench 3.0 and Harbor host paths; browser-supplied paths are forbidden",
   selectSwebenchVerifiedRuntime:
     "requires server-configured SWE-bench Verified harness paths; browser-supplied paths are forbidden",
   selectApexAgentsRuntime:

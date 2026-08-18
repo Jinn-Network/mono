@@ -42,6 +42,16 @@ const SuiteProtocolSelectionShared = {
 export const TerminalBench21SuiteProtocolSelectionSchema = z.object({
   ...SuiteProtocolSelectionShared,
   protocol: z.literal("terminal-bench-2.1"),
+  datasetId: z.literal("terminal-bench/terminal-bench-2-1"),
+  datasetRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+  replicates: z.literal(5),
+  atifRequired: z.literal(true),
+}).strict().superRefine(refineSuiteItems);
+
+export const TerminalBench30SuiteProtocolSelectionSchema = z.object({
+  ...SuiteProtocolSelectionShared,
+  protocol: z.literal("terminal-bench-3.0"),
+  datasetId: z.literal("terminal-bench/terminal-bench"),
   datasetRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
   replicates: z.literal(5),
   atifRequired: z.literal(true),
@@ -65,11 +75,13 @@ export const ApexAgentsSuiteProtocolSelectionSchema = z.object({
 
 export const SuiteProtocolSelectionSchema = z.discriminatedUnion("protocol", [
   TerminalBench21SuiteProtocolSelectionSchema,
+  TerminalBench30SuiteProtocolSelectionSchema,
   SwebenchVerifiedSuiteProtocolSelectionSchema,
   ApexAgentsSuiteProtocolSelectionSchema,
 ]);
 export type SuiteProtocolSelection = z.infer<typeof SuiteProtocolSelectionSchema>;
 export type TerminalBench21SuiteProtocolSelection = z.infer<typeof TerminalBench21SuiteProtocolSelectionSchema>;
+export type TerminalBench30SuiteProtocolSelection = z.infer<typeof TerminalBench30SuiteProtocolSelectionSchema>;
 export type SwebenchVerifiedSuiteProtocolSelection = z.infer<typeof SwebenchVerifiedSuiteProtocolSelectionSchema>;
 export type ApexAgentsSuiteProtocolSelection = z.infer<typeof ApexAgentsSuiteProtocolSelectionSchema>;
 

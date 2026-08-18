@@ -2,7 +2,25 @@
 
 export const SUITE_COVERAGE = ["one_task", "ten_task", "full", "custom"] as const;
 export type SuiteCoverage = (typeof SUITE_COVERAGE)[number];
-export type SuiteProtocolId = "terminal-bench-2.1" | "swe-bench-verified" | "apex-agents";
+export const SUITE_PROTOCOL_IDS = [
+  "terminal-bench-2.1",
+  "terminal-bench-3.0",
+  "swe-bench-verified",
+  "apex-agents",
+] as const;
+export type SuiteProtocolId = (typeof SUITE_PROTOCOL_IDS)[number];
+
+const SUITE_PROTOCOL_DISPLAY_NAMES: Readonly<Record<SuiteProtocolId, string>> = {
+  "terminal-bench-2.1": "Terminal-Bench 2.1",
+  "terminal-bench-3.0": "Terminal-Bench 3.0",
+  "swe-bench-verified": "SWE-bench Verified",
+  "apex-agents": "APEX-Agents",
+};
+
+/** Human-facing suite name for refusal copy and Hub instructions. */
+export function suiteProtocolDisplayName(protocol: SuiteProtocolId): string {
+  return SUITE_PROTOCOL_DISPLAY_NAMES[protocol] ?? "Terminal-Bench 2.1";
+}
 
 export interface SuiteComparability {
   readonly executionConformance: boolean;
@@ -33,6 +51,9 @@ export interface DeriveSuiteComparabilityInput {
 
 export const SUITE_NOT_LEADERBOARD_READY_LIMITATION =
   "This run is not a Terminal-Bench 2.1 leaderboard submission: coverage is not the full official dataset, execution was not protocol-conforming, the Matrix does not account every dataset task × 5 as judged or Harbor-error 0, or ATIF trajectories are missing from the retained Harbor job.";
+
+export const SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0 =
+  "This run is not a Terminal-Bench 3.0 leaderboard submission: coverage is not the full official dataset, execution was not protocol-conforming, the Matrix does not account every dataset task × 5 as judged or Harbor-error 0, or ATIF trajectories are missing from the retained Harbor job.";
 
 export const SWE_BENCH_VERIFIED_NOT_LEADERBOARD_READY_LIMITATION =
   "This run is not a SWE-bench Verified leaderboard submission: coverage is not the full official dataset, execution was not protocol-conforming, the Matrix does not account every dataset instance × 1 as judged or unscorable, or a swebench.harness report.json is missing for an instance.";
@@ -89,6 +110,7 @@ export function suiteLeaderboardLimitation(
   protocol: SuiteProtocolId = "terminal-bench-2.1",
 ): string | undefined {
   if (comparability.leaderboardSubmitReady) return undefined;
+  if (protocol === "terminal-bench-3.0") return SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0;
   if (protocol === "swe-bench-verified") return SWE_BENCH_VERIFIED_NOT_LEADERBOARD_READY_LIMITATION;
   if (protocol === "apex-agents") return APEX_AGENTS_NOT_LEADERBOARD_READY_LIMITATION;
   return SUITE_NOT_LEADERBOARD_READY_LIMITATION;

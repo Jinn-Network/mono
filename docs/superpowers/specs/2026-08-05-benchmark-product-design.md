@@ -1378,6 +1378,13 @@ end-to-end (ReAct `react_toolbelt_agent` + snapshot grader). Cousin
 Stirrup / Code / Harbor / Inspect / k=8 cannot wear the name. Inspection
 export is a derived artifact, not the claim of record.
 
+**Addendum — 2026-08-18, Terminal-Bench 3.0 official suite pointer
+([DR-2026-08-18-b](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md);
+no new Report v2 required fields):** Terminal-Bench 3.0 is a second named
+Harbor-family protocol (`terminal-bench/terminal-bench` at a content-hash
+pin, never `@latest`). TB 2.1, TB 2.0, Verified, and Inspect cannot wear
+that name.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product
