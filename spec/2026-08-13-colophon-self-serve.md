@@ -166,7 +166,7 @@ From a clean, supported machine:
 A report or bundle carries a copyable command shaped like:
 
 ```sh
-npx @colophon-claims/verify@1 ./bundle
+npx @colophon-claims/verify@0.1 ./bundle
 ```
 
 The exact published package name remains subject to the reservation gate in section 6. The package has one executable, so `npx` can infer it. In this package, a bundle path defaults to verification; the longer `colophon bundle verify --bundle ./bundle` grammar remains available after a global install and in the full runner. Its only other surfaces are version/help and a machine-readable capability query.
@@ -216,14 +216,14 @@ Each bundle includes two commands in its reader instructions:
 - the exact verifier version used when the producer published it, for reproduction;
 - the compatible major line, for current fixes that preserve the bundle-format contract.
 
-Within a verifier major, a patch or minor release must continue to accept every bundle-format version that major advertises. Tightening that makes a previously valid bundle fail requires either a security advisory with an explicit compatibility disposition or a new major/format line; `@1` cannot silently rewrite an old claim's verification rules.
+Within a verifier line, a patch release must continue to accept every bundle-format version that line advertises. Tightening that makes a previously valid bundle fail requires either a security advisory with an explicit compatibility disposition or a new version/format line; `@0.1` cannot silently rewrite an old claim's verification rules.
 
 ### 5.2 Visitor path: one command to the first aha
 
 The site's eventual primary command is:
 
 ```sh
-npx @colophon-claims/cli@1
+npx @colophon-claims/cli@0.1
 ```
 
 `npx install Colophon` is not valid npm grammar: `npx` already means “obtain this package, then run its executable,” and a following `install` would be treated as the executable/package to run. The no-argument Colophon executable is therefore the shortest honest first run. An installed user gets the same behavior from `colophon`; `colophon demo` is the explicit repeatable spelling. An unscoped `trycolophon` launcher is not required for v1: it would be another release and supply-chain surface merely to save scope characters. Reserve it if useful, and publish it only after command-friction evidence.
@@ -269,7 +269,7 @@ Identity: sha256:<bundle-id>
 Verified: 6 of 6 checks passed
 
 Check it again:
-  npx @colophon-claims/verify@1 <absolute-path>/bundle
+  npx @colophon-claims/verify@0.1 <absolute-path>/bundle
 
 Use your own work:
   colophon open
@@ -329,7 +329,7 @@ Borrowing Harbor's interaction model is not "you run Harbor." When the Harbor ad
 The user may install the same package for repeated use:
 
 ```sh
-npm install --global @colophon-claims/cli@1
+npm install --global @colophon-claims/cli@0.1
 colophon open
 ```
 
@@ -599,7 +599,7 @@ Add a distinct reader action; leave the runner section source-based:
 >
 > You do not need the benchmark runner. With Node 22 or newer:
 >
-> `npx @colophon-claims/verify@1 ./bundle`
+> `npx @colophon-claims/verify@0.1 ./bundle`
 >
 > The verifier reads the bundle on your machine, uploads nothing, and needs no account, API key, funds, Docker, agent login, or full Jinn checkout. It checks integrity, evidence closure, trust disclosures, calculations, report verification, and claim consistency.
 
@@ -613,7 +613,7 @@ Replace the contributor command as the primary “Run it yourself” action:
 >
 > Requires Node 22 or newer:
 >
-> `npx @colophon-claims/cli@1`
+> `npx @colophon-claims/cli@0.1`
 >
 > No account, API key, funds, or Docker are needed. The sample does not use your agent logins. It runs locally, opens a local comparison, leaves a verified bundle in the current directory, and uploads nothing.
 
