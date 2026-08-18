@@ -48,7 +48,7 @@ export function deepSweExportInstructions(mode: DeepSweExportMode, jobDir: strin
     return [
       "The locked DeepSWE v1.1 method produced a Pier job that can be emailed to Datacurve.",
       `Retain this job tree: ${jobDir}`,
-      "Email serena@datacurve.ai with the derived Pier inspection artifact.",
+      "Email serena@datacurve.ai with the derived Pier job package.",
       DEEPSWE_CLOSED_SUBMIT_SENTENCE,
     ].join("\n");
   }
@@ -119,7 +119,7 @@ export function exportDeepSwePackage(
       mkdirSync(exportDir, { recursive: true });
       cpSync(jobDir, join(exportDir, "job"), { recursive: true });
       const instructions = deepSweExportInstructions(mode, join(exportDir, "job"));
-      writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`);
+      writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, jobDir, exportDir };
     },
   });
