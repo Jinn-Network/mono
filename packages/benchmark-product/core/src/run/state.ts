@@ -184,9 +184,17 @@ export const RunStateSchema = z.object({
   // whatever the interleaving, and it holds for any writer rather than only for `runAnchor`.
   const anchorDigests = new Set<string>();
   const digestsByPair = new Map<string, Set<string>>();
+  // Predecessors already consumed by an upgrade edge, per pair. Without it, "names an earlier
+  // record of the same pair" admits a FORK: [A, B upgrades A, C upgrades A] is well-formed entry by
+  // entry and would leave three durable anchors for one pair. A record has at most one successor.
+  const upgradedByPair = new Map<string, Set<string>>();
   (state.anchors ?? []).forEach((anchor, index) => {
-    const pairKey = `${anchor.subject}${anchor.provider}`;
+    // `\u001f` (unit separator) written as an escape, not as a raw byte: it cannot occur in
+    // `subject`, whose values are the two enum literals, so no provider string can spell another
+    // pair's key — and an invisible control character in source is not reviewable.
+    const pairKey = `${anchor.subject}\u001f${anchor.provider}`;
     const earlierOfPair = digestsByPair.get(pairKey) ?? new Set<string>();
+    const upgradedOfPair = upgradedByPair.get(pairKey) ?? new Set<string>();
 
     if (anchor.upgradesRecordSha256 !== undefined) {
       if (!isUpgradeableAnchorProfile(anchor.provider)) {
@@ -210,7 +218,18 @@ export const RunStateSchema = z.object({
           path: ["anchors", index, "upgradesRecordSha256"],
           message: "an upgraded anchor must name an earlier recorded anchor over the same subject from the same provider",
         });
+      } else if (upgradedOfPair.has(anchor.upgradesRecordSha256)) {
+        // A second edge into one predecessor forks the chain. Each fork is well-formed on its own
+        // terms — earlier, same pair, not itself — so only the consumed set catches it, and without
+        // it the pair ends up carrying three durable anchors under the one-exception rule.
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["anchors", index, "upgradesRecordSha256"],
+          message: "that anchor is already upgraded by another recorded anchor; a record has at most one upgraded form",
+        });
       }
+      upgradedOfPair.add(anchor.upgradesRecordSha256);
+      upgradedByPair.set(pairKey, upgradedOfPair);
     } else if (earlierOfPair.size > 0) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

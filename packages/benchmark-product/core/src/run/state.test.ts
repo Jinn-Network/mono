@@ -365,6 +365,20 @@ describe("anchors — append-only (anchor-evidence design §5 rule 6, §7.1)", (
     }))).toThrowError(/already carries a lock anchor/);
   });
 
+  test("a forked upgrade chain is refused — one record has at most one upgraded form", () => {
+    // Each fork passes every other test on its own terms: appended later, same pair, not itself.
+    // Only the consumed-predecessor set catches it, and without that the pair ends up carrying
+    // three durable anchors under a rule that admits exactly one exception.
+    const fork = { ...upgraded, recordSha256: "b".repeat(64) };
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({
+      anchors: [first, upgraded, fork],
+    }))).toThrowError(/already upgraded by another recorded anchor/);
+
+    // The legitimate pending-then-completed pair the exception exists for is unaffected.
+    writeRunState(workspaceDir, "draft-2", minimalState({ anchors: [first, upgraded] }));
+    expect(readRunState(workspaceDir, "draft-2")?.anchors).toEqual([first, upgraded]);
+  });
+
   test("the same anchor record is never recorded twice", () => {
     // Two different pairs naming one record: isolates the duplicate-digest rule from the
     // write-once-per-pair rule, which would otherwise be the issue that reports.
