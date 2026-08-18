@@ -129,6 +129,7 @@ import {
   type InspectEvaluationStrategy,
 } from "../runtime/inspect/assurance.js";
 import { HARBOR_ADAPTER_ID, HarborSelectionManifestSchema, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
+import { ARCHIPELAGO_ADAPTER_ID, SWE_BENCH_HARNESS_ADAPTER_ID } from "../runtime/suite-protocol/comparability.js";
 import { readHarborHostBinding } from "../runtime/harbor/host.js";
 import { makeHarborLauncher, HARBOR_LAUNCHER_ID } from "../runtime/harbor/launcher.js";
 import { suiteSelectionFromHarbor, taskNameByDigestFromSuite } from "../runtime/suite-protocol/from-harbor.js";
@@ -643,8 +644,8 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     && runtimeId !== INSPECT_ADAPTER_ID
     && runtimeId !== INSPECT_BINARY_JUDGE_ADAPTER_ID
     && runtimeId !== HARBOR_ADAPTER_ID
-    && runtimeId !== "swebench-harness"
-    && runtimeId !== "archipelago"
+    && runtimeId !== SWE_BENCH_HARNESS_ADAPTER_ID
+    && runtimeId !== ARCHIPELAGO_ADAPTER_ID
   ) {
     refuse("venue-unavailable", "evaluationRuntime.adapterId", `unsupported evaluation runtime "${runtimeId}"`);
   }
@@ -1286,11 +1287,11 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     const adapterKind: EvaluationAdapterKind = parserKey === parserAllowlistKey(PREDICTION_PARSER)
       ? "prediction"
       : parserKey === parserAllowlistKey(SWE_REBENCH_PARSER)
-        ? runtimeId === "swebench-harness" || runtimeId === "archipelago"
+        ? runtimeId === SWE_BENCH_HARNESS_ADAPTER_ID || runtimeId === ARCHIPELAGO_ADAPTER_ID
           ? refuse(
             "validation",
             "evaluationSpecBytes.familyBlock.parser",
-            runtimeId === "archipelago"
+            runtimeId === ARCHIPELAGO_ADAPTER_ID
               ? "APEX-Agents official suite refuses the swe-rebench evaluator"
               : "SWE-bench Verified official suite refuses the swe-rebench evaluator",
           )
