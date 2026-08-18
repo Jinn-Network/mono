@@ -1,5 +1,6 @@
 {
   "format": "benchmark-product-conformance-kit/1",
+  "semantics": "expectedMessagePattern is the behavioral pin (a regular expression over the reference verifier's failure message); expectedFailingCheck names the reference check family it belongs to and is advisory. externallyDetectable states whether the external-subset checks alone must reject the variant.",
   "golden": {
     "expectedChecks": [
       "manifest",
@@ -32,6 +33,15 @@
       "path": "tampered/claim-text-tampered"
     },
     {
+      "description": "newlines are inserted into the report envelope's base64 payload; a lenient decoder sees identical bytes, a strict one refuses; digests are repaired",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "report-verification",
+      "expectedMessagePattern": "not strict standard or URL-safe base64",
+      "externallyDetectable": true,
+      "id": "envelope-payload-malleated",
+      "path": "tampered/envelope-payload-malleated"
+    },
+    {
       "description": "verdicts.json deleted; the manifest still lists it",
       "expectedDisposition": "invalid",
       "expectedFailingCheck": "manifest",
@@ -41,13 +51,22 @@
       "path": "tampered/file-truncated"
     },
     {
-      "description": "share.txt gains a trailing byte; its manifest entry is stale",
+      "description": "one byte of share.txt is flipped in place; length matches, the manifest digest does not",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "manifest",
+      "expectedMessagePattern": "^digest mismatch for \"share\\.txt\"$",
+      "externallyDetectable": true,
+      "id": "manifest-digest-mismatch",
+      "path": "tampered/manifest-digest-mismatch"
+    },
+    {
+      "description": "share.txt gains a trailing byte; its manifest byte length is stale",
       "expectedDisposition": "invalid",
       "expectedFailingCheck": "manifest",
       "expectedMessagePattern": "^byte length mismatch for \"share\\.txt\"$",
       "externallyDetectable": true,
-      "id": "manifest-digest-mismatch",
-      "path": "tampered/manifest-digest-mismatch"
+      "id": "manifest-length-mismatch",
+      "path": "tampered/manifest-length-mismatch"
     },
     {
       "description": "report.json is pretty-printed; schema-valid JSON, but no longer the sealed bytes the envelope payload carries",
