@@ -20,3 +20,4 @@ export * from "./timestamp/der.js";
 export * from "./timestamp/oids.js";
 export * from "./timestamp/generalized-time.js";
 export * from "./timestamp/rfc3161-verify.js";
+export * from "./timestamp/ots-verify.js";

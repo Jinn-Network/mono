@@ -1606,7 +1606,10 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/capture-provenance.md | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/cross-validation.md | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/kit-token-canonical.der | — | — | — |
+| fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/ots-stamp-provenance.md | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/README.md | — | — | — |
+| fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/real-stamp-v1-complete.ots | — | — | — |
+| fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/real-stamp-v1-pending.ots | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/token-digicert.der | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/token-sslcom.der | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/authorization-v1/example.json | — | — | — |
@@ -1683,7 +1686,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3819 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3823 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1691,14 +1694,14 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 32 |
 | boundaryPolicies | 26 |
 | catalogManifests | 97 |
-| catalogPublicSurfaces | 1326 |
+| catalogPublicSurfaces | 1329 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 62 |
 | conformanceSources | 31 |
 | decisionRecords | 5 |
-| discoveredFirstPartySurfaces | 2990 |
-| generatedOutputSources | 1388 |
-| generatorSources | 658 |
+| discoveredFirstPartySurfaces | 2993 |
+| generatedOutputSources | 1391 |
+| generatorSources | 659 |
 | marketplaceControl | 2 |
 | requiredGates | 25 |
 | staticControl | 6 |
