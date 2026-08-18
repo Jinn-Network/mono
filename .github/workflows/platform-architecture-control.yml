@@ -76,14 +76,22 @@ jobs:
         id: select
         env:
           EVENT_NAME: ${{ github.event_name }}
+          # Set only on pull_request events, which is exactly where it is read.
+          PR_BASE_REF: ${{ github.base_ref }}
           MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-        # Tiered lanes (DR-2026-08-18-b D3). The PULL_REQUEST lane runs fast mode:
-        # verification is not selected at all, because the merge group is where the
-        # full battery runs and the queue is now the only path onto `next`. Nothing
-        # is laundered by this — the `platform-verification` gate below demands an
-        # exact `skipped` when verification is unselected, so a failed or cancelled
-        # run still reddens the context.
+        # Tiered lanes (DR-2026-08-18-b D3). Fast mode is scoped to the lane the
+        # QUEUE BACKSTOPS: a pull request that does not target `main` is not selected
+        # for verification at all, because the merge group is where the full battery
+        # runs and the queue is the only path onto `next`. Nothing is laundered by
+        # this — the `platform-verification` gate below demands an exact `skipped`
+        # when verification is unselected, so a failed or cancelled run still reddens
+        # the context.
+        #
+        # A pull request targeting `main` is the HOTFIX lane. D2 puts no queue on
+        # `main`, so there is no merge group to carry the battery and fast mode would
+        # simply delete the verification. Those PRs verify in full, like every other
+        # unbackstopped lane.
         #
         # The MERGE_GROUP lane carries its own base/head pair, so the changed-package
         # closure applies to the speculative merge commit and a narrow entry stops
@@ -92,6 +100,11 @@ jobs:
         run: |
           case "${EVENT_NAME}" in
             pull_request)
+              if [ "${PR_BASE_REF}" = main ]; then
+                echo 'hotfix lane: no merge queue backstops main, so verify in full'
+                echo 'run=true' >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
               echo 'pr-fast-lane: full verification runs on the merge group'
               echo 'run=false' >> "${GITHUB_OUTPUT}"
               exit 0

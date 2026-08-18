@@ -38,7 +38,9 @@
 //
 // A repo-wide expectation rides alongside: some active ruleset must restrict
 // creation of `refs/heads/gh-readonly-queue/**`, so nobody but the queue can
-// forge a ref that the required checks would then attest.
+// forge a ref that the required checks would then attest — and that ruleset
+// must admit the merge-queue bot through its bypass list, because a guard with
+// an empty bypass list wedges every enqueue instead of protecting anything.
 //
 // The required contexts are not restated here — they come from
 // `required-check-set.mjs`, the same source `enable-next-merge-queue.sh` reads
@@ -179,26 +181,37 @@ async function readRulesets(repository, request) {
 // Pure read of the effective-rules payload. Every expectation below consumes
 // these facts, so "what the branch has" and "what the branch owes" stay
 // separable — and a drifted branch still reports its real posture.
+//
+// EVERY supplier of a type is collected, not the first one. Reading only the
+// first made a SECOND ruleset contributing rules to the same branch invisible —
+// including one carrying a standing admin bypass, which is the precise hole D2
+// exists to close. So: required contexts are UNIONED across suppliers (that is
+// what the branch actually owes), and the supplying-ruleset set that the bypass
+// and enforcement loops walk is the union of every contributing ruleset id.
 function readBranchFacts(branch, effectiveRules) {
-  const first = new Map();
+  const byType = new Map();
   for (const rule of effectiveRules) {
-    if (typeof rule?.type !== 'string' || first.has(rule.type)) continue;
-    first.set(rule.type, rule);
+    if (typeof rule?.type !== 'string') continue;
+    if (!byType.has(rule.type)) byType.set(rule.type, []);
+    byType.get(rule.type).push(rule);
   }
-  const rulesetIdOf = (type) => {
-    const id = Number(first.get(type)?.ruleset_id);
-    return Number.isInteger(id) ? id : null;
-  };
-  const pull = first.get('pull_request')?.parameters;
-  const checks = first.get('required_status_checks')?.parameters;
-  const queue = first.get('merge_queue')?.parameters;
+  const rulesetIdsOf = (type) => [...new Set((byType.get(type) ?? [])
+    .map((rule) => Number(rule?.ruleset_id))
+    .filter((id) => Number.isInteger(id)))]
+    .sort((left, right) => left - right);
+  // Scalar parameters cannot be unioned, so they are read from the first
+  // supplier in API order — and `expectSingleSupplier` below reports the
+  // multiplicity itself as drift, so the ambiguity is never silent.
+  const firstOf = (type) => byType.get(type)?.[0]?.parameters;
+  const pull = firstOf('pull_request');
+  const queue = firstOf('merge_queue');
   return {
     branch,
-    ruleTypes: sortedStrings([...first.keys()]),
+    ruleTypes: sortedStrings([...byType.keys()]),
     rules: {
-      pull_request: first.has('pull_request')
+      pull_request: byType.has('pull_request')
         ? {
-          rulesetId: rulesetIdOf('pull_request'),
+          rulesetIds: rulesetIdsOf('pull_request'),
           approvals: Number.isInteger(pull?.required_approving_review_count)
             ? pull.required_approving_review_count
             : null,
@@ -206,15 +219,16 @@ function readBranchFacts(branch, effectiveRules) {
           dismissStaleOnPush: pull?.dismiss_stale_reviews_on_push === true,
         }
         : null,
-      required_status_checks: first.has('required_status_checks')
+      required_status_checks: byType.has('required_status_checks')
         ? {
-          rulesetId: rulesetIdOf('required_status_checks'),
-          contexts: sortedStrings((checks?.required_status_checks ?? []).map((check) => check?.context)),
+          rulesetIds: rulesetIdsOf('required_status_checks'),
+          contexts: sortedStrings((byType.get('required_status_checks') ?? [])
+            .flatMap((rule) => (rule?.parameters?.required_status_checks ?? []).map((check) => check?.context))),
         }
         : null,
-      merge_queue: first.has('merge_queue')
+      merge_queue: byType.has('merge_queue')
         ? {
-          rulesetId: rulesetIdOf('merge_queue'),
+          rulesetIds: rulesetIdsOf('merge_queue'),
           check_response_timeout_minutes: queue?.check_response_timeout_minutes ?? null,
           grouping_strategy: queue?.grouping_strategy ?? null,
           max_entries_to_build: queue?.max_entries_to_build ?? null,
@@ -223,16 +237,28 @@ function readBranchFacts(branch, effectiveRules) {
           min_entries_to_merge: queue?.min_entries_to_merge ?? null,
         }
         : null,
-      deletion: first.has('deletion') ? { rulesetId: rulesetIdOf('deletion') } : null,
-      non_fast_forward: first.has('non_fast_forward') ? { rulesetId: rulesetIdOf('non_fast_forward') } : null,
+      deletion: byType.has('deletion') ? { rulesetIds: rulesetIdsOf('deletion') } : null,
+      non_fast_forward: byType.has('non_fast_forward') ? { rulesetIds: rulesetIdsOf('non_fast_forward') } : null,
     },
   };
 }
 
 function supplyingRulesets(facts, rulesets, types) {
-  const ids = [...new Set(types.map((type) => facts.rules[type]?.rulesetId).filter((id) => Number.isInteger(id)))]
+  const ids = [...new Set(types.flatMap((type) => facts.rules[type]?.rulesetIds ?? []))]
     .sort((left, right) => left - right);
   return ids.map((id) => rulesets.get(id) ?? unreadableRuleset(id));
+}
+
+// `pull_request` and `merge_queue` carry scalar parameters that two rulesets can
+// disagree about. Which one GitHub resolves to is not something an audit should
+// guess, so more than one supplier is reported as drift in its own right.
+function expectSingleSupplier(branch, facts, types, complaints) {
+  for (const type of types) {
+    const ids = facts.rules[type]?.rulesetIds ?? [];
+    if (ids.length > 1) {
+      complaints.push(`${branch}: ${ids.length} rulesets supply a ${type} rule (${ids.join(', ')}); exactly one must, or which parameters are in force is ambiguous`);
+    }
+  }
 }
 
 function expectPullRequestReviews(branch, pull, complaints, { dismissStale }) {
@@ -249,6 +275,9 @@ function expectPullRequestReviews(branch, pull, complaints, { dismissStale }) {
   }
 }
 
+// Set EQUALITY, not containment. An extra context added in the UI is as bad as
+// a missing one: nothing reports it, so every queue entry sits on an unreported
+// check until the check-response timeout ejects it.
 function expectRequiredContexts(branch, checks, expected, complaints) {
   if (!checks) {
     complaints.push(`${branch}: no ruleset in effect supplies a required_status_checks rule`);
@@ -256,6 +285,10 @@ function expectRequiredContexts(branch, checks, expected, complaints) {
   }
   const missing = expected.filter((context) => !checks.contexts.includes(context));
   if (missing.length > 0) complaints.push(`${branch}: required status contexts missing: ${missing.join(', ')}`);
+  const unexpected = checks.contexts.filter((context) => !expected.includes(context));
+  if (unexpected.length > 0) {
+    complaints.push(`${branch}: unexpected required status contexts: ${unexpected.join(', ')}; a required context no workflow reports leaves every queue entry on an unreported check until the check-response timeout ejects it`);
+  }
 }
 
 function expectRuleTypes(branch, facts, types, complaints) {
@@ -290,6 +323,7 @@ function evaluateNext(facts, rulesets) {
     }
   }
   expectRuleTypes('next', facts, ['deletion', 'non_fast_forward'], complaints);
+  expectSingleSupplier('next', facts, ['pull_request', 'merge_queue'], complaints);
   const supplying = supplyingRulesets(facts, rulesets, NEXT_RULE_TYPES);
   expectActiveRulesets('next', supplying, complaints);
   // D2: no actor retains direct push to `next`. A bypass actor on any ruleset
@@ -309,14 +343,16 @@ function evaluateMain(facts, rulesets) {
   expectPullRequestReviews('main', facts.rules.pull_request, complaints, { dismissStale: false });
   expectRequiredContexts('main', facts.rules.required_status_checks, MAIN_REQUIRED_CONTEXTS, complaints);
   expectRuleTypes('main', facts, ['deletion', 'non_fast_forward'], complaints);
+  expectSingleSupplier('main', facts, ['pull_request', 'merge_queue'], complaints);
   const supplying = supplyingRulesets(facts, rulesets, MAIN_RULE_TYPES);
   expectActiveRulesets('main', supplying, complaints);
-  // The admin bypass is asserted PRESENT, and asserted on the ruleset supplying
-  // the pull_request rule specifically — that is the rule which would otherwise
-  // refuse `promote-main.yml`'s Monday fast-forward push.
-  const gatingId = facts.rules.pull_request?.rulesetId ?? null;
-  const gating = Number.isInteger(gatingId) ? supplying.find((ruleset) => ruleset.id === gatingId) : null;
-  if (gating?.readable) {
+  // The admin bypass is asserted PRESENT, and asserted on EVERY ruleset
+  // supplying the pull_request rule — that is the rule which would otherwise
+  // refuse `promote-main.yml`'s Monday fast-forward push, and a second supplier
+  // without the bypass refuses the push no matter what the first one allows.
+  const gatingIds = facts.rules.pull_request?.rulesetIds ?? [];
+  for (const gating of supplying.filter((ruleset) => gatingIds.includes(ruleset.id))) {
+    if (!gating.readable) continue;
     const present = gating.bypassActors.some((actor) => (
       actor.actorId === MAIN_ADMIN_BYPASS.actorId
       && actor.actorType === MAIN_ADMIN_BYPASS.actorType
@@ -354,6 +390,12 @@ async function auditBranch({ repository, branch, request, rulesets }) {
 // letting a ruleset restrict creation of those refs while still admitting the
 // queue's own bot. Without it, anyone with push access can create a ref that
 // the required contexts then attest.
+//
+// The bypass list is not optional decoration on this one: a guard WITHOUT the
+// merge-queue bot in bypass stops the queue creating its own refs and wedges
+// every enqueue. Presence alone is therefore not a green — the resolved actor
+// is asserted and reported, so the misconfiguration is visible before it is
+// operational.
 function auditQueueRefGuard(rulesets) {
   const guards = [...rulesets.values()].filter((ruleset) => (
     ruleset.readable
@@ -361,11 +403,28 @@ function auditQueueRefGuard(rulesets) {
     && ruleset.refPatterns.includes(QUEUE_REF_PATTERN)
     && ruleset.ruleTypes.includes('creation')
   ));
+  const complaints = [];
+  for (const guard of guards) {
+    if (guard.bypassActors.length === 0) {
+      complaints.push(`ruleset ${String(guard.id)} (${guard.name}) restricts creation of ${QUEUE_REF_PATTERN} but carries no bypass actor; the merge queue cannot create its own refs and every enqueue wedges`);
+    } else if (guard.bypassActors.length > 1) {
+      complaints.push(`ruleset ${String(guard.id)} (${guard.name}) admits ${String(guard.bypassActors.length)} bypass actors on ${QUEUE_REF_PATTERN}; only the merge-queue bot may create those refs`);
+    }
+  }
   return {
     pattern: QUEUE_REF_PATTERN,
     present: guards.length > 0,
-    rulesets: guards.map((ruleset) => ({ id: ruleset.id, name: ruleset.name })),
+    rulesets: guards.map((ruleset) => ({
+      id: ruleset.id,
+      name: ruleset.name,
+      bypassActors: ruleset.bypassActors,
+    })),
+    complaints,
   };
+}
+
+function describeActor(actor) {
+  return `${String(actor.actorType)} ${String(actor.actorId)} ${String(actor.bypassMode)}`;
 }
 
 async function auditOwner(repository, username, request) {
@@ -443,6 +502,7 @@ export async function auditRepositoryArchitecture({ repository, request }) {
   if (!queueRefGuard.present) {
     errors.push(`no active ruleset restricts creation of ${QUEUE_REF_PATTERN}; queue refs are forgeable`);
   }
+  errors.push(...queueRefGuard.complaints);
   const report = {
     version: 2,
     repository,
@@ -503,7 +563,10 @@ export function formatAuditSummary(report) {
   for (const branch of report.branches) lines.push(`| ${branchRow(branch).join(' | ')} |`);
   const guard = report.queueRefGuard;
   const guardCell = guard?.present
-    ? guard.rulesets.map((ruleset) => `${String(ruleset.id)} ${ruleset.name}`).join('; ')
+    ? guard.rulesets.map((ruleset) => {
+      const bypass = (ruleset.bypassActors ?? []).map(describeActor).join(', ') || 'NO BYPASS ACTOR';
+      return `${String(ruleset.id)} ${ruleset.name} (bypass: ${bypass})`;
+    }).join('; ')
     : 'absent';
   lines.push('', `Queue-ref creation guard \`${guard?.pattern ?? QUEUE_REF_PATTERN}\`: ${guardCell}`);
   lines.push('', '| Owner | Resolved | Collaborator |', '| --- | --- | --- |');

@@ -152,6 +152,23 @@ function dropRule(ruleset, type) {
   ruleset.rules = ruleset.rules.filter((entry) => entry.type !== type);
 }
 
+// A SECOND active ruleset matching `next`. Rulesets are additive, so this is
+// what an out-of-band UI edit looks like from the API: the flip's own ruleset is
+// untouched and still reads clean, while the extra one quietly supplies rules —
+// and, in the hazardous case, a standing bypass.
+function shadowNextRuleset(overrides) {
+  return {
+    id: 400,
+    name: 'Shadow next',
+    target: 'branch',
+    enforcement: 'active',
+    bypass_actors: [],
+    conditions: { ref_name: { include: ['refs/heads/next'], exclude: [] } },
+    rules: [],
+    ...overrides,
+  };
+}
+
 test('audits both protected branches and both required usernames using GET only', async () => {
   const { auditRepositoryArchitecture } = await implementation;
   const fixture = fixtureRequest();
@@ -253,10 +270,40 @@ test('rejects every queue-era ruleset drift variant', async (t) => {
     ['main loses its required_status_checks rule', ({ main }) => dropRule(main, 'required_status_checks'), /main: no ruleset in effect supplies a required_status_checks rule/u],
     ['main loses code-owner review', ({ main }) => { rule(main, 'pull_request').parameters.require_code_owner_review = false; }, /main: pull_request does not require code-owner review/u],
     ['main loses non_fast_forward', ({ main }) => dropRule(main, 'non_fast_forward'), /main: no ruleset in effect supplies a non_fast_forward rule/u],
+    // A required context nothing reports is as bad as a missing one: every queue
+    // entry sits on it until the check-response timeout ejects the entry.
+    ['unexpected extra required context on next', ({ next }) => {
+      rule(next, 'required_status_checks').parameters.required_status_checks.push({ context: 'typo-in-the-ui' });
+    }, /next: unexpected required status contexts: typo-in-the-ui/u],
+    ['unexpected extra required context on main', ({ main }) => {
+      rule(main, 'required_status_checks').parameters.required_status_checks.push({ context: 'typo-in-the-ui' });
+    }, /main: unexpected required status contexts: typo-in-the-ui/u],
+    // A SECOND ruleset supplying rules to `next`. Reading only the first
+    // supplier per type made all three of these invisible.
+    ['a second next ruleset carrying a standing bypass', ({ all }) => {
+      all.push(shadowNextRuleset({
+        bypass_actors: [{ actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'always' }],
+        rules: [{ type: 'deletion' }],
+      }));
+    }, /next: ruleset 400 \(Shadow next\) carries 1 bypass actor\(s\)/u],
+    ['a second next ruleset supplying its own merge_queue rule', ({ all, next }) => {
+      all.push(shadowNextRuleset({
+        rules: [{ type: 'merge_queue', parameters: { ...rule(next, 'merge_queue').parameters, max_entries_to_merge: 5 } }],
+      }));
+    }, /next: 2 rulesets supply a merge_queue rule \(100, 400\)/u],
+    ['a second next ruleset that is only evaluated, not active', ({ all }) => {
+      all.push(shadowNextRuleset({ enforcement: 'evaluate', rules: [{ type: 'non_fast_forward' }] }));
+    }, /next: ruleset 400 \(Shadow next\) enforcement is evaluate, not active/u],
     // Repository-wide: the forgeable queue-ref hazard.
     ['missing gh-readonly-queue restriction', ({ all, guard }) => { all.splice(all.indexOf(guard), 1); }, /no active ruleset restricts creation of refs\/heads\/gh-readonly-queue/u],
     ['gh-readonly-queue guard without a creation rule', ({ guard }) => dropRule(guard, 'creation'), /no active ruleset restricts creation of refs\/heads\/gh-readonly-queue/u],
     ['gh-readonly-queue guard disabled', ({ guard }) => { guard.enforcement = 'disabled'; }, /no active ruleset restricts creation of refs\/heads\/gh-readonly-queue/u],
+    // Present but wedged: the guard exists and blocks creation, and the merge
+    // queue is not in its bypass list, so the queue cannot create its own refs.
+    ['gh-readonly-queue guard with an empty bypass list', ({ guard }) => { guard.bypass_actors = []; }, /ruleset 300 \(gh-readonly-queue guard\) restricts creation of refs\/heads\/gh-readonly-queue\/\*\* but carries no bypass actor/u],
+    ['gh-readonly-queue guard admitting an extra bypass actor', ({ guard }) => {
+      guard.bypass_actors.push({ actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'always' });
+    }, /ruleset 300 \(gh-readonly-queue guard\) admits 2 bypass actors/u],
   ];
   for (const [name, mutate, pattern] of cases) {
     await t.test(name, async () => {
@@ -337,7 +384,10 @@ test('CLI audit runner preserves visibility-unavailable JSON and summary before 
     // The per-branch table renders the ruleset-era facts, not the classic ones.
     assert.match(rendered, /\| next \| 100 Next \| 1 \| required \| yes \| 10 \| MERGE ALLGREEN merge 1\/1 build 2 180m \| 0 \|/u);
     assert.match(rendered, /\| main \| 200 Base \| 1 \| required \| no \| 1 \| absent \| 1 \|/u);
-    assert.match(rendered, /Queue-ref creation guard `refs\/heads\/gh-readonly-queue\/\*\*`: 300 gh-readonly-queue guard/u);
+    // The guard's resolved bypass actor is rendered, not just its presence: a
+    // guard with no bypass actor wedges every enqueue, so the evidence has to
+    // show which actor is admitted.
+    assert.match(rendered, /Queue-ref creation guard `refs\/heads\/gh-readonly-queue\/\*\*`: 300 gh-readonly-queue guard \(bypass: Integration 1 always\)/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

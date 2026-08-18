@@ -30,20 +30,28 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   assert.match(source, /needs: verification-selection\n\s+if: needs\.verification-selection\.outputs\.run == 'true'/u);
   assert.match(source, /test "\$\{SELECTION_RESULT\}" = success/u);
   assert.match(source, /test "\$\{VERIFICATION_RESULT\}" = skipped/u);
-  // Tiered lanes (DR-2026-08-18-b D3). The pull_request lane runs fast mode: it unselects
-  // verification outright rather than diffing, because the merge group now carries the full
-  // battery and the queue is the only path onto `next`. The merge_group lane reads its
-  // base/head pair off the merge-group payload so a narrow queue entry stops paying the
-  // full battery. Any other event still verifies in full; the three-dot diff needs
-  // unshallow history.
+  // Tiered lanes (DR-2026-08-18-b D3). Fast mode is scoped to the lane the merge queue
+  // backstops: a pull request that does not target `main` unselects verification outright
+  // rather than diffing, because the merge group carries the full battery and the queue is
+  // the only path onto `next`. A pull request that DOES target `main` is the hotfix lane —
+  // D2 puts no queue there, so fast mode would delete the verification rather than move it,
+  // and those PRs verify in full. The merge_group lane reads its base/head pair off the
+  // merge-group payload so a narrow queue entry stops paying the full battery. Any other
+  // event still verifies in full; the three-dot diff needs unshallow history.
   const selectionJob = source.slice(
     source.indexOf('  verification-selection:'),
     source.indexOf('  platform-release-surface:'),
   );
   assert.match(selectionJob, /fetch-depth: 0/u);
+  assert.match(selectionJob, /PR_BASE_REF: \$\{\{ github\.base_ref \}\}/u);
   assert.match(selectionJob, /MG_BASE_SHA: \$\{\{ github\.event\.merge_group\.base_sha \}\}/u);
   assert.match(selectionJob, /MG_HEAD_SHA: \$\{\{ github\.event\.merge_group\.head_sha \}\}/u);
-  assert.match(selectionJob, /^\s+pull_request\)\n\s+echo 'pr-fast-lane: full verification runs on the merge group'\n\s+echo 'run=false' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0/mu);
+  // The base-ref carve-out is asserted as one contiguous block, before the fast-lane
+  // unselect, so a future edit cannot reorder them and silently thin the hotfix lane.
+  assert.match(
+    selectionJob,
+    /^\s+pull_request\)\n\s+if \[ "\$\{PR_BASE_REF\}" = main \]; then\n\s+echo '[^']*'\n\s+echo 'run=true' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0\n\s+fi\n\s+echo 'pr-fast-lane: full verification runs on the merge group'\n\s+echo 'run=false' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0/mu,
+  );
   // The PR lane must not diff at all — a surviving pull_request base/head pair would mean
   // fast mode was only half-applied and the PR lane still paid for selection.
   assert.doesNotMatch(selectionJob, /github\.event\.pull_request\.base\.sha/u);
