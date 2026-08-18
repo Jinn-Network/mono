@@ -46,7 +46,7 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **47 generated operations**, all shipped through the library and CLI
+contains **48 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -92,9 +92,10 @@ with an explicit shipped/deferred GUI disposition:
 | `selectHarborRuntime` | `colophon runtime harbor select` | Select and bind the managed Harbor runtime. |
 | `selectTerminalBench2Runtime` | `colophon runtime terminal-bench-2 select` | Resolve and bind one immutable Terminal-Bench 2 task through Harbor. |
 | `selectTerminalBench21Runtime` | `colophon runtime terminal-bench-2-1 select` | Resolve and bind a named Terminal-Bench 2.1 slice through Harbor. |
+| `selectTerminalBench30Runtime` | `colophon runtime terminal-bench-3-0 select` | Resolve and bind a named Terminal-Bench 3.0 slice through Harbor. |
 | `selectSwebenchVerifiedRuntime` | `colophon runtime swe-bench-verified select` | Resolve and bind a named SWE-bench Verified slice to swebench.harness. |
 | `selectApexAgentsRuntime` | `colophon runtime apex-agents select` | Resolve and bind a named APEX-Agents slice to Archipelago. |
-| `exportHarborHubPackage` | `colophon hub export` | Package a retained Harbor Job for Terminal-Bench 2.1 Hub upload without placing the row. |
+| `exportHarborHubPackage` | `colophon hub export` | Package a retained Harbor Job for Terminal-Bench Hub upload without placing the row. |
 | `exportSwebenchPredictions` | `colophon swebench export` | Package predictions.jsonl and harness reports without placing the swebench.com row. |
 | `exportApexAgentsInspection` | `colophon apex-agents export` | Package Archipelago grades without placing the Mercor APEX-Agents row. |
 | `updateDraft` | `colophon draft update` | Apply a validated JSON draft patch. |

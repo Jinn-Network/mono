@@ -140,6 +140,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
     if (!quoted.ok) return;
     expect(quoted.result.presentation.suite).toEqual({
+      protocol: "terminal-bench-2.1",
       executionConformance: true,
       coverage: "one_task",
       leaderboardSubmitReady: false,

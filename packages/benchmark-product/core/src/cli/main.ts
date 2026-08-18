@@ -1,6 +1,6 @@
 /**
  * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
- * 47 parity operations over the operations facade, plus the path-oriented
+ * 48 parity operations over the operations facade, plus the path-oriented
  * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
@@ -68,6 +68,7 @@ import {
   selectHarborRuntime,
   selectTerminalBench2Runtime,
   selectTerminalBench21Runtime,
+  selectTerminalBench30Runtime,
   selectSwebenchVerifiedRuntime,
   selectApexAgentsRuntime,
   migrateTerminalBenchLegacyTask,
@@ -85,6 +86,7 @@ import {
   type SelectHarborRuntimeInput,
   type SelectTerminalBench2RuntimeInput,
   type SelectTerminalBench21RuntimeInput,
+  type SelectTerminalBench30RuntimeInput,
   type SelectSwebenchVerifiedRuntimeInput,
   type SelectApexAgentsRuntimeInput,
   type MigrateTerminalBenchLegacyTaskInput,
@@ -136,6 +138,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --file <selection.json>
   runtime terminal-bench-2-1 select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
+  runtime terminal-bench-3-0 select --workspace <dir> --principal <id> --draft <draftId>
   runtime swe-bench-verified select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
   runtime apex-agents select --workspace <dir> --principal <id> --draft <draftId>
@@ -213,6 +216,7 @@ const RUNTIME_INSPECT_BIND_JUDGE_FLAGS = ["workspace", "principal", "json", "dra
 const RUNTIME_HARBOR_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_2_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_21_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_TERMINAL_BENCH_30_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_SWE_BENCH_VERIFIED_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_APEX_AGENTS_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
@@ -633,6 +637,15 @@ async function handleTerminalBench21RuntimeSelect(args: ParsedArgs, context: Cli
   const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectTerminalBench21RuntimeInput, "draftId">;
   const result = await selectTerminalBench21Runtime(opContext, { draftId, ...configuration } as SelectTerminalBench21RuntimeInput);
   return renderResult(result, jsonMode, (value) => `selected Terminal-Bench 2.1 profile ${value.terminalBench21ProfileSha256} for draft ${draftId}\n`);
+}
+
+async function handleTerminalBench30RuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_30_SELECT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectTerminalBench30RuntimeInput, "draftId">;
+  const result = await selectTerminalBench30Runtime(opContext, { draftId, ...configuration } as SelectTerminalBench30RuntimeInput);
+  return renderResult(result, jsonMode, (value) => `selected Terminal-Bench 3.0 profile ${value.terminalBench30ProfileSha256} for draft ${draftId}\n`);
 }
 
 async function handleSwebenchVerifiedRuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
@@ -1217,6 +1230,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["runtime harbor select", handleHarborRuntimeSelect],
   ["runtime terminal-bench-2 select", handleTerminalBench2RuntimeSelect],
   ["runtime terminal-bench-2-1 select", handleTerminalBench21RuntimeSelect],
+  ["runtime terminal-bench-3-0 select", handleTerminalBench30RuntimeSelect],
   ["runtime swe-bench-verified select", handleSwebenchVerifiedRuntimeSelect],
   ["runtime apex-agents select", handleApexAgentsRuntimeSelect],
   ["runtime terminal-bench migrate", handleTerminalBenchMigration],
