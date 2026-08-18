@@ -4,6 +4,7 @@
 
 // --- pinned identifiers (protocol, media types, record-kind URIs, method URIs, scope) ---
 export {
+  ANCHOR_INTENT_EXTENSION,
   ASSEMBLY_PROCEDURE,
   ASSEMBLY_PROCEDURE_VERSION,
   BENCHMARK_ACCOUNTING_MEDIA_TYPE,
@@ -74,6 +75,15 @@ export {
   withMatrixPublicationExtension,
   withRunPublicationExtension,
 } from "./publication-extension.js";
+// --- anchor-intent/v1 extension helpers (anchor-evidence design §7.3) ---
+export {
+  RunAnchorIntentExtensionSchema,
+  readRunAnchorIntentExtension,
+  runAnchorIntentExtension,
+  withRunAnchorIntentExtension,
+} from "./anchor-intent-extension.js";
+export type { RunAnchorIntentExtension } from "./anchor-intent-extension.js";
+
 export type {
   MatrixPublicationExtension,
   RegistrationArtifact,
