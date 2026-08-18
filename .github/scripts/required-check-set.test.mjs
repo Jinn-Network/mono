@@ -60,17 +60,50 @@ const allJobs = workflowFiles.flatMap((file) => jobBlocks(file).map((job) => ({
   name: displayName(job),
 })));
 
+// Trigger parsing reads a comment-stripped copy of the source. A full-line `#`
+// at column 0 otherwise terminates the `on:` block scan below (`(?=^\S)` matches
+// `#`), which fails OPEN: a comment written above `push:` hid the trigger
+// entirely and this file's queue-reachability test passed a workflow that fires
+// on every queue ref. Only lines whose first non-space character is `#` are
+// removed, and only for trigger parsing — job blocks are read from the raw
+// source, so shell comments inside `run: |` bodies are untouched.
+const triggerSources = new Map([...sources].map(([file, source]) => [
+  file,
+  source.replaceAll(/^[ \t]*#.*$/gmu, ''),
+]));
+
+function triggerSourceOf(file) {
+  sourceOf(file);
+  return triggerSources.get(file);
+}
+
+// `on:` has three legal spellings. Block form is what every workflow here uses;
+// flow (`on: [pull_request]`) and bare-scalar (`on: push`) forms are accepted so
+// they parse into a real trigger list instead of hard-failing with a misleading
+// "has no top-level on: block". The key itself may be quoted — YAML 1.1 reads a
+// bare `on` as the boolean true, so `"on":` is a legitimate defensive spelling.
 function onBlock(file) {
-  const body = sourceOf(file).match(/^on:\n(?<body>[\s\S]*?)(?=^\S)/mu)?.groups?.body;
-  assert.notEqual(body, undefined, `${file}: has no top-level on: block`);
-  return body;
+  const source = triggerSourceOf(file);
+  const block = source.match(/^["']?on["']?:\n(?<body>[\s\S]*?)(?=^\S)/mu)?.groups?.body;
+  if (block !== undefined) return { form: 'block', body: block };
+  const inline = source.match(/^["']?on["']?:[ \t]+(?<value>.+?)[ \t]*$/mu)?.groups?.value;
+  assert.notEqual(inline, undefined, `${file}: has no top-level on: block`);
+  const flow = inline.match(/^\[(?<list>[^\]]*)\]$/u);
+  const triggers = (flow ? flow.groups.list.split(',') : [inline])
+    .map((entry) => entry.trim().replace(/^['"]|['"]$/gu, ''))
+    .filter(Boolean);
+  return { form: 'inline', triggers };
 }
 
 function triggerBlock(file, trigger) {
   const on = onBlock(file);
-  const head = on.match(new RegExp(`^ {2}${trigger}:[ \\t]*$`, 'mu'));
+  // An inline trigger declares no filters at all. Returning the empty body (not
+  // null) says "this trigger exists and is unfiltered", which is what makes the
+  // reachability assertion below fail CLOSED on `on: [push]`.
+  if (on.form === 'inline') return on.triggers.includes(trigger) ? '' : null;
+  const head = on.body.match(new RegExp(`^ {2}${trigger}:[ \\t]*$`, 'mu'));
   if (!head) return null;
-  const rest = on.slice(head.index + head[0].length + 1);
+  const rest = on.body.slice(head.index + head[0].length + 1);
   const next = rest.search(/^ {2}\S/mu);
   return next === -1 ? rest : rest.slice(0, next);
 }
@@ -90,6 +123,55 @@ function parseNeeds(block) {
     entries.push(item.groups.id);
   }
   return entries;
+}
+
+// The `${{ needs.<id>.result }}` bindings a job block declares, as env variable
+// name -> job id. Job-level `env:` sits at six spaces, a step's at ten; both are
+// legitimate places to bind a result, so match any indent.
+function resultBindings(block) {
+  return new Map(
+    [...block.matchAll(
+      /^ {4,}(?<variable>[A-Z][A-Z0-9_]*):[ \t]+\$\{\{[ \t]*needs\.(?<job>[A-Za-z0-9_-]+)\.result[ \t]*\}\}[ \t]*$/gmu,
+    )].map((match) => [match.groups.variable, match.groups.job]),
+  );
+}
+
+// The whole point of a terminal gate is the shell in its `run:` body: `needs:`
+// alone makes the gate WAIT for a job, not FAIL on it, because `if: always()`
+// means an upstream failure no longer skips the gate. Pinning `needs:` and
+// `if:` while leaving the body unread is the hole this closes — the review that
+// found it replaced ci.yml's `test "${CHANGES_RESULT}" = success` with a no-op
+// and every test in this file stayed green.
+//
+// MUTATION-VERIFIED: no-op any single `test "${*_RESULT}" = ...` line in a gate
+// body, or delete one `*_RESULT:` binding, and this assertion must fail. If a
+// future edit makes it pass again, the assertion is broken, not the workflow.
+//
+// The precedent is `platform-verification-workflow.test.mjs`'s receipt-gate
+// block, which pins the same three-part shape (needs -> result binding -> shell
+// comparison) for the PAC receipt; `architecture-control-workflow.test.mjs`
+// pins the literal `test "${VERIFICATION_RESULT}" = success` strings for the PAC
+// gate. Neither covers the operator-surface gates, which is why this exists.
+function assertGateConsumesEveryNeed(label, block) {
+  const needs = parseNeeds(block);
+  assert.notEqual(needs.length, 0, `${label}: a terminal gate must declare needs:`);
+  const bindings = resultBindings(block);
+  const boundJobs = new Set(bindings.values());
+  for (const need of needs) {
+    assert.ok(
+      boundJobs.has(need),
+      `${label}: needs ${need} but never binds \${{ needs.${need}.result }} into an env variable; needs: alone makes the gate WAIT for that job, and with if: always() a red or cancelled ${need} then lands behind a green required context`,
+    );
+  }
+  for (const [variable, job] of bindings) {
+    // `test "${X}" = ...` and `[ "${X}" = ... ]` are the same builtin; accept
+    // either spelling, and nothing looser.
+    assert.match(
+      block,
+      new RegExp(`(?:test|\\[)[ \\t]+"\\$\\{${variable}\\}"[ \\t]+=[ \\t]`, 'u'),
+      `${label}: binds ${variable} from ${job}.result but never compares it; a bound-and-unread result is a job the gate waits for and then ignores`,
+    );
+  }
 }
 
 // A `branches:` filter, or null when the trigger declares none.
@@ -116,13 +198,62 @@ function branchEntries(triggerBody) {
   return entries;
 }
 
+// `branches-ignore:` inverts the semantics of `branches:`, so it is never read
+// as an allowlist. Detecting it only buys a message that names what is wrong;
+// the assertion still rejects.
+function branchesIgnoreDeclared(triggerBody) {
+  return /^ {4}branches-ignore:/mu.test(triggerBody);
+}
+
 const QUEUE_REF_PREFIX = 'gh-readonly-queue';
+// A representative ref of the shape the queue creates. Every branch filter is
+// evaluated against this rather than against an enumeration of wildcard
+// spellings: `**/*` is neither `*` nor `**` nor a `gh-readonly-queue` prefix,
+// yet it matches this ref, and the enumeration this replaces passed a
+// Docker-publish lane whose push filter was exactly `['**/*']`.
+const QUEUE_REF_SAMPLE = `${QUEUE_REF_PREFIX}/next/pr-1-abc`;
+
+function escapeRegExp(literal) {
+  return literal.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+// GitHub filter-pattern semantics for `branches:`: `*` matches any run of
+// characters except `/`, `**` matches any run including `/`, `?` matches zero or
+// one character, `+` quantifies the preceding character, `\` escapes, and the
+// pattern must match the WHOLE ref.
+function branchPatternToRegExp(pattern) {
+  let source = '';
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index];
+    if (character === '*') {
+      if (pattern[index + 1] === '*') {
+        source += '.*';
+        index += 1;
+      } else {
+        source += '[^/]*';
+      }
+    } else if (character === '?') {
+      source += '[^/]?';
+    } else if (character === '+') {
+      source += '+';
+    } else if (character === '\\') {
+      index += 1;
+      source += index < pattern.length ? escapeRegExp(pattern[index]) : '\\\\';
+    } else {
+      source += escapeRegExp(character);
+    }
+  }
+  return new RegExp(`^${source}$`, 'u');
+}
 
 function admitsQueueBranch(entries) {
   if (entries === null || entries.length === 0) return true;
-  return entries.some((entry) => entry === '*'
-    || entry === '**'
-    || entry.startsWith(QUEUE_REF_PREFIX));
+  // Negations are skipped rather than subtracted. A `!` entry can therefore
+  // never rescue an over-broad positive from this check — the fail-closed
+  // direction, since a false "admits" reddens the test and demands a human look
+  // while a false "does not admit" would wave a queue-reachable lane through.
+  return entries.some((entry) => !entry.startsWith('!')
+    && branchPatternToRegExp(entry).test(QUEUE_REF_SAMPLE));
 }
 
 function workflowRunUpstreams(triggerBody) {
@@ -165,14 +296,33 @@ const producerWorkflows = [...new Set(REQUIRED_CHECK_SET.map((member) => member.
 // are shaped differently on purpose (`platform-architecture-control` collects
 // nothing; `platform-verification` collects only the selection and reusable
 // call) and are pinned by `architecture-control-workflow.test.mjs` instead.
+//
+// Selected by the `terminal` flag, not by a `-gate` name suffix: a future
+// terminal member named anything else would silently drop out of a suffix
+// filter and lose its whole-workflow coverage assertion without a single test
+// going red.
 const gateMembers = REQUIRED_CHECK_SET.filter((member) => member.kind === 'job'
-  && member.context.endsWith('-gate'));
+  && member.terminal === true);
 
 test('the required-check set is a frozen, well-formed contract', () => {
   assert.ok(Object.isFrozen(REQUIRED_CHECK_SET), 'REQUIRED_CHECK_SET must be frozen');
   for (const member of REQUIRED_CHECK_SET) {
     assert.ok(Object.isFrozen(member), `${member.context}: each member must be frozen`);
-    assert.deepEqual(Object.keys(member).sort(), ['context', 'kind', 'workflow']);
+    const keys = Object.keys(member).sort();
+    assert.deepEqual(
+      keys.filter((key) => key !== 'terminal'),
+      ['context', 'kind', 'workflow'],
+      `${member.context}: unexpected member keys (${keys.join(', ')})`,
+    );
+    if ('terminal' in member) {
+      assert.equal(member.terminal, true, `${member.context}: terminal is a marker; omit it rather than setting it false`);
+    }
+    // The inverse of the `terminal`-not-suffix selection above: a member named
+    // `*-gate` that forgot the flag would drop out of the terminal-gate test
+    // just as silently as the suffix filter dropped a differently-named one.
+    if (member.context.endsWith('-gate')) {
+      assert.equal(member.terminal, true, `${member.context}: a *-gate context collects its whole workflow, so it must be marked terminal: true`);
+    }
     assert.ok(['job', 'check-run'].includes(member.kind), `${member.context}: unknown kind ${member.kind}`);
     assert.ok(sources.has(member.workflow), `${member.context}: names a workflow that does not exist (${member.workflow})`);
   }
@@ -203,7 +353,11 @@ test('every required context has exactly one producer and nothing else shadows i
       0,
       `${member.context}: an API-posted check-run must not also be a job check name, found ${found}`,
     );
-    const declarers = workflowFiles.filter((file) => sourceOf(file).includes(`"context": "${member.context}"`));
+    // Whitespace- and quote-tolerant: the poster reads a JSON `context` field,
+    // and reformatting the verdict heredoc (single quotes, no space after the
+    // colon) must not make this scan quietly stop finding the declaration.
+    const declaration = new RegExp(`["']context["'][ \\t]*:[ \\t]*["']${escapeRegExp(member.context)}["']`, 'u');
+    const declarers = workflowFiles.filter((file) => declaration.test(sourceOf(file)));
     assert.deepEqual(
       declarers,
       [member.workflow],
@@ -223,10 +377,16 @@ test('the check-run producer posts its context however the gate job ends', () =>
     const posters = jobs.filter((job) => job.block.includes('post-check-run-verdict.mjs'));
     assert.equal(posters.length, 1, `${member.workflow}: exactly one job may post ${member.context}`);
     const [poster] = posters;
+    // END-ANCHORED, and the ONLY extra clause allowed is the fork carve-out
+    // documented on this member in required-check-set.mjs. An unanchored
+    // `if: always()` match accepted anything appended to it: the review that
+    // found this appended `&& github.event_name != 'merge_group'` and every test
+    // here stayed green, which on the one check-run member is 100% queue
+    // ejection through a required context that is never reported at all.
     assert.match(
       poster.block,
-      /^ {4}if: always\(\)/mu,
-      `${member.workflow}: ${poster.id} must run with if: always() so ${member.context} is reported even when the gate job is cancelled`,
+      /^ {4}if: always\(\)(?: && github\.event\.pull_request\.head\.repo\.fork != true)?[ \t]*$/mu,
+      `${member.workflow}: ${poster.id} must run with exactly if: always(), optionally with the documented fork carve-out and nothing else — any further condition can silence ${member.context} on the very event that needs it`,
     );
     const needs = parseNeeds(poster.block);
     const others = jobs.map((job) => job.id).filter((id) => id !== poster.id);
@@ -235,6 +395,7 @@ test('the check-run producer posts its context however the gate job ends', () =>
       [...others].sort(),
       `${member.workflow}: ${poster.id} must need every other job so ${member.context} covers the whole workflow`,
     );
+    assertGateConsumesEveryNeed(`${member.workflow}#${poster.id}`, poster.block);
   }
 });
 
@@ -275,6 +436,7 @@ test('every terminal gate runs always() and collects its whole workflow', () => 
       [...others].sort(),
       `${member.workflow}: ${member.context} must need every other job in the workflow, or a red job lands behind a green required context`,
     );
+    assertGateConsumesEveryNeed(`${member.workflow}#${member.context}`, gate.block);
   }
 });
 
@@ -288,7 +450,9 @@ test('no workflow reacts to branch activity on a merge-queue ref', () => {
         assert.notEqual(
           entries,
           null,
-          `${file}: the push trigger declares no branches: list, so it fires on every gh-readonly-queue/** ref the queue creates`,
+          branchesIgnoreDeclared(body)
+            ? `${file}: the push trigger filters with branches-ignore:, whose semantics are inverted; it is rejected rather than read as an allowlist, because everything not named — including every gh-readonly-queue/** ref — passes it. Use an explicit branches: allowlist`
+            : `${file}: the push trigger declares no branches: list, so it fires on every gh-readonly-queue/** ref the queue creates`,
         );
         assert.notEqual(entries.length, 0, `${file}: the push trigger's branches: list is empty`);
       }
@@ -297,9 +461,17 @@ test('no workflow reacts to branch activity on a merge-queue ref', () => {
           !entry.startsWith(QUEUE_REF_PREFIX),
           `${file}: the ${trigger} branches: entry ${entry} targets the merge-queue ref space`,
         );
+        // Kept alongside the glob evaluation below as defense in depth. Under
+        // GitHub's semantics a bare `*` does not actually match a queue ref
+        // (`*` stops at `/`), but a bare wildcard on a lane that must never see
+        // one is a smell worth rejecting on sight.
         assert.ok(
           entry !== '*' && entry !== '**',
           `${file}: the ${trigger} branches: entry ${entry} is a bare wildcard and admits gh-readonly-queue/** refs`,
+        );
+        assert.ok(
+          entry.startsWith('!') || !branchPatternToRegExp(entry).test(QUEUE_REF_SAMPLE),
+          `${file}: the ${trigger} branches: entry ${entry} matches ${QUEUE_REF_SAMPLE} under GitHub filter-pattern semantics, so it fires on merge-queue refs`,
         );
       }
     }
@@ -311,6 +483,70 @@ test('no workflow reacts to branch activity on a merge-queue ref', () => {
       queueBranchReachable(file),
       false,
       `${file}: can be triggered by activity on a gh-readonly-queue/** ref; publish and release lanes must never fire from a speculative queue commit (DR-2026-08-18-b D5)`,
+    );
+  }
+});
+
+test('branch patterns are evaluated with GitHub glob semantics, not a wildcard enumeration', () => {
+  // `admits` is "does this branches: entry fire on a merge-queue ref". The
+  // enumeration this table replaces answered yes only for `*`, `**`, and a
+  // literal `gh-readonly-queue` prefix, so `**/*` read as safe.
+  const cases = [
+    { pattern: 'next', admits: false },
+    { pattern: 'main', admits: false },
+    { pattern: 'release/*', admits: false },
+    { pattern: 'integration/evidence-v1', admits: false },
+    // `*` and `?` stop at `/`; the queue ref has two separators.
+    { pattern: '*', admits: false },
+    { pattern: 'gh-readonly-queue', admits: false },
+    { pattern: 'gh-readonly-queue/*', admits: false },
+    // `**` crosses `/`.
+    { pattern: '**', admits: true },
+    { pattern: '**/*', admits: true },
+    { pattern: '*/**', admits: true },
+    { pattern: 'gh-readonly-queue/**', admits: true },
+    { pattern: 'gh-readonly-queue/next/**', admits: true },
+    { pattern: 'gh-readonly-queue/*/pr-1-abc', admits: true },
+    // Anchored at both ends: a prefix alone is not a match.
+    { pattern: 'gh-readonly-queue/next/pr-1-abc', admits: true },
+    { pattern: 'gh-readonly-queue/next/pr-1', admits: false },
+    // A literal dot must not read as "any character".
+    { pattern: 'gh-readonly-queue/next/pr-1.abc', admits: false },
+  ];
+  for (const { pattern, admits } of cases) {
+    assert.equal(
+      branchPatternToRegExp(pattern).test(QUEUE_REF_SAMPLE),
+      admits,
+      `${pattern}: expected admits=${admits} against ${QUEUE_REF_SAMPLE}`,
+    );
+    assert.equal(admitsQueueBranch([pattern]), admits, `${pattern}: admitsQueueBranch disagrees with the pattern`);
+  }
+  // A list admits when any positive entry does; a negation is skipped, never
+  // subtracted, so it can only ever leave the answer more conservative.
+  assert.equal(admitsQueueBranch(['next', 'release/*']), false);
+  assert.equal(admitsQueueBranch(['next', '**/*']), true);
+  assert.equal(admitsQueueBranch(['!gh-readonly-queue/**']), false);
+  assert.equal(admitsQueueBranch(['**', '!gh-readonly-queue/**']), true);
+  // An absent or empty filter is unfiltered, which admits everything.
+  assert.equal(admitsQueueBranch(null), true);
+  assert.equal(admitsQueueBranch([]), true);
+});
+
+test('branch-protection-audit.mjs requires no context outside the set', async () => {
+  // Single source of truth, asserted from the outside. The flip PR reworks the
+  // audit to derive its list from `requiredContexts()` outright; until then this
+  // holds the weaker invariant that keeps the two from contradicting each other
+  // — the audit may lag the set, but must never demand a context the set does
+  // not define, which would be a required context no workflow here is pinned to
+  // report.
+  const { REQUIRED_CONTEXTS } = await import('./branch-protection-audit.mjs');
+  assert.ok(Array.isArray(REQUIRED_CONTEXTS), 'branch-protection-audit.mjs must export a REQUIRED_CONTEXTS array');
+  assert.notEqual(REQUIRED_CONTEXTS.length, 0, 'branch-protection-audit.mjs must audit at least one context');
+  const defined = new Set(requiredContexts());
+  for (const context of REQUIRED_CONTEXTS) {
+    assert.ok(
+      defined.has(context),
+      `branch-protection-audit.mjs audits ${context}, which the required-check set does not define; add it to required-check-set.mjs or drop it from the audit`,
     );
   }
 });
