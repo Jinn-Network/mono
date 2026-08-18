@@ -4,9 +4,9 @@
 |---|---|
 | **Version** | 0.4 |
 | **Date** | 2026-08-13 |
-| **Amended** | 2026-08-18 — Inspect-as-specified second named suite protocol ([DR-2026-08-18](../../../log/decisions/2026-08-18-inspect-as-specified.md)); 2026-08-17 — direct-mode job grain ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); official suite protocol and one Job per arm ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)); no §8.4 marketplace rewrite |
+| **Amended** | 2026-08-18 — Inspect eval second named suite protocol ([DR-2026-08-18](../../../log/decisions/2026-08-18-inspect-as-specified.md)); 2026-08-17 — direct-mode job grain ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); official suite protocol and one Job per arm ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)); no §8.4 marketplace rewrite |
 | **Shape** | interoperability profile and design amendment |
-| **Status** | draft; revised after independent design review; §8.3 grain note added 2026-08-17; §8.3 suite protocol added 2026-08-17; Inspect-as-specified added 2026-08-18 |
+| **Status** | draft; revised after independent design review; §8.3 grain note added 2026-08-17; §8.3 suite protocol added 2026-08-17; Inspect eval added 2026-08-18 |
 | **Applies to** | any benchmarking product publishing through Jinn, including Colophon |
 | **Depends on** | [stack design principles](./2026-07-30-stack-design-principles.md), [benchmarking application](./2026-07-28-benchmarking-application-design.md), [record discovery](./2026-07-27-record-discovery-protocol-design.md), [evidence publication](./2026-07-25-evidence-publication-design.md), and [execution evidence](./2026-07-23-jinn-execution-evidence-protocol-design.md) |
 | **Companion research** | [Colophon, Harbor, and marketplace publication spike](../../spikes/2026-08-13-colophon-harbor-marketplace-publication.md) |
@@ -603,14 +603,14 @@ cousin on the same tasks. Named protocols:
 - official env (timeout_multiplier unset or 1.0; no agent/verifier timeout or resource overrides);
 - ATIF trajectories required for Hub packaging.
 
-**Inspect-as-specified** ([DR-2026-08-18](../../../log/decisions/2026-08-18-inspect-as-specified.md)):
+**Inspect eval** ([DR-2026-08-18](../../../log/decisions/2026-08-18-inspect-as-specified.md)):
 
 - operator-chosen Inspect eval locked as specified; `datasetId` is the resolved task name;
 - catalog grain is samples; `one_task` / `ten_task` / `full` / `custom` are lexicographic first 1 /
   first 10 / all / custom sample ids from the sealed catalog (`one_task` = one sample here);
 - specified Inspect epochs map onto Jinn replicates; the worker stays `epochs: 1`;
 - solver is the Task default; `--solver` and `--limit` are not execution-conforming;
-- `leaderboard_submit_ready` means as-specified complete of the sealed catalog, not an Inspect Hub
+- `leaderboard_submit_ready` means eval complete of the sealed catalog, not an Inspect Hub
   row. Colophon does not place an Inspect Hub row. A derived Inspect View log bundle is not the
   claim of record.
 
@@ -622,7 +622,7 @@ extension's `registrationArtifacts`. Surface on the product claim package:
 - `coverage` — `one_task` | `ten_task` | `full` | `custom`;
 - `leaderboard_submit_ready` — for Terminal-Bench 2.1: full coverage, execution conformance, ≥5
   trials on every dataset task accounted after collect as judged or Harbor-error 0, and ATIF bytes
-  on the retained Harbor job. For Inspect-as-specified: full coverage of the sealed sample catalog,
+  on the retained Harbor job. For Inspect eval: full coverage of the sealed sample catalog,
   execution conformance, Matrix replicates equal specified epochs, and every sample × k accounted
   after collect as judged or unscorable. Quote-time method bits and a job `result.json` are not
   enough.
@@ -630,7 +630,7 @@ extension's `registrationArtifacts`. Surface on the product claim package:
 Named slices (lexicographic first 1 / first 10 / all from the pinned snapshot) are how a publisher
 runs cheaply. A protocol-faithful slice is not a leaderboard-complete run. When not
 `leaderboard_submit_ready`, Report `limitations[]` carries a canonical sentence. Canonical
-Inspect-as-specified limitation copy names Inspect-as-specified, not Terminal-Bench.
+Inspect eval limitation copy names Inspect eval, not Terminal-Bench.
 
 **Hub export** is a derived Harbor-shaped artifact of a Colophon-accounted Terminal-Bench 2.1 run,
 not the claim of record. The bundle remains what a third party checks. `leaderboard_submit_ready`
@@ -639,7 +639,7 @@ inspection and must not be packaged as a leaderboard submission. Custom or unver
 suite-named Hub export. A foreign completed Hub job still cannot be imported as a synthesized TEP
 run. Copy must not claim Colophon placed a leaderboard row while community submissions are closed.
 
-**Inspect View export** is the analogous derived artifact for Inspect-as-specified: correlated
+**Inspect View export** is the analogous derived artifact for Inspect eval: correlated
 per-cell `.eval` logs for `inspect view` / `--bundle-dir` semantics. Ready + `full` may copy a
 suite-named bundle. A named slice is inspection-only. Cousin Inspect select, custom coverage, and
 non-conforming execution refuse suite-named export. This is not an Inspect Hub row.

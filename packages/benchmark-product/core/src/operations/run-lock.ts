@@ -31,7 +31,7 @@ import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
-import { readInspectAsSpecifiedSelectionManifest } from "../runtime/inspect/host.js";
+import { readInspectEvalSelectionManifest } from "../runtime/inspect/host.js";
 import { runtimeRegistrationArtifacts } from "../runtime/adapter.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import type { OperationContext } from "./context.js";
@@ -101,7 +101,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         }
       }
       if (document.spec.evaluationRuntime?.adapterId === "inspect") {
-        const inspectSuite = readInspectAsSpecifiedSelectionManifest(
+        const inspectSuite = readInspectEvalSelectionManifest(
           clockedContext.workspaceDir,
           document.spec.evaluationRuntime.selectionManifestSha256,
         );
@@ -109,7 +109,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           refuse(
             "conflict",
             `runs.${input.draftId}.suiteQuote`,
-            "full-suite Inspect-as-specified lock requires a quote that recorded comparability bits",
+            "full-suite Inspect eval lock requires a quote that recorded comparability bits",
           );
         }
       }

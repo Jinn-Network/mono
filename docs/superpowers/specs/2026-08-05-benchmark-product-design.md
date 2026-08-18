@@ -1365,13 +1365,13 @@ product-sealed selection artifact plus Report `limitations[]`. Hub export is
 a derived artifact, not the claim of record. One Harbor Job per arm spans
 planned trials; official SWE-bench Verified remains a follow-on.
 
-**Addendum — 2026-08-18, Inspect-as-specified pointer ([DR-2026-08-18](../../../log/decisions/2026-08-18-inspect-as-specified.md);
+**Addendum — 2026-08-18, Inspect eval pointer ([DR-2026-08-18](../../../log/decisions/2026-08-18-inspect-as-specified.md);
 no new Report v2 required fields, no new record kinds, adapter id stays
-`inspect`):** Inspect-as-specified is a second named protocol. The operator
+`inspect`):** Inspect eval is a second named protocol. The operator
 picks an Inspect eval; Colophon locks it as specified. Coverage enums mean
 sample ids (`one_task` = one sample). Specified epochs are Jinn replicates;
-the worker stays `epochs: 1`. `leaderboard_submit_ready` means as-specified
-complete, not an Inspect Hub row. Cousin `runtime inspect select` cannot wear
+the worker stays `epochs: 1`. `leaderboard_submit_ready` means eval
+complete, not an Inspect Hub row. Inspect task `runtime inspect select` cannot wear
 the suite name. View export is a derived log bundle, not the claim of record.
 
 ## 13. Provenance

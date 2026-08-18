@@ -7,7 +7,7 @@ import {
   type InspectSelectionManifest,
   type InspectSelectionTemplate,
 } from "../inspect/manifest.js";
-import { sampleIdKey, type InspectAsSpecifiedSelectionManifest } from "./manifest.js";
+import { sampleIdKey, type InspectEvalSelectionManifest } from "./manifest.js";
 
 export function overlayInspectCellManifest(
   template: InspectSelectionTemplate,
@@ -33,13 +33,13 @@ export function overlayInspectCellManifest(
   });
 }
 
-export function overlayInspectAsSpecifiedCell(
-  selection: InspectAsSpecifiedSelectionManifest,
+export function overlayInspectEvalCell(
+  selection: InspectEvalSelectionManifest,
   sampleId: string | number,
 ): InspectSelectionManifest {
   const allowed = new Set(selection.selectedSamples.map((sample) => sampleIdKey(sample.sampleId)));
   if (!allowed.has(sampleIdKey(sampleId))) {
-    throw new TypeError("Inspect-as-specified cell sampleId is not in the sealed catalog slice");
+    throw new TypeError("Inspect eval cell sampleId is not in the sealed catalog slice");
   }
   return overlayInspectCellManifest(selection.inspect, sampleId);
 }

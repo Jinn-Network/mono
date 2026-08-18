@@ -1,15 +1,15 @@
-/** Sealed Inspect-as-specified selection: one operator-chosen Inspect eval, locked as specified. */
+/** Sealed Inspect eval selection: one operator-chosen Inspect eval, locked as specified. */
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
 import { sha256Hex } from "../../workspace/sealed-store.js";
 import { InspectSelectionTemplateSchema } from "../inspect/manifest.js";
 import { SUITE_COVERAGE, type SuiteCoverage } from "../suite-protocol/comparability.js";
-import { InspectAsSpecifiedSuiteProtocolSelectionSchema } from "../suite-protocol/manifest.js";
+import { InspectEvalSuiteProtocolSelectionSchema } from "../suite-protocol/manifest.js";
 
-export const INSPECT_AS_SPECIFIED_SELECTION_SCHEMA =
-  "jinn.network/benchmark-product/inspect-as-specified-selection/1" as const;
-export const INSPECT_AS_SPECIFIED_SELECTION_ROLE =
-  "https://product.jinn.network/artifact-roles/inspect-as-specified/selection/v1" as const;
+export const INSPECT_EVAL_SELECTION_SCHEMA =
+  "jinn.network/benchmark-product/inspect-eval-selection/1" as const;
+export const INSPECT_EVAL_SELECTION_ROLE =
+  "https://product.jinn.network/artifact-roles/inspect-eval/selection/v1" as const;
 
 const Sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
 const SampleIdSchema = z.union([z.string().min(1), z.number().int()]);
@@ -25,15 +25,15 @@ export const InspectCatalogSnapshotSchema = z.object({
   datasetSampleCount: z.number().int().nonnegative(),
 }).strict();
 
-export const InspectAsSpecifiedSelectionManifestSchema = z.object({
-  schema: z.literal(INSPECT_AS_SPECIFIED_SELECTION_SCHEMA),
+export const InspectEvalSelectionManifestSchema = z.object({
+  schema: z.literal(INSPECT_EVAL_SELECTION_SCHEMA),
   inspect: InspectSelectionTemplateSchema,
   catalog: InspectCatalogSnapshotSchema,
   coverage: z.enum(SUITE_COVERAGE),
   selectedSamples: z.array(z.object({ sampleId: SampleIdSchema }).strict()).min(1),
   solver: z.string().min(1),
   sampleLimit: z.number().int().positive().nullable(),
-  suite: InspectAsSpecifiedSuiteProtocolSelectionSchema,
+  suite: InspectEvalSuiteProtocolSelectionSchema,
 }).strict().superRefine((value, context) => {
   if (value.selectedSamples.length !== value.suite.selectedTaskNames.length) {
     context.addIssue({
@@ -66,16 +66,16 @@ export const InspectAsSpecifiedSelectionManifestSchema = z.object({
   }
 });
 
-export type InspectAsSpecifiedSelectionManifest = z.infer<typeof InspectAsSpecifiedSelectionManifestSchema>;
+export type InspectEvalSelectionManifest = z.infer<typeof InspectEvalSelectionManifestSchema>;
 export type InspectCatalogSnapshot = z.infer<typeof InspectCatalogSnapshotSchema>;
 export type { SuiteCoverage };
 
-export function inspectAsSpecifiedSelectionBytes(value: InspectAsSpecifiedSelectionManifest): Uint8Array {
-  return canonicalJsonBytes(InspectAsSpecifiedSelectionManifestSchema.parse(value) as never);
+export function inspectEvalSelectionBytes(value: InspectEvalSelectionManifest): Uint8Array {
+  return canonicalJsonBytes(InspectEvalSelectionManifestSchema.parse(value) as never);
 }
 
-export function inspectAsSpecifiedSelectionSha256(value: InspectAsSpecifiedSelectionManifest): string {
-  return sha256Hex(inspectAsSpecifiedSelectionBytes(value));
+export function inspectEvalSelectionSha256(value: InspectEvalSelectionManifest): string {
+  return sha256Hex(inspectEvalSelectionBytes(value));
 }
 
 export function sampleIdKey(sampleId: string | number): string {

@@ -125,10 +125,10 @@ describe("suite run-complete assessor", () => {
     expect(atifOnRetainedJob(jobDir, suite, matrix, "one")).toBe(false);
   });
 
-  test("accountSuiteArmCells loops inspect-as-specified replicates when k>1", () => {
+  test("accountSuiteArmCells loops inspect-eval replicates when k>1", () => {
     const inspectSuite: SuiteProtocolSelection = {
       schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
-      protocol: "inspect-as-specified",
+      protocol: "inspect-eval",
       coverage: "one_task",
       datasetId: "hermetic",
       datasetRevision: "c".repeat(64),

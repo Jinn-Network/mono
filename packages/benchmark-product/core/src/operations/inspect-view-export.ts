@@ -3,9 +3,9 @@ import { parseCellKey, parseMatrix } from "@jinn-network/benchmarking-records";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { refuse } from "../errors.js";
-import { readInspectAsSpecifiedSelectionManifest } from "../runtime/inspect/host.js";
+import { readInspectEvalSelectionManifest } from "../runtime/inspect/host.js";
 import {
-  INSPECT_AS_SPECIFIED_SUBMIT_CLOSED_SENTENCE,
+  INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
   type SuiteCoverage,
 } from "../runtime/suite-protocol/comparability.js";
 import { suiteComparabilityForInspectArm } from "../runtime/suite-protocol/from-inspect.js";
@@ -45,17 +45,17 @@ export function decideInspectViewExportMode(input: {
 export function inspectViewExportInstructions(mode: InspectViewExportMode, exportDir: string): string {
   if (mode === "suite-named") {
     return [
-      "The locked Inspect-as-specified method produced correlated per-cell .eval logs.",
+      "The locked Inspect eval method produced correlated per-cell .eval logs.",
       `inspect view --log-dir ${exportDir}`,
       "inspect view bundle --bundle-dir <out> can wrap this log dir for Inspect View.",
-      INSPECT_AS_SPECIFIED_SUBMIT_CLOSED_SENTENCE,
+      INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
     ].join("\n");
   }
   return [
-    "This run matches Inspect-as-specified execution settings for the selected named slice, but it is not an as-specified complete evaluation of the sealed catalog.",
+    "This run matches Inspect eval execution settings for the selected named slice, but it is not eval complete for the sealed catalog.",
     `You may open the logs for inspection: inspect view --log-dir ${exportDir}`,
     "Do not treat this package as an Inspect Hub row or as the Colophon claim of record.",
-    INSPECT_AS_SPECIFIED_SUBMIT_CLOSED_SENTENCE,
+    INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
   ].join("\n");
 }
 
@@ -65,7 +65,7 @@ export function exportInspectViewBundle(
 ): OperationResult<ExportInspectViewBundleResult> {
   return operate({
     context,
-    action: "runtime.inspect-as-specified.export",
+    action: "runtime.inspect.eval.export",
     subject: input.draftId,
     inputs: input,
     run: () => {
@@ -76,7 +76,7 @@ export function exportInspectViewBundle(
       if (document.spec.evaluationRuntime?.adapterId !== "inspect") {
         refuse("conflict", `drafts.${input.draftId}.evaluationRuntime`, "Inspect View export requires a locked Inspect runtime");
       }
-      const manifest = readInspectAsSpecifiedSelectionManifest(
+      const manifest = readInspectEvalSelectionManifest(
         context.workspaceDir,
         document.spec.evaluationRuntime.selectionManifestSha256,
       );
@@ -84,7 +84,7 @@ export function exportInspectViewBundle(
         refuse(
           "conflict",
           `runs.${input.draftId}.suiteQuote`,
-          "cousin Inspect select cannot wear the Inspect-as-specified suite name",
+          "Inspect task select cannot wear the Inspect eval suite name",
         );
       }
       const runState = requireRunState(context.workspaceDir, input.draftId);
@@ -93,7 +93,7 @@ export function exportInspectViewBundle(
       }
       const quote = runState.suiteQuote;
       if (quote === undefined) {
-        refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named Inspect View export requires an Inspect-as-specified protocol selection");
+        refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named Inspect View export requires an Inspect eval protocol selection");
       }
       const assessed = runState.matrixSha256 === undefined
         ? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false }
@@ -108,7 +108,7 @@ export function exportInspectViewBundle(
           "conflict",
           `runs.${input.draftId}.suiteQuote`,
           quote.coverage === "custom"
-            ? "custom coverage cannot wear the Inspect-as-specified suite name"
+            ? "custom coverage cannot wear the Inspect eval suite name"
             : "execution was not protocol-conforming; suite-named Inspect View export is refused",
         );
       }

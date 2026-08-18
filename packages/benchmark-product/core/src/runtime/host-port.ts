@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLocalVenue, type LocalVenue, type LocalVenueOptions } from "../venue/venue.js";
 import { catalogInspectSelection, probeInspectSelection, type InspectHostBinding } from "./inspect/host.js";
-import type { InspectCatalog } from "./inspect-as-specified/catalog.js";
+import type { InspectCatalog } from "./inspect-eval/catalog.js";
 import { catalogInspectOciSelection, probeInspectOciSelection } from "./inspect/oci.js";
 import type { InspectSandboxExecutionRequest } from "./inspect/oci.js";
 import type {

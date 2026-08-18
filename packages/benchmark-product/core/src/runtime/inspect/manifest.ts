@@ -340,7 +340,7 @@ export const InspectSelectionManifestSchema = z.union([
   MultiScorerInspectSelectionManifestSchema,
 ]).superRefine((manifest, context) => refineInspectSelection(manifest, context, true));
 
-/** Shared Inspect pin without a single sampleId. Used by Inspect-as-specified until per-cell overlay. */
+/** Shared Inspect pin without a single sampleId. Used by Inspect eval until per-cell overlay. */
 export const InspectSelectionTemplateSchema = z.union([
   LegacyInspectSelectionManifestSchema,
   MultiScorerInspectSelectionManifestSchema,

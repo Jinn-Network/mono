@@ -2,7 +2,7 @@
 
 export const SUITE_COVERAGE = ["one_task", "ten_task", "full", "custom"] as const;
 export type SuiteCoverage = (typeof SUITE_COVERAGE)[number];
-export type SuiteProtocolId = "terminal-bench-2.1" | "inspect-as-specified";
+export type SuiteProtocolId = "terminal-bench-2.1" | "inspect-eval";
 
 export interface SuiteComparability {
   readonly executionConformance: boolean;
@@ -28,17 +28,17 @@ export interface DeriveSuiteComparabilityInput {
 export const SUITE_NOT_LEADERBOARD_READY_LIMITATION =
   "This run is not a Terminal-Bench 2.1 leaderboard submission: coverage is not the full official dataset, execution was not protocol-conforming, the Matrix does not account every dataset task × 5 as judged or Harbor-error 0, or ATIF trajectories are missing from the retained Harbor job.";
 
-export const INSPECT_AS_SPECIFIED_NOT_LEADERBOARD_READY_LIMITATION =
-  "This run is not an Inspect-as-specified evaluation of the sealed eval: coverage is not the full sample catalog, execution was not protocol-conforming, or the Matrix does not account every catalog sample × specified epochs as judged or unscorable. Colophon does not place an Inspect Hub row.";
+export const INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION =
+  "This run is not eval complete for the sealed Inspect eval: coverage is not the full sample catalog, execution was not protocol-conforming, or the Matrix does not account every catalog sample × specified epochs as judged or unscorable. Colophon does not place an Inspect Hub row.";
 
 export const COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE =
   "Community submissions are currently closed for Terminal-Bench 2.1. Colophon does not place the leaderboard row.";
 
-export const INSPECT_AS_SPECIFIED_SUBMIT_CLOSED_SENTENCE =
+export const INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE =
   "Colophon does not place an Inspect Hub row. An Inspect View bundle is a derived artifact, not the claim of record.";
 
 export function methodLeaderboardEligible(input: DeriveSuiteComparabilityInput): boolean {
-  if ((input.protocol ?? "terminal-bench-2.1") === "inspect-as-specified") {
+  if ((input.protocol ?? "terminal-bench-2.1") === "inspect-eval") {
     return input.coverage === "full"
       && input.executionConformance
       && input.k >= 1
@@ -57,7 +57,7 @@ export function methodLeaderboardEligible(input: DeriveSuiteComparabilityInput):
 
 export function deriveSuiteComparability(input: DeriveSuiteComparabilityInput): SuiteComparability {
   const protocol = input.protocol ?? "terminal-bench-2.1";
-  const collected = protocol === "inspect-as-specified"
+  const collected = protocol === "inspect-eval"
     ? input.cellsAccounted === true
     : input.cellsAccounted === true && input.atifOnRetainedJob === true;
   return {
@@ -72,8 +72,8 @@ export function suiteLeaderboardLimitation(
   protocol: SuiteProtocolId = "terminal-bench-2.1",
 ): string | undefined {
   if (comparability.leaderboardSubmitReady) return undefined;
-  return protocol === "inspect-as-specified"
-    ? INSPECT_AS_SPECIFIED_NOT_LEADERBOARD_READY_LIMITATION
+  return protocol === "inspect-eval"
+    ? INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION
     : SUITE_NOT_LEADERBOARD_READY_LIMITATION;
 }
 
@@ -113,7 +113,7 @@ export function officialHarborExecutionConformance(input: {
   return true;
 }
 
-export function officialInspectAsSpecifiedConformance(input: {
+export function officialInspectEvalConformance(input: {
   readonly k: number;
   readonly specifiedEpochs: number;
   readonly inspectVersion: string;

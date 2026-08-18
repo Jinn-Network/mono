@@ -19,11 +19,11 @@ import {
   type InspectSelectionManifest,
 } from "./manifest.js";
 import {
-  InspectAsSpecifiedSelectionManifestSchema,
-  type InspectAsSpecifiedSelectionManifest,
-} from "../inspect-as-specified/manifest.js";
-import { inspectCatalogSnapshotSha256 } from "../inspect-as-specified/catalog.js";
-import { stripInspectTemplateSampleId } from "../inspect-as-specified/overlay.js";
+  InspectEvalSelectionManifestSchema,
+  type InspectEvalSelectionManifest,
+} from "../inspect-eval/manifest.js";
+import { inspectCatalogSnapshotSha256 } from "../inspect-eval/catalog.js";
+import { stripInspectTemplateSampleId } from "../inspect-eval/overlay.js";
 import {
   InspectOciHostBindingSchema,
   assertInspectOciHostUndrifted,
@@ -225,10 +225,10 @@ export function readInspectHostBinding(workspaceDir: string, selectionManifestSh
   }
 }
 
-export function readInspectAsSpecifiedSelectionManifest(
+export function readInspectEvalSelectionManifest(
   workspaceDir: string,
   digest: string,
-): InspectAsSpecifiedSelectionManifest | undefined {
+): InspectEvalSelectionManifest | undefined {
   const bytes = getSealedBytes(workspaceDir, digest);
   let decoded: unknown;
   try {
@@ -236,8 +236,8 @@ export function readInspectAsSpecifiedSelectionManifest(
   } catch {
     return refuse("record-integrity", "inspect.selection", "the sealed Inspect selection manifest is not valid UTF-8 JSON");
   }
-  const asSpecified = InspectAsSpecifiedSelectionManifestSchema.safeParse(decoded);
-  return asSpecified.success ? asSpecified.data : undefined;
+  const inspectEval = InspectEvalSelectionManifestSchema.safeParse(decoded);
+  return inspectEval.success ? inspectEval.data : undefined;
 }
 
 export function readInspectSelectionManifest(workspaceDir: string, digest: string): InspectSelectionManifest {
@@ -248,9 +248,9 @@ export function readInspectSelectionManifest(workspaceDir: string, digest: strin
   } catch {
     return refuse("record-integrity", "inspect.selection", "the sealed Inspect selection manifest is not valid UTF-8 JSON");
   }
-  const asSpecified = InspectAsSpecifiedSelectionManifestSchema.safeParse(decoded);
-  if (asSpecified.success) {
-    return asSpecified.data.inspect as InspectSelectionManifest;
+  const inspectEval = InspectEvalSelectionManifestSchema.safeParse(decoded);
+  if (inspectEval.success) {
+    return inspectEval.data.inspect as InspectSelectionManifest;
   }
   const parsed = InspectSelectionManifestSchema.safeParse(decoded);
   if (!parsed.success) {
@@ -264,9 +264,9 @@ export async function assertInspectSelectionUndrifted(
   workspaceDir: string,
   selectionManifestSha256: string,
 ): Promise<void> {
-  const asSpecified = readInspectAsSpecifiedSelectionManifest(workspaceDir, selectionManifestSha256);
+  const inspectEval = readInspectEvalSelectionManifest(workspaceDir, selectionManifestSha256);
   const host = readInspectHostBinding(workspaceDir, selectionManifestSha256);
-  if (asSpecified !== undefined) {
+  if (inspectEval !== undefined) {
     const catalog = host.kind === "oci"
       ? await catalogInspectOciSelection({
         dockerPath: host.dockerPath,
@@ -274,27 +274,27 @@ export async function assertInspectSelectionUndrifted(
         projectDir: host.projectDir,
         datasetCacheDir: host.datasetCacheDir,
         sandboxExecution: host.sandboxExecution,
-        taskReference: asSpecified.inspect.task.reference,
-        taskArgs: asSpecified.inspect.task.args as Readonly<Record<string, unknown>>,
+        taskReference: inspectEval.inspect.task.reference,
+        taskArgs: inspectEval.inspect.task.args as Readonly<Record<string, unknown>>,
       })
       : await catalogInspectSelection({
         pythonPath: host.pythonPath,
         projectDir: host.projectDir,
-        taskReference: asSpecified.inspect.task.reference,
-        taskArgs: asSpecified.inspect.task.args as Readonly<Record<string, unknown>>,
+        taskReference: inspectEval.inspect.task.reference,
+        taskArgs: inspectEval.inspect.task.args as Readonly<Record<string, unknown>>,
       });
     const snapshotSha256 = inspectCatalogSnapshotSha256({
       sampleIds: catalog.sampleIds,
-      taskSourceDigest: asSpecified.inspect.task.source.sha256,
+      taskSourceDigest: inspectEval.inspect.task.source.sha256,
       datasetName: catalog.datasetName,
       datasetLocation: catalog.datasetLocation,
       datasetSampleCount: catalog.datasetSampleCount,
     });
-    if (snapshotSha256 !== asSpecified.catalog.snapshotSha256) {
-      refuse("conflict", "inspect.selection", "Inspect-as-specified sample catalog drifted after selection/lock");
+    if (snapshotSha256 !== inspectEval.catalog.snapshotSha256) {
+      refuse("conflict", "inspect.selection", "Inspect eval sample catalog drifted after selection/lock");
     }
-    const scoringRequest = inspectScoringRequest(asSpecified.inspect as InspectSelectionManifest);
-    const firstSample = asSpecified.selectedSamples[0]!.sampleId;
+    const scoringRequest = inspectScoringRequest(inspectEval.inspect as InspectSelectionManifest);
+    const firstSample = inspectEval.selectedSamples[0]!.sampleId;
     const probed = host.kind === "oci"
       ? (await probeInspectOciSelection({
         dockerPath: host.dockerPath,
@@ -302,24 +302,24 @@ export async function assertInspectSelectionUndrifted(
         projectDir: host.projectDir,
         datasetCacheDir: host.datasetCacheDir,
         sandboxExecution: host.sandboxExecution,
-        taskReference: asSpecified.inspect.task.reference,
-        taskArgs: asSpecified.inspect.task.args as Readonly<Record<string, unknown>>,
-        arms: asSpecified.inspect.arms,
+        taskReference: inspectEval.inspect.task.reference,
+        taskArgs: inspectEval.inspect.task.args as Readonly<Record<string, unknown>>,
+        arms: inspectEval.inspect.arms,
         ...scoringRequest,
-        runOptions: { ...asSpecified.inspect.runOptions, sampleId: firstSample, maxSamples: 1 },
+        runOptions: { ...inspectEval.inspect.runOptions, sampleId: firstSample, maxSamples: 1 },
       })).manifest
       : await probeInspectSelection({
         pythonPath: host.pythonPath,
         projectDir: host.projectDir,
-        taskReference: asSpecified.inspect.task.reference,
-        taskArgs: asSpecified.inspect.task.args as Readonly<Record<string, unknown>>,
-        arms: asSpecified.inspect.arms,
+        taskReference: inspectEval.inspect.task.reference,
+        taskArgs: inspectEval.inspect.task.args as Readonly<Record<string, unknown>>,
+        arms: inspectEval.inspect.arms,
         ...scoringRequest,
-        runOptions: asSpecified.inspect.runOptions,
+        runOptions: inspectEval.inspect.runOptions,
       });
     if (host.kind === "oci") await assertInspectOciHostUndrifted(host, probed);
     const template = stripInspectTemplateSampleId(probed);
-    if (sha256Hex(canonicalJsonBytes(template as never)) !== sha256Hex(canonicalJsonBytes(asSpecified.inspect as never))) {
+    if (sha256Hex(canonicalJsonBytes(template as never)) !== sha256Hex(canonicalJsonBytes(inspectEval.inspect as never))) {
       refuse("conflict", "inspect.selection", "Inspect task, source, Python, runtime, or material configuration drifted after selection/lock");
     }
     return;

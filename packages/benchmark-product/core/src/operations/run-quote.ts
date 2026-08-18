@@ -48,7 +48,7 @@ import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { suiteQuoteFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
-import { readInspectAsSpecifiedSelectionManifest } from "../runtime/inspect/host.js";
+import { readInspectEvalSelectionManifest } from "../runtime/inspect/host.js";
 import { suiteQuoteFromInspect } from "../runtime/suite-protocol/from-inspect.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 
@@ -337,7 +337,7 @@ export function runQuote(
         })
         : evaluationRuntime?.adapterId === "inspect"
           ? (() => {
-            const manifest = readInspectAsSpecifiedSelectionManifest(
+            const manifest = readInspectEvalSelectionManifest(
               clockedContext.workspaceDir,
               evaluationRuntime.selectionManifestSha256,
             );

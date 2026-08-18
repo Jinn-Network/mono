@@ -1,4 +1,4 @@
-/** Catalog snapshot digest for Inspect-as-specified. Not a HuggingFace git SHA. */
+/** Catalog snapshot digest for Inspect eval. Not a HuggingFace git SHA. */
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { sha256Hex } from "../../workspace/sealed-store.js";
 

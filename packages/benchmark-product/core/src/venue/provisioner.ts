@@ -59,8 +59,8 @@ import {
 import type { InspectHostBinding } from "../runtime/inspect/host.js";
 import { resolveHarborMaterial, type HarborHostBinding } from "../runtime/harbor/host.js";
 import { InspectSelectionManifestSchema, type InspectSelectionManifest } from "../runtime/inspect/manifest.js";
-import type { InspectAsSpecifiedSelectionManifest } from "../runtime/inspect-as-specified/manifest.js";
-import { overlayInspectAsSpecifiedCell } from "../runtime/inspect-as-specified/overlay.js";
+import type { InspectEvalSelectionManifest } from "../runtime/inspect-eval/manifest.js";
+import { overlayInspectEvalCell } from "../runtime/inspect-eval/overlay.js";
 import {
   INSPECT_BINARY_JUDGE_CONFIG_FILENAME,
   INSPECT_BINARY_JUDGE_INSTRUMENT_FILENAME,
@@ -646,7 +646,7 @@ export interface InspectProvisionerOptions {
   readonly selectionManifestSha256: string;
   readonly manifest: InspectSelectionManifest;
   readonly host: InspectHostBinding;
-  readonly asSpecified?: InspectAsSpecifiedSelectionManifest;
+  readonly inspectEval?: InspectEvalSelectionManifest;
   /** Present only for the exact embedded direct-check strategy. */
   readonly embeddedEvaluator?: VenueEvaluatorSigner;
 }
@@ -1062,11 +1062,11 @@ function inspectProvisionerContract(
       if (arm === undefined) throw new Error(`Inspect selection carries no configuration for arm ${coordinate.armId}`);
       const payload = input.task.payload as { selectionManifestSha256?: unknown; sampleId?: unknown } | undefined;
       let cellManifest = options.manifest;
-      if (options.asSpecified !== undefined) {
+      if (options.inspectEval !== undefined) {
         if (typeof payload?.sampleId !== "string" && typeof payload?.sampleId !== "number") {
-          throw new Error("Inspect-as-specified Task payload must carry the cell sampleId");
+          throw new Error("Inspect eval Task payload must carry the cell sampleId");
         }
-        cellManifest = overlayInspectAsSpecifiedCell(options.asSpecified, payload.sampleId);
+        cellManifest = overlayInspectEvalCell(options.inspectEval, payload.sampleId);
       } else if (payload?.selectionManifestSha256 !== options.selectionManifestSha256) {
         throw new Error("Inspect Task selection digest does not match the venue's sealed manifest");
       }

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Fail-closed operator qualify for Inspect-as-specified one_task on the in-repo hermetic Task.
+ * Fail-closed operator qualify for Inspect eval one_task on the in-repo hermetic Task.
  * Default `yarn test` does not run this. It never downloads GAIA, Cybench, or inspect_evals.
  *
- * See docs/runbooks/inspect-as-specified-one-task.md.
+ * See docs/runbooks/inspect-eval-one-task.md.
  */
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -20,14 +20,14 @@ function fail(message) {
   process.exit(2);
 }
 
-if (process.env.COLOPHON_INSPECT_AS_SPECIFIED_ONE_TASK_QUALIFY !== "1") {
-  fail("Refusing: set COLOPHON_INSPECT_AS_SPECIFIED_ONE_TASK_QUALIFY=1 and supply operator Python. See docs/runbooks/inspect-as-specified-one-task.md. This script never downloads Inspect eval datasets.");
+if (process.env.COLOPHON_INSPECT_EVAL_ONE_TASK_QUALIFY !== "1") {
+  fail("Refusing: set COLOPHON_INSPECT_EVAL_ONE_TASK_QUALIFY=1 and supply operator Python. See docs/runbooks/inspect-eval-one-task.md. This script never downloads Inspect eval datasets.");
 }
 
 const {
-  INSPECT_AS_SPECIFIED_NOT_LEADERBOARD_READY_LIMITATION,
-  INSPECT_AS_SPECIFIED_SUBMIT_CLOSED_SENTENCE,
-  officialInspectAsSpecifiedConformance,
+  INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION,
+  INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
+  officialInspectEvalConformance,
 } = await import("../dist/index.js");
 
 function requiredEnv(name) {
@@ -74,10 +74,10 @@ const python = realpathSync(
     || process.env.JINN_INSPECT_PYTHON?.trim()
     || requiredEnv("COLOPHON_INSPECT_PYTHON"),
 );
-const workspace = process.env.COLOPHON_INSPECT_AS_SPECIFIED_WORKSPACE?.trim()
-  || "/tmp/colophon-inspect-as-specified-one-task";
+const workspace = process.env.COLOPHON_INSPECT_EVAL_WORKSPACE?.trim()
+  || "/tmp/colophon-inspect-eval-one-task";
 if (existsSync(join(workspace, "workspace.json"))) {
-  fail(`${workspace} is already a Colophon workspace; pick a new COLOPHON_INSPECT_AS_SPECIFIED_WORKSPACE`);
+  fail(`${workspace} is already a Colophon workspace; pick a new COLOPHON_INSPECT_EVAL_WORKSPACE`);
 }
 
 const inspectVersion = (await run(python, ["-c", "import inspect_ai; print(inspect_ai.__version__)"])).trim();
@@ -101,9 +101,9 @@ writeFileSync(selectionPath, `${JSON.stringify({
 
 const common = ["--workspace", workspace, "--principal", "operator"];
 await colophon(["init", ...common]);
-await colophon(["draft", "create", ...common, "--name", "Inspect-as-specified one_task", "--id", draftId]);
+await colophon(["draft", "create", ...common, "--name", "Inspect eval one_task", "--id", draftId]);
 const selected = parseEnvelope(await colophon([
-  "runtime", "inspect-as-specified", "select", ...common, "--draft", draftId, "--file", selectionPath, "--json",
+  "runtime", "inspect", "eval", "select", ...common, "--draft", draftId, "--file", selectionPath, "--json",
 ]));
 const quoted = parseEnvelope(await colophon(["quote", ...common, "--draft", draftId, "--json"]));
 const suite = quoted.presentation?.suite;
@@ -113,7 +113,7 @@ if (suite?.executionConformance !== true || suite?.coverage !== "one_task" || su
 if (suite?.cellCount !== "1 × 2 × 1") {
   fail(`quote cellCount was not 1 × 2 × 1: ${suite?.cellCount}`);
 }
-if (!officialInspectAsSpecifiedConformance({
+if (!officialInspectEvalConformance({
   k: suite.replicates,
   specifiedEpochs: suite.replicates,
   inspectVersion: suite.inspectVersion,
@@ -122,26 +122,26 @@ if (!officialInspectAsSpecifiedConformance({
   sampleLimit: null,
   epochsInRunOptions: false,
 })) {
-  fail(`officialInspectAsSpecifiedConformance was false: ${JSON.stringify(suite)}`);
+  fail(`officialInspectEvalConformance was false: ${JSON.stringify(suite)}`);
 }
 await colophon(["lock", ...common, "--draft", draftId]);
 await colophon(["launch", ...common, "--draft", draftId]);
 await colophon(["collect", ...common, "--draft", draftId, "--json"]);
 const exportControl = parseEnvelope(await colophon([
-  "runtime", "inspect-as-specified", "export", ...common, "--draft", draftId, "--arm", "control", "--json",
+  "runtime", "inspect", "eval", "export", ...common, "--draft", draftId, "--arm", "control", "--json",
 ]));
 const exportCandidate = parseEnvelope(await colophon([
-  "runtime", "inspect-as-specified", "export", ...common, "--draft", draftId, "--arm", "candidate", "--json",
+  "runtime", "inspect", "eval", "export", ...common, "--draft", draftId, "--arm", "candidate", "--json",
 ]));
 const reported = parseEnvelope(await colophon(["report", ...common, "--draft", draftId, "--json"]));
 if (!Array.isArray(reported.claimPackage?.limitations)
-  || !reported.claimPackage.limitations.includes(INSPECT_AS_SPECIFIED_NOT_LEADERBOARD_READY_LIMITATION)) {
-  fail("report limitations missing the canonical Inspect-as-specified not-ready sentence");
+  || !reported.claimPackage.limitations.includes(INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION)) {
+  fail("report limitations missing the canonical Inspect eval not-ready sentence");
 }
 if (exportControl.mode !== "inspection-upload" || exportCandidate.mode !== "inspection-upload") {
   fail(`View export mode was not inspection-upload: ${exportControl.mode} / ${exportCandidate.mode}`);
 }
-if (!exportControl.instructions.includes(INSPECT_AS_SPECIFIED_SUBMIT_CLOSED_SENTENCE)) {
+if (!exportControl.instructions.includes(INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE)) {
   fail("View export instructions missing Inspect Hub closed sentence");
 }
 
@@ -158,11 +158,11 @@ const receipt = {
   },
   reportSha256: reported.reportSha256,
   reportLimitations: reported.claimPackage.limitations,
-  notLeaderboardLimitation: INSPECT_AS_SPECIFIED_NOT_LEADERBOARD_READY_LIMITATION,
-  submitClosedSentence: INSPECT_AS_SPECIFIED_SUBMIT_CLOSED_SENTENCE,
+  notLeaderboardLimitation: INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION,
+  submitClosedSentence: INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
   selectionManifestSha256: selected.selectionManifestSha256,
   runSha256: runState.runSha256,
 };
-const receiptPath = join(workspace, "inspect-as-specified-one-task-qualify-receipt.json");
+const receiptPath = join(workspace, "inspect-eval-one-task-qualify-receipt.json");
 writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
 process.stdout.write(`${JSON.stringify({ ok: true, receiptPath, receipt }, null, 2)}\n`);

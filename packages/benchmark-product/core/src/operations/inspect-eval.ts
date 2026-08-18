@@ -1,22 +1,22 @@
-/** Audited product operation for Inspect-as-specified official-suite selection. */
+/** Audited product operation for Inspect eval official-suite selection. */
 import { isDraftMutable, transition, type LifecycleState } from "../domain/lifecycle.js";
 import { parseDraftSpec, resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
-import { buildInspectAsSpecifiedTasks } from "../intake/inspect-as-specified.js";
+import { buildInspectEvalTasks } from "../intake/inspect-eval.js";
 import {
   INSPECT_ADAPTER_ID,
   INSPECT_ARM_REQUIREMENT_KEY,
   InspectScoringRequestSchema,
   assertNoSecretLikeConfiguration,
 } from "../runtime/inspect/manifest.js";
-import { inspectCatalogSnapshotSha256 } from "../runtime/inspect-as-specified/catalog.js";
+import { inspectCatalogSnapshotSha256 } from "../runtime/inspect-eval/catalog.js";
 import {
-  InspectAsSpecifiedSelectionManifestSchema,
-  inspectAsSpecifiedSelectionBytes,
-  type InspectAsSpecifiedSelectionManifest,
-} from "../runtime/inspect-as-specified/manifest.js";
-import { stripInspectTemplateSampleId } from "../runtime/inspect-as-specified/overlay.js";
+  InspectEvalSelectionManifestSchema,
+  inspectEvalSelectionBytes,
+  type InspectEvalSelectionManifest,
+} from "../runtime/inspect-eval/manifest.js";
+import { stripInspectTemplateSampleId } from "../runtime/inspect-eval/overlay.js";
 import {
   describeInspectRuntimeMethod,
   type InspectRuntimeMethodDisclosure,
@@ -41,7 +41,7 @@ import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 
-interface SelectInspectAsSpecifiedBase {
+interface SelectInspectEvalBase {
   readonly draftId: string;
   readonly coverage?: Exclude<SuiteCoverage, "custom">;
   readonly sampleIds?: readonly (string | number)[];
@@ -50,9 +50,9 @@ interface SelectInspectAsSpecifiedBase {
   readonly sampleLimit?: number | null;
 }
 
-export type SelectInspectAsSpecifiedRuntimeInput = SelectInspectAsSpecifiedBase & InspectRuntimeSelectionRequest;
+export type SelectInspectEvalRuntimeInput = SelectInspectEvalBase & InspectRuntimeSelectionRequest;
 
-export interface SelectInspectAsSpecifiedRuntimeResult {
+export interface SelectInspectEvalRuntimeResult {
   readonly draft: DraftDocument;
   readonly selectionManifestSha256: string;
   readonly suiteProtocolSha256: string;
@@ -62,29 +62,29 @@ export interface SelectInspectAsSpecifiedRuntimeResult {
 
 function selectedCatalogSamples(
   catalogIds: readonly (string | number)[],
-  input: SelectInspectAsSpecifiedRuntimeInput,
+  input: SelectInspectEvalRuntimeInput,
 ): { readonly coverage: SuiteCoverage; readonly selected: readonly (string | number)[] } {
   const names = catalogIds.map((id) => String(id));
   const byKey = new Map(catalogIds.map((id) => [String(id), id] as const));
   if (input.sampleIds !== undefined) {
     if (input.sampleIds.length === 0) {
-      refuse("validation", "inspect-as-specified.sampleIds", "custom sample list must not be empty");
+      refuse("validation", "inspect-eval.sampleIds", "custom sample list must not be empty");
     }
     const selected = input.sampleIds.map((id) => {
       const found = byKey.get(String(id));
       if (found === undefined) {
-        refuse("validation", "inspect-as-specified.sampleIds", `sample ${String(id)} is not in the sealed catalog`);
+        refuse("validation", "inspect-eval.sampleIds", `sample ${String(id)} is not in the sealed catalog`);
       }
       return found;
     });
     const coverage = coverageFromSelectedNames(names, selected.map((id) => String(id)));
     if (input.coverage !== undefined && coverage !== input.coverage) {
-      refuse("validation", "inspect-as-specified.coverage", "sample list does not match the named coverage slice");
+      refuse("validation", "inspect-eval.coverage", "sample list does not match the named coverage slice");
     }
     return { coverage, selected };
   }
   if (input.coverage === undefined) {
-    refuse("validation", "inspect-as-specified.coverage", "Inspect-as-specified selection requires coverage or an explicit sample list");
+    refuse("validation", "inspect-eval.coverage", "Inspect eval selection requires coverage or an explicit sample list");
   }
   const selectedNames = namedSliceTaskNames(names, input.coverage);
   return {
@@ -93,20 +93,20 @@ function selectedCatalogSamples(
   };
 }
 
-export function parseInspectAsSpecifiedSelection(value: unknown): InspectAsSpecifiedSelectionManifest | undefined {
-  const parsed = InspectAsSpecifiedSelectionManifestSchema.safeParse(value);
+export function parseInspectEvalSelection(value: unknown): InspectEvalSelectionManifest | undefined {
+  const parsed = InspectEvalSelectionManifestSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
 }
 
-export function selectInspectAsSpecifiedRuntime(
+export function selectInspectEvalRuntime(
   context: OperationContext,
-  input: SelectInspectAsSpecifiedRuntimeInput,
-): Promise<OperationResult<SelectInspectAsSpecifiedRuntimeResult>> {
+  input: SelectInspectEvalRuntimeInput,
+): Promise<OperationResult<SelectInspectEvalRuntimeResult>> {
   const at = context.clock();
   const clockedContext: OperationContext = { ...context, clock: () => at };
   return operateAsync({
     context: clockedContext,
-    action: "runtime.inspect-as-specified.select",
+    action: "runtime.inspect.eval.select",
     subject: input.draftId,
     inputs: input,
     run: async () => {
@@ -115,13 +115,13 @@ export function selectInspectAsSpecifiedRuntime(
         refuse("illegal-transition", `drafts.${input.draftId}.state`, `draft ${input.draftId} is locked and refuses runtime selection`);
       }
       if (current.spec.taskSet.kind !== "pendingSample") {
-        refuse("conflict", `drafts.${input.draftId}.taskSet`, "Inspect-as-specified selection requires a draft with no benchmark attached");
+        refuse("conflict", `drafts.${input.draftId}.taskSet`, "Inspect eval selection requires a draft with no benchmark attached");
       }
       if ((input.scorer === undefined) === (input.scoring === undefined)) {
-        refuse("validation", "inspect-as-specified.selection", "select exactly one of scorer or scoring");
+        refuse("validation", "inspect-eval.selection", "select exactly one of scorer or scoring");
       }
       if (input.scoring !== undefined && !InspectScoringRequestSchema.safeParse(input.scoring).success) {
-        refuse("validation", "inspect-as-specified.selection.scoring", "Inspect scoring projections or verdictRule are invalid");
+        refuse("validation", "inspect-eval.selection.scoring", "Inspect scoring projections or verdictRule are invalid");
       }
       if (input.solver !== undefined && input.solver !== "task-default") {
         // Allowed to select, but quote will not mark executionConformance.
@@ -134,7 +134,7 @@ export function selectInspectAsSpecifiedRuntime(
           ...(input.scoring === undefined ? {} : { scoring: input.scoring }),
         });
       } catch (cause) {
-        refuse("validation", "inspect-as-specified.selection", cause instanceof Error ? cause.message : String(cause));
+        refuse("validation", "inspect-eval.selection", cause instanceof Error ? cause.message : String(cause));
       }
       const runtimeHost = context.runtimeHost ?? createDefaultBenchmarkRuntimeHost();
       let catalog;
@@ -144,14 +144,14 @@ export function selectInspectAsSpecifiedRuntime(
         if (!(cause instanceof InspectOciUnavailableError)) throw cause;
         refuse(
           "venue-unavailable",
-          "inspect-as-specified.catalog",
+          "inspect-eval.catalog",
           cause instanceof Error ? cause.message : "The Inspect runtime could not be checked locally.",
         );
       }
       const { coverage, selected } = selectedCatalogSamples(catalog.sampleIds, input);
       const specifiedEpochs = input.specifiedEpochs ?? catalog.specifiedEpochs;
       if (!Number.isInteger(specifiedEpochs) || specifiedEpochs < 1) {
-        refuse("validation", "inspect-as-specified.specifiedEpochs", "specified epochs must be a positive integer");
+        refuse("validation", "inspect-eval.specifiedEpochs", "specified epochs must be a positive integer");
       }
       const inspectRequest: InspectRuntimeSelectionRequest = input.execution === "oci"
         ? {
@@ -170,7 +170,7 @@ export function selectInspectAsSpecifiedRuntime(
         if (!(cause instanceof InspectOciUnavailableError)) throw cause;
         refuse(
           "venue-unavailable",
-          "inspect-as-specified.selection.runtime",
+          "inspect-eval.selection.runtime",
           cause instanceof Error ? cause.message : "The Inspect runtime could not be checked locally.",
         );
       }
@@ -183,25 +183,25 @@ export function selectInspectAsSpecifiedRuntime(
         datasetLocation: catalog.datasetLocation,
         datasetSampleCount: catalog.datasetSampleCount,
       });
-      const built = buildInspectAsSpecifiedTasks({
+      const built = buildInspectEvalTasks({
         inspect: inspectTemplate,
         sampleIds: selected,
         resolvedName: inspectTemplate.task.resolvedName,
       });
       if (putSealedBytes(clockedContext.workspaceDir, built.evaluationSpec.bytes) !== built.evaluationSpec.sha256) {
-        refuse("record-integrity", "inspect-as-specified.evaluationSpec", "evaluation spec digest changed while storing");
+        refuse("record-integrity", "inspect-eval.evaluationSpec", "evaluation spec digest changed while storing");
       }
       for (const task of built.tasks) {
         if (putSealedBytes(clockedContext.workspaceDir, task.bytes) !== task.sha256) {
-          refuse("record-integrity", "inspect-as-specified.task", "task digest changed while storing");
+          refuse("record-integrity", "inspect-eval.task", "task digest changed while storing");
         }
       }
       if (putSealedBytes(clockedContext.workspaceDir, built.benchmark.bytes) !== built.benchmark.sha256) {
-        refuse("record-integrity", "inspect-as-specified.benchmark", "benchmark digest changed while storing");
+        refuse("record-integrity", "inspect-eval.benchmark", "benchmark digest changed while storing");
       }
       const suite = SuiteProtocolSelectionSchema.parse({
         schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
-        protocol: "inspect-as-specified",
+        protocol: "inspect-eval",
         coverage,
         datasetId: inspectTemplate.task.resolvedName,
         datasetRevision: snapshotSha256,
@@ -213,8 +213,8 @@ export function selectInspectAsSpecifiedRuntime(
       });
       const suiteBytes = suiteProtocolSelectionBytes(suite);
       const suiteProtocolSha256 = putSealedBytes(clockedContext.workspaceDir, suiteBytes);
-      const selection = InspectAsSpecifiedSelectionManifestSchema.parse({
-        schema: "jinn.network/benchmark-product/inspect-as-specified-selection/1",
+      const selection = InspectEvalSelectionManifestSchema.parse({
+        schema: "jinn.network/benchmark-product/inspect-eval-selection/1",
         inspect: inspectTemplate,
         catalog: {
           sampleIds: [...catalog.sampleIds],
@@ -236,7 +236,7 @@ export function selectInspectAsSpecifiedRuntime(
         sampleLimit: input.sampleLimit ?? null,
         suite,
       });
-      const selectionBytes = inspectAsSpecifiedSelectionBytes(selection);
+      const selectionBytes = inspectEvalSelectionBytes(selection);
       const selectionManifestSha256 = putSealedBytes(clockedContext.workspaceDir, selectionBytes);
       writeInspectHostBinding(clockedContext.workspaceDir, selectionManifestSha256, resolution.binding);
       let nextState: LifecycleState = current.state;

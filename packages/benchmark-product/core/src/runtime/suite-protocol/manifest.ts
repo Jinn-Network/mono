@@ -1,4 +1,4 @@
-/** Product-owned suite protocol selection. TB 2.1 binds via Harbor profiles; Inspect-as-specified binds via its own selection manifest. */
+/** Product-owned suite protocol selection. TB 2.1 binds via Harbor profiles; Inspect eval binds via its own selection manifest. */
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
 import { sha256Hex } from "../../workspace/sealed-store.js";
@@ -43,9 +43,9 @@ export const TerminalBench21SuiteProtocolSelectionSchema = z.object({
   items: z.array(SuiteItemSchema).min(1),
 }).strict().superRefine(refineSuiteItems);
 
-export const InspectAsSpecifiedSuiteProtocolSelectionSchema = z.object({
+export const InspectEvalSuiteProtocolSelectionSchema = z.object({
   schema: z.literal(SUITE_PROTOCOL_SELECTION_SCHEMA),
-  protocol: z.literal("inspect-as-specified"),
+  protocol: z.literal("inspect-eval"),
   coverage: z.enum(SUITE_COVERAGE),
   datasetId: z.string().min(1),
   datasetRevision: Sha256,
@@ -58,11 +58,11 @@ export const InspectAsSpecifiedSuiteProtocolSelectionSchema = z.object({
 
 export const SuiteProtocolSelectionSchema = z.discriminatedUnion("protocol", [
   TerminalBench21SuiteProtocolSelectionSchema,
-  InspectAsSpecifiedSuiteProtocolSelectionSchema,
+  InspectEvalSuiteProtocolSelectionSchema,
 ]);
 export type SuiteProtocolSelection = z.infer<typeof SuiteProtocolSelectionSchema>;
 export type TerminalBench21SuiteProtocolSelection = z.infer<typeof TerminalBench21SuiteProtocolSelectionSchema>;
-export type InspectAsSpecifiedSuiteProtocolSelection = z.infer<typeof InspectAsSpecifiedSuiteProtocolSelectionSchema>;
+export type InspectEvalSuiteProtocolSelection = z.infer<typeof InspectEvalSuiteProtocolSelectionSchema>;
 
 export function suiteProtocolSelectionBytes(value: SuiteProtocolSelection): Uint8Array {
   return canonicalJsonBytes(SuiteProtocolSelectionSchema.parse(value) as never);

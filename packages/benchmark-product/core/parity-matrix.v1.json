@@ -124,7 +124,7 @@
     },
     {
       "operation": "exportInspectViewBundle",
-      "cliVerb": "runtime inspect-as-specified export",
+      "cliVerb": "runtime inspect eval export",
       "authorityGated": false,
       "description": "Builds a derived Inspect View log bundle from correlated per-cell .eval logs without placing an Inspect Hub row.",
       "gui": {
@@ -393,10 +393,10 @@
       }
     },
     {
-      "operation": "selectInspectAsSpecifiedRuntime",
-      "cliVerb": "runtime inspect-as-specified select",
+      "operation": "selectInspectEvalRuntime",
+      "cliVerb": "runtime inspect eval select",
       "authorityGated": false,
-      "description": "Selects an operator-chosen Inspect eval and locks it as the Inspect-as-specified official suite.",
+      "description": "Selects an operator-chosen Inspect eval and locks it as the Inspect eval official suite.",
       "gui": {
         "status": "unavailable",
         "reason": "requires machine-local Inspect host paths; browser-supplied paths are forbidden"

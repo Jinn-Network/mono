@@ -1,18 +1,18 @@
-/** Inspect-as-specified suite quote/lock/report facts. Not Harbor; not Inspect Hub. */
+/** Inspect eval suite quote/lock/report facts. Not Harbor; not Inspect Hub. */
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
-  officialInspectAsSpecifiedConformance,
+  officialInspectEvalConformance,
   suiteLeaderboardLimitation,
   type SuiteComparability,
 } from "./comparability.js";
 import type { SuiteQuotePresentation } from "./from-harbor.js";
 import { allArmsRunComplete, accountSuiteArmCells, type MatrixCellAccount } from "./run-complete.js";
-import type { InspectAsSpecifiedSelectionManifest } from "../inspect-as-specified/manifest.js";
+import type { InspectEvalSelectionManifest } from "../inspect-eval/manifest.js";
 
-function methodBitsFromInspect(manifest: InspectAsSpecifiedSelectionManifest): {
-  readonly protocol: "inspect-as-specified";
-  readonly coverage: InspectAsSpecifiedSelectionManifest["coverage"];
+function methodBitsFromInspect(manifest: InspectEvalSelectionManifest): {
+  readonly protocol: "inspect-eval";
+  readonly coverage: InspectEvalSelectionManifest["coverage"];
   readonly executionConformance: boolean;
   readonly k: number;
   readonly selectedCount: number;
@@ -22,9 +22,9 @@ function methodBitsFromInspect(manifest: InspectAsSpecifiedSelectionManifest): {
 } {
   const suite = manifest.suite;
   return {
-    protocol: "inspect-as-specified",
+    protocol: "inspect-eval",
     coverage: suite.coverage,
-    executionConformance: officialInspectAsSpecifiedConformance({
+    executionConformance: officialInspectEvalConformance({
       k: suite.replicates,
       specifiedEpochs: manifest.catalog.specifiedEpochs,
       inspectVersion: manifest.inspect.runtime.inspectVersion,
@@ -48,7 +48,7 @@ function presentInspectQuote(
     readonly itemCount: number;
     readonly replicates: number;
   },
-  manifest: InspectAsSpecifiedSelectionManifest,
+  manifest: InspectEvalSelectionManifest,
   bits: SuiteComparability,
   eligible: boolean,
 ): SuiteQuotePresentation {
@@ -64,7 +64,7 @@ function presentInspectQuote(
 }
 
 export function suiteQuoteFromInspect(input: {
-  readonly manifest: InspectAsSpecifiedSelectionManifest;
+  readonly manifest: InspectEvalSelectionManifest;
   readonly armCount: number;
   readonly itemCount: number;
   readonly replicates: number;
@@ -74,17 +74,17 @@ export function suiteQuoteFromInspect(input: {
 }
 
 export function suiteFactsFromInspectManifest(input: {
-  readonly manifest: InspectAsSpecifiedSelectionManifest;
+  readonly manifest: InspectEvalSelectionManifest;
   readonly armCount: number;
   readonly itemCount: number;
   readonly replicates: number;
 }): { readonly quote: SuiteQuotePresentation; readonly limitation: string | undefined } {
   const quote = suiteQuoteFromInspect(input);
-  return { quote, limitation: suiteLeaderboardLimitation(quote, "inspect-as-specified") };
+  return { quote, limitation: suiteLeaderboardLimitation(quote, "inspect-eval") };
 }
 
 export function suiteFactsFromAccountedInspectRun(input: {
-  readonly manifest: InspectAsSpecifiedSelectionManifest;
+  readonly manifest: InspectEvalSelectionManifest;
   readonly armCount: number;
   readonly itemCount: number;
   readonly replicates: number;
@@ -101,11 +101,11 @@ export function suiteFactsFromAccountedInspectRun(input: {
     cellsAccounted: complete.cellsAccounted,
   });
   const quote = presentInspectQuote(input, input.manifest, bits, methodLeaderboardEligible(method));
-  return { quote, limitation: suiteLeaderboardLimitation(quote, "inspect-as-specified") };
+  return { quote, limitation: suiteLeaderboardLimitation(quote, "inspect-eval") };
 }
 
 export function suiteComparabilityForInspectArm(input: {
-  readonly manifest: InspectAsSpecifiedSelectionManifest;
+  readonly manifest: InspectEvalSelectionManifest;
   readonly matrix: { readonly cells: readonly MatrixCellAccount[] };
   readonly armId: string;
 }): SuiteComparability {

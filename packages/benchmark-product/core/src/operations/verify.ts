@@ -58,7 +58,7 @@ import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
-import { readInspectAsSpecifiedSelectionManifest } from "../runtime/inspect/host.js";
+import { readInspectEvalSelectionManifest } from "../runtime/inspect/host.js";
 import { suiteFactsFromAccountedInspectRun } from "../runtime/suite-protocol/from-inspect.js";
 import { buildWorkspaceTrustDeps } from "../report/trust.js";
 import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receipts.js";
@@ -226,7 +226,7 @@ export async function verifyRunWorkspace(
         })
         : document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
           ? (() => {
-            const manifest = readInspectAsSpecifiedSelectionManifest(
+            const manifest = readInspectEvalSelectionManifest(
               context.workspaceDir,
               document.spec.evaluationRuntime.selectionManifestSha256,
             );

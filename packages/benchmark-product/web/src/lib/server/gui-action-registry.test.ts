@@ -11,7 +11,7 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires a machine-local configured signer key; browser key custody is forbidden",
   admitHumanTruth:
     "requires local signed-review, roster, and licensed truth evidence files",
-  selectInspectAsSpecifiedRuntime:
+  selectInspectEvalRuntime:
     "requires machine-local Inspect host paths; browser-supplied paths are forbidden",
   exportInspectViewBundle:
     "copies machine-local Inspect .eval logs; browser path-based View export is forbidden",

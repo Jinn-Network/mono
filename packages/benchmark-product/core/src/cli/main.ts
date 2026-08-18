@@ -65,7 +65,7 @@ import {
   runVerify,
   sampleInit,
   selectInspectEvaluation,
-  selectInspectAsSpecifiedRuntime,
+  selectInspectEvalRuntime,
   exportInspectViewBundle,
   selectHarborRuntime,
   selectTerminalBench2Runtime,
@@ -80,7 +80,7 @@ import {
   type QuotePresentation,
   type RunLaunchDeps,
   type SelectInspectEvaluationInput,
-  type SelectInspectAsSpecifiedRuntimeInput,
+  type SelectInspectEvalRuntimeInput,
   type SelectHarborRuntimeInput,
   type SelectTerminalBench2RuntimeInput,
   type SelectTerminalBench21RuntimeInput,
@@ -125,9 +125,9 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --file <admission-manifest.json>
   runtime inspect select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
-  runtime inspect-as-specified select --workspace <dir> --principal <id> --draft <draftId>
+  runtime inspect eval select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
-  runtime inspect-as-specified export --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
+  runtime inspect eval export --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   runtime inspect bind-judge --workspace <dir> --principal <id> --draft <draftId>
                    --file <binding.json>
   runtime harbor select --workspace <dir> --principal <id> --draft <draftId>
@@ -203,8 +203,8 @@ const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "dra
 const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
 const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_INSPECT_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const RUNTIME_INSPECT_AS_SPECIFIED_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const RUNTIME_INSPECT_AS_SPECIFIED_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
+const RUNTIME_INSPECT_EVAL_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_INSPECT_EVAL_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const RUNTIME_INSPECT_BIND_JUDGE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_HARBOR_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_2_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
@@ -592,28 +592,28 @@ async function handleInspectRuntimeSelect(
   );
 }
 
-async function handleInspectAsSpecifiedRuntimeSelect(
+async function handleInspectEvalRuntimeSelect(
   args: ParsedArgs,
   context: CliContext,
   jsonMode: boolean,
 ): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_INSPECT_AS_SPECIFIED_SELECT_FLAGS);
+  assertKnownFlags(args, RUNTIME_INSPECT_EVAL_SELECT_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
   const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
-    SelectInspectAsSpecifiedRuntimeInput,
+    SelectInspectEvalRuntimeInput,
     "draftId"
   >;
-  const result = await selectInspectAsSpecifiedRuntime(opContext, { draftId, ...configuration } as SelectInspectAsSpecifiedRuntimeInput);
+  const result = await selectInspectEvalRuntime(opContext, { draftId, ...configuration } as SelectInspectEvalRuntimeInput);
   return renderResult(
     result,
     jsonMode,
-    (value) => `selected Inspect-as-specified evaluation ${value.selectionManifestSha256} for draft ${draftId}\n`,
+    (value) => `selected Inspect eval ${value.selectionManifestSha256} for draft ${draftId}\n`,
   );
 }
 
-function handleInspectAsSpecifiedExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, RUNTIME_INSPECT_AS_SPECIFIED_EXPORT_FLAGS);
+function handleInspectEvalExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, RUNTIME_INSPECT_EVAL_EXPORT_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
   const armId = required(args, "arm");
@@ -1194,8 +1194,8 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["human-review response sign", handleHumanReviewResponseSign],
   ["human-review admit", handleHumanReviewAdmit],
   ["runtime inspect select", handleInspectRuntimeSelect],
-  ["runtime inspect-as-specified select", handleInspectAsSpecifiedRuntimeSelect],
-  ["runtime inspect-as-specified export", handleInspectAsSpecifiedExport],
+  ["runtime inspect eval select", handleInspectEvalRuntimeSelect],
+  ["runtime inspect eval export", handleInspectEvalExport],
   ["runtime inspect bind-judge", handleInspectRuntimeBindJudge],
   ["runtime harbor select", handleHarborRuntimeSelect],
   ["runtime terminal-bench-2 select", handleTerminalBench2RuntimeSelect],

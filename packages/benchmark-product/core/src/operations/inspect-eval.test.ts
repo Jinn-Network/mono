@@ -7,7 +7,9 @@ import { cellKey } from "@jinn-network/benchmarking-records";
 import { createDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { selectInspectEvaluation } from "./inspect-runtime.js";
-import { selectInspectAsSpecifiedRuntime } from "./inspect-as-specified.js";
+import { CLI_VERB_NAMES } from "../cli/main.js";
+import { OPERATION_TO_ACTION, OPERATION_TO_VERB } from "../cli/parity-map.js";
+import { selectInspectEvalRuntime } from "./inspect-eval.js";
 import {
   decideInspectViewExportMode,
   exportInspectViewBundle,
@@ -23,14 +25,14 @@ import {
   SUPPORTED_INSPECT_VERSION,
   SUPPORTED_INSPECT_WHEEL_SHA256,
 } from "../runtime/inspect/manifest.js";
-import { InspectAsSpecifiedSelectionManifestSchema } from "../runtime/inspect-as-specified/manifest.js";
+import { InspectEvalSelectionManifestSchema } from "../runtime/inspect-eval/manifest.js";
 import { suiteFactsFromAccountedInspectRun } from "../runtime/suite-protocol/from-inspect.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
 import type { LocalVenue } from "../venue/venue.js";
 import {
-  INSPECT_AS_SPECIFIED_NOT_LEADERBOARD_READY_LIMITATION,
-  INSPECT_AS_SPECIFIED_SUBMIT_CLOSED_SENTENCE,
+  INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION,
+  INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
 } from "../runtime/suite-protocol/comparability.js";
 
 const catalogIds = [
@@ -152,7 +154,7 @@ afterEach(() => {
 });
 
 function setup(draftId: string, specifiedEpochs = 1): OperationContext {
-  const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-as-specified-"));
+  const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-eval-"));
   workspaces.push(workspaceDir);
   const context: OperationContext = {
     workspaceDir,
@@ -189,10 +191,22 @@ describe("decideInspectViewExportMode", () => {
   });
 });
 
-describe("Inspect-as-specified official-suite select", () => {
+describe("Inspect eval official-suite select", () => {
+  test("Inspect task and Inspect eval CLI verbs are distinct", () => {
+    expect(OPERATION_TO_VERB.selectInspectEvaluation).toBe("runtime inspect select");
+    expect(OPERATION_TO_VERB.selectInspectEvalRuntime).toBe("runtime inspect eval select");
+    expect(OPERATION_TO_VERB.exportInspectViewBundle).toBe("runtime inspect eval export");
+    expect(OPERATION_TO_ACTION.selectInspectEvaluation).toBe("runtime.inspect.select");
+    expect(OPERATION_TO_ACTION.selectInspectEvalRuntime).toBe("runtime.inspect.eval.select");
+    expect(OPERATION_TO_ACTION.exportInspectViewBundle).toBe("runtime.inspect.eval.export");
+    expect(CLI_VERB_NAMES).toContain("runtime inspect select");
+    expect(CLI_VERB_NAMES).toContain("runtime inspect eval select");
+    expect(CLI_VERB_NAMES).toContain("runtime inspect eval export");
+  });
+
   test("named slices are lexicographic first 1 / first 10 / all; custom cannot be full", async () => {
     const context = setup("one");
-    const one = await selectInspectAsSpecifiedRuntime(context, {
+    const one = await selectInspectEvalRuntime(context, {
       draftId: "one",
       coverage: "one_task",
       pythonPath: "/usr/bin/python3",
@@ -205,14 +219,14 @@ describe("Inspect-as-specified official-suite select", () => {
     if (!one.ok) return;
     expect(one.result.draft.spec.replicates).toBe(1);
     expect(one.result.draft.spec.evaluationRuntime?.adapterId).toBe("inspect");
-    const sealed = InspectAsSpecifiedSelectionManifestSchema.parse(selectionJson(context.workspaceDir, one.result.selectionManifestSha256));
-    expect(sealed.suite.protocol).toBe("inspect-as-specified");
+    const sealed = InspectEvalSelectionManifestSchema.parse(selectionJson(context.workspaceDir, one.result.selectionManifestSha256));
+    expect(sealed.suite.protocol).toBe("inspect-eval");
     expect(sealed.suite.selectedTaskNames).toEqual(["HumanEval/0"]);
     expect(sealed.selectedSamples).toEqual([{ sampleId: "HumanEval/0" }]);
     expect(parseBenchmark(getSealedBytes(context.workspaceDir, one.result.benchmarkSha256)).items).toHaveLength(1);
 
     const tenContext = setup("ten");
-    const ten = await selectInspectAsSpecifiedRuntime(tenContext, {
+    const ten = await selectInspectEvalRuntime(tenContext, {
       draftId: "ten",
       coverage: "ten_task",
       pythonPath: "/usr/bin/python3",
@@ -226,7 +240,7 @@ describe("Inspect-as-specified official-suite select", () => {
     expect(parseBenchmark(getSealedBytes(tenContext.workspaceDir, ten.result.benchmarkSha256)).items).toHaveLength(10);
 
     const customContext = setup("custom");
-    const custom = await selectInspectAsSpecifiedRuntime(customContext, {
+    const custom = await selectInspectEvalRuntime(customContext, {
       draftId: "custom",
       sampleIds: ["s11"],
       pythonPath: "/usr/bin/python3",
@@ -237,7 +251,7 @@ describe("Inspect-as-specified official-suite select", () => {
     });
     expect(custom.ok, JSON.stringify(custom)).toBe(true);
     if (!custom.ok) return;
-    const customSealed = InspectAsSpecifiedSelectionManifestSchema.parse(
+    const customSealed = InspectEvalSelectionManifestSchema.parse(
       selectionJson(customContext.workspaceDir, custom.result.selectionManifestSha256),
     );
     expect(customSealed.coverage).toBe("custom");
@@ -246,7 +260,7 @@ describe("Inspect-as-specified official-suite select", () => {
 
   test("quote is protocol-conforming and not leaderboard_submit_ready; k follows specified epochs", async () => {
     const context = setup("quoted", 3);
-    const selected = await selectInspectAsSpecifiedRuntime(context, {
+    const selected = await selectInspectEvalRuntime(context, {
       draftId: "quoted",
       coverage: "one_task",
       pythonPath: "/usr/bin/python3",
@@ -277,7 +291,7 @@ describe("Inspect-as-specified official-suite select", () => {
 
   test("full coverage quote is method-eligible and not ready; lock without those quote bits refuses", async () => {
     const context = setup("full");
-    const selected = await selectInspectAsSpecifiedRuntime(context, {
+    const selected = await selectInspectEvalRuntime(context, {
       draftId: "full",
       coverage: "full",
       pythonPath: "/usr/bin/python3",
@@ -302,7 +316,7 @@ describe("Inspect-as-specified official-suite select", () => {
     expect(runLock(context, { draftId: "full" }).ok).toBe(true);
 
     const refuseContext = setup("full-refuse");
-    const refuseSelected = await selectInspectAsSpecifiedRuntime(refuseContext, {
+    const refuseSelected = await selectInspectEvalRuntime(refuseContext, {
       draftId: "full-refuse",
       coverage: "full",
       pythonPath: "/usr/bin/python3",
@@ -321,12 +335,12 @@ describe("Inspect-as-specified official-suite select", () => {
     const refused = runLock(refuseContext, { draftId: "full-refuse" });
     expect(refused.ok).toBe(false);
     if (refused.ok) return;
-    expect(refused.error.detail).toMatch(/Inspect-as-specified lock requires a quote/u);
+    expect(refused.error.detail).toMatch(/Inspect eval lock requires a quote/u);
   });
 
   test("solver override and sampleLimit are not executionConformance", async () => {
     const solverContext = setup("solver");
-    const solver = await selectInspectAsSpecifiedRuntime(solverContext, {
+    const solver = await selectInspectEvalRuntime(solverContext, {
       draftId: "solver",
       coverage: "full",
       solver: "custom-solver",
@@ -344,7 +358,7 @@ describe("Inspect-as-specified official-suite select", () => {
     expect(solverQuoted.result.presentation.suite?.executionConformance).toBe(false);
 
     const limitContext = setup("limit");
-    const limited = await selectInspectAsSpecifiedRuntime(limitContext, {
+    const limited = await selectInspectEvalRuntime(limitContext, {
       draftId: "limit",
       coverage: "full",
       sampleLimit: 4,
@@ -362,7 +376,7 @@ describe("Inspect-as-specified official-suite select", () => {
     expect(limitQuoted.result.presentation.suite?.executionConformance).toBe(false);
   });
 
-  test("cousin inspect select has no suite object and cannot export as inspect-as-specified", async () => {
+  test("cousin inspect select has no suite object and cannot export as inspect-eval", async () => {
     const context = setup("cousin");
     const cousin = await selectInspectEvaluation(context, {
       draftId: "cousin",
@@ -387,12 +401,12 @@ describe("Inspect-as-specified official-suite select", () => {
     const exported = exportInspectViewBundle(context, { draftId: "cousin", armId: "control" });
     expect(exported.ok).toBe(false);
     if (exported.ok) return;
-    expect(exported.error.detail).toMatch(/cousin Inspect select cannot wear/u);
+    expect(exported.error.detail).toMatch(/Inspect task select cannot wear/u);
   });
 
   test("accounted sample × k cells may flip ready; a missing cell keeps the limitation", async () => {
     const context = setup("accounted", 2);
-    const selected = await selectInspectAsSpecifiedRuntime(context, {
+    const selected = await selectInspectEvalRuntime(context, {
       draftId: "accounted",
       coverage: "full",
       pythonPath: "/usr/bin/python3",
@@ -403,7 +417,7 @@ describe("Inspect-as-specified official-suite select", () => {
     });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
-    const manifest = InspectAsSpecifiedSelectionManifestSchema.parse(
+    const manifest = InspectEvalSelectionManifestSchema.parse(
       selectionJson(context.workspaceDir, selected.result.selectionManifestSha256),
     );
     const completeCells = manifest.suite.items.flatMap((item) => (
@@ -436,12 +450,12 @@ describe("Inspect-as-specified official-suite select", () => {
       armIds: ["control", "candidate"],
     });
     expect(missing.quote.leaderboardSubmitReady).toBe(false);
-    expect(missing.limitation).toBe(INSPECT_AS_SPECIFIED_NOT_LEADERBOARD_READY_LIMITATION);
+    expect(missing.limitation).toBe(INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION);
   });
 
   test("named-slice View export is inspection-only; custom and non-conforming refuse", async () => {
     const context = setup("export-one");
-    const selected = await selectInspectAsSpecifiedRuntime(context, {
+    const selected = await selectInspectEvalRuntime(context, {
       draftId: "export-one",
       coverage: "one_task",
       pythonPath: "/usr/bin/python3",
@@ -456,7 +470,7 @@ describe("Inspect-as-specified official-suite select", () => {
     expect(runLock(context, { draftId: "export-one" }).ok).toBe(true);
     const logBytes = new TextEncoder().encode("fake-eval-log");
     const logSha256 = putSealedBytes(context.workspaceDir, logBytes);
-    const taskSha256 = InspectAsSpecifiedSelectionManifestSchema.parse(
+    const taskSha256 = InspectEvalSelectionManifestSchema.parse(
       selectionJson(context.workspaceDir, selected.result.selectionManifestSha256),
     ).suite.items[0]!.taskSha256;
     appendRunJournalEntry(context.workspaceDir, "export-one", {
@@ -472,12 +486,12 @@ describe("Inspect-as-specified official-suite select", () => {
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
     expect(exported.result.mode).toBe("inspection-upload");
-    expect(exported.result.instructions).toContain(INSPECT_AS_SPECIFIED_SUBMIT_CLOSED_SENTENCE);
+    expect(exported.result.instructions).toContain(INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE);
     expect(existsSync(join(exported.result.exportDir, `${logSha256}.eval`))).toBe(true);
     expect(readFileSync(join(exported.result.exportDir, `${logSha256}.eval`))).toEqual(Buffer.from(logBytes));
 
     const customContext = setup("export-custom");
-    const custom = await selectInspectAsSpecifiedRuntime(customContext, {
+    const custom = await selectInspectEvalRuntime(customContext, {
       draftId: "export-custom",
       sampleIds: ["s11"],
       pythonPath: "/usr/bin/python3",
@@ -496,7 +510,7 @@ describe("Inspect-as-specified official-suite select", () => {
     expect(customExport.error.detail).toMatch(/custom coverage cannot wear/u);
 
     const solverContext = setup("export-solver");
-    const solver = await selectInspectAsSpecifiedRuntime(solverContext, {
+    const solver = await selectInspectEvalRuntime(solverContext, {
       draftId: "export-solver",
       coverage: "one_task",
       solver: "custom-solver",

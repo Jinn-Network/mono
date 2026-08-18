@@ -5,8 +5,8 @@ import {
   SUPPORTED_INSPECT_VERSION,
   SUPPORTED_INSPECT_WHEEL_SHA256,
 } from "../inspect/manifest.js";
-import { InspectAsSpecifiedSelectionManifestSchema } from "./manifest.js";
-import { overlayInspectAsSpecifiedCell, overlayInspectCellManifest, stripInspectTemplateSampleId } from "./overlay.js";
+import { InspectEvalSelectionManifestSchema } from "./manifest.js";
+import { overlayInspectEvalCell, overlayInspectCellManifest, stripInspectTemplateSampleId } from "./overlay.js";
 
 const manifest = InspectSelectionManifestSchema.parse({
   schema: INSPECT_SELECTION_SCHEMA,
@@ -43,7 +43,7 @@ const manifest = InspectSelectionManifestSchema.parse({
 });
 const template = stripInspectTemplateSampleId(manifest);
 
-describe("Inspect-as-specified cell overlay", () => {
+describe("Inspect eval cell overlay", () => {
   test("overlays a slash sample id onto the shared template", () => {
     const cell = overlayInspectCellManifest(template, "HumanEval/0");
     expect(cell.runOptions.sampleId).toBe("HumanEval/0");
@@ -53,8 +53,8 @@ describe("Inspect-as-specified cell overlay", () => {
   });
 
   test("refuses a sample id outside the sealed slice", () => {
-    const selection = InspectAsSpecifiedSelectionManifestSchema.parse({
-      schema: "jinn.network/benchmark-product/inspect-as-specified-selection/1",
+    const selection = InspectEvalSelectionManifestSchema.parse({
+      schema: "jinn.network/benchmark-product/inspect-eval-selection/1",
       inspect: template,
       catalog: {
         sampleIds: ["HumanEval/0", "alpha"],
@@ -70,7 +70,7 @@ describe("Inspect-as-specified cell overlay", () => {
       sampleLimit: null,
       suite: {
         schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
-        protocol: "inspect-as-specified",
+        protocol: "inspect-eval",
         coverage: "one_task",
         datasetId: "hermetic",
         datasetRevision: "1".repeat(64),
@@ -81,7 +81,7 @@ describe("Inspect-as-specified cell overlay", () => {
         items: [{ taskName: "HumanEval/0", taskSha256: "2".repeat(64) }],
       },
     });
-    expect(() => overlayInspectAsSpecifiedCell(selection, "alpha")).toThrow(/not in the sealed catalog slice/u);
-    expect(overlayInspectAsSpecifiedCell(selection, "HumanEval/0").runOptions.sampleId).toBe("HumanEval/0");
+    expect(() => overlayInspectEvalCell(selection, "alpha")).toThrow(/not in the sealed catalog slice/u);
+    expect(overlayInspectEvalCell(selection, "HumanEval/0").runOptions.sampleId).toBe("HumanEval/0");
   });
 });

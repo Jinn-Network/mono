@@ -68,10 +68,10 @@ export {
   type SelectInspectEvaluationResult,
 } from "./inspect-runtime.js";
 export {
-  selectInspectAsSpecifiedRuntime,
-  type SelectInspectAsSpecifiedRuntimeInput,
-  type SelectInspectAsSpecifiedRuntimeResult,
-} from "./inspect-as-specified.js";
+  selectInspectEvalRuntime,
+  type SelectInspectEvalRuntimeInput,
+  type SelectInspectEvalRuntimeResult,
+} from "./inspect-eval.js";
 export {
   exportInspectViewBundle,
   type ExportInspectViewBundleInput,

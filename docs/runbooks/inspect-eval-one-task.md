@@ -1,4 +1,4 @@
-# Qualify Inspect-as-specified `one_task` on the in-repo hermetic Task
+# Qualify Inspect eval `one_task` on the in-repo hermetic Task
 
 Operator-only campaign. Success is protocol identity, not an Inspect Hub
 score. Default CI and `yarn test` never set the opt-in env and never download
@@ -31,7 +31,7 @@ Quote and collect must show `executionConformance: true`, `coverage:
 - Full catalog / `ten_task` / `leaderboard_submit_ready`
 - GAIA, Cybench, HumanEval, or any `inspect_evals` download
 - Inspect Hub / Flow upload; Harbor Hub export
-- Cousin `runtime inspect select` wearing this protocol name
+- Inspect task `runtime inspect select` wearing this protocol name
 - Wiring this into CI
 
 ## 1. Python and Inspect pin
@@ -41,7 +41,7 @@ python3 -c "import inspect_ai; print(inspect_ai.__version__)"   # must print 0.3
 command -v python3   # keep this realpath for selection.json
 ```
 
-Use the same byte-pinned Inspect the cousin runtime already freezes
+Use the same byte-pinned Inspect the Inspect-task runtime already freezes
 (`SUPPORTED_INSPECT_VERSION` / wheel SHA in
 `packages/benchmark-product/core/src/runtime/inspect/manifest.ts`). Do not
 bump the pin for this qualify.
@@ -58,22 +58,22 @@ PROJECT="$(pwd)/test/fixtures/inspect-project"
 ## 3. Opt-in yarn script
 
 `packages/benchmark-product/core` exposes
-`yarn inspect-as-specified-one-task-qualify`. It **fails closed** unless
-`COLOPHON_INSPECT_AS_SPECIFIED_ONE_TASK_QUALIFY=1`. Default `yarn test` does
+`yarn inspect-eval-one-task-qualify`. It **fails closed** unless
+`COLOPHON_INSPECT_EVAL_ONE_TASK_QUALIFY=1`. Default `yarn test` does
 not run it. It never downloads eval datasets. The fixture is the in-repo
 hermetic Task.
 
 ```bash
 cd packages/benchmark-product/core
-COLOPHON_INSPECT_AS_SPECIFIED_ONE_TASK_QUALIFY=1 \
+COLOPHON_INSPECT_EVAL_ONE_TASK_QUALIFY=1 \
   COLOPHON_INSPECT_PYTHON="$(command -v python3)" \
-  yarn inspect-as-specified-one-task-qualify
+  yarn inspect-eval-one-task-qualify
 ```
 
 Optional:
 
-- `COLOPHON_INSPECT_AS_SPECIFIED_WORKSPACE` — default
-  `/tmp/colophon-inspect-as-specified-one-task`
+- `COLOPHON_INSPECT_EVAL_WORKSPACE` — default
+  `/tmp/colophon-inspect-eval-one-task`
 - `JINN_INSPECT_PYTHON` — accepted if `COLOPHON_INSPECT_PYTHON` is unset
 
 The workspace path must not already be a Colophon workspace.
@@ -81,7 +81,7 @@ The workspace path must not already be a Colophon workspace.
 ## 4. Manual CLI (same path the script drives)
 
 ```bash
-WS=/tmp/colophon-inspect-as-specified-one-task
+WS=/tmp/colophon-inspect-eval-one-task
 PYTHON="$(command -v python3)"
 cat > "$WS/selection.json" <<EOF
 {
@@ -99,14 +99,14 @@ EOF
 
 node "$COLOPHON" init --workspace "$WS" --principal operator
 node "$COLOPHON" draft create --workspace "$WS" --principal operator \
-  --name "Inspect-as-specified one_task" --id inspect-one
-node "$COLOPHON" runtime inspect-as-specified select --workspace "$WS" \
+  --name "Inspect eval one_task" --id inspect-one
+node "$COLOPHON" runtime inspect eval select --workspace "$WS" \
   --principal operator --draft inspect-one --file "$WS/selection.json" --json
 node "$COLOPHON" quote --workspace "$WS" --principal operator --draft inspect-one --json
 node "$COLOPHON" lock --workspace "$WS" --principal operator --draft inspect-one
 node "$COLOPHON" launch --workspace "$WS" --principal operator --draft inspect-one
 node "$COLOPHON" collect --workspace "$WS" --principal operator --draft inspect-one --json
-node "$COLOPHON" runtime inspect-as-specified export --workspace "$WS" \
+node "$COLOPHON" runtime inspect eval export --workspace "$WS" \
   --principal operator --draft inspect-one --arm control --json
 node "$COLOPHON" report --workspace "$WS" --principal operator --draft inspect-one --json
 ```
@@ -125,17 +125,17 @@ After collect / View export, write down (do not invent Hub placement):
 - Worker input still `epochs: 1`; suite `replicates` equals specified epochs
 - View export mode `inspection-upload`; instructions include the Inspect Hub
   closed sentence
-- Report `limitations[]` carries the canonical Inspect-as-specified
-  not-as-specified-complete sentence
-- Cousin `runtime inspect select` was not used
+- Report `limitations[]` carries the canonical Inspect eval
+  not-eval-complete sentence
+- Inspect task `runtime inspect select` was not used
 
 Useful paths under `$WS`:
 
-- Sealed Inspect-as-specified selection in the workspace sealed-bytes store
+- Sealed Inspect eval selection in the workspace sealed-bytes store
 - View export: `artifacts/inspect/view-bundle/inspect-one/<armId>/`
 
 Do not run Inspect Hub upload. Do not treat the View bundle as the claim of
 record.
 
 The qualify script writes
-`$WS/inspect-as-specified-one-task-qualify-receipt.json`.
+`$WS/inspect-eval-one-task-qualify-receipt.json`.

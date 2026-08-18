@@ -11,7 +11,7 @@ import {
 import { isInspectMultiScorerSelection, type InspectSelectionTemplate } from "../runtime/inspect/manifest.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 
-export function buildInspectAsSpecifiedTasks(input: {
+export function buildInspectEvalTasks(input: {
   readonly inspect: InspectSelectionTemplate;
   readonly sampleIds: readonly (string | number)[];
   readonly resolvedName: string;
@@ -50,7 +50,7 @@ export function buildInspectAsSpecifiedTasks(input: {
         digest: { sha256: evaluationSpecSha256 },
         mediaType: "application/json",
       },
-      author: "urn:jinn:benchmark-product:inspect-as-specified",
+      author: "urn:jinn:benchmark-product:inspect-eval",
     };
     const bytes = sealTask(taskDocument);
     return {
@@ -63,8 +63,8 @@ export function buildInspectAsSpecifiedTasks(input: {
   const benchmark = defineBenchmark(
     tasks.map((task) => ({ bytes: task.bytes, digest: `sha256:${task.sha256}` as const })),
     {
-      name: `inspect-as-specified:${input.resolvedName}`,
-      description: "Inspect-as-specified: one unmodified Inspect sample invocation per benchmark cell; specified epochs are Jinn replicates.",
+      name: `inspect-eval:${input.resolvedName}`,
+      description: "Inspect eval: one unmodified Inspect sample invocation per benchmark cell; specified epochs are Jinn replicates.",
       version: "1.0.0",
     },
   );

@@ -111,16 +111,16 @@ part of default `yarn test`. Procedure, receipt checklist, and the fail-closed
 `yarn tb21-one-task-qualify` gate:
 [docs/runbooks/tb21-official-one-task.md](../../docs/runbooks/tb21-official-one-task.md).
 
-## Inspect-as-specified `one_task` operator qualify
+## Inspect eval `one_task` operator qualify
 
 An operator-only campaign against an in-repo Inspect Task (`hermetic_eval`,
 samples `alpha` / `bravo`) with local Python and `inspect-ai==0.3.255`. It
-proves protocol identity (`one_task` = one sample, conforming, not as-specified
+proves protocol identity (`one_task` = one sample, conforming, not eval
 complete, View export `inspection-upload`). It does not download GAIA, Cybench,
 or other large eval datasets, and is not part of default `yarn test`.
 Procedure, receipt checklist, and the fail-closed
-`yarn inspect-as-specified-one-task-qualify` gate:
-[docs/runbooks/inspect-as-specified-one-task.md](../../docs/runbooks/inspect-as-specified-one-task.md).
+`yarn inspect-eval-one-task-qualify` gate:
+[docs/runbooks/inspect-eval-one-task.md](../../docs/runbooks/inspect-eval-one-task.md).
 
 ## Product surfaces
 

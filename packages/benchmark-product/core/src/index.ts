@@ -174,13 +174,13 @@ export type {
 } from "./runtime/terminal-bench-2-1/host.js";
 export {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
-  INSPECT_AS_SPECIFIED_NOT_LEADERBOARD_READY_LIMITATION,
-  INSPECT_AS_SPECIFIED_SUBMIT_CLOSED_SENTENCE,
+  INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION,
+  INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION,
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
-  officialInspectAsSpecifiedConformance,
+  officialInspectEvalConformance,
   suiteLeaderboardLimitation,
 } from "./runtime/suite-protocol/comparability.js";
 export type { SuiteComparability, SuiteCoverage } from "./runtime/suite-protocol/comparability.js";
@@ -503,7 +503,7 @@ export {
   runVerify,
   sampleInit,
   selectInspectEvaluation,
-  selectInspectAsSpecifiedRuntime,
+  selectInspectEvalRuntime,
   exportInspectViewBundle,
   selectHarborRuntime,
   selectTerminalBench2Runtime,
@@ -605,8 +605,8 @@ export type {
   SampleInitTaskSummary,
   SelectInspectEvaluationInput,
   SelectInspectEvaluationResult,
-  SelectInspectAsSpecifiedRuntimeInput,
-  SelectInspectAsSpecifiedRuntimeResult,
+  SelectInspectEvalRuntimeInput,
+  SelectInspectEvalRuntimeResult,
   ExportInspectViewBundleInput,
   ExportInspectViewBundleResult,
   InspectViewExportMode,
