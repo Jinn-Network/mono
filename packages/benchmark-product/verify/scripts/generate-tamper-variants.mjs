@@ -147,10 +147,40 @@ defineCase(
 
 defineCase(
   "manifest-digest-mismatch",
-  "share.txt gains a trailing byte; its manifest entry is stale",
+  "one byte of share.txt is flipped in place; length matches, the manifest digest does not",
+  "manifest",
+  true,
+  (dir) => {
+    const bytes = Buffer.from(read(dir, "share.txt"));
+    bytes[bytes.length - 1] = bytes[bytes.length - 1] === 0x2e ? 0x21 : 0x2e;
+    writeBytes(dir, "share.txt", bytes);
+  },
+);
+
+defineCase(
+  "manifest-length-mismatch",
+  "share.txt gains a trailing byte; its manifest byte length is stale",
   "manifest",
   true,
   (dir) => writeBytes(dir, "share.txt", Buffer.concat([read(dir, "share.txt"), Buffer.from("\n")])),
+);
+
+defineCase(
+  "envelope-payload-malleated",
+  "newlines are inserted into the report envelope's base64 payload; a lenient decoder sees identical bytes, a strict one refuses; digests are repaired",
+  "report-verification",
+  true,
+  (dir) => {
+    const envelope = readJson(dir, "report-envelope.json");
+    const payload = envelope.payload;
+    const cut = Math.floor(payload.length / 2);
+    const malleated = `${payload.slice(0, cut)}\n${payload.slice(cut)}\n`;
+    writeDoc(dir, "report-envelope.json", { ...envelope, payload: malleated });
+    const claim = readJson(dir, "claim-package.json");
+    splice(dir, "claim-package.json", `"reportEnvelopeSha256":"${claim.records.reportEnvelopeSha256}"`,
+      `"reportEnvelopeSha256":"${sha256hex(read(dir, "report-envelope.json"))}"`);
+    refreshManifest(dir);
+  },
 );
 
 defineCase(
@@ -403,8 +433,10 @@ for (const tamperCase of CASES) {
 const EXPECTED_MESSAGE_PATTERNS = {
   "claim-headline-tampered": "^claim package .* is not the exact projection of verified facts$",
   "claim-text-tampered": "^claim package .* is not the exact projection of verified facts$",
+  "envelope-payload-malleated": "not strict standard or URL-safe base64",
   "file-truncated": "^manifest entry \"verdicts\\.json\" is missing$",
-  "manifest-digest-mismatch": "^byte length mismatch for \"share\\.txt\"$",
+  "manifest-digest-mismatch": "^digest mismatch for \"share\\.txt\"$",
+  "manifest-length-mismatch": "^byte length mismatch for \"share\\.txt\"$",
   "recanonicalized-report-bytes": "schema validation at sealing",
   "record-digest-mismatch": "^evidence record digest mismatch",
   "record-substituted": "^verdict [0-9a-f]{64} bytes are missing$",
@@ -420,6 +452,7 @@ writeFileSync(
   `${JSON.stringify(
     {
       format: "benchmark-product-conformance-kit/1",
+      semantics: "expectedMessagePattern is the behavioral pin (a regular expression over the reference verifier's failure message); expectedFailingCheck names the reference check family it belongs to and is advisory. externallyDetectable states whether the external-subset checks alone must reject the variant.",
       golden: {
         expectedChecks: [
           "manifest",
