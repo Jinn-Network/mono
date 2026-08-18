@@ -73,6 +73,8 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   runPreview: "preview",
   runQuote: "quote",
   runLock: "lock",
+  runAnchor: "anchor",
+  anchoringConfigure: "anchoring configure",
   publicationConfigure: "publication configure",
   publicationRegister: "publication register",
   publicationAccounting: "publication accounting",
@@ -120,6 +122,8 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   runPreview: "preview",
   runQuote: "quote",
   runLock: "lock",
+  runAnchor: "anchor",
+  anchoringConfigure: "anchoring.configure",
   publicationConfigure: "publication.configure",
   publicationRegister: "publication.register",
   publicationAccounting: "publication.accounting",
@@ -167,6 +171,10 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
     "Runs a disposable rehearsal of the draft's arms on the local venue in a throwaway area; never official evidence, never advances the lifecycle.",
   runQuote: "Prices a compiled run against the local venue's capabilities, without spending.",
   runLock: "Seals the Run record and transitions the draft to locked (authority-gated).",
+  runAnchor:
+    "Obtains third-party time evidence over the run's own sealed Run or Matrix digest from a configured provider, verifies it, and stores it as an AnchorEvidence record.",
+  anchoringConfigure:
+    "Replaces or clears the workspace's ordered anchor provider and endpoint configuration, which is what makes later locks anchor automatically (authority-gated).",
   publicationConfigure: "Configures the mutable public source locator and explicit prospective-publication intent.",
   publicationRegister: "Stores, announces, and exact-probes the registration closure before dispatch or truthfully post-hoc.",
   publicationAccounting: "Publishes retained complete or partial dispatch accounting and Matrix v2 without running work or requiring a Report.",
@@ -224,6 +232,11 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   runPreview: { status: "shipped", action: "run.preview" },
   runQuote: { status: "shipped", action: "run.quote" },
   runLock: { status: "shipped", action: "run.lock" },
+  runAnchor: { status: "shipped", action: "run.anchor" },
+  // The browser never supplies the endpoint — the server's own configuration does, exactly as it
+  // does for `publication.configure`. A browser-supplied anchor endpoint would make this action an
+  // outbound-request primitive pointed wherever a form said.
+  anchoringConfigure: { status: "shipped", action: "anchoring.configure" },
   publicationConfigure: { status: "shipped", action: "publication.configure" },
   publicationRegister: { status: "shipped", action: "publication.register" },
   publicationAccounting: { status: "shipped", action: "publication.accounting" },

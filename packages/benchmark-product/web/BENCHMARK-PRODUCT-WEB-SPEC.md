@@ -129,9 +129,21 @@ journal renders inside the Workspace surface, not as a separate screen).
   edit or delete affordance for any entry, ever.
 - **Actions** — `init` (workspace creation, distinct from the lifecycle
   `create` that starts a draft) → operation `initWorkspace`, CLI verb
-  `init`. The journal has **no actions of its own** — entries appear only
-  as a side effect of other operations; there is no "add journal entry"
-  control.
+  `init`; anchoring configure → operation `anchoringConfigure`, CLI verb
+  `anchoring configure` (**gated**). The journal has **no actions of its
+  own** — entries appear only as a side effect of other operations; there
+  is no "add journal entry" control.
+
+Anchoring configuration follows the publication-locator rule: the browser never
+names an anchor provider or endpoint. This server contacts the configured
+endpoint on every later lock, so a form-supplied URL would be an
+outbound-request primitive; the deployment supplies its providers through
+`BENCHMARK_PRODUCT_ANCHOR_PROVIDERS`, and the form carries only the decision to
+apply them or to clear the block. With nothing configured server-side the
+action refuses `invalid-invocation` rather than accepting a browser value.
+Action states: `idle → applied | cleared`, with `failed` as the terminal
+alternative (typed `validation` for a profile or endpoint the product cannot
+use, `authority-denied` without the grant).
 
 ### 3.2 Benchmark draft
 
@@ -204,7 +216,23 @@ Covers the design spec §4.6 Official-run row.
   on paid venues); watch/status → `runStatus` / `status`; resume →
   `runResume` / `resume`; collect → `runCollect` / `collect`; cancel →
   `runCancel` / `cancel` (**gated**; durable and idempotent, with typed
-  `requested` and terminal `cancelled` results).
+  `requested` and terminal `cancelled` results); anchor → `runAnchor` /
+  `anchor` (**ungated**; the browser names the draft and which sealed record
+  to anchor — `lock` or `matrix` — never a provider or endpoint, which come
+  from the workspace's own configuration).
+
+Anchoring is opt-in and never blocking. With nothing configured, no anchor is
+attempted and nothing is said about it. Once configured, `lock` attempts one
+anchor over the sealed Run record *after* the lock transition has already
+completed, and any refusal or failure is a note plus its own audit entry — the
+lock's own result is unchanged, so the rendered lock outcome never depends on a
+third party being reachable. The standalone anchor action exists to retry a
+failed lock-time attempt before launch, to anchor the terminal Matrix after
+close, and to upgrade a pending proof before publish. Action states:
+`idle → anchored`, with `failed` as the terminal alternative (typed
+`venue-unavailable` when nothing resolves or the provider does not answer,
+`venue-unverifiable` when what came back does not hold, `conflict` on a
+re-anchor, `illegal-transition` for a lock anchor after dispatch began).
 
 BP-32 renders these controls at `/workspace/[draftId]/run`. The monitor is a
 durable read: every refresh/poll calls `runStatus` against the sealed Run,

@@ -1,6 +1,6 @@
 /**
  * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
- * 40 parity operations over the operations facade, plus the path-oriented
+ * 43 parity operations over the operations facade, plus the path-oriented
  * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
@@ -28,6 +28,7 @@ import { PRODUCT_BRANDING } from "../branding.js";
 import { doctorAgent, listAgentProfiles, observeAndStoreAgentProfile, profileArmPinning, profileMatchesArmPinning, readAgentProfile, requireQualifiedHarnessLogin, storeAgentProfile, storeApiKeyCredential } from "../agent/index.js";
 import { refuse, toErrorEnvelope, type ProductErrorCode, type ProductErrorEnvelope } from "../errors.js";
 import {
+  anchoringConfigure,
   armAdd,
   armList,
   armRemove,
@@ -46,6 +47,7 @@ import {
   initWorkspace,
   inspectDraft,
   listDrafts,
+  runAnchor,
   runCollect,
   runCancel,
   runLaunch,
@@ -69,6 +71,7 @@ import {
   selectTerminalBench2Runtime,
   migrateTerminalBenchLegacyTask,
   updateDraft,
+  type AnchorSubject,
   type ArmWarning,
   type BindInspectBinaryJudgeInput,
   type OperationContext,
@@ -89,6 +92,9 @@ import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregist
 import { readRunJournalEntries } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
 import { readDraftDocument } from "../operations/drafts.js";
+// The lock verb's own §7.2 hook, imported from the module rather than the facade: it is not an
+// operation a caller invokes, so it is not part of the facade's operation inventory.
+import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, readTextFile, required, type ParsedArgs } from "./args.js";
 import type { CliContext, CliResult } from "./result.js";
 
@@ -147,6 +153,10 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    [--ack-provider-network-costs]
   lock             --workspace <dir> --principal <id> --draft <draftId>
                    [--ack-provider-network-costs]
+  anchor           --workspace <dir> --principal <id> --draft <draftId>
+                   --subject lock|matrix [--provider <profileUri>] [--endpoint <url>]
+  anchoring configure --workspace <dir> --principal <id>
+                   (--provider <profileUri> --endpoint <url> | --file <anchoring.json> | --clear)
   publication configure --workspace <dir> --principal <id> --draft <draftId> --public-base-url <url>
   publication register  --workspace <dir> --principal <id> --draft <draftId> [--public-base-url <url>]
   publication status     --workspace <dir> --principal <id> --draft <draftId>
@@ -210,6 +220,8 @@ const PREVIEW_FLAGS = ["workspace", "principal", "json", "draft", "items"] as co
 const PROVIDER_ACK_FLAG = "ack-provider-network-costs" as const;
 const QUOTE_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
 const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
+const ANCHOR_FLAGS = ["workspace", "principal", "json", "draft", "subject", "provider", "endpoint"] as const;
+const ANCHORING_CONFIGURE_FLAGS = ["workspace", "principal", "json", "provider", "endpoint", "file", "clear"] as const;
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -882,7 +894,40 @@ async function handleQuote(args: ParsedArgs, context: CliContext, jsonMode: bool
   });
 }
 
-function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+/**
+ * The §7.2 note a completed lock prints about its anchor attempt, or `""` for the two cases that
+ * print nothing: an unconfigured workspace (§7.3 — "absent any configuration nothing is attempted,
+ * no warning prints"), and `--json` mode, whose stdout stays exactly one machine-parseable
+ * envelope. A JSON caller reads the outcome from the audit journal, or re-runs `anchor` standalone
+ * for a typed envelope.
+ */
+function anchorNote(outcome: AnchorAfterLockOutcome, jsonMode: boolean, draftId: string): string {
+  if (jsonMode) return "";
+  if (!outcome.attempted) {
+    return outcome.reason === "disabled"
+      ? "anchoring: disabled for this draft; no anchor was attempted\n"
+      : "";
+  }
+  if (outcome.result.ok) {
+    const { provider, recordSha256, proofStatus } = outcome.result.result;
+    return `anchoring: ${provider} anchored this lock as ${recordSha256} (${proofStatus})\n`;
+  }
+  const { code, detail } = outcome.result.error;
+  return `anchoring: no anchor was obtained (${code}): ${detail}\n`
+    + `  the lock is unaffected; retry before launch with `
+    + `"${PRODUCT_BRANDING.commandName} anchor --draft ${draftId} --subject lock"\n`;
+}
+
+/**
+ * `lock`, then the §7.2 anchor hook.
+ *
+ * The lock transition completes first and its result is what this verb reports: **any** anchor
+ * failure or refusal becomes a note on stdout plus the operation's own audit entry, and neither the
+ * envelope nor the exit code moves. The verb does spend up to the bounded acquisition timeout
+ * before returning, which is the design's deliberate reading of the never-blocks criterion — the
+ * lock itself was never blocked or delayed, only this process's return.
+ */
+async function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, LOCK_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
@@ -890,12 +935,89 @@ function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boolean): C
     args, context, opContext.workspaceDir, draftId, jsonMode,
   );
 
-  const result = withProviderAcknowledgement(runLock(opContext, { draftId }), acknowledged);
-  return renderResult(
+  const locked = runLock(opContext, { draftId });
+  const result = withProviderAcknowledgement(locked, acknowledged);
+  const rendered = renderResult(
     result,
     jsonMode,
     (value) => `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
   );
+  if (!locked.ok) return rendered;
+
+  const outcome = await anchorAfterLockIfConfigured(opContext, draftId, context.anchorDeps ?? {});
+  return { ...rendered, stdout: `${rendered.stdout}${anchorNote(outcome, jsonMode, draftId)}` };
+}
+
+function assertAnchorSubject(value: string): AnchorSubject {
+  if (value === "lock" || value === "matrix") return value;
+  refuse("invalid-invocation", "--subject", `--subject must be "lock" or "matrix"`);
+}
+
+async function handleAnchor(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, ANCHOR_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  // Present-but-empty is a typo, not an omission: `required` refuses it by name rather than
+  // letting `""` reach the operation as a provider nothing implements.
+  const providerProfile = present(args, "provider") ? required(args, "provider") : undefined;
+  const endpoint = present(args, "endpoint") ? required(args, "endpoint") : undefined;
+
+  const result = await runAnchor(
+    opContext,
+    {
+      draftId: required(args, "draft"),
+      subject: assertAnchorSubject(required(args, "subject")),
+      ...(providerProfile === undefined ? {} : { providerProfile }),
+      ...(endpoint === undefined ? {} : { endpoint }),
+    },
+    context.anchorDeps ?? {},
+  );
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `anchored the sealed ${value.subject} record ${value.subjectSha256} with ${value.provider}: `
+      + `${value.recordSha256} (${value.proofStatus})\n`,
+  );
+}
+
+/**
+ * Three mutually exclusive spellings of one whole-list replacement: the single-provider case
+ * inline, the ordered multi-provider case from a file, and `--clear`. The operation takes the
+ * complete list, so there is no shape here that appends to what is already configured.
+ */
+function anchoringEntriesFrom(args: ParsedArgs, context: CliContext): readonly { providerProfile: string; endpoint: string }[] {
+  const filePath = optional(args, "file");
+  const provider = optional(args, "provider");
+  const endpoint = optional(args, "endpoint");
+  const modes = [present(args, "clear"), filePath !== undefined, provider !== undefined || endpoint !== undefined]
+    .filter(Boolean).length;
+  if (modes !== 1) {
+    refuse(
+      "invalid-invocation",
+      "anchoring configure",
+      "supply exactly one of --provider with --endpoint, --file <anchoring.json>, or --clear",
+    );
+  }
+  if (present(args, "clear")) return [];
+  if (filePath !== undefined) {
+    const parsed = readJsonFile(pathFrom(context.cwd, filePath));
+    if (!Array.isArray(parsed)) {
+      refuse("validation", filePath, "the anchoring file must be a JSON array of { providerProfile, endpoint } entries");
+    }
+    // Shape validation is the operation's, not this surface's: it refuses `validation` with the
+    // entry index and field named, which is a better message than anything reconstructed here.
+    return parsed as readonly { providerProfile: string; endpoint: string }[];
+  }
+  return [{ providerProfile: required(args, "provider"), endpoint: required(args, "endpoint") }];
+}
+
+function handleAnchoringConfigure(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, ANCHORING_CONFIGURE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const result = anchoringConfigure(opContext, { entries: anchoringEntriesFrom(args, context) });
+  return renderResult(result, jsonMode, (value) => value.anchoring.length === 0
+    ? "cleared anchor provider configuration; no lock will attempt anchoring\n"
+    : `configured ${value.anchoring.length} anchor provider(s); every later lock of an anchoring-enabled draft attempts one\n`
+      + `${value.anchoring.map((entry) => `  ${entry.providerProfile}\t${entry.endpoint}`).join("\n")}\n`);
 }
 
 async function handlePublicationConfigure(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
@@ -1141,6 +1263,8 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["preview", handlePreview],
   ["quote", handleQuote],
   ["lock", handleLock],
+  ["anchor", handleAnchor],
+  ["anchoring configure", handleAnchoringConfigure],
   ["publication configure", handlePublicationConfigure],
   ["publication register", handlePublicationRegister],
   ["publication status", handlePublicationStatus],

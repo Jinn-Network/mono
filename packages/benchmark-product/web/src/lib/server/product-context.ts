@@ -14,6 +14,7 @@ export const ENABLE_TEST_CONTROLS_ENV = "BENCHMARK_PRODUCT_ENABLE_TEST_CONTROLS"
 export const TEST_SOLVE_DELAY_MS_ENV = "BENCHMARK_PRODUCT_TEST_SOLVE_DELAY_MS";
 export const OPENAI_KEY_FILE_ENV = "BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE";
 export const PUBLICATION_PUBLIC_BASE_URL_ENV = "BENCHMARK_PRODUCT_PUBLICATION_PUBLIC_BASE_URL";
+export const ANCHOR_PROVIDERS_ENV = "BENCHMARK_PRODUCT_ANCHOR_PROVIDERS";
 
 /** Browser-safe readiness projection. Never returns the credential path or reads its bytes. */
 export function openAIConnectionReadiness(
@@ -29,12 +30,48 @@ export class ProductContextConfigurationError extends Error {
   }
 }
 
+export interface AnchorProviderConfiguration {
+  readonly providerProfile: string;
+  readonly endpoint: string;
+}
+
 export interface ProductServerConfiguration {
   readonly workspaceDir: string;
   /** Non-secret OS user-data directory. This remains server-only. */
   readonly agentDataDir: string;
   readonly principal: string;
   readonly publicationPublicBaseUrl?: string;
+  readonly anchorProviders?: readonly AnchorProviderConfiguration[];
+}
+
+/**
+ * The deployment's own anchor providers, as a JSON array of `{ providerProfile, endpoint }`.
+ *
+ * A browser never supplies an anchor endpoint. The *server* is what contacts it, on every later
+ * lock, so a form-supplied URL would turn this action into an outbound-request primitive pointed
+ * wherever the form said — the same reason the publication locator above is server-owned. Shape
+ * only is checked here; the profile and endpoint rules are the core operation's, which refuses
+ * `validation` naming the offending entry.
+ */
+export function configuredAnchorProviders(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): readonly AnchorProviderConfiguration[] | undefined {
+  const value = environment[ANCHOR_PROVIDERS_ENV]?.trim();
+  if (!value) return undefined;
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch {
+    throw new ProductContextConfigurationError(`${ANCHOR_PROVIDERS_ENV} must be a JSON array of { providerProfile, endpoint } entries`);
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new ProductContextConfigurationError(`${ANCHOR_PROVIDERS_ENV} must be a non-empty JSON array of { providerProfile, endpoint } entries`);
+  }
+  return parsed.map((entry) => {
+    const candidate = entry as { readonly providerProfile?: unknown; readonly endpoint?: unknown };
+    if (typeof candidate?.providerProfile !== "string" || typeof candidate?.endpoint !== "string") {
+      throw new ProductContextConfigurationError(`${ANCHOR_PROVIDERS_ENV} entries must carry string providerProfile and endpoint fields`);
+    }
+    return { providerProfile: candidate.providerProfile, endpoint: candidate.endpoint };
+  });
 }
 
 /** A deployment may set this exact public route as its publication locator. We do not derive it
@@ -88,11 +125,13 @@ export function readProductServerConfiguration(
     throw new ProductContextConfigurationError(`${PRINCIPAL_ENV} must name the acting workspace principal`);
   }
   const publicationPublicBaseUrl = configuredPublicationPublicBaseUrl(environment);
+  const anchorProviders = configuredAnchorProviders(environment);
   return {
     workspaceDir,
     agentDataDir,
     principal,
     ...(publicationPublicBaseUrl === undefined ? {} : { publicationPublicBaseUrl }),
+    ...(anchorProviders === undefined ? {} : { anchorProviders }),
   };
 }
 

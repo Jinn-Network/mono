@@ -128,6 +128,34 @@ function requireHttpsEndpoint(endpoint: string, path: string): string {
   return normalized;
 }
 
+/** The comma-separated spelling one configured endpoint may use (§6.2's several calendars). */
+function endpointSegments(endpoint: string): readonly string[] {
+  return endpoint.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+}
+
+/**
+ * Canonicalizes an endpoint for *durable workspace configuration*, or `undefined` when it is not
+ * one this product would accept — non-throwing, so the configuration surface refuses with its own
+ * error code while the endpoint spelling stays this module's fact.
+ *
+ * It reads the endpoint the way the named profile's own source will read it (one URL, or §6.2's
+ * comma-separated calendars) and is deliberately **stricter on one axis**: a configured endpoint
+ * must be `https`. Acquisition itself still admits a plain-`http` endpoint, so a per-invocation
+ * `--endpoint` is unchanged; what an operator writes into a workspace once and then anchors
+ * through automatically on every later lock is held to TLS.
+ */
+export function normalizeConfiguredAnchorEndpoint(profile: string, endpoint: string): string | undefined {
+  const segments = profile === OPENTIMESTAMPS_ANCHOR_PROFILE ? endpointSegments(endpoint) : [endpoint];
+  if (segments.length === 0) return undefined;
+  const normalized: string[] = [];
+  for (const segment of segments) {
+    const canonical = normalizeHttpEndpoint(segment);
+    if (canonical === undefined || !canonical.startsWith("https://")) return undefined;
+    normalized.push(canonical);
+  }
+  return normalized.join(",");
+}
+
 const SUBJECT_PATTERN = /^[0-9a-f]{64}$/;
 
 function subjectDigestBytes(subjectSha256: string, path: string): Uint8Array {
@@ -299,7 +327,7 @@ const OPENTIMESTAMPS_MEDIA_TYPE = "application/vnd.opentimestamps.v1";
  * spelled the way this repository already spells several endpoints elsewhere.
  */
 function calendarBaseUrls(endpoint: string, path: string): readonly string[] {
-  const entries = endpoint.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+  const entries = endpointSegments(endpoint);
   if (entries.length === 0) unavailable(path, "no OpenTimestamps calendar is configured");
   return entries.map((entry) => requireHttpsEndpoint(entry, path));
 }

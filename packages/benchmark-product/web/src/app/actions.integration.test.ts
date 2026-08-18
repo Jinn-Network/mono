@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { GuiActionState } from "@/lib/action-state";
 import {
   AGENT_DATA_ENV,
+  ANCHOR_PROVIDERS_ENV,
   ENABLE_TEST_CONTROLS_ENV,
   PRINCIPAL_ENV,
   PUBLICATION_PUBLIC_BASE_URL_ENV,
@@ -67,6 +68,7 @@ afterEach(async () => {
   delete process.env[ENABLE_TEST_CONTROLS_ENV];
   delete process.env[TEST_SOLVE_DELAY_MS_ENV];
   delete process.env[PUBLICATION_PUBLIC_BASE_URL_ENV];
+  delete process.env[ANCHOR_PROVIDERS_ENV];
   for (const workspace of workspaces.splice(0)) rmSync(workspace, { recursive: true, force: true });
   rmSync(agentDataDir, { recursive: true, force: true });
   revalidatePathMock.mockClear();
@@ -175,6 +177,51 @@ describe.sequential("server action layer against a real workspace", () => {
     const configured = await invoke("publication.configure", { draftId: "server-publication", publicBaseUrl: "https://attacker.example/archive" });
     expect(configured).toMatchObject({ status: "success", result: { publicBaseUrl: "https://public.example/publication" } });
     expect(JSON.stringify(configured)).not.toContain("attacker.example");
+  }, 120_000);
+
+  test("GUI anchoring configure requires and exclusively uses the server-owned anchor providers", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "anchoring-server-authority-"));
+    workspaces.push(workspace);
+    process.env[WORKSPACE_ENV] = workspace;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    await invoke("workspace.init");
+
+    // Nothing configured server-side: the action is unavailable, whatever the form carries.
+    const unavailable = await invoke("anchoring.configure", { endpoint: "https://attacker.example/tsr" });
+    expect(unavailable).toMatchObject({ status: "error", error: { code: "invalid-invocation" } });
+
+    process.env[ANCHOR_PROVIDERS_ENV] = JSON.stringify([
+      { providerProfile: "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1", endpoint: "https://tsa.example/tsr" },
+    ]);
+    const configured = await invoke("anchoring.configure", { endpoint: "https://attacker.example/tsr" });
+    expect(configured).toMatchObject({
+      status: "success",
+      result: {
+        anchoring: [{
+          providerProfile: "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+          endpoint: "https://tsa.example/tsr",
+        }],
+      },
+    });
+    expect(JSON.stringify(configured)).not.toContain("attacker.example");
+
+    // Turning anchoring off is the one anchoring decision the browser may make on its own.
+    const cleared = await invoke("anchoring.configure", { clear: "clear-anchoring" });
+    expect(cleared).toMatchObject({ status: "success", result: { anchoring: [] } });
+  }, 120_000);
+
+  test("GUI anchor refuses an unknown subject, and the typed venue refusal when nothing is configured", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "anchor-subject-"));
+    workspaces.push(workspace);
+    process.env[WORKSPACE_ENV] = workspace;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    await invoke("workspace.init");
+    await prepareLockedDraft("anchor-subject");
+
+    expect(await invoke("run.anchor", { draftId: "anchor-subject", subject: "report" }))
+      .toMatchObject({ status: "error", error: { code: "invalid-invocation" } });
+    expect(await invoke("run.anchor", { draftId: "anchor-subject", subject: "lock" }))
+      .toMatchObject({ status: "error", error: { code: "venue-unavailable" } });
   }, 120_000);
 
   test("GUI signed Report v2 refuses a persisted locator that differs from the server-owned mount", async () => {

@@ -115,6 +115,33 @@ export function assertWorkspace(workspaceDir: string): WorkspaceMetadata {
   return parsed.data;
 }
 
+/**
+ * Replaces the workspace's `anchoring` block (anchor-evidence design §7.3), atomically and through
+ * the same schema every read validates against.
+ *
+ * An empty list **removes** the key rather than storing `[]`. Absence is the documented default —
+ * "absent any configuration nothing is attempted, no warning prints, and the unconditional
+ * limitation stands" — so clearing configuration must return the file to exactly the shape a
+ * never-configured workspace has, not to a second spelling of the same thing.
+ *
+ * Every other field is carried through unchanged: this reads the file it is about to rewrite, so a
+ * field a later storage version adds is never dropped by an anchoring edit.
+ */
+export function writeWorkspaceAnchoring(
+  workspaceDir: string,
+  entries: readonly WorkspaceAnchoringEntry[],
+): readonly WorkspaceAnchoringEntry[] {
+  const { anchoring: _replaced, ...rest } = assertWorkspace(workspaceDir);
+  const parsed = WorkspaceMetadataSchema.safeParse(
+    entries.length === 0 ? rest : { ...rest, anchoring: entries },
+  );
+  if (!parsed.success) {
+    refuseWithIssues("validation", zodIssuesToProductIssues(parsed.error));
+  }
+  atomicWriteFileSync(workspaceMetadataPath(workspaceDir), JSON.stringify(parsed.data, null, 2));
+  return parsed.data.anchoring ?? [];
+}
+
 /** True when `workspaceDir` has already been initialized as a workspace. */
 export function isWorkspace(workspaceDir: string): boolean {
   return existsSync(workspaceMetadataPath(workspaceDir));

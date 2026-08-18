@@ -427,6 +427,7 @@ export type { AuthorityPolicy, GatedOperation, Principal } from "./authority/pol
 
 // The operations facade (spec §5.1) — the boundary every surface calls.
 export {
+  anchoringConfigure,
   armAdd,
   armList,
   armRemove,
@@ -451,6 +452,7 @@ export {
   publicationRegister,
   publicationReport,
   publicationStatus,
+  runAnchor,
   runCancel,
   runCollect,
   runLaunch,
@@ -471,6 +473,9 @@ export {
   updateDraft,
 } from "./operations/index.js";
 export type {
+  AnchoringConfigureInput,
+  AnchoringConfigureResult,
+  AnchorSubject,
   ArmAddInput,
   ArmInspection,
   ArmRemoveInput,
@@ -517,6 +522,9 @@ export type {
   QuoteCoverageRefusal,
   QuoteEstimatedWallTime,
   QuotePresentation,
+  RunAnchorDeps,
+  RunAnchorInput,
+  RunAnchorResult,
   RunCancelDeps,
   RunCancelInput,
   RunCancelResult,

@@ -38,6 +38,11 @@ describe("generated library / CLI / GUI parity", () => {
       }
     }
 
+    // The anchor surface is shipped on both sides, not silently CLI-only: its endpoint is server
+    // configuration, which is exactly what makes a GUI action safe to offer.
+    expect(GUI_CAPABILITY_CATALOG.runAnchor).toEqual({ status: "shipped", action: "run.anchor" });
+    expect(GUI_CAPABILITY_CATALOG.anchoringConfigure).toEqual({ status: "shipped", action: "anchoring.configure" });
+
     const unavailableReasons = Object.fromEntries(
       Object.entries(GUI_CAPABILITY_CATALOG)
         .flatMap(([operation, capability]) => capability.status === "unavailable"

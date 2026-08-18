@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { redirect } from "next/navigation";
 import {
+  anchoringConfigure,
   armAdd,
   armList,
   armRemove,
@@ -17,6 +18,7 @@ import {
   initWorkspace,
   inspectDraft,
   listDrafts,
+  runAnchor,
   runLock,
   publicationAccounting,
   publicationConfigure,
@@ -386,6 +388,36 @@ export async function runLockAction(_previous: GuiActionState, formData: FormDat
   const acknowledgement = requireProviderAcknowledgement(draftId, formData);
   if (acknowledgement !== undefined) return acknowledgement;
   return executeOperation((context) => runLock(context, { draftId }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
+}
+
+/**
+ * Anchoring is opt-in configuration, and the endpoint is the server's, never the browser's: this
+ * deployment reaches whatever is configured here on every later lock. The form carries only the
+ * decision — apply the server's configured providers, or clear the block.
+ */
+export async function anchoringConfigureAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const clearing = field(formData, "clear") === "clear-anchoring";
+  return executeOperation((context) => {
+    if (clearing) return anchoringConfigure(context, { entries: [] });
+    const configured = readProductServerConfiguration().anchorProviders;
+    if (configured === undefined) throw new ProductContextConfigurationError("The server must configure anchor providers before the GUI can enable anchoring");
+    return anchoringConfigure(context, { entries: configured });
+  }, { revalidate: ["/workspace"] });
+}
+
+/**
+ * Anchors one of a run's own sealed records. Provider and endpoint are resolved from workspace
+ * configuration; the browser names only the draft and which record to anchor.
+ */
+export async function runAnchorAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  const subject = field(formData, "subject");
+  return executeOperation(async (context) => {
+    if (subject !== "lock" && subject !== "matrix") {
+      throw new ProductContextConfigurationError("subject must be lock or matrix");
+    }
+    return runAnchor(context, { draftId, subject });
+  }, { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
 }
 
 /** The browser supplies a locator and draft id only. The workspace is fixed by server config. */
