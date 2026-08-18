@@ -21,3 +21,8 @@ Verification opens no network connection, reads no account or API credential, an
 nothing. It checks the bundle's integrity, evidence closure, calculations, report, and claim
 consistency. It does not prove that the producing machine was honest or that the compared
 identities are independent parties.
+
+Bundles are also verifiable without this package: `../EXTERNAL-VERIFICATION.md` specifies
+the external path (openssl plus a dependency-free script, shipped here as
+`scripts/external-verify.py`), the JSON Schemas under `schemas/`, and the conformance kit
+under `fixtures/public-bundle-conformance-v1/` for testing an independent verifier.

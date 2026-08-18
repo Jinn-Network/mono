@@ -58,6 +58,9 @@ For a received bundle, the smaller reader surface is:
 npx @colophon-claims/verify@2 ./bundle
 ```
 
+To verify a bundle with tools that are not ours, see
+[`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).
+
 The contributor proof remains available from the mono:
 
 After the portal build order above has been completed, start from an empty

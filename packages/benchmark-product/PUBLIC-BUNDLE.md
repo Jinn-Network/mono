@@ -198,6 +198,13 @@ owner.
 
 ## Portable verification
 
+Verification with your own tools — no Jinn code at all — is specified in
+[`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md): the check split, the
+DSSE and digest rules, the JSON Schemas shipped under the reader package's
+`schemas/`, and the conformance kit under
+`verify/fixtures/public-bundle-conformance-v1/` whose tampered variants an
+external verifier must reject.
+
 Use the smaller reader package, without the product or source workspace:
 
 ```bash

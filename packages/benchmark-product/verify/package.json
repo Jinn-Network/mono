@@ -30,6 +30,8 @@
   },
   "files": [
     "dist/",
+    "schemas/",
+    "scripts/external-verify.py",
     "README.md"
   ],
   "publishConfig": {
@@ -80,6 +82,7 @@
   "devDependencies": {
     "@jinn-network/trust-testing": "0.1.0",
     "@types/node": "^22.0.0",
+    "ajv": "8.17.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
   }
