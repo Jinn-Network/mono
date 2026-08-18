@@ -2,6 +2,7 @@ name: Platform Architecture Control
 
 on:
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -76,13 +77,31 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        # A merge group carries its own base/head pair, so the same changed-package
+        # closure the pull_request lane already trusts applies to the speculative
+        # merge commit (DR-2026-08-18-b D3). Without this a merge group bypassed
+        # selection and paid the full battery (observed 11-43 min) for every entry,
+        # however narrow. The selector itself is event-agnostic — it consumes a path
+        # list on stdin — so only the diff endpoints differ between the two lanes.
         run: |
-          if [ "${EVENT_NAME}" != pull_request ]; then
-            echo 'non-pull_request event verifies in full'
-            echo 'run=true' >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-          selection="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" \
+          case "${EVENT_NAME}" in
+            pull_request)
+              diff_base="${BASE_SHA}"
+              diff_head="${HEAD_SHA}"
+              ;;
+            merge_group)
+              diff_base="${MG_BASE_SHA}"
+              diff_head="${MG_HEAD_SHA}"
+              ;;
+            *)
+              echo 'non-PR, non-merge-group event verifies in full'
+              echo 'run=true' >> "${GITHUB_OUTPUT}"
+              exit 0
+              ;;
+          esac
+          selection="$(git diff --name-only "${diff_base}...${diff_head}" \
             | node .github/scripts/platform-verification-selection.mjs)"
           echo "${selection}"
           echo "run=$(jq -r '.run' <<<"${selection}")" >> "${GITHUB_OUTPUT}"
