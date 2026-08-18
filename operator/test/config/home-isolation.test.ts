@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_CONFIG_PATH, loadConfig } from '../../src/config.js';
+import { ISOLATED_HOME_PREFIX } from '../_support/sweep-tree.js';
 
 // The operator's real `~/.jinn-client/config.json` is a production artefact: it holds their
 // joined SolverNets, RPC chain and staking posture, and since the stage-1 shape-v2 migration
@@ -23,7 +24,9 @@ describe('test home isolation', () => {
       'string',
     );
     expect(realHome).toBeTypeOf('string');
-    expect(isolatedHome).toContain('jinn-test-home-');
+    // Read from the shared constant rather than spelled out again: the prefix is what the per-run
+    // guard admits, so a bare literal here would go green against a home the guard rejects.
+    expect(isolatedHome).toContain(ISOLATED_HOME_PREFIX);
   });
 
   it('redirects the home directory away from the real one', () => {

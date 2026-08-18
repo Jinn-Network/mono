@@ -43,8 +43,8 @@
 // every recorded home from the main process once the workers are gone. The second sweep here
 // is a no-op (`force: true` on a missing path), which is why keeping the partial backstop is free.
 //
-// The sweep repairs permissions before giving up — see `sweep-tree.ts`. The same repair is carried
-// by the two package-level copies of this seam
+// The sweep repairs permissions before giving up, and stands down under a keep-artifact flag — see
+// `sweep-tree.ts`. Both behaviours are carried by the two package-level copies of this seam
 // (`packages/task-execution/evaluator-adapters` and `packages/benchmark-product/core`,
 // `src/test-support/isolate-tmp.ts`), so all three sweeps behave identically.
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -53,10 +53,19 @@ import { basename, join } from 'node:path';
 
 import { afterAll } from 'vitest';
 
-import { ISOLATED_HOME_PREFIX, sweepManagedTree } from './sweep-tree.js';
+import { ISOLATED_HOME_PREFIX, assertSocketSafeRoot, sweepManagedTree } from './sweep-tree.js';
 
 const realHome = homedir();
-const isolatedHome = mkdtempSync(join(tmpdir(), ISOLATED_HOME_PREFIX));
+
+// The host temp directory, as published by `global-tmp-root.ts` before any worker was forked,
+// rather than whatever `tmpdir()` reports here. Two reasons: it is the same base the per-run guard
+// checks records against, so the writer's base and the reader's base cannot diverge; and a REUSED
+// worker — `--no-isolate`, where this file is evaluated again in a process whose `$TMPDIR` was
+// already redirected into the previous, by-then-swept home — would otherwise try to create its
+// next home inside a directory that no longer exists. Falls back to `tmpdir()` for a single-file
+// run under a config with no `globalSetup` entry.
+const hostTmpdir = process.env['JINN_TEST_HOST_TMPDIR'] ?? tmpdir();
+const isolatedHome = mkdtempSync(join(hostTmpdir, ISOLATED_HOME_PREFIX));
 
 // Record this home with the per-run teardown in `global-tmp-root.ts`, which removes every
 // recorded tree once the workers are gone — the only thing that cleans up after a file whose
@@ -84,7 +93,16 @@ process.env['JINN_TEST_ISOLATED_HOME'] = isolatedHome;
 process.env['JINN_TEST_REAL_HOME'] = realHome;
 
 const isolatedTmp = join(isolatedHome, 'tmp');
-mkdirSync(isolatedTmp);
+
+// Fail here, naming `$TMPDIR`, rather than let a long host temp directory surface as an EEXIST or
+// EADDRINUSE inside whichever test spawns a subprocess — see the budget in `sweep-tree.ts`.
+// Checked after the home is registered above, so the run teardown still removes it.
+assertSocketSafeRoot(isolatedTmp, hostTmpdir);
+
+// 0o700 as defence in depth. Containment already holds — the parent is a `mkdtemp` home, which is
+// 0o700 — but the default umask would otherwise leave this directory itself group- and
+// world-readable, and every temp directory the test file creates lands inside it.
+mkdirSync(isolatedTmp, { mode: 0o700 });
 
 // No trailing separator: `os.tmpdir()` strips one on POSIX, and the exact string equality is
 // what `test/config/tmp-isolation.test.ts` asserts on. `TMP`/`TEMP` are set alongside `TMPDIR`

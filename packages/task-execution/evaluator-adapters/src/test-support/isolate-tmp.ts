@@ -43,9 +43,17 @@ import { basename, join } from "node:path";
 
 import { afterAll } from "vitest";
 
-import { MANAGED_ROOT_PREFIX, sweepManagedTree } from "./sweep-tree.js";
+import { MANAGED_ROOT_PREFIX, assertSocketSafeRoot, sweepManagedTree } from "./sweep-tree.js";
 
-const managedRoot = mkdtempSync(join(tmpdir(), MANAGED_ROOT_PREFIX));
+// The host temp directory, as published by `global-tmp-root.ts` before any worker was forked,
+// rather than whatever `tmpdir()` reports here. Two reasons: it is the same base the per-run guard
+// checks records against, so the writer's base and the reader's base cannot diverge; and a REUSED
+// worker — `--no-isolate`, where this file is evaluated again in a process whose `$TMPDIR` was
+// already redirected into the previous, by-then-swept root — would otherwise try to create its
+// next root inside a directory that no longer exists. Falls back to `tmpdir()` for a single-file
+// run under a config with no `globalSetup` entry.
+const hostTmpdir = process.env["JINN_TEST_HOST_TMPDIR"] ?? tmpdir();
+const managedRoot = mkdtempSync(join(hostTmpdir, MANAGED_ROOT_PREFIX));
 
 // Record this root with the per-run teardown in `global-tmp-root.ts`, which removes every recorded
 // tree once the workers are gone — the only thing that cleans up after a file whose tests are all
@@ -63,6 +71,11 @@ if (runRegistry !== undefined) {
     // still the normal path, and an unswept empty root is the pre-existing behaviour.
   }
 }
+
+// Fail here, naming `$TMPDIR`, rather than let a long host temp directory surface as an EEXIST or
+// EADDRINUSE inside whichever test spawns a subprocess — see the budget in `sweep-tree.ts`.
+// Checked after the root is registered above, so the run teardown still removes it.
+assertSocketSafeRoot(managedRoot, hostTmpdir);
 
 // No trailing separator: `os.tmpdir()` strips one on POSIX, and the exact string equality is what
 // `tmp-isolation.test.ts` asserts on. `TMP`/`TEMP` are set alongside `TMPDIR` for Windows parity.
