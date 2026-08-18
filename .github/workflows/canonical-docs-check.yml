@@ -1,7 +1,13 @@
 name: Canonical docs check
-on: [pull_request]
+on:
+  pull_request:
+  merge_group:
 jobs:
   check:
+    # The subjects of this gate — the PR body and `github.base_ref` — do not exist on a
+    # merge group, so the check runs on the PR lane only. `canonical-docs-gate` below
+    # turns that skip into the required context's verdict (DR-2026-08-18-b D3).
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -20,3 +26,28 @@ jobs:
               exit 1
             fi
           fi
+  canonical-docs-gate:
+    # The check-run name GitHub reports is this job's display `name:` below, and that
+    # string is the required-status-check context registered on the `next` ruleset
+    # (DR-2026-08-18-b D3) — keep them in sync.
+    name: canonical-docs-gate
+    needs: [check]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      # Per DR-2026-08-18-b D3 this context is required, with an explicit merge-group
+      # no-op: the subject is the PR body's Discussion link, which the PR-side run
+      # already enforced at enqueue time and which no longer exists on a merge group.
+      # The merge-group branch asserts `skipped` exactly, so a failed or cancelled
+      # `check` can never be laundered into a green group.
+      - name: Require the canonical-docs result for this event
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHECK_RESULT: ${{ needs.check.result }}
+        run: |
+          if [ "${EVENT_NAME}" = merge_group ]; then
+            test "${CHECK_RESULT}" = skipped
+            echo "::notice::canonical-docs is a PR-body gate; enforced at enqueue time"
+            exit 0
+          fi
+          test "${CHECK_RESULT}" = success

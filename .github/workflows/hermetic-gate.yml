@@ -26,6 +26,7 @@ name: hermetic-gate
 
 on:
   pull_request:
+  merge_group:
   push:
     branches:
       - next
@@ -199,15 +200,20 @@ jobs:
           path: apps/operator-console/test-results/
           retention-days: 7
 
-      # Write the verdict JSON. Reaching this step means every prior step
-      # succeeded — the hermetic suite (which includes the snapshot indexer
-      # round-trip) and the app-flow step both passed; a failure of either
-      # short-circuits the job before here. `if: success()` is explicit so the
-      # green verdict is only ever written on a genuinely green run.
+      # Write the verdict JSON and hand it to the terminal verdict job. Reaching
+      # this step means every prior step succeeded — the hermetic suite (which
+      # includes the snapshot indexer round-trip) and the app-flow step both
+      # passed; a failure of either short-circuits the job before here.
+      # `if: success()` is explicit so the green verdict is only ever written on a
+      # genuinely green run. On any other outcome — failure, cancellation, a dead
+      # runner — nothing is uploaded and `hermetic-gate-verdict` synthesizes the
+      # red, so the required `hermetic-gate` context is reported exactly once no
+      # matter how this job ends.
       - name: Write verdict (success)
         if: success()
         run: |
-          cat > "$RUNNER_TEMP/hermetic-verdict.json" <<EOF
+          mkdir -p "$RUNNER_TEMP/hermetic-verdict"
+          cat > "$RUNNER_TEMP/hermetic-verdict/hermetic-verdict.json" <<EOF
           {
             "context": "hermetic-gate",
             "headSha": "${HEAD_SHA}",
@@ -221,35 +227,95 @@ jobs:
           }
           EOF
 
-      # On any failure, write a failure verdict so the publish guard refuses
-      # rather than silently missing the check. A hermetic red is always a real
-      # code regression (zero external deps), so failClass is product-red.
-      - name: Write verdict (failure)
-        if: failure()
+      - name: Upload the success verdict
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermetic-verdict
+          path: ${{ runner.temp }}/hermetic-verdict/hermetic-verdict.json
+          if-no-files-found: error
+          retention-days: 1
+
+  hermetic-gate-verdict:
+    # This workflow's required context is the API-posted check-run named
+    # `hermetic-gate` (the verdict JSON's `context` field, posted below), NOT this
+    # job's display name — keep that field in sync with the required-status-check
+    # string on the `next` ruleset. The job exists so the context is reported even
+    # when the ~40-minute gate job is cancelled or its runner dies: an unreported
+    # required context hangs a queue entry until the check-response timeout ejects
+    # it (DR-2026-08-18-b D3/D6).
+    name: Hermetic gate verdict (check-run)
+    needs: [hermetic-gate]
+    # `always()` so failure, cancellation, and dead-runner outcomes all still post.
+    # EXCEPT on fork PRs, where the GITHUB_TOKEN is read-only regardless of the
+    # declared `checks: write` permission, so the POST would 403 and falsely redden
+    # the job. Forks still get the test results in the job log. On push and
+    # merge_group events `github.event.pull_request` is null, so the fork test
+    # passes and the verdict posts.
+    if: always() && github.event.pull_request.head.repo.fork != true
+    runs-on: ubuntu-latest
+    env:
+      # Same binding the gate job uses. On pull_request, github.sha is the ephemeral
+      # merge commit and the PR HEAD is what branch protection reasons about; on push
+      # and merge_group, github.sha is the commit under test (for a merge group, the
+      # speculative merge commit the queue will land).
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      HERMETIC_RESULT: ${{ needs.hermetic-gate.result }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # DR-2026-08-18-b D3 requires the merge-group SHA binding verified, not
+      # assumed, so assert it rather than trusting the github.sha fallback above.
+      - name: Assert the merge-group SHA binding
+        if: github.event_name == 'merge_group'
+        env:
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: test "${HEAD_SHA}" = "${MERGE_GROUP_HEAD_SHA}"
+
+      - name: Download the success verdict if the gate job produced one
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: hermetic-verdict
+          path: ${{ runner.temp }}/hermetic-verdict
+
+      # No artifact means the gate job did not finish green. Synthesize the failure
+      # verdict here so the publish guard refuses rather than silently missing the
+      # check, and so a queue entry is ejected on a real signal instead of burning
+      # the check-response timeout. A hermetic red is always a real code regression
+      # (zero external deps), so failClass stays product-red. The `-s` test is the
+      # real existence gate: a missing, empty, or truncated artifact all fall
+      # through to the synthesized red.
+      - name: Synthesize the failure verdict when the gate job did not report green
         run: |
-          cat > "$RUNNER_TEMP/hermetic-verdict.json" <<EOF
+          VERDICT="$RUNNER_TEMP/hermetic-verdict/hermetic-verdict.json"
+          if [ "${HERMETIC_RESULT}" = success ] && [ -s "$VERDICT" ]; then
+            echo "using the success verdict written by the hermetic-gate job"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/hermetic-verdict"
+          cat > "$VERDICT" <<EOF
           {
             "context": "hermetic-gate",
             "headSha": "${HEAD_SHA}",
             "conclusion": "failure",
             "scenarios": [
-              { "id": "hermetic-gate", "verdict": "fail", "failClass": "product-red", "notes": "A hermetic step failed; with zero external dependencies a red is a real code regression. See the job log." }
+              { "id": "hermetic-gate", "verdict": "fail", "failClass": "product-red", "notes": "The hermetic-gate job did not report green (result: ${HERMETIC_RESULT}); with zero external dependencies a red is a real code regression. See the job log." }
             ],
-            "summary": "Hermetic gate FAILED on ${HEAD_SHA} — a deterministic step regressed (product-red)."
+            "summary": "Hermetic gate FAILED on ${HEAD_SHA} — the hermetic-gate job result was ${HERMETIC_RESULT} (product-red)."
           }
           EOF
 
       # Post the verdict as a check-run bound to HEAD_SHA via the shared poster
-      # (owned by step 3). Always runs so both the green and red verdicts land —
-      # EXCEPT on fork PRs, where the GITHUB_TOKEN is read-only regardless of the
-      # declared `checks: write` permission, so the POST would 403 and falsely
-      # redden the job. Forks still get the test results in the job log; the gate
-      # only posts a check-run for same-repo refs (push / same-repo PR). On push
-      # events `github.event.pull_request` is null, so the fork check is skipped.
+      # (owned by step 3). Exactly one post per workflow run — the gate job above
+      # no longer posts.
       - name: Post hermetic-gate check-run
-        if: always() && github.event.pull_request.head.repo.fork != true
         working-directory: operator
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release/post-check-run-verdict.mjs "$RUNNER_TEMP/hermetic-verdict.json"
+        run: node scripts/release/post-check-run-verdict.mjs "$RUNNER_TEMP/hermetic-verdict/hermetic-verdict.json"

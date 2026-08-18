@@ -2,6 +2,7 @@ name: Repository structure
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main, next]
 
@@ -56,3 +57,21 @@ jobs:
           node --test \
             .github/scripts/evidence-package-inventory.test.mjs \
             .github/scripts/evidence-source-boundaries.test.mjs
+  repo-structure-gate:
+    # The check-run name GitHub reports is this job's display `name:` below, and that
+    # string is the required-status-check context registered on the `next` ruleset
+    # (DR-2026-08-18-b D3) — keep them in sync.
+    name: repo-structure-gate
+    needs: [gitlinks, identifier-origin, evidence-architecture]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require exact success from every structure job
+        env:
+          GITLINKS_RESULT: ${{ needs.gitlinks.result }}
+          IDENTIFIER_ORIGIN_RESULT: ${{ needs.identifier-origin.result }}
+          EVIDENCE_ARCHITECTURE_RESULT: ${{ needs.evidence-architecture.result }}
+        run: |
+          test "${GITLINKS_RESULT}" = success
+          test "${IDENTIFIER_ORIGIN_RESULT}" = success
+          test "${EVIDENCE_ARCHITECTURE_RESULT}" = success
