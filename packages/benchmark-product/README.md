@@ -121,6 +121,20 @@ dataset in CI and is not part of default `yarn test`. Procedure and the
 fail-closed `yarn tb30-one-task-qualify` gate:
 [docs/runbooks/tb30-official-one-task.md](../../docs/runbooks/tb30-official-one-task.md).
 
+## APEX-SWE-dev `one_task` operator qualify
+
+An operator-only campaign against the public 50-task `mercor/APEX-SWE`
+HuggingFace pin with Mercor's own dual harness (`apx` for integration,
+`run_e2e.py` for observability), Docker, and one arm. It proves protocol
+identity (`one_task`, conforming, never leaderboard-ready, export
+`inspection-upload`); it never claims a Mercor APEX-SWE leaderboard row, which
+is the held-out 200. Unlike Terminal-Bench 2.1, the harness wrap runs on the
+operator host between lock and export — `run launch` refuses the
+`apex-swe-dev` adapter. It does not download the 2.08 GB dataset in CI and is
+not part of default `yarn test`. Procedure, receipt checklist, and the
+fail-closed `yarn apex-swe-dev-one-task-qualify` gate:
+[docs/runbooks/apex-swe-dev-official-one-task.md](../../docs/runbooks/apex-swe-dev-official-one-task.md).
+
 ## Product surfaces
 
 - [Installable CLI](./cli/README.md) — the no-argument sample and local viewer.
