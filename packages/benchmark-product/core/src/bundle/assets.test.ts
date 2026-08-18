@@ -170,8 +170,8 @@ function fixture(overrides: {
         trustBoundary: "workspace-minted public keys; no third-party trust anchor",
       },
       verification: {
-        command: "npx @colophon-claims/verify@1.0.0 <bundle-dir>",
-        compatibleCommand: "npx @colophon-claims/verify@1 <bundle-dir>",
+        command: "npx @colophon-claims/verify@0.1.0 <bundle-dir>",
+        compatibleCommand: "npx @colophon-claims/verify@0.1 <bundle-dir>",
         checks: ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
         trustRoot: "Bundle-carried public keys minted by the self-run workspace.",
       },
@@ -253,8 +253,8 @@ function binaryAssetFixture(): PublicAssetInput {
       conflicted: qualification.conflicted,
       verification: {
         ...base.claim.verification,
-        command: "npx @colophon-claims/verify@2.0.0 <bundle-dir>",
-        compatibleCommand: "npx @colophon-claims/verify@2 <bundle-dir>",
+        command: "npx @colophon-claims/verify@0.1.0 <bundle-dir>",
+        compatibleCommand: "npx @colophon-claims/verify@0.1 <bundle-dir>",
       },
     },
     binaryQualification: {

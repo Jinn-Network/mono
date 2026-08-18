@@ -45,8 +45,8 @@ function validBinaryClaim() {
     disclosures: { perSubject: [], integrityTierCounts: { "re-derivable": 0, "attested-only": 0 }, pinningUnverifiableCounts: { harness: 0, model: 0, loadout: 0, isolation: 0 } },
     limitations: [], venueHonesty: {},
     verification: {
-      command: "npx @colophon-claims/verify@2.0.0 <bundle-dir>",
-      compatibleCommand: "npx @colophon-claims/verify@2 <bundle-dir>",
+      command: "npx @colophon-claims/verify@0.1.0 <bundle-dir>",
+      compatibleCommand: "npx @colophon-claims/verify@0.1 <bundle-dir>",
       checks: ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
       trustRoot: "self-run",
     },
@@ -83,8 +83,8 @@ test("claim-package/1 preserves historical unknown-field stripping", () => {
 
 const RFC3161_PROFILE = "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1";
 const RUN_KIND = "https://spec.jinn.network/records/benchmark-run/v1";
-const V6_COMMAND = "npx @colophon-claims/verify@2.0.0 <bundle-dir>";
-const V6_COMPATIBLE = "npx @colophon-claims/verify@2 <bundle-dir>";
+const V6_COMMAND = "npx @colophon-claims/verify@0.1.0 <bundle-dir>";
+const V6_COMPATIBLE = "npx @colophon-claims/verify@0.1 <bundle-dir>";
 const V6_CHECKS = [
   "manifest", "evidence-closure", "trust", "matrix-rederivation",
   "report-verification", "claim-consistency", "integrity-anchors",
@@ -148,7 +148,7 @@ test("claim-package/4 refuses a claim carrying neither headline nor comparison",
   assert.equal(ClaimPackageSchema.safeParse(withoutMethodProjection).success, false);
 });
 
-test("claim-package/4 must pin the verifier 2.0.0/@2 commands and the seven checks in order", () => {
+test("claim-package/4 must pin the verifier 0.1.0/@0.1 commands and the seven checks in order", () => {
   const wrongCommand = validAnchoredClaim();
   wrongCommand.verification = { ...wrongCommand.verification, command: "npx @colophon-claims/verify@1.0.0 <bundle-dir>" };
   assert.equal(ClaimPackageSchema.safeParse(wrongCommand).success, false);

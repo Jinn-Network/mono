@@ -1,6 +1,6 @@
 {
   "name": "@colophon-claims/verify",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "description": "Standalone public-bundle verifier for Colophon claims.",
   "type": "module",
   "packageManager": "yarn@4.13.0",

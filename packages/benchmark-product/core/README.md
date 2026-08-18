@@ -100,10 +100,8 @@ version sealed into a report to reproduce publication, or its compatible major
 line to receive fixes without changing the bundle-format contract:
 
 ```text
-npx @colophon-claims/verify@1.0.0 <dir>
-npx @colophon-claims/verify@1 <dir>
-npx @colophon-claims/verify@2.0.0 <dir> # binary qualification bundle v4
-npx @colophon-claims/verify@2 <dir>     # compatible v2/v4 reader line
+npx @colophon-claims/verify@0.1.0 <dir>
+npx @colophon-claims/verify@0.1 <dir>
 ```
 
 It reads only the caller-selected immutable bundle, needs no workspace or

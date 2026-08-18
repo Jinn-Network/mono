@@ -388,7 +388,7 @@ try {
           throw new Error(`focused T1 cold install did not fetch ${name} metadata and tarball through loopback: ${JSON.stringify([...registry.requests].sort())}`);
         }
       }
-      console.log('Materialized the 144-cell qualification, deleted its builder workspace, and replayed it with a cold-installed @colophon-claims/verify@2 binary.');
+      console.log('Materialized the 144-cell qualification, deleted its builder workspace, and replayed it with a cold-installed @colophon-claims/verify@0.1 binary.');
     } else {
     // Prove the reader's *installed closure*, not just its direct manifest, stays
     // independent of the Colophon runner and task-execution runtime packages.
@@ -454,7 +454,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     ));
     if (
       installedBuildMetadata.kind !== 'colophon-package-build/1'
-      || installedBuildMetadata.packageVersion !== '1.0.0'
+      || installedBuildMetadata.packageVersion !== '0.1.0'
       || !/^[0-9a-f]{40}$/.test(installedBuildMetadata.sourceCommit)
       || JSON.stringify(installedBuildMetadata.qualifiedTargets) !== JSON.stringify(['darwin/arm64', 'linux/x64'])
     ) {
@@ -486,7 +486,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
       const forbiddenOutput = join(temporaryRoot, 'unsupported-target-must-not-exist');
       const unsupported = await runExpectingExit(
         npx,
-        ['--yes', '@colophon-claims/cli@1', 'demo', '--output', forbiddenOutput, '--no-open', '--json'],
+        ['--yes', '@colophon-claims/cli@0.1', 'demo', '--output', forbiddenOutput, '--no-open', '--json'],
         1,
         { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: oneShotCache } },
       );
@@ -498,7 +498,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     } else {
     const demo = JSON.parse(await run(
       npx,
-      ['--yes', '@colophon-claims/cli@1', 'demo', '--no-open', '--json'],
+      ['--yes', '@colophon-claims/cli@0.1', 'demo', '--no-open', '--json'],
       { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: oneShotCache } },
     ));
     if (demo.ok !== true || demo.result?.portableChecks?.length !== 6 || demo.result?.output?.retained !== true) {
@@ -510,12 +510,12 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
       { cwd: oneShotRoot },
     );
     const receipt = JSON.parse(await readFile(join(demo.result.output.root, 'quickstart-receipt.json'), 'utf8'));
-    if (receipt.sourceCommit !== installedBuildMetadata.sourceCommit || receipt.colophonVersion !== '1.0.0') {
+    if (receipt.sourceCommit !== installedBuildMetadata.sourceCommit || receipt.colophonVersion !== '0.1.0') {
       throw new Error(`quickstart receipt did not preserve the packaged immutable provenance: ${JSON.stringify(receipt)}`);
     }
     const reader = JSON.parse(await run(
       npx,
-      ['--yes', '@colophon-claims/verify@2', demo.result.output.bundle, '--json'],
+      ['--yes', '@colophon-claims/verify@0.1', demo.result.output.bundle, '--json'],
       { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: join(temporaryRoot, 'reader-one-shot-npm-cache') } },
     ));
     if (reader.ok !== true || reader.checks?.length !== 6 || reader.identity !== demo.result.digests.bundleIdentity) {
@@ -524,7 +524,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     await appendFile(join(demo.result.output.bundle, 'README.md'), '\ntampered after publication\n');
     const tamperedReader = await runExpectingExit(
       npx,
-      ['--yes', '@colophon-claims/verify@2', demo.result.output.bundle, '--json'],
+      ['--yes', '@colophon-claims/verify@0.1', demo.result.output.bundle, '--json'],
       1,
       { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: join(temporaryRoot, 'reader-one-shot-npm-cache') } },
     );
@@ -535,7 +535,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     }
     console.log(isQualifiedRuntime
       ? `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages, ran the retained sample, served its verified loopback viewer, and reverified it with the reader package.`
-      : `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages and proved the public @1 selectors; darwin/arm64 and linux/x64 CI complete sample execution, viewer, and reader reverification.`);
+      : `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages and proved the public @0.1 selectors; darwin/arm64 and linux/x64 CI complete sample execution, viewer, and reader reverification.`);
     }
   } finally { await registry.close(); }
 } finally {

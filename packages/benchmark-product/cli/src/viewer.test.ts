@@ -210,7 +210,7 @@ describe("verified bundle viewer", () => {
     expect(html).toContain("Verified binary qualification");
     expect(html).toContain("two-human-unanimous");
     expect(html).toContain("factuality");
-    expect(html).toContain("@colophon-claims/verify@2");
+    expect(html).toContain("@colophon-claims/verify@0.1");
     expect(html).not.toContain("What happened, task by task");
   });
 

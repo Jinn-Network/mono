@@ -766,4 +766,4 @@ export { USAGE, runCli } from "./cli/main.js";
 export type { CliContext, CliResult } from "./cli/result.js";
 
 /** The product core's own version, mirrored from package.json. */
-export const PRODUCT_VERSION = "1.0.0";
+export const PRODUCT_VERSION = "0.1.0";

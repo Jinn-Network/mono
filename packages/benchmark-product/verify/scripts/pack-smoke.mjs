@@ -39,7 +39,7 @@ try {
     throw new Error(`packed verifier carries test modules: ${packedTests.join(", ")}`);
   }
   const manifest = JSON.parse((await run("tar", ["-xOzf", archive, "package/package.json"])).stdout);
-  if (manifest.name !== "@colophon-claims/verify" || manifest.version !== "2.0.0") {
+  if (manifest.name !== "@colophon-claims/verify" || manifest.version !== "0.1.0") {
     throw new Error("packed verifier identity/version drifted");
   }
   if (manifest.exports?.["./admission"] === undefined) {

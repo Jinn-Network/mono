@@ -36,7 +36,7 @@ test('publish transform keeps the Colophon product version and pins every Jinn r
   const pin = loadFirstCutPlatformPin(repoRoot);
   const patched = transformColophonManifestForPublish(verifyManifest(), pin);
   assert.equal(patched.name, '@colophon-claims/verify');
-  assert.equal(patched.version, '2.0.0');
+  assert.equal(patched.version, '0.1.0');
   const jinnDeps = Object.entries(patched.dependencies).filter(([name]) => name.startsWith('@jinn-network/'));
   assert.ok(jinnDeps.length >= 8);
   for (const [name, version] of jinnDeps) {

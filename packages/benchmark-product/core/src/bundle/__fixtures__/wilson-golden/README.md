@@ -130,11 +130,11 @@ Source: authenticated [verification assembly](verification/assembly.jsonl).
 
 Copy the complete bundle directory. Reproduce publication with the exact verifier:
 
-    npx @colophon-claims/verify@1.0.0 <bundle-dir>
+    npx @colophon-claims/verify@0.1.0 <bundle-dir>
 
 Use the compatible major line to receive fixes that preserve this bundle-format contract:
 
-    npx @colophon-claims/verify@1 <bundle-dir>
+    npx @colophon-claims/verify@0.1 <bundle-dir>
 
 The verifier authenticates the manifest, records, evidence graph, Matrix, Report, claim consistency, and every presentation byte using only bundle-carried public trust material. See [index.html#verification](index.html#verification). Built on Jinn.
 
