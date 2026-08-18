@@ -44,6 +44,7 @@
 
 import { BENCHMARKING_METHOD_IDS, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
 import { produceReport, type ProducedReport } from "@jinn-network/benchmarking-aggregate";
+import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { join } from "node:path";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
@@ -296,7 +297,14 @@ export function runReport(
       // Step 3: build AND write the claim package. Both can throw (a results-shape mismatch in
       // buildClaimPackage, a schema violation or disk failure in writeClaimPackage) — that must
       // surface here, before the draft is transitioned, not after.
-      const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells, runRecord);
+      // anchor-evidence §7.4: the claim is the report-time projection, so its anchors section is
+      // exactly the set this run had already obtained. Anchoring is expected to complete before
+      // `report` — a lock anchor precedes launch by rule (§7.1), and a matrix anchor or an
+      // OpenTimestamps upgrade is available from `closed` on. An anchor obtained after this point
+      // stays durably recorded and audited, but this sealed claim predates it, and `publish` says
+      // so rather than silently reprojecting a document the operator already read.
+      const carriage = readRunAnchorCarriage(clockedContext.workspaceDir, runState);
+      const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells, runRecord, carriage.anchors);
 
       const claimPackage = buildClaimPackage({
         draftId: input.draftId,
@@ -313,6 +321,7 @@ export function runReport(
         // BP-21 (spec §6): the claim states the preset AND the resolved primitives, never the
         // label alone; buildClaimPackage cross-checks these against the sealed Run's own policy.
         assurance: { preset: document.spec.assurance.preset, resolved: resolvedAssurance },
+        ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
         ...(previewLog !== undefined && previewLog.count > 0
           ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }
           : {}),

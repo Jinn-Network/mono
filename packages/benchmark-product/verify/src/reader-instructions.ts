@@ -27,6 +27,22 @@ export const PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND =
   "npx @colophon-claims/verify@2.0.0 <bundle-dir>" as const;
 export const PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND =
   "npx @colophon-claims/verify@2 <bundle-dir>" as const;
+export const PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND =
+  "npx @colophon-claims/verify@2.0.0 <bundle-dir>" as const;
+export const PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND =
+  "npx @colophon-claims/verify@2 <bundle-dir>" as const;
+
+/**
+ * The anchored closure's check list (anchor-evidence design §8): the six frozen checks plus
+ * `integrity-anchors`, which is **always present** for this format — an anchored bundle whose
+ * anchors were stripped is a closure failure, not a shorter list. Stated as a per-format constant
+ * rather than as an append at the call site, the same way the evidence-native profile states
+ * `EVIDENCE_NATIVE_BUNDLE_V5_CHECKS`.
+ */
+export const PUBLIC_BUNDLE_V6_CHECKS = [
+  ...PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+  "integrity-anchors",
+] as const;
 
 /** Format-scoped commands keep v2 reproduction literals immutable while v4 uses reader2. */
 export const PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS = {
@@ -42,5 +58,9 @@ export const PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS = {
     command: PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
     compatibleCommand: PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   },
+  [BUNDLE_V6_FORMAT]: {
+    command: PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
+    compatibleCommand: PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
+  },
 } as const;
-import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT } from "./manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, BUNDLE_V6_FORMAT } from "./manifest.js";

@@ -12,6 +12,7 @@ on:
       - ".github/scripts/trust-*.test.mjs"
       - ".github/workflows/trust-ci.yml"
       - "docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md"
+      - "docs/superpowers/specs/2026-08-17-pluggable-integrity-providers-design.md"
   push:
     branches: [next]
     paths:
@@ -19,6 +20,7 @@ on:
       - ".github/scripts/trust-*.test.mjs"
       - ".github/workflows/trust-ci.yml"
       - "docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md"
+      - "docs/superpowers/specs/2026-08-17-pluggable-integrity-providers-design.md"
 
 permissions:
   contents: read

@@ -1,0 +1,14 @@
+{
+  "kind": "https://spec.jinn.network/records/anchor-evidence/v1",
+  "subject": {
+    "kind": "https://spec.jinn.network/records/benchmark-run/v1",
+    "digest": {
+      "sha256": "0e1319b7648dfb4b2c2dac7f07621dca2c03b9277fd515c5800b014dd55786a5"
+    }
+  },
+  "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+  "proof": {
+    "mediaType": "application/vnd.etsi.timestamp-token",
+    "content": "amlubi9hbmNob3ItZXZpZGVuY2UtdjEvZ29sZGVuLXBsYWNlaG9sZGVyLXByb29m"
+  }
+}

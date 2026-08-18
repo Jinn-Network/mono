@@ -16,7 +16,12 @@
  * enforcement, it just drives the draft into a state those checks already treat as immutable.
  */
 
-import { RUN_RECORD_KIND, sealRun, withRunPublicationExtension } from "@jinn-network/benchmarking-records";
+import {
+  RUN_RECORD_KIND,
+  sealRun,
+  withRunAnchorIntentExtension,
+  withRunPublicationExtension,
+} from "@jinn-network/benchmarking-records";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
@@ -188,7 +193,19 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           registrationArtifacts: [...runtimeRegistrationArtifacts(clockedContext.workspaceDir, document.spec.evaluationRuntime)],
         },
       );
-      const sealed = sealRun(runWithPublicationAuthorization);
+      // Declared anchoring intent (anchor-evidence design §7.3), sealed ONLY when the draft
+      // declares it. A draft that declares nothing produces byte-identical Run records to the
+      // ones this operation produced before the extension existed: the record object is not
+      // touched at all, rather than extended with an empty declaration. Intent is the draft's own
+      // statement, never derived from workspace configuration — deriving it would make the sealed
+      // bytes depend on the machine that produced them.
+      const declaredProviders = document.spec.anchoring?.declaredProviders;
+      const runWithDeclaredIntent = declaredProviders === undefined
+        ? runWithPublicationAuthorization
+        : withRunAnchorIntentExtension(runWithPublicationAuthorization, {
+          providers: [...new Set(declaredProviders)].sort(),
+        });
+      const sealed = sealRun(runWithDeclaredIntent);
       const runSha256 = putSealedBytes(clockedContext.workspaceDir, sealed.bytes);
       recordWorkspaceAuthorship({
         workspaceDir: clockedContext.workspaceDir,
