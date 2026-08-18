@@ -123,9 +123,6 @@ export function selectInspectEvalRuntime(
       if (input.scoring !== undefined && !InspectScoringRequestSchema.safeParse(input.scoring).success) {
         refuse("validation", "inspect-eval.selection.scoring", "Inspect scoring projections or verdictRule are invalid");
       }
-      if (input.solver !== undefined && input.solver !== "task-default") {
-        // Allowed to select, but quote will not mark executionConformance.
-      }
       try {
         assertNoSecretLikeConfiguration({
           taskArgs: input.taskArgs ?? {},
@@ -219,6 +216,10 @@ export function selectInspectEvalRuntime(
         items: built.tasks.map((task) => ({ taskName: task.taskName, taskSha256: task.sha256 })),
       });
       const suiteBytes = suiteProtocolSelectionBytes(suite);
+      // Stored for content addressability only — unlike Terminal-Bench 2.1 this digest gets no
+      // registration-artifact row of its own. `runtimeRegistrationArtifacts` returns early for
+      // every Inspect adapter with one selection-manifest correlation, and `suite` is embedded
+      // in that selection manifest, so these bytes are bound transitively through its digest.
       const suiteProtocolSha256 = putSealedBytes(clockedContext.workspaceDir, suiteBytes);
       const selection = InspectEvalSelectionManifestSchema.parse({
         schema: "jinn.network/benchmark-product/inspect-eval-selection/1",
@@ -239,6 +240,8 @@ export function selectInspectEvalRuntime(
         },
         coverage,
         selectedSamples: selected.map((sampleId) => ({ sampleId })),
+        // A `--solver` override is allowed to select; quote then declines to mark
+        // executionConformance for it (`officialInspectEvalConformance`).
         solver: input.solver ?? "task-default",
         sampleLimit: input.sampleLimit ?? null,
         suite,

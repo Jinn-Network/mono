@@ -8,8 +8,6 @@ import { InspectEvalSuiteProtocolSelectionSchema } from "../suite-protocol/manif
 
 export const INSPECT_EVAL_SELECTION_SCHEMA =
   "jinn.network/benchmark-product/inspect-eval-selection/1" as const;
-export const INSPECT_EVAL_SELECTION_ROLE =
-  "https://product.jinn.network/artifact-roles/inspect-eval/selection/v1" as const;
 
 const Sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
 const SampleIdSchema = z.union([z.string().min(1), z.number().int()]);

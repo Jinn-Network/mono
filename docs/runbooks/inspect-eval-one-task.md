@@ -81,8 +81,12 @@ The workspace path must not already be a Colophon workspace.
 ## 4. Manual CLI (same path the script drives)
 
 ```bash
+cd packages/benchmark-product/core
+COLOPHON="$(pwd)/dist/cli/bin.js"
+PROJECT="$(pwd)/test/fixtures/inspect-project"
 WS=/tmp/colophon-inspect-eval-one-task
 PYTHON="$(command -v python3)"
+mkdir -p "$WS"
 cat > "$WS/selection.json" <<EOF
 {
   "pythonPath": "$PYTHON",

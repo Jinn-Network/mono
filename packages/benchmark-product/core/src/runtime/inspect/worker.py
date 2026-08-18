@@ -856,14 +856,24 @@ def catalog_sample_ids(log: Any, reference: str, task_args: dict[str, Any]) -> l
     samples = list(log.samples or [])
     if samples:
         return [sample_id_from(sample) for sample in samples]
+    fallback_cause: Exception | None = None
     try:
         from inspect_ai._eval.loader import load_tasks
         tasks = load_tasks([reference], task_args=task_args)
         if len(tasks) == 1 and getattr(tasks[0], "dataset", None) is not None:
             samples = list(tasks[0].dataset)
-    except Exception:
+    except Exception as cause:
+        # This fallback reaches into a private Inspect module, so failing here is ordinary and
+        # must stay non-fatal. But it must never masquerade as an empty dataset: "produced no
+        # sample ids" with the real cause dropped is an unactionable report.
+        fallback_cause = cause
         samples = []
     if not samples:
+        if fallback_cause is not None:
+            raise ValueError(
+                "Inspect catalog probe produced no sample ids; the dataset fallback failed with "
+                f"{type(fallback_cause).__name__}: {fallback_cause}"
+            ) from fallback_cause
         raise ValueError("Inspect catalog probe produced no sample ids")
     return [sample_id_from(sample) for sample in samples]
 

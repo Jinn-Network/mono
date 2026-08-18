@@ -1,4 +1,5 @@
 /** Two-axis official-suite comparability. Not Report v2 required fields. */
+import { SUPPORTED_INSPECT_VERSION } from "../inspect/manifest.js";
 
 export const SUITE_COVERAGE = ["one_task", "ten_task", "full", "custom"] as const;
 export type SuiteCoverage = (typeof SUITE_COVERAGE)[number];
@@ -129,10 +130,14 @@ export function officialInspectEvalConformance(input: {
   readonly sampleLimit: number | null;
   readonly epochsInRunOptions: boolean;
 }): boolean {
+  // Defense in depth: today every caller reaches here off an `inspect` adapter, so this is
+  // unreachable — it stays so a future third protocol cannot borrow Inspect conformance.
   if (input.adapterId !== "inspect") return false;
-  if (input.inspectVersion !== "0.3.255") return false;
+  if (input.inspectVersion !== SUPPORTED_INSPECT_VERSION) return false;
   if (input.solver !== "task-default") return false;
   if (input.sampleLimit !== null) return false;
+  // Defense in depth: the strict selection schema already refuses `epochs` in runOptions, so
+  // this cannot fire today — it stays as the conformance-side guard if that schema loosens.
   if (input.epochsInRunOptions) return false;
   if (!Number.isInteger(input.specifiedEpochs) || input.specifiedEpochs < 1) return false;
   return input.k === input.specifiedEpochs;

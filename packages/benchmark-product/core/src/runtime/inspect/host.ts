@@ -17,6 +17,7 @@ import {
   type InspectRunOptions,
   type InspectScoringSelectionRequest,
   type InspectSelectionManifest,
+  type InspectSelectionTemplate,
 } from "./manifest.js";
 import {
   InspectEvalSelectionManifestSchema,
@@ -240,7 +241,17 @@ export function readInspectEvalSelectionManifest(
   return inspectEval.success ? inspectEval.data : undefined;
 }
 
-export function readInspectSelectionManifest(workspaceDir: string, digest: string): InspectSelectionManifest {
+/**
+ * Both sealed shapes read at the fields they genuinely share. An Inspect eval selection
+ * carries a *template* — no single `runOptions.sampleId`, no `dataset.selectedSampleId`,
+ * because the per-cell sampleId is overlaid at dispatch — so it cannot honestly be typed as
+ * an `InspectSelectionManifest`. Use this for every consumer that must serve both protocols.
+ *
+ * The return type narrows the guarantee; it does not strip anything. A cousin Inspect-task
+ * selection is returned whole, sampleId included, because the provisioner forwards this
+ * object straight to the worker on that path and the worker needs its sampleId.
+ */
+export function readInspectSelectionTemplate(workspaceDir: string, digest: string): InspectSelectionTemplate {
   const bytes = getSealedBytes(workspaceDir, digest);
   let decoded: unknown;
   try {
@@ -249,8 +260,23 @@ export function readInspectSelectionManifest(workspaceDir: string, digest: strin
     return refuse("record-integrity", "inspect.selection", "the sealed Inspect selection manifest is not valid UTF-8 JSON");
   }
   const inspectEval = InspectEvalSelectionManifestSchema.safeParse(decoded);
-  if (inspectEval.success) {
-    return inspectEval.data.inspect as InspectSelectionManifest;
+  if (inspectEval.success) return inspectEval.data.inspect;
+  const parsed = InspectSelectionManifestSchema.safeParse(decoded);
+  if (!parsed.success) {
+    const paths = parsed.error.issues.map((issue) => issue.path.join(".") || "(root)").join(", ");
+    return refuse("record-integrity", "inspect.selection", `the sealed Inspect selection manifest is invalid at ${paths}`);
+  }
+  return parsed.data;
+}
+
+/** The cousin Inspect-task shape only: a selection that really does pin one sampleId. */
+export function readInspectSelectionManifest(workspaceDir: string, digest: string): InspectSelectionManifest {
+  const bytes = getSealedBytes(workspaceDir, digest);
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(bytes));
+  } catch {
+    return refuse("record-integrity", "inspect.selection", "the sealed Inspect selection manifest is not valid UTF-8 JSON");
   }
   const parsed = InspectSelectionManifestSchema.safeParse(decoded);
   if (!parsed.success) {
