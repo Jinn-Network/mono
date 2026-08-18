@@ -15,9 +15,9 @@ import { allArmsRunComplete, assessArmRunComplete, type MatrixCellAccount } from
 export function suiteSelectionFromHarbor(manifest: HarborSelectionManifest): SuiteProtocolSelection | undefined {
   const value = manifest.profiles?.[SUITE_PROTOCOL_PROFILE];
   if (value === undefined) return undefined;
-  const parsed = SuiteProtocolSelectionSchema.safeParse(value);
-  if (!parsed.success) return undefined;
-  return parsed.data;
+  // Absent means "not a suite run". Present-but-invalid means a tampered or forged sealed
+  // profile and must fail loud — `runtime/adapter.ts` parses the same bytes and throws.
+  return SuiteProtocolSelectionSchema.parse(value);
 }
 
 function officialPinFor(protocol: SuiteProtocolId): string {
