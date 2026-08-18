@@ -130,10 +130,13 @@
     "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
     "@jinn-network/task-execution-supervisor": "portal:../../task-execution/backend-local/supervisor",
     "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace",
-    "@jinn-network/trust-core": "portal:../../trust/core"
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "@jinn-network/trust-resolve": "portal:../../trust/resolve",
+    "@jinn-network/trust-testing": "portal:../../trust/testing"
   },
   "devDependencies": {
     "@jinn-network/execution-evidence-builder": "0.1.0",
+    "@jinn-network/trust-testing": "0.1.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
