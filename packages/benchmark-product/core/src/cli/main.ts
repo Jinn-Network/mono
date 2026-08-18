@@ -89,6 +89,7 @@ import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregist
 import { readRunJournalEntries } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
 import { readDraftDocument } from "../operations/drafts.js";
+import { listMethodCatalog } from "../operations/method-catalog.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, readTextFile, required, type ParsedArgs } from "./args.js";
 import type { CliContext, CliResult } from "./result.js";
 
@@ -107,6 +108,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   import swebench  --workspace <dir> --principal <id> --draft <draftId> --file <rows.json>
                    [--name <name>] [--description <text>] [--version <ver>]
                    [--provenance-timestamp <rfc3339>]
+                   (homemade instance rows, not official SWE-bench Verified)
   import item-bank --workspace <dir> --principal <id> --profile binary-judgment@1
                    --draft <draftId> --items <items.jsonl> --sources <sources.jsonl>
                    --admissions <admissions.jsonl>
@@ -121,7 +123,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --file <binding.json>
   runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
   method <ref>     --workspace <dir> --principal <id> --draft <draftId>
-                   [--slice 1|10|all] [--ids <csv>] [--host <host.json>]
+                   [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
+                   (catalog id or method-document file; omit ref to list)
   export           --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   arm add          --workspace <dir> --principal <id> --draft <draftId>
                    --arm <armId> (--pinning <json> | --agent <agentId>) [--notes <text>]
@@ -174,6 +177,42 @@ Verbs (every verb accepts --json for a machine-readable envelope):
 Exit codes: 0 success, 2 invalid-invocation, 3 authority-denied, 1 any other typed error.
 `;
 
+function methodHelp(): string {
+  const catalogLines = listMethodCatalog().map((row) =>
+    [
+      `  ${row.id}`,
+      `    protocol=${row.protocol}  framework=${row.framework}  derivedExport=${row.derivedExport}`,
+      `    hostKeys: ${row.hostKeys.join(", ")}`,
+    ].join("\n"),
+  );
+  return `method [<ref>]
+
+With no operand, lists the catalog. With one operand, binds a catalog id or a
+method-document file onto a draft.
+
+  method           [--json]
+  method <ref>     --workspace <dir> --principal <id> --draft <draftId>
+                   [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
+
+Catalog:
+${catalogLines.join("\n")}
+
+Coverage (catalog id only; pass exactly one of --slice, --ids, or --n):
+  --slice 1|10|all
+  --ids <csv>
+  --n <count>     first N tasks from the host registry
+  --host <file>   required for a catalog id; keys listed per catalog row
+
+Dry-run then paid path: doctor, then quote, then lock, then launch.
+doctor plus quote is the dry-run. There is no run verb.
+
+import swebench loads homemade instance rows. method swe-bench-verified binds
+the official protocol.
+
+inspect is draft inspect. lock is runLock.
+`;
+}
+
 const INIT_FLAGS = ["workspace", "principal", "json"] as const;
 const DRAFT_CREATE_FLAGS = ["workspace", "principal", "json", "name", "description", "id", "file"] as const;
 const DRAFT_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
@@ -191,7 +230,8 @@ const IMPORT_ITEM_BANK_FLAGS = [
 const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
 const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "host"] as const;
+const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "n", "host"] as const;
+const METHOD_LIST_FLAGS = ["json"] as const;
 const EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const RUNTIME_INSPECT_BIND_JUDGE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
@@ -559,19 +599,31 @@ function handleHumanReviewAdmit(args: ParsedArgs, context: CliContext, jsonMode:
   );
 }
 
+function renderMethodCatalogTable(
+  catalog: ReturnType<typeof listMethodCatalog>,
+): string {
+  return `${catalog.map((row) => `${row.id}\t${row.protocol}\t${row.framework}\t${row.derivedExport}`).join("\n")}\n`;
+}
+
 async function handleMethodBind(
   args: ParsedArgs,
   context: CliContext,
   jsonMode: boolean,
 ): Promise<CliResult> {
-  assertKnownFlags(args, METHOD_FLAGS);
-  if (args.words.length !== 2 || args.words[1] === undefined || args.words[1] === "") {
-    refuse("invalid-invocation", "method.ref", "method requires exactly one operand (catalog id or file)");
+  if (args.words.length === 1) {
+    assertKnownFlags(args, METHOD_LIST_FLAGS);
+    const catalog = listMethodCatalog();
+    return renderResult({ ok: true, result: { catalog } }, jsonMode, (value) => renderMethodCatalogTable(value.catalog));
   }
+  if (args.words.length !== 2 || args.words[1] === undefined || args.words[1] === "") {
+    refuse("invalid-invocation", "method.ref", "method requires exactly one operand (catalog id or file), or none to list");
+  }
+  assertKnownFlags(args, METHOD_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
   const slice = optional(args, "slice");
   const ids = optional(args, "ids");
+  const n = optional(args, "n");
   const host = optional(args, "host");
   const result = await selectMethod(opContext, {
     draftId,
@@ -579,6 +631,7 @@ async function handleMethodBind(
     cwd: context.cwd,
     ...(slice === undefined ? {} : { slice }),
     ...(ids === undefined ? {} : { ids }),
+    ...(n === undefined ? {} : { n }),
     ...(host === undefined ? {} : { hostPath: host }),
   });
   return renderResult(
@@ -1298,6 +1351,41 @@ function usageResult(jsonMode: boolean): CliResult {
   return { exitCode: 0, stdout: USAGE, stderr: "" };
 }
 
+function isUsageVerbLine(line: string, verb: string): boolean {
+  if (!line.startsWith("  ")) return false;
+  const rest = line.slice(2);
+  if (!rest.startsWith(verb)) return false;
+  const after = rest.slice(verb.length);
+  return after.length === 0 || after.startsWith(" ") || after.startsWith("<");
+}
+
+function usageStanza(verb: string): string {
+  const lines = USAGE.split("\n");
+  const start = lines.findIndex((line) => isUsageVerbLine(line, verb));
+  if (start === -1) return USAGE;
+  const collected = [lines[start]!];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (line.trim() === "") break;
+    if (/^  \S/.test(line)) break;
+    collected.push(line);
+  }
+  return `${collected.join("\n")}\n`;
+}
+
+function verbHelpText(verbKey: string): string {
+  if (verbKey === "method") return methodHelp();
+  return usageStanza(verbKey);
+}
+
+function verbHelpResult(verbKey: string, jsonMode: boolean): CliResult {
+  const help = verbHelpText(verbKey);
+  if (jsonMode) {
+    return { exitCode: 0, stdout: `${JSON.stringify({ ok: true, result: { help } })}\n`, stderr: "" };
+  }
+  return { exitCode: 0, stdout: help, stderr: "" };
+}
+
 /**
  * An unknown verb refuses `"invalid-invocation"` (exit 2). The `--json`
  * detail stays a single sentence naming the unknown verb — a machine caller
@@ -1354,7 +1442,16 @@ export async function runCli(argv: readonly string[], context: CliContext): Prom
     const args = parseArgs(argv);
     jsonMode = present(args, "json");
 
-    if (args.words.length === 0 || args.words[0] === "help" || present(args, "help")) {
+    if (present(args, "help") || args.words[0] === "help") {
+      const helpWords = args.words[0] === "help" ? args.words.slice(1) : args.words;
+      if (helpWords.length === 0) return usageResult(jsonMode);
+      const helpVerb = matchVerb(helpWords);
+      if (helpVerb === undefined) {
+        return unknownVerbResult(helpWords.join(" "), jsonMode);
+      }
+      return verbHelpResult(helpVerb, jsonMode);
+    }
+    if (args.words.length === 0) {
       return usageResult(jsonMode);
     }
 
