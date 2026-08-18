@@ -145,6 +145,11 @@ function postProcess(filename, schema) {
   }
   // Canonical identifier claim, last member per the execution-evidence schema precedent.
   // The public-surface builder maps this $id to its served path under the spec origin.
+  // Deliberate: ALL six schemas file under the publisher's protocol namespace, including
+  // observation-archive, whose instances declare a profiles/benchmark-observation-archive/v1
+  // identity — the same publisher-namespace convention execution-evidence uses for its
+  // dsse-envelope schema. Identifiers freeze at first publication (DR-2026-08-04); revisit
+  // before the origin ships, never after.
   schema.$id = `https://spec.jinn.network/protocols/benchmarking/v1/schemas/${filename}`;
   return schema;
 }
