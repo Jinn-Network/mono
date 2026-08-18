@@ -9,8 +9,9 @@ import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../seal
 import { isCalendarStrictRfc3339 } from "../rfc3339.js";
 import { ArmIdSchema, ReplicateSchema } from "./cells.js";
 import { exactDecimalInUnitInterval } from "../decimal.js";
-import { BENCHMARK_PUBLICATION_EXTENSION } from "../identifiers.js";
+import { ANCHOR_INTENT_EXTENSION, BENCHMARK_PUBLICATION_EXTENSION } from "../identifiers.js";
 import { RunPublicationExtensionSchema } from "../publication-extension.js";
+import { RunAnchorIntentExtensionSchema } from "../anchor-intent-extension.js";
 
 const Rfc3339 = z.string().refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
 
@@ -91,6 +92,22 @@ export const RunRecordSchema = topLevelRecordSchema({
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
           ctx.addIssue({ ...issue, path: [BENCHMARK_PUBLICATION_EXTENSION, ...issue.path] });
+        }
+      }
+    }
+
+    // Same treatment for the anchor-intent declaration (anchor-evidence design §7.3). A namespaced
+    // extension whose value is present but malformed is a malformed RECORD, and saying so here is
+    // what keeps it a typed record refusal at every reader. Left to the reader, the first consumer
+    // to touch the field would raise a raw schema error out of a code path that has no way to
+    // classify it -- which reaches an operator as an internal failure rather than as "this Run does
+    // not conform".
+    const anchorIntentExtension = run[ANCHOR_INTENT_EXTENSION];
+    if (anchorIntentExtension !== undefined) {
+      const parsed = RunAnchorIntentExtensionSchema.safeParse(anchorIntentExtension);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          ctx.addIssue({ ...issue, path: [ANCHOR_INTENT_EXTENSION, ...issue.path] });
         }
       }
     }

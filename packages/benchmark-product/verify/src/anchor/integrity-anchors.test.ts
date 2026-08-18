@@ -342,7 +342,7 @@ describe("integrity-anchors — conflicting anchors (family 11)", () => {
     expect(limits[1]).toContain("existed no later than 2026-03-01T12:00:00Z");
     // The contradiction is surfaced, never merged into one blended instant.
     expect(limits).toContain(
-      "The lock digest additionally carries a authority-time anchor of 2026-04-01T12:00:00Z.",
+      "The lock digest carries an additional authority-time anchor of 2026-04-01T12:00:00Z.",
     );
     expect(anchors).toHaveLength(2);
   });
@@ -361,7 +361,7 @@ describe("integrity-anchors — conflicting anchors (family 11)", () => {
     });
     expect(governingLockAnchors(anchors)[0]!.recordSha256).toBe(rfc3161.recordSha256);
     expect(anchoredVenueLimits(LOCAL_VENUE_LIMITS, anchors)).toContain(
-      `The lock digest additionally carries a chain-time anchor of ${lockOts.blockHeight}.`,
+      `The lock digest carries an additional chain-time anchor of ${lockOts.blockHeight}.`,
     );
   });
 });
@@ -399,10 +399,34 @@ describe("integrity-anchors — captured production tokens", () => {
     );
   }
 
+  /**
+   * Every field is pinned, not just the two that are easy to eyeball. `serialNumber` and
+   * `signerCertificateSha256` are the two the claim section carries that a reader would act on --
+   * the fingerprint is how they check the authority's published certificate themselves -- so a
+   * rendering change in either has to break a test rather than quietly change a published claim.
+   * The values are extracted from the committed `.der` bytes by the rule engine; the same four are
+   * pinned by this package's own conformance run over those fixtures.
+   */
   test.each([
-    ["token-digicert.der", "2026-08-17T20:37:55Z", "2.16.840.1.114412.7.1"],
-    ["token-sslcom.der", "2026-08-17T20:37:56Z", "1.3.6.1.4.1.38064.1.3.6.1"],
-  ])("%s projects its real byte-facts into the claim section", (name, genTime, policyOid) => {
+    [
+      "token-digicert.der",
+      {
+        genTime: "2026-08-17T20:37:55Z",
+        policyOid: "2.16.840.1.114412.7.1",
+        serialNumber: "00ce28e208030db02ff8ca617585729ed5",
+        signerCertificateSha256: "4aa03fa22cd75c84c55c938f828e676b9caecab33fe36d269aa334f146110a33",
+      },
+    ],
+    [
+      "token-sslcom.der",
+      {
+        genTime: "2026-08-17T20:37:56Z",
+        policyOid: "1.3.6.1.4.1.38064.1.3.6.1",
+        serialNumber: "5628fa1ed557b610",
+        signerCertificateSha256: "542af9a16a8d722e661149788ae994c18a9aaee5a65cb344a2549af96c79c78b",
+      },
+    ],
+  ])("%s projects its real byte-facts into the claim section", (name, facts) => {
     const record = carried(buildRfc3161AnchorEvidenceRecord({
       subjectKind: RUN_RECORD_KIND,
       subjectSha256: REAL_SUBJECT_SHA256,
@@ -423,16 +447,11 @@ describe("integrity-anchors — captured production tokens", () => {
       runSha256: REAL_SUBJECT_SHA256,
       matrixSha256: MATRIX_SHA256,
     });
-    expect(anchors[0]!.facts).toMatchObject({ genTime, policyOid });
-    // The section carries only the four byte-embedded facts; no issuer name, no accuracy.
-    expect(Object.keys(anchors[0]!.facts).sort()).toEqual([
-      "genTime",
-      "policyOid",
-      "serialNumber",
-      "signerCertificateSha256",
-    ]);
+    // Exactly the four byte-embedded facts, each at its exact value: no issuer distinguished
+    // name, no accuracy interval, nothing that needs data from outside the token.
+    expect(anchors[0]!.facts).toEqual(facts);
     expect(anchoredVenueLimits(LOCAL_VENUE_LIMITS, anchors)[1]).toContain(
-      `existed no later than ${genTime}`,
+      `existed no later than ${facts.genTime}`,
     );
   });
 

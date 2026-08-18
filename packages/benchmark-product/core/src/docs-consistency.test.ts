@@ -168,6 +168,13 @@ describe("product documentation consistency", () => {
     expect(guide).toContain("declared-but-absent");
     expect(guide).toMatch(/verifier ships with\s+none/is);
     expect(guide).toMatch(/existed no later than the anchored\s+time.*not that results were produced after it/is);
+    // The default surface discloses the statuses too, so the guide may not promise less than the
+    // reader actually prints.
+    expect(guide).toContain("`--tsa-root`");
+    expect(guide).toContain("`--ots-headers`");
+    expect(guide).toMatch(/Both output modes print the anchor detail; neither\s+summarizes it away/is);
+    expect(guide).toContain("time basis not evaluated: no trust material supplied");
+    expect(guide).toMatch(/an anchor dates the bytes it\s+covers/is);
     expect(security).toMatch(/Requesting a time anchor tells the anchor provider/i);
     expect(security).toMatch(/reveals nothing about the record's content beyond the digest itself/is);
     expect(security).toMatch(/configuring an\s+endpoint is the operator's consent/is);

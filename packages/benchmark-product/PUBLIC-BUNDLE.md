@@ -153,14 +153,47 @@ Anchored bundles pin the same verifier contract v4 does:
 npx @colophon-claims/verify@2 <bundle-dir>
 ```
 
-They return **seven checks**: the six above, in the same order, followed by
-`integrity-anchors`. That check is always present for this format — an anchored
-bundle whose anchors were stripped is a closure failure, not a shorter list. It
-reports every carried anchor's own outcome (`verified`, `present`, `pending`, or
-`invalid`) plus each subject's context outcome, distinguishing a clean absence
-from a run whose sealed Run declared anchoring intent that the bundle does not
-carry. An `invalid` anchor fails the whole verification; every other status is a
-disclosed fact that prints and passes.
+Supply your own trust material to reach `verified`:
+
+```bash
+npx @colophon-claims/verify@2 <bundle-dir> \
+  --tsa-root ./authority-root.pem \
+  --ots-headers ./bitcoin-headers.txt
+```
+
+`--tsa-root` takes a DER or PEM certificate and is repeatable. `--ots-headers`
+takes a file of `<height>:<80-byte-hex>` lines and is repeatable. Both default
+to nothing: which authorities and which chain are acceptable is the reader's
+judgment, not the bundle's, and this tool holds no opinion it did not ask for.
+
+Anchored bundles return **seven checks**: the six above, in the same order,
+followed by `integrity-anchors`. That check is always present for this format —
+an anchored bundle whose anchors were stripped is a closure failure, not a
+shorter list. An `invalid` anchor fails the whole verification; every other
+status is a disclosed fact that prints and passes.
+
+Both output modes print the anchor detail; neither summarizes it away. Under the
+check list the default human output names every carried anchor — its subject,
+time basis, status, and the `genTime` or block height embedded in its own bytes
+— followed by whether this reader's own trust material evaluated the time basis
+or none was supplied, and then each subject's outcome, with an absent anchor and
+a declared-but-absent one named as the different facts they are:
+
+```
+Anchors
+  lock anchor · authority-time · present · 2026-01-01T12:00:00Z
+    time basis not evaluated: no trust material supplied
+    record 4d1c...
+
+Anchor subjects
+  lock: anchored
+  matrix: absent — no anchor was carried and none was declared
+```
+
+The closing paragraph gains the anchor's own limit: an anchor dates the bytes it
+covers and says nothing else about the run — not that results were produced
+after it, and not that the anchoring authority is independent of the bundle's
+owner.
 
 ## Portable verification
 

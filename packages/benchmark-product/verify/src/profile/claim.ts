@@ -43,7 +43,7 @@ import {
   PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
 } from "../reader-instructions.js";
-import { ClaimAnchorSchema, anchoredTrustRoot } from "./anchor-claims.js";
+import { ClaimAnchorSchema, SELF_RUN_TRUST_ROOT, anchoredTrustRoot } from "./anchor-claims.js";
 import type { ClaimAnchor } from "./anchor-claims.js";
 type VenueHonesty = unknown;
 
@@ -577,8 +577,10 @@ export const CLAIM_VERIFICATION_CHECKS: readonly string[] = READER_VERIFICATION_
 /** The anchored closure's list: the six frozen checks plus `integrity-anchors` (§8). */
 export const ANCHORED_CLAIM_VERIFICATION_CHECKS: readonly string[] = READER_ANCHORED_VERIFICATION_CHECKS;
 export const PUBLIC_BUNDLE_VERIFICATION_COMMAND = READER_VERIFICATION_COMMAND;
-export const SELF_RUN_TRUST_ROOT =
-  "Signatures verify against the bundle-carried public keys minted by this workspace; there is no third-party trust anchor on the self-run venue.";
+/** The unconditional trust-root sentence, re-exported unchanged. It is DEFINED once beside its
+ * anchored replacement in `anchor-claims.ts`: one sentence written out twice, in two mirrored
+ * files, is exactly the drift the conditional copy cannot afford. */
+export { SELF_RUN_TRUST_ROOT };
 
 /** Builds the claim package document (spec §8.2) from explicit, already-sealed record data. Pure
  * — no filesystem access, no recomputation of anything the cited records already settled. */

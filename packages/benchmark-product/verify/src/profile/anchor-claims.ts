@@ -110,7 +110,7 @@ const OpenTimestampsClaimAnchorFactsSchema = z.union([
   z.strictObject({ pending: z.literal(true) }),
 ]);
 
-export const ClaimAnchorSchema = z.object({
+export const ClaimAnchorSchema = z.strictObject({
   subject: z.enum(["lock", "matrix"]),
   kind: z.string().min(1),
   provider: z.string().min(1),
@@ -397,7 +397,7 @@ export function anchoredPreRegistrationSentence(governing: ClaimAnchor): string 
 
 /** One neutral line per additional lock anchor (§9.2). It upgrades nothing; it reports. */
 export function additionalLockAnchorLine(anchor: ClaimAnchor): string {
-  return `The lock digest additionally carries a ${anchorClass(anchor)} anchor of ${anchoredTimeOrHeight(anchor)}.`;
+  return `The lock digest carries an additional ${anchorClass(anchor)} anchor of ${anchoredTimeOrHeight(anchor)}.`;
 }
 
 /** One neutral line per carried matrix anchor (§9.2). It upgrades no claim. */

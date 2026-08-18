@@ -225,6 +225,31 @@ describe("anchored public bundle v6 — portable verification", () => {
     await expectRefusal(bundleDir, "claim-package.json");
   }, 240_000);
 
+  test("a malformed anchor-intent declaration is a record refusal, not an operational failure", async () => {
+    const built = await fixture();
+    const bundleDir = detach(built.bundle.bundleDir);
+    const run = json(bundleDir, "run.json");
+    // Present, namespaced, and outside its own schema. A reader that only touched this field when
+    // something downstream asked for it would raise a raw schema error out of a path with no way to
+    // classify it; the Run schema refuses it as what it is — a Run that does not conform.
+    run["https://spec.jinn.network/extensions/anchor-intent/v1"] = { providers: [] };
+    writeFileSync(join(bundleDir, "run.json"), canonicalJsonBytes(run));
+    writeFileSync(
+      join(bundleDir, "bundle.json"),
+      buildBundleManifest(bundleDir, memberPaths(bundleDir), { format: "benchmark-product-public-bundle/2" }).bytes,
+    );
+
+    let code = "";
+    try {
+      await verifyPublicBundle(bundleDir);
+    } catch (cause) {
+      code = String((cause as { code?: unknown }).code);
+    }
+    // `record-integrity` is the exit-1 class: an invalid bundle, never a broken verifier.
+    expect(code).toBe("record-integrity");
+    await expectRefusal(bundleDir, "primary benchmark record is invalid");
+  }, 180_000);
+
   test("an anchor member in a bundle that is not the anchored closure is not allowlisted", async () => {
     const anchored = await fixture([{ kind: "rfc3161-lock" }]);
     const plain = await fixture();
