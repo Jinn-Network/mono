@@ -63,14 +63,16 @@ for (const fixture of manifest.fixtures) {
 
 test("fixtures digest manifest is current", () => {
   const digestManifestPath = join(fixturesRoot, "manifest.sha256.json");
+  const ignored = new Set([".DS_Store", "manifest.sha256.json"]);
   const entries = [];
   const walk = (relative) => {
     for (const entry of readdirSync(join(fixturesRoot, relative), { withFileTypes: true }).sort(
       (left, right) => left.name.localeCompare(right.name),
     )) {
+      if (ignored.has(entry.name)) continue;
       const rel = relative === "" ? entry.name : `${relative}/${entry.name}`;
       if (entry.isDirectory()) walk(rel);
-      else if (rel !== "manifest.sha256.json") {
+      else {
         entries.push({
           id: rel,
           sha256: createHash("sha256").update(readFileSync(join(fixturesRoot, rel))).digest("hex"),

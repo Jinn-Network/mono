@@ -1,14 +1,6 @@
 {
   "entries": [
     {
-      "id": ".DS_Store",
-      "sha256": "2aaed6ab404705088835423013b1946ee72e9e53add1fb56c5a32343e620f0de"
-    },
-    {
-      "id": "public-bundle-conformance-v1/.DS_Store",
-      "sha256": "e3c73dca0c59a48df8ff454379f9e92ab02e746da6586dc08cbb94f4b01ca87d"
-    },
-    {
       "id": "public-bundle-conformance-v1/golden/README.md",
       "sha256": "4d79d05d8be9c9fa43707fede12c0f3468362b2c1b2e7dd53993ee157487a0ab"
     },

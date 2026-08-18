@@ -8,14 +8,18 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const fixturesRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
+// Machine-local junk (e.g. macOS .DS_Store) must never enter the pinned digest
+// set — it varies per machine and would freeze non-reproducible bytes.
+const IGNORED = new Set([".DS_Store", "manifest.sha256.json"]);
 const entries = [];
 const walk = (relative) => {
   for (const entry of readdirSync(join(fixturesRoot, relative), { withFileTypes: true }).sort(
     (left, right) => left.name.localeCompare(right.name),
   )) {
+    if (IGNORED.has(entry.name)) continue;
     const rel = relative === "" ? entry.name : `${relative}/${entry.name}`;
     if (entry.isDirectory()) walk(rel);
-    else if (rel !== "manifest.sha256.json") {
+    else {
       entries.push({
         id: rel,
         sha256: createHash("sha256").update(readFileSync(join(fixturesRoot, rel))).digest("hex"),
