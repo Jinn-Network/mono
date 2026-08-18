@@ -97,6 +97,13 @@ import {
   apexAgentsSelectionBytes,
 } from "./apex-agents/manifest.js";
 import {
+  APEX_SWE_DEV_ADAPTER_ID,
+  APEX_SWE_DEV_RUNTIME_EVIDENCE_PROFILE,
+  APEX_SWE_DEV_SELECTION_ROLE,
+  ApexSweDevSelectionManifestSchema,
+  apexSweDevSelectionBytes,
+} from "./apex-swe-dev/manifest.js";
+import {
   SUITE_PROTOCOL_PROFILE,
   SUITE_PROTOCOL_SELECTION_ROLE,
   SuiteProtocolSelectionSchema,
@@ -243,6 +250,17 @@ const archipelagoDefinition: AdapterDefinition = {
   },
   nativeArtifactPublication: "explicit-consent",
   profile: ARCHIPELAGO_RUNTIME_EVIDENCE_PROFILE,
+};
+
+const apexSweDevDefinition: AdapterDefinition = {
+  summary: {
+    id: APEX_SWE_DEV_ADAPTER_ID,
+    label: "APEX-SWE-dev (Mercor dual harness)",
+    available: true,
+    selectionRequired: true,
+  },
+  nativeArtifactPublication: "explicit-consent",
+  profile: APEX_SWE_DEV_RUNTIME_EVIDENCE_PROFILE,
 };
 
 function digestMatches(bytes: Uint8Array, descriptor: DigestBearingResourceDescriptor): boolean {
@@ -578,6 +596,20 @@ export function runtimeRegistrationArtifacts(workspaceDir: string, binding: Eval
       { role: SUITE_PROTOCOL_SELECTION_ROLE, artifact: { digest: { sha256: suiteSha256 }, mediaType: "application/json" } },
     ].sort((left, right) => `${left.role}\u001f${left.artifact.digest.sha256}`.localeCompare(`${right.role}\u001f${right.artifact.digest.sha256}`));
   }
+  if (binding.adapterId === APEX_SWE_DEV_ADAPTER_ID) {
+    const manifest = ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(selectionBytes)));
+    const profileBytes = apexSweDevSelectionBytes(manifest);
+    const profileSha256 = sha256Hex(profileBytes);
+    if (!Buffer.from(getSealedBytes(workspaceDir, profileSha256)).equals(Buffer.from(profileBytes))) {
+      throw new TypeError("APEX-SWE-dev selection CAS bytes do not match the sealed evaluationRuntime");
+    }
+    const suiteBytes = suiteProtocolSelectionBytes(manifest.suite);
+    const suiteSha256 = sha256Hex(suiteBytes);
+    return [
+      { role: APEX_SWE_DEV_SELECTION_ROLE, artifact: { digest: { sha256: binding.selectionManifestSha256 }, mediaType: "application/json" } },
+      { role: SUITE_PROTOCOL_SELECTION_ROLE, artifact: { digest: { sha256: suiteSha256 }, mediaType: "application/json" } },
+    ].sort((left, right) => `${left.role}\u001f${left.artifact.digest.sha256}`.localeCompare(`${right.role}\u001f${right.artifact.digest.sha256}`));
+  }
   if (binding.adapterId !== HARBOR_ADAPTER_ID) refuse("venue-unavailable", "spec.evaluationRuntime.adapterId", `evaluation runtime adapter "${binding.adapterId}" is not installed`);
   const manifest = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(selectionBytes)));
   const result: RegistrationArtifact[] = [{ role: HARBOR_SELECTION_ROLE, artifact: { digest: { sha256: binding.selectionManifestSha256 }, mediaType: "application/json" } }];
@@ -748,7 +780,7 @@ function createPublicationAdapter(
   options: RuntimeEvidenceAdapterOptions = {},
 ): RuntimePublicationAdapter {
   const adapterId = binding?.adapterId ?? NATIVE_RUNTIME_ADAPTER_ID;
-  const selectedRuntime = isInspectRuntimeAdapterId(adapterId) || adapterId === HARBOR_ADAPTER_ID || adapterId === SWE_BENCH_HARNESS_ADAPTER_ID || adapterId === ARCHIPELAGO_ADAPTER_ID;
+  const selectedRuntime = isInspectRuntimeAdapterId(adapterId) || adapterId === HARBOR_ADAPTER_ID || adapterId === SWE_BENCH_HARNESS_ADAPTER_ID || adapterId === ARCHIPELAGO_ADAPTER_ID || adapterId === APEX_SWE_DEV_ADAPTER_ID;
   const expectedSelectionManifestSha256 = selectedRuntime ? binding?.selectionManifestSha256 : undefined;
   const expectedProfile = isInspectRuntimeAdapterId(adapterId)
     ? INSPECT_RUNTIME_EVIDENCE_PROFILE
@@ -758,7 +790,9 @@ function createPublicationAdapter(
         ? SWE_BENCH_HARNESS_RUNTIME_EVIDENCE_PROFILE
         : adapterId === ARCHIPELAGO_ADAPTER_ID
           ? ARCHIPELAGO_RUNTIME_EVIDENCE_PROFILE
-          : NATIVE_RUNTIME_EVIDENCE_PROFILE;
+          : adapterId === APEX_SWE_DEV_ADAPTER_ID
+            ? APEX_SWE_DEV_RUNTIME_EVIDENCE_PROFILE
+            : NATIVE_RUNTIME_EVIDENCE_PROFILE;
   const adapter: RuntimePublicationAdapter = {
     adapterId,
     profile: definition.profile,
@@ -773,6 +807,8 @@ function createPublicationAdapter(
             ? SWE_BENCH_VERIFIED_SELECTION_ROLE
             : adapterId === ARCHIPELAGO_ADAPTER_ID
               ? APEX_AGENTS_SELECTION_ROLE
+            : adapterId === APEX_SWE_DEV_ADAPTER_ID
+              ? APEX_SWE_DEV_SELECTION_ROLE
             : isInspectRuntimeAdapterId(adapterId)
               ? INSPECT_SELECTION_CORRELATION_ROLE
               : undefined;
@@ -807,6 +843,8 @@ function createPublicationAdapter(
             ? "swebench-harness"
             : adapterId === ARCHIPELAGO_ADAPTER_ID
               ? "archipelago"
+            : adapterId === APEX_SWE_DEV_ADAPTER_ID
+              ? "apex-swe-dev"
             : "native";
       const correlations = input.dispatch.correlations;
       const nativeArtifacts = input.dispatch.nativeArtifacts;
@@ -835,6 +873,7 @@ const inspectBinaryJudgeAdapter = legacyAdapter(inspectBinaryJudgeDefinition);
 const harborAdapter = legacyAdapter(harborDefinition);
 const swebenchHarnessAdapter = legacyAdapter(swebenchHarnessDefinition);
 const archipelagoAdapter = legacyAdapter(archipelagoDefinition);
+const apexSweDevAdapter = legacyAdapter(apexSweDevDefinition);
 
 /**
  * Creates the publication-facing adapter for a particular sealed runtime binding. The caller
@@ -857,6 +896,8 @@ export function createRuntimeEvidenceAdapter(
           ? SWE_BENCH_HARNESS_RUNTIME_EVIDENCE_PROFILE
           : adapter.summary.id === ARCHIPELAGO_ADAPTER_ID
             ? ARCHIPELAGO_RUNTIME_EVIDENCE_PROFILE
+          : adapter.summary.id === APEX_SWE_DEV_ADAPTER_ID
+            ? APEX_SWE_DEV_RUNTIME_EVIDENCE_PROFILE
           : NATIVE_RUNTIME_EVIDENCE_PROFILE,
   }, binding, options);
 }
@@ -868,6 +909,7 @@ const ADAPTERS = new Map<string, EvaluationRuntimeAdapter>([
   [harborAdapter.summary.id, harborAdapter],
   [swebenchHarnessAdapter.summary.id, swebenchHarnessAdapter],
   [archipelagoAdapter.summary.id, archipelagoAdapter],
+  [apexSweDevAdapter.summary.id, apexSweDevAdapter],
 ]);
 
 function adapterFor(binding: EvaluationRuntimeBinding | undefined): EvaluationRuntimeAdapter {

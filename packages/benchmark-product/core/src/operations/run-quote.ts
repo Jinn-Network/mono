@@ -53,6 +53,8 @@ import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-ve
 import { suiteQuoteFromSwebench } from "../runtime/suite-protocol/from-swebench.js";
 import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
 import { suiteQuoteFromApex } from "../runtime/suite-protocol/from-apex.js";
+import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { suiteQuoteFromApexSweDev } from "../runtime/suite-protocol/from-apex-swe-dev.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 
 export interface RunQuoteInput {
@@ -348,6 +350,13 @@ export function runQuote(
           : document.spec.evaluationRuntime?.adapterId === "archipelago"
             ? suiteQuoteFromApex({
               manifest: ApexAgentsSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+              armCount: compiled.plannedRun.record.arms.length,
+              itemCount: compiled.benchmarkRecord.items.length,
+              replicates: compiled.plannedRun.record.replicates,
+            })
+          : document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID
+            ? suiteQuoteFromApexSweDev({
+              manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
               armCount: compiled.plannedRun.record.arms.length,
               itemCount: compiled.benchmarkRecord.items.length,
               replicates: compiled.plannedRun.record.replicates,

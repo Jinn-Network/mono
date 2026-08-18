@@ -7,6 +7,7 @@ export const SUITE_PROTOCOL_IDS = [
   "terminal-bench-3.0",
   "swe-bench-verified",
   "apex-agents",
+  "apex-swe-dev",
 ] as const;
 export type SuiteProtocolId = (typeof SUITE_PROTOCOL_IDS)[number];
 
@@ -15,6 +16,7 @@ const SUITE_PROTOCOL_DISPLAY_NAMES: Readonly<Record<SuiteProtocolId, string>> = 
   "terminal-bench-3.0": "Terminal-Bench 3.0",
   "swe-bench-verified": "SWE-bench Verified",
   "apex-agents": "APEX-Agents",
+  "apex-swe-dev": "APEX-SWE-dev",
 };
 
 /** Human-facing suite name for refusal copy and Hub instructions. */
@@ -43,7 +45,7 @@ export interface DeriveSuiteComparabilityInput {
   readonly cellsAccounted?: boolean;
   /** ATIF bytes on the retained Harbor job, not quote-time `atifRequired`. TB 2.1 only. */
   readonly atifOnRetainedJob?: boolean;
-  /** Harness `report.json` present per selected instance. Verified only. */
+  /** Harness report JSON present per selected instance/task. Verified and APEX-SWE-dev. */
   readonly harnessReportsPresent?: boolean;
   /** Archipelago `grades.json` present per selected task_id. APEX-Agents only. */
   readonly archipelagoGradesPresent?: boolean;
@@ -58,6 +60,9 @@ export const SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0 =
 export const SWE_BENCH_VERIFIED_NOT_LEADERBOARD_READY_LIMITATION =
   "This run is not a SWE-bench Verified leaderboard submission: coverage is not the full official dataset, execution was not protocol-conforming, the Matrix does not account every dataset instance × 1 as judged or unscorable, or a swebench.harness report.json is missing for an instance.";
 
+export const APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION =
+  "This run is not an APEX-SWE leaderboard submission: APEX-SWE-dev locks the public 50-task set and cannot wear the 200-task APEX-SWE leaderboard name, even when coverage is full and every cell is accounted.";
+
 export const COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE =
   "Community submissions are currently closed for Terminal-Bench 2.1. Colophon does not place the leaderboard row.";
 
@@ -70,8 +75,12 @@ export const APEX_AGENTS_NOT_LEADERBOARD_READY_LIMITATION =
 export const APEX_AGENTS_SUBMIT_CLOSED_SENTENCE =
   "Colophon does not place the Mercor APEX-Agents row. Inspection export is a derived artifact; the Colophon bundle is the claim of record.";
 
+export const APEX_SWE_DEV_SUBMIT_CLOSED_SENTENCE =
+  "Colophon does not place a Mercor APEX-SWE leaderboard row. The public 50 is APEX-SWE-dev, not the held-out 200.";
+
 export function methodLeaderboardEligible(input: DeriveSuiteComparabilityInput): boolean {
   const protocol = input.protocol ?? "terminal-bench-2.1";
+  if (protocol === "apex-swe-dev") return false;
   if (protocol === "swe-bench-verified" || protocol === "apex-agents") {
     return input.coverage === "full"
       && input.executionConformance
@@ -93,7 +102,7 @@ export function methodLeaderboardEligible(input: DeriveSuiteComparabilityInput):
 
 export function deriveSuiteComparability(input: DeriveSuiteComparabilityInput): SuiteComparability {
   const protocol = input.protocol ?? "terminal-bench-2.1";
-  const collected = protocol === "swe-bench-verified"
+  const collected = protocol === "swe-bench-verified" || protocol === "apex-swe-dev"
     ? input.cellsAccounted === true && input.harnessReportsPresent === true
     : protocol === "apex-agents"
       ? input.cellsAccounted === true && input.archipelagoGradesPresent === true
@@ -113,6 +122,7 @@ export function suiteLeaderboardLimitation(
   if (protocol === "terminal-bench-3.0") return SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0;
   if (protocol === "swe-bench-verified") return SWE_BENCH_VERIFIED_NOT_LEADERBOARD_READY_LIMITATION;
   if (protocol === "apex-agents") return APEX_AGENTS_NOT_LEADERBOARD_READY_LIMITATION;
+  if (protocol === "apex-swe-dev") return APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION;
   return SUITE_NOT_LEADERBOARD_READY_LIMITATION;
 }
 
@@ -201,4 +211,23 @@ export function officialArchipelagoConformance(input: {
   if (input.webSearch) return false;
   if (input.timeoutOverride || input.resourceOverride) return false;
   return input.evaluatorId === ARCHIPELAGO_ADAPTER_ID;
+}
+
+export const APEX_SWE_DEV_ADAPTER_ID = "apex-swe-dev" as const;
+export const APEX_SWE_DEV_DEFAULT_TIMEOUT_SECONDS = 3600 as const;
+
+export function officialApexSweDevConformance(input: {
+  readonly k: number;
+  readonly nTrials: number;
+  readonly timeoutSeconds: number;
+  readonly timeoutOverride: boolean;
+  readonly resourceOverride: boolean;
+  readonly evaluatorId: string;
+  readonly messageLimit?: number;
+}): boolean {
+  if (input.k !== 1 || input.nTrials !== 1) return false;
+  if (input.timeoutSeconds !== APEX_SWE_DEV_DEFAULT_TIMEOUT_SECONDS) return false;
+  if (input.timeoutOverride || input.resourceOverride) return false;
+  if (input.messageLimit !== undefined && input.messageLimit !== 250) return false;
+  return input.evaluatorId === APEX_SWE_DEV_ADAPTER_ID;
 }

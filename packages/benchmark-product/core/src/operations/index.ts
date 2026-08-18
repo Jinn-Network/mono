@@ -92,6 +92,17 @@ export {
   type SelectTerminalBench30RuntimeResult,
 } from "./terminal-bench-3-0.js";
 export {
+  selectApexSweDevRuntime,
+  type SelectApexSweDevRuntimeInput,
+  type SelectApexSweDevRuntimeResult,
+} from "./apex-swe-dev.js";
+export {
+  exportApexSwePackage,
+  type ExportApexSwePackageInput,
+  type ExportApexSwePackageResult,
+  type ApexSweExportMode,
+} from "./apex-swe-export.js";
+export {
   exportHarborHubPackage,
   type ExportHarborHubPackageInput,
   type ExportHarborHubPackageResult,

@@ -25,6 +25,8 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires server-configured SWE-bench Verified harness paths; browser-supplied paths are forbidden",
   selectApexAgentsRuntime:
     "requires server-configured APEX-Agents Archipelago paths; browser-supplied paths are forbidden",
+  selectApexSweDevRuntime:
+    "requires server-configured APEX-SWE-dev host paths; browser-supplied paths are forbidden",
   migrateTerminalBenchLegacyTask:
     "requires server-configured migration input paths; browser-supplied paths are forbidden",
   exportHarborHubPackage:
@@ -33,6 +35,8 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "copies machine-local predictions and harness reports; browser path-based export is forbidden",
   exportApexAgentsInspection:
     "copies machine-local Archipelago grades; browser path-based export is forbidden",
+  exportApexSwePackage:
+    "copies machine-local Mercor harness JSON; browser path-based export is forbidden",
 } as const;
 
 describe("generated library / CLI / GUI parity", () => {

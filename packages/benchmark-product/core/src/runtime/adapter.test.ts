@@ -51,6 +51,7 @@ describe("runtime adapter registry", () => {
       expect.objectContaining({ id: "inspect-binary-judge", available: true, selectionRequired: true }),
       expect.objectContaining({ id: "swebench-harness", available: true, selectionRequired: true }),
       expect.objectContaining({ id: "archipelago", available: true, selectionRequired: true }),
+      expect.objectContaining({ id: "apex-swe-dev", available: true, selectionRequired: true }),
     ]));
   });
 

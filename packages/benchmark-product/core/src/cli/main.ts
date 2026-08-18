@@ -1,6 +1,6 @@
 /**
  * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
- * 48 parity operations over the operations facade, plus the path-oriented
+ * 50 parity operations over the operations facade, plus the path-oriented
  * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
@@ -73,10 +73,12 @@ import {
   selectTerminalBench30Runtime,
   selectSwebenchVerifiedRuntime,
   selectApexAgentsRuntime,
+  selectApexSweDevRuntime,
   migrateTerminalBenchLegacyTask,
   exportHarborHubPackage,
   exportSwebenchPredictions,
   exportApexAgentsInspection,
+  exportApexSwePackage,
   updateDraft,
   type AnchorSubject,
   type ArmWarning,
@@ -92,6 +94,7 @@ import {
   type SelectTerminalBench30RuntimeInput,
   type SelectSwebenchVerifiedRuntimeInput,
   type SelectApexAgentsRuntimeInput,
+  type SelectApexSweDevRuntimeInput,
   type MigrateTerminalBenchLegacyTaskInput,
   type AdmitHumanTruthInput,
   type CreateHumanReviewPacketsInput,
@@ -149,10 +152,13 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --file <selection.json>
   runtime apex-agents select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
+  runtime apex-swe-dev select --workspace <dir> --principal <id> --draft <draftId>
+                   --file <selection.json>
   runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
   hub export       --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   swebench export  --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   apex-agents export --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
+  apex-swe export  --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   arm add          --workspace <dir> --principal <id> --draft <draftId>
                    --arm <armId> (--pinning <json> | --agent <agentId>) [--notes <text>]
   arm update       --workspace <dir> --principal <id> --draft <draftId>
@@ -229,10 +235,12 @@ const RUNTIME_TERMINAL_BENCH_21_SELECT_FLAGS = ["workspace", "principal", "json"
 const RUNTIME_TERMINAL_BENCH_30_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_SWE_BENCH_VERIFIED_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_APEX_AGENTS_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_APEX_SWE_DEV_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
 const HUB_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const SWEBENCH_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const APEX_AGENTS_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
+const APEX_SWE_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "agent", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -679,6 +687,27 @@ async function handleApexAgentsRuntimeSelect(args: ParsedArgs, context: CliConte
   return renderResult(result, jsonMode, (value) => `selected APEX-Agents ${value.selectionManifestSha256} for draft ${draftId}\n`);
 }
 
+async function handleApexSweDevRuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, RUNTIME_APEX_SWE_DEV_SELECT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectApexSweDevRuntimeInput, "draftId">;
+  const result = await selectApexSweDevRuntime(opContext, { draftId, ...configuration } as SelectApexSweDevRuntimeInput);
+  return renderResult(result, jsonMode, (value) => `selected APEX-SWE-dev ${value.selectionManifestSha256} for draft ${draftId}\n`);
+}
+
+function handleApexSweExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, APEX_SWE_EXPORT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const armId = required(args, "arm");
+  const result = exportApexSwePackage(opContext, { draftId, armId });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `exported APEX-SWE-dev package (${value.mode}) for draft ${draftId} arm ${armId}\n${value.instructions}\n`,
+  );
+}
 async function handleHarborRuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, RUNTIME_HARBOR_SELECT_FLAGS);
   const opContext = buildOperationContext(args, context);
@@ -1365,10 +1394,12 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["runtime terminal-bench-3-0 select", handleTerminalBench30RuntimeSelect],
   ["runtime swe-bench-verified select", handleSwebenchVerifiedRuntimeSelect],
   ["runtime apex-agents select", handleApexAgentsRuntimeSelect],
+  ["runtime apex-swe-dev select", handleApexSweDevRuntimeSelect],
   ["runtime terminal-bench migrate", handleTerminalBenchMigration],
   ["hub export", handleHubExport],
   ["swebench export", handleSwebenchExport],
   ["apex-agents export", handleApexAgentsExport],
+  ["apex-swe export", handleApexSweExport],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],

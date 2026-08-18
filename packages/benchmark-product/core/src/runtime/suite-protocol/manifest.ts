@@ -1,4 +1,4 @@
-/** Product-owned suite protocol selection. TB 2.1 binds via Harbor profiles; Verified binds via its own selection manifest. */
+/** Product-owned suite protocol selection. TB 2.1 binds via Harbor profiles; Verified and APEX-SWE-dev bind via their own selection manifests. */
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
 import { sha256Hex } from "../../workspace/sealed-store.js";
@@ -16,6 +16,13 @@ const SuiteItemSchema = z.object({
   taskName: z.string().min(1),
   taskSha256: Sha256,
 }).strict();
+
+const ApexSweDevSuiteItemSchema = z.object({
+  taskName: z.string().min(1),
+  taskSha256: Sha256,
+  taskType: z.enum(["integration", "observability"]),
+}).strict();
+
 
 function refineSuiteItems(
   value: { readonly items: readonly { readonly taskName: string }[]; readonly selectedTaskNames: readonly string[] },
@@ -73,17 +80,28 @@ export const ApexAgentsSuiteProtocolSelectionSchema = z.object({
   atifRequired: z.literal(false),
 }).strict().superRefine(refineSuiteItems);
 
+export const ApexSweDevSuiteProtocolSelectionSchema = z.object({
+  ...SuiteProtocolSelectionShared,
+  protocol: z.literal("apex-swe-dev"),
+  datasetRevision: z.string().regex(/^[a-f0-9]{40}$/u),
+  replicates: z.literal(1),
+  atifRequired: z.literal(false),
+  items: z.array(ApexSweDevSuiteItemSchema).min(1),
+}).strict().superRefine(refineSuiteItems);
+
 export const SuiteProtocolSelectionSchema = z.discriminatedUnion("protocol", [
   TerminalBench21SuiteProtocolSelectionSchema,
   TerminalBench30SuiteProtocolSelectionSchema,
   SwebenchVerifiedSuiteProtocolSelectionSchema,
   ApexAgentsSuiteProtocolSelectionSchema,
+  ApexSweDevSuiteProtocolSelectionSchema,
 ]);
 export type SuiteProtocolSelection = z.infer<typeof SuiteProtocolSelectionSchema>;
 export type TerminalBench21SuiteProtocolSelection = z.infer<typeof TerminalBench21SuiteProtocolSelectionSchema>;
 export type TerminalBench30SuiteProtocolSelection = z.infer<typeof TerminalBench30SuiteProtocolSelectionSchema>;
 export type SwebenchVerifiedSuiteProtocolSelection = z.infer<typeof SwebenchVerifiedSuiteProtocolSelectionSchema>;
 export type ApexAgentsSuiteProtocolSelection = z.infer<typeof ApexAgentsSuiteProtocolSelectionSchema>;
+export type ApexSweDevSuiteProtocolSelection = z.infer<typeof ApexSweDevSuiteProtocolSelectionSchema>;
 
 export function suiteProtocolSelectionBytes(value: SuiteProtocolSelection): Uint8Array {
   return canonicalJsonBytes(SuiteProtocolSelectionSchema.parse(value) as never);
@@ -120,7 +138,7 @@ function compareCodePoints(left: string, right: string): number {
   const rightPoints = Array.from(right, (value) => value.codePointAt(0)!);
   const shared = Math.min(leftPoints.length, rightPoints.length);
   for (let index = 0; index < shared; index += 1) {
-    if (leftPoints[index] !== rightPoints[index]) return leftPoints[index]! - rightPoints[index]!;
+    if (leftPoints[index] !== rightPoints[index]!) return leftPoints[index]! - rightPoints[index]!;
   }
   return leftPoints.length - rightPoints.length;
 }

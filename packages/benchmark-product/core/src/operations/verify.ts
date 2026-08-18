@@ -62,6 +62,9 @@ import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
 import { suiteFactsFromAccountedSwebenchRun } from "../runtime/suite-protocol/from-swebench.js";
 import { suiteFactsFromAccountedApexRun } from "../runtime/suite-protocol/from-apex.js";
+import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { apexSweDevReportRoot } from "../runtime/apex-swe-dev/launcher.js";
+import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex-swe-dev.js";
 import { resolveSwebenchHarnessRunId, swebenchModelNameOrPathByArm } from "../runtime/swe-bench-verified/launcher.js";
 import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
 import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
@@ -282,6 +285,16 @@ export async function verifyRunWorkspace(
               matrix: matrixRecord,
               armIds: document.spec.arms.map((arm) => arm.armId),
               reportRoot: join(artifactsDir(context.workspaceDir), "archipelago", input.draftId),
+            })
+          : document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID
+            ? suiteFactsFromAccountedApexSweDevRun({
+              manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+              armCount: runRecord.arms.length,
+              itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+              replicates: runRecord.replicates,
+              matrix: matrixRecord,
+              armIds: document.spec.arms.map((arm) => arm.armId),
+              reportRoot: apexSweDevReportRoot(artifactsDir(context.workspaceDir), input.draftId),
             })
             : undefined;
       const additionalLimitations = [

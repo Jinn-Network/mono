@@ -95,6 +95,15 @@ describe("createLocalVenue evaluators", () => {
     expect(venue.evaluators).toHaveLength(1);
   });
 
+  it("accepts the official APEX-SWE-dev dual-harness adapter", () => {
+    venue = createLocalVenue({
+      workspaceDir,
+      now: NOW,
+      evaluationRuntime: { adapterId: "apex-swe-dev", selectionManifestSha256: "a".repeat(64) },
+    });
+    expect(venue.evaluators).toHaveLength(1);
+  });
+
   it("generates a deployment module carrying one registration per evaluator", async () => {
     venue = createLocalVenue({ workspaceDir, now: NOW, evaluatorCount: 2 });
     const source = await readFile(join(workspaceDir, "venue", "evaluation-deployment.mjs"), "utf8");
