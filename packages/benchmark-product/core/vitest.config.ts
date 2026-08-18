@@ -7,10 +7,11 @@ export default defineConfig({
     // suite creates with `mkdtemp(join(tmpdir(), …))` are swept on teardown instead of
     // accumulating in the user temp directory. See src/test-support/isolate-tmp.ts.
     setupFiles: ["./src/test-support/isolate-tmp.ts"],
-    // Create one temp root per run, in the main process, and remove it once every worker is gone.
-    // A fully-skipped test file runs no suite, so the per-file `afterAll` sweep above never fires
-    // for it; this is what keeps those files — and a hard-killed worker, and Ctrl-C — from leaving
-    // empty roots behind. See src/test-support/global-tmp-root.ts.
+    // Create one per-run registry in the main process: each test file records its root there, and
+    // the teardown removes every recorded root once every worker is gone. A fully-skipped test file
+    // runs no suite, so the per-file `afterAll` sweep above never fires for it; this is what keeps
+    // those files — and a hard-killed worker, and Ctrl-C — from leaving empty roots behind. See
+    // src/test-support/global-tmp-root.ts.
     globalSetup: ["./src/test-support/global-tmp-root.ts"],
     // The 62-file suite performs crypto/key generation and temporary-workspace I/O. Two workers
     // retain file-level parallel coverage while bounding that shared-resource pressure; four

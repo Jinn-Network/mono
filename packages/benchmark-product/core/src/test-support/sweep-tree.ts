@@ -15,6 +15,14 @@
 import { chmodSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
+/**
+ * Names the trees this suite owns. `isolate-tmp.ts` creates with it, and the per-run teardown in
+ * `global-tmp-root.ts` admits a recorded path for recursive removal only if it starts with it. The
+ * two have to move together: a rename that reached only the creator would leave the guard
+ * rejecting every real root, turning the per-run sweep into a silent no-op.
+ */
+export const MANAGED_ROOT_PREFIX = "jinn-vitest-tmp-";
+
 // Restores write and traverse permission on the tree. Symlinks are skipped — `chmod` follows them,
 // which would reach outside the tree, and `rmSync` unlinks them without needing the target's
 // permission.

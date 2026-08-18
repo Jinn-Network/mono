@@ -40,7 +40,7 @@
 // So `afterAll` is the normal path, the `exit` listener is a best-effort extra for the
 // import-time-throw case, and NEITHER covers a fully-skipped file. `global-tmp-root.ts` is what
 // closes the remaining cases: this file records its home there, and the per-run teardown removes
-// every recorded home from the main process once the workers are gone. The second `rmSync` here
+// every recorded home from the main process once the workers are gone. The second sweep here
 // is a no-op (`force: true` on a missing path), which is why keeping the partial backstop is free.
 //
 // The sweep repairs permissions before giving up — see `sweep-tree.ts`. The same repair is carried
@@ -53,10 +53,10 @@ import { basename, join } from 'node:path';
 
 import { afterAll } from 'vitest';
 
-import { sweepManagedTree } from './sweep-tree.js';
+import { ISOLATED_HOME_PREFIX, sweepManagedTree } from './sweep-tree.js';
 
 const realHome = homedir();
-const isolatedHome = mkdtempSync(join(tmpdir(), 'jinn-test-home-'));
+const isolatedHome = mkdtempSync(join(tmpdir(), ISOLATED_HOME_PREFIX));
 
 // Record this home with the per-run teardown in `global-tmp-root.ts`, which removes every
 // recorded tree once the workers are gone — the only thing that cleans up after a file whose

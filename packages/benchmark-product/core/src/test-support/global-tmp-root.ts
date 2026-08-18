@@ -29,7 +29,7 @@ import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { sweepManagedTree } from "./sweep-tree.js";
+import { MANAGED_ROOT_PREFIX, sweepManagedTree } from "./sweep-tree.js";
 
 export default function setup(): () => void {
   const registry = mkdtempSync(join(tmpdir(), "jinn-vitest-run-"));
@@ -38,7 +38,7 @@ export default function setup(): () => void {
   process.env["JINN_TEST_RUN_TMPDIR"] = registry;
 
   function sweepRegisteredRoots(): void {
-    let entries: string[] = [];
+    let entries: string[];
     try {
       entries = readdirSync(registry);
     } catch {
@@ -53,7 +53,7 @@ export default function setup(): () => void {
       }
       // These paths drive a recursive removal, so only honour what a worker could legitimately
       // have written: something strictly inside the temp directory this process also sees.
-      if (recorded.startsWith(join(tmpdir(), "jinn-vitest-tmp-"))) {
+      if (recorded.startsWith(join(tmpdir(), MANAGED_ROOT_PREFIX))) {
         sweepManagedTree(recorded, "managed temp root");
       }
     }

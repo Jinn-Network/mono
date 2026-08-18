@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 // only created when `setup()` is called. The wiring assertions below still read the environment,
 // so deleting the `globalSetup` entry turns this file red.
 import globalTmpRootSetup from '../_support/global-tmp-root.js';
+import { ISOLATED_HOME_PREFIX } from '../_support/sweep-tree.js';
 
 // Every `mkdtemp(join(tmpdir(), …))` in the suite used to land directly in the user temp
 // directory and stay there — the success paths cleaned up, the failure paths did not, and the
@@ -96,7 +97,7 @@ describe('test tmpdir isolation', () => {
 
       // Created next to the real isolated homes, because the teardown deliberately only honours
       // recorded paths under `tmpdir()` with the expected prefix.
-      const orphan = mkdtempSync(join(tmpdir(), 'jinn-test-home-'));
+      const orphan = mkdtempSync(join(tmpdir(), ISOLATED_HOME_PREFIX));
       const sealed = join(orphan, 'attempt', 'input');
       mkdirSync(sealed, { recursive: true });
       writeFileSync(join(sealed, 'dispatch-context.json'), '{}', { mode: 0o400 });

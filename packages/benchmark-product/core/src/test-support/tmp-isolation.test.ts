@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 // only created when `setup()` is called. The wiring assertions below still read the environment,
 // so deleting the `globalSetup` entry turns this file red.
 import globalTmpRootSetup from "./global-tmp-root.js";
+import { MANAGED_ROOT_PREFIX } from "./sweep-tree.js";
 
 // The suite's `benchmark-product-*`, `provisioner-*` and `sample-repository-work-*` roots were
 // created straight in the user temp directory and survived any failing run.
@@ -85,7 +86,7 @@ describe("test tmpdir isolation", () => {
 
       // Created next to the real managed roots, because the teardown deliberately only honours
       // recorded paths under `tmpdir()` with the expected prefix.
-      const orphan = mkdtempSync(join(tmpdir(), "jinn-vitest-tmp-"));
+      const orphan = mkdtempSync(join(tmpdir(), MANAGED_ROOT_PREFIX));
       const sealed = join(orphan, "attempt", "input");
       mkdirSync(sealed, { recursive: true });
       writeFileSync(join(sealed, "dispatch-context.json"), "{}", { mode: 0o400 });

@@ -25,7 +25,7 @@
 // So `afterAll` is the normal path, the `exit` listener is a best-effort extra for the
 // import-time-throw case, and NEITHER covers a fully-skipped file. `global-tmp-root.ts` is what
 // closes the remaining cases: this file records its root there, and the per-run teardown removes
-// every recorded root from the main process once the workers are gone. The second `rmSync` here
+// every recorded root from the main process once the workers are gone. The second sweep here
 // is a no-op (`force: true` on a missing path), which is why keeping the partial backstop is free.
 //
 // This module exports NOTHING on purpose. The isolation must come from the `setupFiles` wiring,
@@ -43,9 +43,9 @@ import { basename, join } from "node:path";
 
 import { afterAll } from "vitest";
 
-import { sweepManagedTree } from "./sweep-tree.js";
+import { MANAGED_ROOT_PREFIX, sweepManagedTree } from "./sweep-tree.js";
 
-const managedRoot = mkdtempSync(join(tmpdir(), "jinn-vitest-tmp-"));
+const managedRoot = mkdtempSync(join(tmpdir(), MANAGED_ROOT_PREFIX));
 
 // Record this root with the per-run teardown in `global-tmp-root.ts`, which removes every recorded
 // tree once the workers are gone — the only thing that cleans up after a file whose tests are all

@@ -26,7 +26,7 @@ import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { sweepManagedTree } from './sweep-tree.js';
+import { ISOLATED_HOME_PREFIX, sweepManagedTree } from './sweep-tree.js';
 
 export default function setup(): () => void {
   const registry = mkdtempSync(join(tmpdir(), 'jinn-test-run-'));
@@ -35,7 +35,7 @@ export default function setup(): () => void {
   process.env['JINN_TEST_RUN_TMPDIR'] = registry;
 
   function sweepRegisteredRoots(): void {
-    let entries: string[] = [];
+    let entries: string[];
     try {
       entries = readdirSync(registry);
     } catch {
@@ -50,7 +50,7 @@ export default function setup(): () => void {
       }
       // These paths drive a recursive removal, so only honour what a worker could legitimately
       // have written: something strictly inside the temp directory this process also sees.
-      if (recorded.startsWith(join(tmpdir(), 'jinn-test-home-'))) {
+      if (recorded.startsWith(join(tmpdir(), ISOLATED_HOME_PREFIX))) {
         sweepManagedTree(recorded, 'isolated home');
       }
     }

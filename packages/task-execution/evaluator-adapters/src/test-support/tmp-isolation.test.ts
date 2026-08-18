@@ -16,13 +16,14 @@ import { describe, expect, it } from "vitest";
 // only created when `setup()` is called. The wiring assertions below still read the environment,
 // so deleting the `globalSetup` entry turns this file red.
 import globalTmpRootSetup from "./global-tmp-root.js";
+import { MANAGED_ROOT_PREFIX } from "./sweep-tree.js";
 
 // The suite's `jinn-container-grader-*` roots were created straight in the user temp directory and
 // survived any failing run. `src/test-support/isolate-tmp.ts` now redirects `$TMPDIR` at one
 // managed root per test file and sweeps it on teardown, so every `mkdtemp(join(tmpdir(), …))` is
-// removed with it, and `src/test-support/global-tmp-root.ts` nests that root inside one per-run
-// root so a file whose tests are all skipped — which never fires an `afterAll` — leaves nothing
-// behind either.
+// removed with it. `src/test-support/global-tmp-root.ts` records that root in a per-run registry
+// and sweeps every recorded root after the workers exit, so a file whose tests are all skipped —
+// which never fires an `afterAll` — leaves nothing behind either.
 //
 // This file deliberately does NOT import the shim — importing it would perform the redirect, and
 // the test would then pass even with the `setupFiles` wiring deleted. It reads the path the shim
@@ -87,7 +88,7 @@ describe("test tmpdir isolation", () => {
 
       // Created next to the real managed roots, because the teardown deliberately only honours
       // recorded paths under `tmpdir()` with the expected prefix.
-      const orphan = mkdtempSync(join(tmpdir(), "jinn-vitest-tmp-"));
+      const orphan = mkdtempSync(join(tmpdir(), MANAGED_ROOT_PREFIX));
       const sealed = join(orphan, "attempt", "input");
       mkdirSync(sealed, { recursive: true });
       writeFileSync(join(sealed, "dispatch-context.json"), "{}", { mode: 0o400 });
