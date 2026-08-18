@@ -239,8 +239,10 @@ jobs:
     runs-on: ubuntu-latest
     # Seconds of shell plus one API call. Without this the reporting job inherits
     # the 360-minute default, so a wedged runner would starve the very context it
-    # exists to guarantee. The bound is far above any honest run.
-    timeout-minutes: 5
+    # exists to guarantee. The bound is far above any honest run (observed ~1 min),
+    # with headroom for a slow monorepo checkout under runner contention — this
+    # job's worst case must be "reports late", never "doesn't report".
+    timeout-minutes: 10
     env:
       # The check-run binds to the commit under test. On pull_request, github.sha is
       # the ephemeral merge commit and the PR HEAD is what branch protection reasons
@@ -266,10 +268,12 @@ jobs:
       # job already has, so transporting it runner-to-runner would only add a way for
       # a green gate to post a synthesized red.
       #
-      # No `set -e`, and every branch ends in a written file: this step must not be
-      # able to abort before the POST below.
+      # `set +e` (Actions' default shell runs with errexit on), and every branch
+      # ends in a written file: this step must not be able to abort before the
+      # POST below.
       - name: Build the hermetic-gate verdict
         run: |
+          set +e
           mkdir -p "$RUNNER_TEMP/hermetic-verdict"
           VERDICT="$RUNNER_TEMP/hermetic-verdict/hermetic-verdict.json"
 
