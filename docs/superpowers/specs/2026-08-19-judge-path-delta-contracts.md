@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Version** | 1.1 |
+| **Version** | 1.2 |
 | **Date** | 2026-08-19 |
 | **Author** | P0 design session (operator + Claude Fable 5); every seam cited path:line against `next` @ `4f4ad46f2` |
-| **Revision** | v1.1 folds in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong. The largest are §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today; v1.0 said no adapter was needed), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert, and the refusal it was meant to power already exists), and §8.3 (the singular-Report blast radius). §10.2 is new and is **not frozen at merge** |
+| **Revision** | v1.1 folded in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong: §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert), §8.3 (the singular-Report blast radius). **v1.2 folds in the mechanical constant sweep**, which classified 214 sites across four families and again found the counts short: stratum 11 to 23, arm count 8 to 9, admission **5 to 60** (§6.8a is new and P6 is now the largest packet), singular Report 7 to 35. The sweep also changed one recommendation (§8.3 now prefers N bundles over one bundle carrying N Reports) and produced §10.2, the coverage proof. **The whole document is frozen at merge** |
 | **Shape** | `design` (packet P0 of the judge-report implementation program) |
 | **Closes** | [#2842](https://github.com/Jinn-Network/mono/issues/2842) |
 | **Program** | [`2026-08-18-judge-report-implementation-program.md`](../plans/2026-08-18-judge-report-implementation-program.md) |
@@ -187,6 +187,34 @@ The aggregate side enforces the same rule and must be widened in lockstep:
 provider model fields to the single `MODEL_ID` literal (`:46`), and `:1140-1144` requires
 `limitations` to be exactly the one-element frozen tuple. Both become the per-profile rule.
 
+**Third site, added at v1.2 from the constant sweep, and it is the one that publishes rather than
+refuses.** `binaryInstrumentReportLimitations`
+(`verify/src/profile/binary-qualification.ts:15-31`) builds the **Report's** `limitations` array,
+and it emits `BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias` **unconditionally**. That
+string names `gpt-5.6-luna` in prose and asserts the evidence does not prove invariant weights.
+
+For a `dated-snapshot-sampling` run every clause of it is false, and nothing refuses: `report.ts:249`
+writes it into the sealed Report, and `verify/src/profile/claim-consistency.ts:53` **recomputes the
+same string and agrees with itself** at cold verification. A false limitation that both the
+publisher and the verifier confirm is worse than a missing one, because it survives the check that
+was supposed to catch it.
+
+**Frozen:** the unconditional strings become per-profile conditionals, on the same rule as the
+observation `limitations` tuple. `mutableModelAlias` is emitted only for `reasoning-2026-08`. Two
+further strings in the same array are conditioned in the same edit, because the sweep showed they
+have the same defect in the other direction: `reviewerKeyPerson` and `cognitiveBlinding` are claims
+about a two-reviewer protocol and are emitted today for `operator-only` runs that have no reviewers
+and no visibility receipts at all.
+
+The function is defined once in the verify package and re-exported through
+`core/src/run/binary-instrument-profile.ts:64-65,87`, so one edit covers the publish path and the
+cold-verify path. **Owner: P1** for the model conditional; **P6** adds the screened branch's own
+string to the same array (§6.8).
+
+This is §1.4's rule enforced where the claim is actually published. Emitting the alias limitation on
+a dated snapshot is the exact decorative disclosure this section refuses by name, and v1.0 and v1.1
+both specified the refusal sites and missed the projection site.
+
 ### 1.5 The pre-run snapshot-serving probe
 
 The posted design makes the probe a precondition: "A pre-run check confirms that snapshot is
@@ -244,6 +272,18 @@ verified sites, in the order a six-arm run would hit them:
 | 6 | `binary-instrument-method.ts:1510` | same four callers | `new Set(instrumentByArm.values()).size !== 4` |
 | 7 | `verify/src/schema.ts:186-189` | publish and cold verify | `BundleQualificationSchema.arms` is `z.array(...).length(4)`; written at `bundle/materialize.ts:419`, parsed at `verify.ts:406` |
 | 8 | `verify/src/verify.ts:154` and `:1621` | cold verify | `armCount: 4` as a **hard-coded constant**, not a count |
+| 9 | `verify/src/schema.ts:227` | publish and cold verify | **added at v1.2 from the constant sweep**: a `superRefine` on the same document requiring `new Set(arms.map(instrumentSha256)).size !== 4`, separate from site 7's array length. Site 7 alone would pass a six-arm bundle straight into this |
+
+**The sweep confirmed the eight sites v1.1 named, added site 9, and confirmed four surfaces that are
+already arm-count-agnostic and must not be touched:** the portable judge selection manifest
+(`verify/src/profile/binary-judge-manifest.ts:63`, `.min(2)`), the generic Inspect selection manifest
+(`verify/src/profile/inspect-manifest.ts:288` and its verbatim mirror at
+`core/src/runtime/inspect/manifest.ts:289`), the base `DraftSpec.arms` array
+(`core/src/domain/draft.ts:219`, no length constraint), and the entire reduction layer
+(`aggregate/src/binary-instrument.ts:305` and `binary-instrument-method.ts:1570`, both derived from
+the Matrix's own distinct arm ids). That last confirmation is what makes rule 1 below true rather
+than hopeful: the floor of two already exists in the sealed manifest, so removing the literal `4`
+invents no new rule.
 
 Site 8 is the dangerous one. It does not refuse a six-arm run: it would **publish a false arm
 count**. A bundle asserting four arms over a six-arm panel is exactly the class of fabricated
@@ -257,7 +297,8 @@ disclosure this program exists to make impossible.
    inventing a new rule.
 2. Sites 4, 5, 6 require the Run and Matrix arm sets to be equal, sorted, unique, of distinct
    instruments, and of size two or more. Never a literal count.
-3. Site 7's `arms` becomes `z.array(...).min(2)` with the sorted-unique refinement.
+3. Sites 7 and 9: `arms` becomes `z.array(...).min(2)` with the sorted-unique refinement, and the
+   distinct-instrument `superRefine` counts against `arms.length` rather than against `4`.
    **`BUNDLE_QUALIFICATION_FORMAT` stays at its current version** under §0.4: every four-arm bundle
    ever written still validates, byte-identically. P8 asserts that an existing four-arm bundle
    cold-verifies unchanged.
@@ -284,8 +325,9 @@ test is green unmodified with `armCount: 4`.
 | `core/src/operations/inspect-binary-judge.ts` | probe binding, probe freshness refusal |
 | `aggregate/src/binary-instrument-method.ts:46,913,1045,1107-1108,1140-1144` | model set and per-profile limitations |
 | `aggregate/src/binary-instrument-method.ts:955-960,1488,1510` | arm cardinality (§1.6 sites 4 to 6) |
-| `verify/src/schema.ts:186-189` | arm cardinality (§1.6 site 7), bundle qualification document |
+| `verify/src/schema.ts:186-189,227` | arm cardinality (§1.6 sites 7 and 9), bundle qualification document |
 | `verify/src/verify.ts:154,1621` | arm cardinality (§1.6 site 8), `armCount` becomes derived |
+| **`verify/src/profile/binary-qualification.ts:15-31`** | **per-profile Report `limitations` (§1.4)**; re-exported through `core/src/run/binary-instrument-profile.ts:64-65,87`, consumed at `report.ts:249` and `verify/src/profile/claim-consistency.ts:53` |
 | `profiles/src/identifiers.ts` | new probe protocol URI |
 
 ---
@@ -460,9 +502,9 @@ schema** in `verify` and a hard two-element tuple in the **published bundle docu
 | 1 | `profiles/src/binary-judgment/contracts.ts:360` | analysis context | refuses at seal |
 | 2 | `profiles/src/binary-judgment/label-resolution.ts:26` (imports #1) | label resolution | refuses at seal |
 | 3 | `aggregate/src/binary-instrument.ts:157-158` | method compute | `fail("unsupported-vocabulary")` |
-| 4 | `aggregate/src/binary-instrument-method.ts` `BINARY_INSTRUMENT_PARAMETER_SCHEMA.strata` | parameter JSON schema | `prefixItems [core, stress]`, min 2, max 2 |
+| 4 | `aggregate/src/binary-instrument-method.ts:104` | parameter JSON schema | `prefixItems [core, stress]`, min 2, max 2 |
 | 5 | `aggregate/src/binary-instrument-method.ts:121` | `BinaryInstrumentParameters` TS type | `readonly strata: readonly ["core","stress"]` |
-| 6 | `aggregate/src/binary-instrument-method.ts:167` | imperative check, separate from #4 | refuses |
+| 6 | `aggregate/src/binary-instrument-method.ts:166` | imperative check, separate from #4 | refuses (v1.1 cited `:167`; the sweep gives `:166`) |
 | 7 | `aggregate/src/binary-instrument-method.ts:1500` | `expectedSlices` fallback | `byStratum` slice vocabulary pinned to the pair |
 | 8 | `core/src/run/binary-instrument-profile.ts:299-300` | lock | `sameJson(verified.strata, ["core","stress"])` |
 | 9 | **`verify/src/admission/contracts.ts:30`** | **second `BinaryJudgmentStratumSchema`** | every §6.4 replacement-ledger entry refuses here |
@@ -472,6 +514,47 @@ schema** in `verify` and a hard two-element tuple in the **published bundle docu
 Sites 9 and 10 are the ones v1.0 missed that matter most: site 9 refuses the replacement ledger this
 run's admission depends on, and site 10 is **P8's acceptance path**, so a four-category bundle
 cannot be published or cold-verified until it moves.
+
+**Twelve more sites, added at v1.2 from the constant sweep.** Eleven was still short. The sweep
+found the pair pinned in **five independently maintained copies across four packages**, not two, and
+found six further imperative checks inside `binary-instrument-method.ts` alone.
+
+| # | Site | Layer | Effect on a four-category bank |
+|---|---|---|---|
+| 12 | **`core/src/run/binary-instrument-profile.ts:315`** | lock | **The worst site in the family.** Three lines after site 8's gate passes, `deriveAdmissionProfile` returns `strata: ["core","stress"]` as a literal, **discarding the `verified.strata` it just checked** |
+| 13 | `aggregate/src/binary-instrument-method.ts:396` | method compute | `validateLabelResolution`'s `expected` parameter type |
+| 14 | `aggregate/src/binary-instrument-method.ts:443` | method compute | `validateLabelResolution` wire-format check |
+| 15 | `aggregate/src/binary-instrument-method.ts:779` | method compute | analysis-context wire validator |
+| 16 | `aggregate/src/binary-instrument-method.ts:1388` | report and publish | closed-shape validator for the public F6 projection |
+| 17 | **`benchmarking/evidence/src/binary-instrument.ts:23`** | evidence reduction | a **fourth package** with its own copy, inside `EvidenceBinaryInstrumentContext`, used at `:109` to build the context handed to aggregate |
+| 18 | `core/src/operations/import-item-bank.ts:53` and `core/src/intake/binary-item-bank.ts:130` | import | the imported-bank summary and converted-bank types |
+| 19 | `core/src/operations/human-review.ts:135` | admission | `HumanAdmissionCandidateInput.stratum`, hand-written beside a zod field at `:179` that correctly imports site 1 and would widen on its own |
+| 20 | **`evaluator-adapters/src/binary-judgment/adapter.ts:723`** | delivery registration | refuses any delivered outcome whose stratum is outside the pair. **It sits in the same compound condition as the two-branch `truthAdmission` check at `:715-716`**, so P4 and P6 edit one boolean expression |
+| 21 | `verify/src/assets.ts:372` and `:637` | published HTML and Markdown | the literal caption `Core and stress buckets` rendered above the `byStratum` block. Not a refusal: a **published false label** over four categories |
+
+**Site 12 is the argument for this whole section, and it is stronger than the design case v1.0
+made.** The same `return` statement derives `candidateClasses: verified.classes` dynamically and
+hardcodes `strata: ["core","stress"]` on the next line. The sweep found the identical asymmetry
+three more times: at `binary-instrument-method.ts:443` and `:779` the adjacent `candidateClass`
+checks validate against a caller-supplied vocabulary while the `stratum` checks compare to literals,
+and at `:1500` `expectedSlices` resolves `byCandidateClass` from the dynamic list and pins
+`byStratum` to the pair.
+
+So §3.1 is not introducing a new pattern. **The dynamic pattern already exists, in the same
+functions, one line away, for the sibling axis.** Every site in both tables is the same edit already
+written next to it for `candidateClass`. That is also why the widening is low-risk: it has a
+worked example in every file it touches.
+
+Sites 20 and 21 are new *kinds*. Site 20 is the first stratum pin outside the analysis and admission
+stack, on the delivery-registration path, and it is a P4/P6 collision inside one expression. Site 21
+is a **projects-output** pin: like §1.6 site 8 and §1.4's limitations projection, it does not refuse,
+it publishes something false.
+
+**The sweep confirmed four consume-only sites that need no edit** because they import site 1 and
+widen automatically: `profiles/src/binary-judgment/contracts.ts:373`,
+`profiles/src/binary-judgment/label-resolution.ts:26`, `verify/src/admission/contracts.ts:138`, and
+`core/src/operations/human-review.ts:179`. Row 2 of the first table describes `label-resolution.ts:26`
+as refusing at seal; that is true of its behavior and misleading about its cost. It needs no edit.
 
 **Frozen:**
 
@@ -492,10 +575,12 @@ cannot be published or cold-verified until it moves.
    to `candidateClasses`. `["core","stress"]` is sorted, unique, and grammar-conforming, so existing
    parameter sets stay valid and compute identically. Under §0.4 this is a compatible widening:
    **`binary-instrument@1` does not bump to `@2`.**
-5. **Every site in the table above moves together**, in one PR. Sites 4, 5, and 6 are three separate
-   expressions of one rule and must not be widened partially. Site 7's `expectedSlices` becomes the
-   sealed vocabulary, so the `byStratum` slice set is checked against what the run declared rather
-   than against a constant.
+5. **Every site in both tables above moves together**, in one PR. Sites 4, 5, and 6 are three
+   separate expressions of one rule and must not be widened partially, and site 12 is the proof
+   that a partial widening passes its own gate and then discards the result. Site 7's
+   `expectedSlices` becomes the sealed vocabulary, so the `byStratum` slice set is checked against
+   what the run declared rather than against a constant. Site 21's captions become a rendering of
+   the sealed vocabulary rather than English prose about two buckets.
 6. **The bundle document (site 10).** `BundleQualificationSchema.strata` becomes a sorted-unique
    array of grammar-conforming names, `minItems: 1`. **`BUNDLE_QUALIFICATION_FORMAT` stays at its
    current version** under §0.4: every `["core","stress"]` bundle ever written still validates,
@@ -1038,6 +1123,88 @@ site:
 "screened-not-independently-labeled"
 ```
 
+### 6.8a What the constant sweep added, and why P6 is the largest packet
+
+**Correction to v1.1, from the constant sweep: `truthAdmission` and its coupled vocabularies are
+pinned across roughly fifty production sites, not the five §6.8 named.** The two corrections before
+this one were about *count*. This one is about *kind*: four of the sites do not refuse a screened
+admission, they accept it and do the wrong thing, and three of §6.8's own frozen rulings are
+unreachable without sites §6.8 never named.
+
+**Group A: the two rulings §6.8 made that its own named sites cannot deliver.**
+
+| Site | What it does | Why §6.8 needs it |
+|---|---|---|
+| `verify/src/admission/verification.ts:640` | `publicationGrade: manifest.truthAdmission === "two-human-unanimous"` | **Derives** the boolean by equality. A screened manifest yields `false` |
+| `core/src/operations/human-review.ts:744` | the same equality, at construction rather than verification | Same, at the other end |
+| `verify/src/profile/binary-qualification.ts:26` | adds an admission limitation **only** when the value is exactly `operator-only` | A screened run publishes **zero** admission-mode disclosure. The `screened-not-independently-labeled` string above has no emitter |
+
+The first two are the sharp one. §6.8 rules that the screened branch is publication-grade and pins
+the enforcement at `schema.ts:275-276`. But `publicationGrade` is not asserted anywhere, it is
+**derived** at these two sites, and both derive `false` for a screened manifest. So §6.8's third
+`superRefine` branch, added exactly as specified, would refuse **every screened bundle**: the
+branch requires `true` and the derivation supplies `false`. The rule and its input contradict each
+other. **Frozen:** both derivations become `truthAdmission !== "operator-only"`, and the
+`superRefine` branch stays as §6.8 specifies. One expression, two files, and the ruling becomes
+reachable.
+
+The third is §1.4's finding in the other direction, and it is the same function. The screened
+branch's named limitation is a string in a document until
+`binaryInstrumentReportLimitations` emits it, and today that function's only admission-conditional
+arm tests for `operator-only`.
+
+**Group B: the four sites with no compiler safety net.** These accept `screened-operator-sampled`
+and route it into the two-human path at runtime.
+
+| Site | Failure mode |
+|---|---|
+| `core/src/operations/human-review.ts:491` | `if (parsed.truthAdmission === "operator-only") { ... }` with an **implicit else** that validates the candidate shape as two-human |
+| `core/src/operations/human-review.ts:642` | the same pattern in the resolution-construction half of the same function; the else builds a `two-human-unanimous` resolution input unconditionally |
+| `verify/src/admission/verification.ts:407-419` | role to evidence-role ternary whose catch-all is `: "operator-assertion"`; a new attestor role is silently mis-mapped |
+| `core/src/bundle/materialize.ts:371-375` | the bug-risk twin of the previous row, on the bundle-construction side, catch-all `: "operator-truth-attestor"` |
+
+A widened enum plus an untouched `===` chain is worse than an unwidened enum, because the unwidened
+enum refuses and the widened one proceeds. **Frozen: every one of these four becomes an exhaustive
+switch over the three-member union with a `never`-typed default**, so a fourth admission mode in
+future is a compile error rather than a silent reroute. This is the one place this spec asks for a
+refactor rather than a widening, and the reason is that the current shape has already demonstrated
+it fails open.
+
+**Group C: the screened branch's evidence has nowhere to live.** §6.3 and §6.6 freeze two new
+sealed records. The bundle's admission closure does not have roles for them.
+
+- `verify/src/schema.ts:16` (`BUNDLE_V4_EVIDENCE_ROLES`) and `:49` (the admission-only subset) are
+  the role vocabulary, **duplicated verbatim** at `verify/src/admission/verification.ts:75`
+  (`BINARY_JUDGMENT_ADMISSION_RECORD_ROLES`, same entries, same order, hand-kept in sync).
+  **Frozen:** two new roles, `screening-table` and `screening-reveal-receipt`, added to all three
+  lists in one edit.
+- `verify/src/schema.ts:259-270` is a `superRefine` requiring the evidence set to be **exactly** the
+  six human-review roles **or** exactly the operator assertion, with an `else if` that catches
+  everything non-two-human. A screened bundle carries neither. **Frozen:** a third branch requiring
+  exactly the two screening roles and no human-review evidence and no operator assertion.
+- `verify/src/schema.ts:125-131` requires the trust document's authority roles to be **exactly**
+  `["roster-attestor","truth-reveal-attestor"]` or exactly `["operator-truth-attestor"]`. §6.6's
+  receipt presents `truth-reveal-attestor` alone, which is neither. **Frozen:** a third legal
+  authority set, `["truth-reveal-attestor"]`.
+- `verify/src/schema.ts:104` and its hand-copy `verification.ts:83-86` (`AdmissionAuthorityRole`)
+  keep the existing three roles unchanged. §6.6 deliberately reuses `truth-reveal-attestor` rather
+  than minting a role, so this is one of the few admission sites that needs no edit.
+
+**One disagreement with the sweep, recorded with its reason.** The sweep flags
+`verify/src/schema.ts:119` (`reviewers.length === 1` refuses) as needing to be relaxed, reading the
+screened branch as a single-reviewer admission. **It is not, and the line needs no change.** D1's
+simplified shape is bank-scoped: one signed table, no per-item reviewer records, no roster (§6.9
+records the roster as deliberately dropped). A screened admission therefore registers **zero**
+reviewers, which `:119` already permits ("empty or a registry of at least two"). Relaxing it would
+legalize a one-reviewer two-human admission, which is the shape the line exists to refuse. Left
+alone.
+
+**Consequence for the coordinator: P6 is the largest packet in the program**, and v1.0 and v1.1 both
+sized it as a schema widening. It is a widening plus four exhaustive-switch refactors plus two new
+evidence roles in three synchronized lists plus two publication-grade derivations. §10.2 carries the
+full site inventory. The G2 fallback in §6's preamble (run `operator-only` with prose disclosure,
+land the branch post-run) is unchanged and is now better justified than when it was written.
+
 ### 6.9 Deliberately dropped, recorded so nobody re-adds it
 
 Per-item signatures, visibility and blinding receipts, and the reviewer roster. One key signing 240
@@ -1479,12 +1646,16 @@ Options weighed:
    the property that makes them comparable at all.
 3. **Fold the comparisons into `binary-instrument@1`'s output.** Rejected under §0.4: it changes a
    v1-reference method's output for inputs it already accepts.
-4. **RECOMMENDED. Pre-register the additional methods in the sealed analysis plan, and emit one
-   Report record per plan entry, over one Matrix.**
+4. **Pre-register the additional methods in the sealed analysis plan, and emit one Report record per
+   plan entry, into one bundle, over one Matrix.** Recommended at v1.1; **no longer recommended, see
+   option 5.**
+5. **RECOMMENDED at v1.2. Pre-register the additional methods in the sealed analysis plan exactly as
+   in option 4, and publish one bundle per plan entry, over one Run and one Matrix.**
 
-Option 4 uses a mechanism that already exists for exactly this purpose: `analysisPlan` is already a
-**list**, sealed at lock, whose stated job (`compile.ts:72-75`) is to "honestly pre-register both
-analyses at lock". Frozen mechanics:
+Options 4 and 5 share their entire front half, and it uses a mechanism that already exists for
+exactly this purpose: `analysisPlan` is already a **list**, sealed at lock, whose stated job
+(`compile.ts:72-75`) is to "honestly pre-register both analyses at lock". They differ only in
+packaging, after the science is already settled. Frozen mechanics of the shared half:
 
 - `DraftSpecSchema` gains `additionalAnalyses: z.array(AnalysisSchema).min(1).optional()`. Absent
   means today's behavior exactly. No entry is added to `DRAFT_SPEC_DEFAULTS`, no stored draft is
@@ -1517,13 +1688,61 @@ analyses at lock". Frozen mechanics:
   refuses (two identical plan entries would emit two byte-identical Reports and make the claim
   table's Report attribution ambiguous). Everything is pre-registered before the run, which is the
   property that matters scientifically.
-- `report` emits **one sealed Report record per non-wilson plan entry**, in plan order, each with
-  its own single `method` ref and its own `results`. **No records-schema change**: every Report
-  stays single-method.
-- The bundle carries N Report records; `bundle verify` recomputes each against the same Matrix.
-  Cold verification gains "for each Report in the bundle" in place of "the Report".
+- `report` emits **one sealed Report record per non-wilson plan entry**, each with its own single
+  `method` ref and its own `results`. **No records-schema change**: every Report stays
+  single-method. `report.ts:164` and its independent twin `publication-report.ts:313` today select
+  `planEntries[planEntries.length - 1]`; both become "select the named entry", kept in lockstep.
 - The claim table marks each number with the Report that produced it, satisfying §7.4 with no extra
   vocabulary.
+
+**Where the two options diverge, and why the sweep flipped the recommendation.**
+
+Option 4 puts the N Reports in **one bundle**. Option 5 publishes **N bundles**, each carrying one
+Report, all over the same `runSha256` and the same `matrixSha256`. The science is identical: the
+plan is sealed at lock with every method pre-registered, and every readout is computed over one
+collected cell set. What differs is how much shipped, published surface has to be rewritten before
+the flagship can be verified at all.
+
+**The sweep found four independent reimplementations of "one Report per bundle", not one.** Option 4
+must widen all four. Option 5 touches none of them:
+
+| Surface | Copies | Option 4 | Option 5 |
+|---|---|---|---|
+| Claim `records` block | **three**: `core/src/report/claim.ts:171`, its byte-identical mirror `verify/src/profile/claim.ts:167`, and the hand-maintained `verify/schemas/claim-package.schema.json:32` | all three widen; the claim package's own version moves | unchanged |
+| `exactKeys` control check | two: `core/src/report/claim.ts:371`, `verify/src/profile/claim.ts:361` | both widen | unchanged |
+| `PUBLIC_BUNDLE_FILES` | two: `core/src/bundle/materialize.ts:93`, `verify/src/materialize.ts:2` | a numbered or directory naming scheme, in both | unchanged |
+| Bundle verifier | `verify/src/verify.ts:413` reads the fixed path `report.json`; `:438` re-derives the static bundle from a one-element array | both widen | unchanged |
+| **`verify/scripts/external-verify.py:160,204`** | an **independent Python reimplementation** | must be rewritten, or it silently passes while checking one of N Reports | unchanged |
+| **`benchmarking/evidence/src/portable.ts:133,245`** | a **third claim-package format** (evidence-native `claim-package/3`) with its own singular report reads | must be rewritten | unchanged |
+| Published assets | `verify/src/assets.ts:528,531,554,557` render one Report digest into HTML, the footer, and the badge | templates loop | unchanged |
+
+**Option 5's residual cost is real and is confined to four files**, all of which option 4 pays too:
+`draft.ts:178,226` and `compile.ts:82,119,169` (the shared front half above), `report.ts:164,272,340`
+plus `publication-report.ts:313,326` (select the named plan entry rather than the last, and invoke
+once per entry), and `state.ts:151`. That last one is the only genuinely new work: `report.ts:340`
+overwrites RunState's scalar `reportSha256` / `reportEnvelopeSha256`, so **a second `report` call
+today silently clobbers the first**. Frozen: run state records the report identities per plan entry,
+keyed by `(method, version)`, which is additive and moves no existing draft's bytes.
+
+**The decisive argument is not the file count.** It is that option 5's bundles cold-verify with the
+**already published, unmodified** verifier and the **already published** `external-verify.py`, while
+option 4 produces a flagship bundle that no currently shipped verifier can read. For a program whose
+entire deliverable is a disclosure specification, shipping evidence that requires a new verifier to
+check is the wrong trade, and it is the trade v1.1 recommended without knowing the Python
+reimplementation existed.
+
+**The one property option 4 has that option 5 must supply differently:** option 4's single bundle
+asserts "these three readouts are over one cell set" internally. Under option 5 a reader checks it
+by observing that all N bundles carry the same `runSha256` and `matrixSha256`. That is a two-field
+comparison across N published artifacts, it is stated in the runbook and rendered by R1, and it is
+arguably the stronger disclosure, because each bundle independently re-derives its own Report
+against the shared Matrix rather than asking the reader to trust one bundle's internal consistency.
+
+**Cost of option 4, stated plainly and retained because it is the argument for option 5.**
+v1.0 said "no records-schema change" and left it there; that sentence is true only of
+`packages/benchmarking/records`. Seven surfaces pin **exactly one** Report, and under option 4 each
+must accept N. Named here so the sizing is a table a reviewer can check rather than a claim they
+have to trust:
 
 **Cost, stated plainly. Correction to v1.0, from independent review: v1.0 said "no records-schema
 change" and left it there. That sentence is true only of `packages/benchmarking/records`.** Six
@@ -1545,13 +1764,17 @@ Row 1 is the expensive one and the reason the fallback exists: the Claim's `reco
 Row 7 is the one most likely to be forgotten, because it is presentation rather than schema, and a
 site that renders one Report digest over a three-Report bundle is a fabricated singularity.
 
-Beyond the pins, this touches `draft.ts`, `compile.ts`, `report.ts`, `publication-report.ts`,
-claim-consistency, `publish`, and the bundle profile (which must carry a Report list; P5 verifies
-whether the current profile pins exactly one Report and bumps the bundle format if so). It is a
-genuine P5 sub-packet, sized here so it is not discovered in week two.
+Row 1 understates itself: the sweep found the same `records` block in **three** hand-synchronized
+copies, one of which is a JSON Schema document that goes stale silently. Beyond the pins, option 4
+also touches claim-consistency (`core/src/verification/claim-consistency.ts:10` and its mirror
+`verify/src/profile/claim-consistency.ts:11`), `publish`, and the bundle profile.
 
-**Fallback if it does not fit the window:** `binary-instrument@1` is the single registered Report
-and **both** cross-arm readouts drop to sealed companions. The claim table already supports that and
+**Under option 5 none of this table is touched**, and the residual four-file cost is the one stated
+above. This table is retained because it is the sizing that makes the choice legible, not because
+option 4 is expected to be taken.
+
+**Fallback if neither fits the window:** `binary-instrument@1` is the single registered Report and
+**both** cross-arm readouts drop to sealed companions. The claim table already supports that and
 nothing else changes. This contradicts D2's "register the two headline comparisons", so it is a
 fallback the operator invokes, never one the lane takes on its own.
 
@@ -1635,18 +1858,35 @@ textual conflicts to expect and plan around, none of them a digest conflict.** v
 four added here all follow from the site tables §1.6 and §3.1 grew under review, and three of them
 land in a single six-line block:
 
+Rebuilt at v1.2 from the constant-sweep inventory. Eleven files, four of them touched by three or
+more packets:
+
 | File | Packets | What each touches |
 |---|---|---|
-| `core/src/run/binary-instrument-profile.ts` | P1, P4 | arm cardinality and model literals (P1); the hard `["core","stress"]` join at `:299-300` (P4) |
-| `BINARY_INSTRUMENT_PARAMETER_SCHEMA` (`aggregate/src/binary-instrument-method.ts`) | P4, P6 | `strata` (P4); `truthAdmission` (P6) |
-| `aggregate/src/binary-instrument-method.ts` more broadly | P1, P3, P4 | model set and per-profile limitations, plus arm cardinality at `:955-960,1488,1510` (P1); the mirrored parser digests at `:64,66` (P3); sites 4 to 7 of §3.1 (P4) |
-| **`verify/src/schema.ts`** | **P1, P4, P6** | `arms` `.length(4)` at `:186-189` (P1); the `strata` tuple at `:185` (P4); `truthAdmission` at `:183`, the ledger `reason` copy at `:199`, and the publication-grade `superRefine` at `:275-276` (P6) |
+| `core/src/run/binary-instrument-profile.ts` | P1, P4 | arm cardinality at `:324,349,352` and model literals (P1); the `["core","stress"]` gate at `:299` **and the re-hardcode at `:315`** (P4) |
+| `aggregate/src/binary-instrument-method.ts` | **P1, P3, P4, P6** | model set, per-profile limitations, arm cardinality at `:955,1488,1510` (P1); mirrored parser digests at `:64,66` (P3); ten stratum sites (P4); `truthAdmission` at `:109,123,172,412,415,446` (P6). **The most contended file in the program** |
+| `BINARY_INSTRUMENT_PARAMETER_SCHEMA` (same file, `:88-124`) | P4, P6 | `strata` (P4); `truthAdmission` (P6). Called out separately because it is one object literal |
+| **`verify/src/schema.ts`** | **P1, P4, P6** | `arms` `.length(4)` at `:189` and the distinct-instrument `superRefine` at `:227` (P1); the `strata` tuple at `:185` (P4); `truthAdmission` at `:183`, the ledger `reason` copy at `:199`, the evidence-role lists at `:16,49`, the reviewer and authority checks at `:119-131`, and both `superRefine` blocks at `:259-270,275-276` (P6) |
 | **`verify/src/verify.ts:150-155`** | **P1, P4, P6** | one six-line type block: `armCount` at `:154` (P1), `strata` at `:153` (P4), `truthAdmission` at `:151` (P6). Whichever lands first, the other two rebase through the same lines |
-| **`verify/src/admission/contracts.ts`** | **P2, P4, P6** | the mirrored `BinaryJudgmentPayloadSchema` at `:31-40` (P2); `BinaryJudgmentStratumSchema` at `:30` (P4); the admission manifest at `:167-177` and the ledger `reason` enum (P6) |
+| **`verify/src/admission/contracts.ts`** | **P2, P4, P6** | the mirrored `BinaryJudgmentPayloadSchema` at `:31-40` (P2); `BinaryJudgmentStratumSchema` at `:30` (P4); the admission manifest at `:167-177`, the ledger `reason` at `:141`, the operator limitation at `:163` (P6) |
+| **`verify/src/admission/verification.ts`** | P4, P6 | five inline stratum unions at `:52,61,115,125,136` (P4); the label-resolution view, role lists, `publicationGrade` derivation, and the two-reviewer functions (P6) |
+| **`verify/src/profile/binary-qualification.ts:3-31`** | **P1, P6** | one small array: P1 conditions `mutableModelAlias` per profile (§1.4), P6 adds the screened branch's own string (§6.8a). Both edit the same return expression |
+| **`evaluator-adapters/src/binary-judgment/adapter.ts:715-723`** | **P4, P6** | **one compound boolean expression**: the `truthAdmission` allowlist at `:715-716` (P6) and the stratum refusal at `:723` (P4) are operands of the same condition |
+| `core/src/operations/human-review.ts` | P4, P6 | `HumanAdmissionCandidateInput.stratum` at `:135` (P4); the two implicit-else routers, the reason unions, and the `publicationGrade` derivation (P6) |
+| `core/src/operations/import-item-bank.ts:50-53` | P4, P6 | adjacent lines of one interface: `truthAdmission` at `:50` (P6), `strata` at `:53` (P4) |
 
-The `verify` package is where this program's packets collide, and v1.0 named none of it because v1.0
-did not know the verify package carried second copies. The coordinator sequences the three
-`verify`-touching packets rather than dispatching them concurrently.
+**Shared fixture builder, a hazard rather than a blocker.**
+`core/src/bundle/testing/v4-synthetic-fixture.ts` is touched by **P1, P2, P4, and P6** and is
+consumed by a dozen-plus test files across two packages. §10.2's fixture ruling keeps it safe:
+each packet adds an **option** whose default reproduces today's output byte for byte, so the four
+edits are additive and no existing caller's expectations move. Packets must not change its defaults,
+and a packet that finds itself needing to is widening incompatibly.
+
+**The `verify` package is where this program's packets collide**, and v1.0 named none of it because
+v1.0 did not know the verify package carried second copies. Six of the eleven rows above are in
+`verify`. The coordinator sequences the `verify`-touching packets rather than dispatching them
+concurrently, and P6 goes last of the three that share `schema.ts`, because it touches the most of
+it.
 
 Every packet PR body records its digest movements explicitly, before and after, per row of the table
 above. `next` has zero required status checks, so each PR body also records local full-chain
@@ -1667,40 +1907,150 @@ and the reviewer can falsify that claim by running the stated command and diffin
 the table. A site in the command's output that is absent from the table is a defect in this spec,
 not a judgment call.
 
-| Family | Constant pinned | Site table | Sites named at v1.1 |
-|---|---|---|---|
-| **F1** | the `["core","stress"]` stratum pair | §3.1 | 11 |
-| **F2** | the arm count `4` | §1.6 | 8 |
-| **F3** | the `truthAdmission` enum and the replacement-ledger `reason` enum | §6.8, and rows 13, 18, 22 | 2 copies each |
-| **F4** | the singular Report | §8.3's pin table | 7 |
+**Status at v1.2: the mechanical sweep is complete and §10.2 is frozen.** It classified 214 sites
+across the four families. The counts below are the coverage proof; the per-family inventories that
+follow are the evidence.
 
-Re-derivation, from the repository root. These are deliberately **over-broad**: they return the
-candidate set, not the answer. On `next` @ `4f4ad46f2` they return roughly 29, 67, and 81
-non-test hits for F1, F2, and F4, against 11, 8, and 7 named sites, because a bare comparison to
-`4` and an incidental read of `reportSha256` both match. **The sweep's job is the classification,
-not the grep:** each hit is either a pin of the constant, in which case it must appear in the named
-site table, or it is an unrelated match, in which case the sweep records why. A hit classified as a
-pin and absent from the table is a defect in this spec.
+| Family | Constant pinned | Owning section | Named at v1.1 | Production sites that must change | Confirmed already flexible | Test and fixture sites |
+|---|---|---|---|---|---|---|
+| **F1** | the `["core","stress"]` stratum pair | §3.1 | 11 | **23** | 2 | 8 |
+| **F2** | the arm count `4` | §1.6 | 8 | **9** | 6 | 12 |
+| **F3** | `truthAdmission` and its coupled vocabularies | §6.8, §6.8a | 5 | **60** | 20 | 22 |
+| **F4** | the singular Report | §8.3 | 7 | **35** under option 4, **9** under option 5 | 8 | 9 |
+
+**The headline is F3.** v1.1 sized the screened-admission branch at five sites and it is sixty. §6.8a
+is the section that finding produced, and it is why P6 is now the program's largest packet rather
+than a schema widening. The second headline is F4's split column: the sweep is what showed that the
+packaging choice, not the science, is what costs 35 sites, which is why §8.3 now recommends
+option 5.
+
+**Confirmed-flexible sites are load-bearing findings, not filler.** Thirty-six surfaces were
+checked and found already generic. They are named in their owning sections so that no packet
+"fixes" them: F2's `.min(2)` selection manifests and the whole reduction layer (§1.6), F1's four
+consume-only schema references (§3.1), F3's twenty pass-through and equality-check sites, and F4's
+`analysisPlan` array, which the platform records layer already accepts at any length
+(`records/src/run/schema.ts:55,83`, `records/schemas/run.schema.json:207`).
+
+Re-derivation, from the repository root, at `next` `4f4ad46f2`. These are deliberately
+**over-broad**: they return the candidate set, not the answer, because a bare comparison to `4` and
+an incidental read of `reportSha256` both match. **The classification is the work; the grep only
+bounds it.** Each hit is either a pin, in which case it appears in the inventory above, or an
+unrelated match. A hit classified as a pin and absent from the inventory is a defect in this spec.
+
+**Three of these four commands were wrong when v1.1 wrote them, and running the sweep is how that
+was found.** v1.1's F1 command required the literal `"core"` **with quotes**, so it could never have
+found either `projects-output` site, whose text is the English caption `Core and stress buckets`.
+Its F3 command matched two tokens out of the family's seven and returned 34 hits against 60 real
+sites. Its F4 command excluded `*.py`, so it could not have found the independent Python verifier
+that turned out to be the strongest argument in §8.3. A completeness command that is not a superset
+is worse than no command, because it reports coverage it does not have. Each command below was
+checked against the sweep's site list before being written down.
 
 ```
-# F1
-grep -rn '"core"' --include='*.ts' packages | grep stress
-# F2
-grep -rEn 'armCount|\.length\(4\)|[!=]== 4' --include='*.ts' packages/benchmark-product packages/benchmarking
-# F3
-grep -rEn 'two-human-unanimous|review-disagreement' --include='*.ts' packages
-# F4
-grep -rEn 'reportSha256|reportEnvelopeSha256' --include='*.ts' packages
+# F1  — 33 non-test hits, against 23 production sites
+grep -rEin 'core.{0,40}stress' --include='*.ts' --include='*.json' packages | grep -v '\.test\.'
+# F2  — 67 non-test hits, against 9 production sites
+grep -rEn 'armCount|\.length\(4\)|[!=]== 4' --include='*.ts' packages/benchmark-product packages/benchmarking | grep -v '\.test\.'
+# F3  — 140 non-test hits, against 60 production sites
+grep -rEn 'truthAdmission|two-human-unanimous|operator-only|publicationGrade|-attestor|review-(disagreement|indeterminate|incomplete)' --include='*.ts' packages | grep -v '\.test\.'
+# F4  — 240 non-test hits, against 35 production sites
+grep -rEn 'reportSha256|reportEnvelopeSha256|report\.json|analysisPlan|AnalysisSchema|PUBLIC_BUNDLE_FILES' --include='*.ts' --include='*.py' --include='*.json' packages | grep -v '\.test\.'
 ```
 
-**Status: the four families above are populated from review-verified sites and are awaiting the
-mechanical sweep for completeness.** The sweep runs the commands above over `next` and returns a
-per-constant site inventory; where it finds a site absent from §1.6, §3.1, §6.8, or §8.3, that
-section gains the row and the owning packet's seam inventory gains the line. **No packet begins
-implementation against an unconfirmed family.** This is the one part of this document that is
-explicitly not frozen at merge; §11 records it as such.
+**F1 and F2 are token families; F3 and F4 are contract families, and the difference decides how they
+stay covered.** A stratum pin and an arm-count pin always contain their literal, so a grep bounds
+them today and will keep bounding them. "One Report per bundle" and "the admission mode branches
+here" are contracts, not tokens: a **new** singular `read("report.json")`, or a new
+`if (mode === "operator-only")` with an implicit else, is a new site no token search will surface.
 
-Three standing rules, independent of what the sweep returns:
+That is precisely why §6.8a freezes exhaustive switches with a `never`-typed default rather than a
+widened enum. **For the contract families the compiler is the tripwire that grep cannot be.** The
+commands above are a regression check on the literal half only, and this document says so rather
+than implying a coverage it cannot maintain.
+
+#### Per-family inventories
+
+Grouped by package with line lists, so a reader can hold one package in mind at a time. Roles are
+the sweep's own classification: **pins-schema** (a declared type or validator), **imperative-check**
+(a hand-rolled comparison), **projects-output** (writes a value into a published artifact),
+**consumes-type** (inherits a widened type without its own literal).
+
+**F1, stratum, 23 production sites.** `profiles` 1 (`contracts.ts:360`, the canonical schema) ·
+`aggregate` 10 (`binary-instrument.ts:13,157`; `binary-instrument-method.ts:104,121,166,396,443,779,1388,1500`) ·
+`evidence` 1 (`binary-instrument.ts:23`) · `benchmark-product/verify` 6
+(`admission/contracts.ts:30`; `admission/verification.ts:52,61,115,125,136`; `verify.ts:153`;
+`schema.ts:185`; `assets.ts:372,637`) · `benchmark-product/core` 4
+(`run/binary-instrument-profile.ts:299,315`; `operations/import-item-bank.ts:53`, whose identical
+pattern recurs at `intake/binary-item-bank.ts:130` and is one site;
+`operations/human-review.ts:135`) · `evaluator-adapters` 1
+(`binary-judgment/adapter.ts:723`). Roles: 12 pins-schema, 9 imperative-check, **2
+projects-output** (`assets.ts:372,637`, the published captions).
+
+**F2, arm count, 9 production sites.** `benchmark-product/verify` 4
+(`schema.ts:189,227`; `verify.ts:154,1621`) · `benchmark-product/core` 2
+(`run/binary-instrument-profile.ts:324,349`, the second covering `:352`) · `aggregate` 3
+(`binary-instrument-method.ts:955,1488,1510`). Roles: 2 pins-schema, 6 imperative-check, **1
+projects-output** (`verify.ts:1621`, the false published count).
+
+**F3, admission, 60 production sites.** `benchmark-product/verify` **31**, `benchmark-product/core`
+**16** (plus `README.md:67` and `parity-matrix.v1.json:9`), `aggregate` 7, `profiles` 3
+(`label-resolution.ts:36,60,70`), `evaluator-adapters` 1 (`adapter.ts:716`). Roles: 17 pins-schema,
+21 imperative-check, 15 consumes-type, 4 projects-output, 3 docs-or-comment. The four with no
+compiler safety net, the three that defeat §6.8's own rulings, and the evidence-role vocabulary in
+three synchronized lists are all named and frozen in §6.8a; the rest are mechanical widenings of the
+same enum.
+
+**F4, singular Report, 35 sites under option 4 and 9 under option 5.** `benchmark-product/core` 20 ·
+`benchmark-product/verify` 13 (including `scripts/external-verify.py` and
+`schemas/claim-package.schema.json`) · `evidence` 2 (`portable.ts:133,245`). §8.3's divergence table
+is the option-4 breakdown; option 5's nine are `draft.ts:178,226`, `compile.ts:82,119,169`,
+`report.ts:164,272,340`, `publication-report.ts:313,326`, and `state.ts:151`.
+
+#### The fixture ruling, which is the opposite of what the sweep's `mustChange` column says
+
+The sweep marks 33 test-and-fixture sites `mustChange: true`. **Under this document's design most of
+them must not change, and §0.4 is why.** This is a disagreement with the sweep's classification,
+recorded with its reason rather than silently resolved.
+
+The sweep answered "what changes if the four-arm two-stratum world is **replaced** by a six-arm
+four-category one". That is not what this document specifies. Every delta here except §7.2 option
+(A) is a **compatible widening**, and a widening's only proof is that the *existing* fixture,
+unmodified, still validates, still seals to identical bytes, and still produces identical output.
+Regenerating the old fixture to the new shape does not update the proof, it **deletes** it.
+
+**Frozen:**
+
+1. **The two 144-cell lifecycle fixtures stay green unmodified**, at four arms and two strata.
+   `benchmarking/evidence/src/golden-lifecycle.test.ts` is a frozen replay of PR #2706's real
+   four-arm outcome and its own comment at `:270` says so; `core/src/conformance/binary-qualification-cold-lifecycle.external.test.ts`
+   is its cold-verify sibling. Neither is regenerated by P1 or P4. **P1's acceptance already reads
+   this way** ("the existing four-arm qualification lifecycle test is green unmodified with
+   `armCount: 4`") and is correct as written; the sweep's cross-check confirms the wording does not
+   imply that test exercises the new surface.
+2. **The new surfaces get new fixtures, added alongside.** Six arms, four categories, the screened
+   branch, and the evidence channel are each exercised by a fixture that did not exist before. A
+   packet that finds itself editing a golden fixture to make its feature pass has widened
+   incompatibly and should stop.
+3. **`core/src/bundle/testing/v4-synthetic-fixture.ts` gains options, never new defaults.** It is
+   the single shared builder behind a dozen-plus test files (`v4-materialize.test.ts`,
+   `v6-materialize.test.ts`, `assets.test.ts`, the schema tests, and the cold-lifecycle
+   conformance run). Its arm count, stratum split (`:213`), admission mode (`:98`, `:581`), and
+   evidence presence become parameters whose defaults reproduce today's output byte for byte, so
+   every existing caller's expectations are untouched. This makes it a **merge-order hazard rather
+   than a merge-order blocker**, and §10.1 records it.
+4. **Three fixture sites genuinely must change**, and only these three: 
+   `core/src/run/binary-instrument-profile.test.ts:478` (a negative-path test asserting a three-arm
+   draft refuses; under §1.6 the refusal reason changes, so P1 revisits what boundary it tests),
+   `core/parity-matrix.v1.json:9` with its two prose twins at `cli/parity-map.ts:155` and
+   `core/README.md:67` (regenerated by `yarn generate:parity`, not hand-edited), and every judge
+   fixture under §7.2 option (A), which is not a widening and is already priced in §2.6 and rows 19
+   to 21.
+5. **`profiles/src/binary-judgment/label-resolution.test.ts:42` is a byte-for-byte golden assertion
+   over a serialized label resolution** containing `"stratum":"stress"`. It stays unmodified, and it
+   is doing double duty: it is F1's proof that widening the stratum schema moves no sealed bytes,
+   and it is §6.7's proof that the `CommonShape` refactor moves none either.
+
+Three standing rules, which the sweep's result confirms rather than replaces:
 
 1. **A packet that widens a constant widens every copy of it in the same PR.** Partial widening is
    how §3.1 site 9 would have refused the replacement ledger after §3.1 sites 1 to 8 were green.
@@ -1728,7 +2078,7 @@ Three standing rules, independent of what the sweep returns:
 
 | Ref | Decision | Where | Reads on |
 |---|---|---|---|
-| **G1-D-C** | Three registered readouts over one collected cell set, via `additionalAnalyses` plus one Report per plan entry, with the all-companions fallback | §8.3 | D2's delegated scope |
+| **G1-D-C** | Three registered readouts over one collected cell set, via `additionalAnalyses`; **at v1.2 the packaging recommendation changes from one bundle carrying N Reports (option 4) to N bundles over one Run and one Matrix (option 5)**, on the sweep's evidence that option 4 must rewrite four independent verifier implementations including a published Python script. All-companions fallback unchanged | §8.3 | D2's delegated scope |
 | **R-1** | `paired-delta@1` used unmodified; the paired contrast's unit is the per-item replicate mean, disclosed, rather than forking a v1-reference method | §7.2 | D2's "adding an input adapter only if it cannot consume item-level majority decisions" |
 | **R-2** | The screened branch's ordering receipt is a bank-scoped sibling of the per-item reveal receipt, not a literal reuse of it | §6.6 | D1's "sealing before the first judge call reuses the existing ordering receipt" |
 | **R-3** | A hand check, where it happened, decides; a screen-agreed row the operator hand-excluded is **excluded** | §6.4 | D1's "admitted means screening agreed or hand-confirmed", whose literal disjunction would admit it |
@@ -1751,8 +2101,19 @@ this document.
   payload schema refuses every evidence-carrying item on the human-review path; the mirrored stratum
   schema refuses every four-category replacement-ledger entry; the bundle qualification document
   refuses a four-category or six-arm bundle at publish and at cold verify.
+- **Three sites that publish a false value rather than refusing (§1.4, §1.6 site 8, §3.1 site 21).**
+  `verify.ts:1621` writes `armCount: 4` over any panel; `binary-qualification.ts:23` writes the
+  mutable-alias limitation over a dated snapshot, and the cold verifier recomputes it and agrees;
+  `assets.ts:372,637` caption a four-category `byStratum` block as `Core and stress buckets`. A
+  refusal is visible and a false published number is not, so these outrank the refusal sites.
+- **`binary-instrument-profile.ts:315` (§3.1 site 12).** `deriveAdmissionProfile` checks
+  `verified.strata` at `:299` and then discards it, returning the hardcoded pair. A partial widening
+  of this family passes its own gate and throws the result away.
+- **The screened branch's publication grade is derived, not asserted (§6.8a).** §6.8's third
+  `superRefine` branch, implemented exactly as specified and with nothing else changed, would refuse
+  every screened bundle, because `publicationGrade` is computed as
+  `truthAdmission === "two-human-unanimous"` at two sites and yields `false`.
 
-**Not frozen at merge: §10.2.** The four constant families are populated from review-verified sites
-and await the mechanical sweep's completeness inventory. The coordinator folds the sweep's result
-into §1.6, §3.1, §6.8, §8.3, and the owning seam inventories before any packet in the affected
-family begins implementation. Everything else in this document is frozen on merge.
+**§10.2 is frozen.** The mechanical sweep completed and classified 214 sites across the four
+families; its result is folded into §1.4, §1.6, §3.1, §6.8a, §8.3, §10.1, and the owning seam
+inventories. The whole document is now frozen on merge.
