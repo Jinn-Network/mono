@@ -2,7 +2,7 @@
 
 This directory retains evidence from a manual, credential-free Benchmark Product run through the real Inspect `0.3.255` runtime. It is independent of the automated test assertions: the built product CLI created, previewed, quoted, locked, launched, collected, reported, verified, and published the run.
 
-## Current-verifier note — 2026-08-12
+## Current-verifier note — 2026-08-12, updated 2026-08-18
 
 The bundle passed the verifier that produced it, but it does not pass the
 current verifier. It predates the later requirement that every Inspect bundle
@@ -12,6 +12,21 @@ The historical bytes and observations below are unchanged, but the command in
 “Re-verify the retained evidence” no longer returns success. The current
 credential-free detached proof, including exact runtime-selection closure, is
 [Truthful Inspect OCI isolation accounting](../2026-08-12-inspect-isolation-accounting.md).
+
+Checked again on 2026-08-18 against `@colophon-claims/verify` `2.0.0`
+(supported formats `benchmark-product-public-bundle/2`, `/4`, `/5`): the first
+refusal is now earlier, at the claim-package schema —
+`claim-package.json does not satisfy its public bundle schema` — because this
+bundle's `verification` block predates the self-serve packaging cut: it has no
+`compatibleCommand` field, its `checks` are the four retired prose sentences
+rather than the six current check ids, and its `command` names the retired
+`benchmark-product bundle verify` verb. This is deliberate and will not be
+repaired: the bundle is a dated historical artifact whose bytes are pinned by
+its own manifest and by the digests quoted below, so it is never retro-edited,
+and the current schema is not loosened to admit it. For a bundle in the
+current format that the shipped verifier accepts, use the conformance kit's
+golden fixture at
+`packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1/golden/`.
 
 A separate opt-in external-provider check is recorded in [luna-smoke.md](luna-smoke.md). That smoke used Luna through Inspect directly and deliberately does not claim that the Benchmark Product forwards provider credentials.
 

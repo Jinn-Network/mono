@@ -71,6 +71,7 @@ function presentSuiteQuote(
 ): SuiteQuotePresentation {
   return {
     ...bits,
+    protocol: suite.protocol,
     methodLeaderboardEligible: eligible,
     cellCount: `${input.itemCount} × ${input.armCount} × ${input.replicates}`,
     harnessVersion,

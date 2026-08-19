@@ -22,9 +22,9 @@ const PRODUCT_PACKAGES = [
   ['web', '@colophon-claims/web', 'private'],
 ];
 const PACKAGE_VERSIONS = new Map([
-  ['@colophon-claims/core', '1.0.0'],
-  ['@colophon-claims/cli', '1.0.0'],
-  ['@colophon-claims/verify', '2.0.0'],
+  ['@colophon-claims/core', '0.1.0'],
+  ['@colophon-claims/cli', '0.1.0'],
+  ['@colophon-claims/verify', '0.1.0'],
   ['@colophon-claims/web', '0.1.0'],
 ]);
 
@@ -43,13 +43,23 @@ const CORE_JINN = [
   '@jinn-network/task-execution-oci-grader', '@jinn-network/task-execution-profiles',
   '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-supervisor',
   '@jinn-network/task-execution-workspace', '@jinn-network/trust-core',
+  // `trust-testing` is the Trust layer's conformance kit and a devDependency only: core pins its
+  // producer-side `.ots` serializer (anchor-evidence design §6.2) against the kit's byte-verified
+  // builder and its committed real-calendar capture. The source-boundaries guard pins it to
+  // `src/**/*.test.ts`, which `tsconfig.build.json` excludes from `dist/`, so it never reaches the
+  // published package.
+  '@jinn-network/trust-testing',
 ];
 const VERIFY_JINN = [
   '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-records',
   '@jinn-network/benchmarking-run', '@jinn-network/benchmarking-protocol', '@jinn-network/task-admission',
   '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
-  '@jinn-network/trust-core',
+  // `trust-testing` is the Trust layer's conformance kit and a devDependency only: verify runs
+  // the anchor-proof contract suite (anchor-evidence design §11) against its own node:crypto
+  // ports. The source-boundaries guard pins it to `src/**/*.test.ts`, which `tsconfig.build.json`
+  // excludes from `dist/`, so it never reaches the published package.
+  '@jinn-network/trust-core', '@jinn-network/trust-testing',
 ];
 const TRANSITIVE_PORTALS = [
   '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate',
@@ -79,7 +89,10 @@ const VERIFY_PORTALS = [
   '@jinn-network/benchmarking-run', '@jinn-network/benchmarking-protocol', '@jinn-network/environment-record', '@jinn-network/evidence-protocol',
   '@jinn-network/task-admission',
   '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
-  '@jinn-network/trust-core',
+  // `trust-resolve` is not imported anywhere in verify: it arrives as a declared dependency of
+  // the `trust-testing` devDependency, and a portal resolution is what keeps it pointed at the
+  // live tree rather than at a registry version that does not exist.
+  '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
 ];
 
 const APPROVED = new Map([
@@ -88,6 +101,10 @@ const APPROVED = new Map([
     '@jinn-network/evidence-protocol',
     '@jinn-network/evidence-repository', '@jinn-network/execution-recorder',
     '@jinn-network/record-discovery-client',
+    // As in `verify`: `trust-resolve` is imported nowhere in core, and arrives only as a declared
+    // dependency of the `trust-testing` devDependency. A portal resolution is what keeps it
+    // pointed at the live tree rather than at a registry version that does not exist.
+    '@jinn-network/trust-resolve',
   ] }],
   ['cli', { colophon: ['@colophon-claims/core', '@colophon-claims/verify'], jinn: [], portals: [
     '@colophon-claims/core', '@colophon-claims/verify', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
@@ -136,6 +153,8 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/task-execution-supervisor', join(root, 'packages/task-execution/backend-local/supervisor')],
   ['@jinn-network/task-execution-workspace', join(root, 'packages/task-execution/backend-local/workspace')],
   ['@jinn-network/trust-core', join(root, 'packages/trust/core')],
+  ['@jinn-network/trust-resolve', join(root, 'packages/trust/resolve')],
+  ['@jinn-network/trust-testing', join(root, 'packages/trust/testing')],
 ]);
 
 function readPackage(directory) {

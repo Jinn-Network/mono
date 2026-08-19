@@ -13,6 +13,7 @@ import {
   parseMatrix,
   parseReport,
   parseRun,
+  readRunAnchorIntentExtension,
   readRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { verifyMatrix, type InScopeCell, type InScopeVerdict } from "@jinn-network/benchmarking-run";
@@ -80,7 +81,13 @@ import {
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
 import { PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, BUNDLE_V6_FORMAT } from "./manifest.js";
+import {
+  evaluateIntegrityAnchors,
+  type IntegrityAnchorsReport,
+  type PublicBundleAnchorTrustMaterial,
+} from "./anchor/check.js";
+import { ClaimAnchorProjectionError, deriveClaimAnchors } from "./profile/anchor-claims.js";
 import {
   verifyBinaryJudgmentAdmissionClosure,
   type AdmissionAuthorityRole,
@@ -117,10 +124,16 @@ export type PublicBundleVerificationCheck =
   | "trust"
   | "matrix-rederivation"
   | "report-verification"
-  | "claim-consistency";
+  | "claim-consistency"
+  /** Always present for `benchmark-product-public-bundle/6`, never for any earlier closure
+   * (anchor-evidence design §8, §12). */
+  | "integrity-anchors";
 
 export interface LegacyPublicBundleVerificationResult {
-  readonly format: "benchmark-product-public-bundle/2" | "benchmark-product-public-bundle/4";
+  readonly format:
+    | "benchmark-product-public-bundle/2"
+    | "benchmark-product-public-bundle/4"
+    | "benchmark-product-public-bundle/6";
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
   readonly benchmarkSha256: string;
@@ -129,6 +142,10 @@ export interface LegacyPublicBundleVerificationResult {
   readonly reportSha256: string;
   readonly reportEnvelopeSha256: string;
   readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
+  /** Present exactly for the anchored closure: every carried anchor's own outcome plus each
+   * subject's context outcome (anchor-evidence design §8). Statuses are disclosed facts, not a
+   * summary — nothing here is folded into a single verified badge. */
+  readonly anchors?: IntegrityAnchorsReport;
   readonly qualification?: {
     readonly publicationGrade: boolean;
     readonly truthAdmission: "two-human-unanimous" | "operator-only";
@@ -144,7 +161,16 @@ export type PublicBundleVerificationResult =
   | LegacyPublicBundleVerificationResult
   | EvidenceNativePortableBundleVerification;
 
-export interface VerifyPublicBundleDeps extends VerifyBundleSnapshotDeps {}
+export interface VerifyPublicBundleDeps extends VerifyBundleSnapshotDeps {
+  /**
+   * Trust material for the `integrity-anchors` check (anchor-evidence design §8 step 3): timestamp
+   * authority roots, Bitcoin block headers. **Strictly the verifier operator's own configuration.**
+   * This package ships none, so the default outcome for a well-formed proof is `present`, not
+   * `verified`; a chain validated solely against roots a bundle carried would re-import the
+   * self-run problem with extra ceremony.
+   */
+  readonly anchorTrust?: PublicBundleAnchorTrustMaterial;
+}
 
 /**
  * One semantically verified result bound to the exact authenticated bytes used
@@ -317,6 +343,9 @@ export async function verifyPublicBundleSnapshot(
   const checks: PublicBundleVerificationCheck[] = ["manifest"];
   const manifestPaths = new Set(checked.manifest.files.map((file) => file.path));
   const isV4 = checked.manifest.format === BUNDLE_V4_FORMAT;
+  // The anchored closure is v2's graph plus `anchors/`, so it takes v2's mandatory member list; the
+  // binary qualification projection has its own later anchored allocation and is not this one.
+  const isV6 = checked.manifest.format === BUNDLE_V6_FORMAT;
   const mandatoryFiles = isV4 ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
@@ -336,6 +365,17 @@ export async function verifyPublicBundleSnapshot(
   if (manifestPaths.has("verification/cancel-requested.json")) expectedPaths.add("verification/cancel-requested.json");
   for (const path of manifestPaths) {
     if (/^native\/inspect\/[a-f0-9]{64}\.eval$/u.test(path)) expectedPaths.add(path);
+  }
+  // `anchors/<sha256>.bin` is allowlisted only by the closure version that defines it: an anchor
+  // member in a v2 or v4 bundle is a non-allowlisted file, exactly as it was before this format.
+  const anchorPaths: string[] = [];
+  if (isV6) {
+    for (const path of manifestPaths) {
+      if (/^anchors\/[a-f0-9]{64}\.bin$/u.test(path)) {
+        expectedPaths.add(path);
+        anchorPaths.push(path);
+      }
+    }
   }
   for (const path of manifestPaths) if (!expectedPaths.has(path)) refuse("record-integrity", path, `public bundle contains non-allowlisted file "${path}"`);
   for (const path of expectedPaths) if (!manifestPaths.has(path)) refuse("record-integrity", path, `public bundle closure is missing "${path}"`);
@@ -397,6 +437,57 @@ export async function verifyPublicBundleSnapshot(
   const staticBytes = read("static-bundle.json");
   if (!equalBytes(staticBytes, canonicalJsonBytes(exportStaticBundle(matrix, [report])))) {
     refuse("record-integrity", "static-bundle.json", "static bundle is not the exact platform metadata projection");
+  }
+
+  // ── integrity-anchors (anchor-evidence design §8) ──────────────────────────────────────────
+  //
+  // Evaluated here, before the claim is rebuilt, because an `invalid` anchor is affirmative
+  // evidence of substitution and must be the refusal a reader sees — not a downstream claim
+  // mismatch caused by it. Once nothing is invalid, the same bytes project the claim's anchors
+  // section through the same function the producer used.
+  let anchorReport: IntegrityAnchorsReport | undefined;
+  // Supplied to the claim rebuild only for the anchored closure, and then even when empty: an
+  // empty section and an omitted one are different claims, and §7.3's declared-but-absent bundle
+  // carries the first.
+  let claimAnchors: readonly import("./profile/anchor-claims.js").ClaimAnchor[] | undefined;
+  if (isV6) {
+    const anchorRecords = anchorPaths
+      .map((path) => {
+        const bytes = read(path);
+        const recordSha256 = path.slice("anchors/".length, -".bin".length);
+        if (sha256(bytes) !== recordSha256) {
+          refuse("record-integrity", path, "anchor record digest mismatch");
+        }
+        return { recordSha256, bytes };
+      });
+    anchorReport = evaluateIntegrityAnchors({
+      records: anchorRecords,
+      runSha256: identities.runSha256,
+      matrixSha256: identities.matrixSha256,
+      closeAt: run.closeAt,
+      declaredProfiles: readRunAnchorIntentExtension(run as unknown as Record<string, unknown>)?.providers ?? [],
+      ...(deps.anchorTrust === undefined ? {} : { trust: deps.anchorTrust }),
+    });
+    const firstInvalid = anchorReport.invalid[0];
+    if (firstInvalid !== undefined) {
+      refuse(
+        "record-integrity",
+        `anchors/${firstInvalid.recordSha256}.bin`,
+        `carried anchor is invalid: ${firstInvalid.reason ?? "the proof does not verify"}`,
+      );
+    }
+    try {
+      claimAnchors = deriveClaimAnchors({
+        records: anchorRecords,
+        runSha256: identities.runSha256,
+        matrixSha256: identities.matrixSha256,
+      });
+    } catch (cause) {
+      if (cause instanceof ClaimAnchorProjectionError) {
+        refuse("record-integrity", `anchors/${cause.recordSha256}.bin`, cause.message);
+      }
+      throw cause;
+    }
   }
 
   const assembly = parseAssembly(read("verification/assembly.jsonl"));
@@ -1457,8 +1548,12 @@ export async function verifyPublicBundleSnapshot(
       ? { additionalLimitations: INSPECT_SEPARATE_ASSURANCE_LIMITATIONS }
       : {}),
     ...(assembly.header.rehearsal === undefined ? {} : { rehearsal: assembly.header.rehearsal }),
+    ...(claimAnchors === undefined ? {} : { anchors: claimAnchors }),
   });
   checks.push("claim-consistency");
+  // Always present for this closure version, and never for any earlier one: an anchored bundle
+  // whose anchors were stripped is a closure failure above, not a shorter check list here.
+  if (isV6) checks.push("integrity-anchors");
 
   const dissentCellKeys = assembly.cells
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
@@ -1516,6 +1611,7 @@ export async function verifyPublicBundleSnapshot(
       checks,
       ...identities,
       ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
+      ...(anchorReport === undefined ? {} : { anchors: anchorReport }),
       ...(qualification === undefined ? {} : {
         qualification: {
           publicationGrade: qualification.publicationGrade,

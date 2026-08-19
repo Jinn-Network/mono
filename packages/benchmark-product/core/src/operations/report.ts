@@ -44,6 +44,7 @@
 
 import { BENCHMARKING_METHOD_IDS, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
 import { produceReport, type ProducedReport } from "@jinn-network/benchmarking-aggregate";
+import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { join } from "node:path";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
@@ -71,15 +72,20 @@ import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 import { binaryInstrumentReportLimitations } from "../run/binary-instrument-profile.js";
-import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { HarborSelectionManifestSchema, isHarborCompatibleEvaluationRuntime } from "../runtime/harbor/manifest.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { suiteFactsFromAccountedRun } from "../runtime/suite-protocol/from-harbor.js";
 import { suiteFactsFromAccountedSwebenchRun } from "../runtime/suite-protocol/from-swebench.js";
 import { suiteFactsFromAccountedApexRun } from "../runtime/suite-protocol/from-apex.js";
+import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { apexSweDevReportRoot } from "../runtime/apex-swe-dev/launcher.js";
+import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex-swe-dev.js";
 import { resolveSwebenchHarnessRunId, swebenchModelNameOrPathByArm } from "../runtime/swe-bench-verified/launcher.js";
 import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
 import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
+import { readInspectEvalSelectionManifest } from "../runtime/inspect/host.js";
+import { suiteFactsFromAccountedInspectRun } from "../runtime/suite-protocol/from-inspect.js";
 import { artifactsDir } from "../workspace/layout.js";
 
 export interface RunReportInput {
@@ -174,7 +180,7 @@ export function runReport(
         && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
         ? INSPECT_SEPARATE_ASSURANCE_LIMITATIONS
         : [];
-      const suiteFacts = document.spec.evaluationRuntime?.adapterId === "harbor"
+      const suiteFacts = isHarborCompatibleEvaluationRuntime(document.spec.evaluationRuntime)
         ? suiteFactsFromAccountedRun({
           manifest: HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
           armCount: runRecord.arms.length,
@@ -208,7 +214,34 @@ export function runReport(
               armIds: document.spec.arms.map((arm) => arm.armId),
               reportRoot: join(artifactsDir(clockedContext.workspaceDir), "archipelago", input.draftId),
             })
-            : undefined;
+          : document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID
+            ? suiteFactsFromAccountedApexSweDevRun({
+              manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+              armCount: runRecord.arms.length,
+              itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+              replicates: runRecord.replicates,
+              matrix: matrixRecord,
+              armIds: document.spec.arms.map((arm) => arm.armId),
+              reportRoot: apexSweDevReportRoot(artifactsDir(clockedContext.workspaceDir), input.draftId),
+            })
+            : document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
+              ? (() => {
+                const manifest = readInspectEvalSelectionManifest(
+                  clockedContext.workspaceDir,
+                  document.spec.evaluationRuntime.selectionManifestSha256,
+                );
+                return manifest === undefined
+                  ? undefined
+                  : suiteFactsFromAccountedInspectRun({
+                    manifest,
+                    armCount: runRecord.arms.length,
+                    itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+                    replicates: runRecord.replicates,
+                    matrix: matrixRecord,
+                    armIds: document.spec.arms.map((arm) => arm.armId),
+                  });
+              })()
+              : undefined;
       const suiteLimits = suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation];
       let binaryLimits: readonly string[] = [];
       if (selected.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
@@ -264,7 +297,14 @@ export function runReport(
       // Step 3: build AND write the claim package. Both can throw (a results-shape mismatch in
       // buildClaimPackage, a schema violation or disk failure in writeClaimPackage) — that must
       // surface here, before the draft is transitioned, not after.
-      const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells, runRecord);
+      // anchor-evidence §7.4: the claim is the report-time projection, so its anchors section is
+      // exactly the set this run had already obtained. Anchoring is expected to complete before
+      // `report` — a lock anchor precedes launch by rule (§7.1), and a matrix anchor or an
+      // OpenTimestamps upgrade is available from `closed` on. An anchor obtained after this point
+      // stays durably recorded and audited, but this sealed claim predates it, and `publish` says
+      // so rather than silently reprojecting a document the operator already read.
+      const carriage = readRunAnchorCarriage(clockedContext.workspaceDir, runState);
+      const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells, runRecord, carriage.anchors);
 
       const claimPackage = buildClaimPackage({
         draftId: input.draftId,
@@ -281,6 +321,7 @@ export function runReport(
         // BP-21 (spec §6): the claim states the preset AND the resolved primitives, never the
         // label alone; buildClaimPackage cross-checks these against the sealed Run's own policy.
         assurance: { preset: document.spec.assurance.preset, resolved: resolvedAssurance },
+        ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
         ...(previewLog !== undefined && previewLog.count > 0
           ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }
           : {}),

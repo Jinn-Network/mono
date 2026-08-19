@@ -50,7 +50,8 @@ import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/sig
 import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
-import { BUNDLE_V4_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { buildPublicAssets } from "./assets.js";
 import {
   BUNDLE_ASSEMBLY_FORMAT,
@@ -175,7 +176,10 @@ function exactJson<T>(bytes: Uint8Array, schema: { parse(value: unknown): T }, l
 function recordClosure(input: MaterializeBundleInput): {
   readonly files: Map<string, Uint8Array>;
   readonly evidenceRecords: Map<string, Set<BundleV4EvidenceRole>>;
-  readonly format: "benchmark-product-public-bundle/2" | typeof BUNDLE_V4_FORMAT;
+  readonly format:
+    | "benchmark-product-public-bundle/2"
+    | typeof BUNDLE_V4_FORMAT
+    | typeof BUNDLE_V6_FORMAT;
 } {
   const { workspaceDir, draftId, benchmarkSha256, runState } = input;
   if (
@@ -256,6 +260,41 @@ function recordClosure(input: MaterializeBundleInput): {
       refuse("record-integrity", "claim-package.json", "claim-package/2 must exactly project the sealed binary-instrument@1 Report result");
     }
   }
+
+  // ── The anchored closure (anchor-evidence design §7.4) ─────────────────────────────────────
+  //
+  // `anchors/<recordSha256>.bin` carries each recorded AnchorEvidence record's exact sealed bytes.
+  // The claim's own `anchors` section must be exactly the projection of those bytes: the section is
+  // sealed into the claim at `report` time, so a mismatch means the two disagree about what this
+  // run is anchored by, and publishing either one over the other would put a claim in front of a
+  // reader that its own carried evidence does not back.
+  const anchorCarriage = readRunAnchorCarriage(workspaceDir, runState);
+  const anchored = anchorCarriage.anchoredClosure;
+  if (anchored && binaryQualification) {
+    refuse(
+      "conflict",
+      "anchors",
+      "the anchored binary-qualification closure is a later allocation; this run carries both a"
+      + " binary qualification projection and an anchor, and no closure version expresses both",
+    );
+  }
+  // Presence is compared, not only contents: an unanchored claim inside an anchored closure is
+  // exactly as wrong as an anchored claim whose section drifted, and an omitted section is not an
+  // empty one.
+  const storedAnchors = (claim as { readonly anchors?: readonly unknown[] }).anchors;
+  const expectedAnchors = anchored ? anchorCarriage.anchors : undefined;
+  if (!Buffer.from(canonicalJsonBytes({ anchors: storedAnchors ?? null } as never)).equals(
+    Buffer.from(canonicalJsonBytes({ anchors: expectedAnchors ?? null } as never)),
+  )) {
+    refuse(
+      "record-integrity",
+      "claim-package.json",
+      "the sealed claim's anchors section is not the projection of the anchors this run records"
+      + " — an anchor obtained after the run was reported is recorded and audited, but this claim"
+      + " predates it and cannot be republished as though it did not",
+    );
+  }
+
   const files = new Map<string, Uint8Array>([
     ["benchmark.json", benchmarkBytes],
     ["run.json", runBytes],
@@ -265,6 +304,9 @@ function recordClosure(input: MaterializeBundleInput): {
     ["claim-package.json", claimBytes],
     ["static-bundle.json", canonicalJsonBytes(exportStaticBundle(matrix, [report]))],
   ]);
+  for (const record of anchorCarriage.records) {
+    files.set(`anchors/${record.recordSha256}.bin`, record.bytes);
+  }
 
   const evidenceRecords = new Map<string, Set<BundleV4EvidenceRole>>();
   const admissionReviewerBindings = new Map<string, string>();
@@ -832,7 +874,13 @@ function recordClosure(input: MaterializeBundleInput): {
   return {
     files,
     evidenceRecords,
-    format: binaryQualification ? BUNDLE_V4_FORMAT : "benchmark-product-public-bundle/2",
+    // Carrying an anchor is what moves a bundle onto the anchored closure. Everything else emits
+    // exactly the version it emitted before this feature existed, byte for byte (§12).
+    format: anchored
+      ? BUNDLE_V6_FORMAT
+      : binaryQualification
+        ? BUNDLE_V4_FORMAT
+        : "benchmark-product-public-bundle/2",
   };
 }
 

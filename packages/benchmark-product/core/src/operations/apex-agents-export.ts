@@ -69,7 +69,14 @@ export function exportApexAgentsInspection(
     action: "runtime.apex-agents.export",
     subject: input.draftId,
     inputs: input,
-    run: () => {
+    run: () => executeExportApexAgentsInspection(context, input),
+  });
+}
+
+export function executeExportApexAgentsInspection(
+  context: OperationContext,
+  input: ExportApexAgentsInput,
+): ExportApexAgentsResult {
       const document = readDraftDocument(context.workspaceDir, input.draftId);
       if (!document.spec.arms.some((arm) => arm.armId === input.armId)) {
         refuse("not-found", `drafts.${input.draftId}.spec.arms.${input.armId}`, "draft has no such arm");
@@ -116,6 +123,4 @@ export function exportApexAgentsInspection(
       const instructions = apexAgentsExportInstructions(mode, exportDir);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, exportDir };
-    },
-  });
 }

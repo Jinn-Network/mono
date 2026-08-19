@@ -7,10 +7,12 @@ import { z } from "zod";
 import { atomicWriteFileSync, readFileIfExistsSync } from "../../fs/atomic.js";
 import { runtimeHostPath } from "../../workspace/layout.js";
 import { putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
-import { HarborSelectionManifestSchema, assertSupportedHarborVersion, type HarborDatasetInput, type HarborSelectionManifest, type HarborTaskInput } from "./manifest.js";
+import { HarborSelectionManifestSchema, assertSupportedHarborVersion, HARBOR_ADAPTER_ID, PIER_ADAPTER_ID, type HarborCompatibleAdapterId, type HarborDatasetInput, type HarborSelectionManifest, type HarborTaskInput } from "./manifest.js";
+import { assertSupportedPierVersion } from "../deep-swe-v1.1/manifest.js";
 
 export interface HarborRuntimeSelectionRequest {
   readonly executable: string;
+  readonly engine?: HarborCompatibleAdapterId;
   readonly source:
     | { readonly kind: "task"; readonly input: HarborTaskInput; readonly materialPath: string; readonly revision: string }
     | { readonly kind: "dataset"; readonly input: HarborDatasetInput; readonly materialPath: string; readonly revision: string; readonly taskName: string; readonly taskNames?: readonly string[] };
@@ -92,16 +94,18 @@ export function resolveHarborMaterial(input: { readonly input: { readonly path?:
 }
 
 export async function resolveHarborSelection(input: HarborRuntimeSelectionRequest, signal?: AbortSignal): Promise<HarborRuntimeSelectionResolution> {
+  const engine = input.engine ?? HARBOR_ADAPTER_ID;
   const executable = realpathSync(input.executable);
   if (!lstatSync(executable).isFile()) throw new TypeError("Harbor executable must be a regular file");
   const executableSha256 = createHash("sha256").update(readFileSync(executable)).digest("hex");
   const resolvedVersion = await new Promise<string>((resolve, reject) => {
     execFile(executable, ["--version"], { encoding: "utf8", signal, env: { PATH: process.env.PATH ?? "", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1" } }, (error, stdout) => {
-      if (error !== null) reject(new Error("Harbor version probe failed", { cause: error }));
-      else resolve(stdout.trim().replace(/^harbor\s+/iu, ""));
+      if (error !== null) reject(new Error(`${engine} version probe failed`, { cause: error }));
+      else resolve(stdout.trim().replace(/^(?:harbor|pier)\s+/iu, ""));
     });
   });
-  assertSupportedHarborVersion(resolvedVersion);
+  if (engine === PIER_ADAPTER_ID) assertSupportedPierVersion(resolvedVersion);
+  else assertSupportedHarborVersion(resolvedVersion);
   const resolved = resolveHarborMaterial(input.source);
   const materialRoot = realpathSync(input.source.materialPath);
   const selectedNames = input.source.kind === "dataset" && input.source.taskNames !== undefined
@@ -133,7 +137,7 @@ export async function resolveHarborSelection(input: HarborRuntimeSelectionReques
     };
   const manifest = HarborSelectionManifestSchema.parse({
     schema: "jinn.network/benchmark-product/harbor-selection/1",
-    adapter: { id: "harbor", version: "1" },
+    adapter: { id: engine, version: "1" },
     harbor: { version: resolvedVersion, executableSha256 },
     source, arms: input.arms, environment: input.environment, outputs: input.outputs,
     retryPolicy: input.retryPolicy ?? { nAttempts: 1, nConcurrent: 1, maxRetries: 0 },

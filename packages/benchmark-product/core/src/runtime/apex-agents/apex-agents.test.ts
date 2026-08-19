@@ -146,6 +146,7 @@ describe("APEX-Agents official-suite intake", () => {
     expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
     if (!quoted.ok) return;
     expect(quoted.result.presentation.suite).toEqual({
+      protocol: "apex-agents",
       executionConformance: true,
       coverage: "one_task",
       leaderboardSubmitReady: false,

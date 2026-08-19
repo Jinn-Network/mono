@@ -103,7 +103,7 @@ export {
   harborTrialAttemptNumber,
   harborTrialTaskName,
 } from "./runtime/harbor/manifest.js";
-export { HARBOR_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./runtime/harbor/manifest.js";
+export { HARBOR_ADAPTER_ID, PIER_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./runtime/harbor/manifest.js";
 export {
   HARBOR_SELECTION_ROLE,
   HARBOR_CORRELATION_ROLE,
@@ -220,8 +220,48 @@ export type {
   TerminalBench21SelectionResolution,
 } from "./runtime/terminal-bench-2-1/host.js";
 export {
+  TERMINAL_BENCH_3_0_DATASET_ID,
+  TERMINAL_BENCH_3_0_DATASET_REF,
+  TERMINAL_BENCH_3_0_HUB_VERSION,
+  TERMINAL_BENCH_3_0_PROFILE,
+  TERMINAL_BENCH_3_0_SELECTION_ROLE,
+  TerminalBench30SelectionManifestSchema,
+  terminalBench30SelectionBytes,
+} from "./runtime/terminal-bench-3-0/manifest.js";
+export type { TerminalBench30SelectionManifest } from "./runtime/terminal-bench-3-0/manifest.js";
+export { resolveTerminalBench30Selection } from "./runtime/terminal-bench-3-0/host.js";
+export type {
+  TerminalBench30SelectionRequest,
+  TerminalBench30SelectionResolution,
+} from "./runtime/terminal-bench-3-0/host.js";
+export {
+  APEX_SWE_DEV_ADAPTER_ID,
+  APEX_SWE_DEV_DATASET_ID,
+  APEX_SWE_DEV_DATASET_REVISION,
+  APEX_SWE_DEV_DATASET_TASK_COUNT,
+  APEX_SWE_HARNESS_REVISION,
+  APEX_SWE_DEV_SELECTION_ROLE,
+  ApexSweDevSelectionManifestSchema,
+  apexSweDevSelectionBytes,
+} from "./runtime/apex-swe-dev/manifest.js";
+export type { ApexSweDevSelectionManifest } from "./runtime/apex-swe-dev/manifest.js";
+export { resolveApexSweDevSelection, isGitLfsPointerBytes, readApexSweDevHostBinding } from "./runtime/apex-swe-dev/host.js";
+export type {
+  ApexSweDevSelectionRequest,
+  ApexSweDevSelectionResolution,
+} from "./runtime/apex-swe-dev/host.js";
+export { launchApexSweDev, collectApexSweDevCells, apexSweDevReportRoot } from "./runtime/apex-swe-dev/launcher.js";
+export {
+  harnessReportsPresent as apexSweDevHarnessReportsPresent,
+  harnessReportPath as apexSweDevHarnessReportPath,
+  readHarnessReport as readApexSweDevHarnessReport,
+} from "./runtime/apex-swe-dev/reports.js";
+export {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
+  APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION,
+  APEX_SWE_DEV_SUBMIT_CLOSED_SENTENCE,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION,
+  SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0,
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
@@ -231,9 +271,10 @@ export {
   APEX_AGENTS_NOT_LEADERBOARD_READY_LIMITATION,
   APEX_AGENTS_SUBMIT_CLOSED_SENTENCE,
   officialArchipelagoConformance,
+  officialApexSweDevConformance,
   suiteLeaderboardLimitation,
 } from "./runtime/suite-protocol/comparability.js";
-export type { SuiteComparability, SuiteCoverage } from "./runtime/suite-protocol/comparability.js";
+export type { SuiteComparability, SuiteCoverage, SuiteProtocolId } from "./runtime/suite-protocol/comparability.js";
 export {
   SUITE_PROTOCOL_PROFILE,
   SUITE_PROTOCOL_SELECTION_ROLE,
@@ -475,8 +516,8 @@ export type {
 } from "./venue/demo1-claude.js";
 
 // Workspace metadata and the sealed-bytes store (spec §4.5): exact bytes, digest-addressed.
-export { WORKSPACE_STORAGE_VERSION, WorkspaceMetadataSchema } from "./workspace/workspace.js";
-export type { WorkspaceMetadata } from "./workspace/workspace.js";
+export { WORKSPACE_STORAGE_VERSION, WorkspaceAnchoringEntrySchema, WorkspaceMetadataSchema } from "./workspace/workspace.js";
+export type { WorkspaceAnchoringEntry, WorkspaceMetadata } from "./workspace/workspace.js";
 export { getSealedBytes, hasSealedBytes, putSealedBytes, sha256Hex } from "./workspace/sealed-store.js";
 
 // Publication readiness is an explicit projection over durable state/journal capture. It does
@@ -543,6 +584,8 @@ export {
   runCollect,
   runLaunch,
   runLock,
+  runAnchor,
+  anchoringConfigure,
   runPreview,
   runPublish,
   runQuote,
@@ -552,16 +595,9 @@ export {
   runStatus,
   runVerify,
   sampleInit,
-  selectInspectEvaluation,
-  selectHarborRuntime,
-  selectTerminalBench2Runtime,
-  selectTerminalBench21Runtime,
-  selectSwebenchVerifiedRuntime,
-  selectApexAgentsRuntime,
+  selectMethod,
+  exportDerivedBundle,
   migrateTerminalBenchLegacyTask,
-  exportHarborHubPackage,
-  exportSwebenchPredictions,
-  exportApexAgentsInspection,
   updateDraft,
 } from "./operations/index.js";
 export type {
@@ -620,6 +656,11 @@ export type {
   RunLaunchInput,
   RunLaunchResult,
   RunLockInput,
+  RunAnchorInput,
+  RunAnchorResult,
+  AnchorSubject,
+  AnchoringConfigureInput,
+  AnchoringConfigureResult,
   RunLockResult,
   RunPreviewDeps,
   RunPreviewInput,
@@ -639,23 +680,10 @@ export type {
   RunResumeInput,
   RunResumeResult,
   RunStatusCell,
-  SelectTerminalBench2RuntimeInput,
-  SelectTerminalBench2RuntimeResult,
-  SelectTerminalBench21RuntimeInput,
-  SelectTerminalBench21RuntimeResult,
-  SelectSwebenchVerifiedRuntimeInput,
-  SelectSwebenchVerifiedRuntimeResult,
-  SelectApexAgentsRuntimeInput,
-  SelectApexAgentsRuntimeResult,
-  ExportHarborHubPackageInput,
-  ExportHarborHubPackageResult,
-  HarborHubExportMode,
-  ExportSwebenchPredictionsInput,
-  ExportSwebenchPredictionsResult,
-  SwebenchPredictionsExportMode,
-  ExportApexAgentsInput,
-  ExportApexAgentsResult,
-  ApexAgentsExportMode,
+  SelectMethodInput,
+  SelectMethodResult,
+  ExportDerivedBundleInput,
+  ExportDerivedBundleResult,
   RunStatusCounts,
   RunDriverStatus,
   RunStatusResult,
@@ -665,12 +693,20 @@ export type {
   SampleInitInput,
   SampleInitResult,
   SampleInitTaskSummary,
-  SelectInspectEvaluationInput,
-  SelectInspectEvaluationResult,
   UpdateDraftInput,
   VenueHonesty,
 } from "./operations/index.js";
 export { LOCAL_VENUE_LIMITS } from "./operations/index.js";
+
+// The `lock` verb's own anchor hook (anchor-evidence design §7.2), exported from its module rather
+// than through the operations facade — deliberately, and permanently. The facade's inventory is
+// exactly the operations, which is the invariant `./cli/parity-map.ts` and `./cli/parity.test.ts`
+// depend on; this is a surface helper, like the workspace and journal readers above it. Both
+// shipped surfaces call it after a successful lock so neither can drift into a lock that quietly
+// skips the errand the other performs. It never throws: every anchor outcome is typed, and the
+// operation audits itself.
+export { anchorAfterLockIfConfigured } from "./operations/run-anchor.js";
+export type { AnchorAfterLockOutcome } from "./operations/run-anchor.js";
 
 // BP-40: deletion-portable public bundle verification uses only bundle-carried bytes/public keys.
 export { verifyPublicBundle } from "./bundle/verify.js";
@@ -730,4 +766,4 @@ export { USAGE, runCli } from "./cli/main.js";
 export type { CliContext, CliResult } from "./cli/result.js";
 
 /** The product core's own version, mirrored from package.json. */
-export const PRODUCT_VERSION = "1.0.0";
+export const PRODUCT_VERSION = "0.1.0";
