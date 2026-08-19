@@ -41,22 +41,16 @@ export const REQUIRED_CHECK_SET = Object.freeze([
     workflow: 'platform-architecture-control.yml',
     kind: 'job',
   }),
-  // Posted by operator/scripts/release/post-check-run-verdict.mjs from the
-  // verdict JSON's `context` field. The job display names in that workflow are
-  // deliberately different strings, so no job can shadow this context.
-  //
-  // FORK LIMITATION, recorded here because neither DR-2026-08-18-b nor #2798
-  // records it: the verdict job carries
-  // `github.event.pull_request.head.repo.fork != true`, because a fork PR's
-  // GITHUB_TOKEN is read-only whatever `checks: write` declares, so the
-  // check-run POST would 403 and falsely redden the job. Once this context is
-  // required, that carve-out means a fork PR never reports it and therefore can
-  // never be enqueued. Intended handling: a maintainer re-runs the contribution
-  // from a trusted in-repo branch, where the verdict posts normally.
+  // Native terminal job in hermetic-gate.yml (display `name: hermetic-gate`).
+  // Same producer shape as the other nine required checks, so fork PRs report
+  // the context: the suite needs no secrets, and a job check does not POST
+  // through the Checks API (fork GITHUB_TOKEN is read-only). An API-posted
+  // twin of this name is forbidden — it would skip forks and lock them out of
+  // the merge queue (Permissionless).
   Object.freeze({
     context: 'hermetic-gate',
     workflow: 'hermetic-gate.yml',
-    kind: 'check-run',
+    kind: 'job',
     terminal: true,
   }),
   Object.freeze({

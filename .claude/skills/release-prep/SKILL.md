@@ -5,8 +5,8 @@
 > release-prep's mechanical run-role is **retired** — release validation now runs
 > in CI, not on a laptop. Do not invoke this skill to gate a release. Use:
 >
-> - **`.github/workflows/hermetic-gate.yml`** — deterministic, per-PR; posts the
->   `hermetic-gate` check-run (was Tier 1 + parts of Tier 2/3).
+> - **`.github/workflows/hermetic-gate.yml`** — deterministic, per-PR; the native
+>   `hermetic-gate` job is the check-run (was Tier 1 + parts of Tier 2/3).
 > - **`.github/workflows/environment-suite.yml`** — real testnet, gates the cut;
 >   posts the `environment-suite` check-run (was the real `yarn e2e` phases +
 >   Tier 2 cross-op + Tier 3).

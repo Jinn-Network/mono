@@ -80,9 +80,9 @@ Mechanical checks that fire deterministically against the diff. Each item is eit
 
 - The publish guard queries exactly the two contexts `hermetic-gate` **and** `environment-suite` (no other names), bound to the release SHA, and requires both `success`. It must NOT re-run any test or parse a marker.
 - The `environment-suite` requirement may be waived ONLY via the transitional repo variable `JINN_ENVIRONMENT_SUITE_WAIVED == 'true'`, and the waiver must be logged loudly. `hermetic-gate` is likewise waivable ONLY via the transitional repo variable `JINN_HERMETIC_GATE_WAIVED == 'true'` (in place until the Anvil snapshot fixture lands); both waivers default unset and, when unset, both check-runs are hard-required.
-- The two workflows post their verdicts through the single shared poster `operator/scripts/release/post-check-run-verdict.mjs` with the locked verdict-JSON shape (`{ context, headSha, conclusion, scenarios[], summary }`) and the exact context names above.
+- `environment-suite` posts through the shared poster `operator/scripts/release/post-check-run-verdict.mjs` with the locked verdict-JSON shape (`{ context, headSha, conclusion, scenarios[], summary }`). `hermetic-gate` is the native terminal job of that name in `hermetic-gate.yml` (fork-safe; not API-posted).
 
-Any drift — a third context name, a re-introduced marker parse, a re-run step, a waiver that isn't gated on the repo variable, or a poster bypass — is a finding.
+Any drift — a third context name, a re-introduced marker parse, a re-run step, a waiver that isn't gated on the repo variable, or posting `hermetic-gate` through the Checks API — is a finding.
 
 ## C10 — spec freshness
 
