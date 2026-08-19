@@ -8,7 +8,7 @@ import { browserCommand, runColophonCli, writeQuickstartCompanions } from "./mai
 
 const TEST_BUILD: ColophonBuildMetadata = {
   kind: BUILD_METADATA_KIND,
-  packageVersion: "1.0.0",
+  packageVersion: "0.1.0",
   sourceCommit: "b".repeat(40),
   qualifiedTargets: ["darwin/arm64", "linux/x64"],
 };

@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Describes one row of verification/assembly.jsonl (format benchmark-product-assembly/2): the first row is the run header, every following row is one matrix cell. Source of truth: BundleAssemblyHeaderSchema and BundleAssemblyCellSchema in @colophon-claims/verify src/schema.ts (open objects there, so unknown members are permitted here). The verifier additionally requires each row to be canonical JSON, cellKeys to be unique, and the graph edges to close exactly against the content-addressed records, the matrix, and the verdict catalog.",
+  "description": "One JSONL row of a benchmark-product public bundle's verification assembly.",
+  "oneOf": [
+    { "$ref": "#/$defs/header" },
+    { "$ref": "#/$defs/cell" }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "namedOutput": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "required": ["name", "sha256"]
+    },
+    "verdict": {
+      "type": "object",
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "relationship": { "enum": ["same-execution-scorer", "separate-log-verifier"] },
+        "evalTaskSha256": { "$ref": "#/$defs/sha256" },
+        "evalSubmissionSha256": { "$ref": "#/$defs/sha256" },
+        "evalDeliverySha256": { "$ref": "#/$defs/sha256" },
+        "evalAttempt": { "type": "string", "minLength": 1 },
+        "evalIndex": { "type": "integer", "minimum": 1 },
+        "evaluator": { "type": "string", "minLength": 1 },
+        "verdict": { "enum": ["pass", "fail", "inconclusive"] },
+        "evaluationSpecSha256": { "$ref": "#/$defs/sha256" },
+        "measurements": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        }
+      },
+      "required": ["sha256", "evalIndex", "evaluator", "verdict", "evaluationSpecSha256", "measurements"]
+    },
+    "header": {
+      "type": "object",
+      "properties": {
+        "format": { "const": "benchmark-product-assembly/2" },
+        "kind": { "const": "run" },
+        "runCancelled": { "type": "boolean" },
+        "draftId": { "type": "string", "minLength": 1 },
+        "assurancePreset": { "type": "string", "minLength": 1 },
+        "rehearsal": {
+          "type": "object",
+          "properties": {
+            "previewCount": { "type": "integer", "minimum": 1 },
+            "timestamps": {
+              "type": "array",
+              "items": { "type": "string", "format": "date-time" },
+              "minItems": 1
+            }
+          },
+          "required": ["previewCount", "timestamps"]
+        },
+        "graph": {
+          "type": "object",
+          "properties": {
+            "admissions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "taskSha256": { "$ref": "#/$defs/sha256" },
+                  "receiptSha256": { "$ref": "#/$defs/sha256" }
+                },
+                "required": ["taskSha256", "receiptSha256"]
+              }
+            },
+            "solveSubmissions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "cellKey": { "type": "string", "minLength": 1 },
+                  "dispatch": { "type": "integer", "minimum": 1 },
+                  "sha256": { "$ref": "#/$defs/sha256" },
+                  "pinningEvidenceSha256": { "$ref": "#/$defs/sha256" }
+                },
+                "required": ["cellKey", "dispatch", "sha256"]
+              }
+            },
+            "evaluationSubmissions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "cellKey": { "type": "string", "minLength": 1 },
+                  "dispatch": { "type": "integer", "minimum": 1 },
+                  "evalIndex": { "type": "integer", "minimum": 1 },
+                  "evaluationAttempt": { "type": "integer", "minimum": 1 },
+                  "evaluator": { "type": "string", "minLength": 1 },
+                  "evalTaskSha256": { "$ref": "#/$defs/sha256" },
+                  "sha256": { "$ref": "#/$defs/sha256" }
+                },
+                "required": ["cellKey", "dispatch", "evalIndex", "evaluator", "evalTaskSha256", "sha256"]
+              }
+            },
+            "solveDeliveries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "cellKey": { "type": "string", "minLength": 1 },
+                  "dispatch": { "type": "integer", "minimum": 1 },
+                  "attempt": { "type": "string", "minLength": 1 },
+                  "sha256": { "$ref": "#/$defs/sha256" },
+                  "outputs": { "type": "array", "items": { "$ref": "#/$defs/namedOutput" } }
+                },
+                "required": ["cellKey", "dispatch", "attempt", "sha256", "outputs"]
+              }
+            },
+            "evaluations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "cellKey": { "type": "string", "minLength": 1 },
+                  "evalIndex": { "type": "integer", "minimum": 1 },
+                  "evaluationAttempt": { "type": "integer", "minimum": 1 },
+                  "relationship": { "enum": ["same-execution-scorer", "separate-log-verifier"] },
+                  "evaluator": { "type": "string" },
+                  "evalTaskSha256": { "$ref": "#/$defs/sha256" },
+                  "evalSubmissionSha256": { "$ref": "#/$defs/sha256" },
+                  "evalAttempt": { "type": "string" },
+                  "evalDeliverySha256": { "$ref": "#/$defs/sha256" },
+                  "verdictSha256": { "$ref": "#/$defs/sha256" },
+                  "evaluationTerminal": { "const": "could-not-grade" }
+                },
+                "required": ["cellKey", "evalIndex"]
+              }
+            },
+            "evaluationRetries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "cellKey": { "type": "string", "minLength": 1 },
+                  "dispatch": { "type": "integer", "minimum": 1 },
+                  "evalIndex": { "type": "integer", "minimum": 1 },
+                  "evaluationAttempt": { "type": "integer", "minimum": 1 },
+                  "evaluator": { "type": "string", "minLength": 1 },
+                  "evalTaskSha256": { "$ref": "#/$defs/sha256" },
+                  "evalSubmissionSha256": { "$ref": "#/$defs/sha256" },
+                  "evalAttempt": { "type": "string", "minLength": 1 },
+                  "failureCategory": { "type": "string", "minLength": 1 },
+                  "recoveryAdvice": { "const": "new-attempt-required" },
+                  "detail": { "type": "string", "minLength": 1 }
+                },
+                "required": ["cellKey", "dispatch", "evalIndex", "evaluationAttempt", "evaluator", "failureCategory", "recoveryAdvice", "detail"]
+              }
+            }
+          },
+          "required": ["admissions", "solveSubmissions", "evaluationSubmissions", "solveDeliveries", "evaluations"]
+        }
+      },
+      "required": ["format", "kind", "runCancelled", "draftId", "assurancePreset", "graph"]
+    },
+    "cell": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "cell" },
+        "cellKey": { "type": "string", "minLength": 1 },
+        "armId": { "type": "string", "minLength": 1 },
+        "replicate": { "type": "integer", "minimum": 1 },
+        "taskDigest": { "$ref": "#/$defs/sha256" },
+        "dispatches": { "type": "integer", "minimum": 0 },
+        "accounted": { "type": "integer", "minimum": 1 },
+        "submissionSha256": { "$ref": "#/$defs/sha256" },
+        "pinningEvidenceSha256": { "$ref": "#/$defs/sha256" },
+        "attempt": { "type": "string", "minLength": 1 },
+        "deliverySha256": { "$ref": "#/$defs/sha256" },
+        "solveOutputs": { "type": "array", "items": { "$ref": "#/$defs/namedOutput" } },
+        "evaluationSpecSha256": { "$ref": "#/$defs/sha256" },
+        "evaluationTerminal": { "const": "could-not-grade" },
+        "admission": {
+          "type": "object",
+          "properties": {
+            "zeroReplayVariance": { "type": "boolean" },
+            "externalCapabilities": { "type": "boolean" }
+          },
+          "required": ["zeroReplayVariance", "externalCapabilities"]
+        },
+        "admissionReceiptSha256": { "$ref": "#/$defs/sha256" },
+        "verdicts": { "type": "array", "items": { "$ref": "#/$defs/verdict" } }
+      },
+      "required": ["kind", "cellKey", "armId", "replicate", "taskDigest", "dispatches", "verdicts"]
+    }
+  }
+}

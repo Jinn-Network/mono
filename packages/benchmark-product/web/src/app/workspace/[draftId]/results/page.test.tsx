@@ -122,8 +122,8 @@ function reportedView() {
             limitations: ["Local self-run venue."],
             venueHonesty: { venue: "self-run" },
             verification: {
-              command: "npx @colophon-claims/verify@1.0.0 <bundle-dir>",
-              compatibleCommand: "npx @colophon-claims/verify@1 <bundle-dir>",
+              command: "npx @colophon-claims/verify@0.1.0 <bundle-dir>",
+              compatibleCommand: "npx @colophon-claims/verify@0.1 <bundle-dir>",
               checks: ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
               trustRoot: "Workspace-local report key.",
             },
@@ -307,8 +307,8 @@ describe("semantic results and report surface", () => {
     expect(markup).toContain("direct-check");
     expect(markup).toContain("Agent-distinctness is not party-independence.");
     expect(markup).toContain("Preview count");
-    expect(markup).toContain("npx @colophon-claims/verify@1.0.0 &lt;bundle-dir&gt;");
-    expect(markup).toContain("npx @colophon-claims/verify@1 &lt;bundle-dir&gt;");
+    expect(markup).toContain("npx @colophon-claims/verify@0.1.0 &lt;bundle-dir&gt;");
+    expect(markup).toContain("npx @colophon-claims/verify@0.1 &lt;bundle-dir&gt;");
     expect(markup).toContain("colophon verify --workspace");
     expect(markup).toContain("Workspace-local report key.");
     expect(markup).toContain("Run verification before relying on the signature.");

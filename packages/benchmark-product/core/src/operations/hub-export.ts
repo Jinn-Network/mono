@@ -90,7 +90,14 @@ export function exportHarborHubPackage(
     action: "runtime.harbor.hub-export",
     subject: input.draftId,
     inputs: input,
-    run: () => {
+    run: () => executeExportHarborHubPackage(context, input),
+  });
+}
+
+export function executeExportHarborHubPackage(
+  context: OperationContext,
+  input: ExportHarborHubPackageInput,
+): ExportHarborHubPackageResult {
       const document = readDraftDocument(context.workspaceDir, input.draftId);
       if (!document.spec.arms.some((arm) => arm.armId === input.armId)) {
         refuse("not-found", `drafts.${input.draftId}.spec.arms.${input.armId}`, "draft has no such arm");
@@ -143,6 +150,4 @@ export function exportHarborHubPackage(
       const instructions = harborHubExportInstructions(mode, join(exportDir, "job"), protocol);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, jobDir, exportDir };
-    },
-  });
 }

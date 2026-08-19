@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Describes trust/public-keys.json, format benchmark-product-public-trust/2. Source of truth: BundleTrustSchema in @colophon-claims/verify src/schema.ts (an open object there, so unknown members are permitted here). The verifier additionally requires canonical JSON bytes, an Ed25519 SPKI that parses, report keyId == didKey == did:key derived from the SPKI, and evaluator keyId == 'benchmark-product-verdict-' + first 16 hex of sha256(SPKI DER). Schema validity does not imply verification, and these keys are bundle-carried: they prove signature consistency with the identities the bundle itself names, never third-party custody.",
+  "description": "Bundle-carried public trust material for a self-run benchmark-product public bundle (format benchmark-product-public-trust/2).",
+  "type": "object",
+  "properties": {
+    "format": { "const": "benchmark-product-public-trust/2" },
+    "selfRun": {
+      "type": "object",
+      "properties": {
+        "custody": { "const": "workspace-minted" },
+        "evaluatorDistinctness": { "const": "agent-distinctness-only" },
+        "partyIndependence": { "const": "not-established" }
+      },
+      "required": ["custody", "evaluatorDistinctness", "partyIndependence"]
+    },
+    "report": {
+      "type": "object",
+      "properties": {
+        "keyId": { "type": "string", "minLength": 1 },
+        "algorithm": { "const": "ed25519" },
+        "spkiDerBase64": { "type": "string", "minLength": 1 },
+        "author": { "type": "string", "minLength": 1 },
+        "didKey": { "type": "string", "minLength": 1 },
+        "validFrom": { "type": "string", "format": "date-time" }
+      },
+      "required": ["keyId", "algorithm", "spkiDerBase64", "author", "didKey", "validFrom"]
+    },
+    "evaluators": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "keyId": { "type": "string", "minLength": 1 },
+          "algorithm": { "const": "ed25519" },
+          "spkiDerBase64": { "type": "string", "minLength": 1 },
+          "evaluator": { "type": "string", "minLength": 1 }
+        },
+        "required": ["keyId", "algorithm", "spkiDerBase64", "evaluator"]
+      }
+    }
+  },
+  "required": ["format", "selfRun", "report", "evaluators"]
+}

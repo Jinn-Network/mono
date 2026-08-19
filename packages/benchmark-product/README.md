@@ -45,7 +45,7 @@ local immutable bundle emission only.
 The intended packaged command is:
 
 ```bash
-npx @colophon-claims/cli@1
+npx @colophon-claims/cli@0.1
 ```
 
 It runs the bundled zero-credential comparison, retains its copied bundle and
@@ -55,8 +55,11 @@ a registry command because the packages have not been published.
 For a received bundle, the smaller reader surface is:
 
 ```bash
-npx @colophon-claims/verify@2 ./bundle
+npx @colophon-claims/verify@0.1 ./bundle
 ```
+
+To verify a bundle with tools that are not ours, see
+[`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).
 
 The contributor proof remains available from the mono:
 
@@ -134,6 +137,27 @@ operator host between lock and export — `run launch` refuses the
 not part of default `yarn test`. Procedure, receipt checklist, and the
 fail-closed `yarn apex-swe-dev-one-task-qualify` gate:
 [docs/runbooks/apex-swe-dev-official-one-task.md](../../docs/runbooks/apex-swe-dev-official-one-task.md).
+
+## DeepSWE v1.1 `one_task` operator qualify
+
+An operator-only campaign against the git-pinned DeepSWE v1.1 `tasks/` tree
+with real Pier 0.3.1.x, Docker or Modal, and two `mini-swe-agent` arms. It
+proves protocol identity (`one_task`, conforming, not leaderboard-ready,
+Datacurve email export is inspection-only). It does not download the 113-task
+tree in CI and is not part of default `yarn test`. Procedure and the
+fail-closed `yarn deepswe-v1.1-one-task-qualify` gate:
+[docs/runbooks/deepswe-v1.1-official-one-task.md](../../docs/runbooks/deepswe-v1.1-official-one-task.md).
+
+## Inspect eval `one_task` operator qualify
+
+An operator-only campaign against an in-repo Inspect Task (`hermetic_eval`,
+samples `alpha` / `bravo`) with local Python and `inspect-ai==0.3.255`. It
+proves protocol identity (`one_task` = one sample, conforming, not eval
+complete, View export `inspection-upload`). It does not download GAIA, Cybench,
+or other large eval datasets, and is not part of default `yarn test`.
+Procedure, receipt checklist, and the fail-closed
+`yarn inspect-eval-one-task-qualify` gate:
+[docs/runbooks/inspect-eval-one-task.md](../../docs/runbooks/inspect-eval-one-task.md).
 
 ## Product surfaces
 

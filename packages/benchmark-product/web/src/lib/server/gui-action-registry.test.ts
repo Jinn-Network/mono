@@ -13,30 +13,10 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires local signed-review, roster, and licensed truth evidence files",
   bindInspectBinaryJudge:
     "requires machine-local OCI runtime paths and pre-sealed instrument digests; browser-supplied paths are forbidden",
-  selectHarborRuntime:
-    "requires server-configured Harbor host paths; browser-supplied paths are forbidden",
-  selectTerminalBench2Runtime:
-    "requires server-configured Terminal-Bench and Harbor host paths; browser-supplied paths are forbidden",
-  selectTerminalBench21Runtime:
-    "requires server-configured Terminal-Bench 2.1 and Harbor host paths; browser-supplied paths are forbidden",
-  selectTerminalBench30Runtime:
-    "requires server-configured Terminal-Bench 3.0 and Harbor host paths; browser-supplied paths are forbidden",
-  selectSwebenchVerifiedRuntime:
-    "requires server-configured SWE-bench Verified harness paths; browser-supplied paths are forbidden",
-  selectApexAgentsRuntime:
-    "requires server-configured APEX-Agents Archipelago paths; browser-supplied paths are forbidden",
-  selectApexSweDevRuntime:
-    "requires server-configured APEX-SWE-dev host paths; browser-supplied paths are forbidden",
   migrateTerminalBenchLegacyTask:
     "requires server-configured migration input paths; browser-supplied paths are forbidden",
-  exportHarborHubPackage:
-    "copies a machine-local Harbor job directory; browser path-based job export is forbidden",
-  exportSwebenchPredictions:
-    "copies machine-local predictions and harness reports; browser path-based export is forbidden",
-  exportApexAgentsInspection:
-    "copies machine-local Archipelago grades; browser path-based export is forbidden",
-  exportApexSwePackage:
-    "copies machine-local Mercor harness JSON; browser path-based export is forbidden",
+  exportDerivedBundle:
+    "copies a machine-local job or log directory; browser path-based export is forbidden",
 } as const;
 
 describe("generated library / CLI / GUI parity", () => {
@@ -55,11 +35,6 @@ describe("generated library / CLI / GUI parity", () => {
         expect(GUI_SERVER_ACTIONS).not.toHaveProperty(operation);
       }
     }
-
-    // The anchor surface is shipped on both sides, not silently CLI-only: its endpoint is server
-    // configuration, which is exactly what makes a GUI action safe to offer.
-    expect(GUI_CAPABILITY_CATALOG.runAnchor).toEqual({ status: "shipped", action: "run.anchor" });
-    expect(GUI_CAPABILITY_CATALOG.anchoringConfigure).toEqual({ status: "shipped", action: "anchoring.configure" });
 
     const unavailableReasons = Object.fromEntries(
       Object.entries(GUI_CAPABILITY_CATALOG)

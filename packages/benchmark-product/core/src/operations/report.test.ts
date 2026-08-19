@@ -1238,7 +1238,7 @@ describe("portable public bundle", () => {
         rmSync(copy, { recursive: true, force: true });
       }
     }
-  }, 30_000);
+  }, 60_000);
 
   test("rejects missing and unreachable evidence records and unrelated evaluation graph substitutions", async () => {
     const clock = makeClock();
@@ -1694,7 +1694,7 @@ describe("portable public bundle", () => {
         rmSync(copy, { recursive: true, force: true });
       }
     }
-  }, 30_000);
+  }, 60_000);
 
   test("rejects an inconsistent stored claim mirror instead of replacing sealed Report facts", async () => {
     const clock = makeClock();

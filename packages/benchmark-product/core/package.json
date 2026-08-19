@@ -1,6 +1,6 @@
 {
   "name": "@colophon-claims/core",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Core of the standalone benchmark product (internal codename benchmark-product): the Tier 4 product domain — workspace, draft model, lifecycle, audit journal, principals/authority, the operations-library facade, and the CLI agent surface.",
   "publishConfig": {
     "access": "public"
@@ -47,6 +47,8 @@
     "swebench-verified-one-task-qualify": "node scripts/swebench-verified-one-task-qualify.mjs",
     "apex-agents-one-task-qualify": "node scripts/apex-agents-one-task-qualify.mjs",
     "apex-swe-dev-one-task-qualify": "node scripts/apex-swe-dev-one-task-qualify.mjs",
+    "deepswe-v1.1-one-task-qualify": "node scripts/deepswe-v1.1-one-task-qualify.mjs",
+    "inspect-eval-one-task-qualify": "node scripts/inspect-eval-one-task-qualify.mjs",
     "t1:cold:lifecycle": "node ../../../.github/scripts/benchmark-product-packed-types.test.mjs --t1-cold-lifecycle",
     "generate:parity": "node scripts/generate-parity-matrix.mjs",
     "check:parity": "node scripts/generate-parity-matrix.mjs --check",
@@ -62,7 +64,7 @@
     "prepack": "yarn build"
   },
   "dependencies": {
-    "@colophon-claims/verify": "2.0.0",
+    "@colophon-claims/verify": "0.1.0",
     "@fontsource-variable/newsreader": "5.3.0",
     "@fontsource-variable/public-sans": "5.3.0",
     "@fontsource/ibm-plex-mono": "5.3.0",

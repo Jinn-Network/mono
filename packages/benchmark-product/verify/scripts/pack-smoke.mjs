@@ -17,6 +17,11 @@ try {
     "package/dist/admission/index.d.ts",
     "package/dist/profile/binary-judge-manifest.js",
     "package/dist/reader-instructions.js",
+    // The external verification surface: the published schemas and the
+    // dependency-free reference script must actually reach the tarball.
+    "package/schemas/claim-package.schema.json",
+    "package/schemas/dsse-envelope.schema.json",
+    "package/scripts/external-verify.py",
   ]) {
     if (!listing.includes(required)) throw new Error(`packed verifier is missing ${required}`);
   }
@@ -34,7 +39,7 @@ try {
     throw new Error(`packed verifier carries test modules: ${packedTests.join(", ")}`);
   }
   const manifest = JSON.parse((await run("tar", ["-xOzf", archive, "package/package.json"])).stdout);
-  if (manifest.name !== "@colophon-claims/verify" || manifest.version !== "2.0.0") {
+  if (manifest.name !== "@colophon-claims/verify" || manifest.version !== "0.1.0") {
     throw new Error("packed verifier identity/version drifted");
   }
   if (manifest.exports?.["./admission"] === undefined) {

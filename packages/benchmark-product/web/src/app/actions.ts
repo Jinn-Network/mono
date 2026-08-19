@@ -1,7 +1,9 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { redirect } from "next/navigation";
 import {
   anchorAfterLockIfConfigured,
@@ -39,12 +41,11 @@ import {
   runResults,
   runVerify,
   sampleInit,
-  selectInspectEvaluation,
+  selectMethod,
   profileArmPinning,
   readAgentProfile,
   updateDraft,
   verifyPublicBundle,
-  type SelectInspectEvaluationInput,
 } from "@colophon-claims/core";
 import type { GuiActionState } from "@/lib/action-state";
 import {
@@ -240,14 +241,23 @@ export async function intakeSweBenchAction(_previous: GuiActionState, formData: 
   }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
 }
 
-export async function inspectRuntimeSelectAction(
+export async function methodBindAction(
   _previous: GuiActionState,
   formData: FormData,
 ): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
-  const configuration = jsonField(formData, "configuration") as Omit<SelectInspectEvaluationInput, "draftId">;
+  const configuration = jsonField(formData, "configuration");
   return executeOperation(
-    (context) => selectInspectEvaluation(context, { draftId, ...configuration } as SelectInspectEvaluationInput),
+    async (context) => {
+      const dir = mkdtempSync(join(tmpdir(), "colophon-method-"));
+      try {
+        const filePath = join(dir, "inspect.json");
+        writeFileSync(filePath, JSON.stringify(configuration));
+        return await selectMethod(context, { draftId, ref: filePath, cwd: dir });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
     { revalidate: ["/workspace", `/workspace/${draftId}`] },
   );
 }

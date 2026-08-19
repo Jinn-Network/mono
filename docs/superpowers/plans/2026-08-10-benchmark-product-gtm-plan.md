@@ -1,7 +1,7 @@
 # Benchmark Product: High-Level Go-to-Market Plan
 
 **Status:** Working strategy draft  
-**Version:** 0.4 (2026-08-18 — APEX-SWE-dev named protocol per [DR-2026-08-18-c](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md); APEX-Agents named protocol per [DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md); TB 3.0 named protocol pointer per [DR-2026-08-18-b](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md); 2026-08-17 — TB 2.1 named protocol vs Inspect select-a-task per [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md); engine-wrap vs campaign-overlay copy per [DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md); 2026-08-10 — §6 discovery gate rewritten commitment-gated per [DR-2026-08-10](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md); §10 Phase 1 aligned; authority note routed through the DR. v0.1 circulated outside the repo.)  
+**Version:** 0.5 (2026-08-18 — one method operand per [DR-2026-08-18-f](../../../log/decisions/2026-08-18-colophon-method-cli.md); Inspect eval named protocol vs Inspect-task select per [DR-2026-08-18-e](../../../log/decisions/2026-08-18-inspect-as-specified.md); APEX-SWE-dev named protocol per [DR-2026-08-18-c](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md); APEX-Agents named protocol per [DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md); TB 3.0 named protocol pointer per [DR-2026-08-18-b](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md); 2026-08-17 — TB 2.1 named protocol vs Inspect select-a-task per [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md); engine-wrap vs campaign-overlay copy per [DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md); 2026-08-10 — §6 discovery gate rewritten commitment-gated per [DR-2026-08-10](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md); §10 Phase 1 aligned; authority note routed through the DR. v0.1 circulated outside the repo.)  
 **Work shape:** `design`  
 **Date:** 2026-08-10  
 **Repository basis:** `integration/evidence-v1` is the canonical implementation branch. PR #2541 is the current standalone Benchmark Product candidate and remains open against that branch at the time of writing.
@@ -363,35 +363,31 @@ The success event is not account creation. It is:
 
 ### 8.3 Open evaluation ecosystem
 
-A first-class Inspect integration can be a major acquisition channel:
+One intake, one derived export. Official suites are catalog presets of the same lock path; a path is a method document. Frameworks are not alternatives ([DR-2026-08-18-f](../../../log/decisions/2026-08-18-colophon-method-cli.md)):
 
-> **Select a supported Inspect task. Colophon expands it into a locked multi-arm comparison and runs each cell through Inspect.**
+> **Lock a method — a named suite or a file. Colophon accounts every cell and publishes a checkable bundle. Inspect and Harbor are frameworks that method may name, not Colophon product modes. Derived export is for their submit flow, not the claim of record.**
+
+Do not stack one slogan per suite. Do not present Inspect vs Harbor as rival doors. `adapterId` is how a cell is spawned, not a UX fork. Wearing Terminal-Bench 2.1 still means Harbor's specified method, not any Inspect wrap. Officialness is the sealed document (suite protocol present and conforming), not which CLI operand you passed.
+
+That Inspect-task door stays. It does not wear the Inspect eval suite name.
+
+Inspect eval is a different Inspect door: a **named official protocol** Colophon wraps, not Hub-as-the-claim ([DR-2026-08-18-e](../../../log/decisions/2026-08-18-inspect-as-specified.md)):
+
+> **Lock this Inspect eval as specified. Colophon runs each sample × specified epochs as Jinn cells, accounts every cell, and publishes a checkable bundle. An Inspect View log bundle is a derived artifact, not an Inspect Hub row and not the claim of record.**
 
 The product should complement the open-source evaluation ecosystem by keeping Inspect as the trial engine, not by pretending the Inspect eval-set is the published claim.
 
-Terminal-Bench 2.1 is a different door: a **named official protocol** Colophon wraps, not a select-a-task overlay and not Hub-as-the-claim ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)):
-
-> **Lock the official Terminal-Bench 2.1 method. Colophon runs Harbor under that lock, accounts every cell, and publishes a checkable bundle. Hub export is a derived artifact for their submit flow, not the claim of record.**
-
-Terminal-Bench 3.0 is a second named Harbor-family protocol on dataset `terminal-bench/terminal-bench`, sealed by content-hash, never `@latest` ([DR-2026-08-18-b](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)). A 2.1 lock cannot wear the 3.0 name.
-
-A cousin method on TB tasks must not wear the suite name. A protocol-faithful slice is not a leaderboard-complete run. Copy must not claim Colophon placed a Hub row.
-
-SWE-bench Verified is a third door: a **named official evaluation protocol** Colophon wraps, not a rename of `import swebench` + swe-rebench ([DR-2026-08-17-e](../../../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)):
-
-> **Lock the official SWE-bench Verified method. Colophon solve arms emit patches; their harness grades. Predictions export is a derived artifact for their submit flow, not the claim of record.**
-
-A cousin swe-rebench run must not wear the Verified name. A protocol-faithful slice is not a leaderboard-complete run. Copy must not claim Colophon placed a swebench.com row.
-
-APEX-Agents is a fourth door: a **named official evaluation protocol** Colophon wraps, not Stirrup, not Harbor, and not Inspect on APEX tasks ([DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md)):
-
-> **Lock the official APEX-Agents method. Archipelago owns the cell. Inspection export is a derived artifact, not the claim of record. Colophon does not place the Mercor row.**
-
-A cousin Stirrup, Code, Harbor, Inspect, or k=8 run must not wear the APEX-Agents name. A protocol-faithful slice is not a leaderboard-complete run. Copy must not claim Colophon placed a Mercor row.
+Named protocols keep their honesty rules. Terminal-Bench 2.1 is Harbor under that lock, Hub export derived ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)). Terminal-Bench 3.0 is a second Harbor-family protocol on dataset `terminal-bench/terminal-bench`, content-hash pin, never `@latest`; a 2.1 lock cannot wear the 3.0 name ([DR-2026-08-18-b](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)). SWE-bench Verified is not a rename of `import swebench` + swe-rebench ([DR-2026-08-17-e](../../../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)). APEX-Agents is Archipelago end-to-end, not Stirrup, Harbor, or Inspect on APEX tasks ([DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md)). A cousin method cannot wear the suite name. A protocol-faithful slice is not a leaderboard-complete run. Copy must not claim Colophon placed a Hub, swebench.com, or Mercor row.
 
 APEX-SWE-dev is a third named protocol: wrap both Mercor harnesses on the public 50, Pass@1, never a Mercor leaderboard row ([DR-2026-08-18-c](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md)):
 
 > **Lock the official APEX-SWE-dev method. Colophon wraps Mercor's apx and run_e2e under that lock. The public 50 cannot wear the 200-task APEX-SWE leaderboard.**
+
+DeepSWE v1.1 is the same door with a different engine ([DR-2026-08-18-d](../../../log/decisions/2026-08-18-deep-swe-v1.1-official-suite.md)):
+
+> **Lock the official DeepSWE v1.1 method. Colophon runs Pier + mini-swe-agent under that lock, accounts every cell, and publishes a checkable bundle. Pier export is a derived artifact for Datacurve email, not the claim of record.**
+
+Harbor 0.21, Pier+Claude Code/Codex, DeepSWE v1, and k=1 must not wear the DeepSWE v1.1 name. Copy must not claim Colophon placed a Datacurve row.
 
 Potential distribution surfaces include:
 
@@ -651,6 +647,6 @@ Each campaign creates the foundation for Jinn Data and the later query product.
 
 ## Authority note
 
-Engine-wrap vs campaign-overlay copy in §3, §8.1, §8.3, and §15 is governed by [DR-2026-08-17 — Runtime engine direct mode](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md). TB 2.1 named-protocol copy in §8.3 is governed by [DR-2026-08-17-b — Official suite protocol](../../../log/decisions/2026-08-17-official-suite-protocol.md). TB 3.0 named-protocol copy in §8.3 is governed by [DR-2026-08-18-b — Terminal-Bench 3.0 official suite](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md). APEX-SWE-dev named-protocol copy in §8.3 is governed by [DR-2026-08-18-c — Official suite protocol (APEX-SWE-dev)](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md). `GROWTH.md` is unchanged.
+Engine-wrap vs campaign-overlay copy in §3, §8.1, §8.3, and §15 is governed by [DR-2026-08-17 — Runtime engine direct mode](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md). TB 2.1 named-protocol copy in §8.3 is governed by [DR-2026-08-17-b — Official suite protocol](../../../log/decisions/2026-08-17-official-suite-protocol.md). TB 3.0 named-protocol copy in §8.3 is governed by [DR-2026-08-18-b — Terminal-Bench 3.0 official suite](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md). APEX-SWE-dev named-protocol copy in §8.3 is governed by [DR-2026-08-18-c — Official suite protocol (APEX-SWE-dev)](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md). DeepSWE v1.1 named-protocol copy in §8.3 is governed by [DR-2026-08-18-d — Official suite protocol (DeepSWE v1.1)](../../../log/decisions/2026-08-18-deep-swe-v1.1-official-suite.md). Inspect eval named-protocol copy in §8.3 is governed by [DR-2026-08-18-e — Inspect eval](../../../log/decisions/2026-08-18-inspect-as-specified.md). One-method-operand copy in §8.3 is governed by [DR-2026-08-18-f — Colophon method operand](../../../log/decisions/2026-08-18-colophon-method-cli.md). `GROWTH.md` is unchanged.
 
 The current `integration/evidence-v1` version of `GROWTH.md` encodes a harness-first strategy, and the standalone product design lineage (charter §5, program plan §3, PR #2541) fixes coding-agent builders as the first market. This draft departs from both. The departures are proposed — not silently applied — through [DR-2026-08-10 — Product-Led GTM and Default First Market](../../../log/decisions/2026-08-10-product-led-gtm-and-first-market.md): the GROWTH.md strategy-layer revision routes through the canonical-doc process (linked GitHub Discussion + CODEOWNERS approval per `spec/2026-04-28-canonical-docs.md`), and the first-market amendment lands as a dated addendum on the program plan at ratification. Until the DR ratifies, GROWTH.md and the program plan remain authoritative as written.

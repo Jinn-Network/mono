@@ -86,20 +86,19 @@ parseEnvelope(await colophon(["init", ...common, "--json"]));
 parseEnvelope(await colophon(["draft", "create", ...common, "--id", draftId, "--name", draftId, "--json"]));
 parseEnvelope(await colophon(["arm", "add", ...common, "--draft", draftId, "--arm", "one", "--pinning", JSON.stringify({ harness: { id: "placeholder", version: "1" } }), "--json"]));
 
-const selectionPath = join(workspace, "selection.json");
-writeFileSync(selectionPath, JSON.stringify({
+const hostPath = join(workspace, "host.json");
+writeFileSync(hostPath, JSON.stringify({
   executable: python,
   registryMetadataPath,
-  coverage: "one_task",
   arms: [{ armId: "one", modelNameOrPath: "one" }],
 }, null, 2));
-parseEnvelope(await colophon(["runtime", "swe-bench-verified", "select", ...common, "--draft", draftId, "--file", selectionPath, "--json"]));
+parseEnvelope(await colophon(["method", "swe-bench-verified", ...common, "--draft", draftId, "--slice", "1", "--host", hostPath, "--json"]));
 const quoted = parseEnvelope(await colophon(["quote", ...common, "--draft", draftId, "--json"]));
 if (quoted.presentation?.suite?.coverage !== "one_task") fail(`expected one_task, got ${quoted.presentation?.suite?.coverage}`);
 if (quoted.presentation?.suite?.executionConformance !== true) fail("expected executionConformance true");
 if (quoted.presentation?.suite?.leaderboardSubmitReady !== false) fail("one_task must not be leaderboardSubmitReady");
 parseEnvelope(await colophon(["lock", ...common, "--draft", draftId, "--json"]));
-const exported = parseEnvelope(await colophon(["swebench", "export", ...common, "--draft", draftId, "--arm", "one", "--json"]));
+const exported = parseEnvelope(await colophon(["export", ...common, "--draft", draftId, "--arm", "one", "--json"]));
 if (exported.mode !== "inspection-upload") fail(`expected inspection-upload, got ${exported.mode}`);
 if (!String(exported.instructions).includes(SWE_BENCH_VERIFIED_SUBMIT_CLOSED_SENTENCE)) {
   fail("export instructions must say Colophon does not place the swebench.com row");

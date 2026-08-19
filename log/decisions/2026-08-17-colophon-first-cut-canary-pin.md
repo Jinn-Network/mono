@@ -108,3 +108,17 @@ not flip them.
   spec origin.
 - The 2026-08-15 plan's "Colophon waits on the first stable cut" line is
   superseded for this first cut only.
+
+## Observed first-cut pin (2026-08-18)
+
+Stack npm Publish run 32128150291 (merge of PR #2788) published both
+stack-published groups at SHA `05ab5a98a8b30392ca448de12748b19b0c947684`.
+Colophon Increment 1 pins:
+
+`0.1.0-canary.sha.05ab5a98a8b30392ca448de12748b19b0c947684`
+
+`latest` on those `@jinn-network/*` packages remains bootstrap `0.0.0`.
+`PLATFORM_CANARY_PUBLISH_ENABLED` is already true. Increment 1 moves only
+`@colophon-claims/verify` to release group `colophon-claims-v1` with
+`publishPolicy: independent` in the same product-workflow change. core, cli,
+and web stay `never`.

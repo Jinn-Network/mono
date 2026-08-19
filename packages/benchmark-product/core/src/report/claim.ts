@@ -61,9 +61,9 @@ export const BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.c
  */
 export const ANCHORED_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/4";
 export const BINARY_QUALIFICATION_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@2.0.0 <bundle-dir>" as const;
+  "npx @colophon-claims/verify@0.1.0 <bundle-dir>" as const;
 export const BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@2 <bundle-dir>" as const;
+  "npx @colophon-claims/verify@0.1 <bundle-dir>" as const;
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/, "must be a lowercase sha256 hex digest");
 
@@ -261,7 +261,7 @@ const ClaimPackageWireSchema = z.object({
       claim.verification.command !== PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
       || claim.verification.compatibleCommand !== PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
     ) {
-      ctx.addIssue({ code: "custom", message: "anchored claim package must pin verifier 2.0.0/@2", path: ["verification"] });
+      ctx.addIssue({ code: "custom", message: "anchored claim package must pin verifier 0.1.0/@0.1", path: ["verification"] });
     }
     if (
       claim.verification.checks.length !== READER_ANCHORED_VERIFICATION_CHECKS.length
@@ -337,7 +337,7 @@ const ClaimPackageWireSchema = z.object({
     claim.verification.command !== BINARY_QUALIFICATION_VERIFICATION_COMMAND
     || claim.verification.compatibleCommand !== BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
   ) {
-    ctx.addIssue({ code: "custom", message: "binary claim package must pin verifier 2.0.0/@2", path: ["verification"] });
+    ctx.addIssue({ code: "custom", message: "binary claim package must pin verifier 0.1.0/@0.1", path: ["verification"] });
   }
   if (
     claim.verification.checks.length !== READER_VERIFICATION_CHECKS.length

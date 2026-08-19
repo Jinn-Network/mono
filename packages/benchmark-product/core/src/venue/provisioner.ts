@@ -58,7 +58,9 @@ import {
 } from "../runtime/inspect/artifacts.js";
 import type { InspectHostBinding } from "../runtime/inspect/host.js";
 import { resolveHarborMaterial, type HarborHostBinding } from "../runtime/harbor/host.js";
-import type { InspectSelectionManifest } from "../runtime/inspect/manifest.js";
+import { InspectSelectionManifestSchema, type InspectSelectionManifest } from "../runtime/inspect/manifest.js";
+import type { InspectEvalSelectionManifest } from "../runtime/inspect-eval/manifest.js";
+import { overlayInspectEvalCell } from "../runtime/inspect-eval/overlay.js";
 import {
   INSPECT_BINARY_JUDGE_CONFIG_FILENAME,
   INSPECT_BINARY_JUDGE_INSTRUMENT_FILENAME,
@@ -72,8 +74,8 @@ import type {
   InspectBinaryJudgeHostBinding,
   InspectBinaryJudgeSelectionManifest,
 } from "../runtime/inspect/binary-judge-manifest.js";
-import { assertHarborTrialMatchesCell, assertSingleHarborTrial, HarborJobConfigSchema, harborFollowUpJobSource, harborJobSource, harborSelectedTaskNames, harborTrialTaskName, normalizeHarborSavedJobConfig, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
-import { harborArmFollowUpJobName, harborArmJobName, harborJobName, harborPlannedJobWaitMs, harborPredictionFromVerifierReward } from "../runtime/harbor/launcher.js";
+import { assertHarborTrialMatchesCell, assertSingleHarborTrial, HarborJobConfigSchema, harborFollowUpJobSource, harborJobSource, harborSelectedTaskNames, harborTrialTaskName, isHarborCompatibleAdapterId, normalizeHarborSavedJobConfig, PIER_ADAPTER_ID, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
+import { harborArmFollowUpJobName, harborArmJobName, harborJobName, harborPlannedJobWaitMs, harborPredictionFromVerifierReward, pierPlannedJobWaitMs } from "../runtime/harbor/launcher.js";
 import {
   claimHarborArmJobLeadership,
   harborArmJobsDir,
@@ -644,6 +646,7 @@ export interface InspectProvisionerOptions {
   readonly selectionManifestSha256: string;
   readonly manifest: InspectSelectionManifest;
   readonly host: InspectHostBinding;
+  readonly inspectEval?: InspectEvalSelectionManifest;
   /** Present only for the exact embedded direct-check strategy. */
   readonly embeddedEvaluator?: VenueEvaluatorSigner;
 }
@@ -661,6 +664,12 @@ export interface HarborProvisionerOptions {
   readonly manifest: HarborSelectionManifest;
   readonly host: HarborHostBinding;
   readonly taskNameByDigest?: Readonly<Record<string, string>>;
+}
+
+function plannedJobWaitMs(manifest: HarborSelectionManifest): number {
+  return manifest.adapter.id === PIER_ADAPTER_ID
+    ? pierPlannedJobWaitMs(manifest.retryPolicy.nAttempts)
+    : harborPlannedJobWaitMs(manifest.retryPolicy.nAttempts);
 }
 
 function harborRole(relativePath: string): string {
@@ -795,7 +804,7 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
         followUp = (await waitForHarborArmReplacementGrain({
           plannedRoot: join(jobsDir, plannedJobName),
           mappingPath,
-          timeoutMs: harborPlannedJobWaitMs(options.manifest.retryPolicy.nAttempts),
+          timeoutMs: plannedJobWaitMs(options.manifest),
         })) === "follow-up";
       }
       jobName = followUp
@@ -839,7 +848,7 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
             jobRoot: join(jobsDir, jobName),
             fallbackTaskDigest: parseCellKey(cellKey).taskDigest,
             taskNameByDigest: options.taskNameByDigest,
-            timeoutMs: harborPlannedJobWaitMs(options.manifest.retryPolicy.nAttempts),
+            timeoutMs: plannedJobWaitMs(options.manifest),
           }).catch((cause) => {
             const detail = cause instanceof Error ? cause.stack ?? cause.message : String(cause);
             void writeFile(join(jobsDir, `${jobName}.observer-error`), detail).catch(() => undefined);
@@ -972,11 +981,30 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
           try {
             bytes = new Uint8Array(await readFile(source));
           } catch (cause) {
-            const rewardPath = join(harvestRoot, trialDirectory, "verifier", "reward.txt");
-            if (!existsSync(rewardPath)) throw cause;
-            const rewardText = new TextDecoder("utf8").decode(await readFile(rewardPath));
+            const rewardTxt = join(harvestRoot, trialDirectory, "verifier", "reward.txt");
+            const rewardJson = join(harvestRoot, trialDirectory, "verifier", "reward.json");
+            const rewardAlt = join(harvestRoot, trialDirectory, "reward.json");
+            const rewardPath = existsSync(rewardTxt)
+              ? rewardTxt
+              : existsSync(rewardJson)
+                ? rewardJson
+                : existsSync(rewardAlt)
+                  ? rewardAlt
+                  : undefined;
             const submittedAt = typeof trialResult.finished_at === "string" ? trialResult.finished_at : new Date().toISOString();
-            bytes = harborPredictionFromVerifierReward(rewardText, submittedAt);
+            if (rewardPath !== undefined) {
+              const rewardText = new TextDecoder("utf8").decode(await readFile(rewardPath));
+              bytes = harborPredictionFromVerifierReward(rewardText, submittedAt);
+            } else if (options.manifest.adapter.id === PIER_ADAPTER_ID) {
+              await writeHarborRetryUnscorableMarker(options.workspaceDir, input.attempt.attemptUri, {
+                cellKey,
+                dispatch,
+                missingReward: true,
+              });
+              bytes = harborPredictionFromVerifierReward("0\n", submittedAt);
+            } else {
+              throw cause;
+            }
           }
           await writeFile(join(paths.out, output.name), bytes, { flag: "wx", mode: 0o600 });
         }
@@ -1057,14 +1085,29 @@ function inspectProvisionerContract(
       const coordinate = parseCellKey(cellKey);
       const arm = options.manifest.arms.find((candidate) => candidate.armId === coordinate.armId);
       if (arm === undefined) throw new Error(`Inspect selection carries no configuration for arm ${coordinate.armId}`);
-      const taskSelection = (input.task.payload as { selectionManifestSha256?: unknown } | undefined)?.selectionManifestSha256;
-      if (taskSelection !== options.selectionManifestSha256) {
+      const payload = input.task.payload as { selectionManifestSha256?: unknown; sampleId?: unknown } | undefined;
+      let cellManifest = options.manifest;
+      if (options.inspectEval !== undefined) {
+        if (typeof payload?.sampleId !== "string" && typeof payload?.sampleId !== "number") {
+          throw new Error("Inspect eval Task payload must carry the cell sampleId");
+        }
+        // The Inspect eval Task carries no `selectionManifestSha256` (the shared template has
+        // no single sampleId), so the cousin path's digest equality cannot be reused. Bind the
+        // exact Task bytes instead: without this a hand-built Task with different instructions
+        // or evaluation digest would execute the sealed cell while the bundle records the
+        // swapped Task documents.
+        const taskSha256 = sha256Hex(input.sealedTaskBytes);
+        if (!options.inspectEval.suite.items.some((item) => item.taskSha256 === taskSha256)) {
+          throw new Error("Inspect eval Task bytes are not one of the sealed selection's Task documents");
+        }
+        cellManifest = overlayInspectEvalCell(options.inspectEval, payload.sampleId);
+      } else if (payload?.selectionManifestSha256 !== options.selectionManifestSha256) {
         throw new Error("Inspect Task selection digest does not match the venue's sealed manifest");
       }
       const workerInput = {
         projectDir: options.host.kind === "oci" ? "/jinn/project" : options.host.projectDir,
         outputDir: options.host.kind === "oci" ? "/jinn/output" : paths.out,
-        manifest: options.manifest,
+        manifest: cellManifest,
         arm,
         selectionManifestSha256: options.selectionManifestSha256,
         cellKey,
@@ -1082,10 +1125,12 @@ function inspectProvisionerContract(
       const nativeBytes = new Uint8Array(await readFile(nativeSource));
       const summaryBytes = new Uint8Array(await readFile(summarySource));
       const observedSummary = InspectCellSummarySchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(summaryBytes)));
+      const workerInput = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(paths.input, "inspect-run.json")))) as { manifest?: unknown };
+      const scoringManifest = InspectSelectionManifestSchema.parse(workerInput.manifest);
       const summary = observedSummary.schema === "jinn.network/benchmark-product/inspect-cell-summary/2"
         ? {
           ...observedSummary,
-          verdict: projectInspectCellVerdict(observedSummary, options.manifest),
+          verdict: projectInspectCellVerdict(observedSummary, scoringManifest),
         }
         : observedSummary;
       if (observedSummary.schema === "jinn.network/benchmark-product/inspect-cell-summary/2") {
@@ -1302,7 +1347,8 @@ export function createLocalProvisioner(
         contract: inspectBinaryJudgeProvisionerContract(input, options.inspectBinaryJudge),
       };
     }
-    if ((input.submission.requirements?.harness as { id?: unknown } | undefined)?.id === "harbor" && options.harbor !== undefined) {
+    const harnessId = (input.submission.requirements?.harness as { id?: unknown } | undefined)?.id;
+    if (typeof harnessId === "string" && isHarborCompatibleAdapterId(harnessId) && options.harbor !== undefined) {
       return { id: "benchmark-product-harbor-dir-v1", contract: harborProvisionerContract(input, options.harbor) };
     }
     if (profileUri === PREDICTION_FORECAST_PROFILE_URI) {

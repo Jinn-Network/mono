@@ -9,7 +9,7 @@ Issue: [#2770](https://github.com/Jinn-Network/mono/issues/2770).
 ## What this proves
 
 A human operator, on a machine with Archipelago at the sealed commit, drives
-the **built Colophon CLI** (core `dist/cli/bin.js`) through select → quote →
+the **built Colophon CLI** (core `dist/cli/bin.js`) through method → quote →
 lock → export against:
 
 - Dataset id `mercor/apex-agents`
@@ -41,7 +41,7 @@ archipelago --version
 # must print 0cb5c476c219a9df637e0bd37fb86b2361f4ab89
 ```
 
-Keep this realpath for `selection.json`. The fake executable used in
+Keep this realpath for `host.json`. The fake executable used in
 `yarn test` never downloads worlds.
 
 ## 2. Registry metadata at the pin (task ids only)

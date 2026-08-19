@@ -104,19 +104,11 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
       status: "shipped",
       action: "run.verify",
     });
-    expect(gui.find((entry) => entry.operation === "runAnchor")?.gui).toEqual({
-      status: "shipped",
-      action: "run.anchor",
-    });
-    expect(gui.find((entry) => entry.operation === "anchoringConfigure")?.gui).toEqual({
-      status: "shipped",
-      action: "anchoring.configure",
-    });
     expect(gui.filter((entry) => entry.gui.status === "deferred")).toEqual([]);
     expect(gui.find((entry) => entry.operation === "publicationAccounting")?.gui).toEqual({ status: "shipped", action: "publication.accounting" });
     expect(gui.filter((entry) => entry.gui.status === "unavailable").map((entry) => entry.operation).sort()).toEqual([
-      "admitHumanTruth", "bindInspectBinaryJudge", "createHumanReviewPackets", "exportApexAgentsInspection", "exportApexSwePackage", "exportHarborHubPackage", "exportSwebenchPredictions", "importBinaryItemBank", "migrateTerminalBenchLegacyTask",
-      "selectApexAgentsRuntime", "selectApexSweDevRuntime", "selectHarborRuntime", "selectSwebenchVerifiedRuntime", "selectTerminalBench21Runtime", "selectTerminalBench2Runtime", "selectTerminalBench30Runtime", "signHumanReviewResponse",
+      "admitHumanTruth", "bindInspectBinaryJudge", "createHumanReviewPackets", "exportDerivedBundle", "importBinaryItemBank", "migrateTerminalBenchLegacyTask",
+      "signHumanReviewResponse",
     ]);
   });
 });

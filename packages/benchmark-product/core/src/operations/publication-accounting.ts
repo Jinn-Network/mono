@@ -287,7 +287,7 @@ export function publicationAccounting(
 
         let contributed: Pick<BenchmarkAccountingDispatch, "correlations" | "nativeArtifacts"> = { correlations: [], nativeArtifacts: [] };
         let captureCheck: PublicationCheck | undefined;
-        if (binding?.adapterId === "harbor") {
+        if (binding?.adapterId === "harbor" || binding?.adapterId === "pier") {
           try {
             const indexed = readHarborDispatchArchiveFor(context.workspaceDir, { runSha256, cellKey: line.cellKey, dispatchIndex: line.dispatch, submissionSha256: line.submissionSha256 });
             if (line.attempt !== indexed.archive.lineage.attemptUri) throw new Error("journal Attempt does not match the Harbor archive");

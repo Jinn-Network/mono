@@ -51,7 +51,15 @@ export function selectApexSweDevRuntime(
     action: "runtime.apex-swe-dev.select",
     subject: input.draftId,
     inputs: input,
-    run: async () => {
+    run: () => executeSelectApexSweDevRuntime(clocked, input),
+  });
+}
+
+export async function executeSelectApexSweDevRuntime(
+  context: OperationContext,
+  input: SelectApexSweDevRuntimeInput,
+): Promise<SelectApexSweDevRuntimeResult> {
+  const at = context.clock();
       const current = readDraftDocument(context.workspaceDir, input.draftId);
       if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse APEX-SWE-dev selection");
       if (current.spec.analysis?.method === "jinn.benchmarking.method/binary-instrument") {
@@ -157,6 +165,4 @@ export function selectApexSweDevRuntime(
       };
       atomicWriteFileSync(draftPath(context.workspaceDir, input.draftId), JSON.stringify(draft, null, 2));
       return { draft, selectionManifestSha256, suiteProtocolSha256, benchmarkSha256 };
-    },
-  });
 }

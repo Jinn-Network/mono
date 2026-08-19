@@ -6,15 +6,21 @@ import {
 } from "./manifest.js";
 import {
   APEX_AGENTS_NOT_LEADERBOARD_READY_LIMITATION,
+  DEEPSWE_NOT_LEADERBOARD_READY_LIMITATION,
   deriveSuiteComparability,
+  INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION,
+  INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
   methodLeaderboardEligible,
   officialArchipelagoConformance,
   officialApexSweDevConformance,
   officialHarborExecutionConformance,
+  officialInspectEvalConformance,
+  officialPierExecutionConformance,
   officialSwebenchHarnessConformance,
   SWE_BENCH_VERIFIED_NOT_LEADERBOARD_READY_LIMITATION,
   suiteLeaderboardLimitation,
   suiteProtocolDisplayName,
+  SUITE_NOT_LEADERBOARD_READY_LIMITATION,
   SUITE_PROTOCOL_IDS,
 } from "./comparability.js";
 
@@ -47,6 +53,7 @@ describe("suite comparability", () => {
     });
     expect(bits).toEqual({ executionConformance: true, coverage: "one_task", leaderboardSubmitReady: false });
     expect(suiteLeaderboardLimitation(bits)).toMatch(/not a Terminal-Bench 2\.1 leaderboard submission/u);
+    expect(suiteLeaderboardLimitation(bits)).not.toMatch(/DeepSWE|SWE-bench/u);
   });
 
   test("full coverage + k=5 + ATIF required + official env is method-eligible, not ready until collect", () => {
@@ -464,5 +471,222 @@ describe("APEX-SWE-dev suite comparability", () => {
       resourceOverride: false,
       evaluatorId: "inspect",
     })).toBe(false);
+  });
+});
+
+const pierConforming = {
+  k: 4,
+  maxRetries: 3,
+  jobGrain: "per-arm" as const,
+  environmentConfiguration: {},
+  pierVersion: "0.3.1",
+  adapterId: "pier",
+  environmentType: "docker",
+  agentNames: ["mini-swe-agent", "mini-swe-agent"],
+};
+
+describe("DeepSWE v1.1 suite comparability", () => {
+  test("k=4 + Pier 0.3.1 + mini-swe-agent + official env is protocol-faithful; k=1 and Harbor 0.21 are not", () => {
+    expect(officialPierExecutionConformance(pierConforming)).toBe(true);
+    expect(officialPierExecutionConformance({ ...pierConforming, k: 20 })).toBe(true);
+    expect(officialPierExecutionConformance({ ...pierConforming, k: 1 })).toBe(false);
+    expect(officialPierExecutionConformance({ ...pierConforming, adapterId: "harbor", pierVersion: "0.21.4" })).toBe(false);
+    expect(officialPierExecutionConformance({ ...pierConforming, agentNames: ["claude-code"] })).toBe(false);
+    expect(officialPierExecutionConformance({ ...pierConforming, environmentType: "daytona" })).toBe(false);
+    expect(officialPierExecutionConformance({ ...pierConforming, environmentConfiguration: { override_cpus: 4 } })).toBe(false);
+  });
+
+  test("DeepSWE limitations name DeepSWE v1.1 and never Terminal-Bench or SWE-bench", () => {
+    const bits = deriveSuiteComparability({
+      protocol: "deep-swe-v1.1",
+      coverage: "one_task",
+      executionConformance: true,
+      k: 4,
+      selectedCount: 1,
+      datasetCount: 12,
+      atifPresent: true,
+    });
+    expect(bits.leaderboardSubmitReady).toBe(false);
+    const sentence = suiteLeaderboardLimitation(bits, "deep-swe-v1.1");
+    expect(sentence).toBe(DEEPSWE_NOT_LEADERBOARD_READY_LIMITATION);
+    expect(sentence).toMatch(/DeepSWE v1\.1/u);
+    expect(sentence).not.toMatch(/Terminal-Bench|SWE-bench/u);
+    expect(SUITE_NOT_LEADERBOARD_READY_LIMITATION).not.toMatch(/DeepSWE|SWE-bench/u);
+  });
+
+  test("full coverage + k=4 + ATIF + collect is method-eligible and ready; k=1 cannot be eligible", () => {
+    const method = {
+      protocol: "deep-swe-v1.1" as const,
+      coverage: "full" as const,
+      executionConformance: true,
+      k: 4,
+      selectedCount: 12,
+      datasetCount: 12,
+      atifPresent: true,
+      datasetRevisionMatchesLeaderboardPin: true,
+    };
+    expect(methodLeaderboardEligible(method)).toBe(true);
+    expect(deriveSuiteComparability(method).leaderboardSubmitReady).toBe(false);
+    const bits = deriveSuiteComparability({ ...method, cellsAccounted: true, atifOnRetainedJob: true, rewardOnRetainedJob: true });
+    expect(bits.leaderboardSubmitReady).toBe(true);
+    expect(suiteLeaderboardLimitation(bits, "deep-swe-v1.1")).toBeUndefined();
+    expect(methodLeaderboardEligible({ ...method, k: 1 })).toBe(false);
+  });
+
+  test("DeepSWE suite selection schema seals git SHA, tasks tree SHA, and k≥4", () => {
+    expect(() => SuiteProtocolSelectionSchema.parse({
+      schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
+      protocol: "deep-swe-v1.1",
+      coverage: "one_task",
+      datasetId: "datacurve-ai/deep-swe",
+      datasetRevision: "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+      tasksTreeSha: "66df25a1b382017d0ae014d94cadb2698baaed48",
+      selectedTaskNames: ["t00"],
+      datasetTaskCount: 12,
+      replicates: 4,
+      atifRequired: true,
+      items: [{ taskName: "t00", taskSha256: "b".repeat(64) }],
+    })).not.toThrow();
+    expect(() => SuiteProtocolSelectionSchema.parse({
+      schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
+      protocol: "deep-swe-v1.1",
+      coverage: "one_task",
+      datasetId: "datacurve-ai/deep-swe",
+      datasetRevision: "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+      tasksTreeSha: "66df25a1b382017d0ae014d94cadb2698baaed48",
+      selectedTaskNames: ["t00"],
+      datasetTaskCount: 12,
+      replicates: 1,
+      atifRequired: true,
+      items: [{ taskName: "t00", taskSha256: "b".repeat(64) }],
+    })).toThrow();
+  });
+});
+
+const inspectSamples = [
+  "HumanEval/0", "s01", "s02", "s03", "s04", "s05", "s06", "s07", "s08", "s09", "s10", "s11",
+];
+
+describe("inspect-eval suite protocol", () => {
+  test("lexicographic first 1 / first 10 / all includes sample ids with slashes", () => {
+    expect(namedSliceTaskNames(inspectSamples, "one_task")).toEqual(["HumanEval/0"]);
+    expect(namedSliceTaskNames(inspectSamples, "ten_task")).toHaveLength(10);
+    expect(coverageFromSelectedNames(inspectSamples, ["HumanEval/0"])).toBe("one_task");
+    expect(coverageFromSelectedNames(inspectSamples, ["s11"])).toBe("custom");
+  });
+
+  test("seals inspect-eval items whose names contain slashes", () => {
+    expect(() => SuiteProtocolSelectionSchema.parse({
+      schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
+      protocol: "inspect-eval",
+      coverage: "one_task",
+      datasetId: "inspect_evals/humaneval",
+      datasetRevision: "a".repeat(64),
+      selectedTaskNames: ["HumanEval/0"],
+      datasetTaskCount: 12,
+      replicates: 1,
+      atifRequired: false,
+      items: [{ taskName: "HumanEval/0", taskSha256: "b".repeat(64) }],
+    })).not.toThrow();
+  });
+
+  test("terminal-bench-2.1 still refuses slash sample names", () => {
+    expect(() => SuiteProtocolSelectionSchema.parse({
+      schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
+      protocol: "terminal-bench-2.1",
+      coverage: "one_task",
+      datasetId: "terminal-bench/terminal-bench-2-1",
+      datasetRevision: `sha256:${"a".repeat(64)}`,
+      selectedTaskNames: ["HumanEval/0"],
+      datasetTaskCount: 12,
+      replicates: 5,
+      atifRequired: true,
+      items: [{ taskName: "HumanEval/0", taskSha256: "b".repeat(64) }],
+    })).toThrow();
+  });
+
+  test("one_task × k=1 with official inspect settings is not eval complete", () => {
+    expect(officialInspectEvalConformance({
+      k: 1,
+      specifiedEpochs: 1,
+      inspectVersion: "0.3.255",
+      adapterId: "inspect",
+      solver: "task-default",
+      sampleLimit: null,
+      epochsInRunOptions: false,
+    })).toBe(true);
+    const bits = deriveSuiteComparability({
+      protocol: "inspect-eval",
+      coverage: "one_task",
+      executionConformance: true,
+      k: 1,
+      selectedCount: 1,
+      datasetCount: 12,
+      atifPresent: false,
+    });
+    expect(bits.leaderboardSubmitReady).toBe(false);
+    expect(suiteLeaderboardLimitation(bits, "inspect-eval")).toBe(
+      INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION,
+    );
+  });
+
+  test("full inspect catalog + k matching epochs is method-eligible, not ready until collect", () => {
+    const method = {
+      protocol: "inspect-eval" as const,
+      coverage: "full" as const,
+      executionConformance: true,
+      k: 3,
+      selectedCount: 12,
+      datasetCount: 12,
+      atifPresent: false,
+      datasetRevisionMatchesLeaderboardPin: true,
+    };
+    expect(methodLeaderboardEligible(method)).toBe(true);
+    expect(deriveSuiteComparability(method).leaderboardSubmitReady).toBe(false);
+    expect(deriveSuiteComparability({ ...method, cellsAccounted: true }).leaderboardSubmitReady).toBe(true);
+    expect(deriveSuiteComparability({
+      ...method,
+      cellsAccounted: true,
+      atifOnRetainedJob: true,
+    }).leaderboardSubmitReady).toBe(true);
+  });
+
+  test("a ready inspect-eval run still carries the Inspect-named closed-submissions sentence", () => {
+    // `suiteComparability` on the claim is three protocol-agnostic booleans written by both
+    // protocols. If the ready path emitted no limitation, a ready Inspect eval claim would
+    // name Inspect nowhere and read as a Terminal-Bench 2.1 leaderboard-ready claim.
+    const ready = deriveSuiteComparability({
+      protocol: "inspect-eval",
+      coverage: "full",
+      executionConformance: true,
+      k: 3,
+      selectedCount: 12,
+      datasetCount: 12,
+      atifPresent: false,
+      datasetRevisionMatchesLeaderboardPin: true,
+      cellsAccounted: true,
+    });
+    expect(ready.leaderboardSubmitReady).toBe(true);
+    expect(suiteLeaderboardLimitation(ready, "inspect-eval")).toBe(INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE);
+    // TB 2.1's ready path is unchanged — its closed-submissions copy rides on the Hub export.
+    expect(suiteLeaderboardLimitation(ready, "terminal-bench-2.1")).toBeUndefined();
+  });
+
+  test("solver override, --limit, epochs in runOptions, or k mismatch break inspect conformance", () => {
+    const base = {
+      k: 1,
+      specifiedEpochs: 1,
+      inspectVersion: "0.3.255",
+      adapterId: "inspect" as const,
+      solver: "task-default" as const,
+      sampleLimit: null as number | null,
+      epochsInRunOptions: false,
+    };
+    expect(officialInspectEvalConformance({ ...base, solver: "react" })).toBe(false);
+    expect(officialInspectEvalConformance({ ...base, sampleLimit: 10 })).toBe(false);
+    expect(officialInspectEvalConformance({ ...base, epochsInRunOptions: true })).toBe(false);
+    expect(officialInspectEvalConformance({ ...base, k: 2 })).toBe(false);
+    expect(officialInspectEvalConformance({ ...base, inspectVersion: "0.3.200" })).toBe(false);
+    expect(officialInspectEvalConformance({ ...base, adapterId: "harbor" })).toBe(false);
   });
 });

@@ -18,8 +18,12 @@ export interface SelectHarborRuntimeResult { readonly draft: DraftDocument; read
 
 export function selectHarborRuntime(context: OperationContext, input: SelectHarborRuntimeInput): Promise<OperationResult<SelectHarborRuntimeResult>> {
   const at = context.clock(); const clocked = { ...context, clock: () => at };
-  return operateAsync({ context: clocked, action: "runtime.harbor.select", subject: input.draftId, inputs: input, run: async () => {
-    const current = readDraftDocument(context.workspaceDir, input.draftId);
+  return operateAsync({ context: clocked, action: "runtime.harbor.select", subject: input.draftId, inputs: input, run: () => executeSelectHarborRuntime(clocked, input) });
+}
+
+export async function executeSelectHarborRuntime(context: OperationContext, input: SelectHarborRuntimeInput): Promise<SelectHarborRuntimeResult> {
+  const at = context.clock();
+  const current = readDraftDocument(context.workspaceDir, input.draftId);
     if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse runtime selection");
     const resolution = await (context.runtimeHost ?? createDefaultBenchmarkRuntimeHost()).resolveHarborSelection(input);
     sealHarborSelectionDependencies(context.workspaceDir, resolution);
@@ -38,5 +42,4 @@ export function selectHarborRuntime(context: OperationContext, input: SelectHarb
     }) };
     atomicWriteFileSync(draftPath(context.workspaceDir, input.draftId), JSON.stringify(draft, null, 2));
     return { draft, selectionManifestSha256 };
-  } });
 }
