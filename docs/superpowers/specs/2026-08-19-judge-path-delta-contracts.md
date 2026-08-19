@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Version** | 1.2 |
+| **Version** | 1.3 |
 | **Date** | 2026-08-19 |
 | **Author** | P0 design session (operator + Claude Fable 5); every seam cited path:line against `next` @ `4f4ad46f2` |
-| **Revision** | v1.1 folded in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong: §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert), §8.3 (the singular-Report blast radius). **v1.2 folds in the mechanical constant sweep**, which classified 214 sites across four families and again found the counts short: stratum 11 to 23, arm count 8 to 9, admission **5 to 60** (§6.8a is new and P6 is now the largest packet), singular Report 7 to 35. The sweep also changed one recommendation (§8.3 now prefers N bundles over one bundle carrying N Reports) and produced §10.2, the coverage proof. **The whole document is frozen at merge** |
+| **Revision** | v1.1 folded in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong: §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert), §8.3 (the singular-Report blast radius). **v1.2 folds in the mechanical constant sweep**, which classified 214 sites across four families and again found the counts short: stratum 11 to 23, arm count 8 to 9, admission **5 to 60** (§6.8a is new and P6 is now the largest packet), singular Report 7 to 35. The sweep also changed one recommendation (§8.3 now prefers N bundles over one bundle carrying N Reports) and produced §10.2, the coverage proof. **v1.3 folds in a delta re-review of v1.2**, which verified all 16 earlier findings closed and raised six more. Three were load-bearing: §1.4's v1.2 conditional was **not implementable** (the limitations function cannot see the model, so the profile is now sealed into the analysis parameters as an optional key whose absent case preserves the golden fixtures byte for byte); §6.8a's role mapping does **not** close in either direction, and `materialize.ts:366` is a site invisible to both the grep and the compiler; §8.3's option-5 residual cost omitted the producer side, and `report` turns out to be single-shot exactly as `publish` is. Two proposed citation corrections were checked and declined with evidence. **The whole document is frozen at merge** |
 | **Shape** | `design` (packet P0 of the judge-report implementation program) |
 | **Closes** | [#2842](https://github.com/Jinn-Network/mono/issues/2842) |
 | **Program** | [`2026-08-18-judge-report-implementation-program.md`](../plans/2026-08-18-judge-report-implementation-program.md) |
@@ -199,12 +199,41 @@ same string and agrees with itself** at cold verification. A false limitation th
 publisher and the verifier confirm is worse than a missing one, because it survives the check that
 was supposed to catch it.
 
-**Frozen:** the unconditional strings become per-profile conditionals, on the same rule as the
-observation `limitations` tuple. `mutableModelAlias` is emitted only for `reasoning-2026-08`. Two
-further strings in the same array are conditioned in the same edit, because the sweep showed they
-have the same defect in the other direction: `reviewerKeyPerson` and `cognitiveBlinding` are claims
-about a two-reviewer protocol and are emitted today for `operator-only` runs that have no reviewers
-and no visibility receipts at all.
+**Correction to v1.2, from delta review: v1.2 specified the conditional and it was not
+implementable.** `binaryInstrumentReportLimitations(parameters)` takes exactly one argument, the
+sealed binary-instrument method parameters, and **those parameters carry no model**.
+`BINARY_INSTRUMENT_PARAMETER_SCHEMA` (`aggregate/src/binary-instrument-method.ts:86-113`) declares
+nine properties under `additionalProperties: false` and none of them is a model or a profile. The
+cold-verify call site passes `(plan?.parameters ?? {})` with no sealed-store resolver
+(`verify/src/profile/claim-consistency.ts:53`), and the RunRecord's arm pinning carries the
+**instrument digest**, not the model literal. Neither call site can derive the profile. A
+conditional on a value the function cannot see is not a fix.
+
+**Frozen, and the optionality is the whole design:**
+
+1. **The judge-model profile is sealed into the analysis-plan parameters as an OPTIONAL key.**
+   `BINARY_INSTRUMENT_PARAMETER_SCHEMA` gains `judgeModelProfile`, an optional string over §1.1's
+   two profile ids, derived at lock by `compileBinaryInstrumentProfile` from the arms' shared
+   `model.requested` (§1.3's cross-arm rule guarantees there is exactly one). Under §0.4 this is a
+   compatible widening: adding an **optional** property to a closed object still validates every
+   parameter set valid today, seals identical bytes for them, and computes identically.
+2. **Absent means emit the alias limitation, which is today's behavior byte for byte.** This is not
+   a default chosen for convenience. It is what keeps §10.2's fixture ruling 1 true: the two frozen
+   144-cell golden fixtures seal parameters with no `judgeModelProfile`, so they emit the same three
+   strings in the same order and stay green **unmodified**. An implementation that made the key
+   required, or that flipped the absent case to "emit nothing", would move those fixtures' bytes and
+   destroy the compatibility proof this program depends on. **A naive reading of §1.4 breaks §10.2;
+   this clause is why it is written out.**
+3. **Present means per-profile.** `mutableModelAlias` is emitted only for `reasoning-2026-08`.
+4. **The two reviewer-protocol strings are conditioned in the same edit and need no new key**,
+   because `truthAdmission` is already a sealed parameter. `reviewerKeyPerson` and
+   `cognitiveBlinding` are claims about a two-reviewer protocol and are emitted today for
+   `operator-only` runs that have no reviewers and no visibility receipts at all.
+
+**Consequence for the packet map: P1 now touches `BINARY_INSTRUMENT_PARAMETER_SCHEMA`**, which v1.2
+recorded as a P4 and P6 surface. §10 row 11 and §10.1's conflict table both gain P1, which makes
+`binary-instrument-method.ts` a four-packet file in the conflict table as well as in the seam
+inventories.
 
 The function is defined once in the verify package and re-exported through
 `core/src/run/binary-instrument-profile.ts:64-65,87`, so one edit covers the publish path and the
@@ -993,15 +1022,40 @@ records what the operator actually ran; the verifier's independent recomputation
 sample checkable. A verifier that must execute an arbitrary sealed script to check a sample is not
 a verifier.
 
-> **Procedure `screening-sample/1`.** Given the table's sorted-unique `rows`, `sampleSeed`, and
-> `sampleSize`: for each row compute
-> `stream := HMAC-SHA256(key = utf8(sampleSeed), message = utf8(itemSha256))`; sort rows ascending
-> by `stream` compared as 32 unsigned bytes, ties broken by `itemSha256` in code-unit order; the
-> sample is the first `sampleSize` rows.
+> **Procedure `screening-sample/1`.** Let `rowsDigest` be the SHA-256 of the canonical-JSON bytes of
+> the table's sorted-unique `rows` array. Given `sampleSeed` and `sampleSize`: for each row compute
+> `stream := HMAC-SHA256(key = utf8(sampleSeed) || rowsDigest, message = utf8(itemSha256))`; sort
+> rows ascending by `stream` compared as 32 unsigned bytes, ties broken by `itemSha256` in code-unit
+> order; the sample is the first `sampleSize` rows.
 
 Deterministic, seedable, no PRNG state to carry, and reimplementable from this paragraph in any
 language. If the recomputation and the sealed script disagree, **the recomputation wins and
 admission refuses.**
+
+**Why the key binds the row set, added at v1.3 from delta review.** `sampleSeed` is authored by the
+operator, and the rows it draws from are sealed in the same record the operator also authors.
+Nothing in `screening-sample/1` as v1.2 wrote it stops an operator from grinding candidate seeds
+against the known rows until the draw happens to miss the rows they would rather not hand-check.
+The procedure made the sample **checkable**, which is not the same as making it **unbiased**, and
+v1.2 conflated those.
+
+Binding `rowsDigest` into the HMAC key does not remove the operator's ability to grind, because the
+rows are still known when the seed is chosen. What it removes is the ability to grind **once and
+reuse**: every edit to the row set, including the replacements §6.4 requires, changes `rowsDigest`
+and therefore the entire draw. A seed ground against one row set is worthless against the row set
+that actually seals. Combined with §6.5(0)'s exact-coverage check, which fixes the row set to the
+frozen bank's pool before any of this runs, the remaining attack is a single grind against the final
+pool, which the operator would then have to re-run after every replacement.
+
+**The honest limit, stated rather than papered over:** this narrows the hole, it does not close it.
+Closing it needs a seed commitment sealed **before** the rows are known, which the §6.6 ordering
+receipt could carry. That is a larger change to a D1-ratified shape and it is not taken here. What
+is taken is the version that costs one line and cannot be got wrong.
+
+This reads on **R-4**'s own argument and strengthens it: R-4 rules that the verifier's independent
+recomputation beats the operator's sealed script precisely because an operator-supplied procedure
+over operator-supplied inputs verifies nothing. A seed the operator can grind against the rows is
+the same defect one level down.
 
 **This is a departure from the literal ruling and is flagged as such.** D1 says the verifier
 recomputes "sample membership from seed plus script over the frozen bank", which reads as executing
@@ -1126,7 +1180,7 @@ site:
 ### 6.8a What the constant sweep added, and why P6 is the largest packet
 
 **Correction to v1.1, from the constant sweep: `truthAdmission` and its coupled vocabularies are
-pinned across roughly fifty production sites, not the five §6.8 named.** The two corrections before
+pinned across sixty-one production sites in sixteen files, not the five §6.8 named.** The two corrections before
 this one were about *count*. This one is about *kind*: four of the sites do not refuse a screened
 admission, they accept it and do the wrong thing, and three of §6.8's own frozen rulings are
 unreachable without sites §6.8 never named.
@@ -1169,6 +1223,42 @@ switch over the three-member union with a `never`-typed default**, so a fourth a
 future is a compile error rather than a silent reroute. This is the one place this spec asks for a
 refactor rather than a widening, and the reason is that the current shape has already demonstrated
 it fails open.
+
+**Group B-bis: the attestor-role mapping is not closed by Group B's fix, in either direction.**
+Added at v1.3 from delta review, which is right that an exhaustive switch is necessary and
+insufficient here.
+
+The screened branch's ordering receipt (§6.6) reuses `attestorRole: "truth-reveal-attestor"`, which
+§6.8a above treats as the cheap choice. It is cheap only if the role determines the evidence role,
+and at two sites it does, wrongly:
+
+- **Output direction, `verify/src/admission/verification.ts:415-419`.** The ternary maps
+  `truth-reveal-attestor` to the evidence role `review-reveal-receipt` **unconditionally**. An
+  exhaustive switch over `AdmissionAuthorityRole` is well-typed and still produces this: the union
+  has three members and the screened receipt is signed under one of them. The screening receipt then
+  resolves under a role that is a member of `humanEvidenceRoles`, which is exactly what the third
+  `superRefine` branch frozen above **refuses**. Group C's fix and Group B's fix defeat each other.
+- **Input direction, `core/src/bundle/materialize.ts:366`.** This is the discriminator that decides
+  whether a reachable record contributes an authority binding at all, and it is a hand-written
+  three-term or-chain over string literals followed by `if (role === undefined) continue;`. A
+  `screening-reveal-receipt` matches none of the three, is skipped, contributes no binding,
+  `admissionAuthorityBindings` comes out empty, `authorities` is written empty, and
+  `schema.ts:125-131` refuses. **§6.8a's frozen third authority set `["truth-reveal-attestor"]` is
+  unreachable**, because nothing ever puts the screened receipt into that set. v1.2 named
+  `:371-375`, which is the *output* ternary two lines later; it is the wrong site.
+
+**Frozen:** both mappers take the **evidence role** (or the admission mode) as an input rather than
+deriving it from the attestor role alone. Concretely, `materialize.ts:366`'s discriminator gains
+`screening-reveal-receipt` and `screening-table` and maps them to `truth-reveal-attestor`, and
+`verification.ts:415-419` receives the evidence role from its caller instead of reconstructing it.
+P6 asserts the round trip with a fixture: a screened bundle materializes a non-empty `authorities`,
+parses under the third authority set, and satisfies the third evidence-role branch.
+
+**`materialize.ts:366` is a site with no tripwire at all, and it is the counterexample §10.2 must
+carry.** Adding a role to the vocabulary does not make this or-chain fail to compile, so the
+compiler does not catch it; and the line contains none of F3's search tokens (`operator-assertion`
+is not `operator-only`), so the grep does not catch it either. §10.2's tripwire claim is amended
+accordingly rather than left standing.
 
 **Group C: the screened branch's evidence has nowhere to live.** §6.3 and §6.6 freeze two new
 sealed records. The bundle's admission closure does not have roles for them.
@@ -1545,7 +1635,7 @@ reader who sees only "add a method" will size it as one.
 | `core/src/run/binary-instrument-profile.ts` | `compilePairwiseDisagreementProfile`, sibling of `compileBinaryInstrumentProfile`: same joins, same derivation, minus the arm-cardinality and baseline/candidate branches |
 | method-conformance fixture corpus | one fixture per §7.1's determinism claim: byte-stable output on recompute |
 | `core/src/domain/draft.ts:178-186` | `DraftSpecSchema.additionalAnalyses` (§8.3), optional and additive |
-| `core/src/operations/report.ts:162-168`, `publication-report.ts:313-314` | one Report record per non-wilson plan entry, in plan order (§8.3) |
+| `core/src/operations/report.ts:165`, `publication-report.ts:313` | one Report record per non-wilson plan entry, in plan order (§8.3) |
 | `core/src/report/claim.ts`, `core/src/run/state.ts`, `core/src/bundle/materialize.ts`, `verify/src/verify.ts`, `verify/src/assets.ts` | the Report-singularity pins itemized in §8.3, each of which must accept N Reports or the fallback is taken |
 | **P2-owned, P5-consumed** | the payload provenance reshape under §7.2 option (A). P5 does not implement it and must not fork it |
 
@@ -1630,7 +1720,7 @@ factually accurate one. R1's spec update must say so in the same PR.
 Verified constraint: `AnalysisSchema.method` is a single string
 (`core/src/domain/draft.ts:178-184`); `buildAnalysisPlan` seals `[wilson]` or `[wilson, selected]`
 (`compile.ts:82-100`); `report` reads the **last** plan entry
-(`core/src/operations/report.ts:162-168`); `ReportRecordSchema.method` is one `MethodRefSchema`
+(`core/src/operations/report.ts:165`); `ReportRecordSchema.method` is one `MethodRefSchema`
 (`records/src/report/schema.ts:55`). One `report` invocation yields exactly one non-wilson method's
 results. D2 registers **two** comparisons on top of `binary-instrument@1`, so three registered
 readouts are wanted over one collected cell set.
@@ -1690,7 +1780,7 @@ packaging, after the science is already settled. Frozen mechanics of the shared 
   property that matters scientifically.
 - `report` emits **one sealed Report record per non-wilson plan entry**, each with its own single
   `method` ref and its own `results`. **No records-schema change**: every Report stays
-  single-method. `report.ts:164` and its independent twin `publication-report.ts:313` today select
+  single-method. `report.ts:165` and its independent twin `publication-report.ts:313` today select
   `planEntries[planEntries.length - 1]`; both become "select the named entry", kept in lockstep.
 - The claim table marks each number with the Report that produced it, satisfying §7.4 with no extra
   vocabulary.
@@ -1712,17 +1802,55 @@ must widen all four. Option 5 touches none of them:
 | `exactKeys` control check | two: `core/src/report/claim.ts:371`, `verify/src/profile/claim.ts:361` | both widen | unchanged |
 | `PUBLIC_BUNDLE_FILES` | two: `core/src/bundle/materialize.ts:93`, `verify/src/materialize.ts:2` | a numbered or directory naming scheme, in both | unchanged |
 | Bundle verifier | `verify/src/verify.ts:413` reads the fixed path `report.json`; `:438` re-derives the static bundle from a one-element array | both widen | unchanged |
-| **`verify/scripts/external-verify.py:160,204`** | an **independent Python reimplementation** | must be rewritten, or it silently passes while checking one of N Reports | unchanged |
+| **`verify/scripts/external-verify.py:160,207-208`** | an **independent Python reimplementation** | must be rewritten, or it silently passes while checking one of N Reports | unchanged |
 | **`benchmarking/evidence/src/portable.ts:133,245`** | a **third claim-package format** (evidence-native `claim-package/3`) with its own singular report reads | must be rewritten | unchanged |
 | Published assets | `verify/src/assets.ts:528,531,554,557` render one Report digest into HTML, the footer, and the badge | templates loop | unchanged |
 
-**Option 5's residual cost is real and is confined to four files**, all of which option 4 pays too:
-`draft.ts:178,226` and `compile.ts:82,119,169` (the shared front half above), `report.ts:164,272,340`
-plus `publication-report.ts:313,326` (select the named plan entry rather than the last, and invoke
-once per entry), and `state.ts:151`. That last one is the only genuinely new work: `report.ts:340`
-overwrites RunState's scalar `reportSha256` / `reportEnvelopeSha256`, so **a second `report` call
-today silently clobbers the first**. Frozen: run state records the report identities per plan entry,
+**"Unchanged" in this table means the bundle format and the code that reads it**, which is the
+comparison the table exists to make. It does **not** mean option 5 is free on the producer side: the
+residual-cost table above prices `publish.ts`, `materialize.ts`, and `claim.ts`, all of which option
+4 pays as well. v1.2 conflated the two and delta review was right to catch it.
+
+**Option 5's residual cost, corrected at v1.3.** v1.2 said "confined to four files, nine sites".
+That was wrong, and delta review is right that the omission was entirely on the **producer** side.
+The corrected cost is **eight files, roughly nineteen sites**, all of which option 4 pays too:
+
+| File | Sites | What changes |
+|---|---|---|
+| `core/src/domain/draft.ts` | `:178,226` | `additionalAnalyses`, per the shared front half |
+| `core/src/run/compile.ts` | `:82,119,169` | the plan wrapper and its four returns |
+| `core/src/operations/report.ts` | `:125,165,272,340,351` | see the lifecycle ruling below |
+| `core/src/operations/publication-report.ts` | `:313,326` | the second, independent copy of the last-entry select, and the single `produceReportV2` call |
+| `core/src/run/state.ts` | `:151` | report identities recorded per plan entry |
+| **`core/src/operations/publish.ts`** | `:81,157` | see the lifecycle ruling below |
+| **`core/src/bundle/materialize.ts`** | `:182-186,188-189,198-199,252-253,865` | reads the singular run-state report digests that the `state.ts:151` change makes ambiguous. **v1.2's divergence table marked these "unchanged" and that was wrong**: they are unchanged with respect to *bundle format*, which is the row's point, and changed with respect to *which report identity this bundle is being built from* |
+| **`core/src/report/claim.ts`** | `:723` | `writeClaimPackage` writes one Claim to a `draftId`-keyed path; N bundles need N Claims |
+
+**The lifecycle ruling, which the evidence forces rather than the design choosing.** Delta review
+found that `publish` is single-shot: `publish.ts:81` refuses unless `state === "reported"`, and
+`:157` transitions the draft to the terminal `published-bundle` (`domain/lifecycle.ts:37-45`), so a
+second `publish` is an `illegal-transition`. **`report` is single-shot in exactly the same way, and
+that was not named by anyone:** `report.ts:125` refuses unless `state === "closed"`, and `:351`
+transitions to `reported`. So "invoke `report` once per plan entry" is illegal on the second call.
+
+**Frozen:** **one `report` invocation emits N sealed Report records**, one per non-wilson plan entry,
+and **one `publish` invocation emits N bundle directories**, one per Report. Both verbs stay
+single-shot, the lifecycle gains no state and no repeatable event, and each emitted bundle is
+byte-structurally identical to a bundle published today. Run state records the N report identities
 keyed by `(method, version)`, which is additive and moves no existing draft's bytes.
+
+This also disposes of `report.ts:340`'s clobber, which v1.2 flagged as the only new work: with one
+invocation writing N keyed identities there is no second call to clobber the first.
+
+**A supporting fact delta review found, which the spec should have cited itself.**
+`verify/src/profile/claim-consistency.ts:41` already resolves the plan entry by
+**`method.id` plus `method.version`**, not by position: `analysisPlan?.find((entry) => entry.method
+=== reportRecord.method.id && entry.version === reportRecord.method.version)`. Its core-side twin
+does the same (`core/src/verification/claim-consistency.ts:83`). So consistency checking a bundle
+whose Report is the *second* plan entry already works, unmodified, today. The surface that would
+have been most tedious to make N-aware is already N-aware, and it is N-aware in precisely the way
+option 5 needs: each bundle carries one Report, and the checker finds that Report's own plan entry
+by identity rather than by index.
 
 **The decisive argument is not the file count.** It is that option 5's bundles cold-verify with the
 **already published, unmodified** verifier and the **already published** `external-verify.py`, while
@@ -1828,7 +1956,7 @@ recompute deliberately and reviewers can check completeness.
 | 8 | `BinaryJudgmentObservationSchema` | P1 | schema widens, **bytes stable** | model set and per-profile `limitations`; existing observations unchanged |
 | 9 | `InspectBinaryJudgeSelectionManifestSchema` (`.../inspect-binary-judge-selection/1`) | P1 | schema widens, **URI stays `/1`** | model set, generation union, optional `snapshotProbeSha256`; existing selections byte-identical (§0.4) |
 | 10 | `BinaryJudgmentStratumSchema` | P4 | enum to grammar, **bytes stable** | `core` and `stress` seal identically; analysis-context and label-resolution bytes unchanged |
-| 11 | `BINARY_INSTRUMENT_PARAMETER_SCHEMA` | P4 (`strata`), P6 (`truthAdmission`) | widens, **method stays `@1`** | previously valid parameter sets still validate and compute identically (§0.4) |
+| 11 | `BINARY_INSTRUMENT_PARAMETER_SCHEMA` | **P1 (optional `judgeModelProfile`, §1.4)**, P4 (`strata`), P6 (`truthAdmission`) | widens, **method stays `@1`** | previously valid parameter sets still validate, seal identical bytes, and compute identically (§0.4). P1's key is **optional**, and its absent case must reproduce today's limitations output byte for byte or §10.2 fixture ruling 1 breaks |
 | 12 | `BinaryJudgmentLabelResolutionSchema` | P6 | third member, **existing two byte-identical** | the `CommonShape` refactor (§6.7) changes no serialized bytes |
 | 13 | `BinaryJudgmentAdmissionManifestSchema` | P6 | widens, **bytes stable** | enum value plus optional `screeningTableSha256` |
 | 14 | New sealed records | P1, P6 | new | `snapshot-serving-probe/v1`, `screening-table/v1`, `screening-reveal-receipt/v1` |
@@ -1864,8 +1992,8 @@ more packets:
 | File | Packets | What each touches |
 |---|---|---|
 | `core/src/run/binary-instrument-profile.ts` | P1, P4 | arm cardinality at `:324,349,352` and model literals (P1); the `["core","stress"]` gate at `:299` **and the re-hardcode at `:315`** (P4) |
-| `aggregate/src/binary-instrument-method.ts` | **P1, P3, P4, P6** | model set, per-profile limitations, arm cardinality at `:955,1488,1510` (P1); mirrored parser digests at `:64,66` (P3); ten stratum sites (P4); `truthAdmission` at `:109,123,172,412,415,446` (P6). **The most contended file in the program** |
-| `BINARY_INSTRUMENT_PARAMETER_SCHEMA` (same file, `:88-124`) | P4, P6 | `strata` (P4); `truthAdmission` (P6). Called out separately because it is one object literal |
+| `aggregate/src/binary-instrument-method.ts` | **P1, P3, P4, P6** | model set, per-profile limitations, arm cardinality at `:955,1488,1510`, and the optional `judgeModelProfile` parameter at `:86-113,115-124` (P1); mirrored parser digests at `:64,66` (P3); ten stratum sites (P4); `truthAdmission` at `:109,123,172,412,415,446` (P6). **The most contended file in the program**, and P1's reach into it grew at v1.3 |
+| `BINARY_INSTRUMENT_PARAMETER_SCHEMA` (same file, `:86-113`) | **P1, P4, P6** | optional `judgeModelProfile` (P1, §1.4); `strata` (P4); `truthAdmission` (P6). Called out separately because it is one object literal under `additionalProperties: false`, so all three edits land in the same braces |
 | **`verify/src/schema.ts`** | **P1, P4, P6** | `arms` `.length(4)` at `:189` and the distinct-instrument `superRefine` at `:227` (P1); the `strata` tuple at `:185` (P4); `truthAdmission` at `:183`, the ledger `reason` copy at `:199`, the evidence-role lists at `:16,49`, the reviewer and authority checks at `:119-131`, and both `superRefine` blocks at `:259-270,275-276` (P6) |
 | **`verify/src/verify.ts:150-155`** | **P1, P4, P6** | one six-line type block: `armCount` at `:154` (P1), `strata` at `:153` (P4), `truthAdmission` at `:151` (P6). Whichever lands first, the other two rebase through the same lines |
 | **`verify/src/admission/contracts.ts`** | **P2, P4, P6** | the mirrored `BinaryJudgmentPayloadSchema` at `:31-40` (P2); `BinaryJudgmentStratumSchema` at `:30` (P4); the admission manifest at `:167-177`, the ledger `reason` at `:141`, the operator limitation at `:163` (P6) |
@@ -1915,8 +2043,8 @@ follow are the evidence.
 |---|---|---|---|---|---|---|
 | **F1** | the `["core","stress"]` stratum pair | §3.1 | 11 | **23** | 2 | 8 |
 | **F2** | the arm count `4` | §1.6 | 8 | **9** | 6 | 12 |
-| **F3** | `truthAdmission` and its coupled vocabularies | §6.8, §6.8a | 5 | **60** | 20 | 22 |
-| **F4** | the singular Report | §8.3 | 7 | **35** under option 4, **9** under option 5 | 8 | 9 |
+| **F3** | `truthAdmission` and its coupled vocabularies | §6.8, §6.8a | 5 | **61** (sweep 60 + 1 at v1.3) | 20 | 22 |
+| **F4** | the singular Report | §8.3 | 7 | **35** under option 4, **19** under option 5 | 8 | 9 |
 
 **The headline is F3.** v1.1 sized the screened-admission branch at five sites and it is sixty. §6.8a
 is the section that finding produced, and it is why P6 is now the program's largest packet rather
@@ -1963,10 +2091,22 @@ them today and will keep bounding them. "One Report per bundle" and "the admissi
 here" are contracts, not tokens: a **new** singular `read("report.json")`, or a new
 `if (mode === "operator-only")` with an implicit else, is a new site no token search will surface.
 
-That is precisely why §6.8a freezes exhaustive switches with a `never`-typed default rather than a
-widened enum. **For the contract families the compiler is the tripwire that grep cannot be.** The
-commands above are a regression check on the literal half only, and this document says so rather
-than implying a coverage it cannot maintain.
+That is why §6.8a freezes exhaustive switches with a `never`-typed default rather than a widened
+enum: for a switch over a named union, the compiler is a tripwire that grep cannot be.
+
+**But the compiler is not a complete tripwire either, and §10.2 must say so.** Delta review supplied
+the counterexample: `core/src/bundle/materialize.ts:366` decides whether a reachable record
+contributes an authority binding, using a hand-written or-chain over three string literals followed
+by `if (role === undefined) continue;`. Adding a role to the vocabulary does not make it fail to
+compile, because it switches on nothing; and its line carries none of F3's tokens, because
+`operator-assertion` is not `operator-only`. **It is invisible to both tripwires**, and §6.8a
+records it as such.
+
+So the honest statement of §10.2's coverage is narrower than "the compiler catches what grep cannot".
+It is this: the greps bound the literal half of every family; the exhaustive switches bound the
+branching half of F3 and F4; and a **string-matching discriminator that returns `undefined` on an
+unknown value** is caught by neither and must be found by reading. The sweep found the one that
+exists today. This document does not claim there cannot be another.
 
 #### Per-family inventories
 
@@ -1992,19 +2132,64 @@ projects-output** (`assets.ts:372,637`, the published captions).
 (`binary-instrument-method.ts:955,1488,1510`). Roles: 2 pins-schema, 6 imperative-check, **1
 projects-output** (`verify.ts:1621`, the false published count).
 
-**F3, admission, 60 production sites.** `benchmark-product/verify` **31**, `benchmark-product/core`
-**16** (plus `README.md:67` and `parity-matrix.v1.json:9`), `aggregate` 7, `profiles` 3
-(`label-resolution.ts:36,60,70`), `evaluator-adapters` 1 (`adapter.ts:716`). Roles: 17 pins-schema,
-21 imperative-check, 15 consumes-type, 4 projects-output, 3 docs-or-comment. The four with no
-compiler safety net, the three that defeat §6.8's own rulings, and the evidence-role vocabulary in
-three synchronized lists are all named and frozen in §6.8a; the rest are mechanical widenings of the
-same enum.
+**F3, admission, 61 production sites across 16 files** (the sweep's 60, plus `materialize.ts:366`
+added at v1.3 from delta review). Enumerated at `file:line` like the other
+three, because §10.2's obligation says every file that pins the constant is named and F3 is the
+family a grep cannot bound, so a package-granular proof would be the weakest evidence attached to
+the strongest claim.
 
-**F4, singular Report, 35 sites under option 4 and 9 under option 5.** `benchmark-product/core` 20 ·
-`benchmark-product/verify` 13 (including `scripts/external-verify.py` and
-`schemas/claim-package.schema.json`) · `evidence` 2 (`portable.ts:133,245`). §8.3's divergence table
-is the option-4 breakdown; option 5's nine are `draft.ts:178,226`, `compile.ts:82,119,169`,
-`report.ts:164,272,340`, `publication-report.ts:313,326`, and `state.ts:151`.
+| File | Lines | Roles |
+|---|---|---|
+| `profiles/src/binary-judgment/label-resolution.ts` | 36, 60, 70 | pins-schema |
+| `evaluator-adapters/src/binary-judgment/adapter.ts` | 716 | imperative-check |
+| `aggregate/src/binary-instrument-method.ts` | 109, 123, 172, 397, 412, 415, 446 | pins-schema, consumes-type, imperative-check |
+| `benchmark-product/verify/src/schema.ts` | 16, 49, 104, 119, 125, 183, 199, 259, 263, 275 | pins-schema, imperative-check |
+| `benchmark-product/verify/src/admission/verification.ts` | 63, 75, 83, 116, 126, 407, 437, 443, 487, 566, 601, 640 | pins-schema, consumes-type, imperative-check, projects-output |
+| `benchmark-product/verify/src/admission/contracts.ts` | 141, 163, 170 | pins-schema |
+| `benchmark-product/verify/src/assets.ts` | 26, 455, 461 | consumes-type, projects-output |
+| `benchmark-product/verify/src/profile/binary-qualification.ts` | 10, 26 | pins-schema, imperative-check |
+| `benchmark-product/verify/src/verify.ts` | 151 | consumes-type |
+| `benchmark-product/core/src/operations/human-review.ts` | 148, 162, 189, 491, 566, 598, 642, 651, 744 | pins-schema, consumes-type, imperative-check, projects-output |
+| `benchmark-product/core/src/operations/import-item-bank.ts` | 50 | consumes-type |
+| `benchmark-product/core/src/bundle/materialize.ts` | 313, 316, 366, 371 | consumes-type, imperative-check |
+| `benchmark-product/core/src/bundle/testing/v4-synthetic-fixture.ts` | 98, 581 | consumes-type, imperative-check |
+| `benchmark-product/core/src/cli/parity-map.ts` | 155 | docs-or-comment |
+| `benchmark-product/core/README.md` | 67 | docs-or-comment |
+| `benchmark-product/core/parity-matrix.v1.json` | 9 | docs-or-comment |
+
+Roles across the family: 17 pins-schema, 21 imperative-check, 15 consumes-type, 4 projects-output,
+3 docs-or-comment. `materialize.ts:366` is **added at v1.3** and was not in the sweep's own list; it
+is the discriminator §6.8a Group B-bis names, and it is the family's one site invisible to both the
+grep and the compiler. The last three rows are one sentence of prose in three places, regenerated by
+`yarn generate:parity` rather than hand-edited.
+
+The four sites with no compiler safety net, the three that defeat §6.8's own rulings, the two
+mappers that do not close, and the evidence-role vocabulary in three synchronized lists are named
+and frozen in §6.8a. The rest are mechanical widenings of the same enum.
+
+**F4, singular Report, 35 sites under option 4 and 19 under option 5.** `benchmark-product/core` 20 ·
+`benchmark-product/verify` 13 (including `scripts/external-verify.py:160,207-208` and
+`schemas/claim-package.schema.json:32`) · `evidence` 2 (`portable.ts:133,245`). §8.3's divergence
+table is the option-4 breakdown and §8.3's residual-cost table is option 5's nineteen, across eight
+files. **Corrected at v1.3:** v1.2 said nine across four files and omitted the producer side
+entirely, `publish.ts:81,157`, `materialize.ts:182-186,188-189,198-199,252-253,865`, and
+`claim.ts:723`.
+
+#### Citation precision, including two corrections this document declines
+
+Delta review raised three one-line citation drifts. **One holds and is fixed; two do not, and are
+recorded here with the reading that settles them**, so a later pass does not re-apply them.
+
+| Claim | Verdict |
+|---|---|
+| `report.ts` last-entry select is `:165`, not `:164` | **Holds.** `planEntries[planEntries.length - 1]` is at `:165`. Corrected everywhere, including the two places that cited the range `:162-168` |
+| `publication-report.ts` should cite `:325`, not `:326` | **Does not hold.** `:326` is `produced = await produceReportV2({`, which is what this document cites it as. The `method: { id: selected.method, ... }` reference is at **`:329`**. Neither `:325` nor `:326` is the method ref; `:326` is correct for the claim being made |
+| `external-verify.py` report read is `:202`, not `:204` | **Does not hold.** `:202` is a verdict-record existence check. `def claim_mirror():` is at `:204`, its own `read("report.json")` is at `:207`, and the `perSubject[0]` indexing is at `:208`. This document now cites `:160,207-208`, which is more precise than either the sweep's `:204` or the proposed `:202` |
+
+Both declined corrections were checked by reading the files, not by re-reading the sweep. The
+general rule this illustrates is worth stating once: **a citation is to the line that does the thing
+the sentence claims**, not to the enclosing function's declaration, and a proposed correction is
+verified the same way as an original claim.
 
 #### The fixture ruling, which is the opposite of what the sweep's `mustChange` column says
 
@@ -2040,11 +2225,22 @@ Regenerating the old fixture to the new shape does not update the proof, it **de
    than a merge-order blocker**, and §10.1 records it.
 4. **Three fixture sites genuinely must change**, and only these three: 
    `core/src/run/binary-instrument-profile.test.ts:478` (a negative-path test asserting a three-arm
-   draft refuses; under §1.6 the refusal reason changes, so P1 revisits what boundary it tests),
-   `core/parity-matrix.v1.json:9` with its two prose twins at `cli/parity-map.ts:155` and
-   `core/README.md:67` (regenerated by `yarn generate:parity`, not hand-edited), and every judge
-   fixture under §7.2 option (A), which is not a widening and is already priced in §2.6 and rows 19
-   to 21.
+   draft refuses. Delta review confirmed it **still refuses under §1.6 rule 1, for a different
+   reason**: it slices the draft's arms to three while the sealed selection still declares four, so
+   the new `spec.arms.length === selection.arms.length` check fires exactly where the literal `4`
+   used to. It stays green by coincidence, which is why P1 revisits **what boundary it tests**
+   rather than deleting it or leaving it alone), `core/parity-matrix.v1.json:9` with its two prose
+   twins at `cli/parity-map.ts:155` and `core/README.md:67` (regenerated by `yarn generate:parity`,
+   not hand-edited), and every judge fixture under §7.2 option (A), which is not a widening and is
+   already priced in §2.6 and rows 19 to 21.
+
+   The same question was asked of F1's projection fixture and the answer is better.
+   `aggregate/src/binary-instrument-qualification.test.ts` builds a `byStratum` fixture over
+   `core`/`stress` and asserts the projection validator refuses a dropped slice. Under §3.1 rule 5
+   `expectedSlices` becomes the **sealed** vocabulary rather than the literal pair, and that fixture
+   declares its sealed vocabulary as `["core","stress"]`, so it refuses the same drift for the same
+   reason it always did. That is not coincidence, it is the widening behaving as §0.4 requires, and
+   the fixture stays unmodified.
 5. **`profiles/src/binary-judgment/label-resolution.test.ts:42` is a byte-for-byte golden assertion
    over a serialized label resolution** containing `"stratum":"stress"`. It stays unmodified, and it
    is doing double duty: it is F1's proof that widening the stratum schema moves no sealed bytes,
