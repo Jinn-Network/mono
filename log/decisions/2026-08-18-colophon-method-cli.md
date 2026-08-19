@@ -198,9 +198,28 @@ what a derived export may say. It is extended with a rule that applies to
   sentence sits alongside the existing badge and not-a-submission sentences,
   never in place of them, and it renders the sealed Matrix's own completeness
   block rather than recomputing anything.
-- **Audit before edit.** All six instruction builders were read before this
-  clause was written. Nothing emitted today is false; the certification was
-  simply absent everywhere. No existing sentence is rewritten or deleted.
+- **Audit before edit, and it was run twice.** All six instruction builders
+  were read before this clause was written. Nothing **shipped** is false, and
+  the certification is absent everywhere, so five of the six need only the
+  addition. The sixth is the one clause B gives a second caller: the first
+  sentence of the Inspect View inspection-upload branch asserts a match to
+  Inspect eval execution settings for a named slice, and a judge run matches
+  neither, so that one sentence **becomes** false under clause B and forks for
+  the judge lane. Nothing else is rewritten or deleted. The correct audit
+  question is whether the copy is true after the wiring this amendment
+  authorizes, not whether it is true today.
+
+### Site inventory
+
+Clause A's retirement spans **fourteen** sites, enumerated in the spec's §8.1
+against `origin/next` at `a4c9a2d95`. Two of them are worth naming here because
+they are not visible from the CLI surface this DR governs: `bindInspectBinaryJudge`
+also leaves the **package-root** facade (`core/src/index.ts`), which a hard-coded
+public-surface test asserts by name; and because `core/src/index.ts:15` re-exports
+`OPERATION_TO_GUI` as `GUI_CAPABILITY_CATALOG`, deleting the GUI row breaks a
+byte assertion in **`benchmark-product/web`**. The implementing packet therefore
+spans two packages, and its live merge collision is with the still-open GUI PR
+#2865.
 
 ### Unaffected
 

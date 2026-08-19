@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Version** | 1.5 |
+| **Version** | 1.6 |
 | **Date** | 2026-08-20 |
 | **Author** | P0 design session (operator + Claude Fable 5); every seam cited path:line against `next` @ `4f4ad46f2` |
-| **Revision** | v1.1 folded in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong: §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert), §8.3 (the singular-Report blast radius). **v1.2 folds in the mechanical constant sweep**, which classified 214 sites across four families and again found the counts short: stratum 11 to 23, arm count 8 to 9, admission **5 to 60** (§6.8a is new and P6 is now the largest packet), singular Report 7 to 35. The sweep also changed one recommendation (§8.3 now prefers N bundles over one bundle carrying N Reports) and produced §10.2, the coverage proof. **v1.3 folds in a delta re-review of v1.2**, which verified all 16 earlier findings closed and raised six more. Three were load-bearing: §1.4's v1.2 conditional was **not implementable** (the limitations function cannot see the model, so the profile is now sealed into the analysis parameters as an optional key whose absent case preserves the golden fixtures byte for byte); §6.8a's role mapping does **not** close in either direction, and `materialize.ts:366` is a site invisible to both the grep and the compiler; §8.3's option-5 residual cost omitted the producer side, and `report` turns out to be single-shot exactly as `publish` is. Two proposed citation corrections were checked and declined with evidence, and final review upheld both. **v1.4 fixes the one defect final review found:** v1.3's seed binding digested the full `rows` array, which is circular, because a row carries `handChecked` and which rows carry it depends on the sample the digest determines. The digest is now over the row **identity** set, and v1.3's claim that the binding survives §6.4's replacements is withdrawn as false. **v1.5 folds in the operator's G1 rulings of 2026-08-20 and is the ratified freeze.** Two picks overturn this document's own recommendations. **G1-D-A goes to (a):** the judge becomes a method-operand file citizen and `runtime inspect bind-judge` is **retired in the same change** — one way, not two; §8.1 freezes the mechanics and a dated amendment to DR-2026-08-18-f records both. **G1-D-B goes to a generalized (b):** the orphaned Inspect View export is wired for the judge adapter, and more consequentially every conforming export's certification is generalized — each certifies completeness against its **own** sealed selection, named by the lock digest, with a catalog suite name as an *additional* badge rather than the only lane that says anything at all. Both land in a new packet, **P10**, not in P1. **R-1 is overturned:** the evidence contrast does not ship on `paired-delta@1`'s per-item mean-rate unit; §7.2a registers **`paired-majority-delta@1`**, a new general-purpose paired contrast over **item-majority** decisions, which is the unit D2 specified and the unit the rest of the report uses. G1-D-C, G1-D-D, G1-D-E, R-2, R-3, and R-4 are ratified as recommended. §11 is rewritten from a checklist into the ratified record. **The document is frozen at this revision** |
+| **Revision** | v1.1 folded in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong: §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert), §8.3 (the singular-Report blast radius). **v1.2 folds in the mechanical constant sweep**, which classified 214 sites across four families and again found the counts short: stratum 11 to 23, arm count 8 to 9, admission **5 to 60** (§6.8a is new and P6 is now the largest packet), singular Report 7 to 35. The sweep also changed one recommendation (§8.3 now prefers N bundles over one bundle carrying N Reports) and produced §10.2, the coverage proof. **v1.3 folds in a delta re-review of v1.2**, which verified all 16 earlier findings closed and raised six more. Three were load-bearing: §1.4's v1.2 conditional was **not implementable** (the limitations function cannot see the model, so the profile is now sealed into the analysis parameters as an optional key whose absent case preserves the golden fixtures byte for byte); §6.8a's role mapping does **not** close in either direction, and `materialize.ts:366` is a site invisible to both the grep and the compiler; §8.3's option-5 residual cost omitted the producer side, and `report` turns out to be single-shot exactly as `publish` is. Two proposed citation corrections were checked and declined with evidence, and final review upheld both. **v1.4 fixes the one defect final review found:** v1.3's seed binding digested the full `rows` array, which is circular, because a row carries `handChecked` and which rows carry it depends on the sample the digest determines. The digest is now over the row **identity** set, and v1.3's claim that the binding survives §6.4's replacements is withdrawn as false. **v1.5 folds in the operator's G1 rulings of 2026-08-20 and is the ratified freeze.** Two picks overturn this document's own recommendations. **G1-D-A goes to (a):** the judge becomes a method-operand file citizen and `runtime inspect bind-judge` is **retired in the same change** — one way, not two; §8.1 freezes the mechanics and a dated amendment to DR-2026-08-18-f records both. **G1-D-B goes to a generalized (b):** the orphaned Inspect View export is wired for the judge adapter, and more consequentially every conforming export's certification is generalized — each certifies completeness against its **own** sealed selection, named by the lock digest, with a catalog suite name as an *additional* badge rather than the only lane that says anything at all. Both land in a new packet, **P10**, not in P1. **R-1 is overturned:** the evidence contrast does not ship on `paired-delta@1`'s per-item mean-rate unit; §7.2a registers **`paired-majority-delta@1`**, a new general-purpose paired contrast over **item-majority** decisions, which is the unit D2 specified and the unit the rest of the report uses. G1-D-C, G1-D-D, G1-D-E, R-2, R-3, and R-4 are ratified as recommended. §11 is rewritten from a checklist into the ratified record. **v1.6 folds in a targeted review of v1.5, which passed seven of its nine checks and returned two defects.** Both were in the two overturned rulings, and both are the same shape: a claim that was true of `next` before the ruling and stops being true once the ruling lands. **N1: the P10 retirement inventory was not full.** `bindInspectBinaryJudge` also leaves the **package-root** facade (`core/src/index.ts`) which a hard-coded public-surface test asserts, and deleting its `OPERATION_TO_GUI` row breaks a **cross-package** byte assertion in `benchmark-product/web`, because `core/src/index.ts:15` re-exports that map as `GUI_CAPABILITY_CATALOG`. The inventory goes from ten sites to **fourteen**, and §10.1's claim that P10 touches only `core` is corrected: **P10 reaches into `web`**. **N2: §8.2's own wiring makes one shipped sentence false**, which §8.2's audit conclusion did not survive. `inspect-view-export.ts:55` asserts a match to Inspect eval execution settings for a named slice; a judge run matches neither. One sentence is forked for the judge lane and the audit conclusion is restated over the correct surface. Five further items are folded: `truthAdmission` is sealed into §7.2a's derived parameters and `intervalAlpha` is superseded by `alpha` with the reason stated; `isInspectRuntimeAdapterId` must gain an export; #2862 to #2864 merged so §10.1's collision table and §9's grammar note are rewritten against `origin/next` @ `a4c9a2d95`; five citations are corrected; and one British spelling is fixed. **The document is frozen at this revision** |
 | **Shape** | `design` (packet P0 of the judge-report implementation program) |
 | **Closes** | [#2842](https://github.com/Jinn-Network/mono/issues/2842) |
 | **Program** | [`2026-08-18-judge-report-implementation-program.md`](../plans/2026-08-18-judge-report-implementation-program.md) |
@@ -1657,9 +1657,10 @@ requiredInputs:      ["matrix.cells", "referenced-result-evaluations", "exact-ru
                       "exact-instrument-bytes", "task-provenance-source"]
 parameterSchema:     required ["verdictRule","k","reduction","measurementProfile",
                                "candidateClasses","strata","parserInvalidPolicy",
+                               "truthAdmission",
                                "baseline","candidate","seed","resamples","alpha"]
-                     (every entry derived from the draft and the sealed closure, never
-                      caller-supplied, exactly as binary-instrument@1 derives its own)
+                     (thirteen; every entry derived from the draft and the sealed closure,
+                      never caller-supplied, exactly as binary-instrument@1 derives its own)
 outputShape:         "paired item-majority rate difference + two-sided clustered BCa interval,
                       per-candidate-class and per-stratum slices, source-cluster manifest,
                       and exclusions"
@@ -1684,13 +1685,40 @@ this method throws `task-provenance-source-missing` at
 `resolved-inputs.ts:319-323` on the first paired Task, exactly as §7.2 shows `paired-delta@1` does.
 Registering a new method does not route around the admission gate; it inherits it.
 
-**Parameters.** The first seven are `binary-instrument@1`'s derived set, because the majority
+**Parameters, corrected at v1.6.** v1.5 said "the first seven are `binary-instrument@1`'s derived
+set". **The derived set is nine**, not seven: `BINARY_INSTRUMENT_PARAMETER_SCHEMA`
+(`aggregate/src/binary-instrument-method.ts:78-90`) requires `verdictRule`, `k`, `reduction`,
+`measurementProfile`, `candidateClasses`, `strata`, `parserInvalidPolicy`, **`truthAdmission`**, and
+**`intervalAlpha`**. v1.5 dropped both silently, and its own justification for the first seven applies
+to one of them and rules out the other. §7.1 does not carry this error, because it names the count
+rather than enumerating.
+
+The eight that carry over are `binary-instrument@1`'s nine minus `intervalAlpha`, because the majority
 reduction needs them and they must be the *same* values the per-arm headline used or the two readouts
-are not over the same reduction. The last five are `paired-delta@1`'s pairing and interval
-parameters, minus `verdictRule` which is already in the first seven. `baseline` and `candidate` name
-the evidence-declaring arm and its evidence-free twin, so the method computes **one** named pair, not
-all pairs. That is the deliberate difference from §7.1's `pairwise-disagreement@1`, which is a panel
-question and carries no arm pair; this is a two-arm contrast and the design asks it about one pair.
+are not over the same reduction. The other five are `paired-delta@1`'s pairing and interval
+parameters, minus `verdictRule` which is already carried. Thirteen in total.
+
+**`truthAdmission` is sealed in.** §7.2a's own same-values-or-not-the-same-reduction argument applies
+to it directly: the admission grade is part of what makes the sealed parameter set describe the same
+reduction over the same admitted items, and §6.8 seals it into the Run's analysis parameters
+specifically so the grade is **published as data rather than prose**. A contrast Report whose
+parameters omitted the admission grade that the per-arm Report carries would publish the two readouts
+at different disclosure levels over one cell set, which is exactly the asymmetry §7.4's claim-table
+rule exists to prevent. Its enum is the three-member union after P6 widens it (§6.8), so P5 consumes
+P6's widening rather than forking it.
+
+**`intervalAlpha` is superseded by `alpha`, and that is why it is out rather than dropped.**
+`intervalAlpha` is `{enum: ["0.05"]}`, a single accepted value; `paired-delta@1`'s `alpha` is
+`{enum: ["0.10","0.05","0.01"]}`, a strict superset. Sealing both would put two keys for the interval
+level in one parameter set under `additionalProperties: false`, which is two places for one number to
+disagree, and §2.5 refuses redundant second commitments by name in a different family. Nothing is
+lost: every value `intervalAlpha` accepts, `alpha` accepts. **Frozen: `alpha` carries the interval
+level and `intervalAlpha` does not appear in this method's parameters.**
+
+`baseline` and `candidate` name the evidence-declaring arm and its evidence-free twin, so the method
+computes **one** named pair, not all pairs. That is the deliberate difference from §7.1's
+`pairwise-disagreement@1`, which is a panel question and carries no arm pair; this is a two-arm
+contrast and the design asks it about one pair.
 
 **The unit, stated exactly.** For each Task judged in both arms, each arm contributes its
 **item-majority decision** — the strict majority over the exact `k` registered scientific replicates,
@@ -1705,15 +1733,15 @@ registered readouts in one report, over one cell set, computing majority three d
 three numbers waiting to disagree in public. One import, three callers.
 
 **Interval, determinism, and withholding.** The interval is the package's shipped two-sided clustered
-BCa (`clusteredPairedDeltaInterval`, `registry.ts:1095` neighborhood), applied to the majority
-differences instead of the mean rates. Nothing about the resampler, the cluster manifest, or the
+BCa (`clusteredPairedDeltaInterval`, imported at `registry.ts:29` from `./stats/paired-delta.js` and
+called at `:1187`), applied to the majority differences instead of the mean rates. Nothing about the resampler, the cluster manifest, or the
 jackknife acceleration is reimplemented; the estimator is the only input that changes. Determinism is
 therefore identical to `paired-delta@1`'s: byte-stable given the seed, asserted by the
 method-conformance suite.
 
 The two withholding thresholds are inherited **unchanged and deliberately**: fewer than
-`MIN_PAIRED_DELTA_TASKS = 5` paired Tasks, or fewer than two distinct source clusters
-(`registry.ts:1180-1186`), withholds the interval and emits the point estimate with the method's own
+`MIN_PAIRED_DELTA_TASKS = 5` paired Tasks (`registry.ts:1095`, tested at `:1180-1181`), or fewer than
+two distinct source clusters (`:1182-1186`), withholds the interval and emits the point estimate with the method's own
 `reasons` strings. §7.2's frozen reporting rule applies verbatim to this method: when the interval is
 withheld the report prints the point estimate, both threshold values, the observed counts, and the
 `reasons` strings, marked `registry-verified`, because the withholding is itself a registry-verified
@@ -1847,8 +1875,8 @@ third is confirmed as decided.
 derived export".** They are one CLI surface, they touch the same four files, and splitting them would
 put two packets in the same `main.ts` and `parity-map.ts` lines for no benefit. P10 does **not** grow
 P1: P1 is a schema-and-cardinality packet in `profiles`, `aggregate`, and `verify`, and P10 is a CLI
-packet in `benchmark-product/core/src/cli` and `.../operations`, with no file in common. §10.1 records
-P10's merge position and its one real conflict.
+packet in `benchmark-product/core` **and `benchmark-product/web`** (§8.1 site 14, corrected at v1.6),
+with no file in common. §10.1 records P10's merge position and its one live conflict.
 
 **Standing correction, not a decision.** The method-operand DR is **DR-2026-08-18-f**
 (`log/decisions/2026-08-18-colophon-method-cli.md`). `DR-2026-08-18-d` is the DeepSWE v1.1 official
@@ -1886,7 +1914,7 @@ opposite, and that reading is withdrawn.
 
 1. **`FILE_SCHEMA_KIND` gains one row.** `core/src/operations/method-catalog.ts:79-91` gains
    `jinn.network/benchmark-product/inspect-binary-judge-binding-request/1` mapped to
-   `{documentKind: "inspect-binary-judge", official: false}`. `official: false` is not a judgement
+   `{documentKind: "inspect-binary-judge", official: false}`. `official: false` is not a judgment
    about the run: it is decision 5's rule applied unchanged, since a judge binding carries no suite
    protocol object and therefore wears no suite name.
 2. **The schema literal is extracted as a named export.** Today it lives inline inside the zod literal
@@ -1935,11 +1963,17 @@ verbs the same way, and `method-cli.test.ts:13-38` is the precedent for how the 
 `unknown command "runtime inspect bind-judge"`. Nothing else in `VERBS` shares its prefix except
 `runtime terminal-bench migrate`, which is unaffected.
 
+**Fourteen sites, corrected at v1.6.** v1.5 named ten and was short by four, in the two places the
+review found: the **package-root** facade, which is a second export surface with its own hard-coded
+test, and one **cross-package** byte assertion in `benchmark-product/web`. Every line below is cited
+against **`origin/next` @ `a4c9a2d95`** (post #2862, #2863, #2864), which moved three of the `main.ts`
+citations; `parity-map.ts` and the `main.ts` imports are unmoved and are cited as measured.
+
 | # | Site | Change |
 |---|---|---|
-| 1 | `core/src/cli/main.ts:120-121` | the two USAGE lines removed |
-| 2 | `core/src/cli/main.ts:1254` | the `VERBS` row removed |
-| 3 | `core/src/cli/main.ts:591-606` | `handleInspectRuntimeBindJudge` removed, with `RUNTIME_INSPECT_BIND_JUDGE_FLAGS` |
+| 1 | `core/src/cli/main.ts:122-123` | the two USAGE lines removed |
+| 2 | `core/src/cli/main.ts:1307` | the `VERBS` row removed |
+| 3 | `core/src/cli/main.ts:644-659` | `handleInspectRuntimeBindJudge` removed, with `RUNTIME_INSPECT_BIND_JUDGE_FLAGS` |
 | 4 | `core/src/cli/main.ts:39,75` | the facade import and the `BindInspectBinaryJudgeInput` type import removed |
 | 5 | `core/src/operations/index.ts:66-68` | `bindInspectBinaryJudge` and its two types leave the **operations facade** |
 | 6 | `core/src/cli/parity-map.ts:62,110,157,216` | four rows removed: `OPERATION_TO_VERB`, `OPERATION_TO_ACTION`, `OPERATION_TO_DESCRIPTION`, `OPERATION_TO_GUI` |
@@ -1947,17 +1981,45 @@ verbs the same way, and `method-cli.test.ts:13-38` is the precedent for how the 
 | 8 | `core/src/cli/parity-matrix.test.ts` | `bindInspectBinaryJudge` leaves the hard-coded `unavailable` operation list |
 | 9 | `core/README.md:62` | the verb-table row removed. This one **is** hand-maintained; `generate-parity-matrix.mjs` does not touch the README |
 | 10 | `core/src/cli/method-cli.test.ts:13-38` | `["runtime","inspect","bind-judge"]` joins the retired-verb table |
+| **11** | **`core/src/index.ts:567`** | **added at v1.6.** The value re-export leaves the **package-root** facade. This is a second export surface, distinct from site 5 |
+| **12** | **`core/src/index.ts:611-612`** | **added at v1.6.** `BindInspectBinaryJudgeInput` and `BindInspectBinaryJudgeResult` leave the package-root type re-exports |
+| **13** | **`core/src/index.test.ts:58`** | **added at v1.6.** The name leaves the hard-coded public-surface list, which asserts `typeof entry[name] === "function"` for every entry |
+| **14** | **`web/src/lib/server/gui-action-registry.test.ts:14-15`** | **added at v1.6, and it is in a different package.** The `bindInspectBinaryJudge` entry leaves `EXPECTED_UNAVAILABLE_REASONS`, which is byte-asserted by `expect(unavailableReasons).toEqual(EXPECTED_UNAVAILABLE_REASONS)` at `:45` |
 
 **Site 5 is mandatory rather than tidy, and the reason is a live gate.**
 `parity-matrix.test.ts:42-74` requires every facade operation to have a verb. Leaving
 `bindInspectBinaryJudge` on the facade with its verb gone fails parity, loudly, in CI. The gate that
 makes a half-retirement impossible is already in the tree.
 
+**Sites 11 to 13 are a second facade, and v1.5 conflated it with the first.** `core/src/index.ts` is
+the package entry point and re-exports the operations facade by name; `core/src/index.test.ts:58`
+enumerates that surface as a literal list. Removing the operation from `operations/index.ts` alone
+breaks the build at `index.ts:567`, and even if it did not, the entry test would fail on the name it
+still names.
+
+**Site 14 is the one that leaves the package, and it is not obvious from any file P10 opens.**
+`core/src/index.ts:15` re-exports `OPERATION_TO_GUI` as `GUI_CAPABILITY_CATALOG`, and
+`benchmark-product/web` imports that alias and asserts the **entire** unavailable-reason map with a
+`toEqual`. So deleting `parity-map.ts:216` (site 6) fails a test in `web` that no `core` file
+mentions. **Frozen: P10 edits `web/src/lib/server/gui-action-registry.test.ts` in the same PR.** The
+mechanism is worth stating once, because it is the general form: a byte-asserted re-export is a
+cross-package coupling that neither the compiler nor a `core`-scoped grep will surface.
+
+**The precedent was checked rather than assumed.** Neither `exportHarborHubPackage` nor
+`selectInspectEvaluation` appears in `core/src/index.ts` or in `core/src/operations/index.ts` on
+`origin/next`. Both survive as internals with their own `operate` wrappers and neither is on either
+facade, which is exactly the disposition §8.1 rule 7 freezes for `bindInspectBinaryJudge`. The
+retirement removes the surfaces the precedent says should not be there and keeps the internal the
+precedent says should.
+
 **P10 acceptance gains:** a judge binding file binds through
 `colophon method <judge-binding.json> --workspace <dir> --principal <id> --draft <id>` and produces a
 `selectionManifestSha256` byte-identical to the one `runtime inspect bind-judge` produced from the
 same file before retirement; and `runtime inspect bind-judge` exits 2 with the retired-verb envelope.
 The first assertion is the one that matters: it is the proof that "unchanged" is true.
+
+**P10's verification gains one thing v1.5 would have missed:** the PR runs the **`web`** package suite,
+not only `core`'s, because site 14 is in `web` and nothing in `core` would have caught it.
 
 ### 8.2 G1-D-B: judge derived export — **ratified (b), generalized** (recon C3)
 
@@ -2013,22 +2075,30 @@ was under-specified for everyone.
 4. **`ExportDerivedBundleResult` gains `(ExportInspectViewBundleResult & {shape: "inspect-view"})`.**
    `handleDerivedExport`'s renderer (`main.ts:616-627`) prints `exported inspect-view (<mode>) ...`
    with no new render path.
-5. **The adapter gate widens through the name that already exists.**
+5. **The adapter gate widens through the name that already exists, which must first be exported.**
    `inspect-view-export.ts:76-78`'s `!== "inspect"` becomes `!isInspectRuntimeAdapterId(adapterId)`
-   (`core/src/runtime/adapter.ts:226-228`), which already means exactly `inspect` or
+   (`core/src/runtime/adapter.ts:226`), which already means exactly `inspect` or
    `inspect-binary-judge` and is the repo's own name for the pair. **Not a hand-written or-chain.**
    §10.2's own counterexample is `materialize.ts:366`, a hand-written string or-chain that is
    invisible to both the grep and the compiler; this spec does not add a second one.
+
+   **Added at v1.6: `isInspectRuntimeAdapterId` is module-private today.** `adapter.ts:226` declares
+   it as a bare `function`, with nine callers all inside that module. Routing the widened gate
+   through it from `operations/inspect-view-export.ts` is cross-module, so **it must gain an
+   `export`**. This is the same class of detail as §8.1 rule 2's schema-literal extraction, and it is
+   written down for the same reason: the ruling names a symbol as though it were reachable, and it is
+   one keyword short of being so.
 6. **A judge selection-manifest read path is added.** `readInspectEvalSelectionManifest`
    (`runtime/inspect/host.ts:229`) parses the Inspect-eval selection schema and returns `undefined`
-   for anything else, which is what drives the refusal at `inspect-view-export.ts:86-90`. **Frozen:** a
+   for anything else, which is what drives the refusal at `inspect-view-export.ts:83-89`. **Frozen:** a
    sibling `readInspectBinaryJudgeSelectionManifest` parsing
    `InspectBinaryJudgeSelectionManifestSchema`, used **only** by the judge branch. The Inspect-eval
    read path is byte-untouched.
 7. **A third blocker the ruling did not name, and its frozen resolution.** A judge run has no
-   `suiteQuote`. Verified: `run-quote.ts:339-380` writes `suiteQuote` only for `harbor`,
-   `swebench-harness`, `archipelago`, `apex-swe-dev`, and `inspect`, and `:392` omits the key when the
-   branch yields `undefined`. So `inspect-view-export.ts:94-96` would refuse a judge draft with
+   `suiteQuote`. Verified against `origin/next` @ `a4c9a2d95`: the branch chain at
+   `run-quote.ts:339-382` yields a suite quote only for `harbor`, `swebench-harness`, `archipelago`,
+   `apex-swe-dev`, and `inspect`, falling through to `: undefined` at `:382`, and the conditional
+   spread at `:392` omits the key entirely when it does. So `inspect-view-export.ts:94-96` would refuse a judge draft with
    "requires a quoted run; this draft carries no suite quote" even after rules 5 and 6. **Frozen: the
    judge branch does not consult `suiteQuote` at all, and its mode is `inspection-upload`
    unconditionally.** A judge method names no suite protocol, so it can never earn a badge, and
@@ -2043,21 +2113,68 @@ was under-specified for everyone.
 
 #### Frozen: (2) the certification statement, across all export shapes
 
-**Audit of the emitted wording, run before writing this clause.** All six instruction builders were
-read: `hub-export.ts:48-81` (two protocols, two modes), `swebench-export.ts:47-62`,
-`apex-agents-export.ts:47-60`, `apex-swe-export.ts:48-54` (one mode, no branch),
-`deepswe-export.ts:46-60`, and `inspect-view-export.ts:44-58`. **Nothing emitted today is false.**
-Every `leaderboard-submit` / `suite-named` text correctly names the badge earned; every
-`inspection-upload` text correctly says the package is not a submission and correctly names what it
-may be used for. So the ruling's "change only what is false or missing" resolves entirely to
-**missing**, and no existing sentence is rewritten or deleted.
+**Audit of the emitted wording, run before writing this clause, and corrected at v1.6.** All six
+instruction builders were read: `hub-export.ts:48-81` (two protocols, two modes),
+`swebench-export.ts:47-62`, `apex-agents-export.ts:47-60`, `apex-swe-export.ts:48-54` (one mode, no
+branch), `deepswe-export.ts:46-60`, and `inspect-view-export.ts:45-60`.
+
+**Nothing emitted today is false, and v1.5 stopped there. That was the wrong surface to audit.** The
+question G1-D-B asks is not "is the shipped copy true", it is "is the copy true **after** the wiring
+this ruling authorizes". Rule 1 routes `inspect-binary-judge` drafts through
+`inspectViewExportInstructions`, and **one sentence in it becomes false the moment that happens**:
+
+> `inspect-view-export.ts:55`, first line of the `inspection-upload` branch:
+> *"This run matches Inspect eval execution settings for the selected named slice, but it is not eval
+> complete for the sealed catalog."*
+
+A judge run matches **no** Inspect eval execution settings and has **no** named slice. Both halves are
+false, and the sentence would be written into the exported `INSTRUCTIONS.txt` and into the CLI's
+success output. §8.2 authorizing the wiring and then concluding "nothing is false" was
+self-undermining, and it is corrected rather than defended.
+
+**Frozen: exactly one sentence forks, and nothing else in that builder changes.** The other three
+lines of the branch were re-read against a judge run and all three stay true:
+`inspect view --log-dir <dir>` is correct, because the judge launcher emits genuine `inspect-log`
+`.eval` outputs that `materialize.ts:557-561`'s own comment says open directly in the pinned Inspect
+reader; "Do not treat this package as an Inspect Hub row or as the Colophon claim of record" is
+correct; and `INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE` (`comparability.ts:105-106`, "Colophon does not
+place an Inspect Hub row. An Inspect View bundle is a derived artifact, not the claim of record") is
+correct and needs nothing.
+
+**The judge lane's replacement sentence, frozen:**
+
+```
+This run's method is a custom judge binding, not an Inspect eval selection, so this package wears
+no suite name.
+```
+
+It does the same job as the sentence it replaces on the Inspect-eval lane: both explain why the
+package carries no badge. It is true, it names the actual reason, and it claims nothing further,
+because the certification sentence from clause 2 is already prepended and states the completeness
+commitment.
+
+**How the builder learns which lane it is on, and why not the obvious way.**
+`inspectViewExportInstructions(mode, exportDir)` (`inspect-view-export.ts:45`) takes only the mode.
+**Frozen: it gains a lane discriminant parameter**, and the judge branch passes the judge lane. The
+tempting alternative, a third member of `InspectViewExportMode`, is **refused** on two counts: it
+would change the return type of `decideInspectViewExportMode`, which rule 8 freezes as untouched, and
+it would contradict rule 7's frozen ruling that a judge draft's mode is `inspection-upload`
+unconditionally. It would also leak into the CLI's `exported inspect-view (<mode>)` line as a mode
+name that is really a lane name.
+
+**The corrected audit conclusion.** Of the six builders, **five need only the addition** and no
+rewrite: nothing they emit is false before or after this ruling, and the certification was simply
+absent. The sixth, `inspect-view-export.ts`, needs the addition **and** the one-sentence fork,
+because it is the only builder this ruling gives a second caller. So the ruling's "change only what is
+false or missing" resolves to **missing in six places and false in one**, and the one is named above.
 
 What is missing is the same thing in all six: every builder states what the package is **not**, and
 none states what it **is**.
 
 **Frozen:** one shared builder, `exportCompletenessCertification`, in
 `core/src/runtime/suite-protocol/comparability.ts` — the module that already houses
-`INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE` and its four siblings, so shared export sentences keep one home.
+`INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE` (`:105-106`) and its **five** siblings (`:79`, `:82`, `:88`,
+`:91`, `:94`), so shared export sentences keep one home.
 It returns exactly one line, prepended to every shape's instruction array, in all modes:
 
 ```
@@ -2070,14 +2187,14 @@ Rules:
 
 1. **It renders the sealed Matrix's own `completeness` block and computes nothing.**
    `CompletenessSchema` is `{expected, judged, floor, runOutcome}` with `runOutcome` in
-   `complete | partial | cancelled` (`records/src/matrix/schema.ts:141-146`). The first word of the
+   `complete | partial | cancelled` (`records/src/matrix/schema.ts:142-147`). The first word of the
    sentence **is** the sealed `runOutcome`; the two counts **are** the sealed counts. A certification
    that recomputed completeness would be a second commitment that can disagree with the artifact it
    describes, which §2.5 refuses by name in a different family and the rule does not weaken here.
 2. **The lock digest is `runState.runSha256`**, the digest of the Run record sealed at `lock`, which
    transitively binds the selection manifest through `draft.spec.evaluationRuntime`. All five export
    operations already read it (`hub-export.ts:108-109`, `swebench-export.ts:89-90`,
-   `apex-agents-export.ts:87-88`, `apex-swe-export.ts:81`, `inspect-view-export.ts:91-93`), so this
+   `apex-agents-export.ts:87-88`, `apex-swe-export.ts:81`, `inspect-view-export.ts:90-93`), so this
    costs no new plumbing in any shape.
 3. **The third line is the only branch that claims nothing**, and it is honest rather than a hole:
    every shape already handles `matrixSha256 === undefined` for its mode decision, so an export taken
@@ -2365,12 +2482,16 @@ P10 merges.
    with `unknown command "runtime inspect bind-judge"`. P8 and P9 are written against the
    method-operand form only; the retired verb appears in neither except, in P9, as a one-line note
    for readers of older material.
-3. **Operand-first argument grammar.** `parseArgs` (`core/src/cli/args.ts:32-71`) consumes
-   positionals only until the first `--` token; any positional after a flag refuses
-   `invalid-invocation` with "flags come after the verb". Every `method` line must be written
-   `colophon method <ref> --workspace ... --principal ... --draft ...`. PR #2863 (open, not on
-   `next`) would relax this; write against the strict grammar, which stays valid under both. **This
-   note now binds the judge line too**, which under item 2 is a `method` line like any other.
+3. **Operand-first argument grammar. Rewritten at v1.6: #2863 merged, so the strict grammar is
+   gone.** `parseArgs` on `origin/next` @ `a4c9a2d95` (`core/src/cli/args.ts:28-80`) now lets
+   positionals and flags **interleave**, and its own comment says so; the "flags come after the verb"
+   refusal no longer exists. **Write operand-first anyway:**
+   `colophon method <ref> --workspace ... --principal ... --draft ...` was valid under the old
+   grammar and is valid under the new one, so it is the only form that reads correctly in material
+   written before and after the change. **This binds the judge line too**, which under item 2 is a
+   `method` line like any other. Also merged with #2864: `method` now accepts an **omitted** ref as
+   the catalog-listing form, so "method requires exactly one operand" is no longer the refusal it
+   was; P9 must not describe it as one.
 4. **There is no `method compute` verb.** Method computation is a side effect of `report`,
    parameterized by the sealed `analysisPlan`.
 5. **`k` and the analysis selection are set only via `draft update --file <patch.json>`.** There is
@@ -2391,7 +2512,10 @@ P10 merges.
    option 5 there are **N bundles**, and the reader checks they are one run by comparing `runSha256`
    and `matrixSha256` across them; P9 states that comparison as a step.
 9. **`main.ts` line citations in the program document and in the child issues are stale** by roughly
-   250 lines after #2820, and P10 moves them again. Every other cited file resolves unchanged.
+   250 lines after #2820, and further after #2864; P10 moves them again. §8.1's inventory carries the
+   refreshed values against `origin/next` @ `a4c9a2d95`. Every other cited file resolves unchanged,
+   including `parity-map.ts`, `method.ts`, and `inspect-view-export.ts`, all re-verified at that
+   head.
 10. **The rehearsal's arm count is six**, which requires §1.6 to have landed. P8's fixture must
     exercise six arms, mixed parser identities, one evidence-declaring arm, and the dated-snapshot
     profile, exactly as the program describes.
@@ -2437,7 +2561,8 @@ which is why it is here rather than only in §8.2.
 | 24 | Claim `records` block (`core/src/report/claim.ts:371`) and the six other Report-singularity pins | P5, **only under G1-D-C option 4** | **YES if N Reports land** | §8.3's pin table; the claim package's own version moves with row 1 of it. Under the all-companions fallback nothing here moves |
 | 25 | `FILE_SCHEMA_KIND` and `MethodDocumentKind` (`core/src/operations/method-catalog.ts:35-43,79-91`) | **P10** | one new row, **no digest moves** | §8.1. The judge binding-request schema literal joins the resolver table at `official: false`. Additive: every document that resolves today resolves identically |
 | 26 | `core/parity-matrix.v1.json` | **P10** | **regenerated**, not hand-edited | §8.1 sites 6 to 8. `bindInspectBinaryJudge` leaves the operations facade, so its row leaves the matrix; `yarn generate:parity` after `yarn build` is the only way it is written. The `parity-matrix.test.ts` `unavailable` list loses the same name in the same PR |
-| 27 | Export instruction text, six builders | **P10** | **published copy changes** | §8.2. One shared `exportCompletenessCertification` line is prepended in every shape and every mode. Not a digest: `INSTRUCTIONS.txt` is not sealed and enters no join. It **is** published copy, so it is a claim, and it is the third kind of site §10.2's standing rule 2 cares about — one that projects rather than refuses |
+| 27 | Export instruction text, six builders | **P10** | **published copy changes** | §8.2. One shared `exportCompletenessCertification` line is prepended in every shape and every mode, and **one sentence forks for the judge lane** (`inspect-view-export.ts:55`, corrected at v1.6). Not a digest: `INSTRUCTIONS.txt` is not sealed and enters no join. It **is** published copy, so it is a claim, and it is the third kind of site §10.2's standing rule 2 cares about — one that projects rather than refuses |
+| 28 | Package-root facade and its two assertions (`core/src/index.ts:15,567,611-612`; `core/src/index.test.ts:58`; `web/src/lib/server/gui-action-registry.test.ts:14-15,45`) | **P10** | **no digest**, but a **cross-package** break | **Added at v1.6.** §8.1 sites 11 to 14. The second export surface v1.5 conflated with the operations facade, plus the `GUI_CAPABILITY_CATALOG` re-export that makes a `parity-map.ts` deletion fail a test in `web`. This is the row that puts P10 outside `core` |
 
 ### 10.1 Merge ordering (binding on the lane coordinator)
 
@@ -2447,20 +2572,28 @@ and regenerating the fixtures rather than resolving them by hand. Landing them i
 two mutually stale fixture sets and a conflict nobody can review.
 
 **P10 is outside the fixture chain and inside a different collision.** It moves no sealed byte, no
-digest, and no fixture, so it may land at any point relative to P1 to P7. Its one real hazard is the
-**open `method discover` stack, #2862 to #2865**, which is rooted on `next` at #2862 and is not merged.
-Named explicitly because it is the collision a coordinator will otherwise discover at rebase:
+digest, and no fixture, so it may land at any point relative to P1 to P7.
 
-| P10 file | What the open stack does to it | Consequence |
+**Rewritten at v1.6: three quarters of that collision resolved itself.** v1.5 tabled the `method
+discover` stack as four open PRs. **#2862, #2863, and #2864 have merged to `next`** (merge commit
+`a4c9a2d95` for #2864); **only #2865, the GUI packet, is still open.** What that changes:
+
+| Surface | Status at v1.6 | Consequence for P10 |
 |---|---|---|
-| `core/src/cli/main.ts` | **#2863** rewrites `parseArgs` to accept GNU-style mixed flags and positionals; **#2864** adds a `--n` flag and per-verb help, touching `VERBS` and `USAGE` | Textual conflict in the same `VERBS` block and the same `USAGE` region P10 deletes two lines from. P10's own grammar is operand-first (§9 item 3), which stays valid under both grammars, so the conflict is textual and never semantic |
-| `core/src/cli/parity-map.ts` | **#2862** reverses GUI unavailability, editing `OPERATION_TO_GUI` (`:202-248`) | P10 deletes a row from the same map. Both PRs must re-run `yarn generate:parity` |
-| `core/parity-matrix.v1.json` | any of #2862, #2864, #2865 | **Byte-asserted** by `parity-matrix.test.ts:42-74`. Whichever lands second regenerates; it is never hand-merged |
-| `core/src/cli/parity-matrix.test.ts` | #2862 changes the hard-coded `unavailable` operation list | P10 removes `bindInspectBinaryJudge` from the same literal array |
+| `core/src/cli/main.ts` | **Merged.** #2863 rewrote `parseArgs` to let positionals and flags interleave; #2864 added `--n`, verb help, and the omit-ref listing form | **No conflict left.** The three moved P10 citations are refreshed against `origin/next` @ `a4c9a2d95` in §8.1's inventory: USAGE `:120-121` to **`:122-123`**, `VERBS` `:1254` to **`:1307`**, handler `:591-606` to **`:644-659`**. `main.ts:39,75` are **unmoved** |
+| `core/src/cli/parity-map.ts` | **Merged.** #2862's GUI change landed | **No conflict left**, and verified: `bindInspectBinaryJudge` is still at `:62`, `:110`, `:157`, `:216`, and its GUI row is still `unavailable`. P10's four deletions apply as written |
+| `core/parity-matrix.v1.json` | **Merged**, and **#2865 will move it again** | **Byte-asserted** by `parity-matrix.test.ts:42-74`. Whichever of P10 and #2865 lands second regenerates |
+| `core/src/cli/parity-matrix.test.ts` | **Merged**; #2865 may touch the hard-coded `unavailable` list again | P10 removes `bindInspectBinaryJudge` from the same literal array |
+| **`web/src/lib/server/gui-action-registry.test.ts`** | **#2865 is the GUI packet, so this is now the live collision** | Both P10 (§8.1 site 14) and #2865 edit `EXPECTED_UNAVAILABLE_REASONS`, which is `toEqual`-asserted at `:45`. **This is the one to sequence** |
 
-**The rule for the coordinator: whichever of P10 and the discover stack lands second rebases and
-re-runs `yarn generate:parity` after `yarn build`.** The generated artifact is never resolved by hand,
-and a hand-resolved `parity-matrix.v1.json` fails its own test with the message that says so.
+**The rule for the coordinator, narrowed: whichever of P10 and #2865 lands second rebases and re-runs
+`yarn generate:parity` after `yarn build`**, and reconciles `EXPECTED_UNAVAILABLE_REASONS` by hand,
+since that map is not generated. The parity matrix itself is never resolved by hand, and a
+hand-resolved `parity-matrix.v1.json` fails its own test with the message that says so.
+
+**Do not rebase this docs-only P0 branch onto the moved `next`.** There is no content conflict; the
+merge handles it. The refreshed citations above are cited against `origin/next` @ `a4c9a2d95`
+regardless of what this branch is based on, which is the point of naming the SHA.
 
 **Correction to v1.0: P7 is no longer in this chain.** v1.0 put it third on the strength of a second
 EvaluationSpec digest move that §5.0 removed. P7 now moves no sealed bytes and may land at any time.
@@ -2488,13 +2621,21 @@ more packets:
 | `core/src/operations/import-item-bank.ts:50-53` | P4, P6 | adjacent lines of one interface: `truthAdmission` at `:50` (P6), `strata` at `:53` (P4) |
 
 **P10 adds no row to this table, and that is the argument for it being its own packet.** Its files
-are `core/src/cli/{main.ts, parity-map.ts, method-cli.test.ts, parity-matrix.test.ts}`,
+are `core/src/{index.ts, index.test.ts}`,
+`core/src/cli/{main.ts, parity-map.ts, method-cli.test.ts, parity-matrix.test.ts}`,
 `core/src/operations/{index.ts, method.ts, method-catalog.ts, inspect-binary-judge.ts,
 inspect-view-export.ts}`, `core/src/runtime/inspect/{binary-judge-manifest.ts, host.ts}`,
-`core/src/runtime/suite-protocol/comparability.ts`, the five sibling export builders, `core/README.md`,
-and the generated `parity-matrix.v1.json`. **Not one of them appears in the eleven rows above**, and
-not one is touched by P1 to P7. Its only collision is the out-of-program one tabled earlier in this
-section.
+`core/src/runtime/{adapter.ts, suite-protocol/comparability.ts}`, the five sibling export builders,
+`core/README.md`, the generated `parity-matrix.v1.json`, and
+**`web/src/lib/server/gui-action-registry.test.ts`**. **Not one of them appears in the eleven rows
+above**, and not one is touched by P1 to P7.
+
+**Corrected at v1.6: P10 is not confined to `core`.** v1.5's file list said it was, and §8's preamble
+said P10 lives "in `benchmark-product/core/src/cli` and `.../operations`". Both were wrong in the
+same way, and the reason is §8.1 site 14: `core/src/index.ts:15` re-exports `OPERATION_TO_GUI` as
+`GUI_CAPABILITY_CATALOG`, `benchmark-product/web` imports that alias, and a `toEqual` there asserts
+the whole unavailable-reason map. **P10 reaches into `web`**, its PR runs the `web` suite, and its
+live collision is with #2865 rather than with anything in this program.
 
 **Shared fixture builder, a hazard rather than a blocker.**
 `core/src/bundle/testing/v4-synthetic-fixture.ts` is touched by **P1, P2, P4, and P6** and is
@@ -2793,7 +2934,9 @@ this document.
 
 - **A new packet, P10** (`feat`, "judge method-operand citizenship and derived export"), carries
   G1-D-A and G1-D-B. Issue filed by the coordinator at G1 close. It does not grow P1; §8's preamble
-  and §10.1 give the reason and the merge position.
+  and §10.1 give the reason and the merge position. **It spans `benchmark-product/core` and
+  `benchmark-product/web`** (§8.1 site 14), and its live merge collision is with the still-open
+  **#2865**, not with anything inside this program.
 - **P5 registers two methods, not one** (§7.5), and `compile.ts` grows a third bespoke branch.
 - **P7 is `test`-shaped**, not `fix`-shaped (§5.0).
 - **P8's export acceptance flips** from asserting a typed refusal to asserting a successful
