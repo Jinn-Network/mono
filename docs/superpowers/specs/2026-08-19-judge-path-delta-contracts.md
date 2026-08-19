@@ -2,23 +2,23 @@
 
 | | |
 |---|---|
-| **Version** | 1.4 |
-| **Date** | 2026-08-19 |
+| **Version** | 1.5 |
+| **Date** | 2026-08-20 |
 | **Author** | P0 design session (operator + Claude Fable 5); every seam cited path:line against `next` @ `4f4ad46f2` |
-| **Revision** | v1.1 folded in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong: §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert), §8.3 (the singular-Report blast radius). **v1.2 folds in the mechanical constant sweep**, which classified 214 sites across four families and again found the counts short: stratum 11 to 23, arm count 8 to 9, admission **5 to 60** (§6.8a is new and P6 is now the largest packet), singular Report 7 to 35. The sweep also changed one recommendation (§8.3 now prefers N bundles over one bundle carrying N Reports) and produced §10.2, the coverage proof. **v1.3 folds in a delta re-review of v1.2**, which verified all 16 earlier findings closed and raised six more. Three were load-bearing: §1.4's v1.2 conditional was **not implementable** (the limitations function cannot see the model, so the profile is now sealed into the analysis parameters as an optional key whose absent case preserves the golden fixtures byte for byte); §6.8a's role mapping does **not** close in either direction, and `materialize.ts:366` is a site invisible to both the grep and the compiler; §8.3's option-5 residual cost omitted the producer side, and `report` turns out to be single-shot exactly as `publish` is. Two proposed citation corrections were checked and declined with evidence, and final review upheld both. **v1.4 fixes the one defect final review found:** v1.3's seed binding digested the full `rows` array, which is circular, because a row carries `handChecked` and which rows carry it depends on the sample the digest determines. The digest is now over the row **identity** set, and v1.3's claim that the binding survives §6.4's replacements is withdrawn as false. **The document is frozen at this revision** |
+| **Revision** | v1.1 folded in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong: §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert), §8.3 (the singular-Report blast radius). **v1.2 folds in the mechanical constant sweep**, which classified 214 sites across four families and again found the counts short: stratum 11 to 23, arm count 8 to 9, admission **5 to 60** (§6.8a is new and P6 is now the largest packet), singular Report 7 to 35. The sweep also changed one recommendation (§8.3 now prefers N bundles over one bundle carrying N Reports) and produced §10.2, the coverage proof. **v1.3 folds in a delta re-review of v1.2**, which verified all 16 earlier findings closed and raised six more. Three were load-bearing: §1.4's v1.2 conditional was **not implementable** (the limitations function cannot see the model, so the profile is now sealed into the analysis parameters as an optional key whose absent case preserves the golden fixtures byte for byte); §6.8a's role mapping does **not** close in either direction, and `materialize.ts:366` is a site invisible to both the grep and the compiler; §8.3's option-5 residual cost omitted the producer side, and `report` turns out to be single-shot exactly as `publish` is. Two proposed citation corrections were checked and declined with evidence, and final review upheld both. **v1.4 fixes the one defect final review found:** v1.3's seed binding digested the full `rows` array, which is circular, because a row carries `handChecked` and which rows carry it depends on the sample the digest determines. The digest is now over the row **identity** set, and v1.3's claim that the binding survives §6.4's replacements is withdrawn as false. **v1.5 folds in the operator's G1 rulings of 2026-08-20 and is the ratified freeze.** Two picks overturn this document's own recommendations. **G1-D-A goes to (a):** the judge becomes a method-operand file citizen and `runtime inspect bind-judge` is **retired in the same change** — one way, not two; §8.1 freezes the mechanics and a dated amendment to DR-2026-08-18-f records both. **G1-D-B goes to a generalized (b):** the orphaned Inspect View export is wired for the judge adapter, and more consequentially every conforming export's certification is generalized — each certifies completeness against its **own** sealed selection, named by the lock digest, with a catalog suite name as an *additional* badge rather than the only lane that says anything at all. Both land in a new packet, **P10**, not in P1. **R-1 is overturned:** the evidence contrast does not ship on `paired-delta@1`'s per-item mean-rate unit; §7.2a registers **`paired-majority-delta@1`**, a new general-purpose paired contrast over **item-majority** decisions, which is the unit D2 specified and the unit the rest of the report uses. G1-D-C, G1-D-D, G1-D-E, R-2, R-3, and R-4 are ratified as recommended. §11 is rewritten from a checklist into the ratified record. **The document is frozen at this revision** |
 | **Shape** | `design` (packet P0 of the judge-report implementation program) |
 | **Closes** | [#2842](https://github.com/Jinn-Network/mono/issues/2842) |
 | **Program** | [`2026-08-18-judge-report-implementation-program.md`](../plans/2026-08-18-judge-report-implementation-program.md) |
 | **Design authority** | The experiment design posted in [snap-research/locomo#23](https://github.com/snap-research/locomo/issues/23#issuecomment-5334425775) (2026-08-18). Nothing here changes it |
-| **Ratifies** | Operator decisions **D1** (§6) and **D2** (§7), from issue #2842 comments 1 and 2 |
-| **Gate** | **G1**. This document merging, with the §11 decision points picked, is G1 |
+| **Ratifies** | Operator decisions **D1** (§6) and **D2** (§7), from issue #2842 comments 1 and 2, and the **G1 rulings of 2026-08-20** recorded in §11 |
+| **Gate** | **G1**. Every §11 item was ruled by the operator on 2026-08-20; §11 is the ratified record, and this document merging is G1 |
 
 ## 0. Scope and standing rules
 
 ### 0.1 What this document is
 
-One freeze of every judge-path schema delta the confirmatory run needs, so packets P1 to P7 can be
-implemented in parallel without contract drift. Each section states the frozen shape, the refusal
+One freeze of every judge-path schema delta the confirmatory run needs, so packets P1 to P7 and P10
+can be implemented in parallel without contract drift. Each section states the frozen shape, the refusal
 rules, the seams, and the owning packet. Nothing here is implementation; nothing here is optional
 for the packet that owns it.
 
@@ -375,9 +375,13 @@ arm-specific). Putting evidence on the payload therefore means:
 - **One imported bank serves every arm.** The evidence-declaring arm and its evidence-free twin
   read the same items.
 - **Task digests are identical across arms**, because the Task does not depend on the arm at all.
-  This is what makes the paired evidence contrast work: `paired-delta@1`'s exclusion rule is "pair
-  Task digests judged in both arms" (`aggregate/src/registry.ts:249-259`). Any arm-scoped placement
-  would fork the Task per arm, and the pairing would find zero pairs.
+  This is what makes the paired evidence contrast work: every registered paired method in this
+  package joins on "pair Task digests judged in both arms", including `paired-delta@1`
+  (`aggregate/src/registry.ts:249-259`) and, after the R-1 revision, §7.2a's
+  `paired-majority-delta@1`, which inherits that pairing verbatim. Any arm-scoped placement
+  would fork the Task per arm, and the pairing would find zero pairs under any of them. **The
+  placement argument does not depend on which method carries the contrast**, which is why the R-1
+  revision moved the carrier and left §2 untouched.
 
 Any alternative placement (on the arm, on the instrument, as a side manifest keyed by arm) is
 therefore refused by this spec, not on taste but because it breaks §7's registered contrast.
@@ -809,8 +813,11 @@ chain entirely.
 
 **Consequence for the coordinator: P7 is no longer `fix`-shaped.** Its content becomes pinning two
 existing draft-policy values and proving the three behaviors with tests, which is `test`-shaped. This
-is a real re-scope, not a trim, so it is decision point **G1-D-E** in §11 with the alternative
-stated: keep the declaration as sealed-but-unread disclosure and accept the digest churn.
+is a real re-scope, not a trim, so it was raised as decision point **G1-D-E** in §11 with the
+alternative stated: keep the declaration as sealed-but-unread disclosure and accept the digest churn.
+
+**Ratified at G1 (2026-08-20): declare none.** The shape frozen in this section stands unchanged, and
+P7 is `test`-shaped. The coordinator carries the Issue Type change.
 
 ### 5.1 The class vocabulary
 
@@ -987,7 +994,7 @@ only sane reading: if the machine overrode the human, the hand check would be de
 
 **This is a departure from the literal ruling and is flagged as such.** D1 reads "admitted means
 screening agreed or hand-confirmed", whose literal disjunction would admit a screen-agreed row the
-operator hand-excluded. R-1 and R-2 are marked for ratification over narrower deviations than this
+operator hand-excluded. R-1 and R-2 were flagged for ratification over narrower deviations than this
 one, so it is carried into §11 as **R-3** rather than absorbed.
 
 `screeningVerdict === "indeterminate"` never agrees, so such a row is admitted only by hand
@@ -1130,7 +1137,7 @@ This is the faithful reading of "reuses the existing ordering receipt": same ord
 same gate, one receipt per bank. Literal reuse would require either widening the shipped
 per-item schema (which the two-human branch's byte-compatibility forbids) or stuffing a table digest
 into a field named `itemSha256` (a mislabel that would outlive everyone who understood it).
-**Flagged for ratification** in case the operator meant literal record reuse.
+**Ratified at G1 (2026-08-20) as R-2**, the sibling record, not a literal reuse of the per-item schema.
 
 ### 6.7 Label resolution: the third union member
 
@@ -1334,7 +1341,11 @@ names, distinct record protocol URIs, asserted by fixture (P6 acceptance 3).
 ## 7. Cross-arm projections (packet P5, issue #2837; ratifies D2)
 
 Operator decision **D2 is ratified as ruled**: two registered comparisons, two sealed companions,
-and the claim-table rule.
+and the claim-table rule. **One carrier moved at G1.** The panel comparison is §7.1's
+`pairwise-disagreement@1` as D2 named it; the evidence contrast is §7.2a's newly registered
+`paired-majority-delta@1` rather than the already registered `paired-delta@1`, on the operator's
+2026-08-20 revision of R-1. D2's **unit** — item-level majority decisions — is what the revision
+protects, and §7.2a states the substitution as the residual departure rather than absorbing it.
 
 ### 7.1 Registered: `pairwise-disagreement@1`
 
@@ -1478,7 +1489,7 @@ output, not a gap).
 
 | Option | What it costs | Verdict |
 |---|---|---|
-| **(A) RECOMMENDED. Make binary-judgment Tasks records-admitted** | A payload reshape (below), folded into P2 so the profile document moves **once**, not twice; a **profile-URI major bump**, which §0.4 requires because the reshape rejects payloads that validate today; one new required field on the source-manifest row; the importer's source cross-check reworked; both mirrored payload schemas widened; every digest join re-verified | Unlocks the whole provenance-clustered method family, not just this contrast |
+| **(A) RATIFIED at G1, 2026-08-20. Make binary-judgment Tasks records-admitted** | A payload reshape (below), folded into P2 so the profile document moves **once**, not twice; a **profile-URI major bump**, which §0.4 requires because the reshape rejects payloads that validate today; one new required field on the source-manifest row; the importer's source cross-check reworked; both mirrored payload schemas widened; every digest join re-verified | Unlocks the whole provenance-clustered method family, not just this contrast |
 | **(B) Spec the input adapter D2 anticipated** | **Not available.** `resolveTaskProvenance` runs *inside* `compute`, and the Task bytes it reads are checked against the task digest (`checks.ts:41`) **and** re-serialized and compared byte for byte against canonical JSON (`:48-49`). No adapter can hand the method reshaped provenance without changing the very digest the pairing joins on | Ruled out on fact, not on preference |
 | **(C) Route the contrast through a different already-registered paired method** | **Not available.** Every registered paired method declares `task-provenance-source` in `requiredInputs` and `clusteringRule`: `paired-mcnemar` (`registry.ts:218-227`), `provenance-cluster-sign` (`:228-237`), `noninferiority-iut` (`:238-248`), `paired-delta` (`:249-259`). There is no paired escape hatch; the whole family is gated on the same admission | Ruled out on fact |
 | **(D) Move the evidence contrast to a sealed companion** | Zero engineering risk. Contradicts D2's ruling to register it | The fallback if (A) does not fit the window |
@@ -1553,17 +1564,18 @@ two independent reasons.
   invariant is asserted about `evidence` because evidence is authored per item; it does not need to
   be asserted here, because the shape does not admit the violation.
 
-**Owner if (A) is chosen: P2**, so the profile document moves once and the URI bumps once. P5 then
-consumes it, and P5's own acceptance gains one assertion: `paired-delta@1` computes over the
-regenerated bank without a `task-provenance-source-missing` throw. **Owner if (D) is chosen:**
-nobody; §7.3 gains a third companion.
+**Ratified at G1 (2026-08-20): option (A). Owner: P2**, so the profile document moves once and the URI
+bumps once. P5 then consumes it, and P5's own acceptance gains one assertion: §7.2a's
+`paired-majority-delta@1` computes over the regenerated bank without a `task-provenance-source-missing`
+throw. Option (D) is not taken and §7.3 gains no third companion.
 
-**This is decision point G1-D-D in §11**, and the reason it is a decision rather than a ruling is
-narrow. Option (A) is *inside* D2: it uses `paired-delta@1` unmodified, adds no input adapter, and
-registers the contrast exactly as D2 ruled. What it does is present a cost D2 could not have known
-about, because the blocker was undiscovered when D2 was written. Option (D) is *outside* D2, so the
-lane may never take it on its own. The operator therefore picks between accepting (A)'s cost inside
-P2's window and invoking (D) as a fallback.
+**G1-D-D was a decision rather than a ruling for a narrow reason, and the reason survives the
+ruling.** Option (A) is *inside* D2: it adds no input adapter and it registers the contrast, exactly as
+D2 ruled. What it did was present a cost D2 could not have known about, because the blocker was
+undiscovered when D2 was written. Option (D) was *outside* D2, so the lane could never have taken it on
+its own. The operator accepted (A)'s cost inside P2's window. Note that the R-1 revision does **not**
+weaken this: §7.2a's method clusters on the same `task-provenance-source` input, so the reshape is as
+necessary under the new carrier as it was under `paired-delta@1`.
 
 #### Input mechanics, for whichever option lands
 
@@ -1590,29 +1602,190 @@ them.** Separating them is what makes option (A) a bounded change rather than an
   shape is precisely what `checks.ts:59` rejects. Option (A) does not add provenance to items that
   lacked it; it promotes provenance the items already carry into the shape the records layer admits.
 
-Under option (A) the measured quantity is the paired difference in per-item agreement rate between
-the two arms, with a two-sided clustered BCa interval, which is what the design's row "the judge's
-input shape is a first-class disclosure entry" needs. Under option (D) the same quantity is computed
-by a sealed script and published digest-bound, with no interval claim the registry stands behind.
+Under option (A), which was ratified, the measured quantity is the paired difference in per-item
+agreement between the two arms, with a two-sided clustered BCa interval, which is what the design's
+row "the judge's input shape is a first-class disclosure entry" needs. **The R-1 revision fixes the
+per-item unit at the item-majority decision** rather than the replicate mean; §7.2a states it exactly.
+Option (D) is not taken.
 
-**One divergence, disclosed rather than engineered away.** `paired-delta@1`'s per-Task rate is the
-**mean over judged replicates**, not the strict majority. D2 authorized an input adapter "only if it
-cannot consume item-level majority decisions", and strictly it cannot.
+**One divergence, and R-1 is where the operator overturned this document.** `paired-delta@1`'s
+per-Task rate is the **mean over judged replicates**, not the strict majority. D2 authorized an input
+adapter "only if it cannot consume item-level majority decisions", and strictly it cannot.
 
-**Frozen recommendation: use `paired-delta@1` unmodified and disclose the unit.** The report states
-that the paired contrast's unit is the per-item mean over the `k` replicates, while every per-arm
-headline count in the report is item-majority per `binary-instrument@1`.
+v1.4 recommended shipping the contrast on `paired-delta@1` unmodified and disclosing the unit, on the
+argument that forking a v1-reference method's parameter schema days before the flagship run was the
+wrong trade. **The operator ruled against that on 2026-08-20 and the ruling is now frozen:** the
+contrast does **not** ship on the mean-rate unit, and `paired-delta@1` leaves the headline path.
+§7.2a registers a new general-purpose paired contrast over item-majority decisions instead.
 
-Rationale. Adding a reduction parameter forks a v1-reference method's parameter schema and its
-cold-verification surface. The difference it would buy is nil whenever the three calls agree, and
-where they do not agree the mean is strictly more informative than a majority collapse (it is an
-unbiased estimate of the per-call agreement-rate difference, which is the quantity the design's
-flip-rate discussion is about). Forking a reference method days before the flagship run, to make a
-number less informative, is the wrong trade. **Marked for ratification**, because it reads on D2's
-own wording.
+The operator's reason, recorded because it changes how this program treats its own scope: this
+program exists to fill substrate gaps, and a new registered method with a published contract and
+conformance coverage is as legitimate an output as the one already shipped, and reusable by everyone
+after. The v1.4 argument weighed a fork against a disclosure and never priced the third option, which
+is neither.
 
-Name discipline: the number is reported as "agreement-rate difference, evidence-conditioned". Never
-"accuracy".
+**What survives §7.2 unchanged.** Everything above this paragraph. Option (A)'s payload provenance
+reshape is **still necessary** and is still G1-D-D, because §7.2a's method clusters on
+`task-provenance-source` exactly as `paired-delta@1` does and therefore hits the identical
+records-admission gate at `records/src/benchmark/checks.ts:35-73`. Options (B) and (C) remain
+unavailable on the same facts. What changes is only which registered method consumes the admitted
+provenance.
+
+Name discipline is unchanged: the number is reported as "agreement-rate difference,
+evidence-conditioned". Never "accuracy".
+
+### 7.2a Registered: `paired-majority-delta@1` (the evidence contrast)
+
+**Frozen at G1 (R-1, revised).** The evidence contrast is carried by a **new registered method** whose
+unit is the item-majority decision. Its full contract is given here to the same standard as §7.1,
+because a registered method is five artifacts and a reader who sees "reuse the paired machinery" will
+size it as one.
+
+**New method id.** `jinn.benchmarking.method/paired-majority-delta`, added to
+`BENCHMARKING_METHOD_IDS` (`records/src/identifiers.ts:58-69`) as the camel key `pairedMajorityDelta`
+at the shared version `"1"`, so the registry ref is `paired-majority-delta@1`. The name follows the
+registry's own family convention: `paired-mcnemar`, `paired-delta`, and now `paired-majority-delta`
+are kebab-case siblings under one prefix, and the qualifier names the **unit**, which is the only
+thing that distinguishes it from `paired-delta@1`.
+
+**Registry row** (`aggregate/src/registry.ts` `METHOD_METADATA`):
+
+```
+requiredInputs:      ["matrix.cells", "referenced-result-evaluations", "exact-run-bytes",
+                      "exact-task-bytes", "exact-evaluation-specification-bytes",
+                      "exact-analysis-context-bytes", "exact-label-resolution-bytes",
+                      "exact-instrument-bytes", "task-provenance-source"]
+parameterSchema:     required ["verdictRule","k","reduction","measurementProfile",
+                               "candidateClasses","strata","parserInvalidPolicy",
+                               "baseline","candidate","seed","resamples","alpha"]
+                     (every entry derived from the draft and the sealed closure, never
+                      caller-supplied, exactly as binary-instrument@1 derives its own)
+outputShape:         "paired item-majority rate difference + two-sided clustered BCa interval,
+                      per-candidate-class and per-stratum slices, source-cluster manifest,
+                      and exclusions"
+exclusionRule:       "exact k-cell Task/arm groups only, in both arms of the pair; an item
+                      excluded for either arm is excluded from the pair, with exact cells"
+clusteringRule:      "task-provenance-source"
+referenceSet:        "registered-non-reference"
+deterministic:       true
+resamplingProcedure: "xorshift32-v1; sample whole source clusters with replacement; one uint32
+                      draw per cluster position; cluster jackknife acceleration; two passes at
+                      alpha/2 and 1-alpha/2 over one seed"
+computeAvailability: "available"
+```
+
+**Inputs, and why there are nine.** The first eight are exactly `binary-instrument@1`'s
+(`registry.ts:281-290`), for the same reason §7.1 gives: the majority reduction is single-sourced from
+that module, so this method reads everything that module reads, and declaring fewer inputs than it
+consumes is a false declaration in the registry itself. The ninth, `task-provenance-source`, is what
+`paired-delta@1`, `paired-mcnemar@1`, `provenance-cluster-sign@1`, and `noninferiority-iut@1` all
+declare, and it is why **G1-D-D option (A) stays necessary**: without the payload provenance reshape
+this method throws `task-provenance-source-missing` at
+`resolved-inputs.ts:319-323` on the first paired Task, exactly as §7.2 shows `paired-delta@1` does.
+Registering a new method does not route around the admission gate; it inherits it.
+
+**Parameters.** The first seven are `binary-instrument@1`'s derived set, because the majority
+reduction needs them and they must be the *same* values the per-arm headline used or the two readouts
+are not over the same reduction. The last five are `paired-delta@1`'s pairing and interval
+parameters, minus `verdictRule` which is already in the first seven. `baseline` and `candidate` name
+the evidence-declaring arm and its evidence-free twin, so the method computes **one** named pair, not
+all pairs. That is the deliberate difference from §7.1's `pairwise-disagreement@1`, which is a panel
+question and carries no arm pair; this is a two-arm contrast and the design asks it about one pair.
+
+**The unit, stated exactly.** For each Task judged in both arms, each arm contributes its
+**item-majority decision** — the strict majority over the exact `k` registered scientific replicates,
+with parser-invalid mapped to REJECT per the instrument's frozen invalid-output policy — as `1` for
+ACCEPT and `0` for REJECT. The paired per-Task difference is therefore in `{-1, 0, +1}`, and the
+estimate is the mean of those differences over paired Tasks. This is the unit D2 specified and the
+unit every per-arm headline in the report already uses.
+
+**Frozen: the majority reduction is single-sourced from the `binary-instrument@1` module and never
+reimplemented**, and it is the **same** import `pairwise-disagreement@1` takes (§7.1). Three
+registered readouts in one report, over one cell set, computing majority three different ways would be
+three numbers waiting to disagree in public. One import, three callers.
+
+**Interval, determinism, and withholding.** The interval is the package's shipped two-sided clustered
+BCa (`clusteredPairedDeltaInterval`, `registry.ts:1095` neighborhood), applied to the majority
+differences instead of the mean rates. Nothing about the resampler, the cluster manifest, or the
+jackknife acceleration is reimplemented; the estimator is the only input that changes. Determinism is
+therefore identical to `paired-delta@1`'s: byte-stable given the seed, asserted by the
+method-conformance suite.
+
+The two withholding thresholds are inherited **unchanged and deliberately**: fewer than
+`MIN_PAIRED_DELTA_TASKS = 5` paired Tasks, or fewer than two distinct source clusters
+(`registry.ts:1180-1186`), withholds the interval and emits the point estimate with the method's own
+`reasons` strings. §7.2's frozen reporting rule applies verbatim to this method: when the interval is
+withheld the report prints the point estimate, both threshold values, the observed counts, and the
+`reasons` strings, marked `registry-verified`, because the withholding is itself a registry-verified
+output and not a gap. The bank-construction precondition §7.2 names is unchanged: the bank must span
+at least two distinct provenance source clusters.
+
+**Exclusions.** Two disciplines compose, and the order matters. First `binary-instrument@1`'s: an
+item-arm group is included only if it has exactly `k` cells with a resolved decision, and any
+transport absence, inconclusive, conflict, or missing evaluation excludes the whole item-arm group
+with its exact cell keys. Then the pairing's: an item excluded for **either** arm of the pair is
+excluded from the pair. There is no partial-`k` majority anywhere, which is the standing prohibition
+against treating replicates as items, and no half-paired Task.
+
+**Per-class and per-stratum slicing.** The output carries `byCandidateClass` and `byStratum` slices,
+each with its own `n`, difference, and interval, sorted, over the sealed vocabularies. This is the
+same correction §7.1 records: `candidateClasses` and `strata` are required parameters, so a method
+that sealed them and emitted no slices over them would be sealing parameters nothing reads. Slice
+intervals obey the same withholding thresholds computed **within the slice**, and a zero-denominator
+slice is emitted with its counts and no interval, matching §3.2.
+
+**Output shape (exact):**
+
+```
+{
+  baseline, candidate,                            // the named arm pair
+  n,                                              // Tasks with a majority decision in BOTH arms
+  delta,                                          // fixed-4 decimal string, or null when n = 0
+  interval: { lower, upper, alpha } | null,       // Wilson-free clustered BCa, fixed-4 strings
+  reasons: [ ... ],                               // verbatim, non-empty exactly when interval is null
+  clusters: { count, manifest },                  // the shipped source-cluster manifest
+  byCandidateClass: [ { candidateClass, n, delta, interval, reasons } ],   // sorted
+  byStratum:        [ { stratum, n, delta, interval, reasons } ],          // sorted
+  exclusions: [ { taskDigest, armId, reason } ],  // sorted, exact cell keys
+  conflictedCells: [ ... ]                        // sorted, as paired-delta@1 reports them
+}
+```
+
+**`referenceSet: "registered-non-reference"`, argued rather than assumed.** Same argument §7.1 makes
+and the same evidence: the v1 reference set is a frozen conformance corpus, and a method registered
+after v1 cannot retroactively be part of what "v1-reference" named. `bradleyTerry` is the nearest
+analogue and carries the same value (`registry.ts:276`). If P5 finds a definition of the reference set
+that admits later members, it may argue the stronger value in its PR; it may not assume it. This is
+worth saying plainly rather than hedging: **the contrast is carried by a non-reference method, and the
+report says so.** A newly registered method is not a weaker claim than a reference one — it is
+verifiable by exactly the same registry machinery — but it has not been through the v1 conformance
+corpus, and the claim table's `registry-verified` mark does not imply it has.
+
+**Lock-time work.** The same shape §7.1 describes, and for the same reason: because every parameter is
+derived from the draft and the sealed closure, this method needs a **third bespoke branch** in
+`buildAnalysisPlan` (`core/src/run/compile.ts:115-124` neighborhood, appended past the
+`binaryInstrument` early return through §8.3's wrapper), plus a
+`compilePairedMajorityDeltaProfile` sibling of `compileBinaryInstrumentProfile` — the same joins and
+the same derivation as `compilePairwiseDisagreementProfile`, plus the `baseline`/`candidate`/`seed`/
+`resamples`/`alpha` resolution — plus a conformance fixture. The two sibling derivations share their
+whole front half and P5 writes them as one function with two callers, not two functions.
+
+**What is published, and what is not.** Only the item-majority contrast enters the claim table. The
+`paired-delta@1` mean-rate view is **not** published, in the claim table or beside it. One unit
+everywhere is the property that lets a reader compare the contrast against the per-arm headlines
+without a footnote, and publishing two units for one quantity invites exactly the "which number is the
+real one" question the claim-table rule exists to foreclose. Anyone who wants the mean-rate view can
+compute it from the published Matrix with the already registered `paired-delta@1`, which is what a
+registered method is for.
+
+**The residual departure from D2, named rather than absorbed.** D2's sentence is "the
+evidence-conditioned contrast **through the already registered `paired-delta@1`**, adding an input
+adapter only if it cannot consume item-level majority decisions". This ruling delivers D2's **unit**
+— item-level majority decisions, the thing the conditional was protecting — and substitutes the
+**carrier**: a new registered method rather than the already registered one. The substitution is the
+departure, it is the operator's own, and it is recorded in §11 as R-1 revised rather than folded away.
+D2's conditional turns out to have had a third branch its author could not have priced, because the
+`paired-delta@1` admission blocker was undiscovered when D2 was written.
 
 ### 7.3 Sealed companions
 
@@ -1644,72 +1817,292 @@ marked synthetic analogue.
 ### 7.5 P5 seam inventory
 
 Given at the same grain as §1.7 and §5.6, because a registered method is five artifacts and a
-reader who sees only "add a method" will size it as one.
+reader who sees only "add a method" will size it as one. **P5 now registers two methods, not one**,
+after the R-1 revision; both rows are listed together where the seam is shared, because they are one
+edit in one PR.
 
 | Seam | Change |
 |---|---|
-| `records/src/identifiers.ts:58-69` | `pairwise-disagreement` joins `BENCHMARKING_METHOD_IDS` at the shared version `"1"` |
-| `aggregate/src/registry.ts` `METHOD_METADATA` | the row frozen in §7.1: eight `requiredInputs`, derived parameter schema, output shape, exclusion and clustering rules, `referenceSet: "registered-non-reference"` |
-| `aggregate/src/registry.ts` method list (`:1244` neighborhood) | the `SingleSubjectMethod` implementation, its majority reduction **imported** from the `binary-instrument@1` module, never reimplemented |
-| `core/src/run/compile.ts:115-124` | a **second bespoke derived-parameter branch**, appended past the `binaryInstrument` early return (§8.3 names the mechanics) |
-| `core/src/run/binary-instrument-profile.ts` | `compilePairwiseDisagreementProfile`, sibling of `compileBinaryInstrumentProfile`: same joins, same derivation, minus the arm-cardinality and baseline/candidate branches |
-| method-conformance fixture corpus | one fixture per §7.1's determinism claim: byte-stable output on recompute |
+| `records/src/identifiers.ts:58-69` | `pairwiseDisagreement` and `pairedMajorityDelta` join `BENCHMARKING_METHOD_IDS`, both at the shared version `"1"` |
+| `aggregate/src/registry.ts` `METHOD_METADATA` | two rows: §7.1's (eight `requiredInputs`) and §7.2a's (the same eight plus `task-provenance-source`, the pairing and interval parameters, and the inherited `resamplingProcedure` string). Both `referenceSet: "registered-non-reference"` |
+| `aggregate/src/registry.ts` method list (`:1244` neighborhood) | two `SingleSubjectMethod` implementations, their majority reduction **imported** from the `binary-instrument@1` module and their clustered BCa **imported** from `paired-delta@1`'s, neither reimplemented |
+| `core/src/run/compile.ts:115-124` | a **second and a third bespoke derived-parameter branch**, appended past the `binaryInstrument` early return (§8.3 names the mechanics) |
+| `core/src/run/binary-instrument-profile.ts` | `compilePairwiseDisagreementProfile` and `compilePairedMajorityDeltaProfile`, siblings of `compileBinaryInstrumentProfile`: same joins, same derivation, minus the arm-cardinality branch. They share their whole front half and are written as one function with two callers |
+| method-conformance fixture corpus | one fixture per method per §7.1's and §7.2a's determinism claims: byte-stable output on recompute, including the withheld-interval branch |
 | `core/src/domain/draft.ts:178-186` | `DraftSpecSchema.additionalAnalyses` (§8.3), optional and additive |
 | `core/src/operations/report.ts:165`, `publication-report.ts:313` | one Report record per non-wilson plan entry, in plan order (§8.3) |
 | `core/src/report/claim.ts`, `core/src/run/state.ts`, `core/src/bundle/materialize.ts`, `verify/src/verify.ts`, `verify/src/assets.ts` | the Report-singularity pins itemized in §8.3, each of which must accept N Reports or the fallback is taken |
-| **P2-owned, P5-consumed** | the payload provenance reshape under §7.2 option (A). P5 does not implement it and must not fork it |
+| **P2-owned, P5-consumed** | the payload provenance reshape under §7.2 option (A), ratified at G1. P5 does not implement it and must not fork it |
 
 ---
 
-## 8. Method-operand citizenship and derived export (G1 decision points)
+## 8. Method-operand citizenship and derived export (ratified at G1)
 
 Three findings from the merged method-operand train (DR-2026-08-18-f, PR #2818 and #2820) that this
-spec presents as decisions rather than absorbing. The first two are **for the operator at G1**. The
-third is decided here, inside D2's delegated scope, and marked for ratification.
+spec presented as decisions rather than absorbing. **All three were ruled by the operator on
+2026-08-20 and are frozen below.** The first two overturn this document's own recommendations; the
+third is confirmed as decided.
+
+**Both overturned rulings land in one new packet: P10, `feat`, "judge method-operand citizenship and
+derived export".** They are one CLI surface, they touch the same four files, and splitting them would
+put two packets in the same `main.ts` and `parity-map.ts` lines for no benefit. P10 does **not** grow
+P1: P1 is a schema-and-cardinality packet in `profiles`, `aggregate`, and `verify`, and P10 is a CLI
+packet in `benchmark-product/core/src/cli` and `.../operations`, with no file in common. §10.1 records
+P10's merge position and its one real conflict.
 
 **Standing correction, not a decision.** The method-operand DR is **DR-2026-08-18-f**
 (`log/decisions/2026-08-18-colophon-method-cli.md`). `DR-2026-08-18-d` is the DeepSWE v1.1 official
 suite. The #2842 walkthrough note cites `-d`; every downstream citation uses `-f`.
 
-### 8.1 G1-D-A: the judge bind path (recon C2)
+**One dated amendment covers both rulings.** §8.1's citizenship and retirement and §8.2's
+certification generalization are recorded in a single dated amendment to DR-2026-08-18-f, drafted in
+this same branch at `log/decisions/2026-08-18-colophon-method-cli.md` under the heading
+`## Amendment — 2026-08-20 (judge method-operand citizenship, bind-judge retirement, and export
+certification; operator-directed)`. The amendment is the ratifying record; this section is the
+mechanics.
 
-The walkthrough note assumed the judge run path is the file-operand form of the `method` surface. It
-is not, on `next`.
+### 8.1 G1-D-A: the judge bind path — **ratified (a), with retirement** (recon C2)
 
-Verified: DR-2026-08-18-f decision 6 **explicitly kept** `runtime inspect bind-judge` alongside
-`method`. The judge binding schema
-(`jinn.network/benchmark-product/inspect-binary-judge-binding-request/1`) is absent from the method
-resolver's `FILE_SCHEMA_KIND` table
-(`core/src/operations/method-catalog.ts:79-91`), so `colophon method <judge-binding.json>` refuses
-today at `method-catalog.ts:167`. The shapes also conflict: the judge binding carries its private
-host binding **inside** the file, while decision 3 says a file operand may not carry a `--host`.
+**Ruled by the operator on 2026-08-20, against this document's recommendation of (b).** The judge
+becomes a **method-operand file citizen**, and `runtime inspect bind-judge` is **retired in the same
+change**. One way, not two.
 
-| Option | What it costs |
-|---|---|
-| **(a)** Make the judge a method-operand citizen | A new `FILE_SCHEMA_KIND` row, a new `MethodDocumentKind`, a `bindFile` dispatch case, a reconciliation of host-inside-the-file against decision 3, and therefore **a dated amendment to a DR ratified the previous day**, re-opening a decision it made explicitly. Moves the run path off already-shipped, already-tested surface days before the run |
-| **(b) RECOMMENDED** Record that the judge path is the kept `runtime inspect bind-judge` verb | Nothing. It is what DR-2026-08-18-f ratified. Corrects the walkthrough note's phrasing and its DR citation. No amendment |
+The operator's stated reason, recorded because it is what makes the ruling coherent rather than a
+preference: a judge experiment is still a benchmark, there should not be two ways to do the same
+thing, and the operator's own #2850 ruling already makes the judge suite a catalog row after
+publication, so citizenship is where this path was going regardless. v1.4's recommendation weighed the
+cost of an amendment against the cost of a divergent verb and priced only the first.
 
-**Recommendation: (b).** If the operator wants one verb for everything, that is a post-run cleanup
-with its own DR amendment, not a run-blocker.
+**The consonance the ruling turns on, and it is exact.** Decision 2 describes a file operand as a
+complete method document, *"coverage and host already inside"*, and decision 3 refuses `--host` on a
+file operand for that reason. The judge binding request is `{schema, manifest, host}`
+(`core/src/runtime/inspect/binary-judge-manifest.ts:38-42`), with the private host binding
+(`dockerPath`, `imageDigest`, `platform`, `user`) **inside the file**. There is no reconciliation to
+write: the judge document is the **only** file operand on the tree that satisfies decision 2's
+parenthetical literally. v1.4 read host-inside-the-file as a conflict with decision 3; it is the
+opposite, and that reading is withdrawn.
 
-### 8.2 G1-D-B: judge derived export (recon C3)
+#### Frozen: citizenship
 
-`export inspect view` does not exist as a CLI verb on `next`. `export --draft <id> --arm <armId>` on
-a judge draft refuses `conflict` with "derived export has no suite-named bundle for this method"
+1. **`FILE_SCHEMA_KIND` gains one row.** `core/src/operations/method-catalog.ts:79-91` gains
+   `jinn.network/benchmark-product/inspect-binary-judge-binding-request/1` mapped to
+   `{documentKind: "inspect-binary-judge", official: false}`. `official: false` is not a judgement
+   about the run: it is decision 5's rule applied unchanged, since a judge binding carries no suite
+   protocol object and therefore wears no suite name.
+2. **The schema literal is extracted as a named export.** Today it lives inline inside the zod literal
+   at `binary-judge-manifest.ts:39-40`. It becomes
+   `INSPECT_BINARY_JUDGE_BINDING_REQUEST_SCHEMA`, exported from that module, so `method-catalog.ts`
+   keys on it exactly as it keys on the other eleven (`inspect/manifest.ts:11-14`,
+   `harbor/manifest.ts:18`, and siblings) rather than re-typing a string.
+3. **`MethodDocumentKind` gains `"inspect-binary-judge"`** (`method-catalog.ts:35-43`). It is **not**
+   added to `METHOD_CATALOG` and gets no catalog id: `isMethodCatalogId(documentKind)` stays false, so
+   `finish` (`method.ts:84-96`) attaches no `catalogId`, which is correct.
+4. **The dispatch case reconstitutes the stripped `schema` key.** The resolver strips `schema` before
+   returning the document (`method-catalog.ts:197-198`), and
+   `InspectBinaryJudgeBindingRequestSchema` is a `strictObject` whose `schema` key is **required**. A
+   case that forwarded the stripped document would refuse at `validation` with a message about a bad
+   binding file, which is a plumbing bug wearing a contract error's clothes. **Frozen:** the case
+   passes `{schema: INSPECT_BINARY_JUDGE_BINDING_REQUEST_SCHEMA, ...document}`. This is named because
+   it is the one detail of this ruling that is not obvious from either side.
+5. **The bind body is extracted, and the bind semantics do not move.** The ruling says the dispatch
+   routes to the existing operation *unchanged*, and there is exactly one shape in which that is true.
+   Routing `bindFile` at the exported `bindInspectBinaryJudge` would nest `operate()` inside
+   `operate()`, and `operate`'s documented invariant is that every path through it appends **exactly
+   one** audit entry (`core/src/operations/operate.ts`, "never zero, never two"). The house pattern is
+   already written for this: `inspect-runtime.ts:55-59` has the wrapper's `run:` closure call an
+   exported `executeSelectInspectEvaluation`, and `bindFile` calls that same inner. **Frozen:** the
+   body of `bindInspectBinaryJudge`'s `run:` closure (`operations/inspect-binary-judge.ts:76-148`) is
+   extracted **verbatim** as `executeBindInspectBinaryJudge(context, input)`, the wrapper keeps
+   calling it, and `bindFile` calls it too. Not one refusal, digest, or written byte of the bind
+   changes. That is the "unchanged" the ruling means.
+6. **`finish` needs no widening.** It reads `draft` and `selectionManifestSha256`, both of which the
+   judge bind returns, and `suiteProtocolSha256` is absent because a judge method names no suite
+   protocol. The judge bind's `instruments` array is dropped at the boundary; it was never printed
+   (`main.ts:602-604` rendered only the selection digest). The CLI success line becomes
+   `bound custom inspect-binary-judge method <selectionManifestSha256> for draft <draftId>` through
+   `handleMethodBind`'s existing renderer (`main.ts:585`), with no new render path.
+7. **The wrapper survives as an internal.** `bindInspectBinaryJudge` keeps its `operate` wrapper and
+   its `runtime.inspect.bind-judge` action, off the CLI and off the facade, exactly as
+   `exportHarborHubPackage` (`hub-export.ts:84`) and `selectInspectEvaluation`
+   (`inspect-runtime.ts:48`) survived #2820. That is decision 7's own rule, unamended: "existing
+   select/export modules stay as internals; they are not re-exported from the operations facade."
+
+#### Frozen: retirement, and the full site inventory
+
+Breaking replace, **no aliases**, matching decision 6's own style — the DR removed nine per-suite
+verbs the same way, and `method-cli.test.ts:13-38` is the precedent for how the removal is proved.
+`runtime inspect bind-judge` becomes an unknown command: exit 2, `invalid-invocation`,
+`unknown command "runtime inspect bind-judge"`. Nothing else in `VERBS` shares its prefix except
+`runtime terminal-bench migrate`, which is unaffected.
+
+| # | Site | Change |
+|---|---|---|
+| 1 | `core/src/cli/main.ts:120-121` | the two USAGE lines removed |
+| 2 | `core/src/cli/main.ts:1254` | the `VERBS` row removed |
+| 3 | `core/src/cli/main.ts:591-606` | `handleInspectRuntimeBindJudge` removed, with `RUNTIME_INSPECT_BIND_JUDGE_FLAGS` |
+| 4 | `core/src/cli/main.ts:39,75` | the facade import and the `BindInspectBinaryJudgeInput` type import removed |
+| 5 | `core/src/operations/index.ts:66-68` | `bindInspectBinaryJudge` and its two types leave the **operations facade** |
+| 6 | `core/src/cli/parity-map.ts:62,110,157,216` | four rows removed: `OPERATION_TO_VERB`, `OPERATION_TO_ACTION`, `OPERATION_TO_DESCRIPTION`, `OPERATION_TO_GUI` |
+| 7 | `core/parity-matrix.v1.json:96-97` | **regenerated** by `yarn generate:parity` after `yarn build`, never hand-edited |
+| 8 | `core/src/cli/parity-matrix.test.ts` | `bindInspectBinaryJudge` leaves the hard-coded `unavailable` operation list |
+| 9 | `core/README.md:62` | the verb-table row removed. This one **is** hand-maintained; `generate-parity-matrix.mjs` does not touch the README |
+| 10 | `core/src/cli/method-cli.test.ts:13-38` | `["runtime","inspect","bind-judge"]` joins the retired-verb table |
+
+**Site 5 is mandatory rather than tidy, and the reason is a live gate.**
+`parity-matrix.test.ts:42-74` requires every facade operation to have a verb. Leaving
+`bindInspectBinaryJudge` on the facade with its verb gone fails parity, loudly, in CI. The gate that
+makes a half-retirement impossible is already in the tree.
+
+**P10 acceptance gains:** a judge binding file binds through
+`colophon method <judge-binding.json> --workspace <dir> --principal <id> --draft <id>` and produces a
+`selectionManifestSha256` byte-identical to the one `runtime inspect bind-judge` produced from the
+same file before retirement; and `runtime inspect bind-judge` exits 2 with the retired-verb envelope.
+The first assertion is the one that matters: it is the proof that "unchanged" is true.
+
+### 8.2 G1-D-B: judge derived export — **ratified (b), generalized** (recon C3)
+
+**Ruled by the operator on 2026-08-20, against this document's recommendation of (c).** The orphaned
+Inspect View export is wired, **and** the export's certification is generalized, with **no
+judge-specific classification anywhere**.
+
+The finding v1.4 recorded is unchanged and still the starting point. `export inspect view` does not
+exist as a CLI verb on `next`. `export --draft <id> --arm <armId>` on a judge draft refuses `conflict`
+with "derived export has no suite-named bundle for this method"
 (`core/src/operations/method.ts:256`), because the judge draft's `adapterId` is
 `inspect-binary-judge`, which matches none of the four routed adapters and is not `"inspect"`. The
-orphaned `exportInspectViewBundle` would refuse first anyway, on an adapter gate that requires
-exactly `"inspect"`. **The judge path has no derived-export citizenship at all**; it is outside the
-router, not inside it and coverage-refused.
+orphaned `exportInspectViewBundle` would refuse first anyway, on an adapter gate requiring exactly
+`"inspect"`. **The judge path has no derived-export citizenship at all**; it is outside the router,
+not inside it and coverage-refused.
 
-| Option | What it costs |
-|---|---|
-| **(a)** Add a judge branch to the export router | A new bundle shape, a new mode decision, new conformance surface, and a public claim about what the bundle means, authored days before the run |
-| **(b)** Wire the orphaned Inspect View export and widen its adapter gate | Adopting dead code, plus a selection-manifest parse that would still refuse a judge selection, plus re-opening the Inspect-eval path DR-2026-08-18-f decision 8 left refused |
-| **(c) RECOMMENDED** No derived export by design | P8 asserts the typed refusal at `method.ts:256` as the correct expected outcome. Narrows R1 |
+What v1.4 got wrong was the conclusion. It read the absence as a design boundary and proposed
+asserting the refusal. The operator read it as an unfinished lane and ruled the other way.
 
-**Verified facts backing (c)** (read before writing this section, so the option is factual and not
-hopeful):
+#### The universal rule, which is the substance of the ruling
+
+> **Every conforming export certifies completeness against its own sealed selection**, stated with
+> the lock digest: *complete run of the selection sealed at lock `<digest>`*. A **catalog suite name
+> is an additional badge**, earned only when the sealed selection equals the official dataset.
+> Custom-file runs, the judge included, are first-class in the **nameless lane**, which now states
+> the commitment it always had.
+
+The operator's stated reason: sealing your method ahead of time is Colophon's core value for **every**
+user, not a privilege of the five catalog rows. The judge bank's public freeze is nothing more
+exotic than a lock digest posted publicly. A product whose nameless lane only ever says what a package
+is *not* has hidden its own proposition from the majority of its users.
+
+This is why the ruling forbids a judge-specific classification. A judge branch in the mode decision
+would have made "the judge is special" true in code, when the actual finding is that the nameless lane
+was under-specified for everyone.
+
+#### Frozen: (1) mechanical wiring
+
+1. **`exportDerivedBundle` gains one branch** (`method.ts:229-259`): `INSPECT_BINARY_JUDGE_ADAPTER_ID`
+   returns `{shape: "inspect-view", ...executeExportInspectViewBundle(context, input)}`. It is placed
+   **after** the `INSPECT_ADAPTER_ID` refuse and **before** the final refuse.
+2. **The `"inspect"` refuse at `method.ts:253-255` is left exactly as it is.** This is deliberate and
+   it is what keeps the ruling inside DR-2026-08-18-f. Decision 8 left the Inspect-eval derived path
+   refused; wiring the function for `inspect-binary-judge` does not reopen it, because plain-Inspect
+   drafts still hit their own refuse one line earlier and never reach the function. The Inspect-eval
+   leg of `inspect-view-export.ts` stays dead, by the same decision that killed it.
+3. **The inner is extracted, for the same audit reason as §8.1 rule 5.**
+   `exportInspectViewBundle`'s `run:` body becomes `executeExportInspectViewBundle`, the `operate`
+   wrapper keeps calling it and stays an internal off the facade, and `exportDerivedBundle` calls the
+   inner. This is verbatim the shape `hub-export.ts:84-100` already ships. **`exportInspectViewBundle`
+   does not join the operations facade**: decision 7 says export modules stay internals, and the
+   parity gate would demand a verb it must not have.
+4. **`ExportDerivedBundleResult` gains `(ExportInspectViewBundleResult & {shape: "inspect-view"})`.**
+   `handleDerivedExport`'s renderer (`main.ts:616-627`) prints `exported inspect-view (<mode>) ...`
+   with no new render path.
+5. **The adapter gate widens through the name that already exists.**
+   `inspect-view-export.ts:76-78`'s `!== "inspect"` becomes `!isInspectRuntimeAdapterId(adapterId)`
+   (`core/src/runtime/adapter.ts:226-228`), which already means exactly `inspect` or
+   `inspect-binary-judge` and is the repo's own name for the pair. **Not a hand-written or-chain.**
+   §10.2's own counterexample is `materialize.ts:366`, a hand-written string or-chain that is
+   invisible to both the grep and the compiler; this spec does not add a second one.
+6. **A judge selection-manifest read path is added.** `readInspectEvalSelectionManifest`
+   (`runtime/inspect/host.ts:229`) parses the Inspect-eval selection schema and returns `undefined`
+   for anything else, which is what drives the refusal at `inspect-view-export.ts:86-90`. **Frozen:** a
+   sibling `readInspectBinaryJudgeSelectionManifest` parsing
+   `InspectBinaryJudgeSelectionManifestSchema`, used **only** by the judge branch. The Inspect-eval
+   read path is byte-untouched.
+7. **A third blocker the ruling did not name, and its frozen resolution.** A judge run has no
+   `suiteQuote`. Verified: `run-quote.ts:339-380` writes `suiteQuote` only for `harbor`,
+   `swebench-harness`, `archipelago`, `apex-swe-dev`, and `inspect`, and `:392` omits the key when the
+   branch yields `undefined`. So `inspect-view-export.ts:94-96` would refuse a judge draft with
+   "requires a quoted run; this draft carries no suite quote" even after rules 5 and 6. **Frozen: the
+   judge branch does not consult `suiteQuote` at all, and its mode is `inspection-upload`
+   unconditionally.** A judge method names no suite protocol, so it can never earn a badge, and
+   stating that as an unconditional property is stronger and clearer than deriving it from a quote it
+   does not have. `decideInspectViewExportMode` is byte-unchanged and simply is not called on this
+   path.
+8. **No mode decision and no eligibility predicate changes anywhere.** `decideInspectViewExportMode`,
+   its four siblings, `methodLeaderboardEligible`, and `deriveSuiteComparability`
+   (`runtime/suite-protocol/comparability.ts`) are untouched. Who earns a suite name does not move by
+   one line. **This is the ruling's "do not rewrite catalog behavior", stated as a checkable
+   property.**
+
+#### Frozen: (2) the certification statement, across all export shapes
+
+**Audit of the emitted wording, run before writing this clause.** All six instruction builders were
+read: `hub-export.ts:48-81` (two protocols, two modes), `swebench-export.ts:47-62`,
+`apex-agents-export.ts:47-60`, `apex-swe-export.ts:48-54` (one mode, no branch),
+`deepswe-export.ts:46-60`, and `inspect-view-export.ts:44-58`. **Nothing emitted today is false.**
+Every `leaderboard-submit` / `suite-named` text correctly names the badge earned; every
+`inspection-upload` text correctly says the package is not a submission and correctly names what it
+may be used for. So the ruling's "change only what is false or missing" resolves entirely to
+**missing**, and no existing sentence is rewritten or deleted.
+
+What is missing is the same thing in all six: every builder states what the package is **not**, and
+none states what it **is**.
+
+**Frozen:** one shared builder, `exportCompletenessCertification`, in
+`core/src/runtime/suite-protocol/comparability.ts` — the module that already houses
+`INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE` and its four siblings, so shared export sentences keep one home.
+It returns exactly one line, prepended to every shape's instruction array, in all modes:
+
+```
+complete run of the selection sealed at lock <runSha256>: <judged> of <expected> cells judged.
+partial  run of the selection sealed at lock <runSha256>: <judged> of <expected> cells judged.
+no sealed Matrix: completeness of the selection sealed at lock <runSha256> is not yet certified.
+```
+
+Rules:
+
+1. **It renders the sealed Matrix's own `completeness` block and computes nothing.**
+   `CompletenessSchema` is `{expected, judged, floor, runOutcome}` with `runOutcome` in
+   `complete | partial | cancelled` (`records/src/matrix/schema.ts:141-146`). The first word of the
+   sentence **is** the sealed `runOutcome`; the two counts **are** the sealed counts. A certification
+   that recomputed completeness would be a second commitment that can disagree with the artifact it
+   describes, which §2.5 refuses by name in a different family and the rule does not weaken here.
+2. **The lock digest is `runState.runSha256`**, the digest of the Run record sealed at `lock`, which
+   transitively binds the selection manifest through `draft.spec.evaluationRuntime`. All five export
+   operations already read it (`hub-export.ts:108-109`, `swebench-export.ts:89-90`,
+   `apex-agents-export.ts:87-88`, `apex-swe-export.ts:81`, `inspect-view-export.ts:91-93`), so this
+   costs no new plumbing in any shape.
+3. **The third line is the only branch that claims nothing**, and it is honest rather than a hole:
+   every shape already handles `matrixSha256 === undefined` for its mode decision, so an export taken
+   before `collect` says so in one sentence instead of implying a completeness it cannot see.
+4. **The suite name stays exactly as hard to earn.** The certification sentence sits *alongside* the
+   badge sentences, never in place of them. A `full`-coverage conforming catalog run reads both lines;
+   a nameless run reads the certification and the existing "not a submission" line. That is the
+   ruling's "additional badge" in emitted text.
+
+#### Frozen: (3) the scoreless-transcripts caveat
+
+The judge branch's `inspection-upload` text gains one further sentence, and only the judge branch,
+because it is the only shape where the exported artifact and the claim live in different places:
+
+```
+These .eval logs carry the judge's transcripts, not its verdicts; the verdicts are in the sealed
+Report and the published bundle.
+```
+
+This is a caveat, not a classification: it says where to look, and it does not give the judge a
+different mode, a different badge rule, or a different certification.
+
+**The evidence path this export sits on top of, verified and unchanged.** These are the facts v1.4
+gathered in support of (c); they survive the ruling and are now the reason the export is a
+**convenience view** rather than a claim.
 
 - `inspect-binary-judge` declares `nativeArtifactPublication: "explicit-consent"`
   (`core/src/runtime/adapter.ts:215-224`), and `publish` **refuses** a run under that policy unless
@@ -1724,18 +2117,47 @@ hopeful):
 - The judge launcher emits the `inspect-log` output
   (`core/src/runtime/inspect/binary-judge.ts:50,165`).
 
-**Recommendation: (c).** The per-cell logs are already in the published bundle by the mandatory
-path. A derived export would be a second, weaker copy of evidence the bundle already carries under
-digest.
+`inspect-view-export.ts`'s own first line already says it: "Not Hub. Not the claim of record." That
+sentence is now true and load-bearing rather than true and unreachable.
 
-**R1 consequence, named.** Under (c), R1 (#2849) item 4 loses the per-arm view-bundle download and
-instead links per-cell `.eval` files from the published bundle's `native/inspect/` directory,
-resolved through the evidence graph's cell-to-output mapping. That is a narrower surface and a
-factually accurate one. R1's spec update must say so in the same PR.
+#### Frozen: (4) this does not contradict DR-2026-08-18-f decision 8
 
-### 8.3 G1-D-C: multiple registry-verified readouts over one collected cell set (recon C4)
+Stated explicitly because it is the first objection a reader will raise.
 
-**Decided here, inside D2's delegated scope. Marked for ratification.**
+- **Decision 8 anticipated this.** Its own enumeration reads "Hub job, predictions JSONL, APEX
+  inspection, **later View logs**". The View-log export was named in the DR as future work, not
+  excluded by it.
+- **No-suite-name-for-custom survives intact.** A judge draft's mode is `inspection-upload`
+  unconditionally (rule 7); no cousin, custom, non-conforming, or named-slice document gains a suite
+  name; `methodLeaderboardEligible` is untouched. The nameless lane now **states the commitment it
+  always had**, which is a change to what is said, not to who qualifies.
+- **"Copy must not claim Colophon placed the foreign row" is unaffected.** The certification sentence
+  makes a claim about *this run against its own sealed selection* and says nothing about any external
+  leaderboard.
+
+The generalization is nonetheless a change to what decision 8's copy asserts, so it is recorded in
+the **same dated amendment** as §8.1 rather than treated as an implementation detail.
+
+#### Sequencing and R1
+
+**The export is needed by G3 (the rehearsal) and by the site. It is not on the run-execution path.**
+`method` → `quote` → `lock` → `launch` → `collect` → `report` → `publish` never calls it. P10 must land
+before G3; it does not gate the run.
+
+**R1 consequence, corrected.** v1.4 recorded that under (c) R1 (#2849) item 4 would lose the per-arm
+view-bundle download. Under this ruling **it keeps it**: `colophon export --draft <id> --arm <armId>`
+produces the per-arm `.eval` directory with its `INSTRUCTIONS.txt`, and R1 renders that alongside the
+published bundle's `native/inspect/` files rather than instead of them. R1's spec update says so in the
+same PR, and it now renders the certification sentence too, which is the site-facing half of this
+ruling.
+
+### 8.3 G1-D-C: multiple registry-verified readouts over one collected cell set — **ratified as frozen** (recon C4)
+
+**Decided here, inside D2's delegated scope, and acknowledged as frozen by the operator on
+2026-08-20: option 5, N sealed bundles over one Run and one Matrix.** No substantive change; the
+paragraphs below stand as written. The R-1 revision does not move the count: the three non-wilson plan
+entries are still `binary-instrument@1`, `pairwise-disagreement@1`, and — in place of
+`paired-delta@1` — `paired-majority-delta@1`, so it is still three sealed Reports and three bundles.
 
 Verified constraint: `AnalysisSchema.method` is a single string
 (`core/src/domain/draft.ts:178-184`); `buildAnalysisPlan` seals `[wilson]` or `[wilson, selected]`
@@ -1759,7 +2181,7 @@ Options weighed:
 4. **Pre-register the additional methods in the sealed analysis plan, and emit one Report record per
    plan entry, into one bundle, over one Matrix.** Recommended at v1.1; **no longer recommended, see
    option 5.**
-5. **RECOMMENDED at v1.2. Pre-register the additional methods in the sealed analysis plan exactly as
+5. **RECOMMENDED at v1.2, RATIFIED at G1 on 2026-08-20. Pre-register the additional methods in the sealed analysis plan exactly as
    in option 4, and publish one bundle per plan entry, over one Run and one Matrix.**
 
 Options 4 and 5 share their entire front half, and it uses a mechanism that already exists for
@@ -1931,38 +2353,61 @@ fallback the operator invokes, never one the lane takes on its own.
 ## 9. Corrections for the rehearsal (P8, #2847) and the runbook (P9, #2848)
 
 Operational facts the rehearsal and the runbook must be written against. All verified against `next`
-@ `4f4ad46f2`.
+@ `4f4ad46f2`. **Items 2 and 7 are rewritten at v1.5 by the G1 rulings** and now describe the surface
+P10 delivers; both are marked with the packet they depend on, because P8 and P9 are written before
+P10 merges.
 
-1. **The DR is DR-2026-08-18-f**, not `-d`.
-2. **The judge bind verb is `runtime inspect bind-judge --workspace <dir> --principal <id> --draft <id> --file <binding.json>`**, not `method <judge-doc>` (pending G1-D-A). `colophon method` on a
-   judge binding refuses today.
+1. **The DR is DR-2026-08-18-f**, not `-d`, plus its **2026-08-20 amendment** (§8's preamble).
+2. **The judge bind is the method operand** (**P10**, §8.1):
+   `colophon method <judge-binding.json> --workspace <dir> --principal <id> --draft <id>`. There is
+   **no `--file` flag** on this path — the binding file **is** the operand, and it carries its own
+   host binding inside, so no `--host` either. `runtime inspect bind-judge` is **retired** and exits 2
+   with `unknown command "runtime inspect bind-judge"`. P8 and P9 are written against the
+   method-operand form only; the retired verb appears in neither except, in P9, as a one-line note
+   for readers of older material.
 3. **Operand-first argument grammar.** `parseArgs` (`core/src/cli/args.ts:32-71`) consumes
    positionals only until the first `--` token; any positional after a flag refuses
    `invalid-invocation` with "flags come after the verb". Every `method` line must be written
    `colophon method <ref> --workspace ... --principal ... --draft ...`. PR #2863 (open, not on
-   `next`) would relax this; write against the strict grammar, which stays valid under both.
+   `next`) would relax this; write against the strict grammar, which stays valid under both. **This
+   note now binds the judge line too**, which under item 2 is a `method` line like any other.
 4. **There is no `method compute` verb.** Method computation is a side effect of `report`,
    parameterized by the sealed `analysisPlan`.
 5. **`k` and the analysis selection are set only via `draft update --file <patch.json>`.** There is
-   no `--replicates` flag and no `--method` flag.
+   no `--replicates` flag and no `--method` flag. Under §8.3 this is also where
+   `additionalAnalyses` is set, so the three registered readouts are pre-registered by one patch.
 6. **`publish --include-native-artifacts` is mandatory for a judge run.** The adapter's
    `nativeArtifactPublication` is `explicit-consent` and `publish` refuses without the flag. Per-cell
    `.eval` logs land at `native/inspect/<sha256>.eval`.
-7. **`export` on a judge draft refuses `conflict`.** Expected, not a bug (pending G1-D-B).
+7. **`export` on a judge draft succeeds** (**P10**, §8.2):
+   `colophon export --workspace <dir> --principal <id> --draft <id> --arm <armId>` writes the per-arm
+   `.eval` directory plus `INSTRUCTIONS.txt`, in mode `inspection-upload` unconditionally. It is
+   **not** the claim of record and P8 must not treat it as one. P8's acceptance flips from asserting
+   the typed refusal at `method.ts:256` to asserting the successful `inspect-view` shape, the
+   unconditional mode, and the certification sentence naming the sealed Matrix's own `runOutcome` and
+   counts.
 8. **`publish` plus `bundle verify` are the claim-of-record path.**
-   `bundle verify --bundle <dir> [--json]` is standalone: no workspace, no principal.
+   `bundle verify --bundle <dir> [--json]` is standalone: no workspace, no principal. Under §8.3
+   option 5 there are **N bundles**, and the reader checks they are one run by comparing `runSha256`
+   and `matrixSha256` across them; P9 states that comparison as a step.
 9. **`main.ts` line citations in the program document and in the child issues are stale** by roughly
-   250 lines after #2820. Every other cited file resolves unchanged.
+   250 lines after #2820, and P10 moves them again. Every other cited file resolves unchanged.
 10. **The rehearsal's arm count is six**, which requires §1.6 to have landed. P8's fixture must
     exercise six arms, mixed parser identities, one evidence-declaring arm, and the dated-snapshot
     profile, exactly as the program describes.
+11. **The paired contrast is `paired-majority-delta@1`, not `paired-delta@1`** (§7.2a). P8's claim
+    table asserts three `registry-verified` readouts —
+    `binary-instrument@1`, `pairwise-disagreement@1`, `paired-majority-delta@1` — and the runbook's
+    `draft update` patch names those three. `paired-delta@1` appears nowhere in either.
 
 ---
 
 ## 10. Digest and version inventory
 
-Every digest, schema version, and pinned literal that moves across P1 to P7, so implementers
-recompute deliberately and reviewers can check completeness.
+Every digest, schema version, and pinned literal that moves across P1 to P7 and P10, so implementers
+recompute deliberately and reviewers can check completeness. **Rows 25 to 27 are P10's, added at
+v1.5**; none of them moves a digest, and row 27 is a published-copy row rather than a digest row,
+which is why it is here rather than only in §8.2.
 
 | # | Document or constant | Packet | Moves? | Consequence |
 |---|---|---|---|---|
@@ -1980,7 +2425,7 @@ recompute deliberately and reviewers can check completeness.
 | 12 | `BinaryJudgmentLabelResolutionSchema` | P6 | third member, **existing two byte-identical** | the `CommonShape` refactor (§6.7) changes no serialized bytes |
 | 13 | `BinaryJudgmentAdmissionManifestSchema` | P6 | widens, **bytes stable** | enum value plus optional `screeningTableSha256` |
 | 14 | New sealed records | P1, P6 | new | `snapshot-serving-probe/v1`, `screening-table/v1`, `screening-reveal-receipt/v1` |
-| 15 | `BENCHMARKING_METHOD_IDS` and the registry | P5 | new row | `pairwise-disagreement`; plus a **second bespoke derived-parameter branch** in `compile.ts` and a derivation function (§7.1, §7.5). **Correction to v1.0: there is no allowlist** for an id to be added to |
+| 15 | `BENCHMARKING_METHOD_IDS` and the registry | P5 | **two** new rows | `pairwise-disagreement` (§7.1) and `paired-majority-delta` (§7.2a, added at v1.5 by the R-1 revision); plus a **second and third bespoke derived-parameter branch** in `compile.ts` and their shared derivation function (§7.5). **Correction to v1.0: there is no allowlist** for an id to be added to. Neither id moves any existing digest: both are additive registry rows |
 | 16 | `DraftSpecSchema.additionalAnalyses` | P5 | optional and additive | **no stored draft's `specSha256` moves** |
 | 17 | Bundle profile (Report list) | P5 | **verify and possibly bump** | if the current profile pins exactly one Report, the format version bumps; P5 confirms before implementing |
 | 18 | Replacement-ledger `reason` enum, **both copies** | P6 | widens | `verify/src/admission/contracts.ts` and the second copy at `verify/src/schema.ts:199`; existing three values byte-unchanged in both |
@@ -1990,18 +2435,37 @@ recompute deliberately and reviewers can check completeness.
 | 22 | `BundleQualificationSchema` (`verify/src/schema.ts:183-189,199,275-276`) | P1 (`arms`), P4 (`strata`), P6 (`truthAdmission`, ledger `reason`, the publication-grade branch) | widens, **`BUNDLE_QUALIFICATION_FORMAT` stays** | §1.6 site 7, §3.1 site 10, §6.8. Every existing bundle still validates byte-identically (§0.4). This row was absent from v1.0 despite being P8's acceptance path |
 | 23 | Verifier public result `armCount` (`verify/src/verify.ts:154,1621`) | P1 | literal `4` becomes derived | §1.6 site 8. Not a digest move; a **published-value correction**, and the only row here where leaving it alone publishes a false number rather than refusing |
 | 24 | Claim `records` block (`core/src/report/claim.ts:371`) and the six other Report-singularity pins | P5, **only under G1-D-C option 4** | **YES if N Reports land** | §8.3's pin table; the claim package's own version moves with row 1 of it. Under the all-companions fallback nothing here moves |
+| 25 | `FILE_SCHEMA_KIND` and `MethodDocumentKind` (`core/src/operations/method-catalog.ts:35-43,79-91`) | **P10** | one new row, **no digest moves** | §8.1. The judge binding-request schema literal joins the resolver table at `official: false`. Additive: every document that resolves today resolves identically |
+| 26 | `core/parity-matrix.v1.json` | **P10** | **regenerated**, not hand-edited | §8.1 sites 6 to 8. `bindInspectBinaryJudge` leaves the operations facade, so its row leaves the matrix; `yarn generate:parity` after `yarn build` is the only way it is written. The `parity-matrix.test.ts` `unavailable` list loses the same name in the same PR |
+| 27 | Export instruction text, six builders | **P10** | **published copy changes** | §8.2. One shared `exportCompletenessCertification` line is prepended in every shape and every mode. Not a digest: `INSTRUCTIONS.txt` is not sealed and enters no join. It **is** published copy, so it is a claim, and it is the third kind of site §10.2's standing rule 2 cares about — one that projects rather than refuses |
 
 ### 10.1 Merge ordering (binding on the lane coordinator)
 
-**Two packets regenerate the same judge fixture corpus: P2 (rows 1, and 19 to 21 under option (A))
-and P3 (rows 4, 5, 6).** They must land in the order **P2, then P3**, with P3 rebased on P2 and
-regenerating the fixtures rather than resolving them by hand. Landing them in parallel produces two
-mutually stale fixture sets and a conflict nobody can review.
+**Two packets regenerate the same judge fixture corpus: P2 (rows 1, and 19 to 21, option (A) being
+ratified) and P3 (rows 4, 5, 6).** They must land in the order **P2, then P3**, with P3 rebased on P2
+and regenerating the fixtures rather than resolving them by hand. Landing them in parallel produces
+two mutually stale fixture sets and a conflict nobody can review.
+
+**P10 is outside the fixture chain and inside a different collision.** It moves no sealed byte, no
+digest, and no fixture, so it may land at any point relative to P1 to P7. Its one real hazard is the
+**open `method discover` stack, #2862 to #2865**, which is rooted on `next` at #2862 and is not merged.
+Named explicitly because it is the collision a coordinator will otherwise discover at rebase:
+
+| P10 file | What the open stack does to it | Consequence |
+|---|---|---|
+| `core/src/cli/main.ts` | **#2863** rewrites `parseArgs` to accept GNU-style mixed flags and positionals; **#2864** adds a `--n` flag and per-verb help, touching `VERBS` and `USAGE` | Textual conflict in the same `VERBS` block and the same `USAGE` region P10 deletes two lines from. P10's own grammar is operand-first (§9 item 3), which stays valid under both grammars, so the conflict is textual and never semantic |
+| `core/src/cli/parity-map.ts` | **#2862** reverses GUI unavailability, editing `OPERATION_TO_GUI` (`:202-248`) | P10 deletes a row from the same map. Both PRs must re-run `yarn generate:parity` |
+| `core/parity-matrix.v1.json` | any of #2862, #2864, #2865 | **Byte-asserted** by `parity-matrix.test.ts:42-74`. Whichever lands second regenerates; it is never hand-merged |
+| `core/src/cli/parity-matrix.test.ts` | #2862 changes the hard-coded `unavailable` operation list | P10 removes `bindInspectBinaryJudge` from the same literal array |
+
+**The rule for the coordinator: whichever of P10 and the discover stack lands second rebases and
+re-runs `yarn generate:parity` after `yarn build`.** The generated artifact is never resolved by hand,
+and a hand-resolved `parity-matrix.v1.json` fails its own test with the message that says so.
 
 **Correction to v1.0: P7 is no longer in this chain.** v1.0 put it third on the strength of a second
 EvaluationSpec digest move that §5.0 removed. P7 now moves no sealed bytes and may land at any time.
 
-P1, P4, P6, and P7 move no sealed bytes and may land in any order relative to the chain. **Six
+P1, P4, P6, P7, and P10 move no sealed bytes and may land in any order relative to the chain. **Six
 textual conflicts to expect and plan around, none of them a digest conflict.** v1.0 listed two; the
 four added here all follow from the site tables §1.6 and §3.1 grew under review, and three of them
 land in a single six-line block:
@@ -2022,6 +2486,15 @@ more packets:
 | **`evaluator-adapters/src/binary-judgment/adapter.ts:715-723`** | **P4, P6** | **one compound boolean expression**: the `truthAdmission` allowlist at `:715-716` (P6) and the stratum refusal at `:723` (P4) are operands of the same condition |
 | `core/src/operations/human-review.ts` | P4, P6 | `HumanAdmissionCandidateInput.stratum` at `:135` (P4); the two implicit-else routers, the reason unions, and the `publicationGrade` derivation (P6) |
 | `core/src/operations/import-item-bank.ts:50-53` | P4, P6 | adjacent lines of one interface: `truthAdmission` at `:50` (P6), `strata` at `:53` (P4) |
+
+**P10 adds no row to this table, and that is the argument for it being its own packet.** Its files
+are `core/src/cli/{main.ts, parity-map.ts, method-cli.test.ts, parity-matrix.test.ts}`,
+`core/src/operations/{index.ts, method.ts, method-catalog.ts, inspect-binary-judge.ts,
+inspect-view-export.ts}`, `core/src/runtime/inspect/{binary-judge-manifest.ts, host.ts}`,
+`core/src/runtime/suite-protocol/comparability.ts`, the five sibling export builders, `core/README.md`,
+and the generated `parity-matrix.v1.json`. **Not one of them appears in the eleven rows above**, and
+not one is touched by P1 to P7. Its only collision is the out-of-program one tabled earlier in this
+section.
 
 **Shared fixture builder, a hazard rather than a blocker.**
 `core/src/bundle/testing/v4-synthetic-fixture.ts` is touched by **P1, P2, P4, and P6** and is
@@ -2279,34 +2752,56 @@ Three standing rules, which the sweep's result confirms rather than replaces:
 
 ---
 
-## 11. Ratification checklist (G1)
+## 11. Ratified record (G1)
 
-**Operator picks, at G1:**
+**Every item below was ruled by the operator on 2026-08-20. Nothing here is open.** This section was a
+checklist through v1.4; at v1.5 it becomes the record of what was decided, by whom, and on what
+stated reason. Two rulings overturned this document's own recommendation and one revised a choice
+this document had already frozen; those three carry the operator's reason in their own words'
+substance, because a ruling that reverses a written argument is only auditable if the counter-argument
+is on the page.
 
-| Ref | Decision | Recommendation |
+### Operator picks
+
+| Ref | Ruling (2026-08-20) | Where |
 |---|---|---|
-| **G1-D-A** | Judge bind path: method-operand citizen, or the kept `runtime inspect bind-judge` verb (§8.1) | **(b)** the kept verb; no DR amendment |
-| **G1-D-B** | Judge derived export: router branch, wire the orphan, or none by design (§8.2) | **(c)** none by design; P8 asserts the typed refusal; R1 links `native/inspect/*.eval` instead of a per-arm view bundle |
-| **G1-D-D** | The evidence contrast: accept option (A)'s payload provenance reshape and profile-URI major bump inside P2, or invoke option (D) and demote the contrast to a sealed companion (§7.2) | **(A)**. It is inside D2, it uses `paired-delta@1` unmodified, and it unlocks every provenance-clustered method rather than one contrast. (D) is a fallback the operator invokes, never one the lane takes |
-| **G1-D-E** | P7's shape: declare no `unscorable` classes and pin two existing draft-policy values (`test`-shaped), or keep the three-class declaration as sealed-but-unread disclosure and accept a second EvaluationSpec digest move plus a full fixture regeneration (§5.0) | **Declare none.** Nothing reads a `retryable-infrastructure` entry; the behavior P7's acceptance asks for already exists. §1.4 refuses decorative disclosure by name, and the rule does not weaken because this time it is a class list |
+| **G1-D-A** | **(a), and retire the other path.** The judge becomes a method-operand **file citizen**, and `runtime inspect bind-judge` is **retired in the same change**. This **overturns** the document's recommendation of (b). Operator's reason: a judge experiment is still a benchmark; there must not be two ways to do the same thing; and the operator's own #2850 ruling already makes the judge suite a catalog row after publication, so citizenship is the trajectory regardless. Requires a dated amendment to DR-2026-08-18-f, which is drafted in this branch | §8.1 |
+| **G1-D-B** | **(b), generalized.** Wire the orphaned Inspect View export **and** generalize the export's certification, with **no judge-specific classification**. Every conforming export certifies completeness against its **own** sealed selection, named by the lock digest; a catalog suite name is an **additional** badge; custom-file runs including the judge are first-class in the nameless lane. This **overturns** the document's recommendation of (c). Operator's reason: sealing your method ahead of time is Colophon's core value for **every** user, and the judge bank's public freeze is just a lock digest posted publicly | §8.2 |
+| **G1-D-C** | **Acknowledged as frozen: option 5**, N sealed bundles over one Run and one Matrix, with the additional methods pre-registered in the sealed analysis plan. No substantive change | §8.3 |
+| **G1-D-D** | **(A).** Accept the payload provenance reshape and the `binary-judgment` profile-URI major bump (`1.0` to `2.0`) inside P2, with `publishedAt` required on the source-manifest row. As the document recommended. The R-1 revision does not relax it: §7.2a's method clusters on the same `task-provenance-source` input | §7.2 |
+| **G1-D-E** | **Declare none.** P7 declares no `unscorable` classes and pins two existing draft-policy values; §5.0's shape stands unchanged and P7 is `test`-shaped. As the document recommended. The coordinator carries the Issue Type change | §5.0 |
 
-**Decided in this spec, marked for ratification:**
+### Decided in this spec and ratified
 
-| Ref | Decision | Where | Reads on |
+| Ref | Ruling (2026-08-20) | Where | Reads on |
 |---|---|---|---|
-| **G1-D-C** | Three registered readouts over one collected cell set, via `additionalAnalyses`; **at v1.2 the packaging recommendation changes from one bundle carrying N Reports (option 4) to N bundles over one Run and one Matrix (option 5)**, on the sweep's evidence that option 4 must rewrite four independent verifier implementations including a published Python script. All-companions fallback unchanged | §8.3 | D2's delegated scope |
-| **R-1** | `paired-delta@1` used unmodified; the paired contrast's unit is the per-item replicate mean, disclosed, rather than forking a v1-reference method | §7.2 | D2's "adding an input adapter only if it cannot consume item-level majority decisions" |
-| **R-2** | The screened branch's ordering receipt is a bank-scoped sibling of the per-item reveal receipt, not a literal reuse of it | §6.6 | D1's "sealing before the first judge call reuses the existing ordering receipt" |
-| **R-3** | A hand check, where it happened, decides; a screen-agreed row the operator hand-excluded is **excluded** | §6.4 | D1's "admitted means screening agreed or hand-confirmed", whose literal disjunction would admit it |
-| **R-4** | The verifier recomputes sample membership by the spec-defined `screening-sample/1` procedure, not by executing the sealed sampling script, and the recomputation wins on disagreement | §6.5 | D1's "sample membership from seed plus script over the frozen bank" |
+| **R-1, revised** | **Overturned.** The evidence contrast does **not** ship on `paired-delta@1`'s per-item mean-rate unit. A **new general-purpose paired-contrast method, `paired-majority-delta@1`, is registered** over item-majority decisions — the unit D2 specified and the unit every other readout in the report uses. `paired-delta@1` leaves the headline path and its mean-rate view is **not** published. Operator's reason: this program's job is to fill substrate gaps, and a new registered method with a published contract and conformance coverage is as legitimate an output as the shipped one and reusable afterwards; P5 already mints `pairwise-disagreement@1`, and the majority reduction is single-sourced between them | §7.2a | D2's "through the already registered `paired-delta@1`". The **unit** is delivered; the **carrier** is substituted, and that substitution is the residual departure |
+| **R-2** | **Acknowledged as frozen.** The screened branch's ordering receipt is a bank-scoped sibling of the per-item reveal receipt, not a literal reuse of it | §6.6 | D1's "sealing before the first judge call reuses the existing ordering receipt" |
+| **R-3** | **Acknowledged as frozen.** A hand check, where it happened, decides; a screen-agreed row the operator hand-excluded is **excluded** | §6.4 | D1's "admitted means screening agreed or hand-confirmed", whose literal disjunction would admit it |
+| **R-4** | **Acknowledged as frozen**, residual-limitation language unchanged. The verifier recomputes sample membership by the spec-defined `screening-sample/1` procedure, not by executing the sealed sampling script, and the recomputation wins on disagreement | §6.5 | D1's "sample membership from seed plus script over the frozen bank" |
 
-R-3 and R-4 are here because the reviewer was right that they were larger deviations than R-1 and
-R-2, and were carried silently while narrower ones were flagged. **This spec never absorbs an
-operator ruling it is departing from; it names the departure and the reason and hands it back.**
+R-3 and R-4 are in this table because the reviewer was right that they were larger deviations than
+R-1 and R-2, and were carried silently while narrower ones were flagged. **This spec never absorbs an
+operator ruling it is departing from; it names the departure and the reason and hands it back.** R-1
+is the case where handing it back changed the answer.
 
 **Ratified as ruled:** D1 (§6) and D2 (§7), **except** at R-1 through R-4, each of which names the
 exact ruling sentence it reads on. No other clause of either ruling is reinterpreted anywhere in
 this document.
+
+### What the rulings changed downstream
+
+- **A new packet, P10** (`feat`, "judge method-operand citizenship and derived export"), carries
+  G1-D-A and G1-D-B. Issue filed by the coordinator at G1 close. It does not grow P1; §8's preamble
+  and §10.1 give the reason and the merge position.
+- **P5 registers two methods, not one** (§7.5), and `compile.ts` grows a third bespoke branch.
+- **P7 is `test`-shaped**, not `fix`-shaped (§5.0).
+- **P8's export acceptance flips** from asserting a typed refusal to asserting a successful
+  `inspect-view` export with its certification sentence (§9 item 7).
+- **P8 and P9 are written operand-first against `method <judge-binding.json>`** and never against the
+  retired verb (§9 item 2).
+- **R1 (#2849) item 4 keeps the per-arm view-bundle download** and additionally renders the
+  certification sentence (§8.2, sequencing).
 
 **New findings requiring no decision but blocking the run if unimplemented:**
 
@@ -2329,7 +2824,15 @@ this document.
   `superRefine` branch, implemented exactly as specified and with nothing else changed, would refuse
   every screened bundle, because `publicationGrade` is computed as
   `truthAdmission === "two-human-unanimous"` at two sites and yields `false`.
+- **A judge run has no `suiteQuote`, and the wired export would refuse on it (§8.2 rule 7).** Found at
+  v1.5 while checking G1-D-B's mechanics. `run-quote.ts:339-380` writes `suiteQuote` for five adapter
+  ids and `inspect-binary-judge` is not one of them, so `:392` omits the key entirely. This is a third
+  blocker in front of the wiring, behind the adapter gate and the manifest parse, and neither the
+  ruling nor v1.4's recon named it. §8.2 rule 7 resolves it by making the judge branch's mode
+  unconditional rather than quote-derived, which is also the more honest statement.
 
 **§10.2 is frozen.** The mechanical sweep completed and classified 214 sites across the four
 families; its result is folded into §1.4, §1.6, §3.1, §6.8a, §8.3, §10.1, and the owning seam
-inventories. The whole document is now frozen on merge.
+inventories.
+
+**The whole document is frozen on merge**, at v1.5, with every §11 item ruled.
