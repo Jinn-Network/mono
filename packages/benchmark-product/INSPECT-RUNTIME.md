@@ -358,10 +358,12 @@ benchmark-product method \
   /absolute/path/to/inspect-selection.json
 ```
 
-The web product exposes `method.bind` as a raw Inspect-document form. It does
-not provide a task, solver, scorer, or sandbox editor. Catalog suite presets
-and derived export stay unavailable in the browser (machine host paths / local
-job copy).
+The web product exposes `method.bind` as two forms: a catalog suite bind
+(suite id, host JSON, slice / n / ids) and a raw Inspect-document form. It
+does not provide a task, solver, scorer, or sandbox editor. Derived export
+stays unavailable in the browser (local job copy). `colophon method --help`
+names catalog `--host` keys; binding an Inspect file still refuses `--host`
+([DR-2026-08-19](../../log/decisions/2026-08-19-colophon-method-cli-discover.md)).
 
 An unmodified task with parallel Inspect scorers uses the mutually exclusive
 `scoring` form. Each projection selects one scorer value, or one exact top-level

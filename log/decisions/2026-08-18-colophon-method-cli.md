@@ -4,7 +4,11 @@
 - **Status:** **Accepted 2026-08-18.** Ratified by operator instruction to
   implement the Colophon method CLI train (issue
   [#2804](https://github.com/Jinn-Network/mono/issues/2804)).
-  **Amended 2026-08-20** (decisions 6 and 8; see the Amendment at the end).
+  **Amended twice since.** 2026-08-19, decisions 3 and 9, by
+  [DR-2026-08-19](./2026-08-19-colophon-method-cli-discover.md) (recorded as
+  inline supersession at decision 9 and in Out of this train; that DR is the
+  amending record). 2026-08-20, decisions 6 and 8, by the Amendment section at
+  the end of this file.
 - **Owning docs:** the publication interoperability profile; Colophon
   self-serve; the benchmark-product GTM plan (copy); Inspect runtime adapter
   notes.
@@ -100,12 +104,17 @@ which verb you typed.
 9. **GUI.** The shipped Inspect form maps to `method.bind` with an
    Inspect-shaped document. Catalog presets stay unavailable (machine host
    paths). Derived export stays unavailable (local job/log copy).
+   **Superseded for catalog GUI by
+   [DR-2026-08-19](./2026-08-19-colophon-method-cli-discover.md)
+   Decision 8** — catalog bind is available with the same machine-path trust
+   as the Inspect textarea; derived export stays unavailable.
 
 ## Out of this train
 
-Renaming sealed `one_task`; GUI catalog picker; folding `import swebench`
-into `method`; inspect-harbor as a way to wear TB 2.1; renaming the
-`lock` verb.
+Renaming sealed `one_task`; folding `import swebench` into `method`;
+inspect-harbor as a way to wear TB 2.1; renaming the `lock` verb. GUI
+catalog picker and `--n` / list / verb help moved to
+[DR-2026-08-19](./2026-08-19-colophon-method-cli-discover.md).
 
 ## Amendment — 2026-08-20 (judge method-operand citizenship, bind-judge retirement, and export certification; operator-directed)
 
@@ -148,11 +157,15 @@ complete method document.
   wrapper and the `method` file dispatch call the same function, because
   nesting the operation inside `method.bind` would append two audit entries and
   the boundary helper guarantees exactly one.
-- **Unchanged:** decisions 1 to 5, 7, and 9. `method` is still the canonical
-  bind verb; the resolver is still fail-loud XOR; `--slice` / `--ids` /
-  `--host` are still catalog-id-only; officialness is still a property of the
-  sealed document, and a judge binding carries no suite protocol object, so it
-  binds as **custom** and wears no suite name.
+- **Untouched by this amendment:** decisions 1 to 5, 7, and 9. `method` is
+  still the canonical bind verb; the resolver is still fail-loud XOR;
+  `--slice` / `--ids` / `--n` / `--host` are still catalog-id-only
+  (`--n` added by DR-2026-08-19 decision 5); officialness is still a property
+  of the sealed document, and a judge binding carries no suite protocol object,
+  so it binds as **custom** and wears no suite name. Note the wording:
+  decisions 3 and 9 were already amended on 2026-08-19 by DR-2026-08-19. This
+  amendment does not touch them, which is not the same as their standing
+  unamended.
 - **Still kept** from decision 6: `inspect` (draft),
   `runtime terminal-bench migrate`, and task-set intake (`import swebench` /
   `import item-bank` / `sample init`).
@@ -223,8 +236,22 @@ spans two packages, and its live merge collision is with the still-open GUI PR
 
 ### Unaffected
 
-Decisions 1 to 5, 7, and 9 stand as ratified. The `--slice 1|10|all` mapping,
-the sealed `SUITE_COVERAGE` names, the catalog id list, the facade's two
-exports (`selectMethod`, `exportDerivedBundle`), and the GUI rulings are
+Decisions 1 to 5, 7, and 9 are untouched **by this amendment**; decisions 3 and
+9 carry DR-2026-08-19's earlier amendment, which stands. The
+`--slice 1|10|all` mapping, the sealed `SUITE_COVERAGE` names, the catalog id
+list, and the facade's two exports (`selectMethod`, `exportDerivedBundle`) are
 unchanged. The suite-protocol DRs this DR does not rewrite are still not
 rewritten.
+
+**One disambiguation, because the two documents now both have a decision 8.**
+Every reference above to "decision 8" means **this** DR's decision 8, derived
+export. DR-2026-08-19's decision 8 is the GUI catalog bind, and the two agree
+where they meet: it ends "Derived export stays unavailable", and clause B
+above wires a **CLI** export while leaving the GUI disposition alone. Neither
+amendment moves the other's ground.
+
+**Amendment order in this file.** The 2026-08-19 amendment is recorded as
+inline supersession at decision 9 and in Out of this train, with
+DR-2026-08-19 carrying its own text; the 2026-08-20 amendment is the section
+above, with inline markers at decisions 6 and 8. The two sets are disjoint by
+decision number and compose without either clobbering the other.
