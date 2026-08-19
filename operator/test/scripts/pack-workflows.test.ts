@@ -24,6 +24,73 @@ function workflowStep(path: string, name: string): string {
   return step.run;
 }
 
+// The paths operator CI selects on. They were the workflow-level `paths:` filter
+// until DR-2026-08-18-b D3/D6 moved selection into the `changes` job — a required
+// merge-queue context must not sit behind a workflow-level filter, because a
+// filtered-out workflow never reports on the merge group and the entry hangs.
+const OPERATOR_CI_SELECTED_PATHS = [
+  'operator/**',
+  'apps/operator-console/**',
+  'packages/lifecycle-notifications/**',
+  'packages/sdk/**',
+  'packages/core/**',
+  'packages/plugin/**',
+  '.github/workflows/ci.yml',
+  '.github/workflows/npm-publish.yml',
+  '.github/scripts/npm-publish-workflow.test.mjs',
+  '.github/scripts/operator-*.test.mjs',
+];
+
+function selectionPatterns(path: string): RegExp[] {
+  const parsed = parseYaml(workflow(path)) as {
+    jobs: Record<string, { steps: Array<{ id?: string; run?: string }> }>;
+  };
+  const select = parsed.jobs.changes?.steps.find((step) => step.id === 'select');
+
+  if (select?.run === undefined) {
+    throw new Error(`Workflow ${path} has no changes/select step`);
+  }
+
+  const list = select.run.match(/patterns=\(\n([\s\S]*?)\n\s*\)\n/u);
+
+  if (list === null) {
+    throw new Error(`Workflow ${path} has no selection pattern list`);
+  }
+
+  return list[1]
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const quoted = line.match(/^'(.+)'$/u);
+
+      if (quoted === null) {
+        throw new Error(`Unquoted selection pattern in ${path}: ${line}`);
+      }
+
+      return new RegExp(quoted[1], 'u');
+    });
+}
+
+// A file whose change the glob is meant to catch.
+function changedPathFor(glob: string): string {
+  if (glob.endsWith('/**')) {
+    return `${glob.slice(0, -2)}probe/file.ts`;
+  }
+
+  if (glob.includes('*')) {
+    return glob.replace('*', 'probe');
+  }
+
+  return glob;
+}
+
+function selectionOf(patterns: RegExp[], paths: string[]): Record<string, boolean> {
+  return Object.fromEntries(
+    paths.map((path) => [path, patterns.some((pattern) => pattern.test(path))]),
+  );
+}
+
 describe('packed client workflow coverage', () => {
   it('publishes client 0.2.2 with SDK 0.2.0 and wires the combined external consumer gate', () => {
     const packageJson = JSON.parse(workflow('operator/package.json')) as {
@@ -52,23 +119,39 @@ describe('packed client workflow coverage', () => {
     expect(vendorSdk).toContain("join(targetRoot, 'fixtures')");
   });
 
-  it.each(['.github/workflows/ci.yml', '.github/workflows/sdk-npm-publish.yml'])(
-    '%s covers client, SDK, core, and plugin changes',
-    (path) => {
-      const source = workflow(path);
-      expect(source).toContain("'operator/**'");
-      expect(source).toContain("'packages/sdk/**'");
-      expect(source).toContain("'packages/core/**'");
-      expect(source).toContain("'packages/plugin/**'");
-    },
-  );
+  it('.github/workflows/sdk-npm-publish.yml covers client, SDK, core, and plugin changes', () => {
+    const source = workflow('.github/workflows/sdk-npm-publish.yml');
 
-  it('CI covers internal package changes on pull requests and pushes', () => {
-    const ci = workflow('.github/workflows/ci.yml');
+    expect(source).toContain("'operator/**'");
+    expect(source).toContain("'packages/sdk/**'");
+    expect(source).toContain("'packages/core/**'");
+    expect(source).toContain("'packages/plugin/**'");
+  });
 
-    expect(ci.match(/'packages\/core\/\*\*'/g)).toHaveLength(2);
-    expect(ci.match(/'packages\/plugin\/\*\*'/g)).toHaveLength(2);
-    expect(ci.match(/'packages\/sdk\/\*\*'/g)).toHaveLength(2);
+  it('CI selects on client, SDK, core, plugin, and every other path it used to filter on', () => {
+    const patterns = selectionPatterns('.github/workflows/ci.yml');
+    const changedPaths = OPERATOR_CI_SELECTED_PATHS.map(changedPathFor);
+
+    expect(patterns).toHaveLength(OPERATOR_CI_SELECTED_PATHS.length);
+    expect(selectionOf(patterns, changedPaths)).toEqual(
+      Object.fromEntries(changedPaths.map((path) => [path, true])),
+    );
+  });
+
+  it('CI leaves trees outside the operator surface unselected', () => {
+    const patterns = selectionPatterns('.github/workflows/ci.yml');
+    const changedPaths = [
+      'README.md',
+      'contracts/src/claiming/ClaimRegistry.sol',
+      'packages/indexer/src/index.ts',
+      'docs/runbooks/hotfix.md',
+      // `*` stops at a path separator, so a nested lookalike must not select.
+      '.github/scripts/nested/operator-x.test.mjs',
+    ];
+
+    expect(selectionOf(patterns, changedPaths)).toEqual(
+      Object.fromEntries(changedPaths.map((path) => [path, false])),
+    );
   });
 
   it('CI and publish run the current npm-shaped private-runtime smoke', () => {

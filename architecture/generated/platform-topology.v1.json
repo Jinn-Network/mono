@@ -2025,7 +2025,7 @@
       "decisionRecords": 6,
       "discoveredFirstPartySurfaces": 4159,
       "generatedOutputSources": 1391,
-      "generatorSources": 673,
+      "generatorSources": 674,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 6
@@ -3455,6 +3455,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/website-design-tokens.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/workflow-selection-shell.test.mjs"
       },
       {
         "categories": [

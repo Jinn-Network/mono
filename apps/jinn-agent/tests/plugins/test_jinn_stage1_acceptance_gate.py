@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -12,6 +13,35 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 AGENT_ROOT = REPO_ROOT / "apps" / "jinn-agent"
+
+
+def _selection_patterns(workflow):
+    """The extended regular expressions the `changes` job selects this lane with.
+
+    jinn-agent CI's workflow-level ``paths:`` filters moved into that job under
+    DR-2026-08-18-b D3/D6: a required merge-queue context must not sit behind a
+    workflow-level filter, because a filtered-out workflow never reports on the
+    merge group at all and the entry hangs until the check-response timeout.
+    """
+    select = next(
+        step
+        for step in workflow["jobs"]["changes"]["steps"]
+        if step.get("id") == "select"
+    )
+    block = re.search(r"patterns=\(\n(.*?)\n\s*\)\n", select["run"], re.S)
+    assert block is not None, "the changes job must carry a selection pattern list"
+    patterns = []
+    for line in block.group(1).splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        assert line.startswith("'") and line.endswith("'"), line
+        patterns.append(line[1:-1])
+    return patterns
+
+
+def _selects(patterns, path):
+    return any(re.search(pattern, path) for pattern in patterns)
 
 
 def test_cold_stock_script_uses_built_products_and_both_lifecycle_drivers():
@@ -90,17 +120,21 @@ def test_stage1_gate_is_blocking_for_every_product_boundary():
         )
     )
     triggers = workflow[True]
-    pull_request_paths = triggers["pull_request"]["paths"]
+    patterns = _selection_patterns(workflow)
     gate = workflow["jobs"]["cold-stock-e2e"]
 
-    assert "apps/jinn-agent/**" in pull_request_paths
-    assert "packages/plugin/**" in pull_request_paths
-    assert "packages/core/**" in pull_request_paths
-    assert "packages/layer/**" in pull_request_paths
+    assert "merge_group" in triggers
+    assert _selects(patterns, "apps/jinn-agent/scripts/cold-stock-e2e.sh")
+    assert _selects(patterns, "packages/plugin/src/index.ts")
+    assert _selects(patterns, "packages/core/src/index.ts")
+    assert _selects(patterns, "packages/layer/src/index.ts")
+    assert not _selects(patterns, "docs/press/2026-08-18-note.md")
     assert gate["name"] == "Cold-stock Stage 1 product gate"
     assert gate.get("continue-on-error") is not True
     assert "pull_request" in gate["if"]
     assert "push" in gate["if"]
+    assert "merge_group" in gate["if"]
+    assert "needs.changes.outputs.run == 'true'" in gate["if"]
     rendered_steps = "\n".join(
         f"{step.get('working-directory', '')} {step.get('run', '')}"
         for step in gate["steps"]

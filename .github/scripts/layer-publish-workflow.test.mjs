@@ -100,8 +100,39 @@ function jobBlock(job) {
   return yamlBlock(yamlBlock(workflow, 'jobs', 0), job);
 }
 
-test('layer CI is paths-filtered and rehearses the npm-shaped package', () => {
-  assert.match(ci, /'packages\/layer\/\*\*'/);
+// Layer CI's workflow-level `paths:` filters moved into its `changes` job
+// (DR-2026-08-18-b D3/D6): a required merge-queue context must not sit behind a
+// workflow-level filter, because a filtered-out workflow never reports on the merge
+// group at all and the entry hangs until the check-response timeout ejects it. The
+// selection list is the extended regular expressions that filter became.
+function selectionPatterns(source) {
+  const list = source.match(/patterns=\(\n([\s\S]*?)\n\s*\)\n/u);
+  assert.ok(list, 'the changes job must carry a selection pattern list');
+  return list[1]
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const quoted = line.match(/^'(.+)'$/u);
+      assert.ok(quoted, `unquoted selection pattern: ${line}`);
+      return new RegExp(quoted[1], 'u');
+    });
+}
+
+function selects(patterns, path) {
+  return patterns.some((pattern) => pattern.test(path));
+}
+
+test('layer CI selects its own lane and rehearses the npm-shaped package', () => {
+  const patterns = selectionPatterns(ci);
+  assert.ok(
+    selects(patterns, 'packages/layer/src/index.ts'),
+    'a packages/layer change must select the layer lane',
+  );
+  assert.ok(
+    !selects(patterns, 'README.md'),
+    'an unrelated change must not select the layer lane',
+  );
   assert.match(ci, /yarn pack:smoke/);
   assert.match(ci, /yarn typecheck/);
   assert.match(ci, /yarn test/);
@@ -133,23 +164,24 @@ test('layer CI runs both stable publish suites when publisher surfaces change', 
     /node --test \.github\/scripts\/publish-layer-stable\.test\.mjs/,
   );
 
-  const triggers = yamlBlock(ci, 'on', 0);
-  for (const event of ['pull_request', 'push']) {
-    const trigger = yamlBlock(triggers, event);
-    for (const path of [
-      '.github/workflows/layer-npm-publish.yml',
-      '.github/scripts/layer-publish-workflow.test.mjs',
-      '.github/scripts/publish-layer-stable.mjs',
-      '.github/scripts/publish-layer-stable.test.mjs',
-      '.github/scripts/verify-layer-stable-version.mjs',
-      'docs/runbooks/layer-npm-publishing.md',
-    ]) {
-      assert.ok(
-        trigger.includes(`- '${path}'`),
-        `${event} must include ${path}`,
-      );
-    }
+  const patterns = selectionPatterns(ci);
+  for (const path of [
+    '.github/workflows/layer-npm-publish.yml',
+    '.github/scripts/layer-publish-workflow.test.mjs',
+    '.github/scripts/publish-layer-stable.mjs',
+    '.github/scripts/publish-layer-stable.test.mjs',
+    '.github/scripts/verify-layer-stable-version.mjs',
+    'docs/runbooks/layer-npm-publishing.md',
+  ]) {
+    assert.ok(
+      selects(patterns, path),
+      `the selection list must cover ${path}`,
+    );
   }
+  assert.ok(
+    !selects(patterns, 'docs/runbooks/hotfix.md'),
+    'the selection list must not reach unrelated runbooks',
+  );
 });
 
 test('canary publication is dependency ordered and restricted to next', () => {
