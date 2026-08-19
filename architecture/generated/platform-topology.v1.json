@@ -2023,7 +2023,7 @@
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 6,
-      "discoveredFirstPartySurfaces": 4158,
+      "discoveredFirstPartySurfaces": 4159,
       "generatedOutputSources": 1391,
       "generatorSources": 673,
       "marketplaceControl": 2,
@@ -31833,6 +31833,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/verify/test/inspect-assurance.test.mjs"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/verify/test/kit-reproducibility.test.mjs"
       },
       {
         "categories": [
