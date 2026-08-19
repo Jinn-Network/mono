@@ -408,6 +408,38 @@ test('hermetic-gate is a native job so fork PRs report the required context', ()
   );
 });
 
+test('hermetic-gate does not apt-install Playwright system packages on the required path', () => {
+  // merge_group run 32272723606 (#2868) hung 53 minutes inside
+  // `yarn playwright install --with-deps chromium` on azure.archive.ubuntu.com
+  // (Ign, then stall after mixing archive.ubuntu.com). The 60-minute job
+  // timeout cancelled a still-running apt, the terminal job reported red, and
+  // the queue ejected every entry. GitHub-hosted ubuntu-24.04 already has the
+  // Chromium system libraries; the required path must download the browser
+  // only, and a hung download must fail the step instead of burning the job
+  // budget.
+  const suite = jobBlocks('hermetic-gate.yml').find((job) => job.id === 'hermetic');
+  assert.notEqual(suite, undefined, 'hermetic-gate.yml must contain the suite job `hermetic`');
+  assert.doesNotMatch(
+    suite.block,
+    /playwright install --with-deps/u,
+    'hermetic-gate must not run `playwright install --with-deps`: apt against azure.archive.ubuntu.com hung merge_group run 32272723606 for 53 minutes and ejected the queue',
+  );
+  assert.match(
+    suite.block,
+    /yarn playwright install chromium/u,
+    'hermetic-gate must still install Chromium for the app-flow journeys',
+  );
+  const installStep = suite.block.match(
+    /^ {6}- name: Install operator console\n(?<body>(?: {8}.*\n)+)/mu,
+  );
+  assert.notEqual(installStep, null, 'hermetic suite must keep an Install operator console step');
+  assert.match(
+    installStep.groups.body,
+    /^ {8}timeout-minutes: [1-9][0-9]*[ \t]*$/mu,
+    'a hung Playwright download must fail the install step, not burn the 60-minute job timeout',
+  );
+});
+
 test('the check-run producer posts its context however the gate job ends', () => {
   for (const member of REQUIRED_CHECK_SET.filter((entry) => entry.kind === 'check-run')) {
     const jobs = jobBlocks(member.workflow);

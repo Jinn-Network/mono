@@ -188,12 +188,20 @@ jobs:
         run: |
           yarn install --immutable
           yarn build
+      # Do NOT pass `--with-deps`. That flag runs apt against the runner image's
+      # Ubuntu mirrors. merge_group run 32272723606 hung 53 minutes on
+      # azure.archive.ubuntu.com (Ign, then stall after mixing archive.ubuntu.com);
+      # the 60-minute job timeout cancelled a still-running apt and ejected the
+      # queue. GitHub-hosted ubuntu-24.04 already ships the Chromium system
+      # libraries; this step only downloads the browser. A hung CDN download must
+      # fail this step, not burn the job budget.
       - name: Install operator console
+        timeout-minutes: 15
         working-directory: apps/operator-console
         run: |
           corepack prepare yarn@4.13.0 --activate
           yarn install --immutable
-          yarn playwright install --with-deps chromium
+          yarn playwright install chromium
 
       - name: App-flow determinism (Playwright, mocked daemon)
         id: appflow
