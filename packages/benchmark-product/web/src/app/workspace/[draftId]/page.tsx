@@ -1,3 +1,4 @@
+import "server-only";
 import Link from "next/link";
 import { METHOD_CATALOG } from "@colophon-claims/core";
 import { ActionForm } from "@/components/action-form";
