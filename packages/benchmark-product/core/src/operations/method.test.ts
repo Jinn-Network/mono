@@ -125,7 +125,7 @@ process.exit(64);
       ],
     }));
     const host = createDefaultBenchmarkRuntimeHost();
-    const context = {
+    const context: OperationContext = {
       ...(await prepareDraft("inspect")),
       runtimeHost: {
         ...host,
@@ -163,7 +163,7 @@ process.exit(64);
             scorer: { name: "match", passValue: "C", definition: { name: "match", options: {}, metrics: [] } },
             runOptions: { maxSamples: 1 },
           }),
-          binding: { kind: "local-python", pythonPath: "/not-reached/python", projectDir: "/not-reached/project" },
+          binding: { pythonPath: "/not-reached/python", projectDir: "/not-reached/project" },
         }),
       },
     };
