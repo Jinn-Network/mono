@@ -18,7 +18,7 @@
       "description": "the claim package's stored headline pass rate disagrees with the signed report's results",
       "expectedDisposition": "invalid",
       "expectedFailingCheck": "claim-consistency",
-      "expectedMessagePattern": "^claim package .* is not the exact projection of verified facts$",
+      "expectedMessagePattern": "^claim package headline\\.baseline\\.passRate is not the exact projection of verified facts$",
       "externallyDetectable": true,
       "id": "claim-headline-tampered",
       "path": "tampered/claim-headline-tampered"
@@ -27,7 +27,7 @@
       "description": "a claim-package field outside every digest mirror changes; only full claim recomputation catches it",
       "expectedDisposition": "invalid",
       "expectedFailingCheck": "claim-consistency",
-      "expectedMessagePattern": "^claim package .* is not the exact projection of verified facts$",
+      "expectedMessagePattern": "^claim package verification\\.trustRoot is not the exact projection of verified facts$",
       "externallyDetectable": false,
       "id": "claim-text-tampered",
       "path": "tampered/claim-text-tampered"

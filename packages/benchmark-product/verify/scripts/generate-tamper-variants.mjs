@@ -9,7 +9,7 @@
 // envelopes) are ASCII-keyed and reconstructed with a JCS-compatible
 // sorted-compact serializer. The golden's sealed bytes are never re-emitted
 // as the same document.
-import { createHash, createPrivateKey, sign as cryptoSign, generateKeyPairSync } from "node:crypto";
+import { createHash, createPrivateKey, sign as cryptoSign } from "node:crypto";
 import {
   cpSync,
   readFileSync,
@@ -127,6 +127,24 @@ function resignReportEnvelope(dir) {
     signatures: [{ keyid: envelope.signatures[0].keyid, sig: signature.toString("base64") }],
   });
 }
+
+// A fixed, unrelated Ed25519 public key for the trust-key-swapped case. It is a
+// constant rather than a freshly minted key so regeneration is byte-reproducible:
+// an external implementer who regenerates the kit must get identical bytes, and a
+// per-run key would churn the fixtures and their pinned digest manifest.
+//
+// Provenance, since a reader of a verification kit should not have to take this
+// on trust: minted once with `generateKeyPairSync("ed25519")` and its private
+// half discarded, so nothing can sign for it. That is also why the case works —
+// the golden's report signature was made by a different key, so swapping this
+// one in breaks both the did:key derivation and the signature check. You can
+// confirm it is a well-formed Ed25519 SPKI and not the golden's key by decoding
+// it and comparing against `golden/trust/public-keys.json`.
+const SWAPPED_REPORT_SPKI_BASE64 = "MCowBQYDK2VwAyEA78oJ6JN54PDG3WoaZihaerox3QHlG4Zxd8u8uUlcVS0=";
+
+// The exact field claim-text-tampered edits. Shared by the mutation and by its
+// expected-message pattern below so the two cannot drift apart.
+const CLAIM_TEXT_TAMPERED_PATH = ["verification", "trustRoot"];
 
 const goldenTrust = readJson(goldenDir, "trust/public-keys.json");
 const goldenVerdictCatalog = readJson(goldenDir, "verdicts.json");
@@ -265,9 +283,7 @@ defineCase(
   "trust",
   true,
   (dir) => {
-    const { publicKey } = generateKeyPairSync("ed25519");
-    const freshSpki = publicKey.export({ type: "spki", format: "der" }).toString("base64");
-    splice(dir, "trust/public-keys.json", goldenTrust.report.spkiDerBase64, freshSpki);
+    splice(dir, "trust/public-keys.json", goldenTrust.report.spkiDerBase64, SWAPPED_REPORT_SPKI_BASE64);
     refreshManifest(dir);
   },
 );
@@ -303,7 +319,7 @@ defineCase(
     let changed = true;
     while (changed) {
       changed = false;
-      for (const fileName of readdirSync(join(dir, "records"))) {
+      for (const fileName of readdirSync(join(dir, "records")).sort()) {
         const rel = `records/${fileName}`;
         let text = read(dir, rel).toString("utf8");
         let touched = false;
@@ -389,9 +405,10 @@ defineCase(
   false,
   (dir) => {
     const claim = readJson(dir, "claim-package.json");
-    const trustRoot = claim.verification.trustRoot;
-    splice(dir, "claim-package.json", `"trustRoot":${JSON.stringify(trustRoot)}`,
-      `"trustRoot":${JSON.stringify(`${trustRoot.slice(0, -1)}!`)}`);
+    const leaf = CLAIM_TEXT_TAMPERED_PATH.at(-1);
+    const original = CLAIM_TEXT_TAMPERED_PATH.reduce((node, key) => node[key], claim);
+    splice(dir, "claim-package.json", `"${leaf}":${JSON.stringify(original)}`,
+      `"${leaf}":${JSON.stringify(`${original.slice(0, -1)}!`)}`);
     refreshManifest(dir);
   },
 );
@@ -428,11 +445,23 @@ for (const tamperCase of CASES) {
   statSync(dir);
 }
 
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// The claim-consistency refusal names the field that actually differs, so each
+// claim case pins its own field rather than a shared wildcard — that is what
+// makes the two cases distinguishable to an external implementation. Both are
+// derived from the same values the mutations above use, so they survive a
+// golden regeneration that changes arm names.
+const claimDifferencePattern = (path) =>
+  `^claim package ${escapeRegExp(path)} is not the exact projection of verified facts$`;
+const tamperedHeadlineArmId = Object.keys(
+  JSON.parse(read(goldenDir, "claim-package.json").toString("utf8")).headline,
+).sort()[0];
+
 // Stable regular expressions over the reference verifier's failure message,
 // one per case, verified empirically by test/conformance-kit.test.mjs.
 const EXPECTED_MESSAGE_PATTERNS = {
-  "claim-headline-tampered": "^claim package .* is not the exact projection of verified facts$",
-  "claim-text-tampered": "^claim package .* is not the exact projection of verified facts$",
+  "claim-headline-tampered": claimDifferencePattern(`headline.${tamperedHeadlineArmId}.passRate`),
+  "claim-text-tampered": claimDifferencePattern(CLAIM_TEXT_TAMPERED_PATH.join(".")),
   "envelope-payload-malleated": "not strict standard or URL-safe base64",
   "file-truncated": "^manifest entry \"verdicts\\.json\" is missing$",
   "manifest-digest-mismatch": "^digest mismatch for \"share\\.txt\"$",

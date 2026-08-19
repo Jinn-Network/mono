@@ -310,7 +310,7 @@
     },
     {
       "id": "public-bundle-conformance-v1/manifest.json",
-      "sha256": "ad897be3ee06f354ade7297afa8366002d4b1ad6353c915199dbbfa42f102283"
+      "sha256": "524784771b468c4394a499df2a2f23b73f66384c04ab7ef892c67e5d0693445d"
     },
     {
       "id": "public-bundle-conformance-v1/tampered/claim-headline-tampered/README.md",
@@ -3774,7 +3774,7 @@
     },
     {
       "id": "public-bundle-conformance-v1/tampered/trust-key-swapped/bundle.json",
-      "sha256": "cad83ea4a8b56a9f12fa164f530edc8a917a7261785ef329294d80b9afb1c593"
+      "sha256": "f761820ac57ecbc7490c4aef02a5671d79e6a15d93a3c7e83e84d350ef8284c6"
     },
     {
       "id": "public-bundle-conformance-v1/tampered/trust-key-swapped/claim-package.json",
@@ -4038,7 +4038,7 @@
     },
     {
       "id": "public-bundle-conformance-v1/tampered/trust-key-swapped/trust/public-keys.json",
-      "sha256": "02cb23f39ff30dcef66275e2f243f1a49d1443bbe12559d0abb37008c32975ed"
+      "sha256": "1f1bc9709b9f3000db8febbc3babbb0339cc2b7372eaa7a4fd6669417f17666e"
     },
     {
       "id": "public-bundle-conformance-v1/tampered/trust-key-swapped/verdicts.json",

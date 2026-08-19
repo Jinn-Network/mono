@@ -191,6 +191,18 @@ bytes that a reader verifying one bundle does not need.
 - `keys/` — the test-only signing keys behind the golden, so the re-signed
   cases are reproducible and you can mint variants of your own.
 
+`expectedMessagePattern` describes the reference verifier's own message, and two
+of the patterns name a specific field path. It is there so the kit can tell its
+cases apart; reproducing our exact message text is not a conformance
+requirement, and your verifier is free to report failures however it likes. The
+conformance criterion is the one stated below, in terms of `externallyDetectable`.
+
+Deriving `tampered/` from the shipped `golden/` is byte-reproducible: run
+`scripts/generate-tamper-variants.mjs` and you get the published bytes, which
+`test/kit-reproducibility.test.mjs` enforces. Minting a *new* golden is
+deliberately not reproducible, since that mints fresh venue keys and stamps a
+new signing time.
+
 An implementation of the external subset conforms when it accepts `golden` and
 rejects every case with `externallyDetectable: true`. Two cases are the
 documented boundary and must PASS an external-subset verifier:
