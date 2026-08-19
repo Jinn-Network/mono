@@ -391,7 +391,7 @@ describe("T1 provider-free binary qualification cold lifecycle", () => {
     mkdirSync(coldReaderDir);
     writeFileSync(join(coldReaderDir, "package.json"), JSON.stringify({
       private: true,
-      dependencies: { "@colophon-claims/verify": "2" },
+      dependencies: { "@colophon-claims/verify": "0.1" },
     }, null, 2), { flag: "wx" });
     writeFileSync(join(coldReaderDir, ".npmrc"), [
       `registry=${registryUrl}`,
