@@ -394,7 +394,7 @@ try {
     // independent of the Colophon runner and task-execution runtime packages.
     await mkdir(readerRoot);
     await writeFile(join(readerRoot, 'package.json'), JSON.stringify({ private: true, dependencies: {
-      '@colophon-claims/verify': '2',
+      '@colophon-claims/verify': '0.1',
     } }, null, 2));
     await writeFile(join(readerRoot, '.npmrc'), `@colophon-claims:registry=${registry.baseUrl}\n@jinn-network:registry=${registry.baseUrl}\n`);
     await run('npm', [
@@ -429,7 +429,7 @@ try {
 
     await mkdir(consumerRoot);
     await writeFile(join(consumerRoot, 'package.json'), JSON.stringify({ private: true, type: 'module', dependencies: {
-      '@colophon-claims/core': '1', '@colophon-claims/cli': '1', '@colophon-claims/verify': '2',
+      '@colophon-claims/core': '0.1', '@colophon-claims/cli': '0.1', '@colophon-claims/verify': '0.1',
       '@types/node': '^22.0.0', typescript: '^5.9.3',
     } }, null, 2));
     await writeFile(join(consumerRoot, '.npmrc'), `@colophon-claims:registry=${registry.baseUrl}\n@jinn-network:registry=${registry.baseUrl}\n`);
