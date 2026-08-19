@@ -8,9 +8,12 @@
  * primitive branch protection and the publish guard reason about. A rebase changes
  * the SHA, so a stale verdict simply doesn't apply (automatic invalidation).
  *
- * This single poster is used by BOTH gate workflows:
- *   - .github/workflows/hermetic-gate.yml      (context: "hermetic-gate")
- *   - .github/workflows/environment-suite.yml  (context: "environment-suite")
+ * This poster is used by `.github/workflows/environment-suite.yml`
+ * (context: "environment-suite"). `hermetic-gate` is a native Actions job of
+ * that name, not an API-posted check-run; do not wire this script from
+ * hermetic-gate.yml — a Checks-API twin skips fork PRs (read-only token) and
+ * races the job on trusted SHAs. The name stays a valid `context` value so a
+ * leftover caller still posts a well-shaped verdict rather than a schema error.
  *
  * Invocation:
  *   node post-check-run-verdict.mjs <verdict.json>

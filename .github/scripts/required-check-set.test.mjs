@@ -346,6 +346,17 @@ test('every required context has exactly one producer and nothing else shadows i
         member.workflow,
         `${member.context}: the set names ${member.workflow} but ${reporters[0].file} reports it`,
       );
+      // Inverse of the check-run branch below: a native job already reports this
+      // name. An API-posted twin of the same context races the job on trusted
+      // SHAs and, when the poster is skipped on fork PRs, silences the required
+      // check for outsiders (Permissionless).
+      const declaration = new RegExp(`["']context["'][ \\t]*:[ \\t]*["']${escapeRegExp(member.context)}["']`, 'u');
+      const declarers = workflowFiles.filter((file) => declaration.test(sourceOf(file)));
+      assert.deepEqual(
+        declarers,
+        [],
+        `${member.context}: a job-produced context must not also be posted as a check-run, found ${declarers.join(', ') || 'none'}`,
+      );
       continue;
     }
     assert.equal(
@@ -369,6 +380,32 @@ test('every required context has exactly one producer and nothing else shadows i
       `${member.workflow}: must post ${member.context} through the shared check-run poster`,
     );
   }
+});
+
+test('hermetic-gate is a native job so fork PRs report the required context', () => {
+  // The suite itself is fork-safe (no secrets). An API-posted producer is not:
+  // fork GITHUB_TOKEN is read-only, so the poster is skipped and the required
+  // context never appears — those PRs can never enqueue. The native job is the
+  // same shape as the other nine required checks.
+  const member = REQUIRED_CHECK_SET.find((entry) => entry.context === 'hermetic-gate');
+  assert.notEqual(member, undefined, 'the set must include hermetic-gate');
+  assert.equal(
+    member.kind,
+    'job',
+    'hermetic-gate must be kind: job; an API-posted check-run is skipped on fork PRs',
+  );
+  assert.doesNotMatch(
+    sourceOf('hermetic-gate.yml'),
+    /post-check-run-verdict\.mjs/u,
+    'hermetic-gate.yml must not post the required context through the Checks API',
+  );
+  const gate = jobBlocks('hermetic-gate.yml').find((job) => displayName(job) === 'hermetic-gate');
+  assert.notEqual(gate, undefined, 'hermetic-gate.yml must contain a job whose display name is hermetic-gate');
+  assert.match(
+    gate.block,
+    /^ {4}if: always\(\)[ \t]*$/mu,
+    'hermetic-gate must run with if: always() and no fork carve-out, or a fork PR never reports the required context',
+  );
 });
 
 test('the check-run producer posts its context however the gate job ends', () => {
