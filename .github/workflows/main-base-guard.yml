@@ -10,9 +10,10 @@ concurrency:
 jobs:
   guard:
     # The check-run name reported by GitHub is the job's display `name:` below
-    # (or the job id `guard` if no name is set). The required-status-check
-    # context registered by .github/scripts/enable-main-base-guard.sh must
-    # match this string exactly — keep them in sync.
+    # (or the job id `guard` if no name is set). That string is the
+    # required-status-check context on `main`'s ruleset, written by
+    # .github/scripts/enable-next-merge-queue.sh and asserted by
+    # .github/scripts/branch-protection-audit.mjs — keep all three in sync.
     name: Main base guard
     runs-on: ubuntu-latest
     steps:

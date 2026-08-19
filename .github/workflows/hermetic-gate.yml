@@ -19,10 +19,11 @@ name: hermetic-gate
 # single `hermetic-gate` check-run bound to github.sha via the shared poster
 # (operator/scripts/release/post-check-run-verdict.mjs, owned by step 3).
 #
-# NOTE: this workflow is intentionally NOT a required check yet. Marking it
-# required is a separate, human-applied branch-protection step (see the spec's
-# migration plan §13 step 1 + the enable script). Until then it runs and posts
-# its verdict advisorily so the publish guard can begin reading it.
+# The `hermetic-gate` context is a REQUIRED check on `next` from the merge-queue
+# flip onward (DR-2026-08-18-b D3), which fulfills the two-gate redesign's own
+# migration intent. The context is registered by
+# .github/scripts/enable-next-merge-queue.sh and asserted by
+# .github/scripts/branch-protection-audit.mjs.
 
 on:
   pull_request:

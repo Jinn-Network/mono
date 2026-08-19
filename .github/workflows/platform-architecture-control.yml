@@ -78,23 +78,28 @@ jobs:
         id: select
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Set only on pull_request events, which is exactly where it is read.
+          PR_BASE_REF: ${{ github.base_ref }}
           MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-        # A merge group carries its own base/head pair, so the same changed-package
-        # closure the pull_request lane already trusts applies to the speculative
-        # merge commit (DR-2026-08-18-b D3). Without this a merge group bypassed
-        # selection and paid the full battery (observed 11-43 min) for every entry,
-        # however narrow. The selector itself is event-agnostic — it consumes a path
-        # list on stdin — so only the diff endpoints differ between the two lanes.
-        # The merge-group head is read as `GITHUB_SHA` rather than
-        # `merge_group.head_sha` so the diff head is by construction the commit the
-        # checkout above resolved — one source of truth for the head, not two that
-        # can drift apart. With `max_entries_to_build: 2` the `merge_group.base_sha`
-        # of a successor entry is the predecessor group's speculative head, so
-        # selection for that entry is computed relative to the predecessor rather
-        # than the branch tip — the same trade the pull_request lane already makes
-        # against a merge base that a later push can move.
+        # Tiered lanes (DR-2026-08-18-b D3). Fast mode is scoped to the lane the
+        # QUEUE BACKSTOPS: a pull request that does not target `main` is not selected
+        # for verification at all, because the merge group is where the full battery
+        # runs and the queue is the only path onto `next`. Nothing is laundered by
+        # this — the `platform-verification` gate below demands an exact `skipped`
+        # when verification is unselected, so a failed or cancelled run still reddens
+        # the context.
+        #
+        # A pull request targeting `main` is the HOTFIX lane. D2 puts no queue on
+        # `main`, so there is no merge group to carry the battery and fast mode would
+        # simply delete the verification. Those PRs verify in full, like every other
+        # unbackstopped lane.
+        #
+        # The MERGE_GROUP lane carries its own base/head pair, so the changed-package
+        # closure applies to the speculative merge commit and a narrow entry stops
+        # paying the full battery (observed 11-43 min). The merge-group head is read
+        # as `GITHUB_SHA` rather than `merge_group.head_sha` so the diff head is by
+        # construction the commit the checkout above resolved. The selector itself is
+        # event-agnostic — it consumes a path list on stdin.
         #
         # Selection is fail-loud in both directions. An unresolved endpoint or a
         # broken `git diff` must red this job, never quietly resolve to "nothing
@@ -108,8 +113,14 @@ jobs:
           set -o pipefail
           case "${EVENT_NAME}" in
             pull_request)
-              diff_base="${BASE_SHA}"
-              diff_head="${HEAD_SHA}"
+              if [ "${PR_BASE_REF}" = main ]; then
+                echo 'hotfix lane: no merge queue backstops main, so verify in full'
+                echo 'run=true' >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
+              echo 'pr-fast-lane: full verification runs on the merge group'
+              echo 'run=false' >> "${GITHUB_OUTPUT}"
+              exit 0
               ;;
             merge_group)
               diff_base="${MG_BASE_SHA}"

@@ -170,7 +170,9 @@ real Base RPC (an offline human step). Follow this order so the cut never bricks
    `JINN_HERMETIC_GATE_WAIVED`** — hermetic-gate is deterministic and should be
    re-armed the moment the fixture lands. Optionally run
    `.github/scripts/enable-hermetic-gate-required.sh` to make it a required check
-   on `next`.
+   on `next`. [Retired by DR-2026-08-18-b: that script is deleted and
+   `hermetic-gate` is required on `next`'s ruleset from the merge-queue flip
+   onward — see `.github/scripts/enable-next-merge-queue.sh`.]
 5. **Provision the `testnet-gate` Environment + warm operator** (spec §9/§11),
    let `environment-suite.yml` run green on a candidate SHA, then **unset
    `JINN_ENVIRONMENT_SUITE_WAIVED`** to re-arm the full two-gate guard.

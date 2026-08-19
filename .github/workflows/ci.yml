@@ -230,7 +230,14 @@ jobs:
   pack-smoke:
     name: Pack & Smoke Test
     needs: [changes, check]
-    if: needs.changes.outputs.run == 'true'
+    # Fast PR lane (DR-2026-08-18-b D3): pack smokes and e2e move to the merge
+    # group on the lane the queue backstops. The fast lane is scoped to pull
+    # requests that do NOT target `main`: those land through the queue, which
+    # runs the full battery before anything merges. A PR targeting `main` is the
+    # hotfix lane — D2 puts no queue there, so nothing would run this at all if
+    # the PR lane were thinned wholesale. Push, dispatch, and schedule lanes stay
+    # heavy for the same reason. The PR lane keeps `architecture` and `check`.
+    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -278,7 +285,8 @@ jobs:
     # no human surface after Stage 6.
     name: Operator console E2E (Playwright)
     needs: [changes, check]
-    if: needs.changes.outputs.run == 'true'
+    # Queue-backstopped PR lane only — see pack-smoke above.
+    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -324,7 +332,8 @@ jobs:
     # `funding-sequence-e2e` above.
     name: Degraded Daemon Guard E2E
     needs: [changes, check]
-    if: needs.changes.outputs.run == 'true'
+    # Queue-backstopped PR lane only — see pack-smoke above.
+    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -371,7 +380,10 @@ jobs:
     # ubuntu-latest is linux/amd64; arm64 Mac dev cannot satisfy this gate.
     name: Task Creator AC1 (amd64 gold proof)
     needs: [changes, check]
-    if: needs.changes.outputs.run == 'true'
+    # Queue-backstopped PR lane only — see pack-smoke above. This is the
+    # workflow's 90-minute tail, so it is the single biggest saving the fast PR
+    # lane buys.
+    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -427,6 +439,8 @@ jobs:
       - name: Require exact success from every selected operator-CI job
         env:
           EVENT_NAME: ${{ github.event_name }}
+          # Set only on pull_request events, which is exactly where it is read.
+          BASE_REF: ${{ github.base_ref }}
           SELECTED: ${{ needs.changes.outputs.run }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
@@ -438,7 +452,7 @@ jobs:
           GOLD_PROOF_RESULT: ${{ needs.task-creator-amd64-gold-proof.result }}
         run: |
           set -euo pipefail
-          echo "event=${EVENT_NAME} selected=${SELECTED} changes=${CHANGES_RESULT}"
+          echo "event=${EVENT_NAME} base_ref=${BASE_REF:-none} selected=${SELECTED} changes=${CHANGES_RESULT}"
           echo "architecture=${ARCHITECTURE_RESULT} check=${CHECK_RESULT}"
           echo "pack-smoke=${PACK_SMOKE_RESULT} dashboard-e2e=${DASHBOARD_E2E_RESULT}"
           echo "degraded-daemon-guard-e2e=${DEGRADED_DAEMON_GUARD_RESULT}"
@@ -464,10 +478,21 @@ jobs:
           fi
           test "${ARCHITECTURE_RESULT}" = "${expected}"
           test "${CHECK_RESULT}" = "${expected}"
-          test "${PACK_SMOKE_RESULT}" = "${expected}"
-          test "${DASHBOARD_E2E_RESULT}" = "${expected}"
-          test "${DEGRADED_DAEMON_GUARD_RESULT}" = "${expected}"
-          test "${GOLD_PROOF_RESULT}" = "${expected}"
+          # The four heavy jobs are thinned on the queue-backstopped PR lane only
+          # (DR-2026-08-18-b D3): a pull request that does not target `main` gets
+          # them on the merge group instead. Every other lane keeps them —
+          # merge_group, push, workflow_dispatch, and PRs targeting `main`, which
+          # is the hotfix lane no queue backstops. This mirrors their `if:`
+          # exactly. A failed or cancelled job never reads as skipped, so the
+          # fast lane cannot launder a red either.
+          heavy_expected="${expected}"
+          if [ "${EVENT_NAME}" = pull_request ] && [ "${BASE_REF}" != main ]; then
+            heavy_expected=skipped
+          fi
+          test "${PACK_SMOKE_RESULT}" = "${heavy_expected}"
+          test "${DASHBOARD_E2E_RESULT}" = "${heavy_expected}"
+          test "${DEGRADED_DAEMON_GUARD_RESULT}" = "${heavy_expected}"
+          test "${GOLD_PROOF_RESULT}" = "${heavy_expected}"
           # The marketplace e2e is dispatch-only. On every other event it must be
           # exactly `skipped`, which is what keeps a 45-minute soft gate off the PR and
           # merge-group paths. On a dispatch it may have run or been skipped; either is

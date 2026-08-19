@@ -153,7 +153,14 @@ jobs:
         working-directory: packages/layer
       - run: yarn build
         working-directory: packages/layer
-      - run: yarn pack:smoke
+      # Fast PR lane (DR-2026-08-18-b D3): the pack smoke moves to the merge
+      # group on the lane the queue backstops. Scoped to pull requests that do
+      # NOT target `main` — a PR targeting `main` is the hotfix lane, where D2
+      # puts no queue, so it keeps the smoke. Push and dispatch lanes keep it
+      # too. This is step-level, not job-level — the job still typechecks,
+      # tests, and builds the layer on both lanes, so the PR keeps fast feedback.
+      - if: github.event_name != 'pull_request' || github.base_ref == 'main'
+        run: yarn pack:smoke
         working-directory: packages/layer
       - name: Test layer workflow contracts
         run: node --test .github/scripts/layer-publish-workflow.test.mjs
