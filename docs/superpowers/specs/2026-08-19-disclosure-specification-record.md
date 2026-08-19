@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.1 |
-| **Date** | 2026-08-19 |
+| **Version** | 0.2 |
+| **Date** | 2026-08-19 (v0.1 same day; v0.2 applies independent review) |
 | **Author** | S1 design session (Claude Fable 5, lane coordinator); seam citations read against `next` @ `4f4ad46f2` |
 | **Shape** | `design` (packet S1). Implementation is packet S2 and lands separately |
 | **Status** | proposed — awaits operator ratification of §13's open questions |
@@ -12,6 +12,7 @@
 | **Depends on** | [judge-report implementation program](../plans/2026-08-18-judge-report-implementation-program.md) §4 (packets S1/S2), §8 (prohibitions), §9 (D3); [benchmark product](./2026-08-05-benchmark-product-design.md); [publication interoperability profile](./2026-08-13-benchmark-publication-interoperability-profile.md); [pluggable integrity providers](./2026-08-17-pluggable-integrity-providers-design.md) (the record/carriage/claim/check pattern this design follows) |
 | **Does not do** | Any judge-path delta. Instrument and model profiles, the evidence channel, parser identities, stratum vocabulary, ungradeable classes, and the screening-model admission branch are packet **P0**'s scope; P0's spec is the authority for every one of them (§12.1). This design cites those surfaces and never redefines them |
 | **Never run-blocking** | Per operator ruling D3 (2026-08-19): S1 designs now, S2 implements during report-writing week, and the confirmatory run never waits on either |
+| **v0.2 changes** | Independent review, verdict *with fixes*. The record design (§3–§5, §7, §8) is unchanged; every fix landed in the closure/bundle-binding analysis and the S2 map. New: §6.5.1 (claim-id collision), §6.5.2 (real refusal mechanisms), §6.5.3 (the five `isV4` sites), §7's G0/steps split, §10.5 (grep pass), §12.2 (anchoring non-goal), Q5/Q6, and T20–T25 |
 
 ## 0. Decision in plain language
 
@@ -91,9 +92,12 @@ Three concrete failures, each of which the report would inherit:
 
 For the judge experiment, exactly two of the six variables are measured here. The
 judge model and judge prompt are pinned, sealed, executed in the contained runtime,
-and provable from the bundle. The four answer-factory variables are not: candidate
-answers are drawn from previously published sets, so whatever produced them was fixed
-by someone else and is knowable only to the extent the source stated it.
+and provable from the bundle. The four answer-factory variables are not, and they are
+not uniformly anything: per the design authority's §4, candidates are drawn from
+previously published system answers, or taken from the verified reference itself (no
+answer model involved at all), with remaining gaps filled by hand and marked. So the
+answer factory is not one undisclosed configuration but a mixture, some of it stated
+by an upstream source and some of it never stated by anyone.
 
 A record that could not say that cleanly would force one of two dishonest moves:
 inventing an execution record for the answer factory, or dropping the four variables
@@ -178,10 +182,12 @@ DISCLOSURE_SPECIFICATION_EXTENSION
 ```
 
 The record-kind URI follows the record-discovery grammar
-`${RECORDS_ROOT}/<segment>/<major>` already mirrored in
-`packages/benchmarking/records/src/identifiers.ts:28-36`. The extension key follows
-the `benchmark-publication/v1` and `anchor-intent/v1` precedents in the same file
-(`identifiers.ts:40-48`).
+`${RECORDS_ROOT}/<segment>/<major>.<minor>` as
+`packages/benchmarking/records/src/identifiers.ts:20-28` states it, and adopts the
+`v1` spelling every shipped sibling constant actually uses (`identifiers.ts:29-36`)
+rather than the grammar comment's literal `<major>.<minor>` form. The extension key
+follows the `benchmark-publication/v1` and `anchor-intent/v1` precedents in the same
+file (`identifiers.ts:40-48`).
 
 `specification` is a separate identifier from `kind` on purpose. `kind` names *this
 record shape*; `specification` names *the standard the record claims compliance with*.
@@ -269,6 +275,14 @@ Constraints:
   for the flagship case: the report that states these variables is the artifact this
   record is published inside, so at seal time there is no URI to cite. Inventing a
   placeholder URI to satisfy a required field would be worse than an honest empty.
+- **Heterogeneous variables are carried by `statement`, not by structure.** A variable
+  may be fixed differently across the items in one experiment: the design authority's
+  §4 draws correct-class candidates from published system answers *or* from the
+  verified reference itself, and fills gaps by hand, so `answer-model` genuinely has
+  no single value. `disclosed-by-publisher` therefore means *fixed and stated for the
+  items it covers*, and `statement` must name the mixture, including any subset with
+  no answer model at all. v1 does not give heterogeneity a structural home; §13 Q6
+  asks whether it should.
 
 **Undisclosed.**
 
@@ -281,10 +295,24 @@ Constraints:
 
 - No `statement`, no `evidence`, no `sources`. The branch carries a reason token and
   nothing else.
-- The three reasons are the honest distinctions a reader needs: the source said
-  nothing; the source said something too vague to pin (a family name with no dated
-  snapshot, a strategy name with no parameters); or this experiment deliberately
-  holds the variable out of scope.
+- `not-stated` — nobody stated the variable. This is the token for a variable that
+  some upstream party necessarily fixed but never wrote down, which is the ordinary
+  case for an experiment grading answers it did not produce.
+- `stated-without-identifiers` — something was stated, but too vague to pin: a model
+  family with no dated snapshot, a strategy name with no parameters.
+- `outside-this-experiment` — the variable is **structurally inapplicable**, not
+  merely unknown: an experiment with no retrieval step at all has no retrieval config
+  to disclose. It is not the token for "someone else fixed this and we do not know
+  what they chose"; that is `not-stated`. Scope and knowledge are different
+  distinctions and the tokens must not be used interchangeably.
+
+**Acknowledged tradeoff.** Dropping `statement` from this branch costs the
+`stated-without-identifiers` case its ability to say *what* was vaguely stated. That
+is deliberate: a free-text field on the `undisclosed` branch is the most likely place
+for an assertion to reappear under a status that promises none, and R3's guarantee is
+worth more than the lost nuance. A publisher who wants to record the vague statement
+uses `disclosed-by-publisher` and says in `statement` that it is unpinnable, which is
+the honest expression of that case anyway.
 
 ### 4.4 Evidence roles
 
@@ -339,11 +367,18 @@ the evidence catalog (`verify/src/verify.ts:361-378`).
 One new role token, `disclosure-specification`, **appended to the end** of
 `BUNDLE_V4_EVIDENCE_ROLES` (`verify/src/schema.ts:16-46`). Appending is the only
 additive move available: the enum order is frozen and per-record `roles` arrays must
-be in that order, so an insertion would re-order existing bundles' role arrays and
-break their bytes.
+be in that order (`schema.ts:162,168`), so an insertion would re-order existing
+bundles' role arrays and break their bytes.
+
+Appending is also what keeps the **v2** catalog byte-stable. The producer derives the
+v2 catalog's roles with a hardcoded prefix slice,
+`ROLE_ORDER.slice(0, 12)` (`core/src/bundle/materialize.ts:794`), where the first
+twelve entries are exactly the v2 role set. A token appended after index 11 is
+invisible to that slice; a token inserted anywhere earlier would silently change what
+a v2 bundle publishes. **S2 must not touch that slice**, and §11 T20 pins it.
 
 The disclosure record carries **exactly** this one role and no other. A record bearing
-`disclosure-specification` together with any second role refuses.
+`disclosure-specification` together with any second role refuses (§11 T21).
 
 ### 6.3 Report extension
 
@@ -356,13 +391,17 @@ The disclosure record carries **exactly** this one role and no other. A record b
 }
 ```
 
-The value is a `DigestBearingResourceDescriptor`
-(`records/src/descriptors.ts:11-18`), the same shape
-`RunPublicationExtensionSchema` uses for registration artifacts.
+The value is a bare `DigestBearingResourceDescriptor`
+(`records/src/descriptors.ts:11-18`), matching
+`MatrixPublicationExtensionSchema`'s single-descriptor shape
+(`publication-extension.ts:34-36`). The Run extension's
+`registrationArtifacts` array (`publication-extension.ts:11-14`) is the wrong
+precedent here: this extension names exactly one record, and R1 says the cardinality
+should be structural rather than a length rule on a list.
 
 **The Report record schema does not change.** `ReportRecordSchema` is built on
 `topLevelRecordSchema`, which is a `z.looseObject` admitting any absolute-URI or
-reverse-DNS extension key (`records/src/extensions.ts:16-31`). A new reader function
+reverse-DNS extension key (`records/src/extensions.ts:18-30`). A new reader function
 and the §7 check are the only additions; every existing Report record stays
 byte-identical and every existing fixture stays green. S2 must assert the loose-object
 retention explicitly (§11 T13), because the whole binding rests on unknown keys
@@ -386,8 +425,9 @@ P0's lane (§12.1). Reserved as a v2 tightening once P0's record vocabulary is m
 
 | Thing | Value | Note |
 |---|---|---|
-| Bundle format | `benchmark-product-public-bundle/7` | Mandatory member list **identical** to `PUBLIC_BUNDLE_V4_FILES`. The only differences from `/4` are the role vocabulary, the required Report extension, the claim id, and the check |
+| Bundle format | `benchmark-product-public-bundle/7` | Mandatory member list **identical** to `PUBLIC_BUNDLE_V4_FILES`, including `qualification.json`. The differences from `/4` are enumerated below; "no new file member" does **not** mean "no code changes beyond a constant" |
 | Claim schema | `benchmark-product.claim-package/5` | `claim-package/2` (binary qualification) plus the `disclosure` section and the extended check list |
+| `qualification.json` `claimSchema` | **stays `benchmark-product.claim-package/2`** | See §6.5.1. This field is a hard literal and is deliberately *not* widened |
 | Check name | `disclosure-specification` | Always present on `/7`, never on any earlier closure |
 
 Next free numbers verified against `next` @ `4f4ad46f2`: bundle formats `/2`, `/4`,
@@ -397,15 +437,77 @@ claim ids `/1`, `/2`, `/3` (evidence-native), `/4` (anchored) are taken
 implementation time** and takes the then-next free numbers if the anchored or
 evidence-native lines have advanced.
 
-Why a format bump at all, given no new file member: `verify.ts` already enforces that
-a bundle matches one complete, deterministic presentation profile rather than mixing
-members. Letting a `/4` bundle grow a new evidence role would make "what a `/4`
-bundle may contain" time-dependent, which is exactly the property the frozen role
-order exists to prevent. With the bump, a `/4` bundle carrying a
-`disclosure-specification` role is a non-conforming bundle and refuses loudly, and an
-older verifier meeting a `/7` bundle refuses at the role enum rather than silently
-ignoring a disclosure. Failing closed on an unknown disclosure is the only acceptable
-behavior for this record type.
+#### 6.5.1 The `qualification.json` claim-id collision, and its resolution
+
+`qualification.json` is a mandatory member of the v4 file list
+(`verify/src/materialize.ts:10-14`) and its schema pins
+`claimSchema: z.literal("benchmark-product.claim-package/2")`
+(`verify/src/schema.ts:179`). The producer writes the same literal
+(`core/src/bundle/materialize.ts:421`) and gates the qualification branch on it
+(`core/src/bundle/materialize.ts:239`). A `/7` bundle that naively declared
+`claim-package/5` in `qualification.json` would refuse at that literal **before** the
+disclosure check ever ran.
+
+**Resolution: `qualification.json` keeps `claim-package/2`; only
+`claim-package.json` becomes `/5`.** The two fields answer different questions.
+`qualification.json`'s `claimSchema` names *which claim projection shape the
+qualification graph was built for*, and the disclosure section changes nothing about
+that graph — the qualification projection under `/5` is byte-identical to the one
+under `/2`. Widening the literal to a union would make the qualification schema
+co-vary with an unrelated section and would need widening again for every future
+closure. `verify/src/schema.ts:179` therefore stays untouched, and §7 gains a check
+that a `/7` bundle's `qualification.json` declares exactly `claim-package/2` while its
+`claim-package.json` declares exactly `claim-package/5` (§11 T22).
+
+#### 6.5.2 Why a format bump, and where the refusals actually fire
+
+`verify.ts` already enforces that a bundle matches one complete, deterministic
+presentation profile rather than mixing members. Letting a `/4` bundle grow a new
+evidence role would make "what a `/4` bundle may contain" time-dependent, which is
+exactly the property the frozen role order exists to prevent.
+
+The two refusals this buys, with their real mechanisms:
+
+- **A `/4` bundle carrying a `disclosure-specification` role refuses at
+  `verify.ts:1439`**, not at the role enum. The enum is a single shared constant
+  consumed by `BundleV4EvidenceCatalogSchema` (`verify/src/schema.ts:162`), so once
+  the token is appended it is admitted on `/4` and `/7` alike — there is no
+  per-closure role vocabulary. What actually fires is the evidence-closure
+  reachability check: `if (expectedRoles.size !== declaredRoles.size) refuse(...
+  "evidence catalog contains missing or unreachable records")`. On `/4` the Report
+  extension is not read, so no graph edge derives the record's role, `declaredRoles`
+  exceeds `expectedRoles`, and the bundle refuses. This is stronger than an added
+  bespoke guard because it is a check that already exists and cannot be forgotten;
+  S2 adds **no** new refusal for this case, and §11 T12 names this refusal by line.
+- **An older verifier meeting a `/7` bundle refuses at
+  `SUPPORTED_BUNDLE_FORMATS` (`verify/src/manifest.ts:25-30`) and
+  `LegacyBundleManifestSchema` (`manifest.ts:41-48`)**, not at the role enum — it
+  never reaches the catalog. Failing closed on an unknown disclosure is the only
+  acceptable behavior for this record type, and the manifest-level refusal is the
+  earliest possible place for it.
+
+#### 6.5.3 `isV4` is strict equality — a `/7` flag does not cover it
+
+`verify.ts` decides the whole v4 graph from one strict-equality test,
+`const isV4 = checked.manifest.format === BUNDLE_V4_FORMAT` (`verify.ts:345`), and
+branches on it at four load-bearing sites. A `/7` bundle would take the **v2** branch
+at every one and then refuse at `verify.ts:379` with `qualification.json` reported as
+a non-allowlisted file. Adding "an `isV7` flag" does not fix this; the predicate
+itself must change.
+
+**S2 introduces a closure-descriptor predicate** — `usesV4Graph(format)`, true for
+`BUNDLE_V4_FORMAT` and `BUNDLE_V7_FORMAT` — and replaces every consumer:
+
+| Site | What it selects | Effect if left as strict equality |
+|---|---|---|
+| `verify.ts:345` | the `isV4` definition itself | root cause |
+| `verify.ts:349` | `mandatoryFiles` (v4 list vs v2 list) | `qualification.json` not required, then non-allowlisted |
+| `verify.ts:355` | evidence catalog schema (v4 vs v2) | v2 enum rejects every v4-era role |
+| `verify.ts:393` | trust schema (v4 vs v2) | admission trust block rejected |
+| `verify.ts:404` | the `qualification.json` read | qualification graph never verified |
+
+The five sites are exhaustive for `verify.ts` as of `4f4ad46f2`; §10.2 restates them
+as the checklist, and §10.5 records the wider grep that produced them.
 
 **Strictly opt-in at produce time.** A run with no disclosure declaration produces
 exactly the `/4` bundle it produces today, byte-identical, with no `disclosure`
@@ -448,15 +550,36 @@ Rules, following `deriveClaimAnchors` exactly:
 
 ## 7. The `disclosure-specification` check
 
-Runs exactly on the `/7` closure, after `report-verification` and before
-`claim-consistency`, over the authenticated byte snapshot. No consumer reopens a
-bundle path after `verifyBundleSnapshot`.
+The named check `disclosure-specification` runs **only** on the `/7` closure, after
+`report-verification` and before `claim-consistency`, over the authenticated byte
+snapshot. No consumer reopens a bundle path after `verifyBundleSnapshot`.
+
+A check that runs only on `/7` cannot, by construction, refuse anything on an earlier
+closure. The guards therefore split in two, and the split is load-bearing:
+
+- **G0, closure-independent.** Runs on every format, outside the named check, in the
+  same pass that already reads the Report. *A Report carrying
+  `DISCLOSURE_SPECIFICATION_EXTENSION` on any format other than `/7` refuses.* Without
+  this, a `/4` bundle could carry the extension and the disclosure record with the
+  record's role derived by the extension edge, satisfying `verify.ts:1439`, and no
+  check would ever look at it. G0 closes that hole; §6.5.2's reachability refusal
+  closes the complementary one (role present, extension absent). The two together are
+  what make the extension and the closure inseparable.
+- **Steps 1–11 below, `/7`-only.** These assume the extension is present and
+  authenticate what it names.
+
+`/2`, `/5`, and `/6` are all covered by G0: the extension is legal on `/7` and on no
+other format, evidence-native and anchored included. §13 Q5 asks whether a later
+allocation should combine anchoring with disclosure.
 
 1. **Carrier binding.** Read the Report's `DISCLOSURE_SPECIFICATION_EXTENSION` value.
-   Refuse if it is absent on a `/7` bundle. Refuse if it is present on any earlier
-   closure. Its `digest.sha256` must resolve to exactly one record in the evidence
-   catalog, and that record's declared roles must be exactly
-   `["disclosure-specification"]`.
+   Refuse if it is absent (its presence on non-`/7` formats is G0's job, not this
+   step's). Its `digest.sha256` must resolve to **exactly one** record in the evidence
+   catalog — two catalog entries matching the digest, or none, both refuse — and that
+   record's declared roles must be exactly `["disclosure-specification"]`, one role and
+   no second. Conversely, any catalog record bearing `disclosure-specification` that
+   the extension does not name refuses: the role and the extension must be in exact
+   one-to-one correspondence.
 2. **Exact bytes.** The record's bytes must be the exact canonical encoding of the
    parsed record (parse → JCS → byte-compare), and their SHA-256 must equal both the
    catalog digest and the descriptor digest. Strict schema; unknown keys refuse.
@@ -485,11 +608,15 @@ bundle path after `verifyBundleSnapshot`.
    and no status upgrade (R4).
 8. **`undisclosed` carries nothing.** Structural via the union; restated as a check so
    the refusal names the variable rather than a schema path.
-9. **Projection equality.** `deriveDisclosureSpecification(recordBytes)` must byte-equal
-   the claim's `disclosure` section. Delivered by extending
-   `assertClaimConsistency`'s existing whole-claim compare rather than by a second
-   comparison.
-10. **Result surface.** The verification result gains an optional `disclosure` block:
+9. **Claim-id pairing.** `claim-package.json` declares exactly
+   `benchmark-product.claim-package/5` and `qualification.json` declares exactly
+   `benchmark-product.claim-package/2` (§6.5.1). Either field carrying the other's
+   value refuses, so the two identifiers cannot drift into each other.
+10. **Projection equality.** `deriveDisclosureSpecification(recordBytes)` must
+    byte-equal the claim's `disclosure` section. Delivered by extending
+    `assertClaimConsistency`'s existing whole-claim compare rather than by a second
+    comparison.
+11. **Result surface.** The verification result gains an optional `disclosure` block:
     `{ recordSha256, specification, subjectSha256, statuses: { <six keys>: <status> } }`.
     Statuses are disclosed facts, never folded into a single badge — the same posture
     `anchors` takes in `LegacyPublicBundleVerificationResult`
@@ -540,15 +667,15 @@ instruments:
   "variables": {
     "ingestion-model": {
       "status": "undisclosed",
-      "reason": "outside-this-experiment"
+      "reason": "not-stated"
     },
     "retrieval-config": {
       "status": "undisclosed",
-      "reason": "outside-this-experiment"
+      "reason": "not-stated"
     },
     "answer-model": {
       "status": "disclosed-by-publisher",
-      "statement": "Candidate answers were produced elsewhere by a dated model snapshot named in the source collection's own notes; this venue did not run it.",
+      "statement": "Mixed across items. Most candidates were produced elsewhere by a dated model snapshot named in the source collection's own notes; a minority are the verified reference answer itself, with no answer model involved; a marked remainder were written by hand. This venue ran none of them.",
       "sources": [ { "uri": "https://example.invalid/placeholder-source-collection" } ]
     },
     "answer-prompt": {
@@ -574,20 +701,26 @@ instruments:
 }
 ```
 
-Three things this example demonstrates, and each is the reason the record exists:
+Four things this example demonstrates, and each is the reason the record exists:
 
 1. Two variables are proved, four are not, and a reader can tell at a glance which is
    which without reading a word of the report body.
 2. `answer-prompt` asserts with no source, and the record says so rather than
    fabricating a citation.
-3. `ingestion-model` and `retrieval-config` are marked out of scope rather than
-   omitted. The report proposes a six-variable standard; a compliant record states all
-   six even when four of them are "not here".
+3. `ingestion-model` and `retrieval-config` are `not-stated`, not
+   `outside-this-experiment`. All four answer-factory variables are equally outside
+   what this venue ran; what separates them is whether anyone *stated* them. Two were,
+   two were not. Using a scope token for a knowledge gap would claim the standard does
+   not apply, when in fact it applies and the answer is unknown (§4.3).
+4. `answer-model` is heterogeneous, and `statement` says so plainly rather than
+   picking whichever value covers the most items.
 
 ## 10. S2 implementation map
 
 Mechanical. Ordered so each step compiles on the one before it. Every step is
-additive; nothing existing changes shape.
+additive in the sense that no shipped bundle changes bytes — but §10.2's `isV4`
+row and §10.3's format-selection row are **edits to existing branching**, not new
+files, and §6.5.3 is the reason.
 
 ### 10.1 `packages/benchmarking/records`
 
@@ -605,18 +738,27 @@ additive; nothing existing changes shape.
 | `src/schema.ts` | Append `"disclosure-specification"` to `BUNDLE_V4_EVIDENCE_ROLES` (end of list, §6.2) |
 | `src/manifest.ts` | `BUNDLE_V7_FORMAT`; add to `SUPPORTED_BUNDLE_FORMATS` and to `LegacyBundleManifestSchema`'s format union |
 | `src/materialize.ts` | `PUBLIC_BUNDLE_V7_FILES` = `PUBLIC_BUNDLE_V4_FILES` (alias; no new mandatory member) |
-| `src/profile/disclosure.ts` *(new)* | `deriveDisclosureSpecification` (shared pure projection, §6.6) and `assertDisclosureSpecification` (§7 steps 1–8). Exported from the package root so `core`'s carriage imports the same function |
+| `src/profile/disclosure.ts` *(new)* | `deriveDisclosureSpecification` (shared pure projection, §6.6) and `assertDisclosureSpecification` (§7 steps 1–9). Exported from the package root so `core`'s carriage imports the same function |
 | `src/profile/claim.ts` | `DISCLOSURE_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/5"`; `DisclosureSectionSchema`; a `/5` superRefine branch (requires `disclosure`, requires the `/2` qualification projection, pins the `/7` check list); refuse `disclosure` on `/1`, `/2`, `/3`, `/4` |
 | `src/reader-instructions.ts` | `PUBLIC_BUNDLE_V7_CHECKS = [...PUBLIC_BUNDLE_VERIFICATION_CHECKS, "disclosure-specification"]`; `/7` entries in `PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS` |
-| `src/verify.ts` | `PublicBundleVerificationCheck` gains `"disclosure-specification"` (`verify.ts:121-130`); result `format` union gains `/7`; optional `disclosure` block on the result; `isV7` flag; call `assertDisclosureSpecification` after `report-verification` and `checks.push(...)`; evidence-closure derived-roles map learns the new role's edge (Report extension → record) |
-| `src/assets.ts` | The `/7` presentation profile renders the six-variable table into `index.html` / `README.md`. Deterministic projection of verified facts only |
+| `src/verify.ts` — **the five `isV4` sites** | Replace strict equality with `usesV4Graph(format)` at `verify.ts:345` (definition), `:349` (`mandatoryFiles`), `:355` (evidence catalog schema), `:393` (trust schema), `:404` (`qualification.json` read). §6.5.3 tabulates what each one breaks if missed. This is the single highest-risk edit in the packet |
+| `src/verify.ts` — the rest | `PublicBundleVerificationCheck` gains `"disclosure-specification"` (`verify.ts:121-130`); result `format` union gains `/7`; optional `disclosure` block on the result; G0's closure-independent extension guard (§7); call `assertDisclosureSpecification` after `report-verification` and `checks.push(...)`; evidence-closure derived-roles map learns the new role's edge (Report extension → record) on `/7` only, so §6.5.2's `verify.ts:1439` refusal keeps firing on every other format |
+| `src/schema.ts` — **not changed** | `BundleQualificationSchema.claimSchema` stays `z.literal("benchmark-product.claim-package/2")` (`schema.ts:179`). §6.5.1 |
+| `src/profile/claim.ts` — `exactKeys` | The allowlist at `claim.ts:357` is an exact-key control shape; `"disclosure"` must be added or every `/5` claim fails as a generic control-shape violation |
+| `src/cli.ts` | No change needed. `supportedFormats` is projected from `SUPPORTED_BUNDLE_FORMATS` (`cli.ts:238,246`), so `/7` appears once `manifest.ts` lists it |
+| `src/index.ts` | Export `BUNDLE_V7_FORMAT` and the disclosure types alongside the existing format exports (`index.ts:77,80,102`) |
+| `src/assets.ts` | Assets branch on **report facts**, not bundle format: `reportFacts.kind === "binary"` (`assets.ts:321,472,484,522`). The six-variable table therefore hangs off the new `binaryQualification`-style input, not off a `/7` format test. Deterministic projection of verified facts only |
 
 ### 10.3 `packages/benchmark-product/core`
 
 | File | Change |
 |---|---|
 | `src/disclosure/state.ts` *(new)* | Workspace-side declaration state: the six entries a sponsor composes before lock. Product state, not a sealed record |
-| `src/operations/disclosure-declare.ts` *(new)* | `disclosure declare` operation: validate the declaration, seal the record, write it to the sealed store, record its digest in run state. Idempotent; re-declaring before lock replaces, after lock refuses |
+| `src/operations/disclosure-declare.ts` *(new)* | `disclosure declare` operation: validate the declaration, seal the record, write it to the sealed store, record its digest in run state. `author` is taken from the workspace's **report authority identity** at declare time, which is the same identity `report.author` resolves to, so §7 step 4 holds by construction. Idempotent before lock. After lock the declaration is frozen, with one exception: if the report authority key rotates between lock and report, an **author-only re-seal** is permitted and recorded, because otherwise a rotation would make §7 step 4 unsatisfiable and strand the run |
+| `src/bundle/manifest.ts` | **A second, independent copy of the bundle-format constants lives here** (`core/src/bundle/manifest.ts:25,46,75`), separate from `verify`'s. `BUNDLE_V7_FORMAT` must be added in both or the producer cannot emit what the verifier accepts |
+| `src/bundle/materialize.ts` — format selection | The producer's format ternary (`materialize.ts:879-883`) and its format type union (`:181-182`) currently resolve anchored → `/6`, binaryQualification → `/4`, else `/2`. A disclosure branch is added; §12's non-goal and §13 Q5 govern what happens when disclosure and anchoring are both present |
+| `src/bundle/materialize.ts` — **`ROLE_ORDER.slice(0, 12)` must not change** | `materialize.ts:794` derives the v2 catalog from the first twelve roles. Appending leaves it correct; any other edit silently changes what every v2 bundle publishes (§6.2, §11 T20) |
+| `src/report/claim.ts` | `claimSchema` union (`claim.ts:158-161`) gains `/5`; the superRefine chain (`:226-249`) gains a `/5` branch; the `exactKeys` control shape (`:367`) gains `"disclosure"`. This is the producer-side twin of `verify/src/profile/claim.ts` and drifts silently if only one is edited |
 | `src/disclosure/carriage.ts` *(new)* | Mirrors `anchor/carriage.ts`: reads bytes from the sealed store via `getSealedBytes` (never from run state), projects the claim section via the shared `deriveDisclosureSpecification`, and reports whether this run publishes on the `/7` closure. A projection failure is a typed `record-integrity` product refusal |
 | `src/operations/report.ts` | When a disclosure declaration exists, add the Report extension key before sealing |
 | `src/cli/main.ts` | `disclosure declare` verb, plus `disclosure show` reading back the sealed record |
@@ -633,6 +775,24 @@ additive; nothing existing changes shape.
 - **External-publisher tooling** (a standalone emitter for publishers with no Jinn
   workspace) is a later, separate packet. The record's portability (§5, §4.4) is what
   makes it possible; building it is not in S2.
+
+### 10.5 Grep pass (executed 2026-08-19 against `4f4ad46f2`)
+
+Run over `isV4`, `BUNDLE_V4_FORMAT`, `claimSchema`, `exactKeys`,
+`SUPPORTED_BUNDLE_FORMATS`, `PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS`, and
+`ROLE_ORDER`, excluding tests. It confirmed the five `verify.ts` `isV4` sites and
+surfaced four coupling points that a `verify`-only reading misses, all now rows in
+§10.2 and §10.3:
+
+1. `core/src/bundle/manifest.ts` holds a **duplicate** set of format constants.
+2. `core/src/bundle/materialize.ts:794` slices `ROLE_ORDER` by a hardcoded `12`.
+3. `core/src/report/claim.ts` is a full producer-side twin of the verifier's claim
+   schema, with its own union, refines, and `exactKeys` allowlist.
+4. `verify/src/cli.ts` and `verify/src/index.ts` project `SUPPORTED_BUNDLE_FORMATS`
+   and need no edit beyond the constant.
+
+S2 re-runs this grep before starting; if `next` has moved, the new hits are added
+here rather than discovered during review.
 
 ## 11. Test matrix for S2
 
@@ -651,8 +811,9 @@ the added fixtures is part of the packet's acceptance.
 | T8 | `measured-here` citing only `execution-observation` entries | Refuses at §7 step 6 |
 | T9 | `author` differing from `report.author` | Refuses at §7 step 4 |
 | T10 | `subject.digest` differing from the Matrix digest | Refuses at §7 step 3 |
-| T11 | Report extension present on a `/4` bundle, or absent on a `/7` bundle | Refuses at §7 step 1 |
-| T12 | `disclosure-specification` role on a `/4` bundle | Refuses at the role enum |
+| T11a | Report extension absent on a `/7` bundle | Refuses at §7 step 1 |
+| T11b | Report extension present on a `/2`, `/4`, `/5`, or `/6` bundle | Refuses at **G0** (§7 preamble), the closure-independent guard — not at step 1, which never runs on those formats |
+| T12 | `disclosure-specification` role on a `/4` bundle, extension absent | Refuses at `verify.ts:1439` (`evidence catalog contains missing or unreachable records`), because no graph edge derives the role off `/7`. **No new refusal is added for this case**; the test pins the existing one (§6.5.2) |
 | T13 | Report record with the extension: parse → re-seal → byte-compare | Byte-identical (loose-object retention, §6.3) |
 | T14 | Claim `disclosure` section edited by one byte | `claim-consistency` refuses, naming the field |
 | T15 | Record bytes edited by one byte | `manifest` refuses before any semantic check |
@@ -660,9 +821,20 @@ the added fixtures is part of the packet's acceptance.
 | T17 | Every pre-existing bundle, claim, and Report fixture | Byte-unchanged |
 | T18 | The 144-cell qualification lifecycle test | Green, unmodified |
 | T19 | An assertion whose `statement` is plainly false | **Verifies.** The record is valid and the assertion is carried (R4). This test exists to pin the posture, not to tolerate a bug |
+| T20 | v2 evidence catalog after the role append | Byte-unchanged; `ROLE_ORDER.slice(0, 12)` still yields exactly the v2 role set (§6.2) |
+| T21 | Record declaring `disclosure-specification` plus a second role | Refuses at §7 step 1 |
+| T22 | `/7` bundle whose `claim-package.json` declares `/2` or `/4`, or whose `qualification.json` declares `/5` | Refuses at §7 step 9 (§6.5.1) |
+| T23 | Two catalog records matching the extension's digest | Refuses at §7 step 1 (exactly-one cardinality) |
+| T24 | Catalog record bearing `disclosure-specification` that the Report extension does not name | Refuses at §7 step 1 (one-to-one correspondence) |
+| T25 | `sources` unsorted, or carrying a duplicate `uri` | Refuses at §7 step 7 |
 
 T19 is the test a reviewer will want to delete. It must not be deleted: a verifier
 that failed on a false assertion would be claiming a power it does not have.
+
+T12 and T24 are complements and both are required. T12 covers *role without
+extension*; T24 covers *role without the extension naming it*, on a bundle where the
+extension does exist. Dropping either leaves a path by which a disclosure record rides
+in a bundle with nothing checking it.
 
 ## 12. Boundaries
 
@@ -684,7 +856,37 @@ model-profile record, an evidence-channel input-shape identity), those species j
 §6.4's `pinned-configuration` row at S2 time. That is the only coupling, and it is
 one-directional.
 
-### 12.2 License law
+### 12.2 Explicit non-goal: `/7` does not combine disclosure with integrity anchors
+
+The closure space is more than one dimension, and `/7` deliberately occupies only one
+corner of it:
+
+| Closure | Composition |
+|---|---|
+| `/2` | base graph |
+| `/4` | `/2` + binary qualification |
+| `/6` | `/2` + anchors (`verify.ts:346,348`) |
+| `/7` *(this design)* | `/4` + disclosure |
+
+**An anchored, qualified, disclosed bundle has no closure version and cannot be
+published.** Two points of accuracy about that:
+
+- The anchored + qualification exclusion **pre-dates this design**. The producer
+  already refuses the combination outright — `core/src/bundle/materialize.ts:273-279`
+  ("no closure version expresses both") and `core/src/report/claim.ts:640-644`. So
+  today's flagship qualification bundle cannot be anchored regardless of anything
+  here.
+- What `/7` adds is that it keeps that exclusion in place rather than resolving it,
+  and stacks disclosure on the same unanchored branch. A publisher choosing disclosure
+  is choosing it *instead of* anchoring for as long as no combined allocation exists.
+
+This is stated as a non-goal rather than a limitation because resolving it means
+allocating a combined closure, which is a larger piece of work than S2 and is not on
+the critical path for the report. §13 Q5 puts the choice to the operator, because for
+a flagship publication the tradeoff — a third-party time proof against a machine-readable
+disclosure — is a product decision, not an engineering one.
+
+### 12.3 License law
 
 Program §1 constraint 2 and §8 apply without exception. No third-party prompt bytes,
 dataset rows, annotations, or audit-derived text land in this record, its schema, its
@@ -692,7 +894,7 @@ fixtures, its tests, or this document. Every `statement` is the record author's 
 original prose. §9's worked example is synthetic placeholder text written for this
 document.
 
-### 12.3 Never run-blocking
+### 12.4 Never run-blocking
 
 Per D3, S2 lands during report-writing week and the record publishes with the report
 if ready, or fast-follows within days with the thread post saying so. §6.5's opt-in
@@ -733,10 +935,32 @@ evidence. If the report's reviewers ask for it, add it in `specification/v2` wit
 projection labeling it explicitly as an unanchored assertion.
 
 **Q4 — Where does the verification result's `disclosure` block surface for humans?**
-§7 step 10 defines the machine surface. The bundle's own `index.html` and `README.md`
+§7 step 11 defines the machine surface. The bundle's own `index.html` and `README.md`
 are S2 (§10.2); the site's report template is R1 (§10.4). If the operator wants the
 six-variable table on the site before S2 lands, R1 needs a fallback that renders it
 from report prose, which would be a second source of truth for the same facts.
 *Recommendation:* do not build the fallback. Either the record ships and the table is
 rendered from it, or the table is prose in the report body and the site does not
 duplicate it.
+
+**Q5 — Does the flagship report want integrity anchors, disclosure, or a combined
+closure?** Per §12.2, an anchored qualification bundle is already impossible today and
+`/7` keeps it that way while adding disclosure to the unanchored branch. Three
+options: publish `/7` (disclosure, no anchor); publish `/4` and defer disclosure to a
+later artifact (no anchor either, since anchored + qualification is already refused);
+or allocate a combined closure, which is materially more work than S2 and would move
+the fast-follow date.
+*Recommendation:* publish `/7`. The report's contribution is the disclosure standard,
+and a third-party time proof does nothing for a claim whose whole content is
+"here is what we did and did not measure". But this is a product call about what the
+flagship should carry, so it is the operator's, not this design's.
+
+**Q6 — Should per-variable heterogeneity get a structural home in `specification/v2`?**
+§4.3 resolves v1 by having `statement` carry the mixture, and §9's `answer-model`
+shows it. The alternative is a per-variable breakdown with item counts, which would
+make heterogeneity machine-readable and countable.
+*Recommendation:* keep prose in v1 and revisit after the report. A structural
+breakdown needs an item-partition vocabulary that would have to agree with the item
+bank's own, and that coupling is exactly the kind of thing §6.4 defers until P0's
+record vocabulary is merged. If reviewers of the published record ask for it, that is
+strong evidence it belongs in v2.
