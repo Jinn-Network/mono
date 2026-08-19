@@ -23,6 +23,7 @@ describe("public CLI help routing", () => {
     expect(usesPrimaryWrapperHelp(["method", "--help"])).toBe(false);
     expect(usesPrimaryWrapperHelp(["--help", "method"])).toBe(false);
     expect(usesPrimaryWrapperHelp(["help", "method"])).toBe(false);
+    expect(usesPrimaryWrapperHelp(["help", "method", "--help"])).toBe(false);
     expect(usesPrimaryWrapperHelp(["method"])).toBe(false);
     expect(usesPrimaryWrapperHelp([])).toBe(false);
   });

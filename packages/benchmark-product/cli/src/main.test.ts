@@ -75,6 +75,11 @@ describe("Colophon install surface", () => {
     expect(helpMethod.exitCode).toBe(0);
     expect(helpMethod.stdout).toContain("terminal-bench-2.1");
     expect(helpMethod.stdout).toContain("homemade");
+
+    const helpMethodFlag = await runColophonCli(["help", "method", "--help"], context);
+    expect(helpMethodFlag.exitCode).toBe(0);
+    expect(helpMethodFlag.stdout).toContain("terminal-bench-2.1");
+    expect(helpMethodFlag.stdout).not.toContain("colophon demo");
   });
 
   test("bare --help stays the primary install surface", async () => {
