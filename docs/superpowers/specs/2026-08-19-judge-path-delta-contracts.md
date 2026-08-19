@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Version** | 1.3 |
+| **Version** | 1.4 |
 | **Date** | 2026-08-19 |
 | **Author** | P0 design session (operator + Claude Fable 5); every seam cited path:line against `next` @ `4f4ad46f2` |
-| **Revision** | v1.1 folded in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong: §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert), §8.3 (the singular-Report blast radius). **v1.2 folds in the mechanical constant sweep**, which classified 214 sites across four families and again found the counts short: stratum 11 to 23, arm count 8 to 9, admission **5 to 60** (§6.8a is new and P6 is now the largest packet), singular Report 7 to 35. The sweep also changed one recommendation (§8.3 now prefers N bundles over one bundle carrying N Reports) and produced §10.2, the coverage proof. **v1.3 folds in a delta re-review of v1.2**, which verified all 16 earlier findings closed and raised six more. Three were load-bearing: §1.4's v1.2 conditional was **not implementable** (the limitations function cannot see the model, so the profile is now sealed into the analysis parameters as an optional key whose absent case preserves the golden fixtures byte for byte); §6.8a's role mapping does **not** close in either direction, and `materialize.ts:366` is a site invisible to both the grep and the compiler; §8.3's option-5 residual cost omitted the producer side, and `report` turns out to be single-shot exactly as `publish` is. Two proposed citation corrections were checked and declined with evidence. **The whole document is frozen at merge** |
+| **Revision** | v1.1 folded in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong: §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert), §8.3 (the singular-Report blast radius). **v1.2 folds in the mechanical constant sweep**, which classified 214 sites across four families and again found the counts short: stratum 11 to 23, arm count 8 to 9, admission **5 to 60** (§6.8a is new and P6 is now the largest packet), singular Report 7 to 35. The sweep also changed one recommendation (§8.3 now prefers N bundles over one bundle carrying N Reports) and produced §10.2, the coverage proof. **v1.3 folds in a delta re-review of v1.2**, which verified all 16 earlier findings closed and raised six more. Three were load-bearing: §1.4's v1.2 conditional was **not implementable** (the limitations function cannot see the model, so the profile is now sealed into the analysis parameters as an optional key whose absent case preserves the golden fixtures byte for byte); §6.8a's role mapping does **not** close in either direction, and `materialize.ts:366` is a site invisible to both the grep and the compiler; §8.3's option-5 residual cost omitted the producer side, and `report` turns out to be single-shot exactly as `publish` is. Two proposed citation corrections were checked and declined with evidence, and final review upheld both. **v1.4 fixes the one defect final review found:** v1.3's seed binding digested the full `rows` array, which is circular, because a row carries `handChecked` and which rows carry it depends on the sample the digest determines. The digest is now over the row **identity** set, and v1.3's claim that the binding survives §6.4's replacements is withdrawn as false. **The document is frozen at this revision** |
 | **Shape** | `design` (packet P0 of the judge-report implementation program) |
 | **Closes** | [#2842](https://github.com/Jinn-Network/mono/issues/2842) |
 | **Program** | [`2026-08-18-judge-report-implementation-program.md`](../plans/2026-08-18-judge-report-implementation-program.md) |
@@ -202,7 +202,7 @@ was supposed to catch it.
 **Correction to v1.2, from delta review: v1.2 specified the conditional and it was not
 implementable.** `binaryInstrumentReportLimitations(parameters)` takes exactly one argument, the
 sealed binary-instrument method parameters, and **those parameters carry no model**.
-`BINARY_INSTRUMENT_PARAMETER_SCHEMA` (`aggregate/src/binary-instrument-method.ts:86-113`) declares
+`BINARY_INSTRUMENT_PARAMETER_SCHEMA` (`aggregate/src/binary-instrument-method.ts:78-113`) declares
 nine properties under `additionalProperties: false` and none of them is a model or a profile. The
 cold-verify call site passes `(plan?.parameters ?? {})` with no sealed-store resolver
 (`verify/src/profile/claim-consistency.ts:53`), and the RunRecord's arm pinning carries the
@@ -1022,35 +1022,55 @@ records what the operator actually ran; the verifier's independent recomputation
 sample checkable. A verifier that must execute an arbitrary sealed script to check a sample is not
 a verifier.
 
-> **Procedure `screening-sample/1`.** Let `rowsDigest` be the SHA-256 of the canonical-JSON bytes of
-> the table's sorted-unique `rows` array. Given `sampleSeed` and `sampleSize`: for each row compute
-> `stream := HMAC-SHA256(key = utf8(sampleSeed) || rowsDigest, message = utf8(itemSha256))`; sort
+> **Procedure `screening-sample/1`.** Let `poolDigest` be `sha256:` followed by the 64 lowercase hex
+> digits of the SHA-256 of the canonical-JSON bytes of the table's **`itemSha256` values alone**,
+> code-unit sorted and unique: the row **identity** set, never the rows themselves. Given
+> `sampleSeed` and `sampleSize`: for each row compute
+> `stream := HMAC-SHA256(key = utf8(sampleSeed || poolDigest), message = utf8(itemSha256))`; sort
 > rows ascending by `stream` compared as 32 unsigned bytes, ties broken by `itemSha256` in code-unit
 > order; the sample is the first `sampleSize` rows.
+
+**The key is text, and the digest enters it in exactly the form written above.** Every other value
+in this procedure enters as the UTF-8 bytes of its canonical rendering, including the message, which
+is `utf8(itemSha256)` over the same `sha256:`-prefixed lowercase-hex string used everywhere in this
+document. Keying on the digest's 32 raw bytes instead would introduce the only binary-versus-text
+distinction in an otherwise all-text procedure, which is the sort of thing a second implementer gets
+wrong. No delimiter separates the two parts because `poolDigest` is a fixed 71-character suffix;
+adding one would be a second convention to get wrong. R-4 requires this be reimplementable in any
+language from this paragraph, and that requirement is what settles the encoding, not convention.
 
 Deterministic, seedable, no PRNG state to carry, and reimplementable from this paragraph in any
 language. If the recomputation and the sealed script disagree, **the recomputation wins and
 admission refuses.**
 
-**Why the key binds the row set, added at v1.3 from delta review.** `sampleSeed` is authored by the
-operator, and the rows it draws from are sealed in the same record the operator also authors.
-Nothing in `screening-sample/1` as v1.2 wrote it stops an operator from grinding candidate seeds
-against the known rows until the draw happens to miss the rows they would rather not hand-check.
-The procedure made the sample **checkable**, which is not the same as making it **unbiased**, and
-v1.2 conflated those.
+**Why the key binds the identity set and not the rows. Correction to v1.3, from final review: v1.3
+bound the digest over the full `rows` array and that was circular and uncomputable.** A
+`ScreeningRow` carries `handChecked` and `handVerdict` (§6.3), and §6.5(2) requires every row in
+`flagged` union `sample` to carry `handChecked === true`. So which rows carry a hand check depends
+on the sample, the sample depends on the digest, and a digest over the full rows depends on the hand
+checks. Writing `handChecked: true` onto the drawn sample changes the digest, which redraws the
+sample. There is no general convergence, and the verifier would have refused essentially every
+honest table at check (2). Digesting the **identity** set removes the cycle completely, because
+`itemSha256` is exactly the part of a row that hand-checking never touches.
 
-Binding `rowsDigest` into the HMAC key does not remove the operator's ability to grind, because the
-rows are still known when the seed is chosen. What it removes is the ability to grind **once and
-reuse**: every edit to the row set, including the replacements §6.4 requires, changes `rowsDigest`
-and therefore the entire draw. A seed ground against one row set is worthless against the row set
-that actually seals. Combined with §6.5(0)'s exact-coverage check, which fixes the row set to the
-frozen bank's pool before any of this runs, the remaining attack is a single grind against the final
-pool, which the operator would then have to re-run after every replacement.
+**What the binding buys, stated no larger than it is.** It does not stop grinding: the pool is known
+when the seed is chosen, so an operator can still search seeds against the final pool. What it
+forecloses is grinding **once and reusing**. A seed is now a function of the pool it was drawn
+against, so one lucky seed is worthless for a different bank, a different run, or a pool edited
+before sealing.
 
-**The honest limit, stated rather than papered over:** this narrows the hole, it does not close it.
-Closing it needs a seed commitment sealed **before** the rows are known, which the §6.6 ordering
-receipt could carry. That is a larger change to a D1-ratified shape and it is not taken here. What
-is taken is the version that costs one line and cannot be got wrong.
+**It specifically does not survive §6.4's replacements, and v1.3 claimed it did.** That claim was
+wrong: §6.5(0) requires `rows` to cover the frozen bank's candidate pool exactly and forbids any row
+naming an item outside it, so a same-class same-stratum replacement is necessarily **already a pool
+member with its own row**. Replacing an excluded item changes which rows are admitted; it does not
+change the identity set, so it does not change the draw. The pool is fixed once, by the frozen bank,
+before any of this runs.
+
+**The honest limit, stated rather than papered over:** this narrows the hole, it does not close it,
+and it narrows it less than v1.3 said. Closing it needs a seed commitment sealed **before** the pool
+is known, which the §6.6 ordering receipt could carry. That is a larger change to a D1-ratified
+shape and it is not taken here. What is taken is the version that costs one clause, cannot be got
+wrong, and cannot deadlock an honest operator.
 
 This reads on **R-4**'s own argument and strengthens it: R-4 rules that the verifier's independent
 recomputation beats the operator's sealed script precisely because an operator-supplied procedure
@@ -1992,8 +2012,8 @@ more packets:
 | File | Packets | What each touches |
 |---|---|---|
 | `core/src/run/binary-instrument-profile.ts` | P1, P4 | arm cardinality at `:324,349,352` and model literals (P1); the `["core","stress"]` gate at `:299` **and the re-hardcode at `:315`** (P4) |
-| `aggregate/src/binary-instrument-method.ts` | **P1, P3, P4, P6** | model set, per-profile limitations, arm cardinality at `:955,1488,1510`, and the optional `judgeModelProfile` parameter at `:86-113,115-124` (P1); mirrored parser digests at `:64,66` (P3); ten stratum sites (P4); `truthAdmission` at `:109,123,172,412,415,446` (P6). **The most contended file in the program**, and P1's reach into it grew at v1.3 |
-| `BINARY_INSTRUMENT_PARAMETER_SCHEMA` (same file, `:86-113`) | **P1, P4, P6** | optional `judgeModelProfile` (P1, §1.4); `strata` (P4); `truthAdmission` (P6). Called out separately because it is one object literal under `additionalProperties: false`, so all three edits land in the same braces |
+| `aggregate/src/binary-instrument-method.ts` | **P1, P3, P4, P6** | model set, per-profile limitations, arm cardinality at `:955,1488,1510`, and the optional `judgeModelProfile` parameter at `:78-113,115-124` (P1); mirrored parser digests at `:64,66` (P3); ten stratum sites (P4); `truthAdmission` at `:109,123,172,412,415,446` (P6). **The most contended file in the program**, and P1's reach into it grew at v1.3 |
+| `BINARY_INSTRUMENT_PARAMETER_SCHEMA` (same file, `:78-113`) | **P1, P4, P6** | optional `judgeModelProfile` (P1, §1.4); `strata` (P4); `truthAdmission` (P6). Called out separately because it is one object literal under `additionalProperties: false`, so all three edits land in the same braces |
 | **`verify/src/schema.ts`** | **P1, P4, P6** | `arms` `.length(4)` at `:189` and the distinct-instrument `superRefine` at `:227` (P1); the `strata` tuple at `:185` (P4); `truthAdmission` at `:183`, the ledger `reason` copy at `:199`, the evidence-role lists at `:16,49`, the reviewer and authority checks at `:119-131`, and both `superRefine` blocks at `:259-270,275-276` (P6) |
 | **`verify/src/verify.ts:150-155`** | **P1, P4, P6** | one six-line type block: `armCount` at `:154` (P1), `strata` at `:153` (P4), `truthAdmission` at `:151` (P6). Whichever lands first, the other two rebase through the same lines |
 | **`verify/src/admission/contracts.ts`** | **P2, P4, P6** | the mirrored `BinaryJudgmentPayloadSchema` at `:31-40` (P2); `BinaryJudgmentStratumSchema` at `:30` (P4); the admission manifest at `:167-177`, the ledger `reason` at `:141`, the operator limitation at `:163` (P6) |
