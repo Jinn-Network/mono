@@ -430,12 +430,17 @@ P0's lane (§12.1). Reserved as a v2 tightening once P0's record vocabulary is m
 | `qualification.json` `claimSchema` | **stays `benchmark-product.claim-package/2`** | See §6.5.1. This field is a hard literal and is deliberately *not* widened |
 | Check name | `disclosure-specification` | Always present on `/7`, never on any earlier closure |
 
-Next free numbers verified against `next` @ `4f4ad46f2`: bundle formats `/2`, `/4`,
-`/5` (evidence-native), `/6` (anchored) are taken (`verify/src/manifest.ts:18-24`);
-claim ids `/1`, `/2`, `/3` (evidence-native), `/4` (anchored) are taken
-(`verify/src/profile/claim.ts:50-58`). **S2 re-verifies both against `next` at
-implementation time** and takes the then-next free numbers if the anchored or
-evidence-native lines have advanced.
+Next free numbers verified against `next` @ `4f4ad46f2`. Bundle formats `/2`, `/4`,
+`/5` (evidence-native), and `/6` (anchored) are taken in
+`verify/src/manifest.ts:18-24`, and **`/3` is taken as well** — the accounting-only
+publication profile at `core/src/bundle/manifest.ts:23`, with its own
+`v3-materialize.ts` / `v3-verify.ts` pair. `/3` appears in no `verify` constant, which
+is §10.5's duplicate-format-constants hazard surfacing in this very sentence: reading
+only `verify/src/manifest.ts` makes `/3` look free. Claim ids `/1`, `/2`,
+`/3` (evidence-native), and `/4` (anchored) are taken
+(`verify/src/profile/claim.ts:50-58`). `/7` and claim `/5` are therefore still the
+next free allocations. **S2 re-verifies against both packages' constants at
+implementation time** and takes the then-next free numbers if any line has advanced.
 
 #### 6.5.1 The `qualification.json` claim-id collision, and its resolution
 
@@ -468,17 +473,23 @@ exactly the property the frozen role order exists to prevent.
 
 The two refusals this buys, with their real mechanisms:
 
-- **A `/4` bundle carrying a `disclosure-specification` role refuses at
-  `verify.ts:1439`**, not at the role enum. The enum is a single shared constant
+- **A `/4` bundle carrying a `disclosure-specification` role refuses in the
+  evidence-closure walk**, not at the role enum. The enum is a single shared constant
   consumed by `BundleV4EvidenceCatalogSchema` (`verify/src/schema.ts:162`), so once
   the token is appended it is admitted on `/4` and `/7` alike — there is no
-  per-closure role vocabulary. What actually fires is the evidence-closure
-  reachability check: `if (expectedRoles.size !== declaredRoles.size) refuse(...
-  "evidence catalog contains missing or unreachable records")`. On `/4` the Report
-  extension is not read, so no graph edge derives the record's role, `declaredRoles`
-  exceeds `expectedRoles`, and the bundle refuses. This is stronger than an added
-  bespoke guard because it is a check that already exists and cannot be forgotten;
-  S2 adds **no** new refusal for this case, and §11 T12 names this refusal by line.
+  per-closure role vocabulary. Off `/7` the Report extension is never read, so no
+  graph edge derives the role, and **which** existing refusal fires depends on how the
+  role was smuggled in:
+  - as a *standalone* catalog record, the extra digest trips the size guard,
+    `if (expectedRoles.size !== declaredRoles.size) refuse(... "evidence catalog
+    contains missing or unreachable records")` (`verify.ts:1439`);
+  - *appended to an existing graph record's* role array, the sizes still match and the
+    per-digest compare trips instead, `record <digest> roles do not equal its derived
+    graph roles` (`verify.ts:1441-1445`).
+
+  Both are stronger than an added bespoke guard because they already exist and cannot
+  be forgotten. S2 adds **no** new refusal for either case; §11 T12a and T12b pin them
+  by line.
 - **An older verifier meeting a `/7` bundle refuses at
   `SUPPORTED_BUNDLE_FORMATS` (`verify/src/manifest.ts:25-30`) and
   `LegacyBundleManifestSchema` (`manifest.ts:41-48`)**, not at the role enum — it
@@ -788,8 +799,10 @@ surfaced four coupling points that a `verify`-only reading misses, all now rows 
 2. `core/src/bundle/materialize.ts:794` slices `ROLE_ORDER` by a hardcoded `12`.
 3. `core/src/report/claim.ts` is a full producer-side twin of the verifier's claim
    schema, with its own union, refines, and `exactKeys` allowlist.
-4. `verify/src/cli.ts` and `verify/src/index.ts` project `SUPPORTED_BUNDLE_FORMATS`
-   and need no edit beyond the constant.
+4. `verify/src/cli.ts:238,246` projects `SUPPORTED_BUNDLE_FORMATS` and needs no edit.
+   `verify/src/index.ts:75-81` is **not** the same case: it is an explicit named-export
+   list, so `BUNDLE_V7_FORMAT` has to be added there by hand or the constant is
+   unreachable to consumers.
 
 S2 re-runs this grep before starting; if `next` has moved, the new hits are added
 here rather than discovered during review.
@@ -813,7 +826,8 @@ the added fixtures is part of the packet's acceptance.
 | T10 | `subject.digest` differing from the Matrix digest | Refuses at §7 step 3 |
 | T11a | Report extension absent on a `/7` bundle | Refuses at §7 step 1 |
 | T11b | Report extension present on a `/2`, `/4`, `/5`, or `/6` bundle | Refuses at **G0** (§7 preamble), the closure-independent guard — not at step 1, which never runs on those formats |
-| T12 | `disclosure-specification` role on a `/4` bundle, extension absent | Refuses at `verify.ts:1439` (`evidence catalog contains missing or unreachable records`), because no graph edge derives the role off `/7`. **No new refusal is added for this case**; the test pins the existing one (§6.5.2) |
+| T12a | `disclosure-specification` role on a `/4` bundle as a **standalone** catalog record, extension absent | Refuses at `verify.ts:1439` (`evidence catalog contains missing or unreachable records`): the extra digest makes `declaredRoles` exceed `expectedRoles` |
+| T12b | `disclosure-specification` role **appended to an existing graph record's** role array on a `/4` bundle | Refuses at `verify.ts:1441-1445` (`record <digest> roles do not equal its derived graph roles`): the catalog sizes still match, so the per-digest compare is what fires |
 | T13 | Report record with the extension: parse → re-seal → byte-compare | Byte-identical (loose-object retention, §6.3) |
 | T14 | Claim `disclosure` section edited by one byte | `claim-consistency` refuses, naming the field |
 | T15 | Record bytes edited by one byte | `manifest` refuses before any semantic check |
@@ -831,10 +845,11 @@ the added fixtures is part of the packet's acceptance.
 T19 is the test a reviewer will want to delete. It must not be deleted: a verifier
 that failed on a false assertion would be claiming a power it does not have.
 
-T12 and T24 are complements and both are required. T12 covers *role without
-extension*; T24 covers *role without the extension naming it*, on a bundle where the
-extension does exist. Dropping either leaves a path by which a disclosure record rides
-in a bundle with nothing checking it.
+T12a, T12b, and T24 are complements and all three are required. T12a and T12b cover
+*role without extension* in its two smuggling shapes, standalone record and appended
+role, which trip different refusals (§6.5.2). T24 covers *role without the extension
+naming it*, on a bundle where the extension does exist. Dropping any one leaves a path
+by which a disclosure record rides in a bundle with nothing checking it.
 
 ## 12. Boundaries
 
@@ -864,7 +879,9 @@ corner of it:
 | Closure | Composition |
 |---|---|
 | `/2` | base graph |
+| `/3` | accounting-only publication profile, unrelated to this axis (`core/src/bundle/manifest.ts:23`) |
 | `/4` | `/2` + binary qualification |
+| `/5` | evidence-native, its own lineage |
 | `/6` | `/2` + anchors (`verify.ts:346,348`) |
 | `/7` *(this design)* | `/4` + disclosure |
 
