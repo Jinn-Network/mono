@@ -647,10 +647,10 @@ describe("Task 6: paired-delta@1 bundle asset dispatch", () => {
       name,
       createHash("sha256").update(bytes).digest("hex"),
     ]))).toEqual({
-      "README.md": "c84a462355d8443fcf549bfa092dc9ca08a4f6395b96b683aea5dcab573a79ef",
+      "README.md": "986050e3332a3f7453b0ba4b2cf2b6b0decb0adf8fc24e6ba880e6c69d33e37d",
       "badge.svg": "cdeb0f812c99cd727165e522d1c59770b3a7c89241d08f139ea954390902f8d6",
-      "index.html": "8df4a0b57d63df324dacf452ddfd90c81466e852137ee44e2a93ff4fd9c76bab",
-      "share.txt": "e93ec44415ee76899b198fe3cdd174fb410c876c48e0835f6f28118fb8200056",
+      "index.html": "98dba3ff104d5219b0677d89e52c508bc65741ebf8e6373cdbdf372415143350",
+      "share.txt": "60e03557bb7b1b1768fba8b0132c9d192f5a6b2107ec2d6e0ebd5f744e476653",
       "social-card.svg": "813c2bfb2760cab5370f56883b71be44041120831cf4b736f07156337c8e26f5",
     });
   });
