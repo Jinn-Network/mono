@@ -235,27 +235,40 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
 test('the selection script resolves its diff endpoints from the event it is given', () => {
   const script = extractSelectionScript(readArchitectureControlWorkflow());
 
+  // Fast lane: a pull request that does not target `main` unselects without diffing.
   const pullRequest = runSelectionScript({
     script,
     env: {
       EVENT_NAME: 'pull_request',
-      BASE_SHA: 'base-from-pull-request',
-      HEAD_SHA: 'head-from-pull-request',
+      PR_BASE_REF: 'next',
       MG_BASE_SHA: '',
       GITHUB_SHA: 'checked-out-sha',
     },
   });
   assert.equal(pullRequest.status, 0, pullRequest.stderr);
-  assert.match(pullRequest.gitArgs, /^base-from-pull-request\.\.\.head-from-pull-request$/mu);
-  assert.match(pullRequest.output, /^run=true$/mu);
+  assert.equal(pullRequest.gitArgs, '');
+  assert.match(pullRequest.output, /^run=false$/mu);
+
+  // Hotfix lane: a pull request targeting `main` verifies in full, still without diffing.
+  const hotfix = runSelectionScript({
+    script,
+    env: {
+      EVENT_NAME: 'pull_request',
+      PR_BASE_REF: 'main',
+      MG_BASE_SHA: '',
+      GITHUB_SHA: 'checked-out-sha',
+    },
+  });
+  assert.equal(hotfix.status, 0, hotfix.stderr);
+  assert.equal(hotfix.gitArgs, '');
+  assert.match(hotfix.output, /^run=true$/mu);
 
   // The merge-group head is `GITHUB_SHA`, not a second payload field.
   const mergeGroup = runSelectionScript({
     script,
     env: {
       EVENT_NAME: 'merge_group',
-      BASE_SHA: '',
-      HEAD_SHA: '',
+      PR_BASE_REF: '',
       MG_BASE_SHA: 'base-from-merge-group',
       GITHUB_SHA: 'checked-out-sha',
     },
@@ -267,7 +280,7 @@ test('the selection script resolves its diff endpoints from the event it is give
   // Any other event verifies in full without consulting a diff at all.
   const dispatch = runSelectionScript({
     script,
-    env: { EVENT_NAME: 'workflow_dispatch', BASE_SHA: '', HEAD_SHA: '', MG_BASE_SHA: '', GITHUB_SHA: 'checked-out-sha' },
+    env: { EVENT_NAME: 'workflow_dispatch', PR_BASE_REF: '', MG_BASE_SHA: '', GITHUB_SHA: 'checked-out-sha' },
   });
   assert.equal(dispatch.status, 0, dispatch.stderr);
   assert.match(dispatch.output, /^run=true$/mu);
@@ -277,18 +290,21 @@ test('the selection script resolves its diff endpoints from the event it is give
 test('the selection script refuses to unselect when a diff endpoint is unresolved', () => {
   const script = extractSelectionScript(readArchitectureControlWorkflow());
 
-  for (const [label, env] of [
-    ['merge_group', { EVENT_NAME: 'merge_group', BASE_SHA: '', HEAD_SHA: '', MG_BASE_SHA: '', GITHUB_SHA: 'checked-out-sha' }],
-    ['pull_request', { EVENT_NAME: 'pull_request', BASE_SHA: 'base-from-pull-request', HEAD_SHA: '', MG_BASE_SHA: '', GITHUB_SHA: '' }],
-  ]) {
-    const unresolved = runSelectionScript({ script, env });
-    assert.notEqual(unresolved.status, 0, `${label}: an unresolved endpoint must red the job`);
-    assert.match(unresolved.stdout, new RegExp(`::error::selection endpoints unresolved on ${label}`, 'u'));
-    // No diff was attempted and no verdict was published — the terminal gate sees a
-    // non-success selection job rather than an unselected battery.
-    assert.equal(unresolved.gitArgs, '', `${label}: no diff should be attempted`);
-    assert.equal(unresolved.output, '', `${label}: no run= verdict should be published`);
-  }
+  // Only the merge-group arm reaches the emptiness guard. The PR fast-lane exits
+  // before it, so an empty SHA on pull_request must not be the thing that reds.
+  const unresolved = runSelectionScript({
+    script,
+    env: {
+      EVENT_NAME: 'merge_group',
+      PR_BASE_REF: '',
+      MG_BASE_SHA: '',
+      GITHUB_SHA: 'checked-out-sha',
+    },
+  });
+  assert.notEqual(unresolved.status, 0, 'merge_group: an unresolved endpoint must red the job');
+  assert.match(unresolved.stdout, /::error::selection endpoints unresolved on merge_group/u);
+  assert.equal(unresolved.gitArgs, '', 'merge_group: no diff should be attempted');
+  assert.equal(unresolved.output, '', 'merge_group: no run= verdict should be published');
 });
 
 test('a failing git diff reds selection instead of silently unselecting verification', () => {
