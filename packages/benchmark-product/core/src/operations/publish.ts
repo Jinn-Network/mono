@@ -100,10 +100,12 @@ export function runPublish(
       }
 
       // Exactly the workspace skeptic's three checks, before a staging directory exists.
+      // Exactly the workspace skeptic's three checks must all have run. An anchored run adds
+      // `integrity-anchors` as a fourth, so this gate names the three it requires rather than
+      // counting them — a fourth check having also passed is not a reason to refuse.
       const workspaceVerified = await verifyRunWorkspace(clockedContext, input);
       if (
-        workspaceVerified.checks.length !== 3
-        || !workspaceVerified.checks.includes("matrix-rederivation")
+        !workspaceVerified.checks.includes("matrix-rederivation")
         || !workspaceVerified.checks.includes("report-verification")
         || !workspaceVerified.checks.includes("claim-consistency")
       ) {

@@ -1,0 +1,144 @@
+{
+  "format": "benchmark-product-conformance-kit/1",
+  "semantics": "expectedMessagePattern is the behavioral pin (a regular expression over the reference verifier's failure message); expectedFailingCheck names the reference check family it belongs to and is advisory. externallyDetectable states whether the external-subset checks alone must reject the variant.",
+  "golden": {
+    "expectedChecks": [
+      "manifest",
+      "evidence-closure",
+      "trust",
+      "matrix-rederivation",
+      "report-verification",
+      "claim-consistency"
+    ],
+    "expectedDisposition": "valid",
+    "path": "golden"
+  },
+  "fixtures": [
+    {
+      "description": "the claim package's stored headline pass rate disagrees with the signed report's results",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "claim-consistency",
+      "expectedMessagePattern": "^claim package .* is not the exact projection of verified facts$",
+      "externallyDetectable": true,
+      "id": "claim-headline-tampered",
+      "path": "tampered/claim-headline-tampered"
+    },
+    {
+      "description": "a claim-package field outside every digest mirror changes; only full claim recomputation catches it",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "claim-consistency",
+      "expectedMessagePattern": "^claim package .* is not the exact projection of verified facts$",
+      "externallyDetectable": false,
+      "id": "claim-text-tampered",
+      "path": "tampered/claim-text-tampered"
+    },
+    {
+      "description": "newlines are inserted into the report envelope's base64 payload; a lenient decoder sees identical bytes, a strict one refuses; digests are repaired",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "report-verification",
+      "expectedMessagePattern": "not strict standard or URL-safe base64",
+      "externallyDetectable": true,
+      "id": "envelope-payload-malleated",
+      "path": "tampered/envelope-payload-malleated"
+    },
+    {
+      "description": "verdicts.json deleted; the manifest still lists it",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "manifest",
+      "expectedMessagePattern": "^manifest entry \"verdicts\\.json\" is missing$",
+      "externallyDetectable": true,
+      "id": "file-truncated",
+      "path": "tampered/file-truncated"
+    },
+    {
+      "description": "one byte of share.txt is flipped in place; length matches, the manifest digest does not",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "manifest",
+      "expectedMessagePattern": "^digest mismatch for \"share\\.txt\"$",
+      "externallyDetectable": true,
+      "id": "manifest-digest-mismatch",
+      "path": "tampered/manifest-digest-mismatch"
+    },
+    {
+      "description": "share.txt gains a trailing byte; its manifest byte length is stale",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "manifest",
+      "expectedMessagePattern": "^byte length mismatch for \"share\\.txt\"$",
+      "externallyDetectable": true,
+      "id": "manifest-length-mismatch",
+      "path": "tampered/manifest-length-mismatch"
+    },
+    {
+      "description": "report.json is pretty-printed; schema-valid JSON, but no longer the sealed bytes the envelope payload carries",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "evidence-closure",
+      "expectedMessagePattern": "schema validation at sealing",
+      "externallyDetectable": true,
+      "id": "recanonicalized-report-bytes",
+      "path": "tampered/recanonicalized-report-bytes"
+    },
+    {
+      "description": "one content-addressed record's bytes change; its filename and catalog digest are stale; the manifest is repaired",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "evidence-closure",
+      "expectedMessagePattern": "^evidence record digest mismatch",
+      "externallyDetectable": true,
+      "id": "record-digest-mismatch",
+      "path": "tampered/record-digest-mismatch"
+    },
+    {
+      "description": "one verdict record is removed from the store and both catalogs; the signed matrix still references its digest",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "evidence-closure",
+      "expectedMessagePattern": "^verdict [0-9a-f]{64} bytes are missing$",
+      "externallyDetectable": true,
+      "id": "record-substituted",
+      "path": "tampered/record-substituted"
+    },
+    {
+      "description": "one Wilson bound digit changes in report.json and the envelope payload; the signature is not re-made; digests are repaired",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "report-verification",
+      "expectedMessagePattern": "^report-authenticity:",
+      "externallyDetectable": true,
+      "id": "report-payload-edited",
+      "path": "tampered/report-payload-edited"
+    },
+    {
+      "description": "the report envelope carries a genuine signature lifted from a verdict envelope; digests are repaired",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "report-verification",
+      "expectedMessagePattern": "^report-authenticity:",
+      "externallyDetectable": true,
+      "id": "report-signature-grafted",
+      "path": "tampered/report-signature-grafted"
+    },
+    {
+      "description": "the report's stored interval disagrees with its own method recomputation; everything is internally consistent and genuinely re-signed with the venue key",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "report-verification",
+      "expectedMessagePattern": "^report-recompute: recomputed results do not match",
+      "externallyDetectable": false,
+      "id": "results-miscomputed-resigned",
+      "path": "tampered/results-miscomputed-resigned"
+    },
+    {
+      "description": "the report public key in the trust file is replaced by a fresh key; keyId, did:key, and the signature no longer match",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "trust",
+      "expectedMessagePattern": "^Report author/keyId/didKey are not derived",
+      "externallyDetectable": true,
+      "id": "trust-key-swapped",
+      "path": "tampered/trust-key-swapped"
+    },
+    {
+      "description": "two verdict envelopes swap signatures; the store, catalogs, matrix, report, and claim are all repaired and re-signed with the venue keys, so only the verdict signatures themselves are wrong",
+      "expectedDisposition": "invalid",
+      "expectedFailingCheck": "matrix-rederivation",
+      "expectedMessagePattern": "^matrix-rederivation:",
+      "externallyDetectable": true,
+      "id": "verdict-signature-grafted-resigned",
+      "path": "tampered/verdict-signature-grafted-resigned"
+    }
+  ]
+}

@@ -63,57 +63,23 @@ export {
 } from "./human-review.js";
 
 export {
-  selectInspectEvaluation,
-  type SelectInspectEvaluationInput,
-  type SelectInspectEvaluationResult,
-} from "./inspect-runtime.js";
-export {
   bindInspectBinaryJudge,
   type BindInspectBinaryJudgeInput,
   type BindInspectBinaryJudgeResult,
 } from "./inspect-binary-judge.js";
-export { selectHarborRuntime, type SelectHarborRuntimeInput, type SelectHarborRuntimeResult } from "./harbor-runtime.js";
 export {
   migrateTerminalBenchLegacyTask,
-  selectTerminalBench2Runtime,
   type MigrateTerminalBenchLegacyTaskInput,
   type MigrateTerminalBenchLegacyTaskResult,
-  type SelectTerminalBench2RuntimeInput,
-  type SelectTerminalBench2RuntimeResult,
 } from "./terminal-bench-2.js";
 export {
-  selectTerminalBench21Runtime,
-  type SelectTerminalBench21RuntimeInput,
-  type SelectTerminalBench21RuntimeResult,
-} from "./terminal-bench-2-1.js";
-export {
-  exportHarborHubPackage,
-  type ExportHarborHubPackageInput,
-  type ExportHarborHubPackageResult,
-  type HarborHubExportMode,
-} from "./hub-export.js";
-export {
-  selectSwebenchVerifiedRuntime,
-  type SelectSwebenchVerifiedRuntimeInput,
-  type SelectSwebenchVerifiedRuntimeResult,
-} from "./swe-bench-verified.js";
-export {
-  exportSwebenchPredictions,
-  type ExportSwebenchPredictionsInput,
-  type ExportSwebenchPredictionsResult,
-  type SwebenchPredictionsExportMode,
-} from "./swebench-export.js";
-export {
-  selectApexAgentsRuntime,
-  type SelectApexAgentsRuntimeInput,
-  type SelectApexAgentsRuntimeResult,
-} from "./apex-agents.js";
-export {
-  exportApexAgentsInspection,
-  type ExportApexAgentsInput,
-  type ExportApexAgentsResult,
-  type ApexAgentsExportMode,
-} from "./apex-agents-export.js";
+  selectMethod,
+  exportDerivedBundle,
+  type SelectMethodInput,
+  type SelectMethodResult,
+  type ExportDerivedBundleInput,
+  type ExportDerivedBundleResult,
+} from "./method.js";
 
 export {
   armAdd,
@@ -199,3 +165,19 @@ export { runPreview, type PreviewArtifact, type RunPreviewDeps, type RunPreviewI
 // BP-22: cancellation (spec §4.1 running --cancel--> closed, GATED) — `cancel` stops dispatch,
 // drains outstanding cells to a boundary, and seals the Matrix with the cancellation accounted.
 export { runCancel, type RunCancelDeps, type RunCancelInput, type RunCancelResult } from "./run-cancel.js";
+
+// Anchor evidence (anchor-evidence design §7.1/§7.3) — `anchor` obtains third-party time evidence
+// over one of a run's own sealed records; `anchoring configure` is the gated workspace setting that
+// decides whether the lock flow does so automatically.
+//
+// `./run-anchor.ts`'s other two exports are deliberately NOT re-exported here.
+// `anchorAfterLockIfConfigured` is the `lock` verb's own hook, not an operation a caller invokes,
+// and `resolveAnchorConfiguration` is a pure resolution rule; the facade's inventory is exactly the
+// operations, which is what `../cli/parity-map.ts` is allowed to assume.
+export { runAnchor, type AnchorSubject, type RunAnchorDeps, type RunAnchorInput, type RunAnchorResult } from "./run-anchor.js";
+export {
+  anchoringConfigure,
+  type AnchoringConfigureInput,
+  type AnchoringConfigureResult,
+} from "./anchoring-configure.js";
+

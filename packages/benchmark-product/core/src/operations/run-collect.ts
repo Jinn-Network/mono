@@ -51,6 +51,9 @@ import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-ve
 import { suiteFactsFromAccountedSwebenchRun } from "../runtime/suite-protocol/from-swebench.js";
 import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
 import { suiteFactsFromAccountedApexRun } from "../runtime/suite-protocol/from-apex.js";
+import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
+import { apexSweDevReportRoot } from "../runtime/apex-swe-dev/launcher.js";
+import { suiteFactsFromAccountedApexSweDevRun } from "../runtime/suite-protocol/from-apex-swe-dev.js";
 import { join } from "node:path";
 import { artifactsDir, draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
@@ -188,6 +191,21 @@ export function runCollect(
           matrix: assembled.record,
           armIds: document.spec.arms.map((arm) => arm.armId),
           reportRoot,
+        });
+        nextState.suiteQuote = facts.quote;
+      }
+      if (document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID) {
+        const apex = ApexSweDevSelectionManifestSchema.parse(
+          JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
+        );
+        const facts = suiteFactsFromAccountedApexSweDevRun({
+          manifest: apex,
+          armCount: runRecord.arms.length,
+          itemCount: new Set(assembled.record.cells.map((cell) => cell.taskDigest)).size,
+          replicates: runRecord.replicates,
+          matrix: assembled.record,
+          armIds: document.spec.arms.map((arm) => arm.armId),
+          reportRoot: apexSweDevReportRoot(artifactsDir(clockedContext.workspaceDir), input.draftId),
         });
         nextState.suiteQuote = facts.quote;
       }

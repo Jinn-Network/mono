@@ -322,5 +322,6 @@
       }
     ]
   },
-  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants."
+  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants.",
+  "$id": "https://spec.jinn.network/protocols/benchmarking/v1/schemas/run.schema.json"
 }

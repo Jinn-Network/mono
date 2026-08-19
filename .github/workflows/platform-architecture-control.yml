@@ -32,6 +32,7 @@ jobs:
           mkdir -p .architecture-control
           node --test \
             .github/scripts/platform-catalog.test.mjs \
+            .github/scripts/colophon-publish-manifest.test.mjs \
             .github/scripts/transition-manifest.test.mjs \
             .github/scripts/phase-d-transition-deletion.test.mjs \
             .github/scripts/observation-reader-gate-boundary.test.mjs \
@@ -62,6 +63,7 @@ jobs:
   verification-selection:
     name: verification-selection
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       run: ${{ steps.select.outputs.run }}
     steps:
@@ -79,7 +81,6 @@ jobs:
           # Set only on pull_request events, which is exactly where it is read.
           PR_BASE_REF: ${{ github.base_ref }}
           MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
         # Tiered lanes (DR-2026-08-18-b D3). Fast mode is scoped to the lane the
         # QUEUE BACKSTOPS: a pull request that does not target `main` is not selected
         # for verification at all, because the merge group is where the full battery
@@ -95,9 +96,21 @@ jobs:
         #
         # The MERGE_GROUP lane carries its own base/head pair, so the changed-package
         # closure applies to the speculative merge commit and a narrow entry stops
-        # paying the full battery (observed 11-43 min). The selector itself is
+        # paying the full battery (observed 11-43 min). The merge-group head is read
+        # as `GITHUB_SHA` rather than `merge_group.head_sha` so the diff head is by
+        # construction the commit the checkout above resolved. The selector itself is
         # event-agnostic — it consumes a path list on stdin.
+        #
+        # Selection is fail-loud in both directions. An unresolved endpoint or a
+        # broken `git diff` must red this job, never quietly resolve to "nothing
+        # changed": `pipefail` keeps the pipeline's exit status from being masked by
+        # the selector, and the emptiness guard closes the case an empty
+        # `diff_base` opens, where git reads `"...${diff_head}"` as
+        # `HEAD...${diff_head}` and legitimately reports an empty diff. A red here
+        # leaves SELECTION_RESULT != success, which the terminal
+        # `platform-verification` gate already refuses.
         run: |
+          set -o pipefail
           case "${EVENT_NAME}" in
             pull_request)
               if [ "${PR_BASE_REF}" = main ]; then
@@ -111,7 +124,7 @@ jobs:
               ;;
             merge_group)
               diff_base="${MG_BASE_SHA}"
-              diff_head="${MG_HEAD_SHA}"
+              diff_head="${GITHUB_SHA}"
               ;;
             *)
               echo 'non-PR, non-merge-group event verifies in full'
@@ -119,6 +132,10 @@ jobs:
               exit 0
               ;;
           esac
+          if [ -z "${diff_base}" ] || [ -z "${diff_head}" ]; then
+            echo "::error::selection endpoints unresolved on ${EVENT_NAME}; refusing to unselect"
+            exit 1
+          fi
           selection="$(git diff --name-only "${diff_base}...${diff_head}" \
             | node .github/scripts/platform-verification-selection.mjs)"
           echo "${selection}"
@@ -145,6 +162,7 @@ jobs:
             .github/scripts/stack-publish-workflow.test.mjs \
             .github/scripts/stack-publication-surface.test.mjs \
             .github/scripts/stack-trusted-publishers.test.mjs \
+            .github/scripts/colophon-publish-manifest.test.mjs \
             .github/scripts/generate-architecture.test.mjs
       # The publication surface's other half: that the deploy bundle is actually servable,
       # and that the live-host gate passes over a real socket rather than an injected

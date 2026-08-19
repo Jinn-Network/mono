@@ -31,6 +31,14 @@ import {
   type ReportRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
+import {
+  ANCHORED_PRE_REGISTRATION,
+  STRUCTURAL_PRE_REGISTRATION,
+  anchoredPreRegistration,
+  anchoredVenueLimits,
+} from "@colophon-claims/verify";
+import type { ClaimAnchor } from "@colophon-claims/verify";
+import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { refuse } from "../errors.js";
 import {
   inspectRuntimeMethodForBinding,
@@ -93,7 +101,11 @@ export interface RunResultsCell {
 
 export interface VenueHonesty {
   readonly venue: "self-run";
-  readonly preRegistration: "structural-and-append-order-only";
+  /** anchor-evidence §9.2: widened, additively, by a carried and structurally complete lock anchor.
+   * Every existing bundle keeps the existing value. */
+  readonly preRegistration:
+    | typeof STRUCTURAL_PRE_REGISTRATION
+    | typeof ANCHORED_PRE_REGISTRATION;
   readonly limits: readonly string[];
   readonly unverifiableAxisCounts: {
     readonly harness: number;
@@ -244,16 +256,27 @@ export function unverifiableAxisCounts(cells: readonly MatrixCell[]): VenueHones
   return counts;
 }
 
-/** The exact venue-honesty block carried by every claim; shared by report production and
- * independent claim re-derivation. */
+/**
+ * The exact venue-honesty block carried by every claim; shared by report production and
+ * independent claim re-derivation.
+ *
+ * `anchors` is the claim's own anchors section (anchor-evidence §7.4), already derived from the
+ * carried AnchorEvidence bytes. It is the only input that can change this block's copy, and it
+ * changes it deterministically: a carried, structurally complete, digest- and kind-matching lock
+ * anchor replaces the pre-registration sentence and widens `preRegistration`; a pending-only proof,
+ * a matrix-only anchor, or no anchor at all leaves every byte as it was (§9.2). The verifier's
+ * trust evaluation is deliberately not an input — the sealed copy must read the same for every
+ * reader, whatever roots that reader configured.
+ */
 export function buildLocalVenueHonesty(
   cells: readonly MatrixCell[],
   runRecord: Pick<RunRecord, "policy">,
+  anchors: readonly ClaimAnchor[] = [],
 ): VenueHonesty {
   return {
     venue: "self-run",
-    preRegistration: "structural-and-append-order-only",
-    limits: localVenueLimitsForRun(runRecord),
+    preRegistration: anchoredPreRegistration(anchors),
+    limits: anchoredVenueLimits(localVenueLimitsForRun(runRecord), anchors),
     unverifiableAxisCounts: unverifiableAxisCounts(cells),
   };
 }
@@ -377,7 +400,11 @@ export function runResults(
         attrition: matrix.attrition,
         cells,
         dissentCells: dissentCellKeys(cells),
-        venueHonesty: buildLocalVenueHonesty(matrix.cells, runRecord),
+        venueHonesty: buildLocalVenueHonesty(
+          matrix.cells,
+          runRecord,
+          readRunAnchorCarriage(context.workspaceDir, runState).anchors,
+        ),
         ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
         ...(document.state === "reported" || document.state === "published-bundle"
           ? { report: readReportedProjection(context.workspaceDir, input.draftId, runState) }

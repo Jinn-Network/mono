@@ -132,7 +132,7 @@ if (requiredEntry.PRODUCT_BRANDING.displayName !== PRODUCT_BRANDING.displayName)
   throw new Error("packed require/import branding entries diverged");
 }
 
-if (PRODUCT_VERSION !== "1.0.0") throw new Error("product version drifted");
+if (PRODUCT_VERSION !== "0.1.0") throw new Error("product version drifted");
 if (typeof runCancel !== "function") throw new Error("runCancel missing from packed public entrypoint");
 // The bundled sample must build from the PACKED graph: this proves the admission package ships
 // its golden fixture in the tarball and the whole intake path works for an external consumer.

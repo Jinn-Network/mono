@@ -34,10 +34,15 @@ on:
       - 'release/*'
 
 # Serialize per-ref so a force-push supersedes an in-flight run rather than
-# racing two verdicts onto overlapping SHAs.
+# racing two verdicts onto overlapping SHAs — but only on the PR lane, matching
+# the other required-context producers (repository-structure.yml,
+# stack-fixture-immutability.yml). Off the PR lane every run's verdict is wanted:
+# a merge-group entry that loses its gate to a cancellation gets a red context
+# and is ejected, and a superseded push to `next` still leaves the SHA-bound
+# verdict the publish guard reads.
 concurrency:
   group: hermetic-gate-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -48,6 +53,12 @@ jobs:
   hermetic-gate:
     name: Hermetic gate (deterministic, snapshot)
     runs-on: ubuntu-latest
+    # A hung step must not burn the merge queue's check-response budget, and must
+    # not hold a runner for the 360-minute default against the plan's concurrent-job
+    # ceiling. Observed green runs land around 12 minutes; the ceiling is generous
+    # enough that a slow-but-real run is never truncated. A timeout is a job
+    # `failure`, so `hermetic-gate-verdict` still posts the red context.
+    timeout-minutes: 60
     env:
       # The deterministic loop tests the *loop*, not the *agent* (spec §3.1):
       # the prediction-v1-baseline harness needs no API key, so this gate has
@@ -60,10 +71,9 @@ jobs:
       # Their CPU binaries remain bundled in the npm packages.
       ONNXRUNTIME_NODE_INSTALL: skip
       ONNXRUNTIME_NODE_INSTALL_CUDA: skip
-      # The check-run binds to the commit under test. On pull_request,
-      # github.sha is the ephemeral merge commit; github.event.pull_request.head.sha
-      # is the actual PR HEAD the branch-protection / publish guard reasons about.
-      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      # This job produces no verdict and posts nothing — it only succeeds or fails.
+      # The check-run's SHA binding lives in `hermetic-gate-verdict` below, which is
+      # the single place the context is constructed and posted.
     steps:
       - uses: actions/checkout@v7
 
@@ -201,41 +211,14 @@ jobs:
           path: apps/operator-console/test-results/
           retention-days: 7
 
-      # Write the verdict JSON and hand it to the terminal verdict job. Reaching
-      # this step means every prior step succeeded — the hermetic suite (which
-      # includes the snapshot indexer round-trip) and the app-flow step both
-      # passed; a failure of either short-circuits the job before here.
-      # `if: success()` is explicit so the green verdict is only ever written on a
-      # genuinely green run. On any other outcome — failure, cancellation, a dead
-      # runner — nothing is uploaded and `hermetic-gate-verdict` synthesizes the
-      # red, so the required `hermetic-gate` context is reported exactly once no
-      # matter how this job ends.
-      - name: Write verdict (success)
-        if: success()
-        run: |
-          mkdir -p "$RUNNER_TEMP/hermetic-verdict"
-          cat > "$RUNNER_TEMP/hermetic-verdict/hermetic-verdict.json" <<EOF
-          {
-            "context": "hermetic-gate",
-            "headSha": "${HEAD_SHA}",
-            "conclusion": "success",
-            "scenarios": [
-              { "id": "hermetic-suite", "verdict": "pass", "failClass": null, "notes": "test/hermetic/** (adversarial claim/delivery and exact solution settlement on snapshot bytecode + deterministic RPC fallback + indexer round-trip (local Ponder vs snapshot chain)) green" },
-              { "id": "app-flow-determinism", "verdict": "pass", "failClass": null, "notes": "mocked-daemon console journeys (claim-policy + posting-status) green" },
-              { "id": "operator-console-unit", "verdict": "pass", "failClass": null, "notes": "apps/operator-console handshake + surface-state unit tests green" }
-            ],
-            "summary": "Hermetic gate green on ${HEAD_SHA} — deterministic loop + adversarial conditions on real snapshot bytecode + indexer round-trip + mocked-daemon app-flow journeys."
-          }
-          EOF
-
-      - name: Upload the success verdict
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hermetic-verdict
-          path: ${{ runner.temp }}/hermetic-verdict/hermetic-verdict.json
-          if-no-files-found: error
-          retention-days: 1
+      # This job deliberately ends here: its outcome IS the signal. Reaching the
+      # end means the hermetic suite (including the snapshot indexer round-trip),
+      # the app-flow journeys and the console unit tests all passed; a failure of
+      # any of them short-circuits the job. `hermetic-gate-verdict` reads
+      # `needs.hermetic-gate.result` and constructs the verdict locally — there is
+      # no artifact hand-off, because an artifact carrying only literals plus a SHA
+      # the reader already has adds a runner-to-runner failure mode to a gate whose
+      # whole premise is that it cannot flake for infra reasons.
 
   hermetic-gate-verdict:
     # This workflow's required context is the API-posted check-run named
@@ -255,65 +238,118 @@ jobs:
     # passes and the verdict posts.
     if: always() && github.event.pull_request.head.repo.fork != true
     runs-on: ubuntu-latest
+    # Seconds of shell plus one API call. Without this the reporting job inherits
+    # the 360-minute default, so a wedged runner would starve the very context it
+    # exists to guarantee. The bound is far above any honest run (observed ~1 min),
+    # with headroom for a slow monorepo checkout under runner contention — this
+    # job's worst case must be "reports late", never "doesn't report".
+    timeout-minutes: 10
     env:
-      # Same binding the gate job uses. On pull_request, github.sha is the ephemeral
-      # merge commit and the PR HEAD is what branch protection reasons about; on push
-      # and merge_group, github.sha is the commit under test (for a merge group, the
-      # speculative merge commit the queue will land).
+      # The check-run binds to the commit under test. On pull_request, github.sha is
+      # the ephemeral merge commit and the PR HEAD is what branch protection reasons
+      # about; on push and merge_group, github.sha is the commit under test (for a
+      # merge group, the speculative merge commit the queue will land).
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       HERMETIC_RESULT: ${{ needs.hermetic-gate.result }}
+      EVENT_NAME: ${{ github.event_name }}
+      MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
     steps:
+      # THE ONE REMAINING PRE-POST ABORT RISK. The poster script lives in the repo,
+      # so the checkout cannot be dropped; if it fails, the required context goes
+      # unreported and the queue entry hangs to the check-response timeout. Every
+      # other step that used to sit between the gate result and the POST — a
+      # toolchain install, an artifact download, a bare SHA assertion — is gone, so
+      # this is the whole of the remaining surface. `actions/setup-node` in
+      # particular is deliberately absent: the poster imports only node:fs and
+      # node:child_process and shells out to `gh`, and ubuntu-latest ships both.
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-
-      # DR-2026-08-18-b D3 requires the merge-group SHA binding verified, not
-      # assumed, so assert it rather than trusting the github.sha fallback above.
-      - name: Assert the merge-group SHA binding
-        if: github.event_name == 'merge_group'
-        env:
-          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-        run: test "${HEAD_SHA}" = "${MERGE_GROUP_HEAD_SHA}"
-
-      - name: Download the success verdict if the gate job produced one
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: hermetic-verdict
-          path: ${{ runner.temp }}/hermetic-verdict
-
-      # No artifact means the gate job did not finish green. Synthesize the failure
-      # verdict here so the publish guard refuses rather than silently missing the
-      # check, and so a queue entry is ejected on a real signal instead of burning
-      # the check-response timeout. A hermetic red is always a real code regression
-      # (zero external deps), so failClass stays product-red. The `-s` test is the
-      # real existence gate: a missing, empty, or truncated artifact all fall
-      # through to the synthesized red.
-      - name: Synthesize the failure verdict when the gate job did not report green
+      # Build the verdict here, from `needs.hermetic-gate.result` alone. No artifact
+      # round-trip: the success verdict is literals plus HEAD_SHA, both of which this
+      # job already has, so transporting it runner-to-runner would only add a way for
+      # a green gate to post a synthesized red.
+      #
+      # `set +e` (Actions' default shell runs with errexit on), and every branch
+      # ends in a written file: this step must not be able to abort before the
+      # POST below.
+      - name: Build the hermetic-gate verdict
         run: |
-          VERDICT="$RUNNER_TEMP/hermetic-verdict/hermetic-verdict.json"
-          if [ "${HERMETIC_RESULT}" = success ] && [ -s "$VERDICT" ]; then
-            echo "using the success verdict written by the hermetic-gate job"
-            exit 0
-          fi
+          set +e
           mkdir -p "$RUNNER_TEMP/hermetic-verdict"
-          cat > "$VERDICT" <<EOF
+          VERDICT="$RUNNER_TEMP/hermetic-verdict/hermetic-verdict.json"
+
+          # DR-2026-08-18-b D3 requires the merge-group SHA binding verified, not
+          # assumed. Verifying it in a step of its own would put an abortable check
+          # in front of the POST — the exact hang this job exists to prevent — so a
+          # mismatch becomes a red VERDICT on the SHA this run is evaluating.
+          BINDING_MISMATCH=no
+          if [ "${EVENT_NAME}" = merge_group ] && [ "${HEAD_SHA}" != "${MERGE_GROUP_HEAD_SHA}" ]; then
+            BINDING_MISMATCH=yes
+          fi
+
+          # failClass is the machine-read triage field
+          # (.claude/skills/release-readiness/references/triage-taxonomy.md): a
+          # `product-red` is BLOCKING-by-default and drives a debug hunt for a code
+          # regression. Only an actual job `failure` earns it — the gate has zero
+          # external dependencies, so a red IS the code. `cancelled` and `skipped`
+          # mean the gate never produced a verdict at all; that is an infra outcome
+          # and is classed `infra-blocked`. The CONCLUSION stays `failure` either
+          # way: an unverified gate never clears, and `neutral` risks reading as a
+          # pass to a required-context evaluator.
+          if [ "${HERMETIC_RESULT}" = failure ]; then
+            FAIL_CLASS=product-red
+            FAIL_NOTES="The hermetic-gate job did not report green (result: ${HERMETIC_RESULT}); with zero external dependencies a red is a real code regression. See the job log."
+          else
+            FAIL_CLASS=infra-blocked
+            FAIL_NOTES="The hermetic-gate job never produced a verdict (result: ${HERMETIC_RESULT}) — a cancelled or skipped gate is a CI-infrastructure outcome, NOT a proven code regression. The context is still red because an unverified gate never clears. Re-run the workflow. See the job log."
+          fi
+
+          if [ "${BINDING_MISMATCH}" = yes ]; then
+            cat > "$VERDICT" <<EOF
           {
             "context": "hermetic-gate",
             "headSha": "${HEAD_SHA}",
             "conclusion": "failure",
             "scenarios": [
-              { "id": "hermetic-gate", "verdict": "fail", "failClass": "product-red", "notes": "The hermetic-gate job did not report green (result: ${HERMETIC_RESULT}); with zero external dependencies a red is a real code regression. See the job log." }
+              { "id": "merge-group-sha-binding", "verdict": "fail", "failClass": "infra-blocked", "notes": "github.sha (${HEAD_SHA}) does not match github.event.merge_group.head_sha (${MERGE_GROUP_HEAD_SHA}); the verdict cannot be bound to the commit the queue is evaluating (DR-2026-08-18-b D3). The hermetic-gate job result was ${HERMETIC_RESULT}." }
             ],
-            "summary": "Hermetic gate FAILED on ${HEAD_SHA} — the hermetic-gate job result was ${HERMETIC_RESULT} (product-red)."
+            "summary": "Hermetic gate UNBOUND on ${HEAD_SHA} — the merge-group SHA binding does not hold, so no verdict on this commit can be trusted (infra-blocked)."
           }
           EOF
+          elif [ "${HERMETIC_RESULT}" = success ]; then
+            cat > "$VERDICT" <<EOF
+          {
+            "context": "hermetic-gate",
+            "headSha": "${HEAD_SHA}",
+            "conclusion": "success",
+            "scenarios": [
+              { "id": "hermetic-suite", "verdict": "pass", "failClass": null, "notes": "test/hermetic/** (adversarial claim/delivery and exact solution settlement on snapshot bytecode + deterministic RPC fallback + indexer round-trip (local Ponder vs snapshot chain)) green" },
+              { "id": "app-flow-determinism", "verdict": "pass", "failClass": null, "notes": "mocked-daemon console journeys (claim-policy + posting-status) green" },
+              { "id": "operator-console-unit", "verdict": "pass", "failClass": null, "notes": "apps/operator-console handshake + surface-state unit tests green" }
+            ],
+            "summary": "Hermetic gate green on ${HEAD_SHA} — deterministic loop + adversarial conditions on real snapshot bytecode + indexer round-trip + mocked-daemon app-flow journeys."
+          }
+          EOF
+          else
+            cat > "$VERDICT" <<EOF
+          {
+            "context": "hermetic-gate",
+            "headSha": "${HEAD_SHA}",
+            "conclusion": "failure",
+            "scenarios": [
+              { "id": "hermetic-gate", "verdict": "fail", "failClass": "${FAIL_CLASS}", "notes": "${FAIL_NOTES}" }
+            ],
+            "summary": "Hermetic gate FAILED on ${HEAD_SHA} — the hermetic-gate job result was ${HERMETIC_RESULT} (${FAIL_CLASS})."
+          }
+          EOF
+          fi
+
+          # Echo for the log only; `|| true` keeps the no-abort invariant literal.
+          cat "$VERDICT" || true
 
       # Post the verdict as a check-run bound to HEAD_SHA via the shared poster
       # (owned by step 3). Exactly one post per workflow run — the gate job above
-      # no longer posts.
+      # posts nothing.
       - name: Post hermetic-gate check-run
         working-directory: operator
         env:

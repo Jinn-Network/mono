@@ -34,7 +34,13 @@ env:
 
 jobs:
   changes:
+    # Four workflows run a `changes` job on every event. Without distinct display
+    # names GitHub reports four check runs all called `changes`, and neither a
+    # human nor the branch-protection audit can tell which lane a red one belongs
+    # to. The job *id* stays `changes`: the gates reach it through `needs`.
+    name: operator-ci-changes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         # This job runs no operator command, and the workflow-level `operator`
@@ -46,6 +52,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # The merge-base walk and the name-only diff below read the commit and
+          # tree graph and never a blob. Omitting blobs keeps `fetch-depth: 0`
+          # from cloning the full 200MiB pack four times over on every PR and
+          # every queue entry.
+          filter: blob:none
       - name: Select the operator lane from the diff
         id: select
         env:
@@ -87,6 +98,11 @@ jobs:
             echo 'run=true' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
+          # `diff_head` needs no matching guard: on `merge_group` and `push` it is
+          # the commit this job checked out, and on `pull_request` it is a parent of
+          # the merge commit checked out, which `fetch-depth: 0` fetches in full. Were
+          # it ever unreachable the diff below fails the step under `set -e`, failing
+          # this job and reddening the gate — never a silent unselect.
           # One extended regular expression per path this workflow used to filter on,
           # translated faithfully from the deleted globs: `**` is a prefix match, a
           # single `*` matches within one path segment, and a literal path is anchored
@@ -104,9 +120,19 @@ jobs:
             '^\.github/scripts/operator-[^/]*\.test\.mjs$'
           )
           printf '%s\n' "${patterns[@]}" > "${RUNNER_TEMP}/selection.ere"
-          changed="$(git diff --name-only "${diff_base}...${diff_head}")"
-          echo "${changed}"
-          if printf '%s\n' "${changed}" | grep -qE -f "${RUNNER_TEMP}/selection.ere"; then
+          # The changed list goes to a file and grep reads the file. Piping it into
+          # `grep -q` is a trap: grep exits on its first match, and once the list
+          # outruns the 64KiB pipe buffer the still-writing producer takes SIGPIPE.
+          # Under `pipefail` that makes the pipeline non-zero, the `if` takes the else
+          # branch, and a genuinely matching diff selects run=false — every job skips
+          # and the gate reports green having run nothing.
+          # `core.quotePath=false` keeps a non-ASCII path unquoted and unescaped, so
+          # the `^`-anchored patterns see the real path.
+          git -c core.quotePath=false diff --no-renames --name-only "${diff_base}...${diff_head}" \
+            > "${RUNNER_TEMP}/changed.txt"
+          echo "changed files: $(wc -l < "${RUNNER_TEMP}/changed.txt")"
+          head -200 "${RUNNER_TEMP}/changed.txt"
+          if grep -qE -f "${RUNNER_TEMP}/selection.ere" "${RUNNER_TEMP}/changed.txt"; then
             echo 'run=true' >> "${GITHUB_OUTPUT}"
           else
             echo 'run=false' >> "${GITHUB_OUTPUT}"
@@ -403,6 +429,7 @@ jobs:
       - task-creator-amd64-gold-proof
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     defaults:
       run:
         # This job never checks out, so the workflow-level `operator` default would
@@ -432,6 +459,16 @@ jobs:
           echo "task-creator-marketplace-e2e=${MARKETPLACE_E2E_RESULT}"
           echo "task-creator-amd64-gold-proof=${GOLD_PROOF_RESULT}"
           test "${CHANGES_RESULT}" = success
+          # The selection is read from a job output, which is the empty string when the
+          # select step never wrote one. Empty must never be read as "unselected", or a
+          # broken selection step turns into a green gate over a whole skipped lane.
+          case "${SELECTED}" in
+            true|false) ;;
+            *)
+              echo "::error::unparseable selection output: '${SELECTED}'"
+              exit 1
+              ;;
+          esac
           # When the operator lane is selected the bar is unchanged: exact success. When
           # it is not, each job must be exactly `skipped` — a failed or cancelled job
           # still fails this gate, so unselection can never launder a red.

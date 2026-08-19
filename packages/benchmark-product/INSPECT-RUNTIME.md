@@ -1,5 +1,13 @@
 # Inspect runtime adapter
 
+Inspect is a **framework a sealed method may name**, not a Colophon product
+mode and not an alternative to Harbor
+([DR-2026-08-18-f](../../log/decisions/2026-08-18-colophon-method-cli.md)).
+They compose in the world. Colophon `adapterId` is how a cell is spawned.
+`colophon inspect` is **draft inspect** (resolve arms, benchmark, and
+assurance). Binding an Inspect-shaped document is `colophon method` with a
+file operand, not a rival `runtime inspect` product.
+
 Inspect is an optional evaluation runtime for the Benchmark Product. It is not
 a dependency of the native runtime and it is not a second product lifecycle.
 Both runtimes use the same draft, quote, lock, launch, accounting, Report,
@@ -25,9 +33,31 @@ That per-cell grain is the evidence-atom rule: each Execution Evidence record
 keeps an exclusive native `.eval` log, not a Harbor-copy habit. Selecting a
 supported Inspect **task** is the integration; bringing a completed Inspect
 evaluation is not ([DR-2026-08-17](../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)).
-Batching many samples into one Inspect eval waits on a specified per-sample
+Batching many samples into one Inspect evaluation waits on a specified per-sample
 artifact rule (or an honest shared-log Collection-input rule) and is not
 scheduled here.
+
+## Official suite protocol (Inspect eval)
+
+Inspect task (`colophon runtime inspect select`) stays the first-slice
+integration: select a supported Inspect task, lock a comparison, run one cell.
+It does not write `protocol: "inspect-eval"` and cannot become
+`leaderboardSubmitReady` under that name. `colophon inspect` is draft inspect,
+not either Inspect runtime door.
+
+Inspect eval is a named official-suite protocol
+([DR-2026-08-18-e](../../log/decisions/2026-08-18-inspect-as-specified.md),
+issue [#2745](https://github.com/Jinn-Network/mono/issues/2745)). The operator
+picks the eval; Colophon locks pin, sample catalog, specified epochs, Task-
+default solver, scorers, and native analysis. Wearing the name is not wearing
+GAIA, Cybench, or SWE-bench Verified. Claim of record remains the Colophon
+bundle. Colophon does not place an Inspect Hub row.
+
+Coverage enums are reused: `one_task` | `ten_task` | `full` | `custom` mean
+lexicographic first 1 / first 10 / all / custom **sample ids** from the sealed
+catalog. For this protocol `one_task` is one sample. Specified Inspect epochs
+map onto Jinn replicates; Inspect `--epochs` stays refused inside the worker.
+Eval-set batching remains deferred. Adapter id stays `"inspect"`.
 
 The optional OCI host narrows this further to Python `3.11.9`, Inspect Evals
 `0.16.0`, OpenAI SDK `2.53.0`, `linux/amd64`, and one exact `sampleId`. It can
@@ -317,18 +347,21 @@ preflight validates Docker, the digest-pinned image, dataset bytes, runtime
 identity, broker health, and credential-file metadata without making a model
 request. Preview and official launch make real calls.
 
-Then select it on a mutable draft:
+Then bind it on a mutable draft (`method` takes a complete Inspect document;
+`--slice` / `--host` are catalog-id flags and are refused on a file):
 
 ```bash
-benchmark-product runtime inspect select \
+benchmark-product method \
   --workspace /absolute/path/to/workspace \
   --principal sponsor-1 \
   --draft my-draft \
-  --file /absolute/path/to/inspect-selection.json
+  /absolute/path/to/inspect-selection.json
 ```
 
-The web product exposes the same `selectInspectEvaluation` operation as a raw
-selection form. It does not provide a task, solver, scorer, or sandbox editor.
+The web product exposes `method.bind` as a raw Inspect-document form. It does
+not provide a task, solver, scorer, or sandbox editor. Catalog suite presets
+and derived export stay unavailable in the browser (machine host paths / local
+job copy).
 
 An unmodified task with parallel Inspect scorers uses the mutually exclusive
 `scoring` form. Each projection selects one scorer value, or one exact top-level
@@ -468,15 +501,20 @@ arbitrary sandbox providers, and runtime-supplied sandbox configuration are
 refused rather than coerced. A task that does not declare the supported Docker
 sandbox cannot opt into it merely through selection JSON.
 
-Inspect epochs are intentionally not configurable. One Jinn repetition is one
-expected cell and invokes Inspect with one epoch. This prevents one sample from
-being counted once as an Inspect epoch and again as a Jinn repetition.
-Parallel Inspect scorers are supported when their resolved public names are
-distinct. Inspect executes them unchanged and retains their raw values,
-answers, explanations, metrics, and reductions only in the native log. An
-Inspect `multi_scorer()` remains one native scorer: its own reduction runs once
-inside Inspect and Jinn never reapplies it. Inspect metrics and epoch reducers
-are pinned native analysis configuration, not per-cell Jinn measurements.
+Inspect epochs are intentionally not configurable **inside Inspect**. One Jinn
+repetition is one expected cell and invokes Inspect with one epoch. Specified
+Inspect eval epochs are Jinn `replicates`, not an Inspect inner loop.
+This prevents one sample from being counted once as an Inspect epoch and again
+as a Jinn repetition. Parallel Inspect scorers are supported when their resolved
+public names are distinct. Inspect executes them unchanged and retains their raw
+values, answers, explanations, metrics, and reductions only in the native log.
+An Inspect `multi_scorer()` remains one native scorer: its own reduction runs
+once inside Inspect and Jinn never reapplies it. Inspect metrics and epoch
+reducers are pinned native analysis configuration, not per-cell Jinn
+measurements. A suite metric of epoch-reduce per sample then sample-aggregate
+remains deferred: the reducer is sealed with the selection but nothing computes
+that number yet, and the headline stays wilson@1 over the Boolean cells. Do not
+read the Boolean cell-vote rate as the official Inspect score.
 
 Jinn projections are narrower. Each selected output becomes one Boolean
 measurement by type-strict comparison with its sealed `passValue`; the sealed

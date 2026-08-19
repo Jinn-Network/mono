@@ -12,7 +12,7 @@ vi.mock("@/lib/server/gui-action-registry", () => ({
     "draft.update": vi.fn(),
     "intake.sample": vi.fn(),
     "intake.swebench": vi.fn(),
-    "runtime.inspect.select": vi.fn(),
+    "method.bind": vi.fn(),
     "arm.add": vi.fn(),
     "arm.update": vi.fn(),
     "arm.remove": vi.fn(),

@@ -107,8 +107,8 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
     expect(gui.filter((entry) => entry.gui.status === "deferred")).toEqual([]);
     expect(gui.find((entry) => entry.operation === "publicationAccounting")?.gui).toEqual({ status: "shipped", action: "publication.accounting" });
     expect(gui.filter((entry) => entry.gui.status === "unavailable").map((entry) => entry.operation).sort()).toEqual([
-      "admitHumanTruth", "bindInspectBinaryJudge", "createHumanReviewPackets", "exportApexAgentsInspection", "exportHarborHubPackage", "exportSwebenchPredictions", "importBinaryItemBank", "migrateTerminalBenchLegacyTask",
-      "selectApexAgentsRuntime", "selectHarborRuntime", "selectSwebenchVerifiedRuntime", "selectTerminalBench21Runtime", "selectTerminalBench2Runtime", "signHumanReviewResponse",
+      "admitHumanTruth", "bindInspectBinaryJudge", "createHumanReviewPackets", "exportDerivedBundle", "importBinaryItemBank", "migrateTerminalBenchLegacyTask",
+      "signHumanReviewResponse",
     ]);
   });
 });

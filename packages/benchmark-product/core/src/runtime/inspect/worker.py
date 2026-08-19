@@ -815,9 +815,114 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
+def specified_epochs_from_spec(spec: Any) -> tuple[int, str | None]:
+    config_obj = getattr(spec, "config", None)
+    if config_obj is None:
+        return 1, None
+    raw = getattr(config_obj, "epochs", None)
+    reducer = getattr(config_obj, "epochs_reducer", None)
+    reducer_out: str | None = None
+    if isinstance(reducer, str):
+        reducer_out = reducer
+    elif isinstance(reducer, list) and reducer:
+        reducer_out = str(reducer[0])
+    elif reducer is not None:
+        reducer_out = str(reducer)
+    if raw is None:
+        return 1, reducer_out
+    if isinstance(raw, int) and raw >= 1:
+        return raw, reducer_out
+    inner = getattr(raw, "epochs", None)
+    inner_reducer = getattr(raw, "reducer", None)
+    if inner_reducer is not None and reducer_out is None:
+        reducer_out = str(inner_reducer)
+    if isinstance(inner, int) and inner >= 1:
+        return inner, reducer_out
+    return 1, reducer_out
+
+
+def sample_id_from(sample: Any) -> str | int:
+    sample_id = getattr(sample, "id", None)
+    if sample_id is None and isinstance(sample, dict):
+        sample_id = sample.get("id")
+    if sample_id is None:
+        raise ValueError("Inspect catalog sample is missing an id")
+    if not isinstance(sample_id, (str, int)) or isinstance(sample_id, bool):
+        return str(sample_id)
+    return sample_id
+
+
+def catalog_sample_ids(log: Any, reference: str, task_args: dict[str, Any]) -> list[str | int]:
+    samples = list(log.samples or [])
+    if samples:
+        return [sample_id_from(sample) for sample in samples]
+    fallback_cause: Exception | None = None
+    try:
+        from inspect_ai._eval.loader import load_tasks
+        tasks = load_tasks([reference], task_args=task_args)
+        if len(tasks) == 1 and getattr(tasks[0], "dataset", None) is not None:
+            samples = list(tasks[0].dataset)
+    except Exception as cause:
+        # This fallback reaches into a private Inspect module, so failing here is ordinary and
+        # must stay non-fatal. But it must never masquerade as an empty dataset: "produced no
+        # sample ids" with the real cause dropped is an unactionable report.
+        fallback_cause = cause
+        samples = []
+    if not samples:
+        if fallback_cause is not None:
+            raise ValueError(
+                "Inspect catalog probe produced no sample ids; the dataset fallback failed with "
+                f"{type(fallback_cause).__name__}: {fallback_cause}"
+            ) from fallback_cause
+        raise ValueError("Inspect catalog probe produced no sample ids")
+    return [sample_id_from(sample) for sample in samples]
+
+
+def catalog(config: dict[str, Any]) -> dict[str, Any]:
+    project_dir = Path(config["projectDir"]).resolve()
+    if not project_dir.is_dir():
+        raise ValueError("Inspect projectDir is not a directory")
+    reference = config["taskReference"]
+    task_args = config.get("taskArgs", {})
+    prior_cwd = Path.cwd()
+    try:
+        os.chdir(project_dir)
+        with tempfile.TemporaryDirectory(prefix="jinn-inspect-catalog-") as log_dir:
+            logs = inspect_eval(
+                reference,
+                task_args=task_args,
+                model="mockllm/jinn-catalog",
+                run_samples=False,
+                log_dir=log_dir,
+                log_format="eval",
+                display="none",
+            )
+            if len(logs) != 1:
+                raise ValueError(f"one task reference must resolve to exactly one EvalLog, got {len(logs)}")
+            log = read_eval_log(local_path(logs[0].location))
+            sample_ids = catalog_sample_ids(log, reference, task_args)
+            specified_epochs, epochs_reducer = specified_epochs_from_spec(log.eval)
+            attrib_version = log.eval.task_attribs.get("version") if log.eval.task_attribs else None
+            task_version = str(attrib_version) if attrib_version is not None else (
+                str(log.eval.task_version) if log.eval.task_version is not None else None
+            )
+            dataset = log.eval.dataset
+            return {
+                "sampleIds": sample_ids,
+                "specifiedEpochs": specified_epochs,
+                "epochsReducer": epochs_reducer,
+                "taskVersion": task_version,
+                "datasetName": dataset.name if dataset is not None else None,
+                "datasetLocation": dataset.location if dataset is not None else None,
+                "datasetSampleCount": dataset.samples if dataset is not None and dataset.samples is not None else len(sample_ids),
+            }
+    finally:
+        os.chdir(prior_cwd)
+
+
 def main() -> int:
-    if len(sys.argv) not in {2, 3} or sys.argv[1] not in {"probe", "run", "verify"}:
-        print(json.dumps({"ok": False, "error": "usage: worker.py probe|run|verify [config.json]"}))
+    if len(sys.argv) not in {2, 3} or sys.argv[1] not in {"probe", "run", "verify", "catalog"}:
+        print(json.dumps({"ok": False, "error": "usage: worker.py probe|run|verify|catalog [config.json]"}))
         return 2
     try:
         prepare_readonly_hf_dataset_cache()
@@ -825,7 +930,12 @@ def main() -> int:
         # Task imports and model/scorer code may print. Keep stdout reserved for the bounded
         # worker protocol; the host captures and discards stderr rather than reflecting it.
         with redirect_stdout(sys.stderr):
-            value = probe(config) if sys.argv[1] == "probe" else verify(config) if sys.argv[1] == "verify" else run(config)
+            value = (
+                probe(config) if sys.argv[1] == "probe"
+                else verify(config) if sys.argv[1] == "verify"
+                else catalog(config) if sys.argv[1] == "catalog"
+                else run(config)
+            )
         print(json.dumps({"ok": True, "value": value}, sort_keys=True, separators=(",", ":")))
         return 0
     except BaseException as error:

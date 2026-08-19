@@ -60,6 +60,7 @@ import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
 import { createRuntimeVenue } from "../runtime/adapter.js";
+import { APEX_SWE_DEV_ADAPTER_ID } from "../runtime/apex-swe-dev/manifest.js";
 import { harborRetryUnscorableFacts } from "../runtime/harbor/retry-bind.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import type { OperationContext } from "./context.js";
@@ -146,6 +147,25 @@ function loadLockedOrRunningRun(workspaceDir: string, draftId: string, expectedS
   }
   const benchRecord = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
   return { document, benchRecord, runRecord, runSha256: runState.runSha256, owner: runState.owner };
+}
+
+const APEX_SWE_DEV_OPERATOR_HOST_REFUSAL =
+  "APEX-SWE-dev executes on the operator host, not through the Colophon venue: the protocol wraps"
+  + " Mercor's own `apx` and `run_e2e.py` directly. `run launch` does not drive this protocol."
+  + " Grade the locked selection with `yarn apex-swe-dev-one-task-qualify` (see"
+  + " docs/runbooks/apex-swe-dev-official-one-task.md), then `apex-swe export`.";
+
+/** APEX-SWE-dev seals arms against a harness id the local venue registers no launcher for, by
+ * design (DR-2026-08-18-c: their harnesses run, unmodified, on the operator host). Refuse the
+ * launch verb outright rather than dead-ending inside dispatch with an opaque venue error. */
+function assertLaunchableRuntime(document: DraftDocument, draftId: string): void {
+  if (document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID) {
+    refuse(
+      "venue-unavailable",
+      `drafts.${draftId}.spec.evaluationRuntime.adapterId`,
+      APEX_SWE_DEV_OPERATOR_HOST_REFUSAL,
+    );
+  }
 }
 
 function taskBytesForFactory(workspaceDir: string): (taskDigestHex: string) => Uint8Array {
@@ -278,6 +298,7 @@ export function runLaunch(
     inputs: input,
     run: async () => {
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "locked");
+      assertLaunchableRuntime(loaded.document, input.draftId);
       const publicationIntent = requireRunState(clockedContext.workspaceDir, input.draftId).publication;
       if (publicationIntent?.mode === "prospective") requireProspectiveRegistrationVerified(publicationIntent, input.draftId);
       const createVenue: typeof createLocalVenue = deps.createVenue

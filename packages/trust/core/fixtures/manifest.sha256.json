@@ -2,6 +2,14 @@
   "version": 1,
   "entries": [
     {
+      "id": "anchor-evidence-v1/expected-digests.json",
+      "sha256": "58c1090d3230f868283a685ad98094692627c4a2127c9563fa7d3dcbdac505eb"
+    },
+    {
+      "id": "anchor-evidence-v1/golden.json",
+      "sha256": "19aec39662c656f92b9a42b70bf0a0ee08db91f72343760987c7ca25f0eeaf10"
+    },
+    {
       "id": "ceremony-v1/eoa-siwe.json",
       "sha256": "69411989c855d15600c2fff5a05c086aec7fa0d9f58253f0e854e44e1afa8825"
     },

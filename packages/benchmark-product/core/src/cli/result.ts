@@ -1,5 +1,6 @@
 import type { BenchmarkRuntimeHost } from "../runtime/host-port.js";
 import type { AgentProfile, CredentialGrant } from "../agent/index.js";
+import type { RunAnchorDeps } from "../operations/run-anchor.js";
 
 /**
  * The CLI's return shape and its injected environment (spec §5.2).
@@ -29,4 +30,11 @@ export interface CliContext {
   readonly agentDataDir?: string;
   /** Process-owned interactive subscription capture; absent in tests and non-interactive embeddings. */
   readonly subscriptionLogin?: (dataDir: string, profile: AgentProfile) => Promise<CredentialGrant>;
+  /**
+   * The anchor acquisition transport (`anchor`, and `lock`'s §7.2 hook), injected like
+   * `runtimeHost`. Absent in `bin.ts`, where the sources build their own `globalThis.fetch`-backed
+   * default; supplied by a test so no CLI test can reach a network, and available to an embedder
+   * that wants its own transport or timeout.
+   */
+  readonly anchorDeps?: RunAnchorDeps;
 }

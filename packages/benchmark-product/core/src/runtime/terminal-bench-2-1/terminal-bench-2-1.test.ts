@@ -140,6 +140,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
     if (!quoted.ok) return;
     expect(quoted.result.presentation.suite).toEqual({
+      protocol: "terminal-bench-2.1",
       executionConformance: true,
       coverage: "one_task",
       leaderboardSubmitReady: false,
@@ -212,6 +213,22 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     if (refused.ok) return;
     expect(refused.error.detail).toMatch(/comparability bits/u);
   }, 120_000);
+
+  test("lock refuses when replicates was edited after select away from the sealed suite k", async () => {
+    const context = await prepareDraft("edited-k");
+    const selected = await selectTerminalBench21Runtime(context, { draftId: "edited-k", ...request("one_task") });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    expect(selected.result.draft.spec.replicates).toBe(5);
+    expect(updateDraft(context, { draftId: "edited-k", patch: { replicates: 1 } }).ok).toBe(true);
+    const quoted = await runQuote(context, { draftId: "edited-k" });
+    expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
+    const locked = runLock(context, { draftId: "edited-k" });
+    expect(locked.ok).toBe(false);
+    if (locked.ok) return;
+    expect(locked.error.code).toBe("conflict");
+    expect(locked.error.detail).toMatch(/replicates/u);
+  }, 60_000);
 
   test("official suite refuses a replacement budget below Harbor max_retries 3", async () => {
     const context = await prepareDraft("small-budget");

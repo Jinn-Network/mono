@@ -24,7 +24,7 @@
     "test:browser:production": "BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn build && BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn test:browser"
   },
   "dependencies": {
-    "@colophon-claims/core": "1.0.0",
+    "@colophon-claims/core": "0.1.0",
     "@fontsource-variable/newsreader": "5.3.0",
     "@fontsource-variable/public-sans": "5.3.0",
     "@fontsource/ibm-plex-mono": "5.3.0",
