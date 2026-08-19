@@ -34,6 +34,9 @@ jobs:
     needs: [check]
     if: always()
     runs-on: ubuntu-latest
+    # One `test` against an upstream result. The bound keeps a wedged runner from
+    # holding the required context open for the 360-minute default.
+    timeout-minutes: 5
     steps:
       # Per DR-2026-08-18-b D3 this context is required, with an explicit merge-group
       # no-op: the subject is the PR body's Discussion link, which the PR-side run

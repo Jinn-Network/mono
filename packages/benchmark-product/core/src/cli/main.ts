@@ -1,6 +1,6 @@
 /**
  * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
- * 47 parity operations over the operations facade, plus the path-oriented
+ * 42 parity operations over the operations facade, plus the path-oriented
  * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
@@ -35,6 +35,7 @@ import {
   authorityGrant,
   authorityRevoke,
   authorityShow,
+  anchoringConfigure,
   bindInspectBinaryJudge,
   createDraft,
   getDraft,
@@ -46,6 +47,7 @@ import {
   initWorkspace,
   inspectDraft,
   listDrafts,
+  runAnchor,
   runCollect,
   runCancel,
   runLaunch,
@@ -64,35 +66,24 @@ import {
   runStatus,
   runVerify,
   sampleInit,
-  selectInspectEvaluation,
-  selectHarborRuntime,
-  selectTerminalBench2Runtime,
-  selectTerminalBench21Runtime,
-  selectSwebenchVerifiedRuntime,
-  selectApexAgentsRuntime,
+  selectMethod,
+  exportDerivedBundle,
   migrateTerminalBenchLegacyTask,
-  exportHarborHubPackage,
-  exportSwebenchPredictions,
-  exportApexAgentsInspection,
   updateDraft,
   type ArmWarning,
+  type AnchorSubject,
   type BindInspectBinaryJudgeInput,
   type OperationContext,
   type OperationResult,
   type QuotePresentation,
   type RunLaunchDeps,
-  type SelectInspectEvaluationInput,
-  type SelectHarborRuntimeInput,
-  type SelectTerminalBench2RuntimeInput,
-  type SelectTerminalBench21RuntimeInput,
-  type SelectSwebenchVerifiedRuntimeInput,
-  type SelectApexAgentsRuntimeInput,
   type MigrateTerminalBenchLegacyTaskInput,
   type AdmitHumanTruthInput,
   type CreateHumanReviewPacketsInput,
   type ImportBinaryItemBankInput,
   type SignHumanReviewResponseInput,
 } from "../operations/index.js";
+import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { readRunJournalEntries } from "../run/journal.js";
@@ -126,24 +117,12 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --file <response.json> --signer <configured-signer.json>
   human-review admit --workspace <dir> --principal <id> --draft <draftId>
                    --file <admission-manifest.json>
-  runtime inspect select --workspace <dir> --principal <id> --draft <draftId>
-                   --file <selection.json>
   runtime inspect bind-judge --workspace <dir> --principal <id> --draft <draftId>
                    --file <binding.json>
-  runtime harbor select --workspace <dir> --principal <id> --draft <draftId>
-                   --file <selection.json>
-  runtime terminal-bench-2 select --workspace <dir> --principal <id> --draft <draftId>
-                   --file <selection.json>
-  runtime terminal-bench-2-1 select --workspace <dir> --principal <id> --draft <draftId>
-                   --file <selection.json>
-  runtime swe-bench-verified select --workspace <dir> --principal <id> --draft <draftId>
-                   --file <selection.json>
-  runtime apex-agents select --workspace <dir> --principal <id> --draft <draftId>
-                   --file <selection.json>
   runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
-  hub export       --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
-  swebench export  --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
-  apex-agents export --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
+  method <ref>     --workspace <dir> --principal <id> --draft <draftId>
+                   [--slice 1|10|all] [--ids <csv>] [--host <host.json>]
+  export           --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   arm add          --workspace <dir> --principal <id> --draft <draftId>
                    --arm <armId> (--pinning <json> | --agent <agentId>) [--notes <text>]
   arm update       --workspace <dir> --principal <id> --draft <draftId>
@@ -164,7 +143,11 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   quote            --workspace <dir> --principal <id> --draft <draftId>
                    [--ack-provider-network-costs]
   lock             --workspace <dir> --principal <id> --draft <draftId>
-                   [--ack-provider-network-costs]
+                   [--ack-provider-network-costs] [--no-anchor]
+  anchor           --workspace <dir> --principal <id> --draft <draftId>
+                   --subject lock|matrix [--provider <profileUri>] [--endpoint <url>]
+  anchoring configure --workspace <dir> --principal <id>
+                   (--provider <profileUri> --endpoint <url> | --file <anchoring.json> | --clear)
   publication configure --workspace <dir> --principal <id> --draft <draftId> --public-base-url <url>
   publication register  --workspace <dir> --principal <id> --draft <draftId> [--public-base-url <url>]
   publication status     --workspace <dir> --principal <id> --draft <draftId>
@@ -208,17 +191,10 @@ const IMPORT_ITEM_BANK_FLAGS = [
 const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
 const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const RUNTIME_INSPECT_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "host"] as const;
+const EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const RUNTIME_INSPECT_BIND_JUDGE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const RUNTIME_HARBOR_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const RUNTIME_TERMINAL_BENCH_2_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const RUNTIME_TERMINAL_BENCH_21_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const RUNTIME_SWE_BENCH_VERIFIED_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const RUNTIME_APEX_AGENTS_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
-const HUB_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
-const SWEBENCH_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
-const APEX_AGENTS_EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "agent", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -233,7 +209,10 @@ const AUTHORITY_SHOW_FLAGS = ["workspace", "principal", "json"] as const;
 const PREVIEW_FLAGS = ["workspace", "principal", "json", "draft", "items"] as const;
 const PROVIDER_ACK_FLAG = "ack-provider-network-costs" as const;
 const QUOTE_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
-const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
+const NO_ANCHOR_FLAG = "no-anchor" as const;
+const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG, NO_ANCHOR_FLAG] as const;
+const ANCHOR_FLAGS = ["workspace", "principal", "json", "draft", "subject", "provider", "endpoint"] as const;
+const ANCHORING_CONFIGURE_FLAGS = ["workspace", "principal", "json", "provider", "endpoint", "file", "clear"] as const;
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -580,23 +559,32 @@ function handleHumanReviewAdmit(args: ParsedArgs, context: CliContext, jsonMode:
   );
 }
 
-async function handleInspectRuntimeSelect(
+async function handleMethodBind(
   args: ParsedArgs,
   context: CliContext,
   jsonMode: boolean,
 ): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_INSPECT_SELECT_FLAGS);
+  assertKnownFlags(args, METHOD_FLAGS);
+  if (args.words.length !== 2 || args.words[1] === undefined || args.words[1] === "") {
+    refuse("invalid-invocation", "method.ref", "method requires exactly one operand (catalog id or file)");
+  }
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
-  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
-    SelectInspectEvaluationInput,
-    "draftId"
-  >;
-  const result = await selectInspectEvaluation(opContext, { draftId, ...configuration } as SelectInspectEvaluationInput);
+  const slice = optional(args, "slice");
+  const ids = optional(args, "ids");
+  const host = optional(args, "host");
+  const result = await selectMethod(opContext, {
+    draftId,
+    ref: args.words[1],
+    cwd: context.cwd,
+    ...(slice === undefined ? {} : { slice }),
+    ...(ids === undefined ? {} : { ids }),
+    ...(host === undefined ? {} : { hostPath: host }),
+  });
   return renderResult(
     result,
     jsonMode,
-    (value) => `selected Inspect evaluation ${value.selectionManifestSha256} for draft ${draftId}\n`,
+    (value) => `bound ${value.official ? "official" : "custom"} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`,
   );
 }
 
@@ -617,51 +605,6 @@ function handleInspectRuntimeBindJudge(
   );
 }
 
-async function handleTerminalBench2RuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_2_SELECT_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const draftId = required(args, "draft");
-  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectTerminalBench2RuntimeInput, "draftId">;
-  const result = await selectTerminalBench2Runtime(opContext, { draftId, ...configuration } as SelectTerminalBench2RuntimeInput);
-  return renderResult(result, jsonMode, (value) => `selected Terminal-Bench 2 profile ${value.terminalBench2ProfileSha256} for draft ${draftId}\n`);
-}
-
-async function handleTerminalBench21RuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_21_SELECT_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const draftId = required(args, "draft");
-  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectTerminalBench21RuntimeInput, "draftId">;
-  const result = await selectTerminalBench21Runtime(opContext, { draftId, ...configuration } as SelectTerminalBench21RuntimeInput);
-  return renderResult(result, jsonMode, (value) => `selected Terminal-Bench 2.1 profile ${value.terminalBench21ProfileSha256} for draft ${draftId}\n`);
-}
-
-async function handleSwebenchVerifiedRuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_SWE_BENCH_VERIFIED_SELECT_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const draftId = required(args, "draft");
-  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectSwebenchVerifiedRuntimeInput, "draftId">;
-  const result = await selectSwebenchVerifiedRuntime(opContext, { draftId, ...configuration } as SelectSwebenchVerifiedRuntimeInput);
-  return renderResult(result, jsonMode, (value) => `selected SWE-bench Verified ${value.selectionManifestSha256} for draft ${draftId}\n`);
-}
-
-async function handleApexAgentsRuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_APEX_AGENTS_SELECT_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const draftId = required(args, "draft");
-  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectApexAgentsRuntimeInput, "draftId">;
-  const result = await selectApexAgentsRuntime(opContext, { draftId, ...configuration } as SelectApexAgentsRuntimeInput);
-  return renderResult(result, jsonMode, (value) => `selected APEX-Agents ${value.selectionManifestSha256} for draft ${draftId}\n`);
-}
-
-async function handleHarborRuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_HARBOR_SELECT_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const draftId = required(args, "draft");
-  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectHarborRuntimeInput, "draftId">;
-  const result = await selectHarborRuntime(opContext, { draftId, ...configuration } as SelectHarborRuntimeInput);
-  return renderResult(result, jsonMode, (value) => `selected Harbor runtime ${value.selectionManifestSha256} for draft ${draftId}\n`);
-}
-
 async function handleTerminalBenchMigration(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS);
   const opContext = buildOperationContext(args, context);
@@ -670,42 +613,16 @@ async function handleTerminalBenchMigration(args: ParsedArgs, context: CliContex
   return renderResult(result, jsonMode, (value) => `migrated legacy Terminal-Bench task as ${value.manifestSha256}\n`);
 }
 
-function handleHubExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, HUB_EXPORT_FLAGS);
+function handleDerivedExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, EXPORT_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
   const armId = required(args, "arm");
-  const result = exportHarborHubPackage(opContext, { draftId, armId });
+  const result = exportDerivedBundle(opContext, { draftId, armId });
   return renderResult(
     result,
     jsonMode,
-    (value) => `exported Harbor Hub package (${value.mode}) for draft ${draftId} arm ${armId}\n${value.instructions}\n`,
-  );
-}
-
-function handleSwebenchExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, SWEBENCH_EXPORT_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const draftId = required(args, "draft");
-  const armId = required(args, "arm");
-  const result = exportSwebenchPredictions(opContext, { draftId, armId });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `exported SWE-bench Verified predictions (${value.mode}) for draft ${draftId} arm ${armId}\n${value.instructions}\n`,
-  );
-}
-
-function handleApexAgentsExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, APEX_AGENTS_EXPORT_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const draftId = required(args, "draft");
-  const armId = required(args, "arm");
-  const result = exportApexAgentsInspection(opContext, { draftId, armId });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `exported APEX-Agents inspection (${value.mode}) for draft ${draftId} arm ${armId}\n${value.instructions}\n`,
+    (value) => `exported ${value.shape} (${value.mode}) for draft ${draftId} arm ${armId}\n${value.instructions}\n`,
   );
 }
 
@@ -972,7 +889,46 @@ async function handleQuote(args: ParsedArgs, context: CliContext, jsonMode: bool
   });
 }
 
-function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+/**
+ * The §7.2 note a completed lock emits about its anchor attempt, or `""` for the one case that says
+ * nothing at all: an unconfigured workspace (§7.3 — "absent any configuration nothing is attempted,
+ * no warning prints").
+ *
+ * The note describes a side errand, never the lock's result, so `handleLock` routes it to stdout in
+ * human mode and to **stderr** under `--json`, where stdout stays exactly one machine-parseable
+ * envelope. A JSON caller that discards stderr still loses nothing durable — the operation audits
+ * itself either way, and `anchor` re-run standalone returns the typed envelope.
+ */
+function anchorNote(outcome: AnchorAfterLockOutcome, draftId: string): string {
+  if (!outcome.attempted) {
+    return outcome.reason === "disabled"
+      ? "anchoring: disabled for this draft; no anchor was attempted\n"
+      : "";
+  }
+  if (outcome.result.ok) {
+    const { provider, recordSha256, proofStatus } = outcome.result.result;
+    return `anchoring: ${provider} anchored this lock as ${recordSha256} (${proofStatus})\n`;
+  }
+  const { code, detail } = outcome.result.error;
+  return `anchoring: no anchor was obtained (${code}): ${detail}\n`
+    + `  the lock is unaffected; retry before launch with `
+    + `"${PRODUCT_BRANDING.commandName} anchor --draft ${draftId} --subject lock"\n`;
+}
+
+/**
+ * `lock`, then the §7.2 anchor hook.
+ *
+ * The lock transition completes first and its result is what this verb reports: **any** anchor
+ * failure or refusal becomes a note plus the operation's own audit entry, and neither the envelope
+ * nor the exit code moves. The verb does spend up to the bounded acquisition timeout before
+ * returning, which is the design's deliberate reading of the never-blocks criterion — the lock
+ * itself was never blocked or delayed, only this process's return.
+ *
+ * `--no-anchor` skips the errand for one invocation without touching configuration. It is the
+ * escape hatch for the operator who wants the lock back now and will anchor separately; a durable
+ * opt-out is the draft's own `anchoring.enabled: false`.
+ */
+async function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, LOCK_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
@@ -980,13 +936,94 @@ function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boolean): C
     args, context, opContext.workspaceDir, draftId, jsonMode,
   );
 
-  const result = withProviderAcknowledgement(runLock(opContext, { draftId }), acknowledged);
-  return renderResult(
+  const locked = runLock(opContext, { draftId });
+  const result = withProviderAcknowledgement(locked, acknowledged);
+  const rendered = renderResult(
     result,
     jsonMode,
     (value) => `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
   );
+  if (!locked.ok || present(args, NO_ANCHOR_FLAG)) return rendered;
+
+  const outcome = await anchorAfterLockIfConfigured(opContext, draftId, context.anchorDeps ?? {});
+  const note = anchorNote(outcome, draftId);
+  return jsonMode
+    ? { ...rendered, stderr: `${rendered.stderr}${note}` }
+    : { ...rendered, stdout: `${rendered.stdout}${note}` };
 }
+
+function assertAnchorSubject(value: string): AnchorSubject {
+  if (value === "lock" || value === "matrix") return value;
+  refuse("invalid-invocation", "--subject", `--subject must be "lock" or "matrix"`);
+}
+
+async function handleAnchor(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, ANCHOR_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  // Present-but-empty is a typo, not an omission: `required` refuses it by name rather than
+  // letting `""` reach the operation as a provider nothing implements.
+  const providerProfile = present(args, "provider") ? required(args, "provider") : undefined;
+  const endpoint = present(args, "endpoint") ? required(args, "endpoint") : undefined;
+
+  const result = await runAnchor(
+    opContext,
+    {
+      draftId: required(args, "draft"),
+      subject: assertAnchorSubject(required(args, "subject")),
+      ...(providerProfile === undefined ? {} : { providerProfile }),
+      ...(endpoint === undefined ? {} : { endpoint }),
+    },
+    context.anchorDeps ?? {},
+  );
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `anchored the sealed ${value.subject} record ${value.subjectSha256} with ${value.provider}: `
+      + `${value.recordSha256} (${value.proofStatus})\n`,
+  );
+}
+
+/**
+ * Three mutually exclusive spellings of one whole-list replacement: the single-provider case
+ * inline, the ordered multi-provider case from a file, and `--clear`. The operation takes the
+ * complete list, so there is no shape here that appends to what is already configured.
+ */
+function anchoringEntriesFrom(args: ParsedArgs, context: CliContext): readonly { providerProfile: string; endpoint: string }[] {
+  const filePath = optional(args, "file");
+  const provider = optional(args, "provider");
+  const endpoint = optional(args, "endpoint");
+  const modes = [present(args, "clear"), filePath !== undefined, provider !== undefined || endpoint !== undefined]
+    .filter(Boolean).length;
+  if (modes !== 1) {
+    refuse(
+      "invalid-invocation",
+      "anchoring configure",
+      "supply exactly one of --provider with --endpoint, --file <anchoring.json>, or --clear",
+    );
+  }
+  if (present(args, "clear")) return [];
+  if (filePath !== undefined) {
+    const parsed = readJsonFile(pathFrom(context.cwd, filePath));
+    if (!Array.isArray(parsed)) {
+      refuse("validation", filePath, "the anchoring file must be a JSON array of { providerProfile, endpoint } entries");
+    }
+    // Shape validation is the operation's, not this surface's: it refuses `validation` with the
+    // entry index and field named, which is a better message than anything reconstructed here.
+    return parsed as readonly { providerProfile: string; endpoint: string }[];
+  }
+  return [{ providerProfile: required(args, "provider"), endpoint: required(args, "endpoint") }];
+}
+
+function handleAnchoringConfigure(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, ANCHORING_CONFIGURE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const result = anchoringConfigure(opContext, { entries: anchoringEntriesFrom(args, context) });
+  return renderResult(result, jsonMode, (value) => value.anchoring.length === 0
+    ? "cleared anchor provider configuration; no lock will attempt anchoring\n"
+    : `configured ${value.anchoring.length} anchor provider(s); every later lock of an anchoring-enabled draft attempts one\n`
+      + `${value.anchoring.map((entry) => `  ${entry.providerProfile}\t${entry.endpoint}`).join("\n")}\n`);
+}
+
 
 async function handlePublicationConfigure(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, PUBLICATION_CONFIGURE_FLAGS);
@@ -1212,17 +1249,10 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["human-review packet create", handleHumanReviewPacketCreate],
   ["human-review response sign", handleHumanReviewResponseSign],
   ["human-review admit", handleHumanReviewAdmit],
-  ["runtime inspect select", handleInspectRuntimeSelect],
+  ["method", handleMethodBind],
+  ["export", handleDerivedExport],
   ["runtime inspect bind-judge", handleInspectRuntimeBindJudge],
-  ["runtime harbor select", handleHarborRuntimeSelect],
-  ["runtime terminal-bench-2 select", handleTerminalBench2RuntimeSelect],
-  ["runtime terminal-bench-2-1 select", handleTerminalBench21RuntimeSelect],
-  ["runtime swe-bench-verified select", handleSwebenchVerifiedRuntimeSelect],
-  ["runtime apex-agents select", handleApexAgentsRuntimeSelect],
   ["runtime terminal-bench migrate", handleTerminalBenchMigration],
-  ["hub export", handleHubExport],
-  ["swebench export", handleSwebenchExport],
-  ["apex-agents export", handleApexAgentsExport],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],
@@ -1237,6 +1267,8 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["preview", handlePreview],
   ["quote", handleQuote],
   ["lock", handleLock],
+  ["anchor", handleAnchor],
+  ["anchoring configure", handleAnchoringConfigure],
   ["publication configure", handlePublicationConfigure],
   ["publication register", handlePublicationRegister],
   ["publication status", handlePublicationStatus],
@@ -1273,6 +1305,20 @@ function usageResult(jsonMode: boolean): CliResult {
  * while the human-mode message appends the full usage text, since a human
  * typing the wrong verb wants the verb table right there.
  */
+function matchVerb(words: readonly string[]): string | undefined {
+  let best: string | undefined;
+  let bestLength = 0;
+  for (const key of VERBS.keys()) {
+    const parts = key.split(" ");
+    if (parts.length > words.length || parts.length <= bestLength) continue;
+    if (parts.every((part, index) => words[index] === part)) {
+      best = key;
+      bestLength = parts.length;
+    }
+  }
+  return best;
+}
+
 function unknownVerbResult(verbKey: string, jsonMode: boolean): CliResult {
   const sentence = `unknown command "${verbKey}"`;
   if (jsonMode) {
@@ -1312,10 +1358,13 @@ export async function runCli(argv: readonly string[], context: CliContext): Prom
       return usageResult(jsonMode);
     }
 
-    const verbKey = args.words.join(" ");
+    const verbKey = matchVerb(args.words);
+    if (verbKey === undefined) {
+      return unknownVerbResult(args.words.join(" "), jsonMode);
+    }
     const handler = VERBS.get(verbKey);
     if (handler === undefined) {
-      return unknownVerbResult(verbKey, jsonMode);
+      return unknownVerbResult(args.words.join(" "), jsonMode);
     }
     return await handler(args, context, jsonMode);
   } catch (cause) {

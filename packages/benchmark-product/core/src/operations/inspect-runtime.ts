@@ -52,8 +52,16 @@ export function selectInspectEvaluation(
     action: "runtime.inspect.select",
     subject: input.draftId,
     inputs: input,
-    run: async () => {
-      const current = readDraftDocument(clockedContext.workspaceDir, input.draftId);
+    run: () => executeSelectInspectEvaluation(clockedContext, input),
+  });
+}
+
+export async function executeSelectInspectEvaluation(
+  clockedContext: OperationContext,
+  input: SelectInspectEvaluationInput,
+): Promise<SelectInspectEvaluationResult> {
+  const at = clockedContext.clock();
+  const current = readDraftDocument(clockedContext.workspaceDir, input.draftId);
       if (!isDraftMutable(current.state)) {
         refuse("illegal-transition", `drafts.${input.draftId}.state`, `draft ${input.draftId} is locked and refuses runtime selection`);
       }
@@ -76,7 +84,7 @@ export function selectInspectEvaluation(
       } catch (cause) {
         refuse("validation", "inspect.selection", cause instanceof Error ? cause.message : String(cause));
       }
-      const runtimeHost = context.runtimeHost ?? createDefaultBenchmarkRuntimeHost();
+      const runtimeHost = clockedContext.runtimeHost ?? createDefaultBenchmarkRuntimeHost();
       let resolution: Awaited<ReturnType<typeof runtimeHost.resolveInspectSelection>>;
       try {
         resolution = await runtimeHost.resolveInspectSelection(input);
@@ -138,6 +146,4 @@ export function selectInspectEvaluation(
           resolveAssurance(current.spec.assurance),
         ),
       };
-    },
-  });
 }

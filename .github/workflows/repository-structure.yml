@@ -81,6 +81,9 @@ jobs:
     needs: [gitlinks, identifier-origin, evidence-architecture, workflow-selection]
     if: always()
     runs-on: ubuntu-latest
+    # Three `test`s against upstream results. The bound keeps a wedged runner from
+    # holding the required context open for the 360-minute default.
+    timeout-minutes: 5
     steps:
       - name: Require exact success from every structure job
         env:

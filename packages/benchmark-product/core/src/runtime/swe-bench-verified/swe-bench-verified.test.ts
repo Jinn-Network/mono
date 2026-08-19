@@ -158,6 +158,7 @@ process.exit(1);
     expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
     if (!quoted.ok) return;
     expect(quoted.result.presentation.suite).toEqual({
+      protocol: "swe-bench-verified",
       executionConformance: true,
       coverage: "one_task",
       leaderboardSubmitReady: false,

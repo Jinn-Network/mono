@@ -129,9 +129,28 @@ journal renders inside the Workspace surface, not as a separate screen).
   edit or delete affordance for any entry, ever.
 - **Actions** — `init` (workspace creation, distinct from the lifecycle
   `create` that starts a draft) → operation `initWorkspace`, CLI verb
-  `init`. The journal has **no actions of its own** — entries appear only
-  as a side effect of other operations; there is no "add journal entry"
-  control.
+  `init`; anchoring configure → operation `anchoringConfigure`, CLI verb
+  `anchoring configure` (**gated**). The journal has **no actions of its
+  own** — entries appear only as a side effect of other operations; there
+  is no "add journal entry" control.
+
+Anchoring configuration follows the publication-locator rule: the browser never
+names an anchor provider or endpoint. This server contacts the configured
+endpoint on every later lock, so a form-supplied URL would be an
+outbound-request primitive; the deployment supplies its providers through
+`BENCHMARK_PRODUCT_ANCHOR_PROVIDERS`, and the form carries only the decision to
+apply them or to clear the block. With nothing configured server-side the
+action refuses `invalid-invocation` rather than accepting a browser value. Both
+the rendered configuration and the action's own success state name **provider
+profiles only** — an endpoint is an operator-typed URL that can carry userinfo
+or a key, and neither is worth serializing into a browser to state which
+providers are configured. Action states: `idle → applied | cleared`, with
+`failed` as the terminal alternative (typed `validation` for a profile or
+endpoint the product cannot use, `authority-denied` without the grant).
+
+Rendered at `/workspace` as the **Third-party time** card: the server-configured
+profiles, an *apply* control (disabled with nothing configured server-side) and
+a *turn anchoring off* control. Both are gated.
 
 ### 3.2 Benchmark draft
 
@@ -157,15 +176,27 @@ Covers the design spec §4.6 Benchmark-draft row. The **Quote** sub-surface
     `armRemove` / `arm remove`, `armUpdate` / `arm update`
   - task intake → `importSweBenchRows` / `import swebench`,
     `sampleInit` / `sample init`
-  - evaluation runtime selection → `selectInspectEvaluation` /
-    `runtime inspect select`; the form selects an existing task and runtime
-    configuration and is not an authoring environment
+  - evaluation runtime selection → `selectMethod` / `method`; the shipped
+    form binds an Inspect-shaped method document and is not an authoring
+    environment. Catalog suite presets and derived export stay unavailable
+    (machine host paths / local job copy)
   - preview → `runPreview` / `preview` — ungated, non-advancing; every
     rendered preview artifact leads with the "rehearsal — not official
     evidence" marker (design spec §7.2, BP-20 addendum) so it cannot be
     mistaken for an official result
   - quote → `runQuote` / `quote`
-  - lock → `runLock` / `lock` — **gated**; irreversible once it succeeds
+  - lock → `runLock` / `lock` — **gated**; irreversible once it succeeds.
+    After the transition completes, **both surfaces** run the anchor-evidence
+    design's §7.2 hook through the same exported
+    `anchorAfterLockIfConfigured`: with a configured workspace the lock obtains
+    one anchor over the sealed Run record, and any refusal or failure is
+    swallowed — the CLI emits a note (stdout in human mode, stderr under
+    `--json`), the GUI discards the outcome entirely, and neither the lock
+    result nor the exit code moves. The durable record of the attempt is the
+    audit journal in both cases. The CLI additionally offers `--no-anchor` to
+    skip the errand for one invocation; the GUI has no such control, because a
+    browser lock that quietly skipped a configured anchor would be a second,
+    invisible policy.
   - inspect / read → `inspectDraft` / `inspect`, `getDraft` / `draft show`,
     `listDrafts` / `draft list`
 
@@ -204,7 +235,28 @@ Covers the design spec §4.6 Official-run row.
   on paid venues); watch/status → `runStatus` / `status`; resume →
   `runResume` / `resume`; collect → `runCollect` / `collect`; cancel →
   `runCancel` / `cancel` (**gated**; durable and idempotent, with typed
-  `requested` and terminal `cancelled` results).
+  `requested` and terminal `cancelled` results); anchor → `runAnchor` /
+  `anchor` (**ungated**; the browser names the draft and which sealed record
+  to anchor — `lock` or `matrix` — never a provider or endpoint, which come
+  from the workspace's own configuration).
+
+Anchoring is opt-in and never blocking. With nothing configured, no anchor is
+attempted and nothing is said about it. Once configured, `lock` attempts one
+anchor over the sealed Run record *after* the lock transition has already
+completed, and any refusal or failure is a note plus its own audit entry — the
+lock's own result is unchanged, so the rendered lock outcome never depends on a
+third party being reachable. The standalone anchor action exists to retry a
+failed lock-time attempt before launch, to anchor the terminal Matrix after
+close, and to upgrade a pending proof before publish. Action states:
+`idle → anchored`, with `failed` as the terminal alternative (typed
+`venue-unavailable` when nothing resolves or the provider does not answer,
+`venue-unverifiable` when what came back does not hold, `conflict` on a
+re-anchor, `illegal-transition` for a lock anchor after dispatch began).
+
+Rendered at `/workspace/[draftId]/run` as the **Third-party time** card: one
+control per subject — the sealed Run record (enabled while `locked`) and the
+terminal Matrix (enabled once the run is closed, reported, or published).
+Neither form carries a provider or an endpoint.
 
 BP-32 renders these controls at `/workspace/[draftId]/run`. The monitor is a
 durable read: every refresh/poll calls `runStatus` against the sealed Run,

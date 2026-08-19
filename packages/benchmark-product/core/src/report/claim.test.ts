@@ -348,8 +348,8 @@ describe("buildClaimPackage", () => {
       reportSha256,
       reportEnvelopeSha256,
     });
-    expect(claim.verification.command).toBe("npx @colophon-claims/verify@1.0.0 <bundle-dir>");
-    expect(claim.verification.compatibleCommand).toBe("npx @colophon-claims/verify@1 <bundle-dir>");
+    expect(claim.verification.command).toBe("npx @colophon-claims/verify@0.1.0 <bundle-dir>");
+    expect(claim.verification.compatibleCommand).toBe("npx @colophon-claims/verify@0.1 <bundle-dir>");
     expect(claim.verification.checks).toEqual([
       "manifest",
       "evidence-closure",
@@ -686,7 +686,7 @@ describe("buildClaimPackage — paired-delta@1 comparison shape (P4b Task 5)", (
       assurance: PAIRED_FIXTURE_ASSURANCE,
     });
     expect(sha256Hex(canonicalJsonBytes(ClaimPackageSchema.parse(claim))))
-      .toBe("2aedf08367a245f90b1270b66eff59e339cdcb5e653fde9fbbbb8958e86f61f2");
+      .toBe("882918f92a1ff4ccb059bef78d04c126d1abf971be8c96b72ad87a40eb0d3ea8");
   });
 
   it("builds a claim carrying `comparison`, not `headline`, extracted verbatim from the paired Report", () => {

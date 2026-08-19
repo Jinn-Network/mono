@@ -40,6 +40,15 @@ jobs:
             echo "::notice::No base commit to compare against; skipping."
             exit 0
           fi
+          # Prove the base is actually in this checkout before comparing against it.
+          # fixture-immutability.mjs treats a failed `git show <ref>:<path>` as "no
+          # baseline for this package" and returns null, so an unreachable BASE_REF
+          # does not error — it silently yields "holds across 0 packages" and exits 0.
+          # A vacuous green on an immutability gate is worse than a red, so fail loud.
+          if ! git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null; then
+            echo "::error::Base commit ${BASE_REF} is not present in this checkout; the immutability comparison would be vacuous."
+            exit 1
+          fi
           node .github/scripts/fixture-immutability.mjs --base "${BASE_REF}"
   stack-fixture-gate:
     # The check-run name GitHub reports is this job's display `name:` below, and that
@@ -49,6 +58,9 @@ jobs:
     needs: [fixtures]
     if: always()
     runs-on: ubuntu-latest
+    # One `test` against an upstream result. The bound keeps a wedged runner from
+    # holding the required context open for the 360-minute default.
+    timeout-minutes: 5
     steps:
       - name: Require exact fixture-gate success
         env:

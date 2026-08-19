@@ -9,7 +9,7 @@ Issue: [#2744](https://github.com/Jinn-Network/mono/issues/2744).
 ## What this proves
 
 A human operator, on a machine with `swebench` 4.1.x and Docker, drives the
-**built Colophon CLI** (core `dist/cli/bin.js`) through select → quote →
+**built Colophon CLI** (core `dist/cli/bin.js`) through method → quote →
 lock → export against:
 
 - Dataset id `princeton-nlp/SWE-bench_Verified`
@@ -40,8 +40,8 @@ harness ran and the cell is accounted.
 
 ```bash
 python3 -m pip install 'swebench==4.1.0'
-python3 -c "import swebench; print(swebench.__version__)"   # what select probes
-command -v python3                                         # keep this realpath for selection.json
+python3 -c "import swebench; print(swebench.__version__)"   # what method bind probes
+command -v python3                                         # keep this realpath for host.json
 ```
 
 The selection executable is the Python that can run

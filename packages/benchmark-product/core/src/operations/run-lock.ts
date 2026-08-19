@@ -16,7 +16,12 @@
  * enforcement, it just drives the draft into a state those checks already treat as immutable.
  */
 
-import { RUN_RECORD_KIND, sealRun, withRunPublicationExtension } from "@jinn-network/benchmarking-records";
+import {
+  RUN_RECORD_KIND,
+  sealRun,
+  withRunAnchorIntentExtension,
+  withRunPublicationExtension,
+} from "@jinn-network/benchmarking-records";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
@@ -29,10 +34,13 @@ import {
 import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
-import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { HarborSelectionManifestSchema, isHarborCompatibleEvaluationRuntime } from "../runtime/harbor/manifest.js";
+import { suiteProtocolDisplayName } from "../runtime/suite-protocol/comparability.js";
 import { suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
 import { SwebenchVerifiedSelectionManifestSchema } from "../runtime/swe-bench-verified/manifest.js";
+import { APEX_SWE_DEV_ADAPTER_ID, ApexSweDevSelectionManifestSchema } from "../runtime/apex-swe-dev/manifest.js";
 import { ApexAgentsSelectionManifestSchema } from "../runtime/apex-agents/manifest.js";
+import { readInspectEvalSelectionManifest } from "../runtime/inspect/host.js";
 import { runtimeRegistrationArtifacts } from "../runtime/adapter.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import type { OperationContext } from "./context.js";
@@ -88,16 +96,25 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           "quote invalidated by edit — re-quote",
         );
       }
-      if (document.spec.evaluationRuntime?.adapterId === "harbor") {
+      if (isHarborCompatibleEvaluationRuntime(document.spec.evaluationRuntime)) {
         const harborSelection = HarborSelectionManifestSchema.parse(
           JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
         );
         const suite = suiteSelectionFromHarbor(harborSelection);
+        // Select seals replicates into the suite; the draft spec stays patchable until lock, so a
+        // post-select `replicates: 1` would otherwise lock and quote as protocol-conforming k=5.
+        if (suite !== undefined && document.spec.replicates !== suite.replicates) {
+          refuse(
+            "conflict",
+            `drafts.${input.draftId}.spec.replicates`,
+            `Terminal-Bench 2.1 sealed replicates ${suite.replicates} at select; the draft now says ${document.spec.replicates} — re-run "runtime terminal-bench-2-1 select"`,
+          );
+        }
         if (suite?.coverage === "full" && runState.suiteQuote === undefined) {
           refuse(
             "conflict",
             `runs.${input.draftId}.suiteQuote`,
-            "full-suite Terminal-Bench 2.1 lock requires a quote that recorded comparability bits",
+            `full-suite ${suiteProtocolDisplayName(suite.protocol)} lock requires a quote that recorded comparability bits`,
           );
         }
       }
@@ -122,6 +139,40 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
             "conflict",
             `runs.${input.draftId}.suiteQuote`,
             "full-suite APEX-Agents lock requires a quote that recorded comparability bits",
+          );
+        }
+      }
+      if (document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID) {
+        const apex = ApexSweDevSelectionManifestSchema.parse(
+          JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256))),
+        );
+        // Select seals replicates into the suite; the draft spec stays patchable until lock, so a
+        // post-select `replicates: 5` would otherwise lock and quote as protocol-conforming k=1.
+        if (document.spec.replicates !== apex.suite.replicates) {
+          refuse(
+            "conflict",
+            `drafts.${input.draftId}.spec.replicates`,
+            `APEX-SWE-dev sealed replicates ${apex.suite.replicates} at select; the draft now says ${document.spec.replicates} — re-run "runtime apex-swe-dev select"`,
+          );
+        }
+        if (apex.coverage === "full" && runState.suiteQuote === undefined) {
+          refuse(
+            "conflict",
+            `runs.${input.draftId}.suiteQuote`,
+            "full-suite APEX-SWE-dev lock requires a quote that recorded comparability bits",
+          );
+        }
+      }
+      if (document.spec.evaluationRuntime?.adapterId === "inspect") {
+        const inspectSuite = readInspectEvalSelectionManifest(
+          clockedContext.workspaceDir,
+          document.spec.evaluationRuntime.selectionManifestSha256,
+        );
+        if (inspectSuite?.coverage === "full" && runState.suiteQuote === undefined) {
+          refuse(
+            "conflict",
+            `runs.${input.draftId}.suiteQuote`,
+            "full-suite Inspect eval lock requires a quote that recorded comparability bits",
           );
         }
       }
@@ -151,7 +202,19 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           registrationArtifacts: [...runtimeRegistrationArtifacts(clockedContext.workspaceDir, document.spec.evaluationRuntime)],
         },
       );
-      const sealed = sealRun(runWithPublicationAuthorization);
+      // Declared anchoring intent (anchor-evidence design §7.3), sealed ONLY when the draft
+      // declares it. A draft that declares nothing produces byte-identical Run records to the
+      // ones this operation produced before the extension existed: the record object is not
+      // touched at all, rather than extended with an empty declaration. Intent is the draft's own
+      // statement, never derived from workspace configuration — deriving it would make the sealed
+      // bytes depend on the machine that produced them.
+      const declaredProviders = document.spec.anchoring?.declaredProviders;
+      const runWithDeclaredIntent = declaredProviders === undefined
+        ? runWithPublicationAuthorization
+        : withRunAnchorIntentExtension(runWithPublicationAuthorization, {
+          providers: [...new Set(declaredProviders)].sort(),
+        });
+      const sealed = sealRun(runWithDeclaredIntent);
       const runSha256 = putSealedBytes(clockedContext.workspaceDir, sealed.bytes);
       recordWorkspaceAuthorship({
         workspaceDir: clockedContext.workspaceDir,
