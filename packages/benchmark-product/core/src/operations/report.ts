@@ -411,7 +411,15 @@ export function runReport(
           verificationCommandVerb: VERIFICATION_VERB,
           // BP-21 (spec §6): the claim states the preset AND the resolved primitives, never the
           // label alone; buildClaimPackage cross-checks these against the sealed Run's own policy.
-          assurance: { preset: document.spec.assurance.preset, resolved: resolvedAssurance },
+          assurance: {
+            preset: document.spec.assurance.preset,
+            resolved: {
+              independence: resolvedAssurance.independence,
+              minVerdicts: resolvedAssurance.minVerdicts,
+              distinctEvaluator: resolvedAssurance.distinctEvaluator,
+              verdictRule: resolvedAssurance.verdictRule,
+            },
+          },
           ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
           ...(previewLog !== undefined && previewLog.count > 0
             ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }
