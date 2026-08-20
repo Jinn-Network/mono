@@ -7,12 +7,13 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { cellKey, parseBenchmark } from "@jinn-network/benchmarking-records";
 import { armAdd } from "../../operations/arms.js";
 import { createDraft, readDraftDocument, updateDraft } from "../../operations/drafts.js";
-import { exportApexSwePackage, decideApexSweExportMode } from "../../operations/apex-swe-export.js";
+import { apexSweExportInstructions, exportApexSwePackage, decideApexSweExportMode } from "../../operations/apex-swe-export.js";
 import { initWorkspace } from "../../operations/init.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { selectApexSweDevRuntime } from "../../operations/apex-swe-dev.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
+import { exportCompletenessCertification } from "../suite-protocol/comparability.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { namedSliceTaskNames } from "../suite-protocol/manifest.js";
 import { suiteFactsFromAccountedApexSweDevRun } from "../suite-protocol/from-apex-swe-dev.js";
@@ -383,6 +384,7 @@ describe("APEX-SWE-dev dual harness and export", () => {
     expect(namedSelected.ok, JSON.stringify(namedSelected)).toBe(true);
     if (!namedSelected.ok) return;
     expect((await runQuote(namedContext, { draftId: "named-export" })).ok).toBe(true);
+    expect(runLock(namedContext, { draftId: "named-export" }).ok).toBe(true);
     const namedManifest = ApexSweDevSelectionManifestSchema.parse(
       JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(workspaceDir, namedSelected.result.selectionManifestSha256))),
     );
@@ -404,10 +406,34 @@ describe("APEX-SWE-dev dual harness and export", () => {
     if (!exported.ok) return;
     expect(exported.result.mode).toBe("inspection-upload");
     expect(exported.result.instructions).toMatch(/do not claim a Mercor APEX-SWE leaderboard row/i);
+    // §8.2 clause 2: the certification line is first, and no sealed Matrix exists yet (no collect).
+    const namedRunState = requireRunState(workspaceDir, "named-export");
+    expect(exported.result.instructions.split("\n")[0]).toBe(
+      exportCompletenessCertification({ runSha256: namedRunState.runSha256!, completeness: undefined }),
+    );
 
     const customExport = exportApexSwePackage(context, { draftId: "grade", armId: "one" });
     expect(customExport.ok).toBe(false);
   }, 120_000);
+
+  test("refuses without a sealed Run, naming the digest requirement rather than emitting a certification for undefined (§8.2 known wrinkle)", async () => {
+    const context = await prepareDraft("no-lock");
+    const selected = await selectApexSweDevRuntime(context, { draftId: "no-lock", ...request("one_task") });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    expect((await runQuote(context, { draftId: "no-lock" })).ok).toBe(true);
+    const exported = exportApexSwePackage(context, { draftId: "no-lock", armId: "one" });
+    expect(exported.ok).toBe(false);
+    if (exported.ok) return;
+    expect(exported.error.code).toBe("conflict");
+    expect(exported.error.detail).toBe("APEX-SWE-dev export requires a sealed Run");
+  });
+
+  test("apexSweExportInstructions prepends the certification as the first line", () => {
+    const certification = "complete run of the selection sealed at lock aaaa: 1 of 1 cells judged.";
+    const instructions = apexSweExportInstructions(certification, "/tmp/export");
+    expect(instructions.split("\n")[0]).toBe(certification);
+    expect(instructions).toContain("/tmp/export");
+  });
 
   test("a locked APEX-SWE-dev draft refuses `run launch` and names the operator-host path", async () => {
     const context = await prepareDraft("no-launch");

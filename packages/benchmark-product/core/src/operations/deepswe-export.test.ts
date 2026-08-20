@@ -7,6 +7,7 @@ import { armAdd } from "./arms.js";
 import { createDraft } from "./drafts.js";
 import {
   DEEPSWE_CLOSED_SUBMIT_SENTENCE,
+  exportCompletenessCertification,
 } from "../runtime/suite-protocol/comparability.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
@@ -155,6 +156,15 @@ function clock(): () => string {
   return () => new Date().toISOString();
 }
 
+/** §8.2 clause 2: the certification renders the sealed Matrix's own completeness, or says none is sealed yet. */
+function certificationFor(draftId: string): string {
+  const state = requireRunState(workspaceDir, draftId);
+  const completeness = state.matrixSha256 === undefined
+    ? undefined
+    : parseMatrix(getSealedBytes(workspaceDir, state.matrixSha256)).completeness;
+  return exportCompletenessCertification({ runSha256: state.runSha256!, completeness });
+}
+
 function stubArmJob(draftId: string, armId: string): string {
   const runSha256 = requireRunState(workspaceDir, draftId).runSha256!;
   const jobDir = join(harborArmJobsDir(workspaceDir, runSha256), harborArmJobName(runSha256, armId));
@@ -190,12 +200,15 @@ describe("DeepSWE v1.1 Pier export", () => {
     expect(decideDeepSweExportMode({ executionConformance: true, coverage: "full", leaderboardSubmitReady: true })).toBe("ready");
     expect(decideDeepSweExportMode({ executionConformance: true, coverage: "custom", leaderboardSubmitReady: false })).toBe("refused");
     expect(decideDeepSweExportMode({ executionConformance: false, coverage: "full", leaderboardSubmitReady: false })).toBe("refused");
-    const inspection = deepSweExportInstructions("inspection", "/tmp/job");
+    const certification = "complete run of the selection sealed at lock aaaa: 1 of 1 cells judged.";
+    const inspection = deepSweExportInstructions(certification, "inspection", "/tmp/job");
+    expect(inspection.split("\n")[0]).toBe(certification);
     expect(inspection).toContain("You may retain the Pier job for inspection: /tmp/job");
     expect(inspection).toContain("Do not email this package as a Datacurve leaderboard submission");
     expect(inspection).not.toMatch(/lb submit/u);
     expect(inspection).toContain(DEEPSWE_CLOSED_SUBMIT_SENTENCE);
-    const ready = deepSweExportInstructions("ready", "/tmp/job");
+    const ready = deepSweExportInstructions(certification, "ready", "/tmp/job");
+    expect(ready.split("\n")[0]).toBe(certification);
     expect(ready).toContain("serena@datacurve.ai");
     expect(ready).not.toMatch(/lb submit/u);
     expect(ready).toContain(DEEPSWE_CLOSED_SUBMIT_SENTENCE);
@@ -227,6 +240,7 @@ describe("DeepSWE v1.1 Pier export", () => {
     expect(exported.result.jobDir).toBe(jobDir);
     expect(existsSync(join(jobDir, "result.json"))).toBe(true);
     expect(existsSync(join(exported.result.exportDir, "job", "result.json"))).toBe(true);
+    expect(exported.result.instructions.split("\n")[0]).toBe(certificationFor("one"));
     expect(exported.result.instructions).toContain("Do not email this package as a Datacurve leaderboard submission");
     expect(exported.result.instructions).toContain(DEEPSWE_CLOSED_SUBMIT_SENTENCE);
     expect(readFileSync(join(exported.result.exportDir, "INSTRUCTIONS.txt"), "utf8")).toContain("serena@datacurve.ai");
@@ -266,6 +280,7 @@ describe("DeepSWE v1.1 Pier export", () => {
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
     expect(exported.result.mode).toBe("inspection");
+    expect(exported.result.instructions.split("\n")[0]).toBe(certificationFor("full"));
     expect(exported.result.instructions).toContain("Do not email this package as a Datacurve leaderboard submission");
     expect(exported.result.instructions).toContain(DEEPSWE_CLOSED_SUBMIT_SENTENCE);
   }, 120_000);
@@ -323,6 +338,10 @@ describe("DeepSWE v1.1 Pier export", () => {
     if (!exported.ok) return;
     // Every completeness bit is present; only the official 113-task pin is missing, so this is never ready.
     expect(exported.result.mode).toBe("inspection");
+    expect(exported.result.instructions.split("\n")[0]).toBe(exportCompletenessCertification({
+      runSha256,
+      completeness: matrix.completeness,
+    }));
     expect(exported.result.instructions).toContain("Do not email this package as a Datacurve leaderboard submission");
     expect(exported.result.instructions).not.toMatch(/lb submit/u);
     expect(exported.result.instructions).toContain(DEEPSWE_CLOSED_SUBMIT_SENTENCE);

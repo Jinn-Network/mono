@@ -14,12 +14,18 @@ import type { SwebenchVerifiedSelectionRequest } from "../runtime/swe-bench-veri
 import type { ApexAgentsSelectionRequest } from "../runtime/apex-agents/host.js";
 import type { ApexSweDevSelectionRequest } from "../runtime/apex-swe-dev/host.js";
 import type { InspectRuntimeSelectionRequest } from "../runtime/host-port.js";
+import {
+  INSPECT_BINARY_JUDGE_ADAPTER_ID,
+  INSPECT_BINARY_JUDGE_BINDING_REQUEST_SCHEMA,
+  type InspectBinaryJudgeBindingRequest,
+} from "../runtime/inspect/binary-judge-manifest.js";
 import type { SuiteCoverage } from "../runtime/suite-protocol/comparability.js";
 import type { OperationContext } from "./context.js";
 import { operate } from "./operate.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 import { executeSelectInspectEvaluation } from "./inspect-runtime.js";
+import { executeBindInspectBinaryJudge } from "./inspect-binary-judge.js";
 import { executeSelectHarborRuntime } from "./harbor-runtime.js";
 import { executeSelectTerminalBench2Runtime } from "./terminal-bench-2.js";
 import { executeSelectTerminalBench21Runtime } from "./terminal-bench-2-1.js";
@@ -43,6 +49,10 @@ import {
   executeExportApexSwePackage,
   type ExportApexSwePackageResult,
 } from "./apex-swe-export.js";
+import {
+  executeExportInspectViewBundle,
+  type ExportInspectViewBundleResult,
+} from "./inspect-view-export.js";
 import { readDraftDocument } from "./drafts.js";
 import {
   isMethodCatalogId,
@@ -75,7 +85,8 @@ export type ExportDerivedBundleResult =
   | (ExportHarborHubPackageResult & { readonly shape: "harbor-hub" })
   | (ExportSwebenchPredictionsResult & { readonly shape: "swebench-predictions" })
   | (ExportApexAgentsResult & { readonly shape: "apex-inspection" })
-  | (ExportApexSwePackageResult & { readonly shape: "apex-swe-package" });
+  | (ExportApexSwePackageResult & { readonly shape: "apex-swe-package" })
+  | (ExportInspectViewBundleResult & { readonly shape: "inspect-view" });
 
 function namedCoverage(coverage: SuiteCoverage): Exclude<SuiteCoverage, "custom"> | undefined {
   return coverage === "custom" ? undefined : coverage;
@@ -107,6 +118,15 @@ async function bindFile(
       return finish(
         await executeSelectInspectEvaluation(context, { draftId, ...document } as { draftId: string } & InspectRuntimeSelectionRequest),
         "inspect",
+        resolved.official,
+      );
+    case "inspect-binary-judge":
+      return finish(
+        executeBindInspectBinaryJudge(context, {
+          draftId,
+          binding: { schema: INSPECT_BINARY_JUDGE_BINDING_REQUEST_SCHEMA, ...document } as InspectBinaryJudgeBindingRequest,
+        }),
+        "inspect-binary-judge",
         resolved.official,
       );
     case "harbor":
@@ -252,6 +272,9 @@ export function exportDerivedBundle(
       }
       if (adapterId === INSPECT_ADAPTER_ID) {
         refuse("conflict", `drafts.${input.draftId}.evaluationRuntime`, "Inspect methods have no suite-named derived bundle");
+      }
+      if (adapterId === INSPECT_BINARY_JUDGE_ADAPTER_ID) {
+        return { shape: "inspect-view" as const, ...executeExportInspectViewBundle(context, input) };
       }
       refuse("conflict", `drafts.${input.draftId}.evaluationRuntime`, "derived export has no suite-named bundle for this method");
     },

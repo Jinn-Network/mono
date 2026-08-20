@@ -77,8 +77,16 @@ export function bindInspectBinaryJudge(
     action: "runtime.inspect.bind-judge",
     subject: input.draftId,
     inputs: input,
-    run: () => {
-      const current = readDraftDocument(clockedContext.workspaceDir, input.draftId);
+    run: () => executeBindInspectBinaryJudge(clockedContext, input),
+  });
+}
+
+export function executeBindInspectBinaryJudge(
+  clockedContext: OperationContext,
+  input: BindInspectBinaryJudgeInput,
+): BindInspectBinaryJudgeResult {
+  const at = clockedContext.clock();
+  const current = readDraftDocument(clockedContext.workspaceDir, input.draftId);
       if (!isDraftMutable(current.state)) {
         refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse judge runtime binding");
       }
@@ -144,6 +152,4 @@ export function bindInspectBinaryJudge(
         selectionManifestSha256,
         instruments: manifest.arms.map(({ armId, instrumentSha256 }) => ({ armId, instrumentSha256 })),
       };
-    },
-  });
 }

@@ -55,7 +55,7 @@ describe("public surface", () => {
       "initWorkspace", "createDraft", "updateDraft", "getDraft", "listDrafts", "inspectDraft",
       "transition", "isDraftMutable", "resolveAssurance", "parseDraftSpec", "draftIdFromName",
       "putSealedBytes", "getSealedBytes", "readAuditEntries", "toErrorEnvelope", "runCli",
-      "sampleInit", "importBinaryItemBank", "importSweBenchRows", "selectMethod", "exportDerivedBundle", "bindInspectBinaryJudge", "armAdd", "armUpdate", "armRemove", "armList",
+      "sampleInit", "importBinaryItemBank", "importSweBenchRows", "selectMethod", "exportDerivedBundle", "armAdd", "armUpdate", "armRemove", "armList",
       "authorityGrant", "authorityRevoke", "authorityShow", "buildSampleBenchmark", "convertBinaryItemBank", "convertSweBenchRows",
       "runPreview", "runQuote", "runLock", "runAnchor", "anchoringConfigure", "runLaunch", "runResume", "runStatus", "runCancel", "runCollect", "runResults",
       "publicationConfigure", "publicationRegister", "publicationAccounting", "publicationStatus",

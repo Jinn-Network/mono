@@ -2,6 +2,7 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { refuse } from "../errors.js";
+import { INSPECT_BINARY_JUDGE_BINDING_REQUEST_SCHEMA } from "../runtime/inspect/binary-judge-manifest.js";
 import { HARBOR_SELECTION_SCHEMA } from "../runtime/harbor/manifest.js";
 import {
   INSPECT_MULTI_SCORER_SANDBOX_SELECTION_SCHEMA,
@@ -35,6 +36,7 @@ export type MethodDerivedExport = "harbor-hub" | "swebench-predictions" | "apex-
 export type MethodFramework = "harbor" | "inspect" | "swebench-harness" | "archipelago" | "apex-swe-dev";
 export type MethodDocumentKind =
   | "inspect"
+  | "inspect-binary-judge"
   | "harbor"
   | "terminal-bench-2"
   | "terminal-bench-2.1"
@@ -88,6 +90,7 @@ const FILE_SCHEMA_KIND: Readonly<Record<string, { readonly documentKind: MethodD
   [INSPECT_SANDBOX_SELECTION_SCHEMA]: { documentKind: "inspect", official: false },
   [INSPECT_MULTI_SCORER_SELECTION_SCHEMA]: { documentKind: "inspect", official: false },
   [INSPECT_MULTI_SCORER_SANDBOX_SELECTION_SCHEMA]: { documentKind: "inspect", official: false },
+  [INSPECT_BINARY_JUDGE_BINDING_REQUEST_SCHEMA]: { documentKind: "inspect-binary-judge", official: false },
   [HARBOR_SELECTION_SCHEMA]: { documentKind: "harbor", official: false },
   [TERMINAL_BENCH_2_SELECTION_SCHEMA]: { documentKind: "terminal-bench-2", official: false },
   [TERMINAL_BENCH_2_1_SELECTION_SCHEMA]: { documentKind: "terminal-bench-2.1", official: true },

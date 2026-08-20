@@ -105,6 +105,28 @@ function minReplicates(protocol: SuiteProtocolId): number {
 export const INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE =
   "Colophon does not place an Inspect Hub row. An Inspect View bundle is a derived artifact, not the claim of record.";
 
+/**
+ * One certification line, prepended to every derived export's instructions, on all six shapes
+ * (§8.2 "Frozen: (2) the certification statement"). Renders the sealed Matrix's own
+ * `completeness` block (`CompletenessSchema`, `records/src/matrix/schema.ts:142-147`) and
+ * computes nothing: a certification that recomputed completeness would be a second commitment
+ * that can disagree with the artifact it describes.
+ */
+export function exportCompletenessCertification(input: {
+  readonly runSha256: string;
+  readonly completeness?: {
+    readonly expected: number;
+    readonly judged: number;
+    readonly runOutcome: "complete" | "partial" | "cancelled";
+  };
+}): string {
+  if (input.completeness === undefined) {
+    return `no sealed Matrix: completeness of the selection sealed at lock ${input.runSha256} is not yet certified.`;
+  }
+  const { runOutcome, judged, expected } = input.completeness;
+  return `${runOutcome} run of the selection sealed at lock ${input.runSha256}: ${judged} of ${expected} cells judged.`;
+}
+
 export function methodLeaderboardEligible(input: DeriveSuiteComparabilityInput): boolean {
   const protocol = protocolOf(input);
   if (protocol === "apex-swe-dev") return false;

@@ -8,6 +8,7 @@ import {
   APEX_AGENTS_NOT_LEADERBOARD_READY_LIMITATION,
   DEEPSWE_NOT_LEADERBOARD_READY_LIMITATION,
   deriveSuiteComparability,
+  exportCompletenessCertification,
   INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION,
   INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
   methodLeaderboardEligible,
@@ -688,5 +689,36 @@ describe("inspect-eval suite protocol", () => {
     expect(officialInspectEvalConformance({ ...base, k: 2 })).toBe(false);
     expect(officialInspectEvalConformance({ ...base, inspectVersion: "0.3.200" })).toBe(false);
     expect(officialInspectEvalConformance({ ...base, adapterId: "harbor" })).toBe(false);
+  });
+});
+
+describe("exportCompletenessCertification (§8.2 clause 2)", () => {
+  const runSha256 = "a".repeat(64);
+
+  test("complete run states the sealed runOutcome, digest, and counts, computing nothing", () => {
+    expect(exportCompletenessCertification({
+      runSha256,
+      completeness: { expected: 12, judged: 12, runOutcome: "complete" },
+    })).toBe(`complete run of the selection sealed at lock ${runSha256}: 12 of 12 cells judged.`);
+  });
+
+  test("partial run renders the sealed partial outcome and counts as-is, without reconciling them", () => {
+    expect(exportCompletenessCertification({
+      runSha256,
+      completeness: { expected: 12, judged: 7, runOutcome: "partial" },
+    })).toBe(`partial run of the selection sealed at lock ${runSha256}: 7 of 12 cells judged.`);
+  });
+
+  test("cancelled run renders too — the first word is the sealed runOutcome, not a derived label", () => {
+    expect(exportCompletenessCertification({
+      runSha256,
+      completeness: { expected: 12, judged: 3, runOutcome: "cancelled" },
+    })).toBe(`cancelled run of the selection sealed at lock ${runSha256}: 3 of 12 cells judged.`);
+  });
+
+  test("no sealed Matrix states the lock digest without claiming a completeness it cannot see", () => {
+    expect(exportCompletenessCertification({ runSha256 })).toBe(
+      `no sealed Matrix: completeness of the selection sealed at lock ${runSha256} is not yet certified.`,
+    );
   });
 });

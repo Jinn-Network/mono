@@ -10,6 +10,7 @@ import {
 } from "../runtime/apex-agents/manifest.js";
 import {
   APEX_AGENTS_SUBMIT_CLOSED_SENTENCE,
+  exportCompletenessCertification,
   type SuiteCoverage,
 } from "../runtime/suite-protocol/comparability.js";
 import { suiteComparabilityForApexArm } from "../runtime/suite-protocol/from-apex.js";
@@ -44,15 +45,17 @@ export function decideApexAgentsExportMode(input: {
   return "inspection-upload";
 }
 
-export function apexAgentsExportInstructions(mode: ApexAgentsExportMode, exportDir: string): string {
+export function apexAgentsExportInstructions(certification: string, mode: ApexAgentsExportMode, exportDir: string): string {
   if (mode === "leaderboard-submit") {
     return [
+      certification,
       "The locked APEX-Agents method produced a protocol-faithful full-suite bundle.",
       `Inspect trajectories, snapshots, and grades in ${exportDir}`,
       APEX_AGENTS_SUBMIT_CLOSED_SENTENCE,
     ].join("\n");
   }
   return [
+    certification,
     "This run matches APEX-Agents execution settings for the selected named slice, but it is not a leaderboard submission.",
     `You may inspect Archipelago grades in ${exportDir}`,
     "Do not present this package as a Mercor APEX-Agents leaderboard row; it is not leaderboard_submit_ready.",
@@ -97,11 +100,14 @@ export function executeExportApexAgentsInspection(
       );
       const reportRoot = join(artifactsDir(context.workspaceDir), "archipelago", input.draftId);
       resolveArchipelagoRunId(reportRoot, runState.runSha256, manifest.suite.selectedTaskNames);
-      const bits = runState.matrixSha256 === undefined
+      const matrix = runState.matrixSha256 === undefined
+        ? undefined
+        : parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256));
+      const bits = matrix === undefined
         ? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false }
         : suiteComparabilityForApexArm({
           manifest,
-          matrix: parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256)),
+          matrix,
           armId: input.armId,
           reportRoot,
         });
@@ -120,7 +126,8 @@ export function executeExportApexAgentsInspection(
       mkdirSync(exportDir, { recursive: true });
       const output = join(reportRoot, "output");
       if (existsSync(output)) cpSync(output, join(exportDir, "output"), { recursive: true });
-      const instructions = apexAgentsExportInstructions(mode, exportDir);
+      const certification = exportCompletenessCertification({ runSha256: runState.runSha256, completeness: matrix?.completeness });
+      const instructions = apexAgentsExportInstructions(certification, mode, exportDir);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, exportDir };
 }

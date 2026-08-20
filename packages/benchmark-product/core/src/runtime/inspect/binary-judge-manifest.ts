@@ -35,8 +35,10 @@ export const InspectBinaryJudgeHostBindingSchema = z.strictObject({
 });
 export type InspectBinaryJudgeHostBinding = z.infer<typeof InspectBinaryJudgeHostBindingSchema>;
 
+export const INSPECT_BINARY_JUDGE_BINDING_REQUEST_SCHEMA = "jinn.network/benchmark-product/inspect-binary-judge-binding-request/1";
+
 export const InspectBinaryJudgeBindingRequestSchema = z.strictObject({
-  schema: z.literal("jinn.network/benchmark-product/inspect-binary-judge-binding-request/1"),
+  schema: z.literal(INSPECT_BINARY_JUDGE_BINDING_REQUEST_SCHEMA),
   manifest: InspectBinaryJudgeSelectionManifestSchema,
   host: InspectBinaryJudgeHostBindingSchema,
 });

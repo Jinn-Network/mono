@@ -63,11 +63,6 @@ export {
 } from "./human-review.js";
 
 export {
-  bindInspectBinaryJudge,
-  type BindInspectBinaryJudgeInput,
-  type BindInspectBinaryJudgeResult,
-} from "./inspect-binary-judge.js";
-export {
   migrateTerminalBenchLegacyTask,
   type MigrateTerminalBenchLegacyTaskInput,
   type MigrateTerminalBenchLegacyTaskResult,

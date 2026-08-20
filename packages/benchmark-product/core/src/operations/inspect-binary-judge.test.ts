@@ -6,9 +6,11 @@ import {
   sealBinaryJudgmentInstrument,
   type BinaryJudgmentInstrument,
 } from "@jinn-network/task-execution-profiles";
+import { cellKey, parseMatrix } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { afterEach, describe, expect, test } from "vitest";
 import { runCli } from "../cli/main.js";
+import { createSyntheticV4BundleFixture } from "../bundle/testing/v4-synthetic-fixture.js";
 import {
   INSPECT_BINARY_JUDGE_SELECTION_SCHEMA,
   type InspectBinaryJudgeBindingRequest,
@@ -20,7 +22,11 @@ import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-s
 import type { OperationContext } from "./context.js";
 import { createDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
+import { appendRunJournalEntry } from "../run/journal.js";
+import { requireRunState } from "../run/state.js";
+import { exportCompletenessCertification } from "../runtime/suite-protocol/comparability.js";
 import { bindInspectBinaryJudge } from "./inspect-binary-judge.js";
+import { exportDerivedBundle, selectMethod } from "./method.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -159,29 +165,6 @@ describe("bindInspectBinaryJudge", () => {
     ))).toEqual(binding(alpha, beta).host);
   });
 
-  test("exposes the same binding through the additive file-based CLI without launching the runtime", async () => {
-    const { context, alpha, beta } = setup();
-    const bindingPath = join(context.workspaceDir, "inspect-judge-binding.json");
-    writeFileSync(bindingPath, JSON.stringify(binding(alpha, beta)));
-    const result = await runCli([
-      "runtime", "inspect", "bind-judge",
-      "--workspace", context.workspaceDir,
-      "--principal", context.principal,
-      "--draft", "judge",
-      "--file", bindingPath,
-      "--json",
-    ], { cwd: context.workspaceDir, clock: context.clock });
-    expect(result.exitCode, result.stderr).toBe(0);
-    const envelope = JSON.parse(result.stdout) as {
-      readonly ok: boolean;
-      readonly result?: { readonly selectionManifestSha256?: string };
-    };
-    expect(envelope).toMatchObject({
-      ok: true,
-      result: { selectionManifestSha256: expect.stringMatching(/^[0-9a-f]{64}$/u) },
-    });
-  });
-
   test("rejects host, source, inventory, and instrument identity drift without running Docker or a provider", () => {
     const { context, alpha, beta } = setup();
     const valid = binding(alpha, beta);
@@ -223,5 +206,168 @@ describe("bindInspectBinaryJudge", () => {
       binding: identityDrift,
     });
     expect(rejected).toMatchObject({ ok: false, error: { code: "conflict" } });
+  });
+});
+
+describe("the judge binding as a method-operand file citizen (§8.1)", () => {
+  test("binds byte-identically through the method operand", async () => {
+    const { context: contextA, alpha: alphaA, beta: betaA } = setup();
+    const { context: contextB, alpha: alphaB, beta: betaB } = setup();
+
+    const direct = bindInspectBinaryJudge(contextA, { draftId: "judge", binding: binding(alphaA, betaA) });
+    expect(direct.ok).toBe(true);
+    if (!direct.ok) return;
+
+    const bindingPath = join(contextB.workspaceDir, "inspect-judge-binding.json");
+    writeFileSync(bindingPath, JSON.stringify(binding(alphaB, betaB)));
+    const cli = await runCli([
+      "method", bindingPath,
+      "--workspace", contextB.workspaceDir,
+      "--principal", contextB.principal,
+      "--draft", "judge",
+      "--json",
+    ], { cwd: contextB.workspaceDir, clock: contextB.clock });
+    expect(cli.exitCode, cli.stderr).toBe(0);
+    const envelope = JSON.parse(cli.stdout) as {
+      readonly ok: boolean;
+      readonly result?: {
+        readonly selectionManifestSha256?: string;
+        readonly draft?: { readonly spec: { readonly arms: unknown; readonly evaluationRuntime: unknown } };
+      };
+    };
+    expect(envelope.ok).toBe(true);
+    const viaFile = envelope.result;
+    if (viaFile === undefined || viaFile.selectionManifestSha256 === undefined || viaFile.draft === undefined) {
+      throw new Error("expected a successful method-bind result");
+    }
+
+    expect(viaFile.selectionManifestSha256).toBe(direct.result.selectionManifestSha256);
+    expect(viaFile.draft.spec.arms).toEqual(direct.result.draft.spec.arms);
+    expect(viaFile.draft.spec.evaluationRuntime).toEqual(direct.result.draft.spec.evaluationRuntime);
+
+    expect(getSealedBytes(contextB.workspaceDir, viaFile.selectionManifestSha256))
+      .toEqual(getSealedBytes(contextA.workspaceDir, direct.result.selectionManifestSha256));
+
+    expect(JSON.parse(readFileSync(
+      runtimeHostPath(contextB.workspaceDir, viaFile.selectionManifestSha256),
+      "utf8",
+    ))).toEqual(JSON.parse(readFileSync(
+      runtimeHostPath(contextA.workspaceDir, direct.result.selectionManifestSha256),
+      "utf8",
+    )));
+  });
+
+  test("reports the judge binding as a custom non-catalog method", async () => {
+    const { context, alpha, beta } = setup();
+    const bindingPath = join(context.workspaceDir, "inspect-judge-binding.json");
+    writeFileSync(bindingPath, JSON.stringify(binding(alpha, beta)));
+
+    const direct = await selectMethod(context, { draftId: "judge", ref: bindingPath, cwd: context.workspaceDir });
+    expect(direct.ok).toBe(true);
+    if (!direct.ok) return;
+    expect(direct.result.documentKind).toBe("inspect-binary-judge");
+    expect(direct.result.official).toBe(false);
+    expect(direct.result.catalogId).toBeUndefined();
+    expect(direct.result.suiteProtocolSha256).toBeUndefined();
+
+    const cli = await runCli([
+      "method", bindingPath,
+      "--workspace", context.workspaceDir,
+      "--principal", context.principal,
+      "--draft", "judge",
+    ], { cwd: context.workspaceDir, clock: context.clock });
+    expect(cli.exitCode, cli.stderr).toBe(0);
+    expect(cli.stdout).toBe(`bound custom inspect-binary-judge method ${direct.result.selectionManifestSha256} for draft judge\n`);
+  });
+
+  test("refuses every selection flag on a judge binding file", async () => {
+    const { context, alpha, beta } = setup();
+    const bindingPath = join(context.workspaceDir, "inspect-judge-binding.json");
+    writeFileSync(bindingPath, JSON.stringify(binding(alpha, beta)));
+
+    const flagCases: readonly (readonly [string, string])[] = [
+      ["--slice", "1"],
+      ["--ids", "x"],
+      ["--n", "1"],
+      ["--host", join(context.workspaceDir, "host.json")],
+    ];
+    for (const [flag, value] of flagCases) {
+      const cli = await runCli([
+        "method", bindingPath,
+        "--workspace", context.workspaceDir,
+        "--principal", context.principal,
+        "--draft", "judge",
+        flag, value,
+        "--json",
+      ], { cwd: context.workspaceDir, clock: context.clock });
+      expect(cli.exitCode, `${flag}: ${cli.stdout}${cli.stderr}`).toBe(2);
+      const envelope = JSON.parse(cli.stdout) as { readonly ok: boolean; readonly error?: { readonly code?: string } };
+      expect(envelope.ok).toBe(false);
+      expect(envelope.error?.code).toBe("invalid-invocation");
+    }
+  });
+});
+
+describe("derived Inspect View export wiring for the judge lane (§8.2)", () => {
+  test("a judge draft with no sealed Run still refuses", () => {
+    const { context, alpha, beta } = setup();
+    const bound = bindInspectBinaryJudge(context, { draftId: "judge", binding: binding(alpha, beta) });
+    expect(bound.ok).toBe(true);
+    if (!bound.ok) return;
+    const exported = exportDerivedBundle(context, { draftId: "judge", armId: "alpha" });
+    expect(exported.ok).toBe(false);
+    if (exported.ok) return;
+    expect(exported.error.code).toBe("not-found");
+    expect(exported.error.detail).toMatch(/quote the draft first/u);
+  });
+
+  test("a judge draft exports through exportDerivedBundle as shape inspect-view, mode inspection-upload, with the forked sentence and the scoreless-transcripts caveat", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "colophon-inspect-binary-judge-export-"));
+    roots.push(workspaceDir);
+    const fixture = await createSyntheticV4BundleFixture({ workspaceDir, truthAdmission: "operator-only" });
+    const context: OperationContext = {
+      workspaceDir,
+      principal: "synthetic-operator",
+      clock: () => "2026-08-19T00:00:00.000Z",
+    };
+    const logBytes = new TextEncoder().encode("fake-judge-eval-log");
+    const logSha256 = putSealedBytes(workspaceDir, logBytes);
+    appendRunJournalEntry(workspaceDir, fixture.draftId, {
+      kind: "delivery",
+      at: "2026-08-19T00:00:01.000Z",
+      cellKey: cellKey(fixture.taskSha256s[0]!, "alpha", 1),
+      dispatch: 1,
+      attempt: "urn:jinn:attempt:judge-export-1",
+      deliverySha256: "9".repeat(64),
+      outputs: [{ name: "inspect-log", sha256: logSha256 }],
+    });
+
+    const exported = exportDerivedBundle(context, { draftId: fixture.draftId, armId: "alpha" });
+    expect(exported.ok, JSON.stringify(exported)).toBe(true);
+    if (!exported.ok) return;
+    if (exported.result.shape !== "inspect-view") throw new Error(`expected shape inspect-view, got ${exported.result.shape}`);
+    expect(exported.result.mode).toBe("inspection-upload");
+    expect(exported.result.logCount).toBe(1);
+    // §8.2 clause 2: the certification line is first, rendering the sealed Matrix's own
+    // completeness — never recomputed, never consulting suiteQuote on the judge lane.
+    const judgeRunState = requireRunState(workspaceDir, fixture.draftId);
+    const judgeMatrix = judgeRunState.matrixSha256 === undefined
+      ? undefined
+      : parseMatrix(getSealedBytes(workspaceDir, judgeRunState.matrixSha256));
+    expect(exported.result.instructions.split("\n")[0]).toBe(exportCompletenessCertification({
+      runSha256: judgeRunState.runSha256!,
+      completeness: judgeMatrix?.completeness,
+    }));
+    expect(exported.result.instructions).toContain(
+      "This run's method is a custom judge binding, not an Inspect eval selection, so this package wears no suite name.",
+    );
+    expect(exported.result.instructions).toContain(
+      "These .eval logs carry the judge's transcripts, not its verdicts; the verdicts are in the sealed Report and the published bundle.",
+    );
+    expect(exported.result.instructions).not.toContain("This run matches Inspect eval execution settings");
+
+    const onDisk = readFileSync(join(exported.result.exportDir, "INSTRUCTIONS.txt"), "utf8");
+    expect(onDisk).toBe(`${exported.result.instructions}\n`);
+    expect(onDisk).not.toContain("This run matches Inspect eval execution settings");
   });
 });

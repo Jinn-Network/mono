@@ -9,6 +9,7 @@ import {
   SwebenchVerifiedSelectionManifestSchema,
 } from "../runtime/swe-bench-verified/manifest.js";
 import {
+  exportCompletenessCertification,
   SWE_BENCH_VERIFIED_SUBMIT_CLOSED_SENTENCE,
   type SuiteCoverage,
 } from "../runtime/suite-protocol/comparability.js";
@@ -44,9 +45,10 @@ export function decideSwebenchPredictionsExportMode(input: {
   return "inspection-upload";
 }
 
-export function swebenchPredictionsExportInstructions(mode: SwebenchPredictionsExportMode, exportDir: string): string {
+export function swebenchPredictionsExportInstructions(certification: string, mode: SwebenchPredictionsExportMode, exportDir: string): string {
   if (mode === "leaderboard-submit") {
     return [
+      certification,
       "The locked SWE-bench Verified method produced predictions that can be submitted.",
       `python -m swebench.harness.run_evaluation --predictions_path ${join(exportDir, "predictions.jsonl")}`,
       "Then, if you use sb-cli:",
@@ -55,6 +57,7 @@ export function swebenchPredictionsExportInstructions(mode: SwebenchPredictionsE
     ].join("\n");
   }
   return [
+    certification,
     "This run matches SWE-bench Verified execution settings for the selected named slice, but it is not a leaderboard submission.",
     `You may inspect the predictions and harness reports in ${exportDir}`,
     "Do not run `sb submit` for this package; it is not leaderboard_submit_ready.",
@@ -101,11 +104,14 @@ export function executeExportSwebenchPredictions(
       const runId = resolveSwebenchHarnessRunId(reportRoot, runState.runSha256);
       const arm = document.spec.arms.find((candidate) => candidate.armId === input.armId)!;
       const modelNameOrPath = swebenchModelNameOrPath(arm);
-      const bits = runState.matrixSha256 === undefined
+      const matrix = runState.matrixSha256 === undefined
+        ? undefined
+        : parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256));
+      const bits = matrix === undefined
         ? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false }
         : suiteComparabilityForSwebenchArm({
           manifest,
-          matrix: parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256)),
+          matrix,
           armId: input.armId,
           reportRoot,
           runId,
@@ -130,7 +136,8 @@ export function executeExportSwebenchPredictions(
       }
       const logs = join(reportRoot, "logs");
       if (existsSync(logs)) cpSync(logs, join(exportDir, "logs"), { recursive: true });
-      const instructions = swebenchPredictionsExportInstructions(mode, exportDir);
+      const certification = exportCompletenessCertification({ runSha256: runState.runSha256, completeness: matrix?.completeness });
+      const instructions = swebenchPredictionsExportInstructions(certification, mode, exportDir);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, exportDir };
 }
