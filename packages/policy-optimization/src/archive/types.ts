@@ -11,6 +11,7 @@
  */
 
 import type { PolicyParentRef } from "@jinn-network/policy-identity";
+import type { ObjectiveMethodRef } from "../types.js";
 import type { OutcomesProjectionRow, WaveReportRow } from "../wave-types.js";
 
 // --- §8.3 the lineage graph --------------------------------------------------------------------
@@ -189,6 +190,15 @@ export interface AdoptionRecord {
   readonly overrideReason?: string;
   /** Exact configuration revision the prepared change and rollback target. */
   readonly baseConfigurationRevision?: string;
+  /** Exact recomputable recommendation inputs consent was based on. */
+  readonly recommendationBasis?: {
+    readonly runDigest: string;
+    readonly matrixDigest: string;
+    readonly reportDigests: readonly string[];
+    readonly methodRefs: readonly ObjectiveMethodRef[];
+  };
+  /** Binds every affected-route record written as one local adoption decision. */
+  readonly sharedDecisionId?: string;
 }
 
 /** The adoption log: one campaign's (or one operator's) ordered adoption decisions. */

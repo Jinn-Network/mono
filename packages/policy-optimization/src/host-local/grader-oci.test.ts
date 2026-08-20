@@ -31,7 +31,7 @@ describe("pinned OCI grader", () => {
       command: ["/usr/local/bin/grade", "--out", "/jinn/out/verdict"],
       timeoutMs: 60_000,
       profileRequiresNetwork: false,
-    });
+    }, { uid: 501, gid: 20 });
     expect(invocation.args).toContain("--read-only");
     expect(invocation.args).toContain("--pull");
     expect(invocation.args).toContain("never");
@@ -49,24 +49,24 @@ describe("pinned OCI grader", () => {
       runtime: "docker", image: "ghcr.io/jinn/grader:latest", platform: "linux/amd64",
       inputs: [{ source: input, targetName: "campaign" }], outputDirectory: output,
       command: ["grade"], timeoutMs: 1_000, profileRequiresNetwork: false,
-    })).toThrow(/pinned/u);
+    }, { uid: 501, gid: 20 })).toThrow(/pinned/u);
     expect(() => buildPinnedOciInvocation({
       runtime: "docker", image: IMAGE, platform: "linux/amd64",
       inputs: [{ source: input, targetName: "campaign" }], outputDirectory: output,
       command: ["grade"], timeoutMs: 1_000, profileRequiresNetwork: true,
-    })).toThrow(/network/u);
+    }, { uid: 501, gid: 20 })).toThrow(/network/u);
     expect(() => buildPinnedOciInvocation({
       runtime: "docker", image: IMAGE, platform: "linux/amd64",
       inputs: [{ source: input, targetName: "campaign" }], outputDirectory: output,
       command: ["grade"], timeoutMs: 1_000, profileRequiresNetwork: true, allowedNetwork: "host",
-    })).toThrow(/network/u);
+    }, { uid: 501, gid: 20 })).toThrow(/network/u);
     const secrets = join(root, "secrets");
     writeFileSync(secrets, "private key");
     expect(() => buildPinnedOciInvocation({
       runtime: "docker", image: IMAGE, platform: "linux/amd64",
       inputs: [{ source: secrets, targetName: "campaign" }], outputDirectory: output,
       command: ["grade"], timeoutMs: 1_000, profileRequiresNetwork: false,
-    })).toThrow(/credential|signer/u);
+    }, { uid: 501, gid: 20 })).toThrow(/credential|signer/u);
   });
 });
 

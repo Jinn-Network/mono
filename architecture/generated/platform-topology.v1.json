@@ -1113,6 +1113,11 @@
       {
         "from": "@jinn-network/policy-optimization",
         "kind": "runtime",
+        "to": "@jinn-network/task-execution-oci-grader"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
         "to": "@jinn-network/task-execution-profiles"
       },
       {
@@ -2015,7 +2020,7 @@
   },
   "ownership": {
     "counts": {
-      "authorityDocuments": 32,
+      "authorityDocuments": 33,
       "boundaryPolicies": 26,
       "catalogManifests": 97,
       "catalogPublicSurfaces": 1352,
@@ -4623,6 +4628,16 @@
           "@ritsukai"
         ],
         "path": "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
+      },
+      {
+        "categories": [
+          "authorityDocuments"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "docs/superpowers/specs/2026-08-05-policy-optimization-live-host-and-guided-journey-design.md"
       },
       {
         "categories": [
@@ -58302,6 +58317,7 @@
           "@jinn-network/task-execution-evaluation-harness",
           "@jinn-network/task-execution-evaluator-adapters",
           "@jinn-network/task-execution-launchers",
+          "@jinn-network/task-execution-oci-grader",
           "@jinn-network/task-execution-profiles",
           "@jinn-network/task-execution-protocol",
           "@jinn-network/task-execution-supervisor",

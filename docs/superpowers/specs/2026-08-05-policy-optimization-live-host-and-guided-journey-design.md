@@ -3,7 +3,8 @@
 **Status:** approved implementation design
 **Date:** 2026-08-05
 **Amended:** 2026-08-07 — configurable explore/confirm journeys; `3/3/6` restored as a default
-**Base:** `integration/evidence-v1`
+**Amended:** 2026-08-20 — standalone stack reconciliation and recommendation-bound adoption
+**Base:** revalidated `origin/next`
 **Extends:** `2026-08-03-policy-optimization-product-design.md`
 
 ## 1. Decision
@@ -14,11 +15,18 @@ through ordinary Tasks, preserves attributable and recomputable evidence, and gi
 a recommendation rather than declaring a central winner. Candidate generation remains open and
 replaceable. Adoption remains local.
 
-This design adds the first complete operator journey and the missing live host. The standalone
-`jinn-optimize` executable captures the exact policy a selected route would use next, freezes an
+This design adds the first complete guided journey and local host. The standalone
+`jinn-optimize` executable captures the exact policy the operator declares as the baseline, freezes an
 eligible SupplyPool into exploration and confirmation partitions, dispatches real solve
 and evaluation Attempts, computes registry-owned comparisons, and prepares an operator-approved
 configuration change and rollback.
+
+The optimizer and operator are sibling tier-4 products. The optimizer does not call operator
+endpoints, import operator code, read operator credentials, or inspect operator-private storage.
+The operator supplies route, task profile, public loadout, harness, model, isolation policy, and
+the complete set of routes it says share that loadout. The optimizer can seal and revalidate this
+declaration, but cannot independently prove that the declared route set is complete or that a
+deployment still matches it.
 
 The first venue is deliberately narrow: local, loadout-only, SWE-rebench-shaped, same operator,
 same host, same OS user. Those are launch constraints rather than permanent product boundaries.
@@ -29,8 +37,8 @@ and adoption model remain venue-neutral.
 
 The guided journey guarantees:
 
-- the seed policy is derived from exact next-run Task, Submission, profile, route, and loadout
-  bytes rather than a remembered or reconstructed setup;
+- the seed policy is derived from exact operator-supplied Task, Submission, profile, route, and
+  public loadout bytes rather than a remembered or reconstructed setup;
 - the split is one immutable content-addressed artifact with whole-source grouping and explicit
   exclusions;
 - exploration chooses exactly one challenger before confirmation is revealed, unless the operator
@@ -39,7 +47,7 @@ The guided journey guarantees:
   evidence;
 - every recommendation is a deterministic projection of exact Run, Matrix, Report, and registered
   method results;
-- no live route or daemon configuration changes without the operator.
+- the optimizer never mutates a deployment; applying a prepared plan is a separate decision.
 
 The v0 host does **not** claim confidential held-out material, hostile-candidate isolation,
 cross-operator independence, party-independent evaluation, or tamper resistance against other
@@ -74,10 +82,11 @@ stdin and stdout are TTYs. A headless bare invocation prints help and exits with
 sealing records, or dispatching work. Explicit flags and an authored campaign document compile to
 the same artifacts as the guide; there is no separate easy-mode execution path.
 
-The guide asks for one route when more than one is eligible. It never chooses the first route,
-largest tuple class, or latest successful execution. It then:
+The guide asks for one selected route and every other route the operator declares shares the same
+loadout. It never chooses the first route, largest tuple class, or latest successful execution. It
+then:
 
-1. reads a coherent next-run snapshot;
+1. captures a coherent optimizer-owned declared baseline;
 2. validates and groups the selected SupplyPool;
 3. seals the split and objective preset;
 4. captures the current policy tuple seed;
@@ -93,28 +102,31 @@ more or less on proposal evidence, challenger selection, and fresh confirmation.
 **test this change** journey skips proposal and selection: the operator supplies one challenger,
 freezes it, and compares it directly with the current policy on fresh confirmation groups.
 
-### 3.2 Next-run policy snapshot
+### 3.2 Declared baseline snapshot
 
-`NextRunPolicySnapshot/1.0` is a versioned, read-only wire contract supplied by the operator host.
-The request names the route and exact Task/profile inputs being audited. The response carries:
+`NextRunPolicySnapshot/1.0` remains the versioned wire token for replay compatibility. New captures
+are optimizer-owned baseline snapshots, and user-facing language calls them a **declared
+baseline**, never a snapshot of a running daemon. The operator explicitly supplies:
 
-- one `configRevision` covering the complete batch;
-- the resolved route and safe route diagnostics;
-- exact canonical Submission bytes and digest for each Task;
-- the resolved task profile, harness, model, plugins, isolation policy, and requirement bindings;
-- the current policy tuple seed and its exact public loadout artifact bytes and digest;
-- no secret values, credential references, private environment values, or signer material.
+- the selected route and task profile;
+- exact canonical Task, Submission, and resolved profile bytes and digests;
+- the public `learner-public.v1` loadout directory;
+- the exact harness identity/version/digest, model, and isolation policy;
+- every route it declares is affected by changing that shared loadout.
 
-The consumer independently exact-parses every document, recomputes every digest and tuple, and
-requires one unchanged `configRevision` through final adoption preparation. Revision drift is a
-stable preflight refusal. The snapshot never fabricates a CandidateManifest and never falls back
-to a previous successful attempt.
+The optimizer exact-parses every document, recomputes every digest and tuple, and derives
+`configRevision` deterministically from the complete route-policy declaration, including the
+affected-route set and exact loadout archive/tree identities. That revision identifies the
+captured optimizer baseline; it says nothing about a daemon's in-memory configuration. The same
+declaration through the guide, flags, or authored document seals byte-identical campaign inputs.
+The snapshot never fabricates a CandidateManifest and never falls back to a previous execution.
 
-Before loadout sealing, the host applies the ratified `learner-public.v1` path profile and the
-fail-closed secret/private-path scrub to every included file. The excluded roots include `.git`,
-`operator-requests`, `secrets`, and `transcripts`; unknown roots and unsafe filesystem entries are
-refused. Detection rejects the snapshot rather than redacting it. Captured bytes and object stores
-remain private and are not published or exported in v0.
+Before sealing, the optimizer applies the ratified `learner-public.v1` path profile and a
+fail-closed secret/private-path scrub to every included file. Unknown fields, secret-shaped bytes,
+unsafe paths, symlinks, special files, digest mismatches, and changes during a read are refused.
+Detection rejects the declaration rather than redacting it. Exact captured bytes remain private.
+When one loadout is shared, every declared affected route requires consent; the resulting artifact
+states that route-set completeness is operator-declared and not independently proven.
 
 ### 3.3 SupplyPool and split
 
@@ -229,23 +241,39 @@ winner inputs under the quality-first preset.
 
 ### 4.3 Adoption and operator override
 
-Normal adoption is a separate explicit command. It records consent bound to route, payload class,
-tuple digest, recommendation input digests, and base `configRevision`, then prints the exact
-next-run configuration change and exact rollback. It never writes the daemon configuration.
+Normal adoption is a separate explicit command and accepts only a proven challenger. It recomputes
+`RecommendationDecision` from the exact Run, Matrix, Reports, and preregistered MethodRefs;
+revalidates the challenger bytes and payload-risk classification; re-reads the explicit baseline
+loadout source; and refuses any route, tuple, payload-class, evidence, candidate, or local baseline
+substitution. It requires consent for the exact complete affected-route set.
+
+Confirmation emits immutable canonical `LocalAdoptionPlan/1.0` bytes. The plan contains the
+recommendation status, reasons, limitations, and exact evidence basis; baseline revision and
+expected current tuple; every affected route; consent and payload classes; exact run-pinning change
+and rollback fragments for every route; and an apply-time precondition requiring the destination
+to still match that expected tuple. Its effect is always
+`prepared-only-no-daemon-mutation`. Related `AdoptionRecord`s carry the same shared decision ID and
+recommendation basis and are appended as one atomic local log replacement. Older records without
+those additive fields remain readable.
+
+The optimizer never writes destination configuration, restarts a process, or claims that
+destination drift was checked. A separate deployer may apply the plan only if it enforces the
+expected-current-tuple precondition at apply time.
 
 Any non-proven challenger may be prepared only through `--override-inconclusive`. The command
-requires an override reason, repeats the evidence warning, requires explicit confirmation in the
-interactive path, records the recommendation status and reason, and still performs all payload and
-revision checks. The override preserves operator authority but does not change the evidence label
-or manufacture proof.
+requires warning acknowledgement, a non-empty reason, exact route/payload/tuple consent, and
+explicit confirmation; records the recommendation status and reason; and still performs every
+evidence and local-baseline check. The override preserves operator authority but does not change
+the evidence label or manufacture proof.
 
 ## 5. Live local host
 
 Concrete composition is private under `src/host-local/`; the package root does not re-export it and
-the engine never imports it. Only the process wrapper may compose the host. The source-boundary
+the engine never imports it. Only the process wrapper exposes the host. The source-boundary
 guard permits concrete task-execution, evidence, profile, launcher, workspace, and trust packages
-from that subtree and continues to deny them everywhere else. No client implementation is reused
-or imported.
+from that subtree and continues to deny them everywhere else. It positively denies operator
+products, operator-specific policy-optimization URLs, UI tokens, and operator-private storage
+references. No client or operator implementation is reused or imported.
 
 The host creates two role-scoped instances of the local TaskExecutionBackend with separate private
 state roots, attempt namespaces, OS locks, source/executor identities, and keys. This explicitly
@@ -266,7 +294,9 @@ For each cell the host:
 8. signs the Result Evaluation with the evaluator Agent key outside the sandbox;
 9. assembles Matrix cells with pinning, admission, evidence, cost, and latency references.
 
-The SWE-rebench grader is a host-owned implementation behind the evaluator adapter contract. Its
+The SWE-rebench grader composes the current neutral
+`@jinn-network/task-execution-oci-grader` capability behind the evaluator adapter contract rather
+than carrying a product-local runner or grader-program fork. Its
 OCI image is pinned by manifest digest and platform tuple. It runs with bounded time, bounded output,
 read-only inputs, ephemeral writable work, deterministic cleanup, no credentials or signing
 material, and network disabled unless the profile explicitly requires and pins network behavior.
@@ -335,6 +365,15 @@ Both review blockers are resolved by this document; their recommended optional i
 export to MLCommons Croissant remains deferred because Croissant does not carry Jinn's commitment,
 grouping, exclusion, and withheld-Task semantics.
 
+### 7.1 Current-stack reconciliation disposition
+
+The earlier live-host/adoption implementation is preserved unchanged on
+`codex/policy-optimization-live-host-journey` at `102ca1e04`. This reconciliation manually carries
+forward only standalone-safe behavior. Former daemon snapshot clients, optimizer-specific operator
+endpoints, UI-token access, and operator storage inspection are rejected. New work starts from
+current `next`, preserves newer stack behavior, uses the shared OCI grader, and keeps the operator
+and optimizer as sibling tier-4 products.
+
 ## 8. Acceptance
 
 The implementation is accepted only when:
@@ -354,6 +393,11 @@ The implementation is accepted only when:
 - adversarial substitution, signer confusion, secret-bearing loadouts, symlink escape, imported
   candidates, promotion replay, and post-reveal mutation fail closed;
 - guided, flagged, and authored-document paths seal byte-identical campaign inputs;
-- normal and override adoption both remain non-mutating and refuse configuration drift;
+- normal and override adoption both remain non-mutating, refuse declared-baseline drift, and encode
+  destination drift as an apply-time precondition rather than claiming to have checked it;
+- shared-loadout adoption refuses partial route consent and atomically records every affected route
+  under one decision ID;
+- no change lands under either operator product and no operator dependency, endpoint, credential,
+  or private-storage reference enters the optimizer;
 - package tests, source-boundary guard, dependency inventory, build, pack smoke, and a real
   SWE-rebench campaign pass.

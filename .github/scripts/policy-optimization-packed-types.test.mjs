@@ -42,6 +42,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
   ['@jinn-network/task-execution-evaluation-harness', join(root, 'packages', 'task-execution', 'evaluation-harness')],
   ['@jinn-network/task-execution-evaluator-adapters', join(root, 'packages', 'task-execution', 'evaluator-adapters')],
+  ['@jinn-network/task-execution-oci-grader', join(root, 'packages', 'task-execution', 'oci-grader')],
   ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],

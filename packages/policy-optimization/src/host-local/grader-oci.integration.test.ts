@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalJsonBytes } from "@jinn-network/policy-identity";
+import { canonicalAttestationJsonBytes } from "@jinn-network/attestation-issuer";
 import { expect, test } from "vitest";
 import {
   runPinnedOciGrader,
@@ -26,7 +26,10 @@ test.runIf(process.env["JINN_RUN_OCI_INTEGRATION"] === "1")(
       },
       evaluationMethod: { name: "swe-rebench", digest: { sha256: "4".repeat(64) } },
     };
-    const statementBytes = canonicalJsonBytes({
+    // The evaluator boundary has its own frozen deterministic spelling. A generic policy JSON
+    // encoder can produce semantically identical bytes in a different order, which the host must
+    // (and does) refuse before invoking the evaluator-role signer.
+    const statementBytes = canonicalAttestationJsonBytes({
       _type: "https://in-toto.io/Statement/v1",
       subject: [expected.task, ...expected.results],
       predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",

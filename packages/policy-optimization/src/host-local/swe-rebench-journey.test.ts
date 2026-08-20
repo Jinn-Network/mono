@@ -6,6 +6,7 @@ import { parseBenchmark } from "@jinn-network/benchmarking-records";
 import { describe, expect, test } from "vitest";
 import { runGuidedJourney, runLiveHostCommand } from "./guide.js";
 import { sealLocalLoadoutDirectory } from "./loadout-archive.js";
+import { SWE_REBENCH_PUBLIC_NETWORK_EXTENSION } from "./swe-rebench-grader-source.js";
 import { prepareSweRebenchJourney, type SweRebenchJourneyPorts } from "./swe-rebench-journey.js";
 
 function loadout(root: string, kind: "current" | "candidate") {
@@ -64,6 +65,7 @@ describe("real SWE-rebench journey preparation", () => {
       currentLoadout: loadout(root, "current"),
       candidateLoadout: loadout(root, "candidate"),
       routeName: "swe-rebench-v2",
+      affectedRoutes: ["swe-rebench-v2"],
       harness: "codex",
       model: "gpt-test",
       isolationPolicy: "unrestricted",
@@ -125,12 +127,11 @@ describe("real SWE-rebench journey preparation", () => {
       const spec = parseEvaluationSpec(new Uint8Array(readFileSync(specPath)));
       const block = spec.familyBlock as {
         image: { uri?: string; digest?: { sha256?: string } };
-        "network.jinn.policy-optimization.requires-public-network"?: unknown;
-      };
+      } & Record<string, unknown>;
       const image = block.image;
       expect(image.uri).toMatch(/^docker:\/\/registry\.example\/rebench-\d+@sha256:[a-f0-9]{64}$/u);
       expect(image.digest?.sha256).toMatch(/^[a-f0-9]{64}$/u);
-      expect(block["network.jinn.policy-optimization.requires-public-network"]).toBe(true);
+      expect(block[SWE_REBENCH_PUBLIC_NETWORK_EXTENSION]).toBe(true);
     }
 
     writeFileSync(join(root, "candidate", "skills", "policy.md"), "another candidate policy\n");
@@ -139,6 +140,7 @@ describe("real SWE-rebench journey preparation", () => {
       currentLoadout: loadout(root, "current"),
       candidateLoadout: sealLocalLoadoutDirectory(join(root, "candidate")),
       routeName: "swe-rebench-v2",
+      affectedRoutes: ["swe-rebench-v2"],
       harness: "codex",
       model: "gpt-test",
       isolationPolicy: "unrestricted",
@@ -158,7 +160,7 @@ describe("real SWE-rebench journey preparation", () => {
     loadout(root, "current");
     loadout(root, "candidate");
     const answers = [
-      "1", "", "current", "candidate", "", "gpt-test", "", "state", "yes",
+      "1", "", "", "current", "candidate", "", "gpt-test", "", "state", "yes",
     ];
     let output = "";
     const result = await runGuidedJourney({
