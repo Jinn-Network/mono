@@ -185,7 +185,7 @@ describe("prepareAdoption", () => {
       recommendation: decision, baseConfigurationRevision: "r1", currentConfigurationRevision: "r2",
       routePayloadConsent: true, explicitConfirmation: true,
       overrideInconclusive: { warningAcknowledged: true, reason: "risk accepted" },
-    })).toThrow(/declared baseline moved/u);
+    })).toThrow(/configuration moved/u);
   });
 });
 

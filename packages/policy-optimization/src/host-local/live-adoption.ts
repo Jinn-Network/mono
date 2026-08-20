@@ -11,10 +11,10 @@ import {
   type JsonValue,
 } from "@jinn-network/policy-identity";
 import {
-  adoptionComponentClassesForTree,
   adoptionConfigFragment,
   emptyAdoptionLog,
   prepareAdoption,
+  sortAdoptionComponentClasses,
 } from "../archive/adoption.js";
 import { archiveLayout, defaultArchiveRoot, parseAdoptionLog } from "../archive/store.js";
 import type {
@@ -145,6 +145,33 @@ function candidateTupleFrom(
   return candidate;
 }
 
+const TREE_ADOPTION_CLASS: Readonly<Record<string, AdoptionComponentClass>> = {
+  ".archive": "prompt",
+  agents: "skill",
+  configs: "tool-config",
+  hooks: "hook",
+  notes: "prompt",
+  patterns: "prompt",
+  plans: "prompt",
+  "policy.json": "prompt",
+  runs: "prompt",
+  skills: "skill",
+  strategies: "prompt",
+  tests: "hook",
+  tools: "tool-config",
+  tunables: "prompt",
+};
+
+/** Map the exact admitted tree—not a synthesized CandidateManifest—onto adoption consent classes. */
+function treeAdoptionClasses(
+  entries: SealedLocalLoadoutArchive["entries"],
+): readonly AdoptionComponentClass[] {
+  return sortAdoptionComponentClasses(entries.map((entry) => {
+    const root = entry.path.split("/", 1)[0]!.toLowerCase();
+    return TREE_ADOPTION_CLASS[root] ?? "unclassified";
+  }));
+}
+
 function approvedScopes(
   campaign: ReturnType<typeof parseExactLiveCampaignInputs>,
   approvedRoutes: readonly string[],
@@ -256,7 +283,7 @@ function adoptionContext(input: PrepareLocalCampaignAdoptionInput): AdoptionCont
     affectedScopes: approvedScopes(campaign, input.approvedRoutes),
     targetTupleDigest,
     currentTupleDigest: snapshot.seed.digest,
-    payloadClasses: adoptionComponentClassesForTree(candidateLoadout.entries),
+    payloadClasses: treeAdoptionClasses(candidateLoadout.entries),
     currentTuple: snapshot.seed.tuple,
     candidateTuple,
     currentLoadout,
@@ -312,7 +339,7 @@ export function prepareLocalCampaignAdoption(
   let stagedLog = adoptionLog;
   const records: AdoptionRecord[] = [];
   for (const scope of resolved.affectedScopes) {
-    const record = prepareAdoption({
+    const preparedRecord = prepareAdoption({
       log: stagedLog,
       scope,
       tupleDigest: resolved.targetTupleDigest,
@@ -324,7 +351,6 @@ export function prepareLocalCampaignAdoption(
       currentConfigurationRevision: resolved.configRevision,
       routePayloadConsent: true,
       explicitConfirmation: true,
-      sharedDecisionId,
       ...(input.overrideInconclusive === undefined
         ? {}
         : { overrideInconclusive: {
@@ -332,6 +358,20 @@ export function prepareLocalCampaignAdoption(
             reason: input.overrideInconclusive.reason,
           } }),
     });
+    const record: AdoptionRecord = {
+      ...preparedRecord,
+      recommendationBasis: {
+        runDigest: resolved.recommendation.basis.runDigest,
+        matrixDigest: resolved.recommendation.basis.matrixDigest,
+        reportDigests: [...resolved.recommendation.basis.reportDigests],
+        methodRefs: resolved.recommendation.basis.methodRefs.map((method) => ({
+          id: method.id,
+          version: method.version,
+          parameters: { ...method.parameters },
+        })),
+      },
+      sharedDecisionId,
+    };
     records.push(record);
     stagedLog = { ...stagedLog, records: [...stagedLog.records, record] };
   }

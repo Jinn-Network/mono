@@ -38,7 +38,6 @@ export { evaluatedHistory } from "./history.js";
 export { frontier, frontierMembers } from "./frontier.js";
 export {
   adopt,
-  adoptionComponentClassesForTree,
   adoptionConfigFragment,
   currentAdoption,
   declaredAdoptionComponentClasses,
