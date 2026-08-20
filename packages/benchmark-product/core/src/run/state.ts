@@ -126,6 +126,49 @@ export const RunAnchorSchema = z.object({
 
 export type RunAnchor = z.infer<typeof RunAnchorSchema>;
 
+/**
+ * One additional signed Report v1 identity beyond the canonical `reportSha256`/
+ * `reportEnvelopeSha256` pair (packet P5, spec §8.3 option 5) — one per `additionalAnalyses` plan
+ * entry, keyed by `(method, version)` so a duplicate registered method can never silently collide
+ * (`run/compile.ts`'s `buildAnalysisPlan` already refuses a duplicate at seal time, so this is
+ * belt-and-braces, not the primary guarantee). This is the SAME additive-sibling shape already
+ * used twice in this file — `matrixSha256`/`matrixV2Sha256` above ("never replaces the legacy
+ * Matrix v1 field") and `reportSha256`/`reportPayloadSha256` below ("independent from the legacy
+ * Report v1 fields") — so the canonical pair stays untouched and every reader of it (nine
+ * non-test files, per the packet's own recon) needs no change.
+ */
+export const AdditionalReportIdentitySchema = z.object({
+  method: z.string().min(1),
+  version: z.string().min(1),
+  reportSha256: Sha256HexSchema,
+  reportEnvelopeSha256: Sha256HexSchema,
+});
+
+export type AdditionalReportIdentity = z.infer<typeof AdditionalReportIdentitySchema>;
+
+/**
+ * One additional public bundle identity beyond the canonical `bundleIdentity`/
+ * `bundleRelativePath`/`bundleChecks` triple (packet P5) — one per additional Report, same
+ * `(method, version)` keying and the same additive-sibling posture as `additionalReports` above.
+ */
+export const AdditionalBundleIdentitySchema = z.object({
+  method: z.string().min(1),
+  version: z.string().min(1),
+  bundleIdentity: Sha256HexSchema,
+  bundleRelativePath: z.string().regex(/^artifacts\/[a-z0-9][a-z0-9-]{0,63}\/public-bundles\/[a-f0-9]{64}$/),
+  bundleChecks: z.array(z.enum([
+    "manifest",
+    "evidence-closure",
+    "trust",
+    "matrix-rederivation",
+    "report-verification",
+    "claim-consistency",
+    "integrity-anchors",
+  ])),
+});
+
+export type AdditionalBundleIdentity = z.infer<typeof AdditionalBundleIdentitySchema>;
+
 export const RunStateSchema = z.object({
   draftId: z.string().min(1),
   /** sha256 hex of the draft spec's canonical JSON as of the most recent quote (A2). */
@@ -147,10 +190,18 @@ export const RunStateSchema = z.object({
   matrixV2Sha256: Sha256HexSchema.optional(),
   /** sha256 hex of the exact BenchmarkAccounting record. */
   accountingSha256: Sha256HexSchema.optional(),
-  /** sha256 hex of the sealed Report record's exact PAYLOAD bytes, set at `report` (BP-13). */
+  /** sha256 hex of the sealed Report record's exact PAYLOAD bytes, set at `report` (BP-13). This
+   * is the CANONICAL first report — the one entry `report` always produced before
+   * `additionalAnalyses` existed (the primary plan's own selection). */
   reportSha256: Sha256HexSchema.optional(),
-  /** sha256 hex of the sealed Report's DSSE ENVELOPE bytes, set at `report` (BP-13). */
+  /** sha256 hex of the sealed Report's DSSE ENVELOPE bytes, set at `report` (BP-13). Canonical
+   * first report, paired with `reportSha256` above. */
   reportEnvelopeSha256: Sha256HexSchema.optional(),
+  /** N-1 additional signed Report v1 identities, one per `additionalAnalyses` plan entry, set at
+   * `report` in the SAME invocation as the canonical pair above (packet P5, spec §8.3 option 5).
+   * Absent on every RunState written before this field existed and on every run with no
+   * `additionalAnalyses`. */
+  additionalReports: z.array(AdditionalReportIdentitySchema).optional(),
   /** Signed Report v2 identities. These are independent from the legacy Report v1 fields. */
   reportPayloadSha256: Sha256HexSchema.optional(),
   reportRecordSha256: Sha256HexSchema.optional(),
@@ -172,6 +223,11 @@ export const RunStateSchema = z.object({
      * written before this closure existed keeps exactly the six names it already had. */
     "integrity-anchors",
   ])).optional(),
+  /** N-1 additional public bundle identities, one per additional Report, set at `publish` in the
+   * SAME invocation as the canonical `bundleIdentity`/`bundleRelativePath`/`bundleChecks` triple
+   * above (packet P5). Absent on every RunState written before this field existed and on every run
+   * with no `additionalAnalyses`. */
+  additionalBundles: z.array(AdditionalBundleIdentitySchema).optional(),
   publishedAt: Rfc3339Schema.optional(),
   /** Append-only; absent on every workspace that has never anchored (anchor-evidence §7.1). */
   anchors: z.array(RunAnchorSchema).optional(),

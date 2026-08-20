@@ -50,3 +50,43 @@ describe("updateDraft — analysis field", () => {
     expect(outcome.result.draft.spec.analysis?.candidate).toBe("armB");
   });
 });
+
+describe("updateDraft — additionalAnalyses field (packet P5, spec §8.3 option 5)", () => {
+  test("permits patching the additionalAnalyses field", () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(workspaceDir, clock));
+    const created = createDraft(contextFor(workspaceDir, clock), { name: "Patchable Additional Analyses" });
+    if (!created.ok) throw new Error("setup failed");
+
+    const outcome = updateDraft(contextFor(workspaceDir, clock), {
+      draftId: created.result.draft.draftId,
+      patch: {
+        additionalAnalyses: [{ method: "jinn.benchmarking.method/avg-at-k", version: "1" }],
+      },
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.draft.spec.additionalAnalyses).toEqual([{ method: "jinn.benchmarking.method/avg-at-k", version: "1" }]);
+  });
+
+  test("an unknown sibling key in the same patch still refuses, additionalAnalyses being allowlisted notwithstanding", () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(workspaceDir, clock));
+    const created = createDraft(contextFor(workspaceDir, clock), { name: "Unknown Sibling Key" });
+    if (!created.ok) throw new Error("setup failed");
+
+    const outcome = updateDraft(contextFor(workspaceDir, clock), {
+      draftId: created.result.draft.draftId,
+      patch: {
+        additionalAnalyses: [{ method: "jinn.benchmarking.method/avg-at-k", version: "1" }],
+        notARealField: true,
+      },
+    });
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("validation");
+    expect(outcome.error.issues?.[0]?.message).toMatch(/unknown draft spec field: notARealField/);
+  });
+});

@@ -16,8 +16,9 @@ import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import { readRunState, writeRunState } from "../run/state.js";
+import { additionalClaimPackagePath } from "../report/claim.js";
 import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource, recordPath } from "../run/publication-source.js";
-import { claimPackageArtifactPath, draftPath, publicationDir, publicationServeRoot, publicBundlesDir, runStatePath } from "../workspace/layout.js";
+import { claimPackageArtifactPath, draftPath, publicationDir, publicationServeRoot, publicBundlePath, publicBundlesDir, runStatePath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
   APEX_SWE_DEV_ADAPTER_ID,
@@ -355,6 +356,16 @@ async function setUpClosedRun(
       readonly candidate?: string;
       readonly parameters?: Record<string, unknown>;
     };
+    /** Packet P5 (spec §8.3 option 5): patched onto the draft spec (via updateDraft) before
+     * quote/lock, alongside `analysis` above, so compileDraft's buildAnalysisPlan wrapper appends
+     * these entries after the primary plan. */
+    readonly additionalAnalyses?: readonly {
+      readonly method: string;
+      readonly version: string;
+      readonly baseline?: string;
+      readonly candidate?: string;
+      readonly parameters?: Record<string, unknown>;
+    }[];
   } = {},
 ): Promise<void> {
   initWorkspace(contextFor(clock));
@@ -364,8 +375,14 @@ async function setUpClosedRun(
   if (!sample.ok) throw new Error("unreachable");
   armAdd(contextFor(clock), { draftId, armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
   armAdd(contextFor(clock), { draftId, armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
-  if (options.analysis !== undefined) {
-    const patched = updateDraft(contextFor(clock), { draftId, patch: { analysis: options.analysis } });
+  if (options.analysis !== undefined || options.additionalAnalyses !== undefined) {
+    const patched = updateDraft(contextFor(clock), {
+      draftId,
+      patch: {
+        ...(options.analysis !== undefined ? { analysis: options.analysis } : {}),
+        ...(options.additionalAnalyses !== undefined ? { additionalAnalyses: options.additionalAnalyses } : {}),
+      },
+    });
     expect(patched.ok).toBe(true);
   }
   const quoted = await runQuote(contextFor(clock), { draftId });
@@ -387,8 +404,12 @@ async function setUpClosedRun(
 
 /** The Report-v2 operation consumes the independent accounting closure; it never launches this
  * fixture's backend. Registration after close is deliberately post-hoc. */
-async function setUpPublishedAccounting(clock: () => string, mount = ""): Promise<void> {
-  await setUpClosedRun(clock);
+async function setUpPublishedAccounting(
+  clock: () => string,
+  mount = "",
+  closedRunOptions: Parameters<typeof setUpClosedRun>[2] = {},
+): Promise<void> {
+  await setUpClosedRun(clock, "draft-1", closedRunOptions);
   recordRunPublicationAuthorship("draft-1");
   const publicBaseUrl = await servePublicationWorkspace(mount);
   const configured = await publicationConfigure(contextFor(clock), { draftId: "draft-1", publicBaseUrl });
@@ -509,6 +530,39 @@ describe("publication.report — signed Report v2", () => {
     const repeated = await publicationReport(contextFor(clock), { draftId: "draft-1" });
     expect(repeated).toEqual(published);
   }, 60_000);
+
+  test(
+    "packet P5: with additionalAnalyses registered, publicationReport still pins the PRIMARY entry — never an additional one",
+    async () => {
+      // publicationReport is a genuinely independent, single-Report v2 pipeline (never fans out
+      // to N — the write-once reportPayloadSha256/reportRecordSha256 guard in run/state.ts is
+      // exactly why). Before additionalAnalyses existed, its selection
+      // (`run.analysisPlan?.[run.analysisPlan.length - 1]`) always landed on the primary entry
+      // because the plan was never longer than two. Once additionalAnalyses append more entries,
+      // that same raw last-index read would silently start reporting a DIFFERENT (additional)
+      // method — this draft has no explicit `analysis`, so the primary is wilson, and the
+      // regression this test guards against is publicationReport reporting paired-delta instead.
+      const clock = makeClock();
+      await setUpPublishedAccounting(clock, "", {
+        evaluationModes: Array(8).fill("no-verdict"),
+        additionalAnalyses: [
+          {
+            method: "jinn.benchmarking.method/paired-delta",
+            version: "1",
+            baseline: "baseline",
+            candidate: "sample",
+            parameters: { seed: 1, resamples: 10, alpha: "0.05" },
+          },
+        ],
+      });
+      const published = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      if (!published.ok) return;
+      const signed = parseSignedReportRecord(getSealedBytes(workspaceDir, published.result.reportRecordSha256));
+      expect(signed.payload.method.id).toBe("jinn.benchmarking.method/wilson");
+    },
+    60_000,
+  );
 
   test("leaves accounting complete and report unstarted when an exact-public dependency is unavailable", async () => {
     const clock = makeClock();
@@ -1852,6 +1906,118 @@ describe("runReport — claim-package write failure does not strand the draft", 
       expect(verified.ok, JSON.stringify(verified)).toBe(true);
       if (!verified.ok) return;
       expect(verified.result.checks).toContain("claim-consistency");
+    },
+    30_000,
+  );
+});
+
+describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)", () => {
+  test(
+    "one report invocation emits N sealed Reports and one publish invocation emits N bundles, both single-shot; N distinct identities share one runSha256/matrixSha256",
+    async () => {
+      // Only wilson@1, paired-delta@1, and binary-instrument@1 have a claim-package projection
+      // wired (`report/claim.ts`'s methodProjection — the packet brief owns that switch and P5
+      // must not touch it); wilson can never be an additional entry (it is always the primary
+      // head). paired-delta@1 is therefore the one method this test can register as an additional
+      // analysis end-to-end. Real pairing needs task provenance the bundled sample benchmark does
+      // not carry (P4b scoping §6.1), so — exactly like the existing "selected paired method" test
+      // above — every evaluation is dispatched "no-verdict", which keeps pairing at zero pairs and
+      // sidesteps the provenance gap while still exercising the real produceReport() call.
+      const clock = makeClock();
+      await setUpClosedRun(clock, "draft-1", {
+        evaluationModes: Array(8).fill("no-verdict"),
+        additionalAnalyses: [
+          {
+            method: "jinn.benchmarking.method/paired-delta",
+            version: "1",
+            baseline: "baseline",
+            candidate: "sample",
+            parameters: { seed: 123456789, resamples: 1000, alpha: "0.05" },
+          },
+        ],
+      });
+
+      // ── report: ONE invocation, N sealed Reports, ONE transition ──────────────────────────
+      const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(reported.ok, JSON.stringify(reported)).toBe(true);
+      if (!reported.ok) return;
+      expect(reported.result.draft.state).toBe("reported");
+      expect(reported.result.additionalReports).toHaveLength(1);
+
+      const reportShas = [reported.result.reportSha256, ...reported.result.additionalReports!.map((entry) => entry.reportSha256)];
+      expect(new Set(reportShas).size).toBe(2); // N distinct reportSha256 values
+      const reportEnvelopeShas = [reported.result.reportEnvelopeSha256, ...reported.result.additionalReports!.map((entry) => entry.reportEnvelopeSha256)];
+      expect(new Set(reportEnvelopeShas).size).toBe(2);
+
+      const stateAfterReport = readRunState(workspaceDir, "draft-1")!;
+      expect(stateAfterReport.reportSha256).toBe(reported.result.reportSha256);
+      expect(stateAfterReport.additionalReports).toHaveLength(1);
+      // Run state carries the N-1 additional identities keyed by (method, version).
+      expect(stateAfterReport.additionalReports?.map((entry) => `${entry.method}@${entry.version}`)).toEqual([
+        "jinn.benchmarking.method/paired-delta@1",
+      ]);
+
+      // Every additional Report has its own Claim, at its own path, distinct from the canonical
+      // one.
+      const canonicalClaimBytes = readFileSync(claimPackageArtifactPath(workspaceDir, "draft-1"), "utf8");
+      for (const entry of stateAfterReport.additionalReports!) {
+        const claimPath = additionalClaimPackagePath(workspaceDir, "draft-1", entry.method, entry.version);
+        expect(existsSync(claimPath)).toBe(true);
+        const claimBytes = readFileSync(claimPath, "utf8");
+        expect(claimBytes).not.toBe(canonicalClaimBytes);
+        const parsedClaim = JSON.parse(claimBytes) as { records: { reportSha256: string } };
+        expect(parsedClaim.records.reportSha256).toBe(entry.reportSha256);
+      }
+
+      // A second `report` call still refuses illegal-transition, exactly as before this feature.
+      const secondReport = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(secondReport.ok).toBe(false);
+      if (!secondReport.ok) expect(secondReport.error.code).toBe("illegal-transition");
+
+      // ── verify: claim-consistency already resolves by (method, version), so it already works
+      // for a Report that is not the last plan entry — no code changed to make this true. ──────
+      const verified = await runVerify(contextFor(clock), { draftId: "draft-1" });
+      expect(verified.ok, JSON.stringify(verified)).toBe(true);
+      if (verified.ok) {
+        expect(verified.result.checks).toContain("claim-consistency");
+        expect(verified.result.checks).toContain("report-verification");
+        expect(verified.result.additionalReports).toHaveLength(1);
+      }
+
+      // ── publish: ONE invocation, N bundle directories, ONE transition ─────────────────────
+      const published = await runPublish(contextFor(clock), { draftId: "draft-1" });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      if (!published.ok) return;
+      expect(published.result.draft.state).toBe("published-bundle");
+      expect(published.result.additionalBundles).toHaveLength(1);
+
+      const bundleIdentities = [published.result.bundleIdentity, ...published.result.additionalBundles!.map((entry) => entry.bundleIdentity)];
+      expect(new Set(bundleIdentities).size).toBe(2); // N distinct bundle identities
+
+      const stateAfterPublish = readRunState(workspaceDir, "draft-1")!;
+      expect(stateAfterPublish.bundleIdentity).toBe(published.result.bundleIdentity);
+      expect(stateAfterPublish.additionalBundles).toHaveLength(1);
+      expect(stateAfterPublish.additionalBundles?.map((entry) => `${entry.method}@${entry.version}`)).toEqual([
+        "jinn.benchmarking.method/paired-delta@1",
+      ]);
+
+      // Every bundle — canonical and additional — carries the SAME runSha256/matrixSha256: all N
+      // readouts are over the one collected cell set (spec §8.3's decisive disclosure property).
+      for (const identity of bundleIdentities) {
+        const bundleDir = publicBundlePath(workspaceDir, "draft-1", identity);
+        expect(sha256Hex(new Uint8Array(readFileSync(join(bundleDir, "run.json"))))).toBe(stateAfterPublish.runSha256);
+        expect(sha256Hex(new Uint8Array(readFileSync(join(bundleDir, "matrix.json"))))).toBe(stateAfterPublish.matrixSha256);
+      }
+
+      // A second `publish` call behaves as it does today: idempotent re-verification, identical
+      // identities, no state advancement beyond what already happened.
+      const secondPublish = await runPublish(contextFor(clock), { draftId: "draft-1" });
+      expect(secondPublish.ok, JSON.stringify(secondPublish)).toBe(true);
+      if (secondPublish.ok) {
+        expect(secondPublish.result.bundleIdentity).toBe(published.result.bundleIdentity);
+        expect(secondPublish.result.additionalBundles?.map((entry) => entry.bundleIdentity).sort())
+          .toEqual(published.result.additionalBundles!.map((entry) => entry.bundleIdentity).sort());
+      }
     },
     30_000,
   );

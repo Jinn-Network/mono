@@ -47,8 +47,9 @@ import {
   anchoredTrustRoot,
 } from "@colophon-claims/verify";
 import type { ClaimAnchor } from "@colophon-claims/verify";
+import { join } from "node:path";
 import { atomicWriteFileSync } from "../fs/atomic.js";
-import { claimPackageArtifactPath } from "../workspace/layout.js";
+import { artifactsDir, claimPackageArtifactPath } from "../workspace/layout.js";
 import type { VenueHonesty } from "../operations/run-results.js";
 
 export const CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/1";
@@ -719,8 +720,39 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
   };
 }
 
-/** Validates and atomically writes the claim package to `claimPackageArtifactPath`. */
-export function writeClaimPackage(workspaceDir: string, draftId: string, claim: ClaimPackage): void {
+/** Filesystem-safe, deterministic key for an additional (non-canonical) Claim's sibling path
+ * (packet P5, spec §8.3 option 5), derived from the `(method, version)` pair that produced it.
+ * Method ids reaching this point are always registered/code-controlled identifiers (an
+ * unregistered id refuses at `run/compile.ts` before a Run can seal), so this sanitization is
+ * defense in depth rather than the load-bearing safety property. */
+export function additionalClaimPackageKey(method: string, version: string): string {
+  const safe = (value: string) => value.replace(/[^A-Za-z0-9._-]/g, "_");
+  return `${safe(method)}@${safe(version)}`;
+}
+
+/** `<ws>/artifacts/<draftId>/claims/<method>@<version>.json` — sibling Claim path for an
+ * additional plan entry (packet P5). The canonical first report's Claim keeps its original fixed
+ * `claimPackageArtifactPath`; only N-1 additional Claims land here, so no existing reader of the
+ * canonical path needs to change. */
+export function additionalClaimPackagePath(workspaceDir: string, draftId: string, method: string, version: string): string {
+  return join(artifactsDir(workspaceDir), draftId, "claims", `${additionalClaimPackageKey(method, version)}.json`);
+}
+
+/**
+ * Validates and atomically writes the claim package. Absent `selector`, writes to the canonical
+ * `claimPackageArtifactPath` — byte-identical to every call site before `selector` existed. A
+ * present `selector` (packet P5's additional plan entries) writes to that entry's own sibling path
+ * instead, so N Claims from one `report` invocation land at N distinct paths.
+ */
+export function writeClaimPackage(
+  workspaceDir: string,
+  draftId: string,
+  claim: ClaimPackage,
+  selector?: { readonly method: string; readonly version: string },
+): void {
   const validated = ClaimPackageSchema.parse(claim);
-  atomicWriteFileSync(claimPackageArtifactPath(workspaceDir, draftId), canonicalJsonBytes(validated));
+  const path = selector === undefined
+    ? claimPackageArtifactPath(workspaceDir, draftId)
+    : additionalClaimPackagePath(workspaceDir, draftId, selector.method, selector.version);
+  atomicWriteFileSync(path, canonicalJsonBytes(validated));
 }

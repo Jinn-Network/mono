@@ -30,6 +30,7 @@ import { refuse } from "../errors.js";
 import { parseDraftDocument } from "../domain/draft.js";
 import { atomicWriteFileSync, fsyncDirectorySync } from "../fs/atomic.js";
 import {
+  additionalClaimPackagePath,
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ClaimPackageSchema,
 } from "../report/claim.js";
@@ -124,6 +125,37 @@ export interface MaterializeBundleInput {
   readonly draftId: string;
   readonly benchmarkSha256: string;
   readonly runState: RunState;
+  /** Packet P5 (spec §8.3 option 5): which sealed Report (and its own Claim) this bundle
+   * materializes from, when the run's analysis plan carries more than the canonical entry. Absent
+   * selects the canonical `reportSha256`/`reportEnvelopeSha256` pair and the canonical Claim path
+   * — byte-identical to every bundle materialized before this field existed. Present selects the
+   * matching `(method, version)` sibling from `runState.additionalReports` and that sibling's own
+   * Claim path (`report/claim.ts`'s `additionalClaimPackagePath`). */
+  readonly reportSelector?: { readonly method: string; readonly version: string };
+}
+
+/** Resolves which sealed Report identity pair this bundle materializes from (module header). */
+function resolveReportIdentity(
+  runState: RunState,
+  draftId: string,
+  reportSelector: MaterializeBundleInput["reportSelector"],
+): { readonly reportSha256: string; readonly reportEnvelopeSha256: string } {
+  if (reportSelector === undefined) {
+    // Unreachable when the combined presence check above has already refused — kept as a type
+    // narrowing, not a new runtime branch.
+    return { reportSha256: runState.reportSha256!, reportEnvelopeSha256: runState.reportEnvelopeSha256! };
+  }
+  const match = (runState.additionalReports ?? []).find(
+    (entry) => entry.method === reportSelector.method && entry.version === reportSelector.version,
+  );
+  if (match === undefined) {
+    refuse(
+      "conflict",
+      `runs.${draftId}.additionalReports`,
+      `no additional Report is recorded for "${reportSelector.method}@${reportSelector.version}"`,
+    );
+  }
+  return { reportSha256: match.reportSha256, reportEnvelopeSha256: match.reportEnvelopeSha256 };
 }
 
 export interface MaterializeBundleDeps {
@@ -213,22 +245,22 @@ function recordClosure(input: MaterializeBundleInput): {
     | typeof BUNDLE_V4_FORMAT
     | typeof BUNDLE_V6_FORMAT;
 } {
-  const { workspaceDir, draftId, benchmarkSha256, runState } = input;
+  const { workspaceDir, draftId, benchmarkSha256, runState, reportSelector } = input;
   if (
     runState.runSha256 === undefined
     || runState.matrixSha256 === undefined
-    || runState.reportSha256 === undefined
-    || runState.reportEnvelopeSha256 === undefined
     || runState.reportedAt === undefined
+    || (reportSelector === undefined && (runState.reportSha256 === undefined || runState.reportEnvelopeSha256 === undefined))
   ) {
     refuse("conflict", `runs.${draftId}`, "reported run is missing its Run, Matrix, Report, or Report envelope identity");
   }
+  const { reportSha256, reportEnvelopeSha256 } = resolveReportIdentity(runState, draftId, reportSelector);
 
   const benchmarkBytes = getSealedBytes(workspaceDir, benchmarkSha256);
   const runBytes = getSealedBytes(workspaceDir, runState.runSha256);
   const matrixBytes = getSealedBytes(workspaceDir, runState.matrixSha256);
-  const reportBytes = getSealedBytes(workspaceDir, runState.reportSha256);
-  const reportEnvelopeBytes = getSealedBytes(workspaceDir, runState.reportEnvelopeSha256);
+  const reportBytes = getSealedBytes(workspaceDir, reportSha256);
+  const reportEnvelopeBytes = getSealedBytes(workspaceDir, reportEnvelopeSha256);
   const benchmark = parseBenchmark(benchmarkBytes);
   const run = parseRun(runBytes);
   const matrix = parseMatrix(matrixBytes);
@@ -270,7 +302,10 @@ function recordClosure(input: MaterializeBundleInput): {
     }
   }
 
-  const claimBytes = new Uint8Array(readFileSync(claimPackageArtifactPath(workspaceDir, draftId)));
+  const claimPath = reportSelector === undefined
+    ? claimPackageArtifactPath(workspaceDir, draftId)
+    : additionalClaimPackagePath(workspaceDir, draftId, reportSelector.method, reportSelector.version);
+  const claimBytes = new Uint8Array(readFileSync(claimPath));
   const claim = exactJson(claimBytes, ClaimPackageSchema, "claim-package.json");
   if (!Buffer.from(canonicalJsonBytes(claim)).equals(Buffer.from(claimBytes))) {
     refuse("record-integrity", "claim-package.json", "claim package is not in exact canonical JSON encoding");
@@ -288,8 +323,8 @@ function recordClosure(input: MaterializeBundleInput): {
       || claim.records.benchmarkSha256 !== benchmarkSha256
       || claim.records.runSha256 !== runState.runSha256
       || claim.records.matrixSha256 !== runState.matrixSha256
-      || claim.records.reportSha256 !== runState.reportSha256
-      || claim.records.reportEnvelopeSha256 !== runState.reportEnvelopeSha256
+      || claim.records.reportSha256 !== reportSha256
+      || claim.records.reportEnvelopeSha256 !== reportEnvelopeSha256
       || reportSubjects?.length !== 1
       || reportSubjects[0]?.subjectSha256 !== runState.matrixSha256
       || !Buffer.from(canonicalJsonBytes(reportSubjects[0]?.results as never)).equals(
@@ -926,7 +961,7 @@ function recordClosure(input: MaterializeBundleInput): {
     claim,
     matrix,
     report,
-    reportSha256: runState.reportSha256,
+    reportSha256,
     matrixSha256: runState.matrixSha256,
     recordSha256s: evidenceCatalog.records.map((record) => record.sha256),
     dissentCellKeys,
