@@ -720,7 +720,8 @@ export function validateBinaryJudgmentCompletedEvaluation(
       .test(outcome["itemId"] as string)
     || typeof outcome["candidateClass"] !== "string"
     || !/^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(outcome["candidateClass"] as string)
-    || (outcome["stratum"] !== "core" && outcome["stratum"] !== "stress")
+    || typeof outcome["stratum"] !== "string"
+    || !/^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(outcome["stratum"] as string)
     || typeof outcome["labelResolutionSha256"] !== "string"
     || !/^sha256:[0-9a-f]{64}$/u.test(outcome["labelResolutionSha256"] as string)
     || typeof outcome["instrumentSha256"] !== "string"

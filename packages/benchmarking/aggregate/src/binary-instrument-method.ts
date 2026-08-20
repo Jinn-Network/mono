@@ -25,6 +25,8 @@ import { wilsonInterval } from "./stats/wilson.js";
 const SHA256 = /^[a-f0-9]{64}$/;
 const SHA256_URI = /^sha256:[a-f0-9]{64}$/;
 const CANDIDATE_CLASS = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
+// §3.1 rule 1: one identifier dialect, not two. Shared shape with `candidateClass`.
+const STRATUM_NAME = CANDIDATE_CLASS;
 
 const INSTRUMENT_REQUIREMENT_KEY = "network.jinn.binary-judgment.instrument";
 const ITEM_COMMITMENT_KEY = "network.jinn.binary-judgment.item-sha256";
@@ -119,9 +121,9 @@ export const BINARY_INSTRUMENT_PARAMETER_SCHEMA: Method["parameterSchema"] = {
     },
     strata: {
       type: "array",
-      prefixItems: [{ const: "core" }, { const: "stress" }],
-      minItems: 2,
-      maxItems: 2,
+      minItems: 1,
+      uniqueItems: true,
+      items: { type: "string", pattern: STRATUM_NAME.source },
     },
     parserInvalidPolicy: { enum: ["reject"] },
     truthAdmission: { enum: ["two-human-unanimous", "operator-only"] },
@@ -145,7 +147,7 @@ export interface BinaryInstrumentParameters {
   readonly reduction: "strict-majority";
   readonly measurementProfile: typeof BINARY_INSTRUMENT_MEASUREMENT_PROFILE;
   readonly candidateClasses: readonly string[];
-  readonly strata: readonly ["core", "stress"];
+  readonly strata: readonly string[];
   readonly parserInvalidPolicy: "reject";
   readonly truthAdmission: "two-human-unanimous" | "operator-only";
   readonly intervalAlpha: "0.05";
@@ -193,8 +195,20 @@ export function validateBinaryInstrumentParameters(
     }
   }
   const strata = parameters["strata"];
-  if (!Array.isArray(strata) || strata.length !== 2 || strata[0] !== "core" || strata[1] !== "stress") {
-    issues.push('parameter "strata" must be exactly ["core","stress"]');
+  if (
+    !Array.isArray(strata)
+    || strata.length === 0
+    || strata.some((value) => typeof value !== "string" || !STRATUM_NAME.test(value))
+  ) {
+    issues.push('parameter "strata" must be a non-empty array of stratum names');
+  } else {
+    const sortedStrata = [...strata].sort(compareCodeUnitStrings);
+    if (
+      new Set(strata).size !== strata.length
+      || sortedStrata.some((value, index) => value !== strata[index])
+    ) {
+      issues.push('parameter "strata" must be unique and code-unit sorted');
+    }
   }
   if (parameters["parserInvalidPolicy"] !== "reject") {
     issues.push('parameter "parserInvalidPolicy" must be "reject"');
@@ -467,7 +481,7 @@ function validateLabelResolution(
     readonly itemId: string;
     readonly truthLabel: "CORRECT" | "WRONG";
     readonly candidateClass: string;
-    readonly stratum: "core" | "stress";
+    readonly stratum: string;
     readonly truthAdmission: BinaryInstrumentParameters["truthAdmission"];
   },
 ): void {
@@ -514,7 +528,7 @@ function validateLabelResolution(
   if (typeof resolution["candidateClass"] !== "string" || !CANDIDATE_CLASS.test(resolution["candidateClass"])) {
     throw new MethodInputError("binary-record-malformed", digest, "labelResolution.candidateClass is unsupported");
   }
-  if (resolution["stratum"] !== "core" && resolution["stratum"] !== "stress") {
+  if (typeof resolution["stratum"] !== "string" || !STRATUM_NAME.test(resolution["stratum"])) {
     throw new MethodInputError("binary-record-malformed", digest, "labelResolution.stratum is unsupported");
   }
   if (truthAdmission === "two-human-unanimous") {
@@ -850,7 +864,7 @@ function resolveTaskBinding(
     throw new MethodInputError("binary-binding-mismatch", analysisWire, "analysisContext.candidateClass is outside the registered vocabulary");
   }
   const stratum = analysis["stratum"];
-  if (stratum !== "core" && stratum !== "stress") {
+  if (typeof stratum !== "string" || !STRATUM_NAME.test(stratum)) {
     throw new MethodInputError("binary-record-malformed", analysisWire, "analysisContext.stratum is unsupported");
   }
   const labelResolution = resolveExactJson(labelResolutionWire, input.resolveRecordBytes, "label resolution");
@@ -1473,6 +1487,7 @@ function contextIssues(
   value: unknown,
   path: string,
   candidateClasses: readonly string[],
+  strata: readonly string[],
   issues: string[],
 ): void {
   if (!isObject(value) || !exactKeys(value, [
@@ -1489,7 +1504,7 @@ function contextIssues(
   if (!SHA256_URI.test(String(value["labelResolutionSha256"]))) issues.push(`${path}.labelResolutionSha256 is invalid`);
   if (value["truthLabel"] !== "CORRECT" && value["truthLabel"] !== "WRONG") issues.push(`${path}.truthLabel is invalid`);
   if (typeof value["candidateClass"] !== "string" || !candidateClasses.includes(value["candidateClass"])) issues.push(`${path}.candidateClass is invalid`);
-  if (value["stratum"] !== "core" && value["stratum"] !== "stress") issues.push(`${path}.stratum is invalid`);
+  if (typeof value["stratum"] !== "string" || !strata.includes(value["stratum"])) issues.push(`${path}.stratum is invalid`);
 }
 
 function sameWireContext(left: unknown, right: unknown): boolean {
@@ -1587,6 +1602,9 @@ export function validateBinaryInstrumentQualificationProjection(value: unknown):
   const candidateClasses = isObject(configuration) && Array.isArray(configuration["candidateClasses"])
     ? configuration["candidateClasses"].filter((entry): entry is string => typeof entry === "string")
     : [];
+  const strata = isObject(configuration) && Array.isArray(configuration["strata"])
+    ? configuration["strata"].filter((entry): entry is string => typeof entry === "string")
+    : [];
   const k = isObject(configuration) && Number.isSafeInteger(configuration["k"])
     ? configuration["k"] as number
     : 0;
@@ -1603,7 +1621,7 @@ export function validateBinaryInstrumentQualificationProjection(value: unknown):
     for (const sliceName of ["byCandidateClass", "byStratum"] as const) {
       const slices = raw[sliceName];
       if (!isObject(slices)) { issues.push(`qualification.arms.${armId}.${sliceName} must be an object`); continue; }
-      const expectedSlices = sliceName === "byCandidateClass" ? candidateClasses : ["core", "stress"];
+      const expectedSlices = sliceName === "byCandidateClass" ? candidateClasses : strata;
       if (!exactKeys(slices, expectedSlices)) issues.push(`qualification.arms.${armId}.${sliceName} must exactly match the registered slice vocabulary`);
       for (const [name, slice] of Object.entries(slices)) projectionIssues(slice, `qualification.arms.${armId}.${sliceName}.${name}`, k, issues);
     }
@@ -1631,7 +1649,7 @@ export function validateBinaryInstrumentQualificationProjection(value: unknown):
       || raw["decision"] !== ((accepted as number) > (rejected as number) ? "ACCEPT" : "REJECT")
       || typeof raw["unstable"] !== "boolean"
       || raw["unstable"] !== ((accepted as number) !== 0 && (rejected as number) !== 0)) issues.push(`qualification.itemDecisions.${index} is invalid`);
-    contextIssues(raw["context"], `qualification.itemDecisions.${index}.context`, candidateClasses, issues);
+    contextIssues(raw["context"], `qualification.itemDecisions.${index}.context`, candidateClasses, strata, issues);
   }
   const excluded = value["excluded"];
   if (!isObject(excluded) || !exactKeys(excluded, ["count", "items"]) || !Number.isSafeInteger(excluded["count"]) || (excluded["count"] as number) < 0 || !Array.isArray(excluded["items"]) || excluded["count"] !== excluded["items"].length) issues.push("qualification.excluded is invalid");
@@ -1642,7 +1660,7 @@ export function validateBinaryInstrumentQualificationProjection(value: unknown):
       || raw["instrumentSha256"] !== instrumentByArm.get(raw["armId"] as string)
       || !sortedUniqueStrings(raw["cellKeys"], k)
       || !Array.isArray(raw["reasons"]) || raw["reasons"].length === 0) issues.push(`qualification.excluded.items.${index} is invalid`);
-    contextIssues(raw["context"], `qualification.excluded.items.${index}.context`, candidateClasses, issues);
+    contextIssues(raw["context"], `qualification.excluded.items.${index}.context`, candidateClasses, strata, issues);
     const parentCellKeys = Array.isArray(raw["cellKeys"]) ? raw["cellKeys"].filter((entry): entry is string => typeof entry === "string") : [];
     if (Array.isArray(raw["reasons"])) for (const [reasonIndex, reason] of raw["reasons"].entries()) {
       const reasonPath = `qualification.excluded.items.${index}.reasons.${reasonIndex}`;
@@ -1917,6 +1935,7 @@ export function computeBinaryInstrumentQualification(
       .map(([armId, instrument]) => ({ armId, instrumentSha256: instrument.digest }))
       .sort((left, right) => compareCodeUnitStrings(left.armId, right.armId)),
     cells,
+    strata: parameters.strata,
   });
 
   return projectBinaryInstrumentQualification({

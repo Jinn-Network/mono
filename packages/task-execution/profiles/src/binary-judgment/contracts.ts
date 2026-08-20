@@ -575,7 +575,9 @@ export type BinaryJudgmentSnapshotProbe = z.infer<typeof BinaryJudgmentSnapshotP
 
 export const BinaryJudgmentTruthLabelSchema = z.enum(["CORRECT", "WRONG"]);
 export type BinaryJudgmentTruthLabel = z.infer<typeof BinaryJudgmentTruthLabelSchema>;
-export const BinaryJudgmentStratumSchema = z.enum(["core", "stress"]);
+// §3.1 rule 1: one identifier dialect, not two. Shared with `candidateClass` below.
+const IDENTIFIER_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u;
+export const BinaryJudgmentStratumSchema = NonEmptyStringSchema.regex(IDENTIFIER_NAME);
 export type BinaryJudgmentStratum = z.infer<typeof BinaryJudgmentStratumSchema>;
 
 /** Evaluator-only admitted analysis attributes. This document must never be a Task input. */
@@ -587,7 +589,7 @@ export const BinaryJudgmentAnalysisContextSchema = z.strictObject({
   itemId: BinaryJudgmentItemIdSchema,
   labelResolutionSha256: Sha256DigestSchema,
   truthLabel: BinaryJudgmentTruthLabelSchema,
-  candidateClass: NonEmptyStringSchema.regex(/^[A-Za-z][A-Za-z0-9._-]{0,63}$/u),
+  candidateClass: NonEmptyStringSchema.regex(IDENTIFIER_NAME),
   stratum: BinaryJudgmentStratumSchema,
 });
 export type BinaryJudgmentAnalysisContext = z.infer<typeof BinaryJudgmentAnalysisContextSchema>;

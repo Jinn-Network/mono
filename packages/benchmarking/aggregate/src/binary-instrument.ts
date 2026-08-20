@@ -7,10 +7,12 @@ import {
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const SHA256_URI = /^sha256:[a-f0-9]{64}$/;
+// §3.1 rule 1: one identifier dialect, not two. Shared shape with `candidateClass`.
+const STRATUM_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u;
 
 export type BinaryInstrumentDecision = "ACCEPT" | "REJECT";
 export type BinaryInstrumentTruthLabel = "CORRECT" | "WRONG";
-export type BinaryInstrumentStratum = "core" | "stress";
+export type BinaryInstrumentStratum = string;
 
 /** Evaluator-only item facts. The execution profile must not expose these to the solver. */
 export interface BinaryInstrumentItemContext {
@@ -53,6 +55,8 @@ export interface BinaryInstrumentReductionInput {
   readonly contexts: readonly BinaryInstrumentExpectedContext[];
   readonly instruments: readonly BinaryInstrumentExpectedInstrument[];
   readonly cells: readonly BinaryInstrumentParsedCellInput[];
+  /** The sealed `parameters.strata` declared vocabulary (spec §3.2's membership source). */
+  readonly strata: readonly string[];
 }
 
 export interface BinaryInstrumentReducedCall {
@@ -145,7 +149,11 @@ function requireSha256(value: unknown, label: string): asserts value is string {
   }
 }
 
-function requireContext(context: BinaryInstrumentItemContext, label: string): void {
+function requireContext(
+  context: BinaryInstrumentItemContext,
+  label: string,
+  strata: readonly string[],
+): void {
   if (typeof context !== "object" || context === null) {
     fail("unsupported-vocabulary", `${label} must be an item context`);
   }
@@ -154,8 +162,9 @@ function requireContext(context: BinaryInstrumentItemContext, label: string): vo
   if (context.truthLabel !== "CORRECT" && context.truthLabel !== "WRONG") {
     fail("unsupported-vocabulary", `${label}.truthLabel must be CORRECT or WRONG`);
   }
-  if (context.stratum !== "core" && context.stratum !== "stress") {
-    fail("unsupported-vocabulary", `${label}.stratum must be core or stress`);
+  // §3.2: membership in the sealed `parameters.strata` is enforced exactly once, here.
+  if (typeof context.stratum !== "string" || !strata.includes(context.stratum)) {
+    fail("unsupported-vocabulary", `${label}.stratum is not in the sealed stratum vocabulary`);
   }
   if (typeof context.candidateClass !== "string" || context.candidateClass.trim().length === 0) {
     fail("unsupported-vocabulary", `${label}.candidateClass must be non-empty text`);
@@ -199,7 +208,11 @@ function validateExactSubject(input: BinaryInstrumentReductionInput): void {
   }
 }
 
-function validateParsedCell(input: BinaryInstrumentParsedCellInput, label: string): void {
+function validateParsedCell(
+  input: BinaryInstrumentParsedCellInput,
+  label: string,
+  strata: readonly string[],
+): void {
   if (typeof input !== "object" || input === null) {
     fail("unsupported-vocabulary", `${label} must be a parsed cell input`);
   }
@@ -223,7 +236,7 @@ function validateParsedCell(input: BinaryInstrumentParsedCellInput, label: strin
     fail("unsupported-vocabulary", `${label}.parseValid must be boolean`);
   }
   requireSha256(input.instrumentSha256, `${label}.instrumentSha256`);
-  requireContext(input.context, `${label}.context`);
+  requireContext(input.context, `${label}.context`, strata);
 }
 
 /**
@@ -238,6 +251,13 @@ export function reduceBinaryInstrumentReplicates(
     fail("invalid-k", `k must be an odd positive safe integer; got ${String(input.k)}`);
   }
   if (input.matrix.cells.length === 0) fail("invalid-subject", "Matrix must contain at least one cell");
+  if (
+    !Array.isArray(input.strata)
+    || input.strata.length === 0
+    || input.strata.some((value) => typeof value !== "string" || !STRATUM_NAME.test(value))
+  ) {
+    fail("unsupported-vocabulary", "strata must be the sealed non-empty stratum vocabulary");
+  }
 
   // Check coordinates before schema sealing so the reducer owns a stable duplicate-coordinate
   // failure even when a caller bypasses the records parser at the TypeScript boundary.
@@ -280,7 +300,7 @@ export function reduceBinaryInstrumentReplicates(
   const contexts = new Map<string, BinaryInstrumentItemContext>();
   for (const [index, entry] of input.contexts.entries()) {
     requireSha256(entry.taskDigest, `contexts[${index}].taskDigest`);
-    requireContext(entry.context, `contexts[${index}].context`);
+    requireContext(entry.context, `contexts[${index}].context`, input.strata);
     if (contexts.has(entry.taskDigest)) fail("context-drift", `duplicate context for Task ${entry.taskDigest}`);
     contexts.set(entry.taskDigest, cloneContext(entry.context));
   }
@@ -311,7 +331,7 @@ export function reduceBinaryInstrumentReplicates(
 
   const parsedByCell = new Map<string, BinaryInstrumentParsedCellInput>();
   for (const [index, parsed] of input.cells.entries()) {
-    validateParsedCell(parsed, `cells[${index}]`);
+    validateParsedCell(parsed, `cells[${index}]`, input.strata);
     if (!matrixCellKeys.has(parsed.cellKey)) {
       fail("unknown-cell-input", `parsed input names non-Matrix cell ${parsed.cellKey}`);
     }
