@@ -238,6 +238,51 @@ describe("reduceBinaryInstrumentReplicates", () => {
     expect(result.evaluatedCalls).toHaveLength(8);
   });
 
+  test("excludes the whole item-arm group when one cell is unscorable, and leaves a fully judged sibling group untouched", () => {
+    // spec §5.3: an ungradeable cell excludes its entire item-arm group, with the exact cell
+    // keys listed in the method's exclusions output. There is no partial-k majority.
+    const unscorable = cellKey(TASK_A, "armA", 1);
+    const matrix = matrixFixture({
+      tasks: [TASK_A, TASK_B],
+      arms: ["armA"],
+      overrides: { [unscorable]: { outcome: "unscorable", validVerdicts: [] } },
+    });
+    const result = reduceBinaryInstrumentReplicates(reductionInput(matrix));
+
+    // Load-bearing: TASK_A/armA never reaches a decision. Only the sibling group does.
+    expect(result.items.map((item) => [item.taskDigest, item.armId])).toEqual([[TASK_B, "armA"]]);
+
+    const allThreeCellKeys = [1, 2, 3].map((replicate) => cellKey(TASK_A, "armA", replicate))
+      .sort(compareCodeUnitStrings);
+    expect(result.excluded).toEqual([
+      {
+        taskDigest: TASK_A,
+        armId: "armA",
+        instrumentSha256: INSTRUMENT_A,
+        context: context(TASK_A),
+        cellKeys: allThreeCellKeys,
+        reasons: [{ reason: "cell-not-judged", cellKeys: [unscorable] }],
+      },
+    ]);
+  });
+
+  test("never derives a partial-k majority from an excluded group's surviving cells", () => {
+    // spec §5.3: "There is no partial-k majority" — the two surviving cells here are both
+    // decisive ACCEPTs, which a reducer that weakened k on exclusion would report as a 2-0
+    // ACCEPT item decision. This must never happen.
+    const unscorable = cellKey(TASK_A, "armA", 1);
+    const matrix = matrixFixture({
+      tasks: [TASK_A],
+      arms: ["armA"],
+      overrides: { [unscorable]: { outcome: "unscorable", validVerdicts: [] } },
+    });
+    const result = reduceBinaryInstrumentReplicates(reductionInput(matrix));
+
+    const survivingAccepts = result.evaluatedCalls.filter((call) => call.judgeDecision === "ACCEPT");
+    expect(survivingAccepts).toHaveLength(2);
+    expect(result.items).toEqual([]);
+  });
+
   test("does not turn replacement dispatches into extra scientific observations", () => {
     const replaced = cellKey(TASK_A, "armA", 2);
     const matrix = matrixFixture({ tasks: [TASK_A], arms: ["armA"], overrides: { [replaced]: { dispatches: 3 } } });

@@ -348,6 +348,14 @@ export const BundleAssemblyHeaderSchema = z.object({
       evalDeliverySha256: Sha256HexSchema.optional(),
       verdictSha256: Sha256HexSchema.optional(),
       evaluationTerminal: z.literal("could-not-grade").optional(),
+      /** The operational category that terminalized this leg as could-not-grade. Present only
+       * on a could-not-grade terminal whose journal entry recorded one, which today is the
+       * infrastructure failure that exhausted the sealed retry budget. Without it the accounted
+       * ungradeable cell reaches the bundle as an uncategorized absence: `evaluationRetries`
+       * carries the category of every failure that WAS retried, and the terminal one is the
+       * only failure in the leg that has no retry row to carry it. Additive and optional, so
+       * every bundle that carried no such terminal seals to identical bytes. */
+      failureCategory: z.enum(TASK_EXECUTION_ERROR_CATEGORIES).optional(),
     })),
     evaluationRetries: z.array(z.object({
       cellKey: z.string().min(1),

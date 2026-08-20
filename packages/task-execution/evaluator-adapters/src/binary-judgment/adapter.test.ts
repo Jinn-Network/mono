@@ -52,6 +52,7 @@ import {
   BINARY_JUDGMENT_LABEL_RESOLUTION_NAME,
   BINARY_JUDGMENT_MEASUREMENTS,
   binaryJudgmentEvaluationMethodDescriptor,
+  binaryJudgmentEvaluationSpecVerdictRule,
   buildBinaryJudgmentEvaluationSpecification,
   contextBinaryJudgmentMaterialSource,
   createBinaryJudgmentEvaluatorAdapter,
@@ -279,6 +280,18 @@ async function evaluate(fixture: Fixture, signal = new AbortController().signal)
     fixture.context,
     ATTEMPT,
     signal,
+  );
+}
+
+/** Recursively checks the real returned verdict-rule value for an `inconclusiveWhen` node at any
+ * nesting depth, rather than asserting against a hand-authored shape. */
+function containsInconclusiveWhen(rule: unknown): boolean {
+  if (typeof rule !== "object" || rule === null) return false;
+  if ("inconclusiveWhen" in rule) return true;
+  return Object.values(rule).some((value) =>
+    Array.isArray(value)
+      ? value.some((entry) => containsInconclusiveWhen(entry))
+      : containsInconclusiveWhen(value)
   );
 }
 
@@ -540,6 +553,14 @@ describe("binary judgment evaluator", () => {
     expect(isBinaryJudgmentEvaluationSpecification(fixture.specification)).toBe(true);
     expect(() => buildBinaryJudgmentEvaluationSpecification("sha256:short"))
       .toThrow("binary judgment analysis context must be a canonical sha256 digest");
+  });
+
+  test("declares no unscorable classes and no inconclusiveWhen predicate", () => {
+    // spec §5.1: EvaluationSpec.unscorable stays [], byte-unchanged; binary judgment declares
+    // no inconclusiveWhen and never delivers "inconclusive".
+    const fixture = makeFixture({ truthLabel: "CORRECT", response: encoder.encode("ACCEPT") });
+    expect(fixture.specification.unscorable).toEqual([]);
+    expect(containsInconclusiveWhen(binaryJudgmentEvaluationSpecVerdictRule())).toBe(false);
   });
 
   test.each([

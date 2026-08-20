@@ -21,7 +21,7 @@ import {
   driveEvaluationCatchUp,
   type ProxiedBackend,
 } from "./drive.js";
-import { readRunJournalEntries } from "./journal.js";
+import { evaluationGaps, foldRunJournal, readRunJournalEntries } from "./journal.js";
 import { requireWorkspaceAuthorship } from "./publication-authority.js";
 import { EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "../venue/venue.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
@@ -699,6 +699,65 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
     expect(evaluationEntry).toMatchObject({ evaluationTerminal: "could-not-grade", detail: "no evaluation-harness deployment", evalTaskSha256: sha256Hex(new Uint8Array([9])) });
   });
 
+  test("a non-retryable evaluation failure (the integrity split, spec §5.2) never retries even with budget available", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const solveDeliveryDigestHex = "d".repeat(64);
+    const predictionArtifactHex = "e".repeat(64);
+    const backend = makeFakeBackend({
+      deliveriesByAttempt: { "att-solve-1": [fakeDeliveryRef("att-solve-1", solveDeliveryDigestHex)] },
+      deliveryBytesByDigest: { [`sha256:${solveDeliveryDigestHex}`]: utf8({ outputs: [{ name: "prediction", digest: { sha256: predictionArtifactHex } }] }) },
+      artifactBytesByDigest: { [predictionArtifactHex]: utf8({ probabilityYes: "0.5" }) },
+      // "content-corruption" is outside RETRYABLE_EVALUATION_CATEGORY_VALUES (drive.ts) — an
+      // integrity failure, not an infrastructure outage.
+      submitResult: {
+        accepted: false,
+        error: new TaskExecutionError("content-corruption", { detail: "subject digest mismatch" }),
+      },
+    });
+    const events: CellStatusEvent[] = [
+      { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
+    ];
+    await driveCellEvents(
+      {
+        workspaceDir,
+        draftId: "draft-1",
+        venue: fakeVenue({ taskBytes: new Uint8Array([9]), taskSha256: "9".repeat(64) }),
+        backend,
+        runSha256: "r".repeat(64),
+        owner: "urn:uuid:owner",
+        cellWindowMs: 3_600_000,
+        minVerdicts: 1,
+        // The retry budget is available — the point is it goes demonstrably unspent (§5.2: "an
+        // integrity failure that gets a retry is an integrity failure that gets a second chance
+        // to pass, which defeats the check").
+        maxInfrastructureRetries: 1 as const,
+        liveClock: clock,
+      },
+      (async function* () { for (const event of events) yield event; })(),
+    );
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries.filter((entry) => entry.kind === "evaluation-retryable-failure")).toHaveLength(0);
+    const evaluationEntries = entries.filter((entry) => entry.kind === "evaluation");
+    expect(evaluationEntries).toHaveLength(1);
+    expect(evaluationEntries[0]).toMatchObject({
+      cellKey,
+      evaluationTerminal: "could-not-grade",
+      detail: "subject digest mismatch",
+    });
+    // Observed spec-vs-code divergence (report, don't fix): §5.2 says a do-not-retry terminal is
+    // "could-not-grade with failureCategory recorded". journalCouldNotGrade only ever sets
+    // failureCategory from a RETRYABLE failure's own category (journalEvaluationFailure's
+    // `retryable` branch); a category outside the retryable three carries no `retryable` value at
+    // all, so failureCategory is absent here, not recorded.
+    expect(evaluationEntries[0] && "failureCategory" in evaluationEntries[0]).toBe(false);
+
+    // The leg is closed: nothing will re-attempt it, even though the retry budget was never spent.
+    expect(evaluationGaps(foldRunJournal(entries), 1, 1)).toEqual([]);
+  });
+
   test("evaluation attempt reaches a non-delivered terminal -> could-not-grade naming the state", async () => {
     const clock = makeClock();
     const { taskSha256 } = storeSubjectTaskAndSpec();
@@ -1055,6 +1114,63 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
     expect(entries[0]).toMatchObject({ cellKey, evaluator: evaluatorIri(2), evalIndex: 2 });
   });
 
+  test("the same retryable failure terminalizes immediately at attempt 1 when maxInfrastructureRetries is 0 (the pin is load-bearing, spec §5.3's control)", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const solveDeliveryBytes = utf8({ outputs: [{ name: "prediction", digest: { sha256: "e".repeat(64) } }] });
+    const deliverySha256 = putSealedBytes(workspaceDir, solveDeliveryBytes);
+    const predictionBytes = utf8({ probabilityYes: "0.5" });
+    const predictionSha256 = putSealedBytes(workspaceDir, predictionBytes);
+    const backend = makeFakeBackend({
+      submitResult: {
+        accepted: false,
+        error: new TaskExecutionError("dependency-unavailable", {
+          detail: "pinned image provider unavailable",
+        }),
+      },
+    });
+    const preparedTaskBytes = new Uint8Array([4, 5]);
+    const venue = fakeVenue({ taskBytes: preparedTaskBytes, taskSha256: sha256Hex(preparedTaskBytes) });
+    const deps = {
+      workspaceDir,
+      draftId: "draft-1",
+      venue,
+      backend,
+      runSha256: "r".repeat(64),
+      owner: "urn:uuid:owner",
+      cellWindowMs: 3_600_000,
+      minVerdicts: 1,
+      // No maxInfrastructureRetries — the unpinned default (0). Everything else below — the
+      // cell, the category, the detail, the backend script — is identical to the retry test
+      // right after this one; the pinned value is the ONLY difference, which is what proves the
+      // pin is load-bearing (§5.3) rather than cosmetic.
+      liveClock: clock,
+    };
+    const gap = {
+      cellKey,
+      lastDispatch: 1,
+      deliverySha256,
+      deliveryOutputs: [{ name: "prediction", sha256: predictionSha256 }],
+      missingEvalIndexes: [1],
+    };
+
+    await driveEvaluationCatchUp(deps, [gap]);
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries.some((entry) => entry.kind === "evaluation-retryable-failure")).toBe(false);
+    expect(entries).toEqual([
+      expect.objectContaining({
+        kind: "evaluation",
+        cellKey,
+        evaluationTerminal: "could-not-grade",
+        failureCategory: "dependency-unavailable",
+      }),
+    ]);
+    // evaluationAttempt is only journaled when > 1 — this terminalized on attempt 1.
+    expect(entries[0] && "evaluationAttempt" in entries[0]).toBe(false);
+  });
+
   test("a typed provider outage retries the same derived Task once without re-running solve", async () => {
     const clock = makeClock();
     const { taskSha256 } = storeSubjectTaskAndSpec();
@@ -1145,5 +1261,70 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
       evaluationAttempt: 2,
       verdictSha256: sha256Hex(utf8({ envelope: true })),
     });
+  });
+
+  test("a second retryable failure on the same leg terminalizes as could-not-grade at attempt 2, closing the leg (spec §5.3's far end)", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const solveDeliveryDigestHex = "d".repeat(64);
+    const predictionArtifactHex = "e".repeat(64);
+    const solveDeliveryBytes = utf8({ outputs: [{ name: "prediction", digest: { sha256: predictionArtifactHex } }] });
+    const predictionBytes = utf8({ probabilityYes: "0.5" });
+    const backend = makeFakeBackend({
+      deliveriesByAttempt: { "att-solve-1": [fakeDeliveryRef("att-solve-1", solveDeliveryDigestHex)] },
+      deliveryBytesByDigest: { [`sha256:${solveDeliveryDigestHex}`]: solveDeliveryBytes },
+      artifactBytesByDigest: { [predictionArtifactHex]: predictionBytes },
+      // Every submit rejects the same way — unlike the retry test above, the outage never clears.
+      submitResult: {
+        accepted: false,
+        error: new TaskExecutionError("dependency-unavailable", { detail: "pinned image provider unavailable" }),
+      },
+    });
+    const deps = {
+      workspaceDir,
+      draftId: "draft-1",
+      venue: fakeVenue({ taskBytes: new Uint8Array([9]), taskSha256: "9".repeat(64) }),
+      backend,
+      runSha256: "r".repeat(64),
+      owner: "urn:uuid:owner",
+      cellWindowMs: 3_600_000,
+      minVerdicts: 1,
+      maxInfrastructureRetries: 1 as const,
+      liveClock: clock,
+    };
+    const events: CellStatusEvent[] = [
+      { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
+    ];
+
+    // Attempt 1 (via a real delivered cell-event, so the fold's status is genuinely "delivered"
+    // rather than trivially skipped by evaluationGaps's status filter below) spends the single
+    // allowed retry.
+    await driveCellEvents(deps, (async function* () { for (const event of events) yield event; })());
+    expect(readRunJournalEntries(workspaceDir, "draft-1").filter((entry) => entry.kind === "evaluation-retryable-failure"))
+      .toHaveLength(1);
+
+    // Attempt 2, resumed exactly as a crash-safe catch-up would run it, also fails.
+    await driveEvaluationCatchUp(deps, [{
+      cellKey,
+      lastDispatch: 1,
+      deliverySha256: sha256Hex(solveDeliveryBytes),
+      deliveryOutputs: [{ name: "prediction", sha256: sha256Hex(predictionBytes) }],
+      missingEvalIndexes: [1],
+      nextEvaluationAttempts: { 1: 2 },
+    }]);
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    const evaluationEntries = entries.filter((entry) => entry.kind === "evaluation");
+    expect(evaluationEntries).toHaveLength(1);
+    expect(evaluationEntries[0]).toMatchObject({
+      cellKey,
+      evaluationTerminal: "could-not-grade",
+      evaluationAttempt: 2,
+      failureCategory: "dependency-unavailable",
+    });
+
+    // The accounted unscorable cell: no third attempt is offered.
+    expect(evaluationGaps(foldRunJournal(entries), deps.minVerdicts, 1)).toEqual([]);
   });
 });
