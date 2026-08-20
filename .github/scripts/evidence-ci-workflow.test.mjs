@@ -281,7 +281,7 @@ function assertUniqueYamlKeys(keys, context) {
 
 function setupNodeVersionForStep(step) {
   const fields = parseStepFields(step);
-  if (fields.uses !== "actions/setup-node@v4") return undefined;
+  if (fields.uses !== "actions/setup-node@v7") return undefined;
   return fields.with["node-version"];
 }
 
@@ -299,7 +299,7 @@ function stepUsesCheckout(step) {
 }
 
 function stepUsesSetupNode(step) {
-  return step.lines.some((line) => line.includes("uses: actions/setup-node@v4"));
+  return step.lines.some((line) => line.includes("uses: actions/setup-node@v7"));
 }
 
 export function validateEvidenceCiWorkflow(source) {
@@ -491,7 +491,7 @@ test('mutation: anonymous pack:smoke inserted before npm pin in trace job fails'
 
 test('mutation: remove setup-node from trace job fails', () => {
   const mutant = workflow.replace(
-    /(  trace:[\s\S]*?      - uses: actions\/checkout@v4\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
+    /(  trace:[\s\S]*?      - uses: actions\/checkout@v4\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
     '$1',
   );
   expectValidationFailure(mutant, /trace must have exactly one setup-node step \(found 0\)/);
@@ -499,8 +499,8 @@ test('mutation: remove setup-node from trace job fails', () => {
 
 test('mutation: duplicate setup-node in architecture job fails', () => {
   const mutant = workflow.replace(
-    /(  architecture:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
-    '$1      - uses: actions/setup-node@v4\n        with:\n          node-version: 22.23.1\n',
+    /(  architecture:[\s\S]*?      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
+    '$1      - uses: actions/setup-node@v7\n        with:\n          node-version: 22.23.1\n',
   );
   expectValidationFailure(
     mutant,
@@ -510,8 +510,8 @@ test('mutation: duplicate setup-node in architecture job fails', () => {
 
 test('mutation: setup-node before checkout in trace job fails', () => {
   const mutant = workflow.replace(
-    /(  trace:[\s\S]*?steps:\n)(      - uses: actions\/checkout@v4\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
-    '$1      - uses: actions/setup-node@v4\n        with:\n          node-version: 22.23.1\n$2',
+    /(  trace:[\s\S]*?steps:\n)(      - uses: actions\/checkout@v4\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
+    '$1      - uses: actions/setup-node@v7\n        with:\n          node-version: 22.23.1\n$2',
   );
   expectValidationFailure(mutant, /trace checkout must precede setup-node/);
 });
@@ -543,7 +543,7 @@ test('mutation: wrong setup-node version in foundation job fails', () => {
 test('mutation: bare setup-node with decoy node-version in later step fails', () => {
   const mutant = workflow
     .replace(
-      /(  trace:[\s\S]*?      - uses: actions\/setup-node@v4\n)(        with:\n          node-version: 22\.23\.1\n)/,
+      /(  trace:[\s\S]*?      - uses: actions\/setup-node@v7\n)(        with:\n          node-version: 22\.23\.1\n)/,
       '$1',
     )
     .replace(
@@ -561,7 +561,7 @@ test('mutation: job-level node-version decoy fails', () => {
     /(  trace:\n    name: Evidence Trace\n    needs: \[foundation\]\n    runs-on: ubuntu-latest\n)/,
     '$1    env:\n      node-version: 22.23.1\n',
   ).replace(
-    /(  trace:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: )22\.23\.1/,
+    /(  trace:[\s\S]*?      - uses: actions\/setup-node@v7\n        with:\n          node-version: )22\.23\.1/,
     '$122.0.0',
   );
   expectValidationFailure(
@@ -572,7 +572,7 @@ test('mutation: job-level node-version decoy fails', () => {
 
 test('mutation: setup-node without with block fails', () => {
   const mutant = workflow.replace(
-    /(  architecture:[\s\S]*?      - uses: actions\/setup-node@v4\n)(        with:\n          node-version: 22\.23\.1\n)/,
+    /(  architecture:[\s\S]*?      - uses: actions\/setup-node@v7\n)(        with:\n          node-version: 22\.23\.1\n)/,
     '$1',
   );
   expectValidationFailure(
@@ -583,7 +583,7 @@ test('mutation: setup-node without with block fails', () => {
 
 test('mutation: wrong-indentation node-version outside setup with fails', () => {
   const mutant = workflow.replace(
-    /(  foundation:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n)          node-version: 22\.23\.1\n/,
+    /(  foundation:[\s\S]*?      - uses: actions\/setup-node@v7\n        with:\n)          node-version: 22\.23\.1\n/,
     '$1        node-version: 22.23.1\n',
   );
   expectValidationFailure(
@@ -594,8 +594,8 @@ test('mutation: wrong-indentation node-version outside setup with fails', () => 
 
 test('mutation: duplicate uses in trace setup step fails', () => {
   const mutant = workflow.replace(
-    /(  trace:[\s\S]*?      - uses: actions\/setup-node@v4\n)(        with:\n          node-version: 22\.23\.1\n)/,
-    '$1        uses: actions/setup-node@v4\n$2',
+    /(  trace:[\s\S]*?      - uses: actions\/setup-node@v7\n)(        with:\n          node-version: 22\.23\.1\n)/,
+    '$1        uses: actions/setup-node@v7\n$2',
   );
   expectValidationFailure(mutant, /duplicate YAML mapping key "uses"/);
 });
@@ -610,7 +610,7 @@ test('mutation: duplicate run in trace npm step fails', () => {
 
 test('mutation: duplicate node-version in setup with block fails', () => {
   const mutant = workflow.replace(
-    /(  foundation:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
+    /(  foundation:[\s\S]*?      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
     '$1          node-version: 22.23.1\n',
   );
   expectValidationFailure(mutant, /duplicate YAML mapping key "node-version"/);
@@ -631,8 +631,8 @@ test('mutation: duplicate indented step name inside npm step fails', () => {
 
 test('mutation: duplicate indented uses inside setup step fails', () => {
   const mutant = workflow.replace(
-    /(  trace:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
-    '$1        uses: actions/setup-node@v4\n',
+    /(  trace:[\s\S]*?      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
+    '$1        uses: actions/setup-node@v7\n',
   );
   expectValidationFailure(mutant, /duplicate YAML mapping key "uses"/);
 });
