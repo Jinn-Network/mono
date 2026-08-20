@@ -7,7 +7,11 @@ import { fileURLToPath } from "node:url";
 import { parserAllowlistKey } from "@jinn-network/task-execution-profiles";
 import { describe, expect, test } from "vitest";
 import {
+  BINARY_CORRECT_WRONG_PARSER,
+  BINARY_JSON_VERDICT_PARSER,
   BINARY_JUDGMENT_PARSER,
+  BINARY_LABEL_IN_PROSE_PARSER,
+  BINARY_YES_NO_PARSER,
   evaluatorAdaptersParserAllowlist,
   PREDICTION_PARSER,
   SWE_REBENCH_PARSER,
@@ -41,10 +45,40 @@ describe("parser identities", () => {
     );
   });
 
-  test("the deployment allowlist carries exactly the three parser keys", () => {
+  test.each([
+    ["BINARY_YES_NO_PARSER", () => BINARY_YES_NO_PARSER, "BINARY_YES_NO_PARSER_IDENTITY"],
+    [
+      "BINARY_CORRECT_WRONG_PARSER",
+      () => BINARY_CORRECT_WRONG_PARSER,
+      "BINARY_CORRECT_WRONG_PARSER_IDENTITY",
+    ],
+    [
+      "BINARY_JSON_VERDICT_PARSER",
+      () => BINARY_JSON_VERDICT_PARSER,
+      "BINARY_JSON_VERDICT_PARSER_IDENTITY",
+    ],
+    [
+      "BINARY_LABEL_IN_PROSE_PARSER",
+      () => BINARY_LABEL_IN_PROSE_PARSER,
+      "BINARY_LABEL_IN_PROSE_PARSER_IDENTITY",
+    ],
+  ] as const)(
+    "%s is the profiles-owned oracle for its registered identity",
+    async (_label, actual, oracleExportName) => {
+      const profiles = await import("@jinn-network/task-execution-profiles");
+      const oracle = (profiles as Record<string, unknown>)[oracleExportName];
+      expect(actual()).toEqual(oracle);
+    },
+  );
+
+  test("the deployment allowlist carries exactly the seven parser keys", () => {
     expect([...evaluatorAdaptersParserAllowlist()].sort()).toEqual(
       [
         parserAllowlistKey(BINARY_JUDGMENT_PARSER),
+        parserAllowlistKey(BINARY_YES_NO_PARSER),
+        parserAllowlistKey(BINARY_CORRECT_WRONG_PARSER),
+        parserAllowlistKey(BINARY_JSON_VERDICT_PARSER),
+        parserAllowlistKey(BINARY_LABEL_IN_PROSE_PARSER),
         parserAllowlistKey(PREDICTION_PARSER),
         parserAllowlistKey(SWE_REBENCH_PARSER),
       ].sort(),
@@ -57,6 +91,18 @@ describe("parser identities", () => {
         parserAllowlistKey({
           id: "network.jinn.parser.swe-rebench-v2",
           version: "1.0.0",
+          digest: `sha256:${"0".repeat(64)}`,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  test("a registered id with the wrong digest is not allowlisted", () => {
+    expect(
+      evaluatorAdaptersParserAllowlist().has(
+        parserAllowlistKey({
+          id: BINARY_YES_NO_PARSER.id,
+          version: BINARY_YES_NO_PARSER.version,
           digest: `sha256:${"0".repeat(64)}`,
         }),
       ),

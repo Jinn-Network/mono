@@ -57,7 +57,7 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import {
-  parseBinaryJudgmentResponse,
+  selectBinaryJudgmentResponseParser,
   type BinaryJudgmentDecision,
   type BinaryJudgmentResponseParse,
 } from "./parse.js";
@@ -535,7 +535,9 @@ function requireJoinedInputs(options: {
   return {
     payload,
     observation,
-    responseParse: parseBinaryJudgmentResponse(options.results.response.bytes),
+    responseParse: selectBinaryJudgmentResponseParser(
+      options.inputs.instrument.response.parser.id,
+    )(options.results.response.bytes),
   };
 }
 

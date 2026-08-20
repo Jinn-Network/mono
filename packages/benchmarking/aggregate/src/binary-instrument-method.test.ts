@@ -33,7 +33,24 @@ const TASK_PROFILE_URI = "https://spec.jinn.network/task-profiles/binary-judgmen
 const OLD_TASK_PROFILE_DIGEST = "sha256:40f43e4ab9942f310da716e28ba2c1b8731fdf3c3837bb821573d4d8a0ec259d" as const;
 const OLD_TASK_PROFILE_URI = "https://spec.jinn.network/task-profiles/binary-judgment/1.0" as const;
 const RESPONSE_PARSER_DIGEST = "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073" as const;
-const EVALUATION_METHOD_DIGEST = "sha256:41b36eaffbac8c78133afd2075ec32fd73ed324395fe281dee525db17653937f" as const;
+// A second registered response parser, used to prove the method accepts registry membership
+// rather than one pinned identity.
+const YES_NO_PARSER_ID = "network.jinn.parser.binary-yes-no" as const;
+const YES_NO_PARSER_VERSION = "1.0.0" as const;
+const YES_NO_PARSER_DIGEST = "sha256:1b99469a195fee154c27d0c3b219da7778e1b8f4210bd773350d107c459b7949" as const;
+// The remaining three registered response-parser contracts, used to prove the replay oracle mirrors
+// each contract's own alphabet rather than one hardcoded shape.
+const ACCEPT_REJECT_PARSER_ID = "network.jinn.parser.binary-accept-reject" as const;
+const CORRECT_WRONG_PARSER_ID = "network.jinn.parser.binary-correct-wrong" as const;
+const CORRECT_WRONG_PARSER_VERSION = "1.0.0" as const;
+const CORRECT_WRONG_PARSER_DIGEST = "sha256:2dd7e73c9ee063edb00fe7859821eee1122b483d4bd70568aebb046a6983ac4c" as const;
+const JSON_VERDICT_PARSER_ID = "network.jinn.parser.binary-json-verdict" as const;
+const JSON_VERDICT_PARSER_VERSION = "1.0.0" as const;
+const JSON_VERDICT_PARSER_DIGEST = "sha256:543a71887f3ae95b0aede4513af3fdeadfc706c7a86f93452e3272d7ccdd2201" as const;
+const LABEL_IN_PROSE_PARSER_ID = "network.jinn.parser.binary-label-in-prose" as const;
+const LABEL_IN_PROSE_PARSER_VERSION = "1.0.0" as const;
+const LABEL_IN_PROSE_PARSER_DIGEST = "sha256:d53d23afc8734090c8d54c39de8105ead37c3ecad0cf0f454e97a535e5937f10" as const;
+const EVALUATION_METHOD_DIGEST = "sha256:5a2c2d2f01c9154bb7000f3c3183d1fc27e9e9a1571445f248b56fa25f45ef0a" as const;
 const RUN_OWNER = "urn:uuid:77777777-7777-5777-8777-777777777777";
 const RESPONSE_MEDIA_TYPE = "text/plain; charset=utf-8";
 const OBSERVATION_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.observation.v1+json";
@@ -168,7 +185,49 @@ function sourceDescriptor(seed: string) {
   };
 }
 
-function makeInstrument(armId: string, parserDigest: `sha256:${string}`, modelId: string = "gpt-5.6-luna") {
+/**
+ * Encodes the response bytes a given registered response-parser contract would actually produce
+ * for a decision, mirroring each contract's own alphabet rather than the bare ACCEPT/REJECT token
+ * every fixture used to emit regardless of which parser identity the instrument selected. Each
+ * invalid encoding is checked against its contract's own parse rule before use here: whole-token
+ * contracts reject any string other than their two tokens, the JSON-verdict contract rejects a
+ * `verdict` value outside its two tokens, and the label-in-prose contract requires exactly one of
+ * its two tokens to appear as a delimited word.
+ */
+function encodeParserResponse(
+  parserId: string,
+  decision: "ACCEPT" | "REJECT",
+  parseValid: boolean,
+): string {
+  switch (parserId) {
+    case CORRECT_WRONG_PARSER_ID:
+      if (!parseValid) return "MAYBE";
+      return decision === "ACCEPT" ? "CORRECT" : "WRONG";
+    case JSON_VERDICT_PARSER_ID:
+      return JSON.stringify({ verdict: parseValid ? decision : "MAYBE" });
+    case LABEL_IN_PROSE_PARSER_ID:
+      if (!parseValid) {
+        return "The reviewer weighed the candidate against the reference and moved on to the next item.";
+      }
+      return decision === "ACCEPT"
+        ? "The reviewer weighed the candidate against the reference and settled on ACCEPT."
+        : "The reviewer weighed the candidate against the reference and settled on REJECT.";
+    case YES_NO_PARSER_ID:
+      if (!parseValid) return "MAYBE";
+      return decision === "ACCEPT" ? "YES" : "NO";
+    case ACCEPT_REJECT_PARSER_ID:
+    default:
+      return parseValid ? decision : "MAYBE";
+  }
+}
+
+function makeInstrument(
+  armId: string,
+  parserDigest: `sha256:${string}`,
+  modelId: string = "gpt-5.6-luna",
+  parserId: string = "network.jinn.parser.binary-accept-reject",
+  parserVersion: string = "1.0.0",
+) {
   const messages = [
     {
       role: "developer",
@@ -199,8 +258,8 @@ function makeInstrument(armId: string, parserDigest: `sha256:${string}`, modelId
     response: {
       mediaType: RESPONSE_MEDIA_TYPE,
       parser: {
-        id: "network.jinn.parser.binary-accept-reject",
-        version: "1.0.0",
+        id: parserId,
+        version: parserVersion,
         digest: parserDigest,
       },
       invalidOutputDecision: "REJECT",
@@ -318,6 +377,13 @@ function makeFixture(options: {
   readonly taskProfileDigest?: `sha256:${string}`;
   readonly taskProfileUri?: string;
   readonly responseParserDigest?: `sha256:${string}`;
+  readonly responseParserId?: string;
+  readonly responseParserVersion?: string;
+  // Overrides only the alphabet used to encode cell response bytes, independent of the parser
+  // identity the instrument declares. Defaults to responseParserId, so every other fixture keeps
+  // its instrument and its response bytes speaking the same alphabet; only the negative replay
+  // test deliberately pulls them apart.
+  readonly responseBytesParserId?: string;
   readonly evaluationParserDigest?: `sha256:${string}`;
   readonly extraRunArm?: boolean;
   readonly extraTestMaterial?: boolean;
@@ -345,6 +411,8 @@ function makeFixture(options: {
   const truthAdmission = options.truthAdmission ?? "two-human-unanimous";
   const labelTruthAdmission = options.labelTruthAdmission ?? truthAdmission;
   const parameters = { ...PARAMETERS, truthAdmission };
+  const instrumentParserId = options.responseParserId ?? ACCEPT_REJECT_PARSER_ID;
+  const responseBytesParserId = options.responseBytesParserId ?? instrumentParserId;
   const records = new Map<string, Uint8Array>();
   const put = (bytes: Uint8Array): `sha256:${string}` => {
     const digest = recordDigest(bytes) as `sha256:${string}`;
@@ -355,7 +423,13 @@ function makeFixture(options: {
   const instruments = new Map<string, `sha256:${string}`>();
   const instrumentDocuments = new Map<string, ReturnType<typeof makeInstrument>>();
   for (const armId of options.extraRunArm === true ? [...matrixArmIds, "armExtra"] : matrixArmIds) {
-    let document = makeInstrument(armId, options.responseParserDigest ?? RESPONSE_PARSER_DIGEST, options.judgeModel);
+    let document = makeInstrument(
+      armId,
+      options.responseParserDigest ?? RESPONSE_PARSER_DIGEST,
+      options.judgeModel,
+      options.responseParserId,
+      options.responseParserVersion,
+    );
     if (options.undeclaredModelArm === armId) {
       document = { ...document, model: { ...document.model, requested: "gpt-9-undeclared" } };
     }
@@ -552,10 +626,11 @@ function makeFixture(options: {
       const key = cellKey(item.taskDigest, armId, replicate);
       const expired = key === options.expireCell;
       const [decision, parseValid] = decisions.get(`${item.taskDigest}/${armId}`)![offset]!;
+      const responseText = encodeParserResponse(responseBytesParserId, decision, parseValid);
       const responseBytes = new TextEncoder().encode(
         options.tamper?.cellKey === key && options.tamper.kind === "response-bom"
-          ? `\ufeff${decision}`
-          : parseValid ? decision : "MAYBE",
+          ? `\ufeff${responseText}`
+          : responseText,
       );
       const responseSha256 = put(responseBytes);
       const instrument = instrumentDocuments.get(armId)!;
@@ -790,6 +865,42 @@ describe("binary-instrument@1 qualification oracle", () => {
     expect(result.configuration.truthAdmission).toBe("operator-only");
     expect(result.itemDecisions).toHaveLength(8);
   });
+
+  test.each([
+    {
+      name: "yes-no",
+      responseParserId: YES_NO_PARSER_ID,
+      responseParserVersion: YES_NO_PARSER_VERSION,
+      responseParserDigest: YES_NO_PARSER_DIGEST,
+    },
+    {
+      name: "correct-wrong",
+      responseParserId: CORRECT_WRONG_PARSER_ID,
+      responseParserVersion: CORRECT_WRONG_PARSER_VERSION,
+      responseParserDigest: CORRECT_WRONG_PARSER_DIGEST,
+    },
+    {
+      name: "json-verdict",
+      responseParserId: JSON_VERDICT_PARSER_ID,
+      responseParserVersion: JSON_VERDICT_PARSER_VERSION,
+      responseParserDigest: JSON_VERDICT_PARSER_DIGEST,
+    },
+    {
+      name: "label-in-prose",
+      responseParserId: LABEL_IN_PROSE_PARSER_ID,
+      responseParserVersion: LABEL_IN_PROSE_PARSER_VERSION,
+      responseParserDigest: LABEL_IN_PROSE_PARSER_DIGEST,
+    },
+  ])(
+    "accepts an instrument naming a different registered response parser, replayed against that parser's own alphabet ($name)",
+    ({ responseParserId, responseParserVersion, responseParserDigest }) => {
+      const fixture = makeFixture({ responseParserId, responseParserVersion, responseParserDigest });
+      const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+      const result = method.compute!(fixture.input).perSubject[0]!.results as any;
+
+      expect(result.itemDecisions).toHaveLength(8);
+    },
+  );
 });
 
 describe("binary-instrument@1 tamper refusals", () => {
@@ -799,8 +910,28 @@ describe("binary-instrument@1 tamper refusals", () => {
     { evaluationParserDigest: `sha256:${"f".repeat(64)}` as const },
     { taskProfileDigest: OLD_TASK_PROFILE_DIGEST },
     { taskProfileUri: OLD_TASK_PROFILE_URI },
+    { responseParserVersion: "2.0.0" },
+    { responseParserId: "network.jinn.parser.binary-unregistered" },
+    {
+      responseParserId: YES_NO_PARSER_ID,
+      responseParserVersion: YES_NO_PARSER_VERSION,
+      responseParserDigest: RESPONSE_PARSER_DIGEST,
+    },
   ])("rejects drift from frozen profile and parser semantics: %o", (drift) => {
     const fixture = makeFixture(drift);
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    expect(() => method.compute!(fixture.input)).toThrow(expect.objectContaining({
+      code: "binary-binding-mismatch",
+    }));
+  });
+
+  test("refuses a yes-no instrument whose cells replay a different registered parser's response bytes", () => {
+    const fixture = makeFixture({
+      responseParserId: YES_NO_PARSER_ID,
+      responseParserVersion: YES_NO_PARSER_VERSION,
+      responseParserDigest: YES_NO_PARSER_DIGEST,
+      responseBytesParserId: ACCEPT_REJECT_PARSER_ID,
+    });
     const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
     expect(() => method.compute!(fixture.input)).toThrow(expect.objectContaining({
       code: "binary-binding-mismatch",

@@ -14,6 +14,7 @@ import {
 } from "@jinn-network/task-execution-evaluation-harness";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_YES_NO_PARSER_IDENTITY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
   BINARY_JUDGMENT_EVALUATION_CONTEXT_FORMAT_URI,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
@@ -100,7 +101,9 @@ function inline(bytes: Uint8Array) {
   };
 }
 
-function makeInstrument(): BinaryJudgmentInstrument {
+function makeInstrument(
+  parser: BinaryJudgmentInstrument["response"]["parser"] = BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+): BinaryJudgmentInstrument {
   const messages = [{
     role: "developer" as const,
     segments: [
@@ -110,7 +113,7 @@ function makeInstrument(): BinaryJudgmentInstrument {
       { field: "referenceAnswer" as const },
       { literal: "\nCandidate: " },
       { field: "candidateAnswer" as const },
-      { literal: "\nReturn ACCEPT or REJECT." },
+      { literal: "\nReturn a verdict." },
     ],
   }];
   const source = { uri: "https://example.test/prompt", digest: { sha256: "1".repeat(64) } };
@@ -142,7 +145,7 @@ function makeInstrument(): BinaryJudgmentInstrument {
     },
     response: {
       mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
-      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      parser,
       invalidOutputDecision: "REJECT",
     },
   };
@@ -162,6 +165,7 @@ function makeFixture(options: {
   readonly stratum?: "core" | "stress";
   readonly taskInstrumentPin?: boolean;
   readonly evidence?: string;
+  readonly parser?: BinaryJudgmentInstrument["response"]["parser"];
 }): Fixture {
   const candidateClass = options.candidateClass ?? "factual";
   const stratum = options.stratum ?? "core";
@@ -175,7 +179,7 @@ function makeFixture(options: {
     sources: [{ digest: { sha256: "4".repeat(64) } }],
   };
   const itemSha256 = recordDigest(canonicalJsonBytes(payload));
-  const instrument = makeInstrument();
+  const instrument = makeInstrument(options.parser);
   const sealedInstrument = sealBinaryJudgmentInstrument(instrument);
   const labelResolution = sealBinaryJudgmentLabelResolution({
     protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
@@ -449,6 +453,35 @@ describe("binary judgment evaluator", () => {
       expect(() => validateBinaryJudgmentCompletedEvaluation(completed)).not.toThrow();
     },
   );
+
+  test("the adapter honours the instrument's selected response parser", async () => {
+    // Same response bytes ("YES"), two instruments differing only in their sealed
+    // response.parser: the PC-2 (binary-yes-no) instrument recognizes it as ACCEPT, while the
+    // default PC-1 (binary-accept-reject) instrument, which does not know the YES/NO alphabet,
+    // reports it as an invalid, unparseable REJECT. This proves selection, not supply: the
+    // adapter itself carries no parser logic beyond looking up the id the instrument names.
+    const yesNoCompleted = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("YES"),
+      parser: BINARY_YES_NO_PARSER_IDENTITY,
+    }));
+    expect(yesNoCompleted.detailedOutcome).toMatchObject({
+      judgeDecision: "ACCEPT",
+      parseValid: true,
+      agreement: true,
+    });
+
+    const acceptRejectCompleted = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("YES"),
+    }));
+    expect(acceptRejectCompleted.detailedOutcome).toMatchObject({
+      judgeDecision: "REJECT",
+      parseValid: false,
+      invalidReason: "unexpected-token",
+      agreement: false,
+    });
+  });
 
   test("a delivered malformed response is completed and scored, not operational", async () => {
     const completed = await evaluate(makeFixture({

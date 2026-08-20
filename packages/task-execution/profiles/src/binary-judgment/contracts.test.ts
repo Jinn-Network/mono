@@ -22,8 +22,17 @@ import { ProfilesError } from "../errors.js";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
   BINARY_ACCEPT_REJECT_PARSER_SEALED,
+  BINARY_CORRECT_WRONG_PARSER_IDENTITY,
+  BINARY_CORRECT_WRONG_PARSER_SEALED,
+  BINARY_JSON_VERDICT_PARSER_IDENTITY,
+  BINARY_JSON_VERDICT_PARSER_SEALED,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
   BINARY_JUDGMENT_EVALUATION_PARSER_SEALED,
+  BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY,
+  BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
+  BINARY_LABEL_IN_PROSE_PARSER_SEALED,
+  BINARY_YES_NO_PARSER_IDENTITY,
+  BINARY_YES_NO_PARSER_SEALED,
   BinaryJudgmentAnalysisContextSchema,
   BinaryJudgmentEvaluationContextSchema,
   BinaryJudgmentInstrumentSchema,
@@ -552,6 +561,16 @@ describe("binary-judgment closed contracts", () => {
     expect(sealed.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(canonicalJsonBytes(instrument)).toEqual(sealed.bytes);
   });
+
+  it("keeps sealing the PC-1-selecting instrument fixture to its pre-registry digest (compatible widening)", () => {
+    // Adding four sibling parser identities to the closed registry must not move a single byte of
+    // an instrument that already validated and sealed under the single-parser schema. This pins
+    // the exact pre-change digest so any accidental reordering, renaming, or shape drift in the
+    // registry machinery fails loudly here rather than only in a downstream digest join.
+    expect(sealBinaryJudgmentInstrument(instrument).digest).toBe(
+      "sha256:c219dea01080475f573778e8a88bd58166bc5ec57a29f3a7679cb77df733a9a0",
+    );
+  });
 });
 
 describe("judge model profiles", () => {
@@ -712,7 +731,7 @@ describe("binary-judgment parser semantics goldens", () => {
       });
   });
 
-  it("pins the strict ACCEPT/REJECT and umbrella registry identities to exact on-disk bytes", async () => {
+  it("pins all six sealed parser documents (the five contracts plus the umbrella) to exact on-disk bytes", async () => {
     const cases = [
       {
         root: new URL(
@@ -721,6 +740,38 @@ describe("binary-judgment parser semantics goldens", () => {
         ),
         sealed: BINARY_ACCEPT_REJECT_PARSER_SEALED,
         identity: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      },
+      {
+        root: new URL(
+          "../../profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/",
+          import.meta.url,
+        ),
+        sealed: BINARY_CORRECT_WRONG_PARSER_SEALED,
+        identity: BINARY_CORRECT_WRONG_PARSER_IDENTITY,
+      },
+      {
+        root: new URL(
+          "../../profiles/binary-judgment/parsers/binary-json-verdict/1.0.0/",
+          import.meta.url,
+        ),
+        sealed: BINARY_JSON_VERDICT_PARSER_SEALED,
+        identity: BINARY_JSON_VERDICT_PARSER_IDENTITY,
+      },
+      {
+        root: new URL(
+          "../../profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0/",
+          import.meta.url,
+        ),
+        sealed: BINARY_LABEL_IN_PROSE_PARSER_SEALED,
+        identity: BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
+      },
+      {
+        root: new URL(
+          "../../profiles/binary-judgment/parsers/binary-yes-no/1.0.0/",
+          import.meta.url,
+        ),
+        sealed: BINARY_YES_NO_PARSER_SEALED,
+        identity: BINARY_YES_NO_PARSER_IDENTITY,
       },
       {
         root: new URL(
@@ -738,5 +789,184 @@ describe("binary-judgment parser semantics goldens", () => {
       expect(digest).toBe(vector.sealed.digest);
       expect(vector.identity.digest).toBe(digest);
     }
+  });
+
+  it("keeps PC-1's own sealed semantics document and digest byte-frozen (§4.5: PC-1 does not move)", () => {
+    expect(BINARY_ACCEPT_REJECT_PARSER_SEALED.digest).toBe(
+      "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073",
+    );
+    expect(BINARY_ACCEPT_REJECT_PARSER_IDENTITY.digest).toBe(
+      "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073",
+    );
+  });
+
+  it("freezes the YES/NO parser semantics document (PC-2)", () => {
+    expect(JSON.parse(new TextDecoder().decode(BINARY_YES_NO_PARSER_SEALED.bytes)))
+      .toStrictEqual({
+        protocol: "https://spec.jinn.network/binary-judgment/parser-semantics/v1",
+        parser: {
+          id: "network.jinn.parser.binary-yes-no",
+          version: "1.0.0",
+        },
+        input: {
+          mediaType: "text/plain; charset=utf-8",
+          utf8: "strict",
+          trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+          normalization: "none",
+        },
+        rule: {
+          kind: "whole-output-token",
+          caseSensitive: true,
+          tokens: { ACCEPT: "YES", REJECT: "NO" },
+        },
+        invalidOutputDecision: "REJECT",
+      });
+  });
+
+  it("freezes the CORRECT/WRONG parser semantics document (PC-3)", () => {
+    expect(JSON.parse(new TextDecoder().decode(BINARY_CORRECT_WRONG_PARSER_SEALED.bytes)))
+      .toStrictEqual({
+        protocol: "https://spec.jinn.network/binary-judgment/parser-semantics/v1",
+        parser: {
+          id: "network.jinn.parser.binary-correct-wrong",
+          version: "1.0.0",
+        },
+        input: {
+          mediaType: "text/plain; charset=utf-8",
+          utf8: "strict",
+          trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+          normalization: "none",
+        },
+        rule: {
+          kind: "whole-output-token",
+          caseSensitive: true,
+          tokens: { ACCEPT: "CORRECT", REJECT: "WRONG" },
+        },
+        invalidOutputDecision: "REJECT",
+      });
+  });
+
+  it("freezes the JSON-verdict parser semantics document (PC-4)", () => {
+    expect(JSON.parse(new TextDecoder().decode(BINARY_JSON_VERDICT_PARSER_SEALED.bytes)))
+      .toStrictEqual({
+        protocol: "https://spec.jinn.network/binary-judgment/parser-semantics/v1",
+        parser: {
+          id: "network.jinn.parser.binary-json-verdict",
+          version: "1.0.0",
+        },
+        input: {
+          mediaType: "text/plain; charset=utf-8",
+          utf8: "strict",
+          trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+          normalization: "none",
+        },
+        rule: {
+          kind: "json-member-token",
+          caseSensitive: true,
+          tokens: { ACCEPT: "ACCEPT", REJECT: "REJECT" },
+          json: {
+            standard: "RFC 8259",
+            text: "exactly one JSON value after the edge trim, with no leading or trailing content",
+            root: "object",
+            member: "verdict",
+            memberType: "string",
+            memberTrimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+            duplicateMember: "refused",
+            otherMembers: "ignored",
+          },
+        },
+        invalidOutputDecision: "REJECT",
+      });
+  });
+
+  it("freezes the label-in-prose parser semantics document, with no trim codepoints (PC-5)", () => {
+    expect(JSON.parse(new TextDecoder().decode(BINARY_LABEL_IN_PROSE_PARSER_SEALED.bytes)))
+      .toStrictEqual({
+        protocol: "https://spec.jinn.network/binary-judgment/parser-semantics/v1",
+        parser: {
+          id: "network.jinn.parser.binary-label-in-prose",
+          version: "1.0.0",
+        },
+        input: {
+          mediaType: "text/plain; charset=utf-8",
+          utf8: "strict",
+          trimCodePoints: [],
+          normalization: "none",
+        },
+        rule: {
+          kind: "delimited-token-scan",
+          caseSensitive: true,
+          tokens: { ACCEPT: "ACCEPT", REJECT: "REJECT" },
+          delimiter:
+            "the code point immediately before and immediately after an occurrence, where one exists, "
+            + "must not be an ASCII letter, an ASCII digit, or U+005F",
+          repeatedToken: "permitted",
+          bothTokens: "invalid",
+          neitherToken: "invalid",
+          positionalPreference: "none",
+        },
+        invalidOutputDecision: "REJECT",
+      });
+  });
+
+  it("code-unit sorts the response-parser registry by (id, version)", () => {
+    const ids = BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY.map((parser) => parser.id);
+    const sorted = [...ids].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+    expect(ids).toStrictEqual(sorted);
+    expect(ids).toStrictEqual([
+      "network.jinn.parser.binary-accept-reject",
+      "network.jinn.parser.binary-correct-wrong",
+      "network.jinn.parser.binary-json-verdict",
+      "network.jinn.parser.binary-label-in-prose",
+      "network.jinn.parser.binary-yes-no",
+    ]);
+  });
+
+  it("carries the umbrella document's responseParsers as exactly the registry", () => {
+    const umbrella = JSON.parse(
+      new TextDecoder().decode(BINARY_JUDGMENT_EVALUATION_PARSER_SEALED.bytes),
+    ) as { responseParsers: unknown };
+    expect(umbrella.responseParsers).toStrictEqual(BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY);
+  });
+});
+
+describe("binary-judgment instrument seal against the closed parser registry", () => {
+  const withParser = (parser: unknown) => ({
+    ...instrument,
+    response: { ...instrument.response, parser },
+  });
+
+  it("seals an instrument naming each of the five registered parser identities", () => {
+    for (const identity of BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY) {
+      const candidate = withParser(identity);
+      expect(BinaryJudgmentInstrumentSchema.safeParse(candidate).success).toBe(true);
+      expect(() => sealBinaryJudgmentInstrument(candidate as never)).not.toThrow();
+    }
+  });
+
+  it("refuses a registered id paired with the wrong version", () => {
+    const candidate = withParser({
+      ...BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      version: "1.0.1",
+    });
+    expect(BinaryJudgmentInstrumentSchema.safeParse(candidate).success).toBe(false);
+  });
+
+  it("refuses a registered id paired with the wrong digest", () => {
+    const candidate = withParser({
+      ...BINARY_YES_NO_PARSER_IDENTITY,
+      digest: `sha256:${"0".repeat(64)}`,
+    });
+    expect(BinaryJudgmentInstrumentSchema.safeParse(candidate).success).toBe(false);
+    expect(() => sealBinaryJudgmentInstrument(candidate as never)).toThrow();
+  });
+
+  it("refuses an id that is not a member of the closed registry", () => {
+    const candidate = withParser({
+      id: "network.jinn.parser.binary-unregistered",
+      version: "1.0.0",
+      digest: `sha256:${"0".repeat(64)}`,
+    });
+    expect(BinaryJudgmentInstrumentSchema.safeParse(candidate).success).toBe(false);
   });
 });

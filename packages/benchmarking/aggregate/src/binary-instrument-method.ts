@@ -64,10 +64,210 @@ const JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS: Readonly<Record<JudgeModelPro
 
 const EVALUATION_PARSER_ID = "network.jinn.parser.binary-judgment-evaluation";
 const EVALUATION_PARSER_VERSION = "1.0.0";
-const EVALUATION_PARSER_SHA256 = "41b36eaffbac8c78133afd2075ec32fd73ed324395fe281dee525db17653937f";
-const RESPONSE_PARSER_ID = "network.jinn.parser.binary-accept-reject";
-const RESPONSE_PARSER_VERSION = "1.0.0";
-const RESPONSE_PARSER_DIGEST = "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073";
+const EVALUATION_PARSER_SHA256 = "5a2c2d2f01c9154bb7000f3c3183d1fc27e9e9a1571445f248b56fa25f45ef0a";
+interface FrozenResponseParse {
+  readonly decision: "ACCEPT" | "REJECT";
+  readonly parseValid: boolean;
+}
+
+/**
+ * The mirrored parsers collapse the source's two invalid results (`invalid-utf8` and
+ * `unexpected-token`) into one. That is the only behavioral liberty this mirror takes, and it is
+ * forced: the signed measurements this oracle replays against carry `judgeDecision` and
+ * `parseValid` and no reason field, so there is nothing here for a reason to be checked against.
+ * Every other line of the five behaviors is a mechanical transcription of the source named above.
+ */
+const RESPONSE_PARSE_INVALID: FrozenResponseParse = { decision: "REJECT", parseValid: false };
+
+/** Trims only U+0020, U+0009, U+000D, and U+000A, at the two edges. */
+function isAsciiEdgeWhitespace(codeUnit: number): boolean {
+  return codeUnit === 0x20 || codeUnit === 0x09 || codeUnit === 0x0d || codeUnit === 0x0a;
+}
+
+function trimResponseEdges(value: string): string {
+  let start = 0;
+  while (start < value.length && isAsciiEdgeWhitespace(value.charCodeAt(start))) start += 1;
+  let end = value.length;
+  while (end > start && isAsciiEdgeWhitespace(value.charCodeAt(end - 1))) end -= 1;
+  return value.slice(start, end);
+}
+
+function decodeStrictUtf8(bytes: Uint8Array): string | undefined {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+/** PC-1, PC-2, and PC-3: edge-trim, then the whole output must equal one token exactly. */
+function parseWholeOutputToken(
+  bytes: Uint8Array,
+  acceptToken: string,
+  rejectToken: string,
+): FrozenResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return RESPONSE_PARSE_INVALID;
+  const token = trimResponseEdges(decoded);
+  if (token === acceptToken) return { decision: "ACCEPT", parseValid: true };
+  if (token === rejectToken) return { decision: "REJECT", parseValid: true };
+  return RESPONSE_PARSE_INVALID;
+}
+
+/**
+ * Member names declared directly on the root object of JSON text already confirmed to parse as a
+ * single object-rooted value, in source order, including duplicates. `JSON.parse` collapses a
+ * duplicate key to its last value, so it cannot answer "was this root key written twice"; depth is
+ * tracked independently so a nested member sharing the name is never counted at the root.
+ */
+function rootObjectMemberNames(text: string): readonly string[] {
+  const names: string[] = [];
+  let depth = 0;
+  let index = 0;
+  while (index < text.length) {
+    const ch = text[index]!;
+    if (ch === '"') {
+      const start = index;
+      index += 1;
+      while (index < text.length) {
+        const inner = text[index]!;
+        if (inner === "\\") {
+          index += 2;
+          continue;
+        }
+        if (inner === '"') {
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      if (depth === 1) {
+        let lookahead = index;
+        while (lookahead < text.length && isAsciiEdgeWhitespace(text.charCodeAt(lookahead))) {
+          lookahead += 1;
+        }
+        if (text[lookahead] === ":") {
+          names.push(JSON.parse(text.slice(start, index)) as string);
+        }
+      }
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      depth += 1;
+      index += 1;
+      continue;
+    }
+    if (ch === "}" || ch === "]") {
+      depth -= 1;
+      index += 1;
+      continue;
+    }
+    index += 1;
+  }
+  return names;
+}
+
+/** PC-4: one strict RFC 8259 object whose single `verdict` string member is ACCEPT or REJECT. */
+function parseJsonVerdictResponse(bytes: Uint8Array): FrozenResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return RESPONSE_PARSE_INVALID;
+  const trimmed = trimResponseEdges(decoded);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return RESPONSE_PARSE_INVALID;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return RESPONSE_PARSE_INVALID;
+  }
+  const verdictOccurrences = rootObjectMemberNames(trimmed)
+    .filter((name) => name === "verdict").length;
+  if (verdictOccurrences !== 1) return RESPONSE_PARSE_INVALID;
+  const value = (parsed as Record<string, unknown>)["verdict"];
+  if (typeof value !== "string") return RESPONSE_PARSE_INVALID;
+  const token = trimResponseEdges(value);
+  if (token === "ACCEPT") return { decision: "ACCEPT", parseValid: true };
+  if (token === "REJECT") return { decision: "REJECT", parseValid: true };
+  return RESPONSE_PARSE_INVALID;
+}
+
+function isAsciiWordCharCode(codeUnit: number): boolean {
+  return (codeUnit >= 0x41 && codeUnit <= 0x5a) // A-Z
+    || (codeUnit >= 0x61 && codeUnit <= 0x7a) // a-z
+    || (codeUnit >= 0x30 && codeUnit <= 0x39) // 0-9
+    || codeUnit === 0x5f; // _
+}
+
+function hasDelimitedTokenOccurrence(text: string, token: string): boolean {
+  let index = text.indexOf(token);
+  while (index !== -1) {
+    const beforeDelimited = index === 0 || !isAsciiWordCharCode(text.charCodeAt(index - 1));
+    const afterIndex = index + token.length;
+    const afterDelimited = afterIndex >= text.length
+      || !isAsciiWordCharCode(text.charCodeAt(afterIndex));
+    if (beforeDelimited && afterDelimited) return true;
+    index = text.indexOf(token, index + 1);
+  }
+  return false;
+}
+
+/** PC-5: no trim; exactly one of the two delimited tokens present decides, both or neither is invalid. */
+function parseLabelInProseResponse(bytes: Uint8Array): FrozenResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return RESPONSE_PARSE_INVALID;
+  const acceptFound = hasDelimitedTokenOccurrence(decoded, "ACCEPT");
+  const rejectFound = hasDelimitedTokenOccurrence(decoded, "REJECT");
+  if (acceptFound === rejectFound) return RESPONSE_PARSE_INVALID;
+  return { decision: acceptFound ? "ACCEPT" : "REJECT", parseValid: true };
+}
+
+// Hand-mirrored from BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY in
+// packages/task-execution/profiles/src/binary-judgment/contracts.ts (identities) and from
+// packages/task-execution/evaluator-adapters/src/binary-judgment/parse.ts (behaviors), because
+// this package deliberately does not depend on the task-execution tree. Code-unit sorted by id,
+// matching the mirrored source. An instrument selects one member; it never supplies parser
+// configuration.
+//
+// Identity and behavior live in ONE row on purpose. This method is the replay oracle: it recomputes
+// the decision from exact judge-response bytes and refuses a cell whose signed measurements do not
+// reproduce. A row that admitted an identity without carrying its behavior would replay every arm
+// through the wrong alphabet, so the two cannot be allowed to drift apart into parallel tables.
+// The digests are the anti-drift tripwire: a semantics change moves one, which forces this table to
+// be edited, which is where the behavior beside it gets re-checked. The behavior itself is pinned
+// end to end by the per-alphabet replay fixtures in `binary-instrument-method.test.ts`, one per
+// contract, each carrying that contract's own valid and invalid response bytes.
+const RESPONSE_PARSER_REGISTRY: ReadonlyMap<string, {
+  readonly version: string;
+  readonly digest: string;
+  readonly parse: (bytes: Uint8Array) => FrozenResponseParse;
+}> = new Map([
+  ["network.jinn.parser.binary-accept-reject", {
+    version: "1.0.0",
+    digest: "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073",
+    parse: (bytes: Uint8Array) => parseWholeOutputToken(bytes, "ACCEPT", "REJECT"),
+  }],
+  ["network.jinn.parser.binary-correct-wrong", {
+    version: "1.0.0",
+    digest: "sha256:2dd7e73c9ee063edb00fe7859821eee1122b483d4bd70568aebb046a6983ac4c",
+    parse: (bytes: Uint8Array) => parseWholeOutputToken(bytes, "CORRECT", "WRONG"),
+  }],
+  ["network.jinn.parser.binary-json-verdict", {
+    version: "1.0.0",
+    digest: "sha256:543a71887f3ae95b0aede4513af3fdeadfc706c7a86f93452e3272d7ccdd2201",
+    parse: parseJsonVerdictResponse,
+  }],
+  ["network.jinn.parser.binary-label-in-prose", {
+    version: "1.0.0",
+    digest: "sha256:d53d23afc8734090c8d54c39de8105ead37c3ecad0cf0f454e97a535e5937f10",
+    parse: parseLabelInProseResponse,
+  }],
+  ["network.jinn.parser.binary-yes-no", {
+    version: "1.0.0",
+    digest: "sha256:1b99469a195fee154c27d0c3b219da7778e1b8f4210bd773350d107c459b7949",
+    parse: (bytes: Uint8Array) => parseWholeOutputToken(bytes, "YES", "NO"),
+  }],
+]);
 
 export const BINARY_INSTRUMENT_MEASUREMENT_PROFILE = "binary-instrument@1" as const;
 export const BINARY_INSTRUMENT_MEASUREMENTS = {
@@ -1012,12 +1212,14 @@ function validateInstrument(
     throw new MethodInputError("binary-record-malformed", digest, "instrument parser must be an object");
   }
   requireExactKeys(parser, ["id", "version", "digest"], digest, "instrument.response.parser");
+  const parserId = parser["id"];
+  const registeredParser = typeof parserId === "string" ? RESPONSE_PARSER_REGISTRY.get(parserId) : undefined;
   if (
-    parser["id"] !== RESPONSE_PARSER_ID
-    || parser["version"] !== RESPONSE_PARSER_VERSION
-    || parser["digest"] !== RESPONSE_PARSER_DIGEST
+    registeredParser === undefined
+    || parser["version"] !== registeredParser.version
+    || parser["digest"] !== registeredParser.digest
   ) {
-    throw new MethodInputError("binary-binding-mismatch", digest, "instrument parser is not the frozen ACCEPT/REJECT semantics");
+    throw new MethodInputError("binary-binding-mismatch", digest, "instrument parser must be a member of the registered response-parser registry");
   }
 }
 
@@ -1142,20 +1344,24 @@ function renderSemanticRequest(
   };
 }
 
-function parseFrozenResponse(bytes: Uint8Array): {
-  readonly decision: "ACCEPT" | "REJECT";
-  readonly parseValid: boolean;
-} {
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-  } catch {
-    return { decision: "REJECT", parseValid: false };
+/**
+ * Replays exact judge-response bytes through the response parser the arm's sealed instrument
+ * selected. `validateInstrument` has already refused any id outside the registry, so the lookup is
+ * total; the guard is a compile-time-unreachable invariant, not a validation path.
+ */
+function parseFrozenResponse(bytes: Uint8Array, parserId: string): FrozenResponseParse {
+  const registered = RESPONSE_PARSER_REGISTRY.get(parserId);
+  if (registered === undefined) {
+    throw new TypeError(`no mirrored response-parser behavior for ${parserId}`);
   }
-  const token = text.replace(/^[ \t\r\n]+|[ \t\r\n]+$/gu, "");
-  return token === "ACCEPT" || token === "REJECT"
-    ? { decision: token, parseValid: true }
-    : { decision: "REJECT", parseValid: false };
+  return registered.parse(bytes);
+}
+
+/** The parser id the arm's sealed instrument selected, already validated against the registry. */
+function instrumentResponseParserId(instrument: ResolvedArmInstrument): string {
+  const response = instrument.document["response"];
+  const parser = isObject(response) ? response["parser"] : undefined;
+  return isObject(parser) && typeof parser["id"] === "string" ? parser["id"] : "";
 }
 
 function validateObservation(
@@ -1370,7 +1576,10 @@ function resolveCellInput(
     responseSha256: responseMaterial.sha256,
     requestSha256,
   });
-  const responseParse = parseFrozenResponse(responseMaterial.bytes);
+  const responseParse = parseFrozenResponse(
+    responseMaterial.bytes,
+    instrumentResponseParserId(expectedInstrument),
+  );
   const evidence = predicate["evidence"];
   if (!Array.isArray(evidence) || evidence.length !== 1 || !isObject(evidence[0])) {
     throw new MethodInputError("binary-binding-mismatch", verdictDigest, "Result Evaluation must carry one exact label-resolution evidence reference");
