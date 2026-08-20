@@ -2028,7 +2028,7 @@
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 6,
-      "discoveredFirstPartySurfaces": 4185,
+      "discoveredFirstPartySurfaces": 4186,
       "generatedOutputSources": 1414,
       "generatorSources": 683,
       "marketplaceControl": 2,
@@ -19768,6 +19768,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/src/bundle/testing"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/src/bundle/testing/judge-rehearsal-fixture.ts"
       },
       {
         "categories": [
