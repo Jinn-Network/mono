@@ -2,10 +2,12 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["src/**/*.test.ts"],
     // Point `$TMPDIR` at a managed root before any test module loads, so the workspace roots this
     // suite creates with `mkdtemp(join(tmpdir(), …))` are swept on teardown instead of
     // accumulating in the user temp directory. See src/test-support/isolate-tmp.ts.
+    //
+    // Deliberately no `include`: `yarn test` relied on Vitest's default glob before this file
+    // existed, and narrowing it here would silently drop test files from the run.
     setupFiles: ["./src/test-support/isolate-tmp.ts"],
     // Create one per-run registry in the main process: each test file records its root there, and
     // the teardown removes every recorded root once every worker is gone. A fully-skipped test file
@@ -13,10 +15,5 @@ export default defineConfig({
     // those files — and a hard-killed worker, and Ctrl-C — from leaving empty roots behind. See
     // src/test-support/global-tmp-root.ts.
     globalSetup: ["./src/test-support/global-tmp-root.ts"],
-    // The 62-file suite performs crypto/key generation and temporary-workspace I/O. Two workers
-    // retain file-level parallel coverage while bounding that shared-resource pressure; four
-    // workers still starved unrelated sub-second cases past Vitest's fail-loud 5s default on the
-    // shared local/CI-class runner. Keep the default timeout so a real deadlock still fails fast.
-    maxWorkers: 2,
   },
 });
