@@ -29,7 +29,8 @@ describe("human-review CLI", () => {
         question: "Question?",
         referenceAnswer: "Reference",
         candidateAnswer: "Candidate",
-        provenance: [{ digest: { sha256: "1".repeat(64) } }],
+        provenance: { sourceCommitment: `sha256:${"1".repeat(64)}`, timestamp: "2026-01-01T00:00:00Z" },
+        sources: [{ digest: { sha256: "1".repeat(64) } }],
       },
       evaluatorIds: ["urn:jinn:reviewer:a", "urn:jinn:reviewer:b"],
     }));

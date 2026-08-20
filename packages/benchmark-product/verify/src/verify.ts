@@ -100,6 +100,8 @@ import {
   BinaryItemBankEntrySchema,
   BinaryItemBankIntakeExtensionSchema,
   BinarySourceManifestEntrySchema,
+  type BinaryItemBankEntry,
+  type BinarySourceManifestEntry,
 } from "./admission/intake.js";
 import {
   BundleAssemblyCellSchema,
@@ -309,6 +311,54 @@ function verifyEvidenceNativeSignature(input: EvidenceNativeSignatureVerificatio
   } catch {
     return false;
   }
+}
+
+/**
+ * The cold verifier's item-bank/source-manifest closure, over already-parsed canonical rows.
+ *
+ * Exported so the closure can be exercised directly. It has to be: a bundle whose cluster key is
+ * decoupled from its declared sources cannot be produced by this repository's own import path,
+ * because the importer's code-unit-least rule is strictly stronger than the membership rule below.
+ * This check exists for bundles produced by other implementations, so its test has to construct
+ * the rows rather than round-trip them through the importer.
+ */
+export function checkItemBankSourceClosure(
+  itemRows: readonly BinaryItemBankEntry[],
+  sourceRows: readonly BinarySourceManifestEntry[],
+): { readonly itemDigests: ReadonlySet<string> } {
+  const itemDigests = new Set<string>();
+  const coveredSourceDigests = new Set<string>();
+  for (const [index, row] of itemRows.entries()) {
+    const item = row.item;
+    const digest = `sha256:${sha256(canonicalJsonBytes(item))}`;
+    if (itemDigests.has(digest)) refuse("record-integrity", "item-bank.jsonl", "item bank contains duplicate payloads");
+    itemDigests.add(digest);
+    const itemSourceDigests = new Set<string>();
+    for (const descriptor of item.sources) {
+      const digestHex = descriptor.digest.sha256;
+      itemSourceDigests.add(`sha256:${digestHex}`);
+      coveredSourceDigests.add(`sha256:${digestHex}`);
+    }
+    // Membership only. The cluster key must name one of this item's own declared sources, or a
+    // bundle could ship provenance decoupled from the sources it claims to draw on. Deliberately
+    // NOT the code-unit-least rule and NOT the timestamp equality: both are enforced once, at
+    // import. Membership is a different property, so this is not a second enforcement point.
+    if (!itemSourceDigests.has(item.provenance.sourceCommitment)) {
+      refuse(
+        "record-integrity",
+        `item-bank.jsonl.${index + 1}.item.provenance.sourceCommitment`,
+        "item provenance sourceCommitment is not one of the item's declared sources",
+      );
+    }
+  }
+  // The covered set is derived from `sources` alone. Folding the cluster key in here would let a
+  // source row count as used when only a cluster key names it, weakening this exact-equality
+  // refusal against an unused source row.
+  const sourceDigests = sourceRows.map((row) => row.provenanceSha256);
+  if (!sameCanonical([...coveredSourceDigests].sort(), [...sourceDigests].sort())) {
+    refuse("record-integrity", "source-manifest.jsonl", "source manifest does not exactly cover item-bank provenance");
+  }
+  return { itemDigests };
 }
 
 /** Verifies a copied public bundle using one authenticated byte snapshot and only bundle-carried
@@ -629,23 +679,7 @@ export async function verifyPublicBundleSnapshot(
     strictOrder(sourceRows.map((row) => row.provenanceSha256), "source-manifest.jsonl");
     strictOrder(admissionRows.map((row) => row.itemSha256), "admission-index.jsonl");
     const admittedByItem = new Map(verifiedAdmission.accepted.map((entry) => [entry.itemSha256, entry]));
-    const itemDigests = new Set<string>();
-    const usedProvenance = new Set<string>();
-    for (const [index, row] of itemRows.entries()) {
-      const item = row.item;
-      const digest = `sha256:${sha256(canonicalJsonBytes(item))}`;
-      if (itemDigests.has(digest)) refuse("record-integrity", "item-bank.jsonl", "item bank contains duplicate payloads");
-      itemDigests.add(digest);
-      const provenance = item.provenance;
-      for (const descriptor of provenance) {
-        const digestHex = descriptor.digest.sha256;
-        usedProvenance.add(`sha256:${digestHex}`);
-      }
-    }
-    const sourceDigests = sourceRows.map((row) => row.provenanceSha256);
-    if (!sameCanonical([...usedProvenance].sort(), [...sourceDigests].sort())) {
-      refuse("record-integrity", "source-manifest.jsonl", "source manifest does not exactly cover item-bank provenance");
-    }
+    const { itemDigests } = checkItemBankSourceClosure(itemRows, sourceRows);
     const expectedAdmissions = verifiedAdmission.accepted.map((entry) => ({
       admissionManifestSha256: verifiedAdmission!.manifestSha256,
       itemSha256: entry.itemSha256,

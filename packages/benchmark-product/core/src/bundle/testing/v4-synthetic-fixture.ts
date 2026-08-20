@@ -153,11 +153,52 @@ interface SyntheticFixtureItem {
   readonly question: string;
   readonly referenceAnswer: string;
   readonly candidateAnswer: string;
-  readonly provenance: readonly [{ readonly digest: { readonly sha256: string } }];
+  /** Bare hex digest of the one source row this item cites; see `SYNTHETIC_SOURCE_DIGESTS`. */
+  readonly sourceDigestHex: string;
   readonly truthLabel: "CORRECT" | "WRONG";
   readonly stratum: "core" | "stress";
   readonly reviewLabels?: readonly ["CORRECT" | "WRONG", "CORRECT" | "WRONG"];
   readonly replacesItemId?: string;
+}
+
+// Three distinct synthetic source rows, cycled across items by position, so the bank spans more
+// than one publication instant instead of every item citing the same source/timestamp pair.
+const SYNTHETIC_SOURCE_DIGESTS = ["a".repeat(64), "e".repeat(64), "f".repeat(64)] as const;
+const SYNTHETIC_SOURCE_PUBLISHED_AT = [
+  "2026-03-09T00:00:00Z",
+  "2026-04-01T00:00:00Z",
+  "2026-05-20T00:00:00Z",
+] as const;
+
+function sourceDigestForPosition(position: number): string {
+  return SYNTHETIC_SOURCE_DIGESTS[position % SYNTHETIC_SOURCE_DIGESTS.length]!;
+}
+
+function sourcePublishedAt(sourceDigestHex: string): string {
+  const position = SYNTHETIC_SOURCE_DIGESTS.indexOf(sourceDigestHex as typeof SYNTHETIC_SOURCE_DIGESTS[number]);
+  if (position === -1) throw new Error(`no synthetic source row for digest ${sourceDigestHex}`);
+  return SYNTHETIC_SOURCE_PUBLISHED_AT[position]!;
+}
+
+/**
+ * The exact binary-judgment/2.0 item payload shape. `withEvidence` is opt-in and defaults off
+ * everywhere it is threaded through, so existing callers see no behavior change; when on, the
+ * evidence string is derived from the item's own question so the §2.4 anti-truth-channel
+ * invariant (identical question implies identical evidence) holds by construction.
+ */
+function buildItemPayload(item: SyntheticFixtureItem, withEvidence: boolean) {
+  return {
+    itemId: item.itemId,
+    question: item.question,
+    referenceAnswer: item.referenceAnswer,
+    candidateAnswer: item.candidateAnswer,
+    ...(withEvidence ? { evidence: `Synthetic evidence for: ${item.question}` } : {}),
+    provenance: {
+      sourceCommitment: prefixed(item.sourceDigestHex),
+      timestamp: sourcePublishedAt(item.sourceDigestHex),
+    },
+    sources: [{ digest: { sha256: item.sourceDigestHex } }],
+  };
 }
 
 const DISPUTED_ITEM_ID = "urn:uuid:40000000-0000-4000-8000-000000000000";
@@ -171,7 +212,7 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
       question: "Does the synthetic core statement match its reference?",
       referenceAnswer: "The synthetic core statement is correct.",
       candidateAnswer: "The synthetic core statement is correct.",
-      provenance: [{ digest: { sha256: "a".repeat(64) } }],
+      sourceDigestHex: sourceDigestForPosition(0),
       truthLabel: "CORRECT" as const,
       stratum: "core" as const,
     },
@@ -180,7 +221,7 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
       question: "Does the synthetic stress statement match its reference?",
       referenceAnswer: "The synthetic stress statement is correct.",
       candidateAnswer: "The synthetic stress statement is deliberately wrong.",
-      provenance: [{ digest: { sha256: "a".repeat(64) } }],
+      sourceDigestHex: sourceDigestForPosition(1),
       truthLabel: "WRONG" as const,
       stratum: "stress" as const,
     },
@@ -196,7 +237,7 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
     question: "Does the disputed synthetic reserve-control statement match its reference?",
     referenceAnswer: "The disputed synthetic reserve-control statement is correct.",
     candidateAnswer: "The disputed synthetic reserve-control statement is correct.",
-    provenance: [{ digest: { sha256: "a".repeat(64) } }],
+    sourceDigestHex: sourceDigestForPosition(0),
     truthLabel: "CORRECT",
     stratum: "core",
     reviewLabels: ["CORRECT", "WRONG"],
@@ -208,7 +249,7 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
     candidateAnswer: truthLabel === "CORRECT"
       ? `Synthetic qualification reference T${index}.`
       : `Deliberately different synthetic qualification answer T${index}.`,
-    provenance: [{ digest: { sha256: "a".repeat(64) } }],
+    sourceDigestHex: sourceDigestForPosition(index + 1),
     truthLabel,
     stratum: index < 6 ? "core" : "stress",
     reviewLabels: [truthLabel, truthLabel],
@@ -303,7 +344,7 @@ function parseJson(bytes: Uint8Array): Record<string, any> {
 
 function makeCapabilities(instrumentSha256s: readonly string[]) {
   return {
-    taskProfiles: ["https://spec.jinn.network/task-profiles/binary-judgment/1.0"],
+    taskProfiles: ["https://spec.jinn.network/task-profiles/binary-judgment/2.0"],
     inputMediaTypes: ["application/json"],
     outputMediaTypes: [BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE, BINARY_JUDGMENT_OBSERVATION_MEDIA_TYPE],
     cancel: false,
@@ -576,11 +617,12 @@ async function admitItems(
   context: OperationContext,
   truthAdmission: SyntheticV4TruthAdmission,
   scenario: SyntheticV4Scenario,
+  withEvidence: boolean,
 ) {
   const items = fixtureItems(scenario);
   if (truthAdmission === "operator-only") {
     const candidates = items.map((item, index) => {
-      const { truthLabel, stratum, reviewLabels: _reviewLabels, replacesItemId: _replacesItemId, ...payload } = item;
+      const payload = buildItemPayload(item, withEvidence);
       const itemSha256 = recordDigest(canonicalJsonBytes(payload));
       putSealedBytes(context.workspaceDir, canonicalJsonBytes(payload));
       return {
@@ -588,9 +630,9 @@ async function admitItems(
         itemId: payload.itemId,
         humanReviewEvaluationSpecSha256: BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest,
         candidateClass: "synthetic",
-        stratum,
+        stratum: item.stratum,
         poolPosition: index + 1,
-        operatorTruthLabel: truthLabel,
+        operatorTruthLabel: item.truthLabel,
       };
     });
     return requireOk(admitHumanTruth(context, {
@@ -608,7 +650,7 @@ async function admitItems(
   const candidates = [];
   const itemSha256ById = new Map<string, string>();
   for (const [index, item] of items.entries()) {
-    const { truthLabel, stratum, reviewLabels: _reviewLabels, replacesItemId: _replacesItemId, ...payload } = item;
+    const payload = buildItemPayload(item, withEvidence);
     const packets = requireOk(createHumanReviewPackets(context, {
       draftId: DRAFT_ID,
       item: payload,
@@ -622,7 +664,7 @@ async function admitItems(
         activeEvaluatorId: packet.reviewerId,
         packetSha256: packet.packetSha256,
         visibilityReceiptSha256: packet.visibilityReceiptSha256,
-        label: item.reviewLabels?.[reviewerIndex] ?? truthLabel,
+        label: item.reviewLabels?.[reviewerIndex] ?? item.truthLabel,
         complete: true,
         completedAt: context.clock(),
       }), `human verdict ${index}/${reviewerIndex}`));
@@ -639,7 +681,7 @@ async function admitItems(
       itemId: payload.itemId,
       humanReviewEvaluationSpecSha256: packets.humanReviewEvaluationSpecSha256,
       candidateClass: "synthetic",
-      stratum,
+      stratum: item.stratum,
       poolPosition: index + 1,
       reviewVerdictSha256s: [verdicts[0]!.verdictSha256, verdicts[1]!.verdictSha256] as [string, string],
       reviewers: reviewerRoster,
@@ -661,10 +703,13 @@ export async function createSyntheticV4BundleFixture(input: {
   readonly workspaceDir: string;
   readonly truthAdmission: SyntheticV4TruthAdmission;
   readonly scenario?: SyntheticV4Scenario;
+  /** Opt-in only; defaults off so every existing caller is unaffected. See `buildItemPayload`. */
+  readonly withEvidence?: boolean;
   /** Test-only seam: corrupt the exact intake bytes before the real import operation parses them. */
   readonly mutateIntake?: (intake: SyntheticV4IntakeBytes) => SyntheticV4IntakeBytes;
 }): Promise<SyntheticV4BundleFixture> {
   const scenario = input.scenario ?? "minimal";
+  const withEvidence = input.withEvidence ?? false;
   let tick = Date.parse("2026-08-15T11:00:00.000Z");
   const context: OperationContext = {
     workspaceDir: input.workspaceDir,
@@ -677,19 +722,20 @@ export async function createSyntheticV4BundleFixture(input: {
   };
   requireOk(initWorkspace(context), "workspace init");
   requireOk(createDraft(context, { draftId: DRAFT_ID, name: "Synthetic binary publication" }), "draft create");
-  const admission = await admitItems(context, input.truthAdmission, scenario);
+  const admission = await admitItems(context, input.truthAdmission, scenario, withEvidence);
   const items = fixtureItems(scenario);
+  const usedSourceDigests = [...new Set(items.map((item) => item.sourceDigestHex))].sort();
   const exactIntake: SyntheticV4IntakeBytes = {
-    itemBankJsonl: renderCanonicalJsonl(items.map(({ truthLabel: _truthLabel, stratum: _stratum, reviewLabels: _reviewLabels, replacesItemId: _replacesItemId, ...item }) => ({
+    itemBankJsonl: renderCanonicalJsonl(items.map((item) => ({
       protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL,
-      item,
+      item: buildItemPayload(item, withEvidence),
     }))),
-    sourceManifestJsonl: renderCanonicalJsonl([{
+    sourceManifestJsonl: renderCanonicalJsonl(usedSourceDigests.map((hex) => ({
       protocol: BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
-      provenanceSha256: prefixed("a".repeat(64)),
+      provenanceSha256: prefixed(hex),
       source: {
-        uri: "https://fixtures.example.test/synthetic-source.json",
-        digest: { sha256: "a".repeat(64) },
+        uri: `https://fixtures.example.test/synthetic-source-${hex.slice(0, 8)}.json`,
+        digest: { sha256: hex },
       },
       license: {
         uri: "https://fixtures.example.test/licenses/apache-2.0.txt",
@@ -699,7 +745,8 @@ export async function createSyntheticV4BundleFixture(input: {
         uri: "https://fixtures.example.test/synthetic-attribution.txt",
         digest: { sha256: "c".repeat(64) },
       },
-    }]),
+      publishedAt: sourcePublishedAt(hex),
+    }))),
     admissionIndexJsonl: renderCanonicalJsonl([...admission.resolutions]
       .sort((left, right) => left.itemSha256 < right.itemSha256 ? -1 : left.itemSha256 > right.itemSha256 ? 1 : 0)
       .map((resolution) => ({
@@ -712,7 +759,7 @@ export async function createSyntheticV4BundleFixture(input: {
   };
   const intake = input.mutateIntake?.(exactIntake) ?? exactIntake;
   const imported = requireOk(importBinaryItemBank(context, {
-    profile: "binary-judgment@1",
+    profile: "binary-judgment@2",
     draftId: DRAFT_ID,
     itemBankJsonl: intake.itemBankJsonl,
     sourceManifestJsonl: intake.sourceManifestJsonl,

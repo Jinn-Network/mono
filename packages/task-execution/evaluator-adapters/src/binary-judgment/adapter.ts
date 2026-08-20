@@ -355,7 +355,7 @@ function requireBinaryJudgmentTask(
     profileDigest !== BINARY_JUDGMENT_PROFILE_DIGEST.slice("sha256:".length)
     || (task.profile.uri !== undefined && task.profile.uri !== BINARY_JUDGMENT_PROFILE_URI)
   ) {
-    malformed("binary judgment Task does not pin the binary-judgment/1.0 profile");
+    malformed("binary judgment Task does not pin the binary-judgment/2.0 profile");
   }
   if (task.evaluation?.digest?.["sha256"] !== specificationDigest.slice("sha256:".length)) {
     mismatch("binary judgment Task does not bind the evaluated specification");

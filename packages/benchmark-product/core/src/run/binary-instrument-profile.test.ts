@@ -32,6 +32,7 @@ import {
   sealTask,
 } from "@jinn-network/task-execution-protocol";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
+import { BenchmarkProductError } from "../errors.js";
 import { BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED } from "../human-review/application.js";
 import type { OperationContext } from "../operations/context.js";
 import { createDraft, readDraftDocument } from "../operations/drafts.js";
@@ -160,21 +161,20 @@ function evaluationSpec(analysisContextSha256: `sha256:${string}`) {
   });
 }
 
-function instrument(instrumentId: string) {
+function instrument(instrumentId: string, options: { readonly declaresEvidence?: boolean } = {}) {
+  const userSegments = [
+    { literal: "Question: " },
+    { field: "question" },
+    { literal: "\nReference: " },
+    { field: "referenceAnswer" },
+    { literal: "\nCandidate: " },
+    { field: "candidateAnswer" },
+    ...(options.declaresEvidence ? [{ literal: "\nEvidence: " }, { field: "evidence" }] : []),
+  ];
   const messages = [
     { role: "developer", segments: [{ literal: "Judge only the supplied item. " }] },
-    {
-      role: "user",
-      segments: [
-        { literal: "Question: " },
-        { field: "question" },
-        { literal: "\nReference: " },
-        { field: "referenceAnswer" },
-        { literal: "\nCandidate: " },
-        { field: "candidateAnswer" },
-      ],
-    },
-  ] as const;
+    { role: "user", segments: userSegments },
+  ];
   const descriptor = {
     uri: "https://fixtures.example.test/judge-prompt",
     digest: { sha256: "a".repeat(64) },
@@ -204,7 +204,14 @@ interface Fixture {
   readonly taskSha256s: readonly string[];
 }
 
-function setUpFixture(): Fixture {
+function setUpFixture(options: {
+  /** Adds an `evidence` field to every candidate item's payload. Default off. */
+  readonly withItemEvidence?: boolean;
+  /** Arm ids whose instrument should interpolate `evidence`. Default: none declare. */
+  readonly declaringArmIds?: readonly string[];
+} = {}): Fixture {
+  const withItemEvidence = options.withItemEvidence ?? false;
+  const declaringArmIds = new Set(options.declaringArmIds ?? []);
   expect(initWorkspace(context()).ok).toBe(true);
   const initial = createDraft(context(), {
     draftId: "draft-1",
@@ -219,7 +226,9 @@ function setUpFixture(): Fixture {
       question: "Core question",
       referenceAnswer: "Core reference",
       candidateAnswer: "Core candidate",
-      provenance: [{ digest: { sha256: "a".repeat(64) } }],
+      ...(withItemEvidence ? { evidence: "Direct synthetic verification of the core item." } : {}),
+      provenance: { sourceCommitment: sha("a"), timestamp: "2026-03-09T00:00:00Z" },
+      sources: [{ digest: { sha256: "a".repeat(64) } }],
       truthLabel: "CORRECT" as const,
       candidateClass: "zeta",
       stratum: "core" as const,
@@ -229,7 +238,9 @@ function setUpFixture(): Fixture {
       question: "Stress question",
       referenceAnswer: "Stress reference",
       candidateAnswer: "Stress candidate",
-      provenance: [{ digest: { sha256: "b".repeat(64) } }],
+      ...(withItemEvidence ? { evidence: "Direct synthetic verification of the stress item." } : {}),
+      provenance: { sourceCommitment: sha("b"), timestamp: "2026-04-01T00:00:00Z" },
+      sources: [{ digest: { sha256: "b".repeat(64) } }],
       truthLabel: "WRONG" as const,
       candidateClass: "alpha",
       stratum: "stress" as const,
@@ -306,7 +317,7 @@ function setUpFixture(): Fixture {
 
   const armIds = ["alpha", "beta", "delta", "gamma"] as const;
   const instruments = armIds.map((armId) => {
-    const sealed = instrument(armId);
+    const sealed = instrument(armId, { declaresEvidence: declaringArmIds.has(armId) });
     store(sealed.bytes);
     return sealed;
   });
@@ -389,6 +400,16 @@ function rewriteDraft(transform: (draft: DraftDocument) => DraftDocument): Draft
   const next = transform(readDraftDocument(workspaceDir, "draft-1"));
   atomicWriteFileSync(draftPath(workspaceDir, "draft-1"), JSON.stringify(next, null, 2));
   return next;
+}
+
+function expectProductError(run: () => unknown): BenchmarkProductError {
+  try {
+    run();
+    throw new Error("expected refusal");
+  } catch (cause) {
+    expect(cause).toBeInstanceOf(BenchmarkProductError);
+    return cause as BenchmarkProductError;
+  }
 }
 
 describe("binary-instrument@1 lock-time composition", () => {
@@ -503,6 +524,50 @@ describe("binary-instrument@1 lock-time composition", () => {
       expect(text).not.toContain(BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY);
       for (const armId of ["alpha", "beta", "delta", "gamma"]) expect(text).not.toContain(armId);
     }
+  });
+
+  // §2.3 (frozen): "Arms constrain items; items never constrain arms." The two rows of the table
+  // are both proven here, not just the refusing row -- a paired contrast needs its twin verified,
+  // not assumed to work by omission.
+  describe("§2.3 lock-time evidence direction rule", () => {
+    test("a declaring arm over an evidence-free bank refuses at lock with the exact frozen message", () => {
+      const fixture = setUpFixture({ declaringArmIds: ["beta"] });
+      const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+      const error = expectProductError(() => compileBinaryInstrumentProfile({
+        workspaceDir,
+        draft: fixture.draft,
+        benchmark,
+      }));
+      expect(error.code).toBe("conflict");
+      expect(error.issues).toEqual([{
+        path: "spec.arms.1.instrument",
+        message: "instrument interpolates evidence but the bound bank carries none",
+      }]);
+    });
+
+    test("an evidence-carrying bank with non-declaring arms locks cleanly", () => {
+      const fixture = setUpFixture({ withItemEvidence: true });
+      const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+      expect(() => compileBinaryInstrumentProfile({
+        workspaceDir,
+        draft: fixture.draft,
+        benchmark,
+      })).not.toThrow();
+    });
+
+    // The flagship's actual path: the evidence-declaring arm and its evidence-free twins bound to
+    // one evidence-carrying bank. Proven at lock, not only at the launcher seam, because lock is
+    // where the arm set and the item set are both frozen and both in scope.
+    test("a declaring arm over an evidence-carrying bank locks cleanly alongside its evidence-free twins", () => {
+      const fixture = setUpFixture({ withItemEvidence: true, declaringArmIds: ["beta"] });
+      const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+      const parameters = compileBinaryInstrumentProfile({
+        workspaceDir,
+        draft: fixture.draft,
+        benchmark,
+      });
+      expect(parameters.strata).toStrictEqual(["core", "stress"]);
+    });
   });
 });
 

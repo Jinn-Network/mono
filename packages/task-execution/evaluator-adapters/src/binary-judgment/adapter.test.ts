@@ -161,6 +161,7 @@ function makeFixture(options: {
   readonly candidateClass?: string;
   readonly stratum?: "core" | "stress";
   readonly taskInstrumentPin?: boolean;
+  readonly evidence?: string;
 }): Fixture {
   const candidateClass = options.candidateClass ?? "factual";
   const stratum = options.stratum ?? "core";
@@ -169,7 +170,9 @@ function makeFixture(options: {
     question: "Where was Ada born?",
     referenceAnswer: "London.",
     candidateAnswer: options.truthLabel === "CORRECT" ? "London." : "Paris.",
-    provenance: [{ digest: { sha256: "4".repeat(64) } }],
+    ...(options.evidence === undefined ? {} : { evidence: options.evidence }),
+    provenance: { sourceCommitment: sha("4"), timestamp: "2026-08-14T22:00:00Z" },
+    sources: [{ digest: { sha256: "4".repeat(64) } }],
   };
   const itemSha256 = recordDigest(canonicalJsonBytes(payload));
   const instrument = makeInstrument();
@@ -474,6 +477,56 @@ describe("binary judgment evaluator", () => {
     }).catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(EvaluationOperationalError);
     expect((error as EvaluationOperationalError).reason).toBe("subject-digest-mismatch");
+  });
+
+  test("an evidence mutation breaks the analysis context/item equality, not the item-id equality", async () => {
+    // Evidence rides inside the item payload, so it is already covered by the existing
+    // itemSha256 commitment (payload -> analysis context / label resolution). This test proves
+    // that transitively: mutating evidence, with the analysis context left un-recomputed, trips
+    // the "analysis context/item" digest join, and NOT the sibling "analysis context/item id"
+    // join (which compares payload.itemId alone and cannot see an evidence change). Adding a
+    // second, evidence-specific commitment (e.g. a standalone evidenceSha256 equality) would
+    // create a commitment that can disagree with this one -- strictly worse than the one
+    // commitment that already cannot.
+    const evidence = "Synthetic supporting evidence for Ada Lovelace's birthplace.";
+    const mutatedEvidence = `${evidence.slice(0, -1)}!`;
+
+    const original = makeFixture({ truthLabel: "CORRECT", response: encoder.encode("ACCEPT"), evidence });
+    await expect(evaluate(original)).resolves.toMatchObject({ verdict: "pass" });
+
+    const mutated = makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("ACCEPT"),
+      evidence: mutatedEvidence,
+    });
+    const originalBinary = original.context[BINARY_JUDGMENT_CONTEXT_KEY] as {
+      readonly material: { readonly analysisContext: { digest: string; bytesBase64: string } };
+    };
+    const mutatedBinary = mutated.context[BINARY_JUDGMENT_CONTEXT_KEY] as Record<string, unknown> & {
+      readonly material: Record<string, unknown>;
+    };
+    const tampered: Fixture = {
+      ...mutated,
+      context: {
+        [BINARY_JUDGMENT_CONTEXT_KEY]: {
+          ...mutatedBinary,
+          material: {
+            ...mutatedBinary.material,
+            // Reuse the pre-mutation analysis context unchanged: its itemSha256 still commits to
+            // the original evidence, so it now disagrees with the mutated Task's recomputed item
+            // digest without touching any other join that would otherwise fire first.
+            analysisContext: originalBinary.material.analysisContext,
+          },
+        },
+      },
+    };
+    const error = await evaluate(tampered).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(EvaluationOperationalError);
+    expect((error as EvaluationOperationalError).reason).toBe("subject-digest-mismatch");
+    expect((error as EvaluationOperationalError).safeDetail).toBe(
+      "binary judgment digest join failed: analysis context/item",
+    );
+    expect((error as EvaluationOperationalError).safeDetail).not.toContain("analysis context/item id");
   });
 
   test("refuses an arm-specific instrument pin in the shared item Task", async () => {

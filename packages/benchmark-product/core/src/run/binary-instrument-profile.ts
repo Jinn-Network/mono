@@ -33,6 +33,7 @@ import {
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
   BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE,
   BinaryJudgmentPayloadSchema,
+  binaryJudgmentInstrumentDeclaresEvidence,
   parseBinaryJudgmentInstrument,
   parseEvaluationSpec,
   sealBinaryJudgmentInstrument,
@@ -234,7 +235,7 @@ function validateTaskClosure(input: {
       || !sameJson(task.outputs, EXPECTED_OUTPUTS)
       || (taskRequirements !== undefined && Object.hasOwn(taskRequirements, BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY))
     ) {
-      refuse("conflict", `tasks.${taskDigest}`, "Benchmark item is not an arm-neutral binary-judgment/1.0 Task");
+      refuse("conflict", `tasks.${taskDigest}`, "Benchmark item is not an arm-neutral binary-judgment/2.0 Task");
     }
     const payloadResult = BinaryJudgmentPayloadSchema.safeParse(task.payload);
     if (!payloadResult.success) {
@@ -317,9 +318,25 @@ function deriveAdmissionProfile(input: {
   };
 }
 
+// A Task this function cannot read is not an evidence-free Task, it is a malformed one, and
+// `validateTaskClosure` already refuses it accurately moments later. Answering `true` here keeps
+// the evidence refusal from claiming "the bound bank carries none" about bytes it never parsed.
+function taskPayloadCarriesEvidence(taskBytes: Uint8Array): boolean {
+  let json: unknown;
+  try {
+    json = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(taskBytes));
+  } catch {
+    return true;
+  }
+  const payload = object(json)?.["payload"];
+  const parsed = BinaryJudgmentPayloadSchema.safeParse(payload);
+  return !parsed.success || parsed.data.evidence !== undefined;
+}
+
 function validateRuntimeAndArms(input: {
   readonly workspaceDir: string;
   readonly spec: DraftSpec;
+  readonly benchmark: BenchmarkRecord;
 }): void {
   if (input.spec.arms.length !== 4) {
     refuse("validation", "spec.arms", "binary-instrument@1 requires exactly four instrument arms");
@@ -354,6 +371,7 @@ function validateRuntimeAndArms(input: {
     refuse("conflict", "spec.evaluationRuntime.selectionManifestSha256", "binary judge selection arms must be sorted, distinct, and share one generation block");
   }
 
+  let declaringArmIndex: number | undefined;
   for (const [index, arm] of input.spec.arms.entries()) {
     const selected = selection.arms[index]!;
     if (
@@ -383,6 +401,32 @@ function validateRuntimeAndArms(input: {
       || !sameJson(instrument.model.generation, selected.generation)
     ) {
       refuse("conflict", `spec.arms.${index}.instrument`, "instrument identity, jinn-openai Luna model, or generation settings drifted from the runtime selection");
+    }
+    if (declaringArmIndex === undefined && binaryJudgmentInstrumentDeclaresEvidence(instrument)) {
+      declaringArmIndex = index;
+    }
+  }
+
+  // §2.3 lock-time leak refusal (frozen) -- the ONE enforcement point for the direction rule "arms
+  // constrain items; items never constrain arms": an instrument that interpolates `evidence`
+  // requires every bound item's payload to carry it. The converse -- bank items carry evidence, no
+  // arm declares it -- is allowed and required by the design: the declaring arm's evidence-free
+  // twin must still be able to ignore evidence that happens to be present. Lock is the enforcement
+  // point (and nowhere else) because it is the first moment the arm set and the item set are both
+  // frozen and both in scope; binding is not, because a bind may precede benchmark attachment. The
+  // scan below is lazy -- it only runs when some arm actually declares evidence -- so a
+  // non-declaring run pays nothing for it.
+  if (declaringArmIndex !== undefined) {
+    for (const item of input.benchmark.items) {
+      const taskDigest = itemTaskDigest(item);
+      const taskBytes = getSealedBytes(input.workspaceDir, taskDigest);
+      if (!taskPayloadCarriesEvidence(taskBytes)) {
+        refuse(
+          "conflict",
+          `spec.arms.${declaringArmIndex}.instrument`,
+          "instrument interpolates evidence but the bound bank carries none",
+        );
+      }
     }
   }
 }
@@ -422,7 +466,7 @@ export function compileBinaryInstrumentProfile(input: {
   if (effectiveVerdictRule !== "sole") {
     refuse("validation", "spec.assurance", "binary-instrument@1 requires resolved verdictRule=sole");
   }
-  validateRuntimeAndArms({ workspaceDir: input.workspaceDir, spec });
+  validateRuntimeAndArms({ workspaceDir: input.workspaceDir, spec, benchmark: input.benchmark });
   const admission = deriveAdmissionProfile(input);
   const parameters: BinaryInstrumentParameters = {
     verdictRule: "sole",

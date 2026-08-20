@@ -2018,13 +2018,13 @@
       "authorityDocuments": 32,
       "boundaryPolicies": 26,
       "catalogManifests": 97,
-      "catalogPublicSurfaces": 1329,
+      "catalogPublicSurfaces": 1330,
       "catalogSchema": 2,
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 6,
-      "discoveredFirstPartySurfaces": 4159,
-      "generatedOutputSources": 1391,
+      "discoveredFirstPartySurfaces": 4160,
+      "generatedOutputSources": 1392,
       "generatorSources": 676,
       "marketplaceControl": 2,
       "requiredGates": 25,
@@ -48902,6 +48902,18 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings-profile-2.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings.json"
       },
       {
@@ -51132,7 +51144,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-execution/profiles/profiles/task-profiles/binary-judgment/1.0"
+        "path": "packages/task-execution/profiles/profiles/task-profiles/binary-judgment/2.0"
       },
       {
         "categories": [
@@ -51144,7 +51156,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-execution/profiles/profiles/task-profiles/binary-judgment/1.0/profile.json"
+        "path": "packages/task-execution/profiles/profiles/task-profiles/binary-judgment/2.0/profile.json"
       },
       {
         "categories": [
@@ -51156,7 +51168,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-execution/profiles/profiles/task-profiles/binary-judgment/1.0/profile.sha256"
+        "path": "packages/task-execution/profiles/profiles/task-profiles/binary-judgment/2.0/profile.sha256"
       },
       {
         "categories": [
@@ -65149,6 +65161,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-execution-profiles",
         "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings-profile-2.json",
+        "relativeSource": "fixtures/binary-judgment-request/golden/unicode-line-endings-profile-2.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
         "path": "packages/task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings.json",
         "relativeSource": "fixtures/binary-judgment-request/golden/unicode-line-endings.json"
       },
@@ -66239,15 +66260,15 @@
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://spec.jinn.network/task-profiles/binary-judgment/1.0",
-          "servedPath": "task-profiles/binary-judgment/1.0"
+          "identifier": "https://spec.jinn.network/task-profiles/binary-judgment/2.0",
+          "servedPath": "task-profiles/binary-judgment/2.0"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
         "packedTargets": [],
-        "path": "packages/task-execution/profiles/profiles/task-profiles/binary-judgment/1.0/profile.json",
-        "relativeSource": "profiles/task-profiles/binary-judgment/1.0/profile.json"
+        "path": "packages/task-execution/profiles/profiles/task-profiles/binary-judgment/2.0/profile.json",
+        "relativeSource": "profiles/task-profiles/binary-judgment/2.0/profile.json"
       },
       {
         "claim": null,
@@ -66255,8 +66276,8 @@
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
         "packedTargets": [],
-        "path": "packages/task-execution/profiles/profiles/task-profiles/binary-judgment/1.0/profile.sha256",
-        "relativeSource": "profiles/task-profiles/binary-judgment/1.0/profile.sha256"
+        "path": "packages/task-execution/profiles/profiles/task-profiles/binary-judgment/2.0/profile.sha256",
+        "relativeSource": "profiles/task-profiles/binary-judgment/2.0/profile.sha256"
       },
       {
         "claim": {
@@ -69053,10 +69074,10 @@
       },
       {
         "field": "profile",
-        "identifier": "https://spec.jinn.network/task-profiles/binary-judgment/1.0",
+        "identifier": "https://spec.jinn.network/task-profiles/binary-judgment/2.0",
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
-        "path": "packages/task-execution/profiles/profiles/task-profiles/binary-judgment/1.0/profile.json"
+        "path": "packages/task-execution/profiles/profiles/task-profiles/binary-judgment/2.0/profile.json"
       },
       {
         "field": "profile",
