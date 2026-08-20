@@ -2,6 +2,15 @@
 node_modules/
 .local/
 
+# SkillsBench native-capture blob cache. Local only; never land on next (PR #2729).
+.skillsbench-cache/
+
+# Content-addressed blob cache written by the SkillsBench scripts under
+# packages/benchmark-product/core/scripts/. Every entry is re-fetchable from the
+# pinned upstream release and is verified against its Git object id on read, so
+# it is a local speed-up, never a source of truth.
+.skillsbench-cache/
+
 # .claude/ is operator-local (settings.json, worktrees, DS_Store) by default,
 # but shareable skill prose lives at .claude/skills/<name>/SKILL.md and must
 # be tracked so every contributor's Claude Code instance auto-discovers it

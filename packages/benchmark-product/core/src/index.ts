@@ -386,6 +386,153 @@ export {
   demo1PreRunFreezeV3Digest,
   verifyDemo1PreRunFreezeV3,
 } from "./method/demo1-prerun-v3.js";
+export {
+  SKILLSBENCH_V1_1_SOURCE,
+} from "./method/skillsbench-source.js";
+export type { SkillsBenchPinnedTask } from "./method/skillsbench-source.js";
+export {
+  SKILLSBENCH_RESOURCE_CLASSES,
+  SKILLSBENCH_NETWORK_MODES,
+  SKILLSBENCH_TASK_BUNDLE_UNIT_SCHEMA,
+  buildSkillsBenchUnit,
+  canonicalSkillsBenchUnitBytes,
+  classifySkillsBenchResource,
+  skillsBenchUnitDigest,
+  verifySkillsBenchUnit,
+  verifySkillsBenchUnitBodies,
+} from "./method/skillsbench-unit.js";
+export type {
+  SkillsBenchEntry,
+  SkillsBenchNetworkMode,
+  SkillsBenchResource,
+  SkillsBenchResourceClass,
+  SkillsBenchSkill,
+  SkillsBenchUnit,
+  SkillsBenchUnitBuildInput,
+} from "./method/skillsbench-unit.js";
+export {
+  SKILLSBENCH_CLUSTER_EDGE_CLASSES,
+  SKILLSBENCH_CLUSTER_POLICY,
+  deriveSkillsBenchClusters,
+  skillsBenchClusterId,
+  skillsBenchClusterOf,
+  verifySkillsBenchClusterGraph,
+} from "./method/skillsbench-clusters.js";
+export type {
+  SkillsBenchCluster,
+  SkillsBenchClusterEdge,
+  SkillsBenchClusterEdgeClass,
+  SkillsBenchClusterGraph,
+  SkillsBenchClusterInput,
+} from "./method/skillsbench-clusters.js";
+export {
+  SKILLSBENCH_ADMISSION_CHECKS,
+  SKILLSBENCH_ADMISSION_POLICY,
+  SKILLSBENCH_CONFLICTING_INSTRUCTION_PATHS,
+  SKILLSBENCH_REQUIRED_CLUSTERS,
+  SKILLSBENCH_REQUIRED_UNITS,
+  SKILLSBENCH_STATIC_CHECKS,
+  assessSkillsBenchStaticAdmission,
+} from "./method/skillsbench-admission.js";
+export type {
+  SkillsBenchAdmissionCheck,
+  SkillsBenchAdmissionInput,
+  SkillsBenchCapacity,
+  SkillsBenchCheckResult,
+  SkillsBenchCheckStatus,
+  SkillsBenchStaticAdmission,
+  SkillsBenchUnitVerdict,
+} from "./method/skillsbench-admission.js";
+export {
+  SKILLSBENCH_CLAUDE_MD_TRANSFORM,
+  SKILLSBENCH_ARMS,
+  SKILLSBENCH_TREATMENT_SCHEMA,
+  buildSkillsBenchClaudeMd,
+  buildSkillsBenchTreatment,
+  canonicalSkillsBenchTreatmentBytes,
+  skillsBenchFlattenSpan,
+  verifySkillsBenchClaudeMdBodies,
+  verifySkillsBenchTreatment,
+} from "./method/skillsbench-treatment.js";
+export type {
+  SkillsBenchArm,
+  SkillsBenchArmFile,
+  SkillsBenchArmPlan,
+  SkillsBenchTreatment,
+  SkillsBenchTreatmentInput,
+} from "./method/skillsbench-treatment.js";
+export {
+  DEMO1_PRE_RUN_FREEZE_V4_SCHEMA,
+  buildDemo1PreRunFreezeV4,
+  canonicalDemo1PreRunFreezeV4Bytes,
+  demo1PreRunFreezeV4AsE2Input,
+  demo1PreRunFreezeV4Digest,
+  verifyDemo1PreRunFreezeV4,
+} from "./method/skillsbench-prerun-v4.js";
+export type {
+  Demo1PreRunFreezeV4,
+  Demo1PreRunFreezeV4Input,
+} from "./method/skillsbench-prerun-v4.js";
+export {
+  SKILLSBENCH_DENIED_HOSTS,
+  SKILLSBENCH_EGRESS_POLICY,
+  deriveSkillsBenchEgressPlan,
+  extractEgressHosts,
+  isDeniedEgressHost,
+  verifySkillsBenchEgressPlan,
+} from "./method/skillsbench-egress.js";
+export type {
+  SkillsBenchEgressDecision,
+  SkillsBenchEgressInput,
+  SkillsBenchEgressPlan,
+} from "./method/skillsbench-egress.js";
+export {
+  SKILLSBENCH_DEFAULT_FULL_SUCCESS,
+  SKILLSBENCH_REWARD_CONTRACT,
+  judgeSkillsBenchControls,
+  parseSkillsBenchCtrf,
+  readSkillsBenchReward,
+} from "./method/skillsbench-reward.js";
+export type {
+  SkillsBenchCtrfSummary,
+  SkillsBenchOutcome,
+  SkillsBenchRewardInput,
+  SkillsBenchRewardReading,
+} from "./method/skillsbench-reward.js";
+export {
+  SKILLSBENCH_PARTITION_POLICY,
+  partitionSkillsBenchPools,
+  verifySkillsBenchPartition,
+} from "./method/skillsbench-partition.js";
+export type {
+  SkillsBenchPartition,
+  SkillsBenchPartitionUnit,
+  SkillsBenchSelectedUnit,
+} from "./method/skillsbench-partition.js";
+export {
+  NATIVE_SNAPSHOT_ALGORITHM,
+  NativeSnapshotRefusedError,
+  NativeSourceMutatedError,
+  STRICT_SNAPSHOT_POLICY,
+  createFilesystemNativeSnapshotPort,
+  createProcessNativeLauncher,
+} from "./runtime/native-ports.js";
+export type {
+  FilesystemSnapshotOptions,
+  ProcessLauncherOptions,
+} from "./runtime/native-ports.js";
+export {
+  SKILLSBENCH_PLUGIN_DIR,
+  SKILLSBENCH_RESOURCE_ROOT,
+  SKILLSBENCH_WORKSPACE_LAYOUT,
+  materializeSkillsBenchWorkspace,
+  verifySkillsBenchWorkspaceTriple,
+} from "./runtime/skillsbench-workspace.js";
+export type {
+  SkillsBenchWorkspace,
+  SkillsBenchWorkspaceFile,
+  SkillsBenchWorkspaceInput,
+} from "./runtime/skillsbench-workspace.js";
 export type {
   Demo1PreRunFreezeV3,
   Demo1PreRunFreezeV3CandidateInventory,

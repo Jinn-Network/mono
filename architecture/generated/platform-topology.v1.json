@@ -2028,9 +2028,9 @@
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 6,
-      "discoveredFirstPartySurfaces": 4183,
+      "discoveredFirstPartySurfaces": 4185,
       "generatedOutputSources": 1414,
-      "generatorSources": 678,
+      "generatorSources": 683,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 7
@@ -2288,6 +2288,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/custody-boundaries.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/demo1-historical-artifacts.test.mjs"
       },
       {
         "categories": [
@@ -19487,6 +19497,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmark-product/core/scripts/demo1-preregister.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmark-product/core/scripts/demo1-task-evidence-freeze.mjs"
       },
       {
@@ -19508,6 +19528,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/scripts/demo1-task-evidence-runner.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/demo1-verify.mjs"
       },
       {
         "categories": [
@@ -19687,6 +19717,26 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmark-product/core/scripts/skillsbench-arm-cell.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/skillsbench-controls.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmark-product/core/scripts/swebench-verified-one-task-qualify.mjs"
       },
       {
@@ -19798,6 +19848,26 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/src/conformance/publication-release-rehearsal.external.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/src/conformance/skillsbench-calibration-report.external.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/src/conformance/skillsbench-demo1-report.external.test.ts"
       },
       {
         "categories": [

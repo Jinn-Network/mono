@@ -1,0 +1,782 @@
+{
+  "schema": "jinn.demo1.arm-cells.v1",
+  "status": "REAL DEMO-1 ARM CELLS — pilot scale, not a locked official run",
+  "source": {
+    "benchmark": "skillsbench",
+    "release": "v1.1",
+    "commit": "b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af"
+  },
+  "model": "claude-haiku-4-5-20251001",
+  "agentLocation": "host",
+  "deviation": "The agent runs on the host, not inside the task image. Claude Code authenticates itself there, so no credential is handled or forwarded. The agent therefore works against the host interpreter rather than the task environment; grading always happens inside the pinned image.",
+  "cells": {
+    "ada-bathroom-plan-repair/A-native-skill/r0": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 474,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "ada-bathroom-plan-repair/A-native-skill/r1": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 457,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "ada-bathroom-plan-repair/A-native-skill/r2": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 390,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "ada-bathroom-plan-repair/A-native-skill/r3": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 555,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "ada-bathroom-plan-repair/A-native-skill/r4": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 627,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "ada-bathroom-plan-repair/B-flat-claude-md/r0": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 433,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": "b4d512d58ad1c6cc5223fbb396ced1140dc658148603a6522e496653d2c6da19",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "ada-bathroom-plan-repair/B-flat-claude-md/r1": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 711,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": "b4d512d58ad1c6cc5223fbb396ced1140dc658148603a6522e496653d2c6da19",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "ada-bathroom-plan-repair/B-flat-claude-md/r2": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 562,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": "b4d512d58ad1c6cc5223fbb396ced1140dc658148603a6522e496653d2c6da19",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "ada-bathroom-plan-repair/B-flat-claude-md/r3": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 663,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": "b4d512d58ad1c6cc5223fbb396ced1140dc658148603a6522e496653d2c6da19",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "ada-bathroom-plan-repair/B-flat-claude-md/r4": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 562,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": "b4d512d58ad1c6cc5223fbb396ced1140dc658148603a6522e496653d2c6da19",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "ada-bathroom-plan-repair/C-no-instructions/r0": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 625,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "ada-bathroom-plan-repair/C-no-instructions/r1": {
+      "taskId": "ada-bathroom-plan-repair",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 444,
+      "skills": [
+        {
+          "folder": "ada-plan-view-accessibility",
+          "bodySha256": "00917dbef828a8a30645304e1dd1e74616074730a8286cd5ab52850247749ea5"
+        },
+        {
+          "folder": "architectural-dxf-extraction",
+          "bodySha256": "218229a3eed097ebb819584b84dbf02c391520893b88095866862923443a2d83"
+        },
+        {
+          "folder": "geometric-layout-repair",
+          "bodySha256": "c4714dbd608225928967e1e8bf63f61d05a54724155b6967f7825076925cee96"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "drone-planning-control/A-native-skill/r1": {
+      "taskId": "drone-planning-control",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 682,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/A-native-skill/r2": {
+      "taskId": "drone-planning-control",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 715,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/A-native-skill/r3": {
+      "taskId": "drone-planning-control",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.266667",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 145,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/B-flat-claude-md/r0": {
+      "taskId": "drone-planning-control",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 492,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": "4da3a8ea7646757ba19f32cb74fcf8c5b3e62b2392eb65e6ebc1b890bdeb41eb",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/B-flat-claude-md/r1": {
+      "taskId": "drone-planning-control",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 493,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": "4da3a8ea7646757ba19f32cb74fcf8c5b3e62b2392eb65e6ebc1b890bdeb41eb",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/B-flat-claude-md/r2": {
+      "taskId": "drone-planning-control",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.533333",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 478,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": "4da3a8ea7646757ba19f32cb74fcf8c5b3e62b2392eb65e6ebc1b890bdeb41eb",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/B-flat-claude-md/r3": {
+      "taskId": "drone-planning-control",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 653,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": "4da3a8ea7646757ba19f32cb74fcf8c5b3e62b2392eb65e6ebc1b890bdeb41eb",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/A-native-skill/r0": {
+      "taskId": "drone-planning-control",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 837,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/A-native-skill/r4": {
+      "taskId": "drone-planning-control",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 796,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/B-flat-claude-md/r4": {
+      "taskId": "drone-planning-control",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.033333",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 730,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": "4da3a8ea7646757ba19f32cb74fcf8c5b3e62b2392eb65e6ebc1b890bdeb41eb",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/C-no-instructions/r0": {
+      "taskId": "drone-planning-control",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 777,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/C-no-instructions/r1": {
+      "taskId": "drone-planning-control",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 532,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    }
+  }
+}

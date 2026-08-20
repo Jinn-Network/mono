@@ -11,7 +11,12 @@
 |---|---|---|---|
 | `E1-pre-run-freeze.stop.v2.json` | `jinn.demo1.pre-run-freeze.v2` | `08b7e7d0a17d8a4c1ff876111a2e0cb49056b3e5bfe313e8684f46d2b85ae58a` | Preserved byte-for-byte; historical STOP |
 | `E1-task-evidence.v1.json` | `jinn.demo1.task-evidence.v1` | `b136f80342e5d6e7179267590c72d6bcde9c6922ecd61841faf18905daada8e1` | Complete static scan of the authorized task universe |
-| `E1-pre-run-freeze.stop.v3.json` | `jinn.demo1.pre-run-freeze.v3` | `d439e6729144a74c84f124c058a3c1e01e557091085b9e2c26740884e24b2f3c` | Current independently recomputable STOP |
+| `E1-pre-run-freeze.stop.v3.json` | `jinn.demo1.pre-run-freeze.v3` | `d439e6729144a74c84f124c058a3c1e01e557091085b9e2c26740884e24b2f3c` | Historical STOP on the superseded `anthropics/skills` source |
+| `E1-pre-run-freeze.v4.json` | `jinn.demo1.pre-run-freeze.v4` | `404b3c8ad00330a9ff09a7dbb415a44498173979ad965fe13bcf9ca659dc0ca0` | **Current freeze**, on SkillsBench v1.1; supersedes v3 by digest. Static admission **passes**; authorizes the no-model controls only |
+| `E1-demo1-confirmatory-cells.v1.json` | `jinn.demo1.arm-cells.v1` | `b394d197174f136dc7c10a9564c5e6e5a730935370c141fc7c70ea5efc6da575` | Confirmatory 492-cell flat A/B/C run; separate from exploration `E1-arm-cells.v1.json` |
+| `E1-demo1-host-control-evidence.v1.json` | `jinn.demo1.host-control-evidence.v1` | `7164cb1f435f3d851a661b17a5727a4a3fb4e4402d8eb4d162a9161ad87a65c8` | Union of six-host oracle / no-op controls (41 units) |
+| `E1-demo1-evidence-bundle.v1.json` | `jinn.demo1.evidence-bundle.v1` | `11a8c189eb06405f8bd97dd2dc31ae5b20a4fb300a2d9b57feabcadc399bdadd` | Sealed final evidence-native bundle |
+| `demo1-report.v1.json` | `jinn.demo1.report.v1` | `df1f8bb2ded82b82f2454306d6fd33da59f47811b7a45e26c609278ed72f9173` | Machine-readable confirmatory report (`stage: final`) |
 
 The v3 artifact names and authenticates v2 rather than replacing its bytes. It embeds the exact
 task-evidence artifact, rebuilds every candidate disposition, derives the selection basis
@@ -145,3 +150,116 @@ yarn vitest run src/method/demo1-task-evidence.test.ts src/method/demo1-prerun.t
 
 The check command fetches only the two exact pinned candidate files, authenticates both, rebuilds
 the 197-task evidence and v3 freeze, and requires byte-identical output.
+
+Note that this reproduction is **not third-party recomputable**: the generator reads two
+operator-private snapshots under `~/.jinn-client/swe-rebench-v2/`. That limitation is inherent to
+the superseded source and is one of the reasons the amendment below moves to a fully public one.
+
+---
+
+## Source-method amendment (2026-08-16)
+
+**Everything above this line is preserved exactly and continues to describe the superseded method:
+one `anthropics/skills` candidate against an unrelated SWE-rebench slate.** The three artifacts in
+the table at the top of this document are unchanged, and their digests are pinned by
+`.github/scripts/demo1-historical-artifacts.test.mjs` (build-free, runs on every pull request) and
+by `packages/benchmark-product/core/src/method/demo1-task-evidence.test.ts` (real verifier
+round-trips). **Nothing below rewrites the STOP; it records why the next attempt uses a different
+source.**
+
+Ratified by [DR-2026-08-16](../../../../log/decisions/2026-08-16-demo1-skillsbench-source-amendment.md).
+Frame-level detail is in [`E1-comparison-frame.md`](E1-comparison-frame.md) §2.3.1.
+
+**The resumption condition, met.** This document's resumption boundary required "a newly
+authenticated task snapshot from the same pinned content source (or an explicit, separately
+reviewed source change) whose static domain ceiling can satisfy all three disjoint pools." The
+source change is now explicit and separately reviewed. The *ceiling* is not yet established — that
+is the work the amendment authorizes, and it authorizes nothing else.
+
+**New source identity.**
+
+| Property | Value |
+|---|---|
+| Repository | `benchflow-ai/skillsbench` |
+| Release | `v1.1`, annotated tag `a30b2ac88c8f1fd1c77385be6b4dea204ca9eb69` |
+| Commit | `b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af` |
+| Active roster | 87 task packages under `tasks/`; 14 excluded under `tasks-extra/` |
+| Runner | BenchFlow `>=0.6.3,<0.7`, pinned at v0.6.3 commit `99baefb602674bbd31139fd2f1a22c3ed45752f9` |
+| Root license | Apache-2.0 |
+
+**New experimental unit.** One exact upstream task package plus its complete curated Skill bundle.
+Multi-Skill bundles are in scope (66 of 87 tasks carry more than one Skill). No candidate ranking,
+no winner, no domain classifier.
+
+**New independence rule.** Transitive clusters over four fixed edge classes replace repository
+disjointness. Pool floors are unchanged: 6/6, 10/5, 5/2 — combined **21 units across 13 clusters**,
+cluster-disjoint.
+
+**Execution accounting is still zero.** This amendment authorizes no Docker control, no model arm,
+no preview, no Haiku cell, no E2 rehearsal, no official cell, and no publication claim. The
+successor freeze (`jinn.demo1.pre-run-freeze.v4`) supersedes v3 by digest exactly as v3 supersedes
+v2, and a `stop` v4 cannot authorize E2 — the same guard shape as
+`demo1PreRunFreezeV3AsV2`'s "a STOP freeze cannot authorize E2".
+
+**The open question, stated plainly.** 86 of the 87 active tasks declare
+`environment.network_mode: public`; exactly one (`bike-rebalance`) declares `no-network`. The
+verifiers are non-hermetic too — `verifier/test.sh` runs `apt-get update` and
+`curl https://astral.sh/uv/…`. Against a 21-unit floor, and under a contamination rule that makes
+unrestricted public networking ineligible without a separately reviewed mechanism, **this source
+may not be viable either.** DR-2026-08-16 Decision 6 gates the ruling on the static admission
+count, which costs no execution to obtain.
+
+### Static admission result (2026-08-16, corrected)
+
+The gate has been run — `yarn skillsbench:inventory`, zero model arms, zero previews, zero Docker
+controls. It authenticates all 87 active tasks from the pinned release and refuses any byte stream
+that does not hash back to its declared Git object id.
+
+| Measure | Result |
+|---|---|
+| Inventoried | 84 of 87 |
+| Refused at construction | 3 — `simpo-code-reproduction` (git submodule), `earthquake-phase-association`, `seismic-phase-picking` (a `licenses` directory where a skill folder belongs) |
+| Independence clusters | 52, from 129 evidence-bearing edges |
+| Egress decisions | 63 offline, 14 broker-only, **7 ineligible** |
+| **Static capacity** | **41 units / 34 clusters** against a required **21 / 13** — **sufficient** |
+| Remaining rejections | 21 statement disclosure, 19 licence, 6 answer collision, 14 pending broker enforcement |
+| After arm-B treatment feasibility | 37 units / 32 clusters |
+| **Pool partition** | suitability 6 units / 6 clusters · rehearsal 10 / 5 · official-feasibility 5 / 5 · 23 further units in frozen official order — all three pools cluster-disjoint |
+
+**Static admission passes. Demo-1 is no longer stopped at the content boundary.** The v4 freeze
+records `status: ready`.
+
+**It authorizes the no-model dynamic controls and nothing else.** `authorizes: "dynamic-controls"`,
+with `withOracleEvidence: 0` and `withNoOpEvidence: 0` across all 41 admitted units. E2 and every
+model-executing path stay shut until each admitted unit has real pinned-environment evidence that
+its oracle reaches full success and a blank submission does not.
+
+#### The correction that produced this, recorded in full
+
+An earlier run of this same gate reported **1 unit / 1 cluster** and closed
+[DR-2026-08-16](../../../../log/decisions/2026-08-16-demo1-skillsbench-source-amendment.md) Decision 6
+to a second STOP. That result was **an artifact of Jinn's own egress policy, not a property of the
+source**, and it was wrong in two compounding ways:
+
+1. **It conflated three moments into one.** The policy treated a denied host as disqualifying
+   wherever it appeared — in the image build, the verifier, or the agent's own text. But only the
+   **agent** can leak an answer to the solver. The image build completes before the agent exists
+   and its result is frozen into a digest-pinned image; the verifier runs after the solve is sealed.
+   Rejecting a unit because its `Dockerfile` mentions GitHub was a category error.
+2. **It treated "cannot derive" as "must refuse".** 57 units declare `public` while naming no host,
+   because what they actually need is `apt-get` and `pip install` — package indexes, at build time.
+   The correct default for an agent that names no host is **no network at all**, which is
+   fail-safe: if the task genuinely needs egress to be solvable, its oracle fails offline in the
+   dynamic control and the unit is rejected on evidence rather than on an assumption.
+
+The corrected policy adds a fixed, content-independent build-time infrastructure allowlist (package
+indexes and OS repositories, which serve versioned third-party software and never a task's oracle),
+keeps the answer-bearing deny-list absolute at agent time, and defaults an unspecified agent to
+offline. Under it, only **7 units** are egress-ineligible, all because their own agent-visible text
+reaches for `github.com`.
+
+Both the superseded 1/1 result and the intermediate 57/45 counterfactual are left in the record.
+The useful lesson is not that the numbers moved — it is that **two of the three figures this gate
+produced were measuring the wrong quantity**, and only writing the policy out and running it
+exposed which.
+

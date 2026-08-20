@@ -1,0 +1,540 @@
+{
+  "schema": "jinn.demo1.host-control-evidence.v1",
+  "source": {
+    "benchmark": "skillsbench",
+    "release": "v1.1",
+    "commit": "b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af"
+  },
+  "hosts": {
+    "w1": {
+      "schema": "jinn.demo1.host-control-evidence.v1",
+      "recordedHost": "unknown",
+      "cells": {
+        "3d-scan-calc": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "data-to-d3": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "enterprise-information-search": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "lake-warming-attribution": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "mars-clouds-clustering": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "r2r-mpc-control": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "threejs-structure-parser": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "exam-block-sequencing": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "radar-vital-signs": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7"
+        }
+      }
+    },
+    "w2": {
+      "schema": "jinn.demo1.host-control-evidence.v1",
+      "recordedHost": "unknown",
+      "cells": {
+        "ada-bathroom-plan-repair": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "drone-planning-control": {
+          "oracleReward": "1.000000",
+          "noOpReward": "0.000000",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        }
+      }
+    },
+    "w3": {
+      "schema": "jinn.demo1.host-control-evidence.v1",
+      "recordedHost": "unknown",
+      "cells": {
+        "adaptive-cruise-control": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "edit-pdf": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "glm-lake-mendota": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214"
+        },
+        "manufacturing-codebook-normalization": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "parallel-tfidf-search": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "react-performance-debugging": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "tictoc-unnecessary-abort-detection": {
+          "oracleReward": "1.000000000000",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        }
+      }
+    },
+    "w4": {
+      "schema": "jinn.demo1.host-control-evidence.v1",
+      "recordedHost": "unknown",
+      "cells": {
+        "azure-bgp-oscillation-route-leak": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "energy-ac-optimal-power-flow": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "grid-dispatch-operator": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "manufacturing-equipment-maintenance": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "paratransit-routing": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "sec-financial-report": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "travel-planning": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "llm-prefix-cache-replay": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        }
+      }
+    },
+    "w5": {
+      "schema": "jinn.demo1.host-control-evidence.v1",
+      "recordedHost": "unknown",
+      "cells": {
+        "bike-rebalance": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "energy-market-pricing": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "hvac-control": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "manufacturing-fjsp-optimization": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "pddl-airport-planning": {
+          "oracleReward": "0",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "suricata-custom-exfil": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+        },
+        "video-silence-remover": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "multilingual-video-dubbing": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        }
+      }
+    },
+    "w6": {
+      "schema": "jinn.demo1.host-control-evidence.v1",
+      "recordedHost": "unknown",
+      "cells": {
+        "dapt-intrusion-detection": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "energy-unit-commitment": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+        },
+        "jax-computing-basics": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "mario-coin-counting": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "pddl-tpp-planning": {
+          "oracleReward": "0",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "syzkaller-ppdev-syzlang": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        },
+        "threejs-to-obj": {
+          "oracleReward": "1",
+          "noOpReward": "0",
+          "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+        }
+      }
+    }
+  },
+  "units": {
+    "3d-scan-calc": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w1"
+    },
+    "ada-bathroom-plan-repair": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w2"
+    },
+    "adaptive-cruise-control": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w3"
+    },
+    "azure-bgp-oscillation-route-leak": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w4"
+    },
+    "bike-rebalance": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w5"
+    },
+    "dapt-intrusion-detection": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w6"
+    },
+    "data-to-d3": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w1"
+    },
+    "drone-planning-control": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1.000000",
+      "noOpReward": "0.000000",
+      "eligible": true,
+      "host": "w2"
+    },
+    "edit-pdf": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w3"
+    },
+    "energy-ac-optimal-power-flow": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w4"
+    },
+    "energy-market-pricing": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w5"
+    },
+    "energy-unit-commitment": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w6"
+    },
+    "enterprise-information-search": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w1"
+    },
+    "exam-block-sequencing": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w1"
+    },
+    "glm-lake-mendota": {
+      "baseImage": "ubuntu@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w3"
+    },
+    "grid-dispatch-operator": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w4"
+    },
+    "hvac-control": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w5"
+    },
+    "jax-computing-basics": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w6"
+    },
+    "lake-warming-attribution": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w1"
+    },
+    "llm-prefix-cache-replay": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w4"
+    },
+    "manufacturing-codebook-normalization": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w3"
+    },
+    "manufacturing-equipment-maintenance": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w4"
+    },
+    "manufacturing-fjsp-optimization": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w5"
+    },
+    "mario-coin-counting": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w6"
+    },
+    "mars-clouds-clustering": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w1"
+    },
+    "multilingual-video-dubbing": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w5"
+    },
+    "parallel-tfidf-search": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w3"
+    },
+    "paratransit-routing": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w4"
+    },
+    "pddl-airport-planning": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "0",
+      "noOpReward": "0",
+      "eligible": false,
+      "host": "w5"
+    },
+    "pddl-tpp-planning": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "0",
+      "noOpReward": "0",
+      "eligible": false,
+      "host": "w6"
+    },
+    "r2r-mpc-control": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w1"
+    },
+    "radar-vital-signs": {
+      "baseImage": "python@sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w1"
+    },
+    "react-performance-debugging": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w3"
+    },
+    "sec-financial-report": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w4"
+    },
+    "suricata-custom-exfil": {
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w5"
+    },
+    "syzkaller-ppdev-syzlang": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w6"
+    },
+    "threejs-structure-parser": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w1"
+    },
+    "threejs-to-obj": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w6"
+    },
+    "tictoc-unnecessary-abort-detection": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1.000000000000",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w3"
+    },
+    "travel-planning": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w4"
+    },
+    "video-silence-remover": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true,
+      "host": "w5"
+    }
+  }
+}
