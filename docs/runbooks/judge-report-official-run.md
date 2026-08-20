@@ -29,8 +29,9 @@ standalone `bundle verify`.
 - `k = 3` scientific replicates. Primary readout `binary-instrument@1`.
   Additional readouts `pairwise-disagreement@1` and
   `paired-majority-delta@1`. All three are pre-registered by one
-  `draft update` patch. Computation is a side effect of `report`. There is
-  no `method compute` verb.
+  `draft update` patch (the `additionalAnalyses` key is packet-P5-gated).
+  Computation is a side effect of `report`. There is no `method compute`
+  verb.
 - `publish --include-native-artifacts` is mandatory. Per-cell logs land at
   `native/inspect/<sha256>.eval` inside each bundle.
 - `export` on a judge draft succeeds in mode `inspection-upload`. It is not
@@ -59,8 +60,8 @@ Workspace lives **outside** the repo.
 cd packages/benchmark-product/core
 yarn build
 COLOPHON="$(pwd)/dist/cli/bin.js"
-WS=/tmp/colophon-judge-official
-DRAFT=locomo-judge
+export WS=/tmp/colophon-judge-official
+export DRAFT=locomo-judge
 mkdir -p "$WS"
 ```
 
@@ -140,6 +141,16 @@ flag. `k` is `replicates` (derived into analysis parameters at lock;
 caller-supplied `parameters.k` is refused). Patch keys replace wholesale:
 include the full `assurance` and `policy` objects.
 
+The `additionalAnalyses` array in the patch below is packet-P5-gated
+(PR #2884), same as N-bundle packaging. On `next` without P5,
+`DRAFT_SPEC_FIELD_NAMES` has no `additionalAnalyses` and `draft update`
+refuses `unknown draft spec field: additionalAnalyses`. Do not apply this
+patch until P5 is on `next`. If G4 takes the companion-analysis fallback,
+do not run this patch: the three registered readouts become sealed
+companions labeled as such. Pin `replicates`, `assurance`, and `policy`
+with the same file minus the `additionalAnalyses` key. N-bundle steps stay
+labeled packet P5.
+
 ```bash
 cat > "$WS/draft-pin.json" <<'EOF'
 {
@@ -191,40 +202,183 @@ in public first), a `probedAt` in the future relative to the bind clock,
 or a probe older than 24 hours (`SNAPSHOT_PROBE_MAX_AGE_MS`). Required
 when any bound arm's model is a dated snapshot; forbidden otherwise.
 
-Probe shape (sealed by the profiles package, carried on the binding file):
+There is no Colophon verb that produces the probe. The live snapshot-serving
+check is research-side. Record it as `$WS/snapshot-probe.json` with exactly
+these keys (profiles `BinaryJudgmentSnapshotProbeSchema`):
 
-```
-protocol: "https://spec.jinn.network/binary-judgment/snapshot-serving-probe/v1"
-requestedModel / resolvedModel / responseId / eventSha256 / probedAt / outcome
+```json
+{
+  "protocol": "https://spec.jinn.network/binary-judgment/snapshot-serving-probe/v1",
+  "requestedModel": "gpt-4o-mini-2024-07-18",
+  "resolvedModel": "gpt-4o-mini-2024-07-18",
+  "responseId": "<provider-response-id>",
+  "eventSha256": "sha256:<64-lowercase-hex>",
+  "probedAt": "<RFC-3339 with offset>",
+  "outcome": "serving"
+}
 ```
 
 `outcome` is `"serving"` if and only if `resolvedModel === requestedModel`.
-Put the probe object on the binding as `snapshotProbe` and its sealed
-digest on the manifest as `snapshotProbeSha256`. Host binding stays inside
-the same file (`host.dockerPath` must be absolute).
+`requestedModel` must be a dated-snapshot model that matches at least one
+bound arm. Seal with the profiles function `sealBinaryJudgmentSnapshotProbe`
+(not a Colophon verb). Bind reads that digest on
+`manifest.snapshotProbeSha256` and the same object on `snapshotProbe`.
+
+From `packages/benchmark-product/core` after section 1's `yarn build` (core
+depends on `@jinn-network/task-execution-profiles`):
+
+```bash
+export PROBE="$WS/snapshot-probe.json"
+node --input-type=module - <<'JS'
+import { readFileSync, writeFileSync } from "node:fs";
+import { sealBinaryJudgmentSnapshotProbe } from "@jinn-network/task-execution-profiles";
+const probe = JSON.parse(readFileSync(process.env.PROBE, "utf8"));
+const sealed = sealBinaryJudgmentSnapshotProbe(probe);
+writeFileSync(`${process.env.PROBE}.digest`, `${sealed.digest}\n`);
+process.stdout.write(`${sealed.digest}\n`);
+JS
+PROBE_SHA256=$(cat "$PROBE.digest")
+```
+
+Write `$WS/judge-binding.json` with the method-operand schema
+(`InspectBinaryJudgeBindingRequestSchema`): top-level `schema`, `manifest`,
+`host`, and `snapshotProbe` when the manifest declares `snapshotProbeSha256`.
+Operator paths and sealed instrument digests; no bank bytes. Official run:
+six arms, code-unit sorted by `armId`, distinct `instrumentSha256`, one
+shared generation block. Schema minimum is two arms. Four runtime source
+hashes must match this product build or bind refuses. `host.dockerPath`
+must be absolute. `host.imageDigest` and `host.platform` must equal
+`manifest.runtime.imageDigest` and `manifest.runtime.platform`.
+
+```bash
+cat > "$WS/judge-binding.json" <<EOF
+{
+  "schema": "jinn.network/benchmark-product/inspect-binary-judge-binding-request/1",
+  "manifest": {
+    "schema": "jinn.network/benchmark-product/inspect-binary-judge-selection/1",
+    "runtime": {
+      "imageDigest": "sha256:<64-lowercase-hex>",
+      "platform": "linux/amd64",
+      "pythonVersion": "3.11.9",
+      "inspectVersion": "0.3.255",
+      "inspectEvalsVersion": "0.16.0",
+      "openaiSdkVersion": "2.53.0",
+      "runtimeHostSourceSha256": "<64-lowercase-hex this build>",
+      "workerSourceSha256": "<64-lowercase-hex this build>",
+      "brokerSourceSha256": "<64-lowercase-hex this build>",
+      "modelProviderSourceSha256": "<64-lowercase-hex this build>"
+    },
+    "execution": {
+      "callsPerCell": 1,
+      "epochs": 1,
+      "inspectScorer": false,
+      "retries": 0,
+      "fallbacks": 0,
+      "tools": [],
+      "storage": false
+    },
+    "requirement": {
+      "key": "network.jinn.binary-judgment.instrument",
+      "valueShape": "sha256:<64-lowercase-hex>",
+      "comparison": "exact",
+      "location": "submission-effective-requirements"
+    },
+    "arms": [
+      {
+        "armId": "<arm-a>",
+        "instrumentSha256": "sha256:<64-lowercase-hex>",
+        "model": "gpt-4o-mini-2024-07-18",
+        "generation": {
+          "temperature": 0,
+          "maxOutputTokens": 512,
+          "store": false,
+          "background": false,
+          "stream": false,
+          "serviceTier": "default",
+          "tools": [],
+          "fallbackModels": [],
+          "retries": 0,
+          "persistedConversation": false,
+          "metadata": null,
+          "promptCacheIdentifier": null
+        }
+      },
+      {
+        "armId": "<arm-b>",
+        "instrumentSha256": "sha256:<64-lowercase-hex>",
+        "model": "gpt-4o-mini-2024-07-18",
+        "generation": {
+          "temperature": 0,
+          "maxOutputTokens": 512,
+          "store": false,
+          "background": false,
+          "stream": false,
+          "serviceTier": "default",
+          "tools": [],
+          "fallbackModels": [],
+          "retries": 0,
+          "persistedConversation": false,
+          "metadata": null,
+          "promptCacheIdentifier": null
+        }
+      }
+    ],
+    "snapshotProbeSha256": "$PROBE_SHA256"
+  },
+  "host": {
+    "kind": "oci",
+    "dockerPath": "/absolute/path/to/docker",
+    "imageDigest": "sha256:<same as manifest.runtime.imageDigest>",
+    "platform": "linux/amd64",
+    "user": "<uid>:<gid>"
+  },
+  "snapshotProbe": $(cat "$PROBE")
+}
+EOF
+```
+
+Substitute the sealed instrument digests, this-build runtime hashes, absolute
+Docker path, and the six-arm panel from the sealed selection.
+`requirement.valueShape` is the frozen literal `sha256:<64-lowercase-hex>`,
+not a slot. Then bind:
 
 ```bash
 node "$COLOPHON" method "$WS/judge-binding.json" --workspace "$WS" --principal operator \
-  --draft "$DRAFT" --json
+  --draft "$DRAFT" --json | tee "$WS/bind.json"
 ```
 
-Success: `bound custom inspect-binary-judge method <selectionManifestSha256>`.
-The selection digest flows into `draft.spec.evaluationRuntime.selectionManifestSha256`
-and from there into the sealed Run at lock.
+Success (`--json` envelope): `ok` is true; `result.official` is false;
+`result.documentKind` is `"inspect-binary-judge"`;
+`result.selectionManifestSha256` is 64 lowercase hex. That digest flows into
+`draft.spec.evaluationRuntime.selectionManifestSha256` and from there into
+the sealed Run at lock.
 
 ## 6. Quote, then lock
 
 ```bash
-node "$COLOPHON" quote --workspace "$WS" --principal operator --draft "$DRAFT" --json
-node "$COLOPHON" lock --workspace "$WS" --principal operator --draft "$DRAFT" --json
+node "$COLOPHON" quote --workspace "$WS" --principal operator --draft "$DRAFT" --json \
+  | tee "$WS/quote.json"
+node "$COLOPHON" lock --workspace "$WS" --principal operator --draft "$DRAFT" --json \
+  | tee "$WS/lock.json"
+LOCK_DIGEST=$(node --input-type=module - <<JS
+import { readFileSync } from "node:fs";
+const body = JSON.parse(readFileSync("$WS/lock.json", "utf8"));
+if (body.ok !== true || typeof body.result?.runSha256 !== "string") {
+  throw new Error("lock --json did not return result.runSha256");
+}
+process.stdout.write(body.result.runSha256);
+JS
+)
 ```
 
 `--ack-provider-network-costs` is required only when a draft arm is a
 Claude Code or Codex agent. This judge bind does not use those harnesses.
 
-Success: quote `ok=true` with `expectedCellCount` inside the authorized
-budget; lock prints `locked draft locomo-judge: run <runSha256>, closes <closeAt>`.
-That `runSha256` is the top-level lock digest for the freeze post.
+Success (`--json` envelope): quote `ok` is true, `result.quote.ok` is true,
+and `result.quote.expectedCellCount` is inside the authorized budget. Lock
+`ok` is true; `result.runSha256` is 64 lowercase hex; `result.closeAt` is
+set. That `result.runSha256` is the top-level lock digest for the freeze
+post. Set `LOCK_DIGEST` from it before the OpenTimestamps step.
 
 ## 7. Freeze post and OpenTimestamps
 
@@ -235,8 +389,8 @@ load-bearing:
 
 1. Archive URL of the public freeze registration (a link alone can point at
    mutable content; the archive is the registration pointer).
-2. The top-level lock digest inline in the comment body (the `runSha256`
-   from lock).
+2. The top-level lock digest inline in the comment body (`result.runSha256`
+   from lock `--json`).
 3. One-sentence immutability clause: `Nothing in the sealed freeze moves once judging starts.`
 
 Independently timestamp the same lock digest with OpenTimestamps. The stamp
@@ -300,10 +454,11 @@ For each `armId` from `arm list`:
 
 ```bash
 node "$COLOPHON" export --workspace "$WS" --principal operator --draft "$DRAFT" \
-  --arm "$ARM" --json
+  --arm "$ARM" --json | tee "$WS/export-$ARM.json"
 ```
 
-Export success: `exported inspect-view (inspection-upload)`. Instructions
+Export success (`--json` envelope): `ok` is true; `result.shape` is
+`"inspect-view"`; `result.mode` is `"inspection-upload"`. `result.instructions`
 include the completeness certification naming the sealed Matrix
 `runOutcome` and counts (`complete|partial|cancelled` run of the selection
 sealed at lock `<runSha256>: <judged> of <expected> cells judged`). Logs
@@ -312,7 +467,7 @@ plus `INSTRUCTIONS.txt` land at
 
 ```bash
 node "$COLOPHON" publish --workspace "$WS" --principal operator --draft "$DRAFT" \
-  --include-native-artifacts --json
+  --include-native-artifacts --json | tee "$WS/publish.json"
 ```
 
 Without `--include-native-artifacts`, publish refuses. Human-mode stdout
@@ -326,12 +481,31 @@ $WS/artifacts/$DRAFT/public-bundles/<manifest-sha256>
 Per-cell `.eval` logs: `native/inspect/<sha256>.eval` inside each bundle.
 
 ```bash
-node "$COLOPHON" bundle verify --bundle "$BUNDLE_DIR" --json
+export PUBLISH_JSON="$WS/publish.json"
+export BUNDLES_ROOT="$WS/artifacts/$DRAFT/public-bundles"
+while IFS= read -r identity; do
+  BUNDLE_DIR="$BUNDLES_ROOT/$identity"
+  node "$COLOPHON" bundle verify --bundle "$BUNDLE_DIR" --json \
+    | tee "$WS/bundle-verify-$identity.json"
+done < <(node --input-type=module - <<'JS'
+import { readFileSync } from "node:fs";
+const body = JSON.parse(readFileSync(process.env.PUBLISH_JSON, "utf8"));
+if (body.ok !== true || typeof body.result?.bundleIdentity !== "string") {
+  throw new Error("publish --json did not return result.bundleIdentity");
+}
+const identities = [
+  body.result.bundleIdentity,
+  ...(body.result.additionalBundles ?? []).map((entry) => entry.bundleIdentity),
+];
+process.stdout.write(`${identities.join("\n")}\n`);
+JS
+)
 ```
 
-Repeat for each of the three directories. No `--workspace`. No
-`--principal`. Success: `verified public bundle <identity>` with the
-verifier checks present.
+No `--workspace`. No `--principal`. Loop the publish identities: canonical
+`result.bundleIdentity` plus each P5 `result.additionalBundles[].bundleIdentity`.
+Success (`--json` envelope): `ok` is true; `result.identity` is the directory's
+bundle identity; `result.checks` is present.
 
 Workspace `verify` is not the claim of record:
 
@@ -346,17 +520,27 @@ run. Equal `runSha256` and `matrixSha256` across all three;
 `reportSha256` and bundle identity distinct.
 
 ```bash
+export PUBLISH_JSON="$WS/publish.json"
+export BUNDLES_ROOT="$WS/artifacts/$DRAFT/public-bundles"
 node --input-type=module - <<'JS'
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 const root = process.env.BUNDLES_ROOT;
-const dirs = readdirSync(root).map((name) => join(root, name));
-if (dirs.length !== 3) {
-  throw new Error(`expected 3 bundle directories, found ${dirs.length}`);
+const body = JSON.parse(readFileSync(process.env.PUBLISH_JSON, "utf8"));
+if (body.ok !== true || typeof body.result?.bundleIdentity !== "string") {
+  throw new Error("publish --json did not return result.bundleIdentity");
 }
-const records = dirs.map((dir) => {
+const identities = [
+  body.result.bundleIdentity,
+  ...(body.result.additionalBundles ?? []).map((entry) => entry.bundleIdentity),
+];
+if (identities.length !== 3) {
+  throw new Error(`expected 3 publish identities, found ${identities.length}`);
+}
+const records = identities.map((identity) => {
+  const dir = join(root, identity);
   const claim = JSON.parse(readFileSync(join(dir, "claim-package.json"), "utf8"));
-  return { identity: dir, ...claim.records };
+  return { identity, ...claim.records };
 });
 const runs = new Set(records.map((row) => row.runSha256));
 const matrices = new Set(records.map((row) => row.matrixSha256));
@@ -371,7 +555,9 @@ process.stdout.write(`${JSON.stringify({ ok: true, runSha256: [...runs][0], matr
 JS
 ```
 
-Set `BUNDLES_ROOT="$WS/artifacts/$DRAFT/public-bundles"`.
+Identities come from publish `--json` (canonical `result.bundleIdentity`
+plus P5 `result.additionalBundles`), not from listing everything under
+`public-bundles`.
 
 ## 11. G4 go/no-go
 
@@ -385,7 +571,9 @@ redesigned.
    exclusions listed; admission closure complete; seeded sampling script
    sealed; corrupt-key module (20 × 2) and gate probes (12) built.
 3. Freeze manifest cut; freeze post carries the archive URL, the inline
-   lock digest, the immutability clause, and the out-of-band OTS stamp.
+   lock digest, and the immutability clause. The OpenTimestamps stamp is a
+   separate out-of-band file kept with the operator notes, not in the freeze
+   post.
 4. In-thread asks closed: missing-judges question (silence keeps the
    default), the Backboard prompt's provenance recorded per the license
    brief, per-prompt license register sealed.
