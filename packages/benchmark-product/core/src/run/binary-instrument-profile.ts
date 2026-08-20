@@ -12,8 +12,15 @@
 import { Buffer } from "node:buffer";
 import {
   BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
+  PAIRED_MAJORITY_DELTA_ALPHA,
+  PAIRED_MAJORITY_DELTA_RESAMPLES,
+  PAIRED_MAJORITY_DELTA_SEED,
   validateBinaryInstrumentParameters,
+  validatePairedMajorityDeltaParameters,
+  validatePairwiseDisagreementParameters,
   type BinaryInstrumentParameters,
+  type PairedMajorityDeltaParameters,
+  type PairwiseDisagreementParameters,
 } from "@jinn-network/benchmarking-aggregate";
 import {
   BENCHMARKING_METHOD_IDS,
@@ -40,6 +47,8 @@ import {
   sealBinaryJudgmentInstrument,
   sealEvaluationSpec,
   type AcceptedJudgeModelId,
+  type BinaryJudgmentInstrument,
+  type BinaryJudgmentTemplateSegment,
 } from "@jinn-network/task-execution-profiles";
 import {
   TASK_EXECUTION_PROTOCOL_URI,
@@ -50,7 +59,7 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import { canonicalJsonBytes, recordDigest } from "@jinn-network/trust-core";
 import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../human-review/verification-workspace.js";
-import { resolveAssurance, type DraftDocument, type DraftSpec } from "../domain/draft.js";
+import { resolveAssurance, type Analysis, type DraftDocument, type DraftSpec } from "../domain/draft.js";
 import { refuse } from "../errors.js";
 import {
   BINARY_ITEM_BANK_INTAKE_EXTENSION,
@@ -341,7 +350,25 @@ function validateRuntimeAndArms(input: {
   readonly workspaceDir: string;
   readonly spec: DraftSpec;
   readonly benchmark: BenchmarkRecord;
-}): { readonly judgeModel: AcceptedJudgeModelId } {
+}): {
+  readonly judgeModel: AcceptedJudgeModelId;
+  /** Index of the FIRST arm whose instrument declares evidence, or `undefined` if none do.
+   * Unchanged in meaning from before this field was named (P5, packet #2837): the §2.3 leak
+   * refusal below only ever needed presence, so it always tracked the first match. Exposed now so
+   * `compilePairedMajorityDeltaProfile` can name the evidence-declaring arm as `candidate`. */
+  readonly declaringArmIndex: number | undefined;
+  /** How many arms declare evidence -- ADDED (P5, packet #2837) alongside `declaringArmIndex`
+   * rather than folding into it, because the §2.3 leak check only ever needed "at least one", so
+   * widening `declaringArmIndex` itself to a list would have touched that check's condition for no
+   * reason. `paired-majority-delta@1`'s derivation needs the exact count to refuse an ambiguous
+   * pairing (more than one declaring arm) rather than silently pairing against the first. */
+  readonly declaringArmCount: number;
+  /** Every arm's parsed instrument, in Run-arm order -- ADDED (P5, packet #2837, RULING C2) so
+   * `compilePairedMajorityDeltaProfile` can DERIVE the evidence-declaring arm's twin structurally
+   * instead of assuming a two-arm roster. Already parsed and reseal-checked in the loop below, so
+   * returning them costs nothing and avoids a second parse of the same sealed bytes. */
+  readonly armInstruments: readonly BinaryJudgmentInstrument[];
+} {
   const runtime = input.spec.evaluationRuntime;
   if (
     runtime?.adapterId !== INSPECT_BINARY_JUDGE_ADAPTER_ID
@@ -390,6 +417,8 @@ function validateRuntimeAndArms(input: {
   }
 
   let declaringArmIndex: number | undefined;
+  let declaringArmCount = 0;
+  const armInstruments: BinaryJudgmentInstrument[] = [];
   for (const [index, arm] of input.spec.arms.entries()) {
     const selected = selection.arms[index]!;
     if (
@@ -420,8 +449,10 @@ function validateRuntimeAndArms(input: {
     ) {
       refuse("conflict", `spec.arms.${index}.instrument`, "instrument identity, jinn-openai model, or generation settings drifted from the runtime selection");
     }
-    if (declaringArmIndex === undefined && binaryJudgmentInstrumentDeclaresEvidence(instrument)) {
-      declaringArmIndex = index;
+    armInstruments.push(instrument);
+    if (binaryJudgmentInstrumentDeclaresEvidence(instrument)) {
+      declaringArmCount += 1;
+      if (declaringArmIndex === undefined) declaringArmIndex = index;
     }
   }
 
@@ -448,7 +479,7 @@ function validateRuntimeAndArms(input: {
     }
   }
 
-  return { judgeModel: firstModel };
+  return { judgeModel: firstModel, declaringArmIndex, declaringArmCount, armInstruments };
 }
 
 export function isBinaryInstrumentSpec(spec: DraftSpec): boolean {
@@ -514,6 +545,324 @@ export function compileBinaryInstrumentProfile(input: {
   );
   if (!validation.ok) {
     refuse("validation", "spec.analysis", `derived binary-instrument parameters are invalid: ${validation.issues.join("; ")}`);
+  }
+  return parameters;
+}
+
+/**
+ * The shared front half of `pairwise-disagreement@1`'s and `paired-majority-delta@1`'s
+ * derivations (spec §7.1/§7.2a/§7.5): "siblings of `compileBinaryInstrumentProfile`: same joins,
+ * same derivation, minus the arm-cardinality branch. They share their whole front half and are
+ * written as one function with two callers, not two functions." `compileBinaryInstrumentProfile`
+ * above is left untouched -- this is a NEW function for the two NEW methods, not a refactor of the
+ * existing one, and it takes the analysis ENTRY as a parameter (never reads `spec.analysis`
+ * itself) because both new methods are typically `additionalAnalyses` entries, not the primary.
+ *
+ * Reuses `validateRuntimeAndArms` and `deriveAdmissionProfile` verbatim -- both already
+ * arm-cardinality-agnostic and already shared with `compileBinaryInstrumentProfile`.
+ *
+ * Deliberately excludes two of `compileBinaryInstrumentProfile`'s own spec-shape checks (P5
+ * coordinator ruling, packet #2837):
+ *  - the odd-`k` check on `spec.replicates`: both new methods' own tail-end validators
+ *    (`validatePairwiseDisagreementParameters` / `validatePairedMajorityDeltaParameters`) already
+ *    refuse a non-odd derived `k`, so repeating the check here would be purely redundant with the
+ *    check every caller below already runs.
+ *  - the caller-must-not-supply-baseline/candidate refusal: unlike binary-instrument's fixed
+ *    message ("is a non-comparative...and does not accept baseline or candidate arms"), each new
+ *    method's own reason for refusing caller-supplied roles differs by comparative shape, so that
+ *    refusal is written once per caller instead (see `compilePairwiseDisagreementProfile` /
+ *    `compilePairedMajorityDeltaProfile` below) rather than folded in here with one shared message
+ *    that would be accurate for neither.
+ */
+function deriveBinaryInstrumentFamilyClosure(input: {
+  readonly workspaceDir: string;
+  readonly draft: DraftDocument;
+  readonly benchmark: BenchmarkRecord;
+  readonly analysis: Analysis;
+  /** Names the calling method in refusal messages only (mirrors `compile.ts`'s own `pathPrefix`
+   * convention) -- the checks themselves are identical for both callers. */
+  readonly methodLabel: string;
+  /** Refusal PATH prefix, threaded from `compile.ts` (M2). The primary entry is `"spec.analysis"`;
+   * an additional entry is `"spec.additionalAnalyses.<i>"`. Without it every refusal raised here
+   * pointed a reader at `spec.analysis` even when the offending entry was an additional one.
+   * Optional, defaulting to `"spec.analysis"`, so a direct caller that does not know its own index
+   * is unaffected. */
+  readonly pathPrefix?: string;
+}): {
+  readonly k: number;
+  readonly candidateClasses: readonly string[];
+  readonly strata: readonly string[];
+  readonly truthAdmission: BinaryInstrumentParameters["truthAdmission"];
+  readonly declaringArmIndex: number | undefined;
+  readonly declaringArmCount: number;
+  readonly armInstruments: readonly BinaryJudgmentInstrument[];
+} {
+  const { analysis, methodLabel } = input;
+  const pathPrefix = input.pathPrefix ?? "spec.analysis";
+  const spec = input.draft.spec;
+
+  if (analysis.version !== BENCHMARKING_METHOD_VERSION) {
+    refuse("validation", `${pathPrefix}.version`, `${methodLabel} requires version ${BENCHMARKING_METHOD_VERSION}`);
+  }
+  const supplied = analysis.parameters ?? {};
+  if (Object.hasOwn(supplied, "k")) {
+    refuse("validation", `${pathPrefix}.parameters.k`, "k is derived exactly from Draft.replicates and must not be caller-supplied");
+  }
+  if (Object.keys(supplied).length > 0) {
+    refuse("validation", `${pathPrefix}.parameters`, `${methodLabel} parameters are derived from the draft and sealed evidence; callers must not supply them`);
+  }
+  const effectiveVerdictRule = resolveAssurance(spec.assurance).verdictRule;
+  if (effectiveVerdictRule !== "sole") {
+    refuse("validation", "spec.assurance", `${methodLabel} requires resolved verdictRule=sole`);
+  }
+
+  const { declaringArmIndex, declaringArmCount, armInstruments } = validateRuntimeAndArms({
+    workspaceDir: input.workspaceDir,
+    spec,
+    benchmark: input.benchmark,
+  });
+  const admission = deriveAdmissionProfile({
+    workspaceDir: input.workspaceDir,
+    draft: input.draft,
+    benchmark: input.benchmark,
+  });
+
+  return {
+    k: spec.replicates,
+    candidateClasses: admission.candidateClasses,
+    strata: admission.strata,
+    truthAdmission: admission.truthAdmission,
+    declaringArmIndex,
+    declaringArmCount,
+    armInstruments,
+  };
+}
+
+/**
+ * Validate every sealed cross-layer join and derive `pairwise-disagreement@1`'s exact registered
+ * parameters (spec §7.1). Non-comparative like `binary-instrument@1`: it computes all unordered
+ * arm pairs in one pass, so it carries no `baseline`/`candidate` and refuses a caller who supplies
+ * either -- same polarity as `binary-instrument@1`'s own refusal, different message because the
+ * reason is "computes every pair" rather than "is non-comparative".
+ */
+export function compilePairwiseDisagreementProfile(input: {
+  readonly workspaceDir: string;
+  readonly draft: DraftDocument;
+  readonly benchmark: BenchmarkRecord;
+  readonly analysis: Analysis;
+  /** See the closure's own `pathPrefix` (M2). Optional; defaults to `"spec.analysis"`. */
+  readonly pathPrefix?: string;
+}): PairwiseDisagreementParameters {
+  const { analysis } = input;
+  if (analysis.baseline !== undefined || analysis.candidate !== undefined) {
+    refuse(
+      "validation",
+      input.pathPrefix ?? "spec.analysis",
+      "pairwise-disagreement computes all unordered arm pairs in one pass and does not accept baseline or candidate arms",
+    );
+  }
+  const closure = deriveBinaryInstrumentFamilyClosure({
+    workspaceDir: input.workspaceDir,
+    draft: input.draft,
+    benchmark: input.benchmark,
+    analysis,
+    methodLabel: "pairwise-disagreement",
+    pathPrefix: input.pathPrefix,
+  });
+
+  const parameters: PairwiseDisagreementParameters = {
+    verdictRule: "sole",
+    k: closure.k,
+    reduction: "strict-majority",
+    measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
+    candidateClasses: closure.candidateClasses,
+    strata: closure.strata,
+    parserInvalidPolicy: "reject",
+    truthAdmission: closure.truthAdmission,
+    intervalAlpha: "0.05",
+  };
+  const validation = validatePairwiseDisagreementParameters(
+    parameters as unknown as Readonly<Record<string, unknown>>,
+  );
+  if (!validation.ok) {
+    refuse("validation", input.pathPrefix ?? "spec.analysis", `derived pairwise-disagreement parameters are invalid: ${validation.issues.join("; ")}`);
+  }
+  return parameters;
+}
+
+/**
+ * The evidence-declaring arm's message templates with its evidence interpolation removed, in a
+ * canonical comparable form (packet #2837, RULING C2). This is the structural definition of "the
+ * evidence-free twin": the twin is the arm whose instrument renders the SAME prompt the declaring
+ * arm would render if evidence were not interpolated at all.
+ *
+ * Two normalizations, both deliberate:
+ *
+ * 1. **A literal immediately preceding an `evidence` field is dropped with it.** That literal is
+ *    the interpolation's introducer (the shipped convention writes the pair as
+ *    `[{literal: "\nEvidence: "}, {field: "evidence"}]`), and it carries no meaning once the field
+ *    is gone. Dropping the field alone would leave a dangling "Evidence: " label in the stripped
+ *    form, so no real twin would ever match and the derivation would refuse every roster.
+ * 2. **Consecutive literals are merged and empty literals dropped.** The comparison is over the
+ *    rendered template, not over how its author happened to split the literal runs, so a twin
+ *    written as one literal matches a declaring arm whose literals bracket the removed evidence.
+ *
+ * Every other segment must match exactly, in order: this is a structural equality test, not a
+ * fuzzy one.
+ */
+function evidenceStrippedMessages(instrument: BinaryJudgmentInstrument): unknown {
+  return instrument.messages.map((message) => {
+    const kept: BinaryJudgmentTemplateSegment[] = [];
+    for (const segment of message.segments) {
+      if ("field" in segment && segment.field === "evidence") {
+        const last = kept[kept.length - 1];
+        if (last !== undefined && "literal" in last) kept.pop();
+        continue;
+      }
+      kept.push(segment);
+    }
+    const merged: BinaryJudgmentTemplateSegment[] = [];
+    for (const segment of kept) {
+      const last = merged[merged.length - 1];
+      if ("literal" in segment && last !== undefined && "literal" in last) {
+        merged[merged.length - 1] = { literal: last.literal + segment.literal };
+      } else {
+        merged.push(segment);
+      }
+    }
+    return {
+      role: message.role,
+      segments: merged.filter((segment) => !("literal" in segment) || segment.literal !== ""),
+    };
+  });
+}
+
+/**
+ * Is `candidate` the evidence-free twin of `declaring` (packet #2837, RULING C2)? True iff the two
+ * instruments are identical on every axis once the evidence interpolation is stripped from both.
+ *
+ * `instrumentId` and `promptTemplateSha256` are excluded by construction, not by leniency:
+ * `instrumentId` is pinned to the arm id (so a twin's necessarily differs), and
+ * `promptTemplateSha256` is a digest OF the messages (so it necessarily differs whenever the
+ * evidence segments do). Everything else -- model, generation, promptSource, license, attribution,
+ * response contract, protocol -- must match exactly, which is what makes this a twin rather than
+ * merely another arm that happens not to declare evidence.
+ */
+function isEvidenceFreeTwin(declaring: BinaryJudgmentInstrument, candidate: BinaryJudgmentInstrument): boolean {
+  const withoutDerivedIdentity = (instrument: BinaryJudgmentInstrument) => {
+    const { instrumentId: _id, promptTemplateSha256: _digest, messages: _messages, ...rest } = instrument;
+    return rest;
+  };
+  return sameJson(withoutDerivedIdentity(declaring), withoutDerivedIdentity(candidate))
+    && sameJson(evidenceStrippedMessages(declaring), evidenceStrippedMessages(candidate));
+}
+
+/**
+ * Validate every sealed cross-layer join and derive `paired-majority-delta@1`'s exact registered
+ * parameters (spec §7.2a). Comparative, unlike its sibling above: it needs exactly ONE named pair.
+ *
+ * **Baseline/candidate derivation (coordinator ruling, packet #2837, overriding a literal reading
+ * of spec §7.2a):** §7.2a's text -- "`baseline` and `candidate` name the evidence-declaring arm and
+ * its evidence-free twin" -- names a PAIR but assigns no role to either name. The estimator computes
+ * `pB - pA` with `pB` as `candidate` (spec §7.2a, mirroring `paired-delta@1`'s own `pB - pA`
+ * convention), so the assignment is load-bearing: **`candidate` is the evidence-declaring arm,
+ * `baseline` is its evidence-free twin**, and a positive `delta` means declaring evidence increased
+ * agreement.
+ *
+ * **Pair derivation is STRUCTURAL, never a literal arm count (packet #2837, RULING C2; spec §1.6's
+ * no-literal-counts rule is frozen for this family).** The pair is derived in two steps, each
+ * refusing by name rather than guessing:
+ *
+ * 1. Exactly one arm's instrument must declare evidence. Zero declaring arms and two-or-more
+ *    declaring arms both refuse -- with neither, there is no contrast to measure; with several,
+ *    "the" declaring arm is not well defined.
+ * 2. That arm's twin is the UNIQUE other arm whose instrument is identical once the evidence
+ *    interpolation is stripped from both (`isEvidenceFreeTwin`). No match refuses; more than one
+ *    match refuses.
+ *
+ * This works for the two-arm rehearsal roster and the ratified six-arm flagship panel alike: the
+ * four unrelated arms of a six-arm panel simply fail the twin test, leaving one match. The
+ * ambiguity the old literal `arms.length !== 2` ban was protecting against is now a typed refusal
+ * on genuinely ambiguous rosters, instead of a ban on the flagship shape itself.
+ */
+export function compilePairedMajorityDeltaProfile(input: {
+  readonly workspaceDir: string;
+  readonly draft: DraftDocument;
+  readonly benchmark: BenchmarkRecord;
+  readonly analysis: Analysis;
+  /** See the closure's own `pathPrefix` (M2). Optional; defaults to `"spec.analysis"`. */
+  readonly pathPrefix?: string;
+}): PairedMajorityDeltaParameters {
+  const { analysis } = input;
+  if (analysis.baseline !== undefined || analysis.candidate !== undefined) {
+    refuse(
+      "validation",
+      input.pathPrefix ?? "spec.analysis",
+      "paired-majority-delta derives its own baseline/candidate from the evidence-declaring arm and does not accept caller-supplied baseline or candidate arms",
+    );
+  }
+  const closure = deriveBinaryInstrumentFamilyClosure({
+    workspaceDir: input.workspaceDir,
+    draft: input.draft,
+    benchmark: input.benchmark,
+    analysis,
+    methodLabel: "paired-majority-delta",
+    pathPrefix: input.pathPrefix,
+  });
+
+  const spec = input.draft.spec;
+  if (closure.declaringArmCount !== 1) {
+    refuse(
+      "conflict",
+      "spec.evaluationRuntime.selectionManifestSha256",
+      `paired-majority-delta@1 requires exactly one arm whose instrument declares evidence to name candidate/baseline; found ${closure.declaringArmCount}`,
+    );
+  }
+  const declaringArmIndex = closure.declaringArmIndex!;
+  const declaringInstrument = closure.armInstruments[declaringArmIndex]!;
+  const twinIndexes = closure.armInstruments.flatMap((instrument, index) => (
+    index !== declaringArmIndex && isEvidenceFreeTwin(declaringInstrument, instrument) ? [index] : []
+  ));
+  if (twinIndexes.length === 0) {
+    refuse(
+      "conflict",
+      "spec.arms",
+      `paired-majority-delta@1 found no evidence-free twin for declaring arm "${spec.arms[declaringArmIndex]!.armId}": no other arm's instrument is identical to it once the evidence interpolation is stripped`,
+    );
+  }
+  if (twinIndexes.length > 1) {
+    refuse(
+      "conflict",
+      "spec.arms",
+      `paired-majority-delta@1 found ${twinIndexes.length} evidence-free twins for declaring arm "${spec.arms[declaringArmIndex]!.armId}" (${twinIndexes.map((index) => `"${spec.arms[index]!.armId}"`).join(", ")}); the twin must be unique`,
+    );
+  }
+  const candidate = spec.arms[declaringArmIndex]!.armId;
+  const baseline = spec.arms[twinIndexes[0]!]!.armId;
+
+  const parameters: PairedMajorityDeltaParameters = {
+    verdictRule: "sole",
+    k: closure.k,
+    reduction: "strict-majority",
+    measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
+    candidateClasses: closure.candidateClasses,
+    strata: closure.strata,
+    parserInvalidPolicy: "reject",
+    truthAdmission: closure.truthAdmission,
+    baseline,
+    candidate,
+    // Frozen derivation constants (spec §7.2a): sealed FROM the aggregate package's own exported
+    // names, never retyped, so this module can never drift from what the method itself compares
+    // against at compute time.
+    seed: PAIRED_MAJORITY_DELTA_SEED,
+    resamples: PAIRED_MAJORITY_DELTA_RESAMPLES,
+    alpha: PAIRED_MAJORITY_DELTA_ALPHA,
+  };
+  const validation = validatePairedMajorityDeltaParameters(
+    parameters as unknown as Readonly<Record<string, unknown>>,
+  );
+  if (!validation.ok) {
+    refuse("validation", input.pathPrefix ?? "spec.analysis", `derived paired-majority-delta parameters are invalid: ${validation.issues.join("; ")}`);
   }
   return parameters;
 }

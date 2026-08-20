@@ -934,3 +934,446 @@ describe("claim-package/2 exact binary qualification gate", () => {
     expect("qualification" in parsed).toBe(false);
   });
 });
+
+// --- packet #2837: pairwise-disagreement@1 and paired-majority-delta@1 claim projections ---
+
+interface JudgeFamilyFixture {
+  readonly matrixRecord: ReturnType<typeof parseMatrix>;
+  readonly runRecord: ReturnType<typeof parseRun>;
+  readonly reportRecord: ReturnType<typeof parseReport>;
+  readonly matrixSha256: string;
+  readonly runSha256: string;
+  readonly reportSha256: string;
+  readonly reportEnvelopeSha256: string;
+}
+
+const JUDGE_FAMILY_ASSURANCE = {
+  preset: "direct-check",
+  resolved: {
+    independence: "disclosed",
+    minVerdicts: 1,
+    distinctEvaluator: false,
+    verdictRule: "sole",
+  },
+} as const;
+
+/** Sibling of `buildPairedFixture`, generalized to any judge-family method (packet #2837): the
+ * same two-arm/two-task Run+Matrix shape, with the analysisPlan's non-wilson entry and the sealed
+ * Report's method/parameters/results/limitations supplied by the caller. */
+function buildJudgeFamilyFixture(input: {
+  readonly method: string;
+  readonly parameters: Record<string, unknown>;
+  readonly results: unknown;
+  readonly limitations?: readonly string[];
+}): JudgeFamilyFixture {
+  const passVerdict = verdictEnvelope("pass", "judge-a1");
+  const failVerdict = verdictEnvelope("fail", "judge-b2");
+
+  const run = sealRun({
+    protocol: BENCHMARKING_PROTOCOL,
+    benchmark: { digest: { sha256: "c".repeat(64) } },
+    owner: "urn:uuid:44444444-4444-5444-8444-444444444444",
+    arms: [{ armId: "armA", pinning: { label: "armA" } }, { armId: "armB", pinning: { label: "armB" } }],
+    replicates: 1,
+    policy: {
+      completenessFloor: "1",
+      cellWindow: 60_000,
+      replacement: { allowed: false },
+      independence: "disclosed",
+      evaluation: { minVerdicts: 1, distinctEvaluator: false },
+      submissionBaseline: {},
+    },
+    analysisPlan: [
+      { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: { verdictRule: "sole" } },
+      { method: input.method, version: BENCHMARKING_METHOD_VERSION, parameters: input.parameters },
+    ],
+    closeAt: "2026-08-20T00:00:00Z",
+  });
+
+  const task1 = "1".repeat(64);
+  const task2 = "2".repeat(64);
+  const perArmComplete = {
+    expected: 2, judged: 2, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 0, replacements: 0,
+  };
+
+  const matrix = sealMatrix({
+    protocol: BENCHMARKING_PROTOCOL,
+    run: { digest: { sha256: run.digest.slice("sha256:".length) } },
+    closeBoundary: { at: "2026-08-20T00:00:00Z" },
+    cells: [
+      {
+        cellKey: `${task1}/armA/1`, taskDigest: task1, armId: "armA", replicate: 1,
+        dispatches: 1, accounted: 1,
+        submission: `sha256:${"3".repeat(64)}`, delivery: `sha256:${"4".repeat(64)}`,
+        verdicts: [recordDigest(passVerdict)], validVerdicts: [recordDigest(passVerdict)],
+        outcome: "judged", verification: MATCH_ALL, integrityTier: "re-derivable",
+      },
+      {
+        cellKey: `${task1}/armB/1`, taskDigest: task1, armId: "armB", replicate: 1,
+        dispatches: 1, accounted: 1,
+        submission: `sha256:${"5".repeat(64)}`, delivery: `sha256:${"6".repeat(64)}`,
+        verdicts: [recordDigest(passVerdict)], validVerdicts: [recordDigest(passVerdict)],
+        outcome: "judged", verification: MATCH_ALL, integrityTier: "re-derivable",
+      },
+      {
+        cellKey: `${task2}/armA/1`, taskDigest: task2, armId: "armA", replicate: 1,
+        dispatches: 1, accounted: 1,
+        submission: `sha256:${"7".repeat(64)}`, delivery: `sha256:${"8".repeat(64)}`,
+        verdicts: [recordDigest(failVerdict)], validVerdicts: [recordDigest(failVerdict)],
+        outcome: "judged", verification: MATCH_ALL, integrityTier: "re-derivable",
+      },
+      {
+        cellKey: `${task2}/armB/1`, taskDigest: task2, armId: "armB", replicate: 1,
+        dispatches: 1, accounted: 1,
+        submission: `sha256:${"9".repeat(64)}`, delivery: `sha256:${"a".repeat(64)}`,
+        verdicts: [recordDigest(passVerdict)], validVerdicts: [recordDigest(passVerdict)],
+        outcome: "judged", verification: MATCH_ALL, integrityTier: "re-derivable",
+      },
+    ],
+    exclusions: [],
+    attrition: { perArm: { armA: perArmComplete, armB: perArmComplete }, asymmetryFlags: [] },
+    completeness: { expected: 4, judged: 4, floor: "1", runOutcome: "complete" },
+    assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
+  });
+
+  const matrixDigestHex = matrix.digest.slice("sha256:".length);
+
+  const disclosurePerSubject = {
+    subjectSha256: matrixDigestHex,
+    integrityTiers: { "re-derivable": 4, "attested-only": 0 },
+    pinning: {
+      harness: { match: 4, mismatch: 0, unverifiable: 0 },
+      model: { match: 4, mismatch: 0, unverifiable: 0 },
+      loadout: { match: 4, mismatch: 0, unverifiable: 0 },
+      isolation: { match: 4, mismatch: 0, unverifiable: 0 },
+    },
+    independence: 0,
+    completeness: { expected: 4, judged: 4, floor: "1", runOutcome: "complete" as const },
+    attrition: { perArm: { armA: perArmComplete, armB: perArmComplete }, asymmetryFlags: [] },
+  };
+
+  const reportSealed = sealReport({
+    protocol: BENCHMARKING_PROTOCOL,
+    subjects: [{ digest: { sha256: matrixDigestHex } }],
+    method: { id: input.method, version: BENCHMARKING_METHOD_VERSION, parameters: input.parameters },
+    preregistered: true,
+    results: { perSubject: [{ subjectSha256: matrixDigestHex, results: input.results }] },
+    disclosures: { perSubject: [disclosurePerSubject] },
+    limitations: input.limitations ?? ["This is a local, self-run venue."],
+    author: AUTHOR,
+  });
+
+  return {
+    matrixRecord: parseMatrix(matrix.bytes),
+    runRecord: parseRun(run.bytes),
+    reportRecord: parseReport(reportSealed.bytes),
+    matrixSha256: matrixDigestHex,
+    runSha256: run.digest.slice("sha256:".length),
+    reportSha256: sha256Hex(reportSealed.bytes),
+    reportEnvelopeSha256: "e".repeat(64),
+  };
+}
+
+function buildJudgeFamilyClaim(fixture: JudgeFamilyFixture, extra: Partial<BuildClaimPackageInput> = {}) {
+  return buildClaimPackage({
+    draftId: "judge-1",
+    benchmarkSha256: "c".repeat(64),
+    runRecord: fixture.runRecord,
+    runSha256: fixture.runSha256,
+    matrixRecord: fixture.matrixRecord,
+    matrixSha256: fixture.matrixSha256,
+    reportRecord: fixture.reportRecord,
+    reportSha256: fixture.reportSha256,
+    reportEnvelopeSha256: fixture.reportEnvelopeSha256,
+    venueHonesty: venueHonestyFor(fixture.matrixRecord),
+    verificationCommandVerb: "verify",
+    assurance: JUDGE_FAMILY_ASSURANCE,
+    ...extra,
+  });
+}
+
+const PAIRWISE_DISAGREEMENT_PARAMETERS = {
+  verdictRule: "sole",
+  k: 3,
+  reduction: "strict-majority",
+  measurementProfile: "binary-instrument@1",
+  candidateClasses: ["zeta"],
+  strata: ["core"],
+  parserInvalidPolicy: "reject",
+  truthAdmission: "operator-only",
+  intervalAlpha: "0.05",
+};
+
+const EXPECTED_PAIRWISE_DISAGREEMENT = {
+  pairs: [
+    {
+      armA: "armA",
+      armB: "armB",
+      n: 2,
+      disagreements: 1,
+      rate: "0.5000",
+      interval: { lower: "0.0655", upper: "0.9345", alpha: "0.05" },
+      byCandidateClass: [
+        { candidateClass: "zeta", n: 1, disagreements: 0, rate: "0.0000", interval: { lower: "0.0000", upper: "0.7935", alpha: "0.05" } },
+      ],
+      byStratum: [
+        { stratum: "core", n: 1, disagreements: 0, rate: "0.0000", interval: { lower: "0.0000", upper: "0.7935", alpha: "0.05" } },
+      ],
+      exclusions: [],
+    },
+  ],
+  conflicted: { count: 0, cellKeys: [] },
+};
+
+describe("buildClaimPackage — pairwise-disagreement@1 panel shape (packet #2837)", () => {
+  it("builds a claim carrying `pairwiseDisagreement`, not `headline`/`comparison`/`qualification`, extracted verbatim from the Report", () => {
+    const fixture = buildJudgeFamilyFixture({
+      method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+      parameters: PAIRWISE_DISAGREEMENT_PARAMETERS,
+      results: EXPECTED_PAIRWISE_DISAGREEMENT,
+    });
+    const claim = buildJudgeFamilyClaim(fixture);
+
+    expect(claim.pairwiseDisagreement).toEqual(EXPECTED_PAIRWISE_DISAGREEMENT);
+    expect(claim.headline).toBeUndefined();
+    expect(claim.comparison).toBeUndefined();
+    expect(claim.qualification).toBeUndefined();
+    expect(claim.pairedMajorityDelta).toBeUndefined();
+    // The top-level conflicted field (always required, regardless of method) mirrors the method's
+    // own conflicted count — same source, never invented.
+    expect(claim.conflicted).toEqual(EXPECTED_PAIRWISE_DISAGREEMENT.conflicted);
+    expect(claim.method).toEqual({
+      id: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: "1",
+      parameters: PAIRWISE_DISAGREEMENT_PARAMETERS, preregistered: true,
+    });
+    expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+  });
+
+  it("throws when the Report results do not carry pairwise-disagreement@1's pairs/conflicted shape", () => {
+    const fixture = buildJudgeFamilyFixture({
+      method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+      parameters: PAIRWISE_DISAGREEMENT_PARAMETERS,
+      results: { pairs: EXPECTED_PAIRWISE_DISAGREEMENT.pairs }, // conflicted missing
+    });
+    expect(() => buildJudgeFamilyClaim(fixture)).toThrow(/pairwise-disagreement@1's pairs\/conflicted shape/);
+  });
+});
+
+const PAIRED_MAJORITY_DELTA_PARAMETERS = {
+  verdictRule: "sole",
+  k: 3,
+  reduction: "strict-majority",
+  measurementProfile: "binary-instrument@1",
+  candidateClasses: ["zeta"],
+  strata: ["core"],
+  parserInvalidPolicy: "reject",
+  truthAdmission: "operator-only",
+  baseline: "armA",
+  candidate: "armB",
+  seed: 20_260_819,
+  resamples: 20_000,
+  alpha: "0.05",
+};
+
+const EXPECTED_PAIRED_MAJORITY_DELTA = {
+  baseline: "armA",
+  candidate: "armB",
+  n: 2,
+  delta: "0.5000",
+  interval: null,
+  reasons: ["fewer than minN=5 paired tasks (got 2)", "fewer than two source clusters (got 1)"],
+  clusters: { count: 1, manifest: [{ key: ["source", "fixture-source"], members: [task1(), task2()] }] },
+  byCandidateClass: [
+    {
+      candidateClass: "zeta", n: 1, delta: "0.0000", interval: null,
+      reasons: ["fewer than minN=5 paired tasks (got 1)", "fewer than two source clusters (got 1)"],
+    },
+  ],
+  byStratum: [
+    {
+      stratum: "core", n: 1, delta: "0.0000", interval: null,
+      reasons: ["fewer than minN=5 paired tasks (got 1)", "fewer than two source clusters (got 1)"],
+    },
+  ],
+  exclusions: [],
+  conflicted: { count: 0, cellKeys: [] },
+};
+
+function task1(): string { return "1".repeat(64); }
+function task2(): string { return "2".repeat(64); }
+
+describe("buildClaimPackage — paired-majority-delta@1 evidence-contrast shape (packet #2837)", () => {
+  it("builds a claim carrying `pairedMajorityDelta`, not `headline`/`comparison`/`qualification`, extracted verbatim from the Report", () => {
+    const fixture = buildJudgeFamilyFixture({
+      method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+      parameters: PAIRED_MAJORITY_DELTA_PARAMETERS,
+      results: EXPECTED_PAIRED_MAJORITY_DELTA,
+    });
+    const claim = buildJudgeFamilyClaim(fixture);
+
+    expect(claim.pairedMajorityDelta).toEqual(EXPECTED_PAIRED_MAJORITY_DELTA);
+    expect(claim.pairedMajorityDelta?.baseline).toBe("armA");
+    expect(claim.pairedMajorityDelta?.candidate).toBe("armB");
+    expect(claim.headline).toBeUndefined();
+    expect(claim.comparison).toBeUndefined();
+    expect(claim.qualification).toBeUndefined();
+    expect(claim.pairwiseDisagreement).toBeUndefined();
+    expect(claim.conflicted).toEqual(EXPECTED_PAIRED_MAJORITY_DELTA.conflicted);
+    expect(claim.method).toEqual({
+      id: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: "1",
+      parameters: PAIRED_MAJORITY_DELTA_PARAMETERS, preregistered: true,
+    });
+    expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+  });
+
+  it("throws when the Report results do not carry paired-majority-delta@1's baseline/candidate/delta shape", () => {
+    const fixture = buildJudgeFamilyFixture({
+      method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+      parameters: PAIRED_MAJORITY_DELTA_PARAMETERS,
+      results: EXPECTED_PAIRED_MAJORITY_DELTA,
+    });
+    // `sealReport` validates the RECORD schema, not this method's own results shape, so a
+    // malformed method-results object cannot be sealed directly (`results` fails schema
+    // validation before it ever reaches the projection). Mutating the already-sealed, already-
+    // parsed record in place isolates the check to exactly what `pairedMajorityDeltaProjection`
+    // itself is responsible for.
+    const mutated = structuredClone(fixture.reportRecord) as any;
+    delete mutated.results.perSubject[0].results.baseline;
+    expect(() => buildJudgeFamilyClaim({ ...fixture, reportRecord: mutated })).toThrow(
+      /paired-majority-delta@1's baseline\/candidate\/delta shape/,
+    );
+  });
+
+  it("refuses a binary-instrument qualification claim that also carries pairwiseDisagreement/pairedMajorityDelta (exactBinaryClaimControls admits the keys, the schema-level refine still refuses by name)", async () => {
+    const base = buildClaimPackage(await wilsonGoldenInput());
+    const qualification = binaryQualificationFixture();
+    const claim = {
+      ...base,
+      claimSchema: BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+      method: { ...base.method, id: BENCHMARKING_METHOD_IDS.binaryInstrument, version: BENCHMARKING_METHOD_VERSION },
+      results: { perSubject: [{ subjectSha256: base.records.matrixSha256, results: qualification }] },
+      headline: undefined,
+      comparison: undefined,
+      qualification,
+      conflicted: qualification.conflicted,
+      verification: {
+        ...base.verification,
+        command: BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+        compatibleCommand: BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+      },
+    };
+    delete claim.headline;
+    delete claim.comparison;
+    // A well-formed binary claim (no leak) validates -- proves the fixture itself is right before
+    // asserting the leak case below.
+    expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+
+    // exactBinaryClaimControls admits `pairwiseDisagreement` (packet #2837) so this reaches the
+    // schema-level refine and is refused BY NAME, not collapsed into the generic control-shape
+    // failure -- proving admitting the key in the allowlist did not also widen what a binary claim
+    // may legally carry.
+    const leaked = { ...claim, pairwiseDisagreement: EXPECTED_PAIRWISE_DISAGREEMENT };
+    const leakedResult = ClaimPackageSchema.safeParse(leaked);
+    expect(leakedResult.success).toBe(false);
+    expect(
+      leakedResult.success ? undefined : leakedResult.error.issues.some((issue) => issue.path.join(".") === "qualification"),
+    ).toBe(true);
+  });
+});
+
+// packet #2837: the limitations decision (PAIRED_ESTIMATE_LIMITATION carries to
+// paired-majority-delta@1, no extra line for the withheld-interval case) asserted at the
+// `assertClaimConsistency` cold-rebuild layer -- see `operations/report.ts`'s matching
+// method-conditional and `verification/claim-consistency.ts`'s matching `pairedEstimateLimitation`.
+describe("assertClaimConsistency — paired-majority-delta@1 carries PAIRED_ESTIMATE_LIMITATION (packet #2837)", () => {
+  const PAIRED_ESTIMATE_LIMITATION =
+    "This method estimates an effect; it does not gate one — no verdict, threshold, or selection was registered.";
+  // A non-empty `additionalLimitations` is what forces the isolation/additionalLimitations gate
+  // open in `assertClaimConsistency` -- mirrors how `operations/verify.ts`'s real caller supplies
+  // suite/inspect facts through the same input, and is the only way to exercise the
+  // exact-disclosure rebuild this test is about without depending on isolation posture.
+  const FORCING_ADDITIONAL_LIMITATIONS = ["forcing fact so the limitations gate opens"];
+
+  it("does not throw when the sealed Report's limitations exactly match venue + additional + PAIRED_ESTIMATE_LIMITATION", () => {
+    const fixture = buildJudgeFamilyFixture({
+      method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+      parameters: PAIRED_MAJORITY_DELTA_PARAMETERS,
+      results: EXPECTED_PAIRED_MAJORITY_DELTA,
+      limitations: [...LOCAL_VENUE_LIMITS, ...FORCING_ADDITIONAL_LIMITATIONS, PAIRED_ESTIMATE_LIMITATION],
+    });
+    const claim = buildJudgeFamilyClaim(fixture);
+
+    expect(() =>
+      assertClaimConsistency({
+        claim,
+        identities: {
+          benchmarkSha256: "c".repeat(64), runSha256: fixture.runSha256, matrixSha256: fixture.matrixSha256,
+          reportSha256: fixture.reportSha256, reportEnvelopeSha256: fixture.reportEnvelopeSha256,
+        },
+        benchmarkRecord: {} as unknown as BenchmarkRecord,
+        runRecord: fixture.runRecord,
+        matrixRecord: fixture.matrixRecord,
+        reportRecord: fixture.reportRecord,
+        draftId: "judge-1",
+        assurancePreset: JUDGE_FAMILY_ASSURANCE.preset,
+        additionalLimitations: FORCING_ADDITIONAL_LIMITATIONS,
+      }),
+    ).not.toThrow();
+  });
+
+  it("throws when the sealed Report's limitations omit PAIRED_ESTIMATE_LIMITATION for a paired-majority-delta@1 Report", () => {
+    const fixture = buildJudgeFamilyFixture({
+      method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+      parameters: PAIRED_MAJORITY_DELTA_PARAMETERS,
+      results: EXPECTED_PAIRED_MAJORITY_DELTA,
+      // Omits PAIRED_ESTIMATE_LIMITATION -- proves the cold rebuild actually requires it rather
+      // than passing vacuously.
+      limitations: [...LOCAL_VENUE_LIMITS, ...FORCING_ADDITIONAL_LIMITATIONS],
+    });
+    const claim = buildJudgeFamilyClaim(fixture);
+
+    expect(() =>
+      assertClaimConsistency({
+        claim,
+        identities: {
+          benchmarkSha256: "c".repeat(64), runSha256: fixture.runSha256, matrixSha256: fixture.matrixSha256,
+          reportSha256: fixture.reportSha256, reportEnvelopeSha256: fixture.reportEnvelopeSha256,
+        },
+        benchmarkRecord: {} as unknown as BenchmarkRecord,
+        runRecord: fixture.runRecord,
+        matrixRecord: fixture.matrixRecord,
+        reportRecord: fixture.reportRecord,
+        draftId: "judge-1",
+        assurancePreset: JUDGE_FAMILY_ASSURANCE.preset,
+        additionalLimitations: FORCING_ADDITIONAL_LIMITATIONS,
+      }),
+    ).toThrow(/Report limitations are not the exact disclosure/);
+  });
+
+  it("does NOT require an extra limitation line for pairwise-disagreement@1 (no PAIRED_ESTIMATE_LIMITATION, no withheld-interval disclosure)", () => {
+    const fixture = buildJudgeFamilyFixture({
+      method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+      parameters: PAIRWISE_DISAGREEMENT_PARAMETERS,
+      results: EXPECTED_PAIRWISE_DISAGREEMENT,
+      limitations: [...LOCAL_VENUE_LIMITS, ...FORCING_ADDITIONAL_LIMITATIONS],
+    });
+    const claim = buildJudgeFamilyClaim(fixture);
+
+    expect(() =>
+      assertClaimConsistency({
+        claim,
+        identities: {
+          benchmarkSha256: "c".repeat(64), runSha256: fixture.runSha256, matrixSha256: fixture.matrixSha256,
+          reportSha256: fixture.reportSha256, reportEnvelopeSha256: fixture.reportEnvelopeSha256,
+        },
+        benchmarkRecord: {} as unknown as BenchmarkRecord,
+        runRecord: fixture.runRecord,
+        matrixRecord: fixture.matrixRecord,
+        reportRecord: fixture.reportRecord,
+        draftId: "judge-1",
+        assurancePreset: JUDGE_FAMILY_ASSURANCE.preset,
+        additionalLimitations: FORCING_ADDITIONAL_LIMITATIONS,
+      }),
+    ).not.toThrow();
+  });
+});

@@ -49,18 +49,35 @@ import {
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
 import { planRun, type PlannedRun } from "@jinn-network/benchmarking-run";
-import { resolveAssurance, type DraftDocument, type DraftSpec, type ResolvedAssurance } from "../domain/draft.js";
+import { resolveAssurance, type Analysis, type DraftDocument, type DraftSpec, type ResolvedAssurance } from "../domain/draft.js";
 import { refuse, refuseWithIssues } from "../errors.js";
 import { runtimeSubmissionBaseline } from "../runtime/adapter.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
   compileBinaryInstrumentProfile,
+  compilePairedMajorityDeltaProfile,
+  compilePairwiseDisagreementProfile,
   isBinaryInstrumentSpec,
 } from "./binary-instrument-profile.js";
 
 /** The sealed Run record's own analysisPlan entry shape — reused rather than invented so this
  * module can never drift from what `planRun`/`sealRun` actually accept. */
 type RunAnalysisPlanEntry = NonNullable<RunRecord["analysisPlan"]>[number];
+
+/**
+ * The sealed Benchmark/draft closure `pairwise-disagreement@1`'s and `paired-majority-delta@1`'s
+ * derivations need (packet #2837) — the same three values `compileBinaryInstrumentProfile` itself
+ * takes, bundled so `resolveNonWilsonAnalysisEntry` can pass them through unchanged regardless of
+ * whether the entry it is resolving is the primary or an `additionalAnalyses` member. Unlike
+ * `binaryParameters` (computed once, keyed to the single primary `spec.analysis`), this bundle
+ * carries the RAW closure rather than a pre-derived result, because either new method can appear
+ * as the primary entry, an additional entry, or (not yet, but not precluded) more than one
+ * additional entry — the derivation has to run per plan entry, not once per draft. */
+interface JudgeFamilyContext {
+  readonly workspaceDir: string;
+  readonly draft: DraftDocument;
+  readonly benchmark: BenchmarkRecord;
+}
 
 /** `analysis.parameters` keys `buildAnalysisPlan` always derives itself — from the draft's
  * resolved `verdictRule` and the validated `analysis.baseline`/`analysis.candidate` — never from
@@ -69,9 +86,36 @@ type RunAnalysisPlanEntry = NonNullable<RunRecord["analysisPlan"]>[number];
 const RESERVED_ANALYSIS_PARAMETER_KEYS = ["verdictRule", "baseline", "candidate"] as const;
 
 /**
- * The sealed analysis plan. `wilson@1` is always present — it is the product's baseline read and
- * every existing consumer expects it — and a selected non-wilson method is appended, so the plan
- * honestly pre-registers both analyses at lock.
+ * Registered method ids whose ADDITIONAL-entry parameters are DERIVED from the sealed
+ * Benchmark/draft closure (the same way `binary-instrument@1`'s own bespoke branch below derives
+ * its parameters) rather than taken from caller-supplied `analysis.parameters`. Populated (packet
+ * #2837, spec §7.1/§7.2a) with the two D2 comparison methods — `pairwise-disagreement@1` and
+ * `paired-majority-delta@1` — whose own derivation branches live in `resolveNonWilsonAnalysisEntry`
+ * below, mirroring the binary-instrument branch immediately above it.
+ */
+const DERIVED_PARAMETER_METHOD_IDS: ReadonlySet<string> = new Set([
+  BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+  BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+]);
+
+/** Composite `(method, version)` key used to detect duplicate plan entries — mirrors the
+ * ``-joined `pairKey` convention `run/state.ts` already uses for its own uniqueness check. */
+function analysisEntryKey(method: string, version: string): string {
+  return `${method}${version}`;
+}
+
+/**
+ * The three-way dispatch every non-wilson analysis entry goes through, whether it is the primary
+ * plan's own selection or one of `additionalAnalyses`'s appended entries (spec §8.3: "per-entry
+ * validation dispatches the same three ways the primary does, because the entries are not
+ * homogeneous"): a `binary-instrument@1` entry takes its parameters from the caller-supplied
+ * derived `binaryParameters`; a registered derived-parameter entry runs its own derivation (seam
+ * above, unimplemented); any other registered id takes the generic path's checks verbatim.
+ *
+ * `pathPrefix` only shapes refusal paths (`"spec.analysis"` for the primary entry,
+ * `"spec.additionalAnalyses.<index>"` for an appended one) — the checks and their messages are
+ * identical either way, which is what "per-entry validation dispatches the same three ways the
+ * primary does" means in practice: ONE dispatch function, not two copies of the three-way branch.
  *
  * Refusals happen HERE, at compile time, deliberately. Neither `planRun` nor the records schema
  * validates method ids (`benchmarking/run/src/plan.ts`, `records/src/run/schema.ts`'s
@@ -79,10 +123,117 @@ const RESERVED_ANALYSIS_PARAMETER_KEYS = ["verdictRule", "baseline", "candidate"
  * would otherwise seal into an immutable Run and only fail at `report` time — after the run has
  * been executed and paid for.
  */
-function buildAnalysisPlan(
+function resolveNonWilsonAnalysisEntry(
   spec: DraftSpec,
   verdictRule: ResolvedAssurance["verdictRule"],
-  binaryParameters?: BinaryInstrumentParameters,
+  analysis: Analysis,
+  pathPrefix: string,
+  binaryParameters: BinaryInstrumentParameters | undefined,
+  judgeFamilyContext: JudgeFamilyContext,
+): RunAnalysisPlanEntry {
+  if (analysis.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
+    if (binaryParameters === undefined) {
+      refuse("validation", pathPrefix, "binary-instrument composition was not derived from the sealed Benchmark closure");
+    }
+    return {
+      method: BENCHMARKING_METHOD_IDS.binaryInstrument,
+      version: BENCHMARKING_METHOD_VERSION,
+      parameters: binaryParameters as unknown as Record<string, unknown>,
+    };
+  }
+
+  if (DERIVED_PARAMETER_METHOD_IDS.has(analysis.method)) {
+    // Derivation branches (packet #2837, spec §7.1/§7.2a), mirroring the binary-instrument branch
+    // above: `parameters` is derived from the sealed Benchmark/draft closure, never taken from
+    // caller-supplied `analysis.parameters`. Each derivation function refuses on its own if the
+    // closure or the arm roster does not satisfy its method's own requirements.
+    if (analysis.method === BENCHMARKING_METHOD_IDS.pairwiseDisagreement) {
+      const parameters = compilePairwiseDisagreementProfile({ ...judgeFamilyContext, analysis, pathPrefix });
+      return {
+        method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+        version: BENCHMARKING_METHOD_VERSION,
+        parameters: parameters as unknown as Record<string, unknown>,
+      };
+    }
+    if (analysis.method === BENCHMARKING_METHOD_IDS.pairedMajorityDelta) {
+      const parameters = compilePairedMajorityDeltaProfile({ ...judgeFamilyContext, analysis, pathPrefix });
+      return {
+        method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+        version: BENCHMARKING_METHOD_VERSION,
+        parameters: parameters as unknown as Record<string, unknown>,
+      };
+    }
+    // Unreachable while DERIVED_PARAMETER_METHOD_IDS names only the two ids handled above — kept
+    // as a loud refusal rather than a silent fall-through in case the set is ever widened without
+    // a matching branch.
+    refuse(
+      "validation",
+      pathPrefix,
+      `analysis.method "${analysis.method}" is registered as derived-parameter but has no derivation implemented yet`,
+    );
+  }
+
+  const method = BENCHMARKING_METHOD_REGISTRY.get(analysis.method, analysis.version);
+  if (method === undefined) {
+    refuse("validation", pathPrefix, `analysis.method "${analysis.method}@${analysis.version}" is not a registered method`);
+  }
+  if (method.computeAvailability !== "available") {
+    refuse("validation", pathPrefix, `analysis.method "${analysis.method}@${analysis.version}" is registered but its compute is unavailable`);
+  }
+
+  const suppliedParameters = analysis.parameters ?? {};
+  const reservedKeysPresent = RESERVED_ANALYSIS_PARAMETER_KEYS.filter((key) => key in suppliedParameters);
+  if (reservedKeysPresent.length > 0) {
+    refuse(
+      "validation",
+      `${pathPrefix}.parameters`,
+      `analysis.parameters may not set reserved key(s) ${reservedKeysPresent.join(", ")} — these are derived from analysis.baseline/analysis.candidate and the draft's resolved verdictRule, not caller-supplied`,
+    );
+  }
+
+  const armIds = new Set(spec.arms.map((arm) => arm.armId));
+  const needsPair = method.parameterSchema.required.includes("baseline")
+    || method.parameterSchema.required.includes("candidate");
+  if (needsPair) {
+    for (const role of ["baseline", "candidate"] as const) {
+      const armId = analysis[role];
+      if (armId === undefined) {
+        refuse("validation", pathPrefix, `analysis.${role} is required by ${analysis.method} but is absent`);
+      }
+      if (!armIds.has(armId)) {
+        refuse("validation", pathPrefix, `analysis.${role} "${armId}" does not name an arm of this draft`);
+      }
+    }
+  }
+
+  const parameters: Record<string, unknown> = {
+    verdictRule,
+    ...(analysis.baseline === undefined ? {} : { baseline: analysis.baseline }),
+    ...(analysis.candidate === undefined ? {} : { candidate: analysis.candidate }),
+    ...suppliedParameters,
+  };
+  const validated = method.validateParameters(parameters);
+  if (!validated.ok) {
+    refuse("validation", `${pathPrefix}.parameters`, `analysis.parameters rejected by ${analysis.method}: ${validated.issues.join("; ")}`);
+  }
+  return { method: analysis.method, version: analysis.version, parameters };
+}
+
+/**
+ * The primary sealed analysis plan (frozen shape, spec §8.3). `wilson@1` is always present — it is
+ * the product's baseline read and every existing consumer expects it — and a selected non-wilson
+ * method is appended, so the plan honestly pre-registers both analyses at lock.
+ *
+ * FROZEN: this function's four returns yield the identical plan they always did, byte for byte,
+ * regardless of `additionalAnalyses` — `buildAnalysisPlan` below is the wrapper that appends to
+ * this function's output, never a change to this function's own construction. Every existing
+ * draft therefore still seals the identical plan and the identical `specSha256`.
+ */
+function buildPrimaryAnalysisPlan(
+  spec: DraftSpec,
+  verdictRule: ResolvedAssurance["verdictRule"],
+  binaryParameters: BinaryInstrumentParameters | undefined,
+  judgeFamilyContext: JudgeFamilyContext,
 ): RunAnalysisPlanEntry[] {
   const wilson: RunAnalysisPlanEntry = {
     method: BENCHMARKING_METHOD_IDS.wilson,
@@ -112,61 +263,67 @@ function buildAnalysisPlan(
     return [wilson];
   }
 
-  if (analysis.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
-    if (binaryParameters === undefined) {
-      refuse("validation", "spec.analysis", "binary-instrument composition was not derived from the sealed Benchmark closure");
+  return [wilson, resolveNonWilsonAnalysisEntry(spec, verdictRule, analysis, "spec.analysis", binaryParameters, judgeFamilyContext)];
+}
+
+/**
+ * The number of entries `buildPrimaryAnalysisPlan` returns for this spec: 1 when the plan is
+ * `[wilson]` alone (no `analysis` set, or an explicit wilson selection), 2 otherwise (a bespoke
+ * binary-instrument or generic registered-method primary). Exposed so `operations/report.ts` and
+ * `operations/publication-report.ts` can both locate "the primary entry" — the one entry either
+ * operation always selected before `additionalAnalyses` existed — by identity rather than by
+ * trusting a raw array index, and without drifting from each other (spec §8.3: "both become
+ * 'select the named entry', kept in lockstep").
+ */
+export function primaryAnalysisPlanLength(spec: DraftSpec): 1 | 2 {
+  return spec.analysis === undefined || spec.analysis.method === BENCHMARKING_METHOD_IDS.wilson ? 1 : 2;
+}
+
+/**
+ * The sealed analysis plan (spec §8.3 option 5): the primary plan (above), unchanged, plus every
+ * `additionalAnalyses` entry appended in order. Absent `additionalAnalyses` returns the primary
+ * plan's own array exactly — no existing draft's sealed plan, or `specSha256`, moves.
+ *
+ * Two refusals apply only to the appended entries, never to the primary: an entry naming wilson
+ * (wilson is always the head of the plan; a second copy is a duplicate readout), and an entry
+ * naming the same `(method, version)` as the primary or as an earlier additional entry (two
+ * identical plan entries would emit two byte-identical Reports and make the claim table's Report
+ * attribution ambiguous — `operations/report.ts`).
+ */
+function buildAnalysisPlan(
+  spec: DraftSpec,
+  verdictRule: ResolvedAssurance["verdictRule"],
+  binaryParameters: BinaryInstrumentParameters | undefined,
+  judgeFamilyContext: JudgeFamilyContext,
+): RunAnalysisPlanEntry[] {
+  const primaryPlan = buildPrimaryAnalysisPlan(spec, verdictRule, binaryParameters, judgeFamilyContext);
+  const additionalAnalyses = spec.additionalAnalyses;
+  if (additionalAnalyses === undefined || additionalAnalyses.length === 0) return primaryPlan;
+
+  const seenKeys = new Set(primaryPlan.map((entry) => analysisEntryKey(entry.method, entry.version)));
+  const additionalEntries: RunAnalysisPlanEntry[] = [];
+  additionalAnalyses.forEach((analysis, index) => {
+    const pathPrefix = `spec.additionalAnalyses.${index}`;
+    if (analysis.method === BENCHMARKING_METHOD_IDS.wilson) {
+      refuse(
+        "validation",
+        pathPrefix,
+        `additionalAnalyses[${index}] names wilson — wilson is always the head of the sealed plan, and a second copy would be a duplicate readout`,
+      );
     }
-    return [wilson, {
-      method: BENCHMARKING_METHOD_IDS.binaryInstrument,
-      version: BENCHMARKING_METHOD_VERSION,
-      parameters: binaryParameters as unknown as Record<string, unknown>,
-    }];
-  }
-
-  const method = BENCHMARKING_METHOD_REGISTRY.get(analysis.method, analysis.version);
-  if (method === undefined) {
-    refuse("validation", "spec.analysis", `analysis.method "${analysis.method}@${analysis.version}" is not a registered method`);
-  }
-  if (method.computeAvailability !== "available") {
-    refuse("validation", "spec.analysis", `analysis.method "${analysis.method}@${analysis.version}" is registered but its compute is unavailable`);
-  }
-
-  const suppliedParameters = analysis.parameters ?? {};
-  const reservedKeysPresent = RESERVED_ANALYSIS_PARAMETER_KEYS.filter((key) => key in suppliedParameters);
-  if (reservedKeysPresent.length > 0) {
-    refuse(
-      "validation",
-      "spec.analysis.parameters",
-      `analysis.parameters may not set reserved key(s) ${reservedKeysPresent.join(", ")} — these are derived from analysis.baseline/analysis.candidate and the draft's resolved verdictRule, not caller-supplied`,
-    );
-  }
-
-  const armIds = new Set(spec.arms.map((arm) => arm.armId));
-  const needsPair = method.parameterSchema.required.includes("baseline")
-    || method.parameterSchema.required.includes("candidate");
-  if (needsPair) {
-    for (const role of ["baseline", "candidate"] as const) {
-      const armId = analysis[role];
-      if (armId === undefined) {
-        refuse("validation", "spec.analysis", `analysis.${role} is required by ${analysis.method} but is absent`);
-      }
-      if (!armIds.has(armId)) {
-        refuse("validation", "spec.analysis", `analysis.${role} "${armId}" does not name an arm of this draft`);
-      }
+    const key = analysisEntryKey(analysis.method, analysis.version);
+    if (seenKeys.has(key)) {
+      refuse(
+        "validation",
+        pathPrefix,
+        `additionalAnalyses[${index}] names "${analysis.method}@${analysis.version}", which is already registered earlier in the sealed plan`,
+      );
     }
-  }
+    seenKeys.add(key);
+    additionalEntries.push(resolveNonWilsonAnalysisEntry(spec, verdictRule, analysis, pathPrefix, binaryParameters, judgeFamilyContext));
+  });
 
-  const parameters: Record<string, unknown> = {
-    verdictRule,
-    ...(analysis.baseline === undefined ? {} : { baseline: analysis.baseline }),
-    ...(analysis.candidate === undefined ? {} : { candidate: analysis.candidate }),
-    ...suppliedParameters,
-  };
-  const validated = method.validateParameters(parameters);
-  if (!validated.ok) {
-    refuse("validation", "spec.analysis.parameters", `analysis.parameters rejected by ${analysis.method}: ${validated.issues.join("; ")}`);
-  }
-  return [wilson, { method: analysis.method, version: analysis.version, parameters }];
+  return [...primaryPlan, ...additionalEntries];
 }
 
 export interface CompileDraftInput {
@@ -203,7 +360,8 @@ function planFromSpec(
   benchmarkDigestHex: string,
   owner: string,
   closeAt: string,
-  binaryParameters?: BinaryInstrumentParameters,
+  binaryParameters: BinaryInstrumentParameters | undefined,
+  judgeFamilyContext: JudgeFamilyContext,
 ): PlannedRun {
   const arms: RunArm[] = spec.arms.map((arm) => ({
     armId: arm.armId,
@@ -234,7 +392,7 @@ function planFromSpec(
         },
         submissionBaseline: runtimeSubmissionBaseline(spec.evaluationRuntime),
       },
-      analysisPlan: buildAnalysisPlan(spec, resolvedAssurance.verdictRule, binaryParameters),
+      analysisPlan: buildAnalysisPlan(spec, resolvedAssurance.verdictRule, binaryParameters, judgeFamilyContext),
       ...(spec.budget !== undefined ? { budget: spec.budget } : {}),
       venue: { kind: "self-run" },
       closeAt,
@@ -273,9 +431,26 @@ export function compileDraft(input: CompileDraftInput): CompiledRun {
     ? compileBinaryInstrumentProfile({ workspaceDir, draft, benchmark: benchmarkRecord })
     : undefined;
 
-  const plannedRun = planFromSpec(spec, benchmarkSha256, owner, closeAt, binaryParameters);
+  const plannedRun = planFromSpec(
+    spec,
+    benchmarkSha256,
+    owner,
+    closeAt,
+    binaryParameters,
+    { workspaceDir, draft, benchmark: benchmarkRecord },
+  );
 
   return { plannedRun, benchmarkRecord, benchmarkSha256 };
+}
+
+/** True when `analysis` names one of the three binary-instrument-family methods (packet #2837):
+ * `binary-instrument@1` itself, `pairwise-disagreement@1`, or `paired-majority-delta@1`. Used only
+ * by `compilePreviewRun` to decide whether the subset Benchmark must carry the
+ * binary-judgment-intake extension every family derivation reads — see the call site. */
+function isBinaryInstrumentFamilyAnalysis(analysis: Analysis | undefined): boolean {
+  return analysis?.method === BENCHMARKING_METHOD_IDS.binaryInstrument
+    || analysis?.method === BENCHMARKING_METHOD_IDS.pairwiseDisagreement
+    || analysis?.method === BENCHMARKING_METHOD_IDS.pairedMajorityDelta;
 }
 
 export interface CompilePreviewRunInput {
@@ -334,6 +509,18 @@ export function compilePreviewRun(input: CompilePreviewRunInput): CompiledPrevie
   const itemCount = itemLimit === undefined ? fullRecord.items.length : Math.min(itemLimit, fullRecord.items.length);
   const subsetItems = fullRecord.items.slice(0, itemCount);
 
+  // The binary-judgment-intake extension carries the admission manifest reference every
+  // binary-instrument-family derivation reads (`deriveAdmissionProfile`), so it must survive onto
+  // the subset document whenever ANY plan entry -- primary or additional -- names one of the three
+  // family methods, not only when binary-instrument itself is the primary (`binaryParameters`'s own
+  // gate). `pairwise-disagreement@1` and `paired-majority-delta@1` are typically
+  // `additionalAnalyses` entries (packet #2837), so `binaryParameters === undefined` alone would
+  // silently drop the extension the moment neither of them is also the primary.
+  const needsBinaryJudgmentIntakeExtension =
+    binaryParameters !== undefined
+    || isBinaryInstrumentFamilyAnalysis(spec.analysis)
+    || (spec.additionalAnalyses ?? []).some(isBinaryInstrumentFamilyAnalysis);
+
   const subsetDocument: Record<string, unknown> = {
     protocol: fullRecord.protocol,
     name: fullRecord.name,
@@ -345,12 +532,12 @@ export function compilePreviewRun(input: CompilePreviewRunInput): CompiledPrevie
     ...(fullRecord.license !== undefined ? { license: fullRecord.license } : {}),
     ...(fullRecord.citation !== undefined ? { citation: fullRecord.citation } : {}),
     ...(fullRecord.supersedes !== undefined ? { supersedes: fullRecord.supersedes } : {}),
-    ...(binaryParameters === undefined
-      ? {}
-      : {
+    ...(needsBinaryJudgmentIntakeExtension
+      ? {
           ["https://product.jinn.network/extensions/binary-judgment-intake/v1"]:
             (fullRecord as unknown as Record<string, unknown>)["https://product.jinn.network/extensions/binary-judgment-intake/v1"],
-        }),
+        }
+      : {}),
   };
 
   let previewBenchmarkBytes: Uint8Array;
@@ -363,7 +550,14 @@ export function compilePreviewRun(input: CompilePreviewRunInput): CompiledPrevie
   const previewBenchmarkSha256 = sha256Hex(previewBenchmarkBytes);
   const previewBenchmarkRecord = parseBenchmark(previewBenchmarkBytes);
 
-  const plannedRun = planFromSpec(spec, previewBenchmarkSha256, owner, closeAt, binaryParameters);
+  const plannedRun = planFromSpec(
+    spec,
+    previewBenchmarkSha256,
+    owner,
+    closeAt,
+    binaryParameters,
+    { workspaceDir, draft, benchmark: fullRecord },
+  );
 
   return { plannedRun, previewBenchmarkRecord, previewBenchmarkSha256, itemCount: subsetItems.length };
 }

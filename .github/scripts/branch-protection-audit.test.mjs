@@ -36,7 +36,7 @@ function rulesets() {
         {
           type: 'pull_request',
           parameters: {
-            required_approving_review_count: 1,
+            required_approving_review_count: 0,
             require_code_owner_review: true,
             dismiss_stale_reviews_on_push: true,
           },
@@ -257,7 +257,7 @@ test('rejects every queue-era ruleset drift variant', async (t) => {
     ['missing required_status_checks rule', ({ next }) => dropRule(next, 'required_status_checks'), /next: no ruleset in effect supplies a required_status_checks rule/u],
     ['dismiss-stale false', ({ next }) => { rule(next, 'pull_request').parameters.dismiss_stale_reviews_on_push = false; }, /next: pull_request does not dismiss stale reviews on push/u],
     ['code-owner review off', ({ next }) => { rule(next, 'pull_request').parameters.require_code_owner_review = false; }, /next: pull_request does not require code-owner review/u],
-    ['zero approvals', ({ next }) => { rule(next, 'pull_request').parameters.required_approving_review_count = 0; }, /next: pull_request requires 0 approving reviews/u],
+    ['generic approvals on next', ({ next }) => { rule(next, 'pull_request').parameters.required_approving_review_count = 1; }, /next: pull_request requires 1 approving reviews; exactly 0 is required/u],
     ['missing pull_request rule', ({ next }) => dropRule(next, 'pull_request'), /next: no ruleset in effect supplies a pull_request rule/u],
     ['missing deletion rule', ({ next }) => dropRule(next, 'deletion'), /next: no ruleset in effect supplies a deletion rule/u],
     ['missing non_fast_forward rule', ({ next }) => dropRule(next, 'non_fast_forward'), /next: no ruleset in effect supplies a non_fast_forward rule/u],
@@ -382,7 +382,7 @@ test('CLI audit runner preserves visibility-unavailable JSON and summary before 
     const rendered = readFileSync(summary, 'utf8');
     assert.match(rendered, /visibility-unavailable/u);
     // The per-branch table renders the ruleset-era facts, not the classic ones.
-    assert.match(rendered, /\| next \| 100 Next \| 1 \| required \| yes \| 10 \| MERGE ALLGREEN merge 1\/1 build 2 180m \| 0 \|/u);
+    assert.match(rendered, /\| next \| 100 Next \| 0 \| required \| yes \| 10 \| MERGE ALLGREEN merge 1\/1 build 2 180m \| 0 \|/u);
     assert.match(rendered, /\| main \| 200 Base \| 1 \| required \| no \| 1 \| absent \| 1 \|/u);
     // The guard's resolved bypass actor is rendered, not just its presence: a
     // guard with no bypass actor wedges every enqueue, so the evidence has to

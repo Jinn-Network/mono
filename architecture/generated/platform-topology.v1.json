@@ -2033,9 +2033,19 @@
       "generatorSources": 678,
       "marketplaceControl": 2,
       "requiredGates": 25,
-      "staticControl": 6
+      "staticControl": 7
     },
     "paths": [
+      {
+        "categories": [
+          "staticControl"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/architecture-owners"
+      },
       {
         "categories": [
           "staticControl"
@@ -70855,8 +70865,8 @@
   },
   "schemaVersion": 1,
   "sources": {
+    "architectureOwners": ".github/architecture-owners",
     "catalog": "architecture/platform-packages.v1.json",
-    "codeowners": ".github/CODEOWNERS",
     "manifests": "catalog package paths/package.json"
   },
   "transitions": [

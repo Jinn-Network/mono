@@ -38,13 +38,14 @@ import {
   parseBenchmark,
   parseMatrix,
   parseRun,
+  type ReportRecord,
 } from "@jinn-network/benchmarking-records";
 import { evaluateIntegrityAnchors } from "@colophon-claims/verify";
 import { verifyMatrix } from "@jinn-network/benchmarking-run";
 import { verifyReport } from "@jinn-network/benchmarking-aggregate";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { refuse } from "../errors.js";
-import { ClaimPackageSchema } from "../report/claim.js";
+import { additionalClaimPackagePath, ClaimPackageSchema } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
 import {
   inspectRuntimeMethodForBinding,
@@ -97,13 +98,29 @@ export type RunVerifyCheck =
    * portable reader runs, over this workspace's own sealed anchor bytes. */
   | "integrity-anchors";
 
+/** One additional sealed Report this invocation also independently verified (packet P5, spec §8.3
+ * option 5) — one per `runState.additionalReports` entry. It passed the SAME report-verification +
+ * claim-consistency checks the canonical Report did; `checks` records the check KINDS that ran
+ * (once), not a per-report tally — a `claim-consistency: ok` in `checks` means every sealed Report
+ * this run carries passed it, not merely the canonical one. */
+export interface AdditionalRunVerifyResult {
+  readonly method: string;
+  readonly version: string;
+  readonly reportEnvelopeSha256: string;
+}
+
 export interface RunVerifyResult {
   readonly draftId: string;
   /** The checks actually performed, in order — `["matrix-rederivation"]` for a closed-but-not-yet-
    * reported run, all three for a reported one. */
   readonly checks: readonly RunVerifyCheck[];
   readonly matrixSha256: string;
+  /** The CANONICAL first Report's envelope identity — the one this operation always verified
+   * before `additionalAnalyses` existed. */
   readonly reportEnvelopeSha256?: string;
+  /** N-1 additional sealed Reports this invocation also verified, in plan order. Absent when this
+   * run's Report has no additional siblings (packet P5, spec §8.3 option 5). */
+  readonly additionalReports?: readonly AdditionalRunVerifyResult[];
   readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
@@ -115,6 +132,9 @@ export async function verifyRunWorkspace(
       if (document.spec.taskSet.kind !== "benchmark") {
         refuse("conflict", `drafts.${input.draftId}.taskSet`, `draft ${input.draftId} has no attached benchmark`);
       }
+      // Captured as a local const so the "benchmark" narrowing above survives into
+      // `verifyOneReport`'s nested closure below, which TS does not otherwise propagate into.
+      const benchmarkSha256 = document.spec.taskSet.benchmarkSha256;
 
       const runState = requireRunState(context.workspaceDir, input.draftId);
       if (runState.runSha256 === undefined || runState.matrixSha256 === undefined) {
@@ -185,184 +205,242 @@ export async function verifyRunWorkspace(
         );
       }
 
-      const envelopeBytes = getSealedBytes(context.workspaceDir, runState.reportEnvelopeSha256);
-      const verifiedReport = await verifyReport(
-        { envelopeBytes, subjects: [matrixBytes], effectiveTime: runState.reportedAt },
-        {
-          ...buildMethodPorts(context.workspaceDir),
-          // The sealed Run record's own owner, not mutable product state — see the matching
-          // comment at the matrix-rederivation ports above.
-          trust: buildWorkspaceTrustDeps({ workspaceDir: context.workspaceDir, author: runRecord.owner }),
-        },
-      );
-      if (!verifiedReport.ok) {
-        refuse("record-integrity", "report-verification", `${verifiedReport.check}: ${verifiedReport.detail}`);
-      }
-      checks.push("report-verification");
-      const reportRecord = verifiedReport.record;
+      // Shared, method-independent context (anchors validity, rehearsal disclosure, runtime/suite
+      // limitations) is computed exactly once — during the canonical Report's own verification, in
+      // the SAME relative position it always ran in — and reused unchanged for every additional
+      // Report this run carries (packet P5, spec §8.3 option 5): none of it depends on WHICH
+      // Report is being checked, only on the Run and Matrix both share.
+      let sharedContext: {
+        readonly previewLog: ReturnType<typeof readPreviewLog>;
+        readonly carriage: ReturnType<typeof readRunAnchorCarriage>;
+        readonly additionalLimitations: readonly string[];
+        readonly suiteComparability?: {
+          readonly executionConformance: boolean;
+          readonly coverage: "one_task" | "ten_task" | "full" | "custom";
+          readonly leaderboardSubmitReady: boolean;
+        };
+      } | undefined;
 
-      const claimPath = claimPackageArtifactPath(context.workspaceDir, input.draftId);
-      let claimText: string;
-      try {
-        claimText = readFileSync(claimPath, "utf8");
-      } catch {
-        refuse("conflict", claimPath, `draft ${input.draftId} has a sealed Report but no readable claim package at ${claimPath}`);
-      }
-      let claimRaw: unknown;
-      try {
-        claimRaw = JSON.parse(claimText);
-      } catch {
-        refuse("conflict", claimPath, `claim package at ${claimPath} is not valid JSON`);
-      }
-      const claimParsed = ClaimPackageSchema.safeParse(claimRaw);
-      if (!claimParsed.success) {
-        refuse(
-          "record-integrity",
-          "claim-consistency",
-          `claim package at ${claimPath} does not satisfy the claim package schema: ${claimParsed.error.issues[0]?.message ?? "invalid"}`,
+      /**
+       * Independently verifies ONE sealed Report and its own Claim: `report-verification` (DSSE +
+       * exact-subject re-check) then `claim-consistency` (byte-exact re-derivation via the SAME
+       * `assertClaimConsistency` the canonical Report always used — already resolves its plan
+       * entry by `(method, version)`, not by position, so this needed no change to become
+       * N-aware). `label` names which Report a refusal is about, without moving the refusal's
+       * PATH (kept at the exact strings existing callers already assert on).
+       */
+      async function verifyOneReport(entryIdentities: {
+        readonly reportSha256: string | undefined;
+        readonly reportEnvelopeSha256: string;
+        readonly claimPath: string;
+      }, label: string): Promise<void> {
+        const envelopeBytes = getSealedBytes(context.workspaceDir, entryIdentities.reportEnvelopeSha256);
+        const verifiedReport = await verifyReport(
+          { envelopeBytes, subjects: [matrixBytes], effectiveTime: runState.reportedAt! },
+          {
+            ...buildMethodPorts(context.workspaceDir),
+            // The sealed Run record's own owner, not mutable product state — see the matching
+            // comment at the matrix-rederivation ports above.
+            trust: buildWorkspaceTrustDeps({ workspaceDir: context.workspaceDir, author: runRecord.owner }),
+          },
         );
-      }
-      const claim = claimParsed.data;
+        if (!verifiedReport.ok) {
+          refuse("record-integrity", "report-verification", `${label}: ${verifiedReport.check}: ${verifiedReport.detail}`);
+        }
+        const reportRecord: ReportRecord = verifiedReport.record;
 
-      const previewLog = readPreviewLog(context.workspaceDir, input.draftId);
-      // anchor-evidence §7.4: the anchors section is re-derived from the sealed AnchorEvidence
-      // bytes, not read out of the claim under test — an unanchored claim that asserts an anchor,
-      // and an anchored claim whose section drifted from its own records, both fail below.
-      const carriage = readRunAnchorCarriage(context.workspaceDir, runState);
-      // The same shared check the portable reader runs, over the workspace's own sealed bytes and
-      // with no trust material — roots and headers are verifier-side configuration, and a producer
-      // that supplied its own here would be grading its own homework. `invalid` refuses; every
-      // other status, including a declared-but-absent subject, is a disclosed fact.
-      if (carriage.anchoredClosure) {
-        const anchorReport = evaluateIntegrityAnchors({
-          records: carriage.records,
-          runSha256: runState.runSha256,
-          matrixSha256: runState.matrixSha256,
-          closeAt: runRecord.closeAt,
-          declaredProfiles: carriage.declaredProfiles,
-        });
-        const firstInvalid = anchorReport.invalid[0];
-        if (firstInvalid !== undefined) {
+        let claimText: string;
+        try {
+          claimText = readFileSync(entryIdentities.claimPath, "utf8");
+        } catch {
+          refuse("conflict", entryIdentities.claimPath, `draft ${input.draftId} has a sealed Report but no readable claim package at ${entryIdentities.claimPath}`);
+        }
+        let claimRaw: unknown;
+        try {
+          claimRaw = JSON.parse(claimText);
+        } catch {
+          refuse("conflict", entryIdentities.claimPath, `claim package at ${entryIdentities.claimPath} is not valid JSON`);
+        }
+        const claimParsed = ClaimPackageSchema.safeParse(claimRaw);
+        if (!claimParsed.success) {
           refuse(
             "record-integrity",
-            `anchors/${firstInvalid.recordSha256}.bin`,
-            `carried anchor is invalid: ${firstInvalid.reason ?? "the proof does not verify"}`,
+            "claim-consistency",
+            `${label}: claim package at ${entryIdentities.claimPath} does not satisfy the claim package schema: ${claimParsed.error.issues[0]?.message ?? "invalid"}`,
           );
         }
-      }
-      const inspectAdditional = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
-        && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
-        ? [...INSPECT_SEPARATE_ASSURANCE_LIMITATIONS]
-        : [];
-      const suiteFacts = isHarborCompatibleEvaluationRuntime(document.spec.evaluationRuntime)
-        ? suiteFactsFromAccountedRun({
-          manifest: HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
-          armCount: runRecord.arms.length,
-          itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
-          replicates: runRecord.replicates,
-          matrix: matrixRecord,
-          armJobs: document.spec.arms.map((arm) => ({
-            armId: arm.armId,
-            jobDir: join(harborArmJobsDir(context.workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId)),
-          })),
-        })
-        : document.spec.evaluationRuntime?.adapterId === "swebench-harness"
-          ? suiteFactsFromAccountedSwebenchRun({
-            manifest: SwebenchVerifiedSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
-            armCount: runRecord.arms.length,
-            itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
-            replicates: runRecord.replicates,
-            matrix: matrixRecord,
-            armIds: document.spec.arms.map((arm) => arm.armId),
-            reportRoot: join(artifactsDir(context.workspaceDir), "swebench-harness", input.draftId),
-            runId: resolveSwebenchHarnessRunId(join(artifactsDir(context.workspaceDir), "swebench-harness", input.draftId), runSha256),
-            modelNameOrPathByArm: swebenchModelNameOrPathByArm(document.spec.arms),
-          })
-          : document.spec.evaluationRuntime?.adapterId === "archipelago"
-            ? suiteFactsFromAccountedApexRun({
-              manifest: ApexAgentsSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+        const claim = claimParsed.data;
+
+        if (sharedContext === undefined) {
+          const previewLog = readPreviewLog(context.workspaceDir, input.draftId);
+          // anchor-evidence §7.4: the anchors section is re-derived from the sealed AnchorEvidence
+          // bytes, not read out of the claim under test — an unanchored claim that asserts an
+          // anchor, and an anchored claim whose section drifted from its own records, both fail
+          // below. Computed once — the anchors are a property of the Run/Matrix, not of any one
+          // Report.
+          const carriage = readRunAnchorCarriage(context.workspaceDir, runState);
+          // The same shared check the portable reader runs, over the workspace's own sealed bytes
+          // and with no trust material — roots and headers are verifier-side configuration, and a
+          // producer that supplied its own here would be grading its own homework. `invalid`
+          // refuses; every other status, including a declared-but-absent subject, is a disclosed
+          // fact.
+          if (carriage.anchoredClosure) {
+            const anchorReport = evaluateIntegrityAnchors({
+              records: carriage.records,
+              runSha256: runState.runSha256!,
+              matrixSha256: runState.matrixSha256!,
+              closeAt: runRecord.closeAt,
+              declaredProfiles: carriage.declaredProfiles,
+            });
+            const firstInvalid = anchorReport.invalid[0];
+            if (firstInvalid !== undefined) {
+              refuse(
+                "record-integrity",
+                `anchors/${firstInvalid.recordSha256}.bin`,
+                `carried anchor is invalid: ${firstInvalid.reason ?? "the proof does not verify"}`,
+              );
+            }
+          }
+          const inspectAdditional = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
+            && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
+            ? [...INSPECT_SEPARATE_ASSURANCE_LIMITATIONS]
+            : [];
+          const suiteFacts = isHarborCompatibleEvaluationRuntime(document.spec.evaluationRuntime)
+            ? suiteFactsFromAccountedRun({
+              manifest: HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
               armCount: runRecord.arms.length,
               itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
               replicates: runRecord.replicates,
               matrix: matrixRecord,
-              armIds: document.spec.arms.map((arm) => arm.armId),
-              reportRoot: join(artifactsDir(context.workspaceDir), "archipelago", input.draftId),
+              armJobs: document.spec.arms.map((arm) => ({
+                armId: arm.armId,
+                jobDir: join(harborArmJobsDir(context.workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId)),
+              })),
             })
-          : document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID
-            ? suiteFactsFromAccountedApexSweDevRun({
-              manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
-              armCount: runRecord.arms.length,
-              itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
-              replicates: runRecord.replicates,
-              matrix: matrixRecord,
-              armIds: document.spec.arms.map((arm) => arm.armId),
-              reportRoot: apexSweDevReportRoot(artifactsDir(context.workspaceDir), input.draftId),
-            })
-            : document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
-              ? (() => {
-                const manifest = readInspectEvalSelectionManifest(
-                  context.workspaceDir,
-                  document.spec.evaluationRuntime.selectionManifestSha256,
-                );
-                return manifest === undefined
-                  ? undefined
-                  : suiteFactsFromAccountedInspectRun({
-                    manifest,
-                    armCount: runRecord.arms.length,
-                    itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
-                    replicates: runRecord.replicates,
-                    matrix: matrixRecord,
-                    armIds: document.spec.arms.map((arm) => arm.armId),
-                  });
-              })()
-              : undefined;
-      const additionalLimitations = [
-        ...inspectAdditional,
-        ...(suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation]),
-      ];
-      assertClaimConsistency({
-        claim,
-        identities: {
-          benchmarkSha256: document.spec.taskSet.benchmarkSha256,
-          runSha256: runState.runSha256,
-          matrixSha256: runState.matrixSha256,
-          reportSha256: runState.reportSha256,
-          reportEnvelopeSha256: runState.reportEnvelopeSha256,
-        },
-        matrixRecord,
-        reportRecord,
-        benchmarkRecord: benchRecord,
-        runRecord,
-        draftId: input.draftId,
-        assurancePreset: document.spec.assurance.preset,
-        ...(additionalLimitations.length > 0 ? { additionalLimitations } : {}),
-        ...(suiteFacts === undefined ? {} : {
-          suiteComparability: {
-            executionConformance: suiteFacts.quote.executionConformance,
-            coverage: suiteFacts.quote.coverage,
-            leaderboardSubmitReady: suiteFacts.quote.leaderboardSubmitReady,
-          },
-        }),
-        ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
-        ...(previewLog === undefined
-          ? {}
-          : {
-              rehearsal: {
-                previewCount: previewLog.count,
-                timestamps: previewLog.previews.map((preview) => preview.at),
+            : document.spec.evaluationRuntime?.adapterId === "swebench-harness"
+              ? suiteFactsFromAccountedSwebenchRun({
+                manifest: SwebenchVerifiedSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+                armCount: runRecord.arms.length,
+                itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+                replicates: runRecord.replicates,
+                matrix: matrixRecord,
+                armIds: document.spec.arms.map((arm) => arm.armId),
+                reportRoot: join(artifactsDir(context.workspaceDir), "swebench-harness", input.draftId),
+                runId: resolveSwebenchHarnessRunId(join(artifactsDir(context.workspaceDir), "swebench-harness", input.draftId), runSha256),
+                modelNameOrPathByArm: swebenchModelNameOrPathByArm(document.spec.arms),
+              })
+              : document.spec.evaluationRuntime?.adapterId === "archipelago"
+                ? suiteFactsFromAccountedApexRun({
+                  manifest: ApexAgentsSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+                  armCount: runRecord.arms.length,
+                  itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+                  replicates: runRecord.replicates,
+                  matrix: matrixRecord,
+                  armIds: document.spec.arms.map((arm) => arm.armId),
+                  reportRoot: join(artifactsDir(context.workspaceDir), "archipelago", input.draftId),
+                })
+              : document.spec.evaluationRuntime?.adapterId === APEX_SWE_DEV_ADAPTER_ID
+                ? suiteFactsFromAccountedApexSweDevRun({
+                  manifest: ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+                  armCount: runRecord.arms.length,
+                  itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+                  replicates: runRecord.replicates,
+                  matrix: matrixRecord,
+                  armIds: document.spec.arms.map((arm) => arm.armId),
+                  reportRoot: apexSweDevReportRoot(artifactsDir(context.workspaceDir), input.draftId),
+                })
+                : document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
+                  ? (() => {
+                    const manifest = readInspectEvalSelectionManifest(
+                      context.workspaceDir,
+                      document.spec.evaluationRuntime.selectionManifestSha256,
+                    );
+                    return manifest === undefined
+                      ? undefined
+                      : suiteFactsFromAccountedInspectRun({
+                        manifest,
+                        armCount: runRecord.arms.length,
+                        itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+                        replicates: runRecord.replicates,
+                        matrix: matrixRecord,
+                        armIds: document.spec.arms.map((arm) => arm.armId),
+                      });
+                  })()
+                  : undefined;
+          sharedContext = {
+            previewLog,
+            carriage,
+            additionalLimitations: [
+              ...inspectAdditional,
+              ...(suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation]),
+            ],
+            ...(suiteFacts === undefined ? {} : {
+              suiteComparability: {
+                executionConformance: suiteFacts.quote.executionConformance,
+                coverage: suiteFacts.quote.coverage,
+                leaderboardSubmitReady: suiteFacts.quote.leaderboardSubmitReady,
               },
             }),
-        ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
-      });
+          };
+        }
+        const { previewLog, carriage, additionalLimitations, suiteComparability } = sharedContext;
 
+        assertClaimConsistency({
+          claim,
+          identities: {
+            benchmarkSha256,
+            runSha256: runState.runSha256!,
+            matrixSha256: runState.matrixSha256!,
+            reportSha256: entryIdentities.reportSha256,
+            reportEnvelopeSha256: entryIdentities.reportEnvelopeSha256,
+          },
+          matrixRecord,
+          reportRecord,
+          benchmarkRecord: benchRecord,
+          runRecord,
+          draftId: input.draftId,
+          assurancePreset: document.spec.assurance.preset,
+          ...(additionalLimitations.length > 0 ? { additionalLimitations } : {}),
+          ...(suiteComparability === undefined ? {} : { suiteComparability }),
+          ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
+          ...(previewLog === undefined
+            ? {}
+            : {
+                rehearsal: {
+                  previewCount: previewLog.count,
+                  timestamps: previewLog.previews.map((preview) => preview.at),
+                },
+              }),
+        });
+      }
+
+      await verifyOneReport(
+        { reportSha256: runState.reportSha256, reportEnvelopeSha256: runState.reportEnvelopeSha256, claimPath: claimPackageArtifactPath(context.workspaceDir, input.draftId) },
+        "canonical",
+      );
+      const additionalReports: AdditionalRunVerifyResult[] = [];
+      for (const entry of runState.additionalReports ?? []) {
+        await verifyOneReport(
+          {
+            reportSha256: entry.reportSha256,
+            reportEnvelopeSha256: entry.reportEnvelopeSha256,
+            claimPath: additionalClaimPackagePath(context.workspaceDir, input.draftId, entry.method, entry.version),
+          },
+          `${entry.method}@${entry.version}`,
+        );
+        additionalReports.push({ method: entry.method, version: entry.version, reportEnvelopeSha256: entry.reportEnvelopeSha256 });
+      }
+
+      checks.push("report-verification");
       checks.push("claim-consistency");
-      if (carriage.anchoredClosure) checks.push("integrity-anchors");
+      if (sharedContext!.carriage.anchoredClosure) checks.push("integrity-anchors");
 
       return {
         draftId: input.draftId,
         checks,
         matrixSha256: runState.matrixSha256,
         reportEnvelopeSha256: runState.reportEnvelopeSha256,
+        ...(additionalReports.length === 0 ? {} : { additionalReports }),
         ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
       };
 }

@@ -211,6 +211,20 @@ export const DraftAnchoringSchema = z.object({
 
 export type DraftAnchoring = z.infer<typeof DraftAnchoringSchema>;
 
+/**
+ * Pre-registered additional analysis-plan entries (packet P5, spec §8.3 option 5): sealed verbatim
+ * after the primary `analysis` entry at lock (`run/compile.ts`'s `buildAnalysisPlan`), so a sealed
+ * Run can carry more than one registered readout over the one collected cell set while still
+ * emitting a single-method Report record per entry (`operations/report.ts`).
+ *
+ * Optional and additive: an absent block means today's behavior exactly, so — like `analysis`,
+ * `budget`, and `anchoring` above — no entry is added to `DRAFT_SPEC_DEFAULTS` and no stored draft
+ * needs migrating, and no existing draft's `specSha256` moves. `.min(1)`: an empty array carries no
+ * information an absent field doesn't already carry, so it is refused rather than silently accepted
+ * as a no-op.
+ */
+export const AdditionalAnalysesSchema = z.array(AnalysisSchema).min(1);
+
 export const DraftSpecSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
@@ -224,6 +238,7 @@ export const DraftSpecSchema = z.object({
   venue: VenueSchema,
   evaluationRuntime: EvaluationRuntimeBindingSchema.optional(),
   analysis: AnalysisSchema.optional(),
+  additionalAnalyses: AdditionalAnalysesSchema.optional(),
   anchoring: DraftAnchoringSchema.optional(),
 });
 

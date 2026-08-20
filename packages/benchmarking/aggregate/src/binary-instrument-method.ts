@@ -24,9 +24,12 @@ import { wilsonInterval } from "./stats/wilson.js";
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const SHA256_URI = /^sha256:[a-f0-9]{64}$/;
-const CANDIDATE_CLASS = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
+// Exported (P5, packet #2837) so `pairwise-disagreement@1` and `paired-majority-delta@1` gate
+// their own `candidateClasses`/`strata` parameters against the identical grammar instead of each
+// carrying a private copy that can drift from the parameter schema's own `pattern` values.
+export const CANDIDATE_CLASS = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
 // §3.1 rule 1: one identifier dialect, not two. Shared shape with `candidateClass`.
-const STRATUM_NAME = CANDIDATE_CLASS;
+export const STRATUM_NAME = CANDIDATE_CLASS;
 
 const INSTRUMENT_REQUIREMENT_KEY = "network.jinn.binary-judgment.instrument";
 const ITEM_COMMITMENT_KEY = "network.jinn.binary-judgment.item-sha256";
@@ -1158,6 +1161,30 @@ function exactGeneration(value: unknown, digest: string, profile: JudgeModelProf
   }
 }
 
+// Mirrored from BINARY_JUDGMENT_OPTIONAL_TEMPLATE_FIELDS in
+// packages/task-execution/profiles/src/binary-judgment/contracts.ts, which is the source of
+// truth. `packages/benchmarking/aggregate` deliberately does not depend on
+// `@jinn-network/task-execution-profiles` (see its package.json — only benchmarking-records and
+// trust-core are runtime dependencies here), so `evidence` is hardcoded below as a second copy
+// rather than imported, matching this file's existing mirror-and-widen-together pattern (see
+// JUDGE_MODEL_PROFILE_IDS above).
+//
+// This completes the P2 evidence-channel seam on the aggregate side; it is not a P5 contract
+// change. P2 declared `evidence` OPTIONAL on the profiles side and shipped
+// `binaryJudgmentInstrumentDeclaresEvidence` to identify an evidence-declaring arm by exactly this
+// segment, but this aggregate-side allowlist was never widened to match. An arm whose instrument
+// interpolated `evidence` therefore passed lock and then threw
+// `binary-record-malformed: instrument field segment is unsupported` at report time, in the
+// PRIMARY readout (binary-instrument@1), blocking the whole flagship judge run before either
+// cross-arm readout was reached.
+//
+// Compatible widening under spec §0.4: `evidence` is added only to this ACCEPTED set, never to
+// the REQUIRED set enforced a few lines below in this function (`usedFields` must still cover
+// exactly question/referenceAnswer/candidateAnswer — evidence stays optional). Every instrument
+// that validates today still validates, seals to identical bytes, and computes identically;
+// binary-instrument@1 does not bump for this change.
+const ACCEPTED_INSTRUMENT_FIELD_SEGMENTS = new Set(["question", "referenceAnswer", "candidateAnswer", "evidence"]);
+
 function validateInstrument(
   instrument: Record<string, unknown>,
   digest: `sha256:${string}`,
@@ -1205,7 +1232,7 @@ function validateInstrument(
       }
       if (keys[0] === "field") {
         const field = segment["field"];
-        if (field !== "question" && field !== "referenceAnswer" && field !== "candidateAnswer") {
+        if (typeof field !== "string" || !ACCEPTED_INSTRUMENT_FIELD_SEGMENTS.has(field)) {
           throw new MethodInputError("binary-record-malformed", digest, "instrument field segment is unsupported");
         }
         usedFields.add(field);
@@ -1938,7 +1965,9 @@ export function validateBinaryInstrumentQualificationProjection(value: unknown):
   return issues.length === 0 ? { ok: true } : { ok: false, issues };
 }
 
-function fixed4(value: number): string {
+/** Exported (P5, packet #2837) so `pairwise-disagreement@1` and its sibling methods format
+ * rates identically instead of growing a third private copy (registry.ts:301 is the second). */
+export function fixed4(value: number): string {
   return value.toFixed(4);
 }
 
@@ -2105,14 +2134,38 @@ export function projectBinaryInstrumentQualification(
   };
 }
 
-/** Pure registered-method core. All external bytes enter only through digest-bound resolver ports. */
-export function computeBinaryInstrumentQualification(
+/**
+ * The reduction-relevant parameters `resolveBinaryInstrumentReduction` reads. Deliberately not
+ * `BinaryInstrumentParameters`: a caller whose own parameter set has no `intervalAlpha` (or no
+ * `measurementProfile`/`parserInvalidPolicy`/`verdictRule`, which the resolve half never reads
+ * either) can never satisfy `validateBinaryInstrumentParameters`, so the resolve half must not
+ * re-run that validator — it takes exactly the four scalars it uses.
+ */
+export interface BinaryInstrumentReductionParameters {
+  readonly k: number;
+  readonly candidateClasses: readonly string[];
+  readonly strata: readonly string[];
+  readonly truthAdmission: BinaryInstrumentParameters["truthAdmission"];
+}
+
+export interface BinaryInstrumentReductionResolution {
+  readonly reduction: BinaryInstrumentReduction;
+  readonly instruments: readonly { readonly armId: string; readonly instrumentSha256: string }[];
+}
+
+/**
+ * The resolve half of the registered binary-judgment closure: arm instruments, per-task bindings
+ * (Task, EvaluationSpec, analysis context, label resolution), parsed cell inputs, then the
+ * scientific-replicate reduction. Extracted from `computeBinaryInstrumentQualification` (P5,
+ * packet #2837) so `pairwise-disagreement@1` and `paired-majority-delta@1` single-source the same
+ * majority reduction over the same admitted closure rather than each re-deriving it — spec
+ * §7.1/§7.2a: "one import, three callers." Pure w.r.t. its inputs; all external bytes still enter
+ * only through `input`'s digest-bound resolver ports.
+ */
+export function resolveBinaryInstrumentReduction(
   input: BinaryInstrumentQualificationComputeInput,
-): unknown {
-  const parameters = parametersFrom(input.parameters);
-  if (input.verdictRule !== "sole") {
-    throw new Error(`binary-instrument@1 requires MethodComputeInput.verdictRule=sole; got ${input.verdictRule}`);
-  }
+  parameters: BinaryInstrumentReductionParameters,
+): BinaryInstrumentReductionResolution {
   if (input.resolveRecordBytes === undefined) {
     throw new MethodInputError(
       "binary-record-unavailable",
@@ -2170,12 +2223,33 @@ export function computeBinaryInstrumentQualification(
     strata: parameters.strata,
   });
 
-  return projectBinaryInstrumentQualification({
-    parameters: input.parameters,
+  return {
     reduction,
     instruments: [...instruments.entries()].map(([armId, instrument]) => ({
       armId,
       instrumentSha256: instrument.digest,
     })),
+  };
+}
+
+/** Pure registered-method core. All external bytes enter only through digest-bound resolver ports. */
+export function computeBinaryInstrumentQualification(
+  input: BinaryInstrumentQualificationComputeInput,
+): unknown {
+  const parameters = parametersFrom(input.parameters);
+  if (input.verdictRule !== "sole") {
+    throw new Error(`binary-instrument@1 requires MethodComputeInput.verdictRule=sole; got ${input.verdictRule}`);
+  }
+  const { reduction, instruments } = resolveBinaryInstrumentReduction(input, {
+    k: parameters.k,
+    candidateClasses: parameters.candidateClasses,
+    strata: parameters.strata,
+    truthAdmission: parameters.truthAdmission,
+  });
+
+  return projectBinaryInstrumentQualification({
+    parameters: input.parameters,
+    reduction,
+    instruments,
   });
 }

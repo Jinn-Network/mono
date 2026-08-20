@@ -40,9 +40,12 @@ name is never release authority.
 
 ## Ownership and generated views
 
-Task 6's architecture-control validator applies CODEOWNERS last-match semantics to catalog
+Task 6's architecture-control validator applies last-match semantics from
+[`.github/architecture-owners`](../.github/architecture-owners) to catalog
 authorities, manifests, boundary policies, gates, public surfaces, conformance assets, and
-generator sources. The generated ownership section embeds that validator's report rather than
+generator sources. That file is the PAC ownership inventory, not GitHub's enqueue
+CODEOWNERS gate (see [`.github/CODEOWNERS`](../.github/CODEOWNERS) and
+[DR-2026-08-20](../log/decisions/2026-08-20-human-surface-enqueue-gate.md)). The generated ownership section embeds that validator's report rather than
 maintaining a second ownership model.
 
 Regenerate after any catalog, manifest, public-surface, gate, or ownership change:
@@ -59,7 +62,7 @@ set. Missing, changed, or unknown files fail.
 
 For every operation below, update the manifest and catalog in one change, update the owning
 design or decision record when semantics change, extend the declared gate/boundary/public-surface
-inputs, confirm CODEOWNERS coverage, regenerate, and run the catalog, topology, public-surface,
+inputs, confirm `.github/architecture-owners` coverage, regenerate, and run the catalog, topology, public-surface,
 architecture-control, and generated-drift tests.
 
 - **Add:** create the manifest, add exactly one catalog record, assign tier/classification,
