@@ -14,6 +14,8 @@ import {
   sealBinaryJudgmentInstrument,
   type BinaryJudgmentInstrument,
   type BinaryJudgmentPayload,
+  type BinaryJudgmentReasoningGeneration,
+  type BinaryJudgmentSamplingGeneration,
 } from "@jinn-network/task-execution-profiles";
 import { sealTask, TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
 import { canonicalJsonBytes, recordDigest } from "@jinn-network/trust-core";
@@ -36,6 +38,7 @@ import {
   inspectBinaryJudgeWorkerPath,
   inspectBinaryJudgeWorkerSha256,
   makeInspectBinaryJudgeLauncher,
+  validateInspectBinaryJudgePinning,
 } from "./binary-judge.js";
 import { inspectOciRunnerPath } from "./oci.js";
 import { inspectOciRunnerSha256 } from "./oci.js";
@@ -51,7 +54,16 @@ const fixture = JSON.parse(readFileSync(new URL(
   expect: { semanticRequest: unknown; semanticRequestSha256: `sha256:${string}` };
 };
 
-const generation = fixture.input.instrument.model.generation;
+// This F0 golden fixture is a reasoning-model instrument (spec §1.1), but its
+// `model.generation` is now typed as the profile union (reasoning | dated-snapshot-sampling).
+// Narrow it once, here, rather than casting at each use site: the runtime check makes the
+// narrowing sound, and `generation.reasoningEffort` below is then a compile-time fact, not an
+// assumption.
+const rawGeneration = fixture.input.instrument.model.generation;
+if (!("reasoningEffort" in rawGeneration)) {
+  throw new Error("binary-judge.test fixture must use the reasoning-2026-08 generation variant");
+}
+const generation: BinaryJudgmentReasoningGeneration = rawGeneration;
 const alphaInstrument = { ...fixture.input.instrument, instrumentId: "alpha" };
 const betaInstrument = { ...fixture.input.instrument, instrumentId: "beta" };
 const sealedAlpha = sealBinaryJudgmentInstrument(alphaInstrument);
@@ -125,6 +137,72 @@ function taskView(overrides: Record<string, unknown> = {}): TaskView {
       model: { id: "gpt-5.6-luna" },
       isolationPolicy: "oci-container",
       [BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY]: sealedAlpha.digest,
+      ...overrides,
+    },
+  };
+}
+
+// Dated-snapshot-sampling fixtures (spec §1.1/§1.3), for the P1 tests below proving arm
+// resolution and the run-pinning inventory are derived from the sealed selection rather than
+// hardcoded to the reasoning model.
+function datedSnapshotGeneration(): BinaryJudgmentSamplingGeneration {
+  return {
+    temperature: 0,
+    maxOutputTokens: 512,
+    store: false,
+    background: false,
+    stream: false,
+    serviceTier: "default",
+    tools: [],
+    fallbackModels: [],
+    retries: 0,
+    persistedConversation: false,
+    metadata: null,
+    promptCacheIdentifier: null,
+  };
+}
+const datedAlphaInstrument: BinaryJudgmentInstrument = {
+  ...fixture.input.instrument,
+  instrumentId: "dated-alpha",
+  model: { adapter: "jinn-openai", requested: "gpt-4o-mini-2024-07-18", generation: datedSnapshotGeneration() },
+};
+const datedBetaInstrument: BinaryJudgmentInstrument = {
+  ...fixture.input.instrument,
+  instrumentId: "dated-beta",
+  model: { adapter: "jinn-openai", requested: "gpt-4o-mini-2024-07-18", generation: datedSnapshotGeneration() },
+};
+const sealedDatedAlpha = sealBinaryJudgmentInstrument(datedAlphaInstrument);
+const sealedDatedBeta = sealBinaryJudgmentInstrument(datedBetaInstrument);
+const datedManifest: InspectBinaryJudgeSelectionManifest = {
+  ...manifest,
+  arms: [
+    {
+      armId: "dated-alpha",
+      instrumentSha256: sealedDatedAlpha.digest,
+      model: "gpt-4o-mini-2024-07-18",
+      generation: datedSnapshotGeneration(),
+    },
+    {
+      armId: "dated-beta",
+      instrumentSha256: sealedDatedBeta.digest,
+      model: "gpt-4o-mini-2024-07-18",
+      generation: datedSnapshotGeneration(),
+    },
+  ],
+  // Required by the sealed selection schema whenever a bound arm's model is a dated snapshot
+  // (spec §1.5 rule 2). Nothing exercised below dereferences the digest.
+  snapshotProbeSha256: `sha256:${"9".repeat(64)}`,
+};
+
+function datedTaskView(overrides: Record<string, unknown> = {}): TaskView {
+  return {
+    task,
+    profile: buildBinaryJudgmentProfile(),
+    effectiveRequirements: {
+      harness: { id: INSPECT_BINARY_JUDGE_LAUNCHER_ID, version: INSPECT_BINARY_JUDGE_LAUNCHER_VERSION },
+      model: { id: "gpt-4o-mini-2024-07-18" },
+      isolationPolicy: "oci-container",
+      [BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY]: sealedDatedAlpha.digest,
       ...overrides,
     },
   };
@@ -355,6 +433,47 @@ describe("Inspect binary-judge selection", () => {
   });
 });
 
+describe("Inspect binary-judge dated-snapshot arms (spec §1.6 / P1 changes 3a-3b)", () => {
+  test("resolves and validates a dated-snapshot cell against its own selected arm", () => {
+    const arm = validateInspectBinaryJudgePinning(datedTaskView(), datedManifest);
+    expect(arm.armId).toBe("dated-alpha");
+    expect(arm.model).toBe("gpt-4o-mini-2024-07-18");
+  });
+
+  test("refuses a cell whose model.id differs from its selected arm's own model", () => {
+    expect(() => validateInspectBinaryJudgePinning(
+      datedTaskView({ model: { id: "gpt-5.6-luna" } }),
+      datedManifest,
+    )).toThrow(/exact selected arm's model/u);
+  });
+
+  // Today's closed model set couples model to generation profile 1:1, and the sealed selection
+  // schema requires every arm in one manifest to share one identical generation block (spec
+  // §1.3: "this run isolates the prompt, not the model"). A single manifest naming two different
+  // models is therefore not schema-constructible today — `makeInspectBinaryJudgeLauncher` would
+  // refuse it at `InspectBinaryJudgeSelectionManifestSchema.parse`, before the run-pinning
+  // inventory is ever built. What IS provable, and what this test proves, is that the inventory
+  // is derived from whichever model(s) the sealed selection actually names rather than hardcoded
+  // to the reasoning model: it reports exactly `["gpt-5.6-luna"]` for today's all-reasoning
+  // manifest (the compatibility proof) and exactly `["gpt-4o-mini-2024-07-18"]` once the sealed
+  // selection is a dated-snapshot one.
+  test("the enforced run-pinning model inventory reflects the sealed selection's own arm models", () => {
+    const reasoningLauncher = makeInspectBinaryJudgeLauncher({ host, manifest });
+    expect(reasoningLauncher.capabilities().runPinning.keys).toContainEqual({
+      key: "model",
+      inventory: ["gpt-5.6-luna"],
+      posture: "enforced",
+    });
+
+    const datedLauncher = makeInspectBinaryJudgeLauncher({ host, manifest: datedManifest });
+    expect(datedLauncher.capabilities().runPinning.keys).toContainEqual({
+      key: "model",
+      inventory: ["gpt-4o-mini-2024-07-18"],
+      posture: "enforced",
+    });
+  });
+});
+
 describe("Inspect binary-judge Python worker contract", () => {
   test("validates the cross-runtime request and builds a closed observation without any provider call", () => {
     const script = String.raw`
@@ -367,7 +486,7 @@ request=worker.validate_semantic_request(fixture["expect"]["semanticRequest"])
 assert "sha256:"+worker.sha256_bytes(worker.canonical_bytes(request)) == fixture["expect"]["semanticRequestSha256"]
 config={"taskDigest":"sha256:"+"1"*64,"armId":"alpha","replicate":1,"instrumentSha256":"sha256:"+"2"*64,"requestSha256":fixture["expect"]["semanticRequestSha256"]}
 record={"status":"completed","resolvedModel":"gpt-5.6-luna","responseId":"resp_fixture","eventDigest":"3"*64,"usage":{"input_tokens":11,"output_tokens":2,"total_tokens":13}}
-observation=worker.build_observation(config,b" ACCEPT\r\n",record)
+observation=worker.build_observation(config,b" ACCEPT\r\n",record,request["model"])
 assert observation["call"] == {"count":1,"retries":0,"fallbacks":0}
 assert observation["provider"]["usage"] == {"inputTokens":11,"outputTokens":2,"totalTokens":13}
 assert "verdict" not in observation and "decision" not in observation and "brokerProtocol" not in observation
@@ -376,8 +495,12 @@ try:
   raise AssertionError("accepted inconsistent usage")
 except ValueError: pass
 try:
-  worker.build_observation(config,b"ACCEPT",{**record,"status":"budget-rejected"})
+  worker.build_observation(config,b"ACCEPT",{**record,"status":"budget-rejected"},request["model"])
   raise AssertionError("accepted non-completed broker event")
+except ValueError: pass
+try:
+  worker.build_observation(config,b"ACCEPT",{**record,"resolvedModel":"gpt-4o-mini-2024-07-18"},request["model"])
+  raise AssertionError("accepted a resolvedModel that differs from the requested model")
 except ValueError: pass
 print(json.dumps(observation,sort_keys=True,separators=(",",":")))
 `;

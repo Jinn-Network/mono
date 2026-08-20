@@ -2023,7 +2023,7 @@
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 6,
-      "discoveredFirstPartySurfaces": 4160,
+      "discoveredFirstPartySurfaces": 4161,
       "generatedOutputSources": 1392,
       "generatorSources": 676,
       "marketplaceControl": 2,
@@ -31613,6 +31613,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/verify/src/profile/binary-judge-manifest.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/verify/src/profile/binary-qualification.test.ts"
       },
       {
         "categories": [

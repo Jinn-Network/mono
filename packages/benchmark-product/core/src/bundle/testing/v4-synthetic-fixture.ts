@@ -21,15 +21,21 @@ import {
   BINARY_JUDGMENT_LABEL_RESOLUTION_MEDIA_TYPE,
   BINARY_JUDGMENT_OBSERVATION_MEDIA_TYPE,
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+  BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
   VERDICT_DSSE_PAYLOAD_TYPE,
   binaryJudgmentPromptTemplateDigest,
   binaryJudgmentSemanticRequestDigest,
+  isDatedSnapshotJudgeModel,
+  JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS,
+  JUDGE_MODEL_PROFILES,
   parseBinaryJudgmentAnalysisContext,
   parseBinaryJudgmentInstrument,
   parseBinaryJudgmentLabelResolution,
   parseBinaryJudgmentObservation,
   sealBinaryJudgmentInstrument,
   sealBinaryJudgmentObservation,
+  sealBinaryJudgmentSnapshotProbe,
+  type AcceptedJudgeModelId,
 } from "@jinn-network/task-execution-profiles";
 import {
   SubmissionRecordSchema,
@@ -121,6 +127,8 @@ const decoder = new TextDecoder("utf-8", { fatal: true });
 const encoder = new TextEncoder();
 const DRAFT_ID = "binary-publication";
 const EVALUATED_AT = "2026-08-15T12:30:00.000Z";
+// Stays the reasoning variant: this is the default judge model's generation shape, and every
+// existing caller of createSyntheticV4BundleFixture depends on its bytes being unchanged.
 const generation: InspectBinaryJudgeSelectionManifest["arms"][number]["generation"] = {
   reasoningEffort: "low",
   maxOutputTokens: 128,
@@ -135,6 +143,29 @@ const generation: InspectBinaryJudgeSelectionManifest["arms"][number]["generatio
   metadata: null,
   promptCacheIdentifier: null,
 } as const;
+
+// The dated-snapshot-sampling profile's generation shape (spec §1.3). Only reachable when a
+// caller opts into `judgeModel: "gpt-4o-mini-2024-07-18"`.
+const samplingGeneration: InspectBinaryJudgeSelectionManifest["arms"][number]["generation"] = {
+  temperature: 0,
+  maxOutputTokens: 512,
+  store: false,
+  background: false,
+  stream: false,
+  serviceTier: "default",
+  tools: [],
+  fallbackModels: [],
+  retries: 0,
+  persistedConversation: false,
+  metadata: null,
+  promptCacheIdentifier: null,
+} as const;
+
+function generationForJudgeModel(
+  judgeModel: AcceptedJudgeModelId,
+): InspectBinaryJudgeSelectionManifest["arms"][number]["generation"] {
+  return JUDGE_MODEL_PROFILES[judgeModel] === "dated-snapshot-sampling" ? samplingGeneration : generation;
+}
 
 function requireOk<T>(
   result: { readonly ok: true; readonly result: T } | { readonly ok: false; readonly error: { readonly detail: string } },
@@ -292,7 +323,7 @@ function syntheticCellOutcome(
   return token;
 }
 
-function instrument(armId: string) {
+function instrument(armId: string, judgeModel: AcceptedJudgeModelId) {
   const messages = [
     { role: "developer", segments: [{ literal: `Synthetic ${armId} rubric. Judge only the supplied item. ` }] },
     {
@@ -325,7 +356,7 @@ function instrument(armId: string) {
       uri: `https://fixtures.example.test/${armId}/attribution`,
       digest: { sha256: sha256Hex(encoder.encode(`synthetic-${armId}-attribution`)) },
     },
-    model: { adapter: "jinn-openai", requested: "gpt-5.6-luna", generation },
+    model: { adapter: "jinn-openai", requested: judgeModel, generation: generationForJudgeModel(judgeModel) },
     response: {
       mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
       parser: {
@@ -342,7 +373,7 @@ function parseJson(bytes: Uint8Array): Record<string, any> {
   return JSON.parse(decoder.decode(bytes)) as Record<string, any>;
 }
 
-function makeCapabilities(instrumentSha256s: readonly string[]) {
+function makeCapabilities(instrumentSha256s: readonly string[], judgeModel: AcceptedJudgeModelId) {
   return {
     taskProfiles: ["https://spec.jinn.network/task-profiles/binary-judgment/2.0"],
     inputMediaTypes: ["application/json"],
@@ -361,7 +392,7 @@ function makeCapabilities(instrumentSha256s: readonly string[]) {
     runPinning: {
       keys: [
         { key: "harness", inventory: [INSPECT_BINARY_JUDGE_LAUNCHER_ID], posture: "enforced" as const },
-        { key: "model", inventory: ["gpt-5.6-luna"], posture: "enforced" as const },
+        { key: "model", inventory: [judgeModel], posture: "enforced" as const },
         { key: "isolationPolicy", inventory: ["oci-container"], posture: "enforced" as const },
         { key: BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY, inventory: [...instrumentSha256s], posture: "enforced" as const },
       ],
@@ -378,6 +409,7 @@ function syntheticInspectVenue(
   workspaceDir: string,
   instrumentSha256s: readonly string[],
   scenario: SyntheticV4Scenario,
+  judgeModel: AcceptedJudgeModelId,
 ): LocalVenue {
   const [{ key }] = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: INSPECT_EMBEDDED_EVALUATOR_ID }]);
   const artifacts = new Map<string, Uint8Array>();
@@ -397,7 +429,7 @@ function syntheticInspectVenue(
 
   const backend: ProxiedBackend = {
     async capabilities() {
-      return makeCapabilities(instrumentSha256s);
+      return makeCapabilities(instrumentSha256s, judgeModel);
     },
     async submit(taskBytes, submissionBytes) {
       const submission = SubmissionRecordSchema.parse(parseJson(submissionBytes));
@@ -427,14 +459,16 @@ function syntheticInspectVenue(
         requestSha256: binaryJudgmentSemanticRequestDigest(task.payload, parsedInstrument),
         response: { digest: responseSha256, mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE },
         provider: {
-          requestedModel: "gpt-5.6-luna",
-          resolvedModel: "gpt-5.6-luna",
+          requestedModel: parsedInstrument.model.requested,
+          resolvedModel: parsedInstrument.model.requested,
           responseId: `synthetic-no-provider-${counter + 1}`,
           eventSha256: recordDigest(canonicalJsonBytes({ cellKey, source: "provider-free-fixture" })),
           usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
         },
         call: { count: 1, retries: 0, fallbacks: 0 },
-        limitations: ["mutable-model-alias"],
+        limitations: [
+          ...JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS[JUDGE_MODEL_PROFILES[parsedInstrument.model.requested]],
+        ],
       }).bytes;
       const responseHex = store(responseBytes);
       const observationHex = store(observationBytes);
@@ -707,9 +741,28 @@ export async function createSyntheticV4BundleFixture(input: {
   readonly withEvidence?: boolean;
   /** Test-only seam: corrupt the exact intake bytes before the real import operation parses them. */
   readonly mutateIntake?: (intake: SyntheticV4IntakeBytes) => SyntheticV4IntakeBytes;
+  /** Defaults to the four frozen arms ["alpha","beta","delta","gamma"]. */
+  readonly armIds?: readonly string[];
+  /** Defaults to "gpt-5.6-luna" (the reasoning-2026-08 profile). */
+  readonly judgeModel?: "gpt-5.6-luna" | "gpt-4o-mini-2024-07-18";
 }): Promise<SyntheticV4BundleFixture> {
   const scenario = input.scenario ?? "minimal";
   const withEvidence = input.withEvidence ?? false;
+  const judgeModel: AcceptedJudgeModelId = input.judgeModel ?? "gpt-5.6-luna";
+  const armIds = input.armIds ?? ["alpha", "beta", "delta", "gamma"];
+  if (scenario === "qualification-144") {
+    // The qualification-144 outcome table is a 12-row x 4-column matrix indexed by arm
+    // position (spec §10.2's fixture ruling), so this scenario keeps its four named arms.
+    // Six-arm coverage uses the "minimal" scenario instead, whose outcome is arm-agnostic.
+    const matchesFrozenArms = armIds.length === qualificationArms.length
+      && armIds.every((armId, index) => armId === qualificationArms[index]);
+    if (!matchesFrozenArms) {
+      throw new Error(
+        'scenario "qualification-144" requires its four frozen arms '
+        + `[${qualificationArms.join(", ")}]; use scenario "minimal" for other arm counts`,
+      );
+    }
+  }
   let tick = Date.parse("2026-08-15T11:00:00.000Z");
   const context: OperationContext = {
     workspaceDir: input.workspaceDir,
@@ -767,9 +820,27 @@ export async function createSyntheticV4BundleFixture(input: {
     description: "Provider-free synthetic evidence; no benchmark dataset content.",
   }), "binary item-bank import");
 
-  const arms = ["alpha", "beta", "delta", "gamma"] as const;
-  const instruments = arms.map((armId) => instrument(armId));
+  const arms = armIds;
+  const instruments = arms.map((armId) => instrument(armId, judgeModel));
   for (const sealed of instruments) putSealedBytes(input.workspaceDir, sealed.bytes);
+
+  // §1.5 rule 2: required when any bound arm's model is a dated snapshot, forbidden otherwise.
+  // Sealed into the workspace CAS here so the published bundle carries it as a "snapshot-probe"
+  // evidence record alongside the selection manifest.
+  let snapshotProbeSha256: `sha256:${string}` | undefined;
+  if (isDatedSnapshotJudgeModel(judgeModel)) {
+    const sealedProbe = sealBinaryJudgmentSnapshotProbe({
+      protocol: BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
+      requestedModel: judgeModel,
+      resolvedModel: judgeModel,
+      responseId: "synthetic-snapshot-probe-1",
+      eventSha256: recordDigest(canonicalJsonBytes({ source: "synthetic-snapshot-probe" })),
+      probedAt: context.clock(),
+      outcome: "serving",
+    });
+    putSealedBytes(input.workspaceDir, sealedProbe.bytes);
+    snapshotProbeSha256 = sealedProbe.digest;
+  }
   const selection: InspectBinaryJudgeSelectionManifest = {
     schema: INSPECT_BINARY_JUDGE_SELECTION_SCHEMA,
     runtime: {
@@ -802,9 +873,10 @@ export async function createSyntheticV4BundleFixture(input: {
     arms: arms.map((armId, index) => ({
       armId,
       instrumentSha256: instruments[index]!.digest,
-      model: "gpt-5.6-luna",
-      generation,
+      model: judgeModel,
+      generation: generationForJudgeModel(judgeModel),
     })),
+    ...(snapshotProbeSha256 === undefined ? {} : { snapshotProbeSha256 }),
   };
   const selectionManifestSha256 = putSealedBytes(input.workspaceDir, canonicalJsonBytes(selection));
   for (const [index, armId] of arms.entries()) {
@@ -813,7 +885,7 @@ export async function createSyntheticV4BundleFixture(input: {
       armId,
       pinning: {
         harness: { id: INSPECT_BINARY_JUDGE_LAUNCHER_ID, version: INSPECT_BINARY_JUDGE_LAUNCHER_VERSION },
-        model: { id: "gpt-5.6-luna" },
+        model: { id: judgeModel },
         [BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY]: instruments[index]!.digest,
       },
     }), `arm ${armId}`);
@@ -836,7 +908,7 @@ export async function createSyntheticV4BundleFixture(input: {
   }), "draft binary profile");
 
   const instrumentSha256s = instruments.map((entry) => entry.digest);
-  const createVenue = () => syntheticInspectVenue(input.workspaceDir, instrumentSha256s, scenario);
+  const createVenue = () => syntheticInspectVenue(input.workspaceDir, instrumentSha256s, scenario, judgeModel);
   requireOk(await runQuote(context, { draftId: DRAFT_ID }, { createVenue }), "quote");
   requireOk(runLock(context, { draftId: DRAFT_ID }), "lock");
   requireOk(await runLaunch(context, { draftId: DRAFT_ID }, { createVenue }), "launch");
