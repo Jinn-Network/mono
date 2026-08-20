@@ -40,7 +40,12 @@ interface BinaryJudgmentPayloadView {
   readonly question: string;
   readonly referenceAnswer: string;
   readonly candidateAnswer: string;
-  readonly provenance: readonly { readonly digest: { readonly sha256: string } }[];
+  readonly evidence?: string;
+  readonly provenance: {
+    readonly sourceCommitment: string;
+    readonly timestamp: string;
+  };
+  readonly sources: readonly { readonly digest: { readonly sha256: string } }[];
 }
 
 interface BinaryJudgmentAnalysisContextView {

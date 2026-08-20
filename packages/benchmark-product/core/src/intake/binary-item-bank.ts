@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Generic, backend-neutral intake for the binary-judgment/1.0 Task profile.
+ * Generic, backend-neutral intake for the binary-judgment/2.0 Task profile.
  *
  * The three input files are canonical JSONL manifests. Item rows carry only the closed
  * solver-visible payload; source rows retain the full source/license/attribution descriptors;
@@ -256,18 +256,78 @@ export function convertBinaryItemBank(input: ConvertBinaryItemBankInput): Conver
   const itemIds = new Set<string>();
   const usedProvenance = new Set<string>();
   const sourceByDigest = new Map(sources.records.map((entry) => [entry.provenanceSha256, entry]));
+  // §2.4 uniformity (frozen): within one bank, `evidence` is present on every item or on none.
+  // This turns the arm-to-bank evidence rule into a per-bank property rather than a per-item scan,
+  // and removes a whole class of silent per-item degradation where one arm quietly renders a hole.
+  let bankHasEvidence: boolean | undefined;
+  // §2.4 anti-truth-channel invariant (frozen): items sharing `question` bytes must carry
+  // byte-identical `evidence`. This does not prove the evidence is truth-free -- nothing can -- it
+  // forecloses the specific mechanism by which evidence could vary with the label: tailoring the
+  // passage per candidate class or per reference-key variant. Evidence is a property of the
+  // question, and this check is that sentence made checkable. It also restates a standing
+  // obligation: evidence bytes are never derived from `truthLabel`, `candidateClass`, or `stratum`,
+  // which remain evaluator-only on the analysis context.
+  const evidenceByQuestion = new Map<string, string | undefined>();
   for (const [index, entry] of itemBank.records.entries()) {
     const itemSha256 = recordDigest(canonicalJsonBytes(entry.item));
     if (itemsBySha.has(itemSha256)) refuse("validation", `items.${index + 1}`, "duplicate item payload digest");
     if (itemIds.has(entry.item.itemId)) refuse("validation", `items.${index + 1}.item.itemId`, "duplicate itemId");
     itemIds.add(entry.item.itemId);
     itemsBySha.set(itemSha256, entry.item);
-    for (const descriptor of entry.item.provenance) {
+
+    const sourceDigests: `sha256:${string}`[] = [];
+    for (const descriptor of entry.item.sources) {
       const digest = `sha256:${descriptor.digest.sha256}` as `sha256:${string}`;
       if (!sourceByDigest.has(digest)) {
-        refuse("validation", `items.${index + 1}.item.provenance`, `no source row maps ${digest}`);
+        refuse("validation", `items.${index + 1}.item.sources`, `no source row maps ${digest}`);
       }
       usedProvenance.add(digest);
+      sourceDigests.push(digest);
+    }
+
+    const hasEvidence = entry.item.evidence !== undefined;
+    if (bankHasEvidence === undefined) {
+      bankHasEvidence = hasEvidence;
+    } else if (bankHasEvidence !== hasEvidence) {
+      refuse("validation", "items", "evidence must be present on every item or on none");
+    }
+
+    if (evidenceByQuestion.has(entry.item.question)) {
+      if (evidenceByQuestion.get(entry.item.question) !== entry.item.evidence) {
+        refuse(
+          "validation",
+          `items.${index + 1}.item.evidence`,
+          "items sharing a question must carry identical evidence",
+        );
+      }
+    } else {
+      evidenceByQuestion.set(entry.item.question, entry.item.evidence);
+    }
+
+    // The provenance commitment is VERIFIED, not written: item bytes are digest-committed by the
+    // admission closure (`itemSha256`), sealed before import, so the importer mechanically cannot
+    // write this value onto the payload -- it can only check the copy the bank author already
+    // made. Living on the source row (not the item) makes "two items drawn from one source carry
+    // the same cluster key and the same timestamp" a structural property of the manifest rather
+    // than a rule someone checks by hand, and forecloses a bank author encoding a per-item
+    // timestamp ordering that correlates with the label. Both values are safe to be
+    // solver-visible: neither is a declared template field, so neither is renderable, and
+    // `sourceCommitment` is an opaque digest rather than a source string.
+    const leastSourceDigest = [...sourceDigests].sort(compareCodeUnitStrings)[0]!;
+    if (entry.item.provenance.sourceCommitment !== leastSourceDigest) {
+      refuse(
+        "validation",
+        `items.${index + 1}.item.provenance.sourceCommitment`,
+        "sourceCommitment must be the code-unit-least digest in the item's sources",
+      );
+    }
+    const namedSourceRow = sourceByDigest.get(entry.item.provenance.sourceCommitment)!;
+    if (entry.item.provenance.timestamp !== namedSourceRow.publishedAt) {
+      refuse(
+        "validation",
+        `items.${index + 1}.item.provenance.timestamp`,
+        "timestamp must equal the publishedAt of the source row named by sourceCommitment",
+      );
     }
   }
   for (const entry of sources.records) {

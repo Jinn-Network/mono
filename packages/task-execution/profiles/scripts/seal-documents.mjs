@@ -11,7 +11,7 @@ import { sealDocument } from "../dist/bytes.js";
 import { buildRepositoryWorkProfile } from "../dist/documents/repository-work-1.0.js";
 import { buildPredictionForecastProfile } from "../dist/documents/prediction-forecast-1.0.js";
 import { buildEvaluationTaskProfile } from "../dist/documents/evaluation-task-1.0.js";
-import { buildBinaryJudgmentProfile } from "../dist/documents/binary-judgment-1.0.js";
+import { buildBinaryJudgmentProfile } from "../dist/documents/binary-judgment-2.0.js";
 import {
   buildBinaryAcceptRejectParserSemantics,
   buildBinaryJudgmentEvaluationParserSemantics,
@@ -41,7 +41,7 @@ const DOCUMENTS = [
     shaName: "profile.sha256",
   },
   {
-    dir: join("profiles", "task-profiles", "binary-judgment", "1.0"),
+    dir: join("profiles", "task-profiles", "binary-judgment", "2.0"),
     build: buildBinaryJudgmentProfile,
     seal: sealTaskProfile,
     jsonName: "profile.json",

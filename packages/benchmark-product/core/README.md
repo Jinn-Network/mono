@@ -141,7 +141,7 @@ EvaluationSpec, Benchmark, and sealed-store contracts:
 
 ```text
 colophon import item-bank --workspace <dir> --principal <id> \
-  --profile binary-judgment@1 --draft <draftId> \
+  --profile binary-judgment@2 --draft <draftId> \
   --items <items.jsonl> --sources <sources.jsonl> \
   --admissions <admissions.jsonl>
 ```

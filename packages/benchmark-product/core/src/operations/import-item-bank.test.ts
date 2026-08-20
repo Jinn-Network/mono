@@ -25,7 +25,7 @@ import {
   createHumanReviewPackets,
   signHumanReviewResponse,
 } from "./human-review.js";
-import { importBinaryItemBank } from "./import-item-bank.js";
+import { BINARY_ITEM_BANK_PROFILE, importBinaryItemBank } from "./import-item-bank.js";
 import { initWorkspace } from "./init.js";
 
 const workspaces: string[] = [];
@@ -60,7 +60,8 @@ async function reviewItem(
     readonly question: string;
     readonly referenceAnswer: string;
     readonly candidateAnswer: string;
-    readonly provenance: readonly [{ readonly digest: { readonly sha256: string } }];
+    readonly provenance: { readonly sourceCommitment: `sha256:${string}`; readonly timestamp: string };
+    readonly sources: readonly [{ readonly digest: { readonly sha256: string } }];
   },
   labels: readonly ["CORRECT" | "WRONG", "CORRECT" | "WRONG"],
 ) {
@@ -96,12 +97,14 @@ describe("importBinaryItemBank", () => {
   test("composes F2 admission into ordinary stored Task/EvaluationSpec/Benchmark records", () => {
     const { context, draftId } = setup();
     const provenanceSha256 = `sha256:${"a".repeat(64)}` as const;
+    const publishedAt = "2026-03-09T00:00:00Z";
     const admittedItem = {
       itemId: "urn:uuid:10000000-0000-4000-8000-000000000001",
       question: "Synthetic question?",
       referenceAnswer: "Synthetic reference.",
       candidateAnswer: "Synthetic candidate.",
-      provenance: [{ digest: { sha256: provenanceSha256.slice("sha256:".length) } }],
+      provenance: { sourceCommitment: provenanceSha256, timestamp: publishedAt },
+      sources: [{ digest: { sha256: provenanceSha256.slice("sha256:".length) } }],
     };
     const heldBackItem = {
       ...admittedItem,
@@ -147,6 +150,7 @@ describe("importBinaryItemBank", () => {
         uri: "https://fixtures.example.test/attribution.txt",
         digest: { sha256: "c".repeat(64) },
       },
+      publishedAt,
     }]);
     const admissions = renderCanonicalJsonl(admitted.result.resolutions.map((resolution) => ({
       protocol: BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
@@ -157,7 +161,7 @@ describe("importBinaryItemBank", () => {
     })));
 
     const imported = importBinaryItemBank(context, {
-      profile: "binary-judgment@1",
+      profile: "binary-judgment@2",
       draftId,
       itemBankJsonl: items,
       sourceManifestJsonl: sources,
@@ -195,26 +199,33 @@ describe("importBinaryItemBank", () => {
     expect(() => getSealedBytes(context.workspaceDir, imported.result.sourceManifestSha256)).not.toThrow();
     expect(readAuditEntries(context.workspaceDir).filter((entry) => entry.action === "import.item-bank"))
       .toEqual([expect.objectContaining({ actor: "sponsor-1", outcome: "ok" })]);
+  });
 
-    const wrongProfile = importBinaryItemBank(context, {
-      profile: "binary-judgment@2" as "binary-judgment@1",
+  test("refuses the superseded binary-judgment@1 profile", () => {
+    // The profile check runs before any manifest is read, so this proves refusal on the profile
+    // operand alone; it does not need admitted evidence or well-formed manifests behind it.
+    const { context, draftId } = setup();
+    const rejected = importBinaryItemBank(context, {
+      profile: "binary-judgment@1" as typeof BINARY_ITEM_BANK_PROFILE,
       draftId,
-      itemBankJsonl: items,
-      sourceManifestJsonl: sources,
-      admissionIndexJsonl: admissions,
+      itemBankJsonl: "",
+      sourceManifestJsonl: "",
+      admissionIndexJsonl: "",
     });
-    expect(wrongProfile).toMatchObject({ ok: false, error: { code: "validation" } });
+    expect(rejected).toMatchObject({ ok: false, error: { code: "validation" } });
   });
 
   test("authenticates human-review exclusion evidence and imports only its later same-slice replacement", async () => {
     const { context, draftId, setClock } = setup();
     const provenanceSha256 = `sha256:${"d".repeat(64)}` as const;
+    const publishedAt = "2026-04-01T00:00:00Z";
     const disputedItem = {
       itemId: "urn:uuid:30000000-0000-4000-8000-000000000001",
       question: "Synthetic disputed question?",
       referenceAnswer: "Synthetic reference.",
       candidateAnswer: "Synthetic disputed candidate.",
-      provenance: [{ digest: { sha256: provenanceSha256.slice("sha256:".length) } }] as const,
+      provenance: { sourceCommitment: provenanceSha256, timestamp: publishedAt },
+      sources: [{ digest: { sha256: provenanceSha256.slice("sha256:".length) } }] as const,
     };
     const replacementItem = {
       ...disputedItem,
@@ -259,7 +270,7 @@ describe("importBinaryItemBank", () => {
     if (!admitted.ok) throw new Error("unreachable");
 
     const imported = importBinaryItemBank(context, {
-      profile: "binary-judgment@1",
+      profile: "binary-judgment@2",
       draftId,
       itemBankJsonl: renderCanonicalJsonl([
         { protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL, item: disputedItem },
@@ -271,6 +282,7 @@ describe("importBinaryItemBank", () => {
         source: { uri: "https://fixtures.example.test/replacement-source", digest: { sha256: "d".repeat(64) } },
         license: { uri: "https://fixtures.example.test/replacement-license", digest: { sha256: "e".repeat(64) } },
         attribution: { uri: "https://fixtures.example.test/replacement-attribution", digest: { sha256: "f".repeat(64) } },
+        publishedAt,
       }]),
       admissionIndexJsonl: renderCanonicalJsonl(admitted.result.resolutions.map((resolution) => ({
         protocol: BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,

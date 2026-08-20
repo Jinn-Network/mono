@@ -630,20 +630,20 @@ export async function verifyPublicBundleSnapshot(
     strictOrder(admissionRows.map((row) => row.itemSha256), "admission-index.jsonl");
     const admittedByItem = new Map(verifiedAdmission.accepted.map((entry) => [entry.itemSha256, entry]));
     const itemDigests = new Set<string>();
-    const usedProvenance = new Set<string>();
+    const coveredSourceDigests = new Set<string>();
     for (const [index, row] of itemRows.entries()) {
       const item = row.item;
       const digest = `sha256:${sha256(canonicalJsonBytes(item))}`;
       if (itemDigests.has(digest)) refuse("record-integrity", "item-bank.jsonl", "item bank contains duplicate payloads");
       itemDigests.add(digest);
-      const provenance = item.provenance;
-      for (const descriptor of provenance) {
+      coveredSourceDigests.add(item.provenance.sourceCommitment);
+      for (const descriptor of item.sources) {
         const digestHex = descriptor.digest.sha256;
-        usedProvenance.add(`sha256:${digestHex}`);
+        coveredSourceDigests.add(`sha256:${digestHex}`);
       }
     }
     const sourceDigests = sourceRows.map((row) => row.provenanceSha256);
-    if (!sameCanonical([...usedProvenance].sort(), [...sourceDigests].sort())) {
+    if (!sameCanonical([...coveredSourceDigests].sort(), [...sourceDigests].sort())) {
       refuse("record-integrity", "source-manifest.jsonl", "source manifest does not exactly cover item-bank provenance");
     }
     const expectedAdmissions = verifiedAdmission.accepted.map((entry) => ({
