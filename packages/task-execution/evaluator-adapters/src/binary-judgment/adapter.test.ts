@@ -14,6 +14,7 @@ import {
 } from "@jinn-network/task-execution-evaluation-harness";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_YES_NO_PARSER_IDENTITY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
   BINARY_JUDGMENT_EVALUATION_CONTEXT_FORMAT_URI,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
@@ -52,6 +53,7 @@ import {
   BINARY_JUDGMENT_LABEL_RESOLUTION_NAME,
   BINARY_JUDGMENT_MEASUREMENTS,
   binaryJudgmentEvaluationMethodDescriptor,
+  binaryJudgmentEvaluationSpecVerdictRule,
   buildBinaryJudgmentEvaluationSpecification,
   contextBinaryJudgmentMaterialSource,
   createBinaryJudgmentEvaluatorAdapter,
@@ -99,7 +101,9 @@ function inline(bytes: Uint8Array) {
   };
 }
 
-function makeInstrument(): BinaryJudgmentInstrument {
+function makeInstrument(
+  parser: BinaryJudgmentInstrument["response"]["parser"] = BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+): BinaryJudgmentInstrument {
   const messages = [{
     role: "developer" as const,
     segments: [
@@ -109,7 +113,7 @@ function makeInstrument(): BinaryJudgmentInstrument {
       { field: "referenceAnswer" as const },
       { literal: "\nCandidate: " },
       { field: "candidateAnswer" as const },
-      { literal: "\nReturn ACCEPT or REJECT." },
+      { literal: "\nReturn a verdict." },
     ],
   }];
   const source = { uri: "https://example.test/prompt", digest: { sha256: "1".repeat(64) } };
@@ -141,7 +145,7 @@ function makeInstrument(): BinaryJudgmentInstrument {
     },
     response: {
       mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
-      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      parser,
       invalidOutputDecision: "REJECT",
     },
   };
@@ -158,8 +162,13 @@ function makeFixture(options: {
   readonly truthLabel: BinaryJudgmentTruthLabel;
   readonly response: Uint8Array;
   readonly candidateClass?: string;
-  readonly stratum?: "core" | "stress";
+  readonly stratum?: string;
   readonly taskInstrumentPin?: boolean;
+  readonly evidence?: string;
+  readonly parser?: BinaryJudgmentInstrument["response"]["parser"];
+  /** Defaults to "two-human-unanimous", matching every existing call site byte-for-byte (spec
+   * §6.7; packet P6 item F). */
+  readonly truthAdmission?: "two-human-unanimous" | "screened-operator-sampled";
 }): Fixture {
   const candidateClass = options.candidateClass ?? "factual";
   const stratum = options.stratum ?? "core";
@@ -168,26 +177,42 @@ function makeFixture(options: {
     question: "Where was Ada born?",
     referenceAnswer: "London.",
     candidateAnswer: options.truthLabel === "CORRECT" ? "London." : "Paris.",
-    provenance: [{ digest: { sha256: "4".repeat(64) } }],
+    ...(options.evidence === undefined ? {} : { evidence: options.evidence }),
+    provenance: { sourceCommitment: sha("4"), timestamp: "2026-08-14T22:00:00Z" },
+    sources: [{ digest: { sha256: "4".repeat(64) } }],
   };
   const itemSha256 = recordDigest(canonicalJsonBytes(payload));
-  const instrument = makeInstrument();
+  const instrument = makeInstrument(options.parser);
   const sealedInstrument = sealBinaryJudgmentInstrument(instrument);
-  const labelResolution = sealBinaryJudgmentLabelResolution({
-    protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
-    itemSha256,
-    itemId: ITEM_ID,
-    humanReviewEvaluationSpecSha256: sha("5"),
-    truthLabel: options.truthLabel,
-    candidateClass,
-    stratum,
-    truthAdmission: "two-human-unanimous",
-    reviewVerdictSha256s: [sha("6"), sha("7")],
-    reviewerRosterSha256: sha("8"),
-    visibilityReceiptSha256s: [sha("9"), sha("a")],
-    revealReceiptSha256: sha("b"),
-    resolvedAt: "2026-08-15T09:00:00.000Z",
-  });
+  const truthAdmission = options.truthAdmission ?? "two-human-unanimous";
+  const labelResolution = sealBinaryJudgmentLabelResolution(truthAdmission === "screened-operator-sampled"
+    ? {
+      protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
+      itemSha256,
+      itemId: ITEM_ID,
+      truthLabel: options.truthLabel,
+      candidateClass,
+      stratum,
+      truthAdmission: "screened-operator-sampled",
+      screeningTableSha256: sha("5"),
+      screeningRevealReceiptSha256: sha("6"),
+      resolvedAt: "2026-08-15T09:00:00.000Z",
+    }
+    : {
+      protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
+      itemSha256,
+      itemId: ITEM_ID,
+      humanReviewEvaluationSpecSha256: sha("5"),
+      truthLabel: options.truthLabel,
+      candidateClass,
+      stratum,
+      truthAdmission: "two-human-unanimous",
+      reviewVerdictSha256s: [sha("6"), sha("7")],
+      reviewerRosterSha256: sha("8"),
+      visibilityReceiptSha256s: [sha("9"), sha("a")],
+      revealReceiptSha256: sha("b"),
+      resolvedAt: "2026-08-15T09:00:00.000Z",
+    });
   const analysisContext = sealBinaryJudgmentAnalysisContext({
     protocol: BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
     itemSha256,
@@ -279,6 +304,18 @@ async function evaluate(fixture: Fixture, signal = new AbortController().signal)
     fixture.context,
     ATTEMPT,
     signal,
+  );
+}
+
+/** Recursively checks the real returned verdict-rule value for an `inconclusiveWhen` node at any
+ * nesting depth, rather than asserting against a hand-authored shape. */
+function containsInconclusiveWhen(rule: unknown): boolean {
+  if (typeof rule !== "object" || rule === null) return false;
+  if ("inconclusiveWhen" in rule) return true;
+  return Object.values(rule).some((value) =>
+    Array.isArray(value)
+      ? value.some((entry) => containsInconclusiveWhen(entry))
+      : containsInconclusiveWhen(value)
   );
 }
 
@@ -434,6 +471,52 @@ describe("binary judgment evaluator", () => {
     },
   );
 
+  // Declared stratum vocabulary (P4, spec §3.2): the delivery-registration path checks grammar
+  // only, not membership in a sealed vocabulary — a four-category name registers exactly like
+  // "core" or "stress" does.
+  test("a delivered outcome whose stratum is a grammar-conforming four-category name registers", async () => {
+    const completed = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("ACCEPT"),
+      stratum: "category-3",
+    }));
+    expect(completed.detailedOutcome).toMatchObject({ stratum: "category-3" });
+    expect(completed.measurements).toContainEqual({
+      name: BINARY_JUDGMENT_MEASUREMENTS.stratum,
+      value: "category-3",
+    });
+    expect(() => validateBinaryJudgmentCompletedEvaluation(completed)).not.toThrow();
+  });
+
+  test("the adapter honours the instrument's selected response parser", async () => {
+    // Same response bytes ("YES"), two instruments differing only in their sealed
+    // response.parser: the PC-2 (binary-yes-no) instrument recognizes it as ACCEPT, while the
+    // default PC-1 (binary-accept-reject) instrument, which does not know the YES/NO alphabet,
+    // reports it as an invalid, unparseable REJECT. This proves selection, not supply: the
+    // adapter itself carries no parser logic beyond looking up the id the instrument names.
+    const yesNoCompleted = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("YES"),
+      parser: BINARY_YES_NO_PARSER_IDENTITY,
+    }));
+    expect(yesNoCompleted.detailedOutcome).toMatchObject({
+      judgeDecision: "ACCEPT",
+      parseValid: true,
+      agreement: true,
+    });
+
+    const acceptRejectCompleted = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("YES"),
+    }));
+    expect(acceptRejectCompleted.detailedOutcome).toMatchObject({
+      judgeDecision: "REJECT",
+      parseValid: false,
+      invalidReason: "unexpected-token",
+      agreement: false,
+    });
+  });
+
   test("a delivered malformed response is completed and scored, not operational", async () => {
     const completed = await evaluate(makeFixture({
       truthLabel: "WRONG",
@@ -461,6 +544,56 @@ describe("binary judgment evaluator", () => {
     }).catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(EvaluationOperationalError);
     expect((error as EvaluationOperationalError).reason).toBe("subject-digest-mismatch");
+  });
+
+  test("an evidence mutation breaks the analysis context/item equality, not the item-id equality", async () => {
+    // Evidence rides inside the item payload, so it is already covered by the existing
+    // itemSha256 commitment (payload -> analysis context / label resolution). This test proves
+    // that transitively: mutating evidence, with the analysis context left un-recomputed, trips
+    // the "analysis context/item" digest join, and NOT the sibling "analysis context/item id"
+    // join (which compares payload.itemId alone and cannot see an evidence change). Adding a
+    // second, evidence-specific commitment (e.g. a standalone evidenceSha256 equality) would
+    // create a commitment that can disagree with this one -- strictly worse than the one
+    // commitment that already cannot.
+    const evidence = "Synthetic supporting evidence for Ada Lovelace's birthplace.";
+    const mutatedEvidence = `${evidence.slice(0, -1)}!`;
+
+    const original = makeFixture({ truthLabel: "CORRECT", response: encoder.encode("ACCEPT"), evidence });
+    await expect(evaluate(original)).resolves.toMatchObject({ verdict: "pass" });
+
+    const mutated = makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("ACCEPT"),
+      evidence: mutatedEvidence,
+    });
+    const originalBinary = original.context[BINARY_JUDGMENT_CONTEXT_KEY] as {
+      readonly material: { readonly analysisContext: { digest: string; bytesBase64: string } };
+    };
+    const mutatedBinary = mutated.context[BINARY_JUDGMENT_CONTEXT_KEY] as Record<string, unknown> & {
+      readonly material: Record<string, unknown>;
+    };
+    const tampered: Fixture = {
+      ...mutated,
+      context: {
+        [BINARY_JUDGMENT_CONTEXT_KEY]: {
+          ...mutatedBinary,
+          material: {
+            ...mutatedBinary.material,
+            // Reuse the pre-mutation analysis context unchanged: its itemSha256 still commits to
+            // the original evidence, so it now disagrees with the mutated Task's recomputed item
+            // digest without touching any other join that would otherwise fire first.
+            analysisContext: originalBinary.material.analysisContext,
+          },
+        },
+      },
+    };
+    const error = await evaluate(tampered).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(EvaluationOperationalError);
+    expect((error as EvaluationOperationalError).reason).toBe("subject-digest-mismatch");
+    expect((error as EvaluationOperationalError).safeDetail).toBe(
+      "binary judgment digest join failed: analysis context/item",
+    );
+    expect((error as EvaluationOperationalError).safeDetail).not.toContain("analysis context/item id");
   });
 
   test("refuses an arm-specific instrument pin in the shared item Task", async () => {
@@ -540,6 +673,14 @@ describe("binary judgment evaluator", () => {
     expect(isBinaryJudgmentEvaluationSpecification(fixture.specification)).toBe(true);
     expect(() => buildBinaryJudgmentEvaluationSpecification("sha256:short"))
       .toThrow("binary judgment analysis context must be a canonical sha256 digest");
+  });
+
+  test("declares no unscorable classes and no inconclusiveWhen predicate", () => {
+    // spec §5.1: EvaluationSpec.unscorable stays [], byte-unchanged; binary judgment declares
+    // no inconclusiveWhen and never delivers "inconclusive".
+    const fixture = makeFixture({ truthLabel: "CORRECT", response: encoder.encode("ACCEPT") });
+    expect(fixture.specification.unscorable).toEqual([]);
+    expect(containsInconclusiveWhen(binaryJudgmentEvaluationSpecVerdictRule())).toBe(false);
   });
 
   test.each([
@@ -637,6 +778,10 @@ describe("binary judgment evaluator", () => {
     ["candidateClass", "not a closed class", BINARY_JUDGMENT_MEASUREMENTS.candidateClass],
     ["labelResolutionSha256", `sha256:${"A".repeat(64)}`, BINARY_JUDGMENT_MEASUREMENTS.labelResolutionSha256],
     ["instrumentSha256", "sha256:short", BINARY_JUDGMENT_MEASUREMENTS.instrumentSha256],
+    // Declared stratum vocabulary (P4, spec §3.2): the delivery-registration path checks grammar
+    // only. Neither a non-grammar-conforming name nor a non-string value registers.
+    ["stratum", "1bad", BINARY_JUDGMENT_MEASUREMENTS.stratum],
+    ["stratum", 7, BINARY_JUDGMENT_MEASUREMENTS.stratum],
   ] as const)(
     "outcome validation refuses an invalid %s",
     async (field, value, measurementName) => {
@@ -655,6 +800,33 @@ describe("binary judgment evaluator", () => {
       })).toThrow(EvaluationOperationalError);
     },
   );
+
+  // spec §6.7 (packet P6 item F): the truthAdmission allowlist widens to a third value. Both
+  // operands of the equality check between detailedOutcome.truthAdmission and the referenced
+  // label resolution's own truthAdmission must agree, so a genuine end-to-end fixture (not an
+  // isolated field mutation) is what actually exercises the widened allowlist.
+  test("outcome validation accepts a screened-operator-sampled label resolution", async () => {
+    const completed = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("ACCEPT"),
+      truthAdmission: "screened-operator-sampled",
+    }));
+    expect((completed.detailedOutcome as Record<string, unknown>)["truthAdmission"])
+      .toBe("screened-operator-sampled");
+    expect(() => validateBinaryJudgmentCompletedEvaluation(completed)).not.toThrow();
+  });
+
+  test("outcome validation refuses an unsupported truthAdmission value entirely", async () => {
+    const completed = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("ACCEPT"),
+    }));
+    const outcome = completed.detailedOutcome as Record<string, unknown>;
+    expect(() => validateBinaryJudgmentCompletedEvaluation({
+      ...completed,
+      detailedOutcome: { ...outcome, truthAdmission: "some-other-mode" },
+    })).toThrow(EvaluationOperationalError);
+  });
 });
 
 describe("binary judgment evaluator through the real evaluation harness", () => {

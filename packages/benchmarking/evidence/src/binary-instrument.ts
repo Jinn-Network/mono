@@ -20,7 +20,7 @@ import type { VerifiedEvidenceCohort, VerifiedCohortMember } from "./types.js";
 export interface EvidenceBinaryInstrumentContext {
   readonly memberKey: string;
   readonly candidateClass: string;
-  readonly stratum: "core" | "stress";
+  readonly stratum: string;
 }
 
 export interface EvidenceBinaryInstrumentInput {

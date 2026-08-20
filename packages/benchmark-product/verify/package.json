@@ -1,6 +1,6 @@
 {
   "name": "@colophon-claims/verify",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "description": "Standalone public-bundle verifier for Colophon claims.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -30,6 +30,8 @@
   },
   "files": [
     "dist/",
+    "schemas/",
+    "scripts/external-verify.py",
     "README.md"
   ],
   "publishConfig": {
@@ -38,7 +40,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "yarn build && node --test test/*.test.mjs",
+    "test": "yarn build && node --test test/*.test.mjs && vitest run",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },
@@ -73,10 +75,14 @@
     "@jinn-network/task-admission": "portal:../../task-supply/admission",
     "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
     "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
-    "@jinn-network/trust-core": "portal:../../trust/core"
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "@jinn-network/trust-resolve": "portal:../../trust/resolve",
+    "@jinn-network/trust-testing": "portal:../../trust/testing"
   },
   "devDependencies": {
+    "@jinn-network/trust-testing": "0.1.0",
     "@types/node": "^22.0.0",
+    "ajv": "8.17.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
   }

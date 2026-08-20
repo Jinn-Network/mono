@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { GuiActionState } from "@/lib/action-state";
 import {
   AGENT_DATA_ENV,
+  ANCHOR_PROVIDERS_ENV,
   ENABLE_TEST_CONTROLS_ENV,
   PRINCIPAL_ENV,
   PUBLICATION_PUBLIC_BASE_URL_ENV,
@@ -16,6 +17,7 @@ import {
   WORKSPACE_ENV,
 } from "@/lib/server/product-context";
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
+import { readAuditEntries } from "@colophon-claims/core";
 import { agentProfileArmAddAction } from "@/app/actions";
 import { executeOperation } from "@/lib/server/action-support";
 import { executeBackgroundOperation } from "@/lib/server/background-operation";
@@ -67,6 +69,7 @@ afterEach(async () => {
   delete process.env[ENABLE_TEST_CONTROLS_ENV];
   delete process.env[TEST_SOLVE_DELAY_MS_ENV];
   delete process.env[PUBLICATION_PUBLIC_BASE_URL_ENV];
+  delete process.env[ANCHOR_PROVIDERS_ENV];
   for (const workspace of workspaces.splice(0)) rmSync(workspace, { recursive: true, force: true });
   rmSync(agentDataDir, { recursive: true, force: true });
   revalidatePathMock.mockClear();
@@ -177,6 +180,80 @@ describe.sequential("server action layer against a real workspace", () => {
     expect(JSON.stringify(configured)).not.toContain("attacker.example");
   }, 120_000);
 
+  test("GUI anchoring configure requires and exclusively uses the server-owned anchor providers", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "anchoring-server-authority-"));
+    workspaces.push(workspace);
+    process.env[WORKSPACE_ENV] = workspace;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    await invoke("workspace.init");
+
+    // Nothing configured server-side: the action is unavailable, whatever the form carries.
+    const unavailable = await invoke("anchoring.configure", { endpoint: "https://attacker.example/tsr" });
+    expect(unavailable).toMatchObject({ status: "error", error: { code: "invalid-invocation" } });
+
+    process.env[ANCHOR_PROVIDERS_ENV] = JSON.stringify([
+      { providerProfile: "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1", endpoint: "https://tsa.example/tsr" },
+    ]);
+    const configured = await invoke("anchoring.configure", { endpoint: "https://attacker.example/tsr" });
+    expect(configured).toMatchObject({
+      status: "success",
+      result: { providerProfiles: ["https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1"] },
+    });
+    // Neither the browser-supplied endpoint nor the server-configured one reaches browser state:
+    // an endpoint is an operator-typed URL and can carry userinfo or a key.
+    expect(JSON.stringify(configured)).not.toContain("attacker.example");
+    expect(JSON.stringify(configured)).not.toContain("tsa.example");
+
+    // Turning anchoring off is the one anchoring decision the browser may make on its own.
+    const cleared = await invoke("anchoring.configure", { clear: "clear-anchoring" });
+    expect(cleared).toMatchObject({ status: "success", result: { providerProfiles: [] } });
+  }, 120_000);
+
+  test("GUI lock runs the same anchor hook the CLI does, and renders identically either way", async () => {
+    const unconfigured = mkdtempSync(join(tmpdir(), "gui-lock-unanchored-"));
+    workspaces.push(unconfigured);
+    process.env[WORKSPACE_ENV] = unconfigured;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    await invoke("workspace.init");
+    await prepareLockedDraft("gui-lock-unanchored");
+    const control = await invoke("run.status", { draftId: "gui-lock-unanchored" });
+    expect(control).toMatchObject({ status: "success" });
+    expect(readAuditEntries(unconfigured).filter((entry) => entry.action === "anchor")).toEqual([]);
+
+    const configured = mkdtempSync(join(tmpdir(), "gui-lock-anchored-"));
+    workspaces.push(configured);
+    process.env[WORKSPACE_ENV] = configured;
+    process.env[ANCHOR_PROVIDERS_ENV] = JSON.stringify([
+      { providerProfile: "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1", endpoint: "https://tsa.invalid/tsr" },
+    ]);
+    await invoke("workspace.init");
+    expect(await invoke("anchoring.configure")).toMatchObject({ status: "success" });
+    // `prepareLockedDraft` ends in `run.lock`, which is the call under test: the endpoint is
+    // unroutable, so acquisition fails, and the lock must succeed exactly as it did above.
+    await prepareLockedDraft("gui-lock-anchored");
+
+    const anchorEntries = readAuditEntries(configured).filter((entry) => entry.action === "anchor");
+    expect(anchorEntries).toHaveLength(1);
+    expect(anchorEntries[0]?.outcome).not.toBe("ok");
+    expect(anchorEntries[0]?.subject).toBe("gui-lock-anchored");
+    expect(readAuditEntries(configured).filter((entry) => entry.action === "lock").map((entry) => entry.outcome))
+      .toEqual(["ok"]);
+  }, 180_000);
+
+  test("GUI anchor refuses an unknown subject, and the typed venue refusal when nothing is configured", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "anchor-subject-"));
+    workspaces.push(workspace);
+    process.env[WORKSPACE_ENV] = workspace;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    await invoke("workspace.init");
+    await prepareLockedDraft("anchor-subject");
+
+    expect(await invoke("run.anchor", { draftId: "anchor-subject", subject: "report" }))
+      .toMatchObject({ status: "error", error: { code: "invalid-invocation" } });
+    expect(await invoke("run.anchor", { draftId: "anchor-subject", subject: "lock" }))
+      .toMatchObject({ status: "error", error: { code: "venue-unavailable" } });
+  }, 120_000);
+
   test("GUI signed Report v2 refuses a persisted locator that differs from the server-owned mount", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "publication-report-server-authority-"));
     workspaces.push(workspace);
@@ -202,6 +279,25 @@ describe.sequential("server action layer against a real workspace", () => {
     expect(openAIConnectionReadiness({ BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE: "/private/path/key" })).toBe("configured");
     expect(JSON.stringify(openAIConnectionReadiness({ BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE: "/private/path/key" })))
       .not.toContain("/private/path/key");
+  });
+
+  test("method.bind refuses a catalog suite and an Inspect configuration together, and refuses neither", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "bp-method-bind-xor-"));
+    workspaces.push(workspace);
+    process.env[WORKSPACE_ENV] = workspace;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    expect(await invoke("workspace.init")).toMatchObject({ status: "success" });
+    expect(await invoke("draft.create", { draftId: "method-xor", name: "Method xor" })).toMatchObject({ status: "success" });
+
+    const both = await invoke("method.bind", {
+      draftId: "method-xor",
+      ref: "terminal-bench-2.1",
+      configuration: "{}",
+    });
+    expect(both).toMatchObject({ status: "error", error: { code: "invalid-invocation" } });
+
+    const neither = await invoke("method.bind", { draftId: "method-xor" });
+    expect(neither).toMatchObject({ status: "error", error: { code: "invalid-invocation" } });
   });
 
   test("guided agent Arm setup projects local readiness safely and seals only credential-free pinning", async () => {

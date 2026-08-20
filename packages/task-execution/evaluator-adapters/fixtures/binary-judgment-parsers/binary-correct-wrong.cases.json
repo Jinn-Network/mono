@@ -1,0 +1,173 @@
+{
+  "parser": {
+    "id": "network.jinn.parser.binary-correct-wrong",
+    "version": "1.0.0",
+    "digest": "sha256:2dd7e73c9ee063edb00fe7859821eee1122b483d4bd70568aebb046a6983ac4c"
+  },
+  "cases": [
+    {
+      "case": "empty-output",
+      "input": {
+        "text": ""
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "whitespace-only",
+      "input": {
+        "text": " \t\r\n"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "edge-newlines-around-valid-token",
+      "input": {
+        "text": "\n  CORRECT \r\n"
+      },
+      "expect": {
+        "decision": "ACCEPT",
+        "parseValid": true
+      }
+    },
+    {
+      "case": "lowercase-token",
+      "input": {
+        "text": "correct"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "interior-whitespace-in-token",
+      "input": {
+        "text": "CORR ECT"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "token-followed-by-period",
+      "input": {
+        "text": "CORRECT."
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "token-embedded-in-word",
+      "input": {
+        "text": "CORRECTNESS"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "both-tokens-present",
+      "input": {
+        "text": "CORRECT WRONG"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "bom-prefixing-valid-token",
+      "input": {
+        "text": "﻿CORRECT"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "invalid-utf8",
+      "input": {
+        "bytesBase64": "/w=="
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "invalid-utf8"
+      }
+    },
+    {
+      "case": "truncated-at-generation-cap",
+      "input": {
+        "text": "The candidate answer restates the reference, so the verdict is CORREC"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "json-object-with-extra-members",
+      "input": {
+        "text": "{\"verdict\":\"CORRECT\",\"rationale\":\"the candidate matches\"}"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "json-inside-code-fence",
+      "input": {
+        "text": "```json\n{\"verdict\":\"CORRECT\",\"rationale\":\"the candidate matches\"}\n```"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "json-array-root",
+      "input": {
+        "text": "[\"CORRECT\"]"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "duplicate-verdict-member",
+      "input": {
+        "text": "{\"verdict\":\"CORRECT\",\"verdict\":\"WRONG\"}"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 - **Version:** 0.6
 - **Date:** 2026-08-13
-- **Updated:** 2026-08-17 — §5.5 official TB 2.1 protocol vs “select a supported task” ([DR-2026-08-17-b](../log/decisions/2026-08-17-official-suite-protocol.md)); engine-wrap vs Harbor campaign ([DR-2026-08-17](../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); 2026-08-14 qualification notes retained
+- **Updated:** 2026-08-19 — §5.5 catalog list, `--n`, verb help, GUI catalog bind ([DR-2026-08-19](../log/decisions/2026-08-19-colophon-method-cli-discover.md)); 2026-08-18 — §5.5 one method operand ([DR-2026-08-18-f](../log/decisions/2026-08-18-colophon-method-cli.md)); §5.5 Inspect eval named protocol ([DR-2026-08-18-e](../log/decisions/2026-08-18-inspect-as-specified.md)); §5.5 DeepSWE v1.1 named protocol ([DR-2026-08-18-d](../log/decisions/2026-08-18-deep-swe-v1.1-official-suite.md)); §5.5 APEX-SWE-dev named protocol ([DR-2026-08-18-c](../log/decisions/2026-08-18-apex-swe-dev-official-suite.md)); §5.5 official APEX-Agents protocol ([DR-2026-08-18](../log/decisions/2026-08-18-apex-agents-official-suite.md)); §5.5 official TB 3.0 protocol ([DR-2026-08-18-b](../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)); 2026-08-17 — first public npm cut may pin one exact stack-canary receipt ([DR-2026-08-17-c](../log/decisions/2026-08-17-colophon-first-cut-canary-pin.md)); §5.5 official SWE-bench Verified protocol ([DR-2026-08-17-e](../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)); official TB 2.1 protocol vs “select a supported task” ([DR-2026-08-17-b](../log/decisions/2026-08-17-official-suite-protocol.md)); engine-wrap vs Harbor campaign ([DR-2026-08-17](../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); 2026-08-14 qualification notes retained
 - **Status:** Accepted; implementation authorized 2026-08-13
 - **Decision owner:** Operator
 - **Design scope:** From a cold product-site visitor to a locally published, independently verified benchmark bundle
@@ -21,18 +21,18 @@ Colophon's public v1 install surface should be one top-level npm application pac
 
 The scope is deliberately not `@colophon`: that scope's `cli` package is already used by an unrelated project. `@colophon-claims` matches the product domain and the plain promise, “Publish benchmark claims people can check,” without pretending to own the generic word. Reservation and publisher custody remain publication gates; the product identity itself is accepted.
 
-The target assumes the required tier-1–3 `@jinn-network/*` packages will have coherent stable npm releases before Colophon packaging begins. The Colophon package may depend on those published packages at exact versions from one stable platform release receipt. npm, not the visitor, resolves and installs the graph; the visitor never clones the mono or builds its distributions. This preserves the stack's source/package boundaries instead of copying the platform into a product-owned bundle.
+The standing target remains coherent **stable** `@jinn-network/*` releases. [DR-2026-08-17-c](../log/decisions/2026-08-17-colophon-first-cut-canary-pin.md) names one exception: Colophon's **first** public npm cut may pin exact `0.1.0-canary.sha.<fullSha>` versions from **one** stack-canary receipt (not the floating `canary` dist-tag). After that cut, the next pin change waits for the first stable stack receipt. npm, not the visitor, resolves and installs the graph; the visitor never clones the mono or builds its distributions. This preserves the stack's source/package boundaries instead of copying the platform into a product-owned bundle.
 
 The reader verifier is a second, smaller package built from the same verification implementation. `npx @colophon-claims/verify ./bundle` verifies a received bundle without installing the runner, workspace, launchers, Docker integration, or Python/Inspect runtime. It is the first packaging increment because a report is not genuinely checkable when checking it requires the report producer's full development environment.
 
-The reader package is a **reference convenience, not the specification**. Before it ships, the existing product-neutral benchmarking schemas, named procedures, and golden/adversarial conformance fixtures must be retrievable at a stable public location without cloning this repository. The Colophon public-bundle format and its own product-level test vectors must also be published, clearly non-normative for the platform. Those two contracts precede and test the reference package. A third party must be able to implement the record procedures without importing or naming Colophon, and to implement the Colophon bundle checks without installing Colophon.
+The reader package is a **reference convenience, not the specification**. The standing precondition is that product-neutral benchmarking schemas, named procedures, and golden/adversarial conformance fixtures are retrievable at `https://spec.jinn.network/` without cloning this repository. For the first public cut only ([DR-2026-08-17-c](../log/decisions/2026-08-17-colophon-first-cut-canary-pin.md)), those bytes are the exact platform tarballs on npm at the pinned canary versions; the live spec origin is not hosted, and that gap must be disclosed. The Colophon public-bundle format and its own product-level test vectors must also be published, clearly non-normative for the platform. A third party must still be able to implement the record procedures without importing or naming Colophon, and to implement the Colophon bundle checks without installing Colophon — after the spec origin is live. Until then, independent implementation from `$id` URLs is the named unproven claim.
 
 These are three Colophon-owned Tier 4 packages over a published platform, not a public mirror of every workspace package:
 
 - core owns the operations library and product composition used by the runner and local UI;
 - the runner installs one user-facing application, including `bundle verify`;
 - the reader package installs only the verifier and its public evidence schemas/assets;
-- each pins only the smallest published `@jinn-network/*` runtime closure it actually needs, at one coherent stable platform set;
+- each pins only the smallest published `@jinn-network/*` runtime closure it actually needs, at one coherent platform set;
 - neither exposes Jinn workspace packages as Colophon commands or asks a user to coordinate their versions;
 - both declare the public-bundle format versions they accept, and use one verifier implementation against the same product-neutral conformance corpus.
 
@@ -93,13 +93,13 @@ The existing product establishes these invariants:
 
 `packages/benchmark-product/core` is currently private. Its clean CI build constructs 23 platform dependency distributions in a strict order before it builds the product. The existing external-consumer smoke test succeeds by packing those packages as local tarballs and installing all of them together. At the time of this design, representative platform packages are not available as stable public npm dependencies.
 
-This design records stable publication of the required Jinn packages as an upstream precondition, not as Colophon packaging work. A release candidate is valid only when it can install its exact dependency set from the public registry in a clean directory. Workspace protocols, Yarn portals, local tarballs, canaries, and `resolutions` are forbidden in that proof.
+This design records publication of the required Jinn packages as an upstream precondition, not as Colophon packaging work. A release candidate is valid only when it can install its exact dependency set from the public registry in a clean directory. Workspace protocols, Yarn portals, local tarballs, the floating `canary` dist-tag, and `resolutions` that hide a workspace are forbidden in that proof. Exact `0.1.0-canary.sha.<fullSha>` version pins from one stack-canary receipt are allowed for the first public cut only ([DR-2026-08-17-c](../log/decisions/2026-08-17-colophon-first-cut-canary-pin.md)).
 
-The mono has a canary-on-integration and Monday stable train. Colophon does not follow every platform cut. It pins one coherent **stable** Jinn platform set and may publish multiple product-only versions against it. When Colophon needs a new platform API, it waits for the next compatible stable cut and upgrades the complete set deliberately. That is a dependency gate, not a rule that every Colophon release must coincide with Monday. It avoids the release-train trap without copying the platform closure into Colophon or publishing canary dependencies to users.
+The mono has a canary-on-integration and Monday stable train. Colophon does not follow every platform cut. After the first cut it pins one coherent **stable** Jinn platform set and may publish multiple product-only versions against it. When Colophon needs a new platform API, it waits for the next compatible stable cut and upgrades the complete set deliberately. That is a dependency gate, not a rule that every Colophon release must coincide with Monday. It avoids the release-train trap without copying the platform closure into Colophon.
 
 The existing extraction assessment is not green. Stable registry dependencies, component-only CI, independent conformance/release protection, and other extraction gates remain open. Moving source to another repository now would move the dependency problem rather than solve it.
 
-The mono already contains the product-neutral building blocks this design must preserve: published-shape schemas and fixtures under `packages/benchmarking/records`, and the benchmarking conformance corpus under `packages/benchmarking/testing`. The missing off-mono property is distribution: those schemas and kits are not yet stably retrievable as platform artifacts without a repository checkout. Colophon's separate `PUBLIC-BUNDLE.md` and verifier tests own the product-level closure. Colophon packaging must not fill the platform gap by turning a product run or bundle into a normative tier-1–3 fixture.
+The mono already contains the product-neutral building blocks this design must preserve: published-shape schemas and fixtures under `packages/benchmarking/records`, and the benchmarking conformance corpus under `packages/benchmarking/testing`. The missing off-mono property is distribution: those schemas and kits are not yet served at `spec.jinn.network`. First-cut npm tarballs at a pinned canary receipt are a public retrieval path that is not that origin. Colophon's separate `PUBLIC-BUNDLE.md` and verifier tests own the product-level closure. Colophon packaging must not fill the platform gap by turning a product run or bundle into a normative tier-1–3 fixture.
 
 ### 3.3 GTM authority
 
@@ -166,7 +166,7 @@ From a clean, supported machine:
 A report or bundle carries a copyable command shaped like:
 
 ```sh
-npx @colophon-claims/verify@1 ./bundle
+npx @colophon-claims/verify@0.1 ./bundle
 ```
 
 The exact published package name remains subject to the reservation gate in section 6. The package has one executable, so `npx` can infer it. In this package, a bundle path defaults to verification; the longer `colophon bundle verify --bundle ./bundle` grammar remains available after a global install and in the full runner. Its only other surfaces are version/help and a machine-readable capability query.
@@ -216,14 +216,14 @@ Each bundle includes two commands in its reader instructions:
 - the exact verifier version used when the producer published it, for reproduction;
 - the compatible major line, for current fixes that preserve the bundle-format contract.
 
-Within a verifier major, a patch or minor release must continue to accept every bundle-format version that major advertises. Tightening that makes a previously valid bundle fail requires either a security advisory with an explicit compatibility disposition or a new major/format line; `@1` cannot silently rewrite an old claim's verification rules.
+Within a verifier line, a patch release must continue to accept every bundle-format version that line advertises. Tightening that makes a previously valid bundle fail requires either a security advisory with an explicit compatibility disposition or a new version/format line; `@0.1` cannot silently rewrite an old claim's verification rules.
 
 ### 5.2 Visitor path: one command to the first aha
 
 The site's eventual primary command is:
 
 ```sh
-npx @colophon-claims/cli@1
+npx @colophon-claims/cli@0.1
 ```
 
 `npx install Colophon` is not valid npm grammar: `npx` already means “obtain this package, then run its executable,” and a following `install` would be treated as the executable/package to run. The no-argument Colophon executable is therefore the shortest honest first run. An installed user gets the same behavior from `colophon`; `colophon demo` is the explicit repeatable spelling. An unscoped `trycolophon` launcher is not required for v1: it would be another release and supply-chain surface merely to save scope characters. Reserve it if useful, and publish it only after command-friction evidence.
@@ -269,7 +269,7 @@ Identity: sha256:<bundle-id>
 Verified: 6 of 6 checks passed
 
 Check it again:
-  npx @colophon-claims/verify@1 <absolute-path>/bundle
+  npx @colophon-claims/verify@0.1 <absolute-path>/bundle
 
 Use your own work:
   colophon open
@@ -314,18 +314,22 @@ Harbor's primary surface is one `harbor run` command. It writes a durable job di
 
 Colophon does not copy Harbor's hosted Hub, account/upload path, usage statistics, cloud-sandbox posture, or product record model. Its distinct aha continues past inspection: a comparison becomes a locally published bundle that a reader can verify independently.
 
-Harbor is a later **runtime adapter**, not a new Colophon importer or canonical record kind. A Harbor Trial can contribute attempt evidence and a managed Job can be published post-hoc through the product-neutral accounting/publication profile. A Harbor Job is not a Colophon Run, arbitrary historical Jobs do not earn synthesized provenance, and a Harbor retry that starts work is a visible Colophon dispatch rather than salvage under one Submission. Terminal-Bench 2.1 locks maintainer `retry.max_retries: 3`; TB 2.0 keeps `0`. The first UI can borrow Harbor's interaction model before the adapter ships; it must not advertise Harbor execution until that conformance path exists.
+Harbor is a **framework** a sealed method may name, and in Colophon an **adapter slot**, not a product mode and not an alternative to Inspect ([DR-2026-08-18-f](../log/decisions/2026-08-18-colophon-method-cli.md)). They compose in the world. A Harbor Trial can contribute attempt evidence and a managed Job can be published post-hoc through the product-neutral accounting/publication profile. A Harbor Job is not a Colophon Run, arbitrary historical Jobs do not earn synthesized provenance, and a Harbor retry that starts work is a visible Colophon dispatch rather than salvage under one Submission. Terminal-Bench 2.1 locks maintainer `retry.max_retries: 3`; TB 2.0 keeps `0`. The first UI can borrow Harbor's interaction model before the adapter ships; it must not advertise Harbor execution until that conformance path exists.
 
 Borrowing Harbor's interaction model is not "you run Harbor." When the Harbor adapter is advertised, it is a **trial engine under a Jinn lock** ([DR-2026-08-17](../log/decisions/2026-08-17-runtime-engine-direct-mode.md)). Do not promise that Hub placement is the Colophon claim, that one `harbor run` is the Colophon Run, or that last week's foreign job can be imported.
 
-**Official suite vs select-a-task.** Terminal-Bench 2.1 is a **named protocol** Colophon wraps: lock the official dataset pin, k=5 planned trials, official env, and named coverage, then run Harbor under that lock ([DR-2026-08-17-b](../log/decisions/2026-08-17-official-suite-protocol.md)). Direct-mode grain for that protocol is one Harbor Job per arm spanning selected tasks × planned trials; each Trial binds to a pre-sealed cell as it starts. Hub export is a derived Harbor-shaped artifact of that accounted run, not the claim of record, and must not be offered as a leaderboard submission unless `leaderboard_submit_ready` after collect (every dataset task × 5 judged or Harbor-error 0, ATIF bytes on the retained job). Inspect remains “select a supported Inspect task” — Colophon expands it into a locked comparison and runs each cell through Inspect. The TB 2.0 one-task path stays and cannot wear the 2.1 suite name. A cousin method on official-suite tasks cannot wear the suite name.
+**One method operand.** Bind with `colophon method` — a catalog id (named suite preset plus host and slice) or a complete method file. Fail-loud if both match. `--slice 1|10|all`, `--ids`, `--n`, and `--host` apply only to a catalog id; a file already contains coverage and host. `colophon method` with no operand lists the catalog. `colophon method --help` names catalog ids and per-suite `--host` keys. `--n` is first N ids from the host registry (sealed coverage via the existing enum; do not rename `one_task`). Doctor then quote is the dry-run; there is no `colophon run`. `colophon inspect` is draft inspect, not the Inspect framework. `lock` remains `runLock`. Derived packaging is `colophon export`. Officialness is the sealed document (suite protocol present and conforming), not which operand you passed. Next suite is a catalog row, not a verb. `import swebench` stays homemade instance rows; official SWE-bench Verified is `method swe-bench-verified`. The GUI catalog form is a second `method.bind` shape, not a new operation ([DR-2026-08-18-f](../log/decisions/2026-08-18-colophon-method-cli.md); [DR-2026-08-19](../log/decisions/2026-08-19-colophon-method-cli-discover.md)).
+
+**Named protocols.** Terminal-Bench 2.1 is a **named protocol** Colophon wraps: lock the official dataset pin, k=5 planned trials, official env, and named coverage, then run Harbor under that lock ([DR-2026-08-17-b](../log/decisions/2026-08-17-official-suite-protocol.md)). Direct-mode grain for that protocol is one Harbor Job per arm spanning selected tasks × planned trials; each Trial binds to a pre-sealed cell as it starts. Hub export is a derived Harbor-shaped artifact of that accounted run, not the claim of record, and must not be offered as a leaderboard submission unless `leaderboard_submit_ready` after collect (every dataset task × 5 judged or Harbor-error 0, ATIF bytes on the retained job). Terminal-Bench 3.0 is a second named Harbor-family protocol on dataset `terminal-bench/terminal-bench` at a content-hash pin, never `@latest` ([DR-2026-08-18-b](../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)). SWE-bench Verified is a second **named protocol**: lock the HuggingFace pin, k=1, and `swebench.harness.run_evaluation`, then let Colophon solve arms emit patches and their harness grade ([DR-2026-08-17-e](../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)). Predictions JSONL / `sb submit` is a derived export, not the claim of record, and must not be offered as a leaderboard submission unless `leaderboard_submit_ready` after collect (every dataset instance × 1 judged or unscorable, harness `report.json` present). The cousin `import swebench` + swe-rebench grader path stays and cannot wear the Verified name. APEX-Agents is a third **named protocol**: lock the HuggingFace pin, k=1, and Archipelago end-to-end (ReAct `react_toolbelt_agent` + snapshot grader) ([DR-2026-08-18](../log/decisions/2026-08-18-apex-agents-official-suite.md)). Inspection export is a derived artifact, not the claim of record, and must not be offered as a leaderboard submission unless `leaderboard_submit_ready` after collect (every dataset task × 1 judged or unscorable, Archipelago `grades.json` present). AA Stirrup, Claude Code / Codex as the agent, Harbor, Inspect, and k=8 cannot wear the APEX-Agents name. DeepSWE v1.1 is a fifth **named protocol**: lock the git-pinned `tasks/` tree, Pier 0.3.1.x, mini-swe-agent, and k≥4, then run Pier under that lock ([DR-2026-08-18-d](../log/decisions/2026-08-18-deep-swe-v1.1-official-suite.md)). Direct-mode grain is one Pier Job per arm; Pier export is a derived job tree for Datacurve email, not the claim of record, and Colophon does not place the Datacurve row. Harbor 0.21, Pier+Claude Code/Codex, DeepSWE v1, and k=1 cannot wear the DeepSWE v1.1 name. Inspect eval is a sixth **named protocol**: the operator picks an Inspect eval; Colophon locks pin, sample catalog, specified epochs as Jinn replicates, Task-default solver, and native analysis, then runs one cell per sample × k ([DR-2026-08-18-e](../log/decisions/2026-08-18-inspect-as-specified.md)). For that protocol `one_task` means one sample. `leaderboard_submit_ready` means eval complete of the sealed catalog, not an Inspect Hub row; View export is a derived log bundle, not the claim of record. Inspect task remains “select a supported Inspect task” — Colophon expands it into a locked comparison and runs each cell through Inspect, and that Inspect-task method cannot wear `inspect-eval`. The TB 2.0 one-task path stays and cannot wear the 2.1 or 3.0 suite name. A cousin method on official-suite tasks cannot wear the suite name.
+
+**APEX-SWE-dev.** The public 50-task HuggingFace set is a fourth named protocol Colophon wraps: dual Mercor harness, Pass@1, never `leaderboard_submit_ready` ([DR-2026-08-18-c](../log/decisions/2026-08-18-apex-swe-dev-official-suite.md)). Do not wear `APEX-SWE` or offer Mercor leaderboard-submit. Inspect remains select-a-task; TB 2.1 remains Harbor under lock.
 
 ### 5.6 From the sample to “my tasks, my arms”
 
 The user may install the same package for repeated use:
 
 ```sh
-npm install --global @colophon-claims/cli@1
+npm install --global @colophon-claims/cli@0.1
 colophon open
 ```
 
@@ -411,7 +415,7 @@ It must not:
 
 - install a compiler or build workspace packages on the user's machine;
 - fetch executables, fonts, schemas, or scripts from mutable URLs at runtime;
-- use `workspace:`, Yarn portal/link protocols, local tarballs, canary versions, or unpublished Jinn packages in a release candidate;
+- use `workspace:`, Yarn portal/link protocols, local tarballs, the floating `canary` dist-tag, mixed canary SHAs, or unpublished Jinn packages in a release candidate (exact `0.1.0-canary.sha.<fullSha>` pins from one receipt are allowed for the first public cut only; [DR-2026-08-17-c](../log/decisions/2026-08-17-colophon-first-cut-canary-pin.md));
 - expose unrelated platform commands because code happened to be bundled;
 - turn optional Docker/Python integrations into prerequisites for the sample or verifier.
 
@@ -421,16 +425,16 @@ The current workspace-order CI remains useful for mono development, but it is no
 
 The verifier follows the same rule but declares only the product-neutral record/facts dependencies needed for bundle parsing, evidence-closure derivation, trust/claim/report checks, plus Colophon bundle projection, required report assets, and CLI/error handling. Product verifier code that currently imports execution-oriented modules must be cut at a public verification boundary rather than dragging the runner, launcher, local backend, Docker, or Python/Inspect closure into the reader artifact. The full runner and reader package must execute the same verification implementation.
 
-Normative schemas and fixtures remain owned and published by the product-neutral stack packages. Their stable availability is a precondition to Increment 1, not a Colophon issue. Increment 1 publishes the tier-4 public-bundle format/vectors separately and proves the Colophon reference verifier against both layers. The reader may install or package the exact released platform bytes for offline use, with their independent identity and source preserved; it may not fork or relabel them as Colophon schemas. Product-level bundle vectors stay visibly separate and may name Colophon.
+Normative schemas and fixtures remain owned and published by the product-neutral stack packages. Live `spec.jinn.network` availability remains the standing precondition to calling Increment 1 a complete independent-implementer proof. For the first public cut, npm-published platform tarballs at the pinned canary versions are the retrievable bytes, and the missing live origin must be disclosed ([DR-2026-08-17-c](../log/decisions/2026-08-17-colophon-first-cut-canary-pin.md)). Increment 1 publishes the tier-4 public-bundle format/vectors separately and proves the Colophon reference verifier against both layers. The reader may install or package the exact released platform bytes for offline use, with their independent identity and source preserved; it may not fork or relabel them as Colophon schemas. Product-level bundle vectors stay visibly separate and may name Colophon.
 
 ### 6.3 Relationship to `@jinn-network`
 
-The platform source remains in `@jinn-network/*` packages inside the mono, and those packages publish under the Jinn-Network scope. Colophon consumes their stable releases as ordinary dependencies and continues to say “Built on Jinn, by Jinn contributors” where the GTM program requires that relationship line. The public install contract is nevertheless the Colophon endpoint package and bundle format; users are not asked to assemble or version the platform themselves.
+The platform source remains in `@jinn-network/*` packages inside the mono, and those packages publish under the Jinn-Network scope. Colophon consumes those published packages as ordinary dependencies (exact first-cut canary versions, then stable) and continues to say “Built on Jinn, by Jinn contributors” where the GTM program requires that relationship line. The public install contract is nevertheless the Colophon endpoint package and bundle format; users are not asked to assemble or version the platform themselves.
 
 This separates product and platform identity without hiding either one:
 
 - **npm publisher shown for the product:** the Colophon-controlled organization;
-- **runtime platform dependencies:** `@jinn-network/*` at one stable release set;
+- **runtime platform dependencies:** `@jinn-network/*` at one coherent release set (stable after the first cut; exact stack-canary versions for that first cut only);
 - **public product face:** `ritsukai` and `colophon.claims`;
 - **source and Issue source of record today:** the Jinn-Network mono and exact package directory;
 - **attribution:** “Built on Jinn, by Jinn contributors.”
@@ -595,7 +599,7 @@ Add a distinct reader action; leave the runner section source-based:
 >
 > You do not need the benchmark runner. With Node 22 or newer:
 >
-> `npx @colophon-claims/verify@1 ./bundle`
+> `npx @colophon-claims/verify@0.1 ./bundle`
 >
 > The verifier reads the bundle on your machine, uploads nothing, and needs no account, API key, funds, Docker, agent login, or full Jinn checkout. It checks integrity, evidence closure, trust disclosures, calculations, report verification, and claim consistency.
 
@@ -609,7 +613,7 @@ Replace the contributor command as the primary “Run it yourself” action:
 >
 > Requires Node 22 or newer:
 >
-> `npx @colophon-claims/cli@1`
+> `npx @colophon-claims/cli@0.1`
 >
 > No account, API key, funds, or Docker are needed. The sample does not use your agent logins. It runs locally, opens a local comparison, leaves a verified bundle in the current directory, and uploads nothing.
 
@@ -619,7 +623,7 @@ Keep “Build from source” as a secondary contributor link. State the qualifie
 
 Add “Use your tasks and agents” only when the relevant adapter/importer is released:
 
-> Run `colophon open`, choose **Use my work**, import SWE-bench tasks, select a supported Inspect task, or lock a named Terminal-Bench 2.1 protocol (including a protocol-faithful slice), then compare Claude Code and Codex through pinned arm definitions. Colophon checks the machine and shows the locked method and comparability bits before any paid call.
+> Run `colophon open`, choose **Use my work**, bind a method (named suite or file), then compare Claude Code and Codex through pinned arm definitions. Colophon checks the machine and shows the locked method and comparability bits before any paid call.
 >
 > Real agent arms use your existing agent logins and may make paid provider calls. Docker is required only for task/evaluation paths that say so. Colophon has no account, holds no funds, and does not upload your benchmark bundle.
 
@@ -632,8 +636,8 @@ Signals are recorded manually from concierge engagements, direct reader replies,
 | Increment | Audience and problem | Smallest shippable work | Start trigger (any one is enough) | Site change |
 |---|---|---|---|---|
 | **0. Honest source proof** (current) | Contributors can prove the lifecycle; cold visitors cannot install it | Keep current quickstart/CI proof green and label it as source-based | Already true | Contributor copy only |
-| **1. Reader verifier** | Report readers cannot check a bundle without the full product closure | Accept/reserve Colophon scope and identity boundary; publish the Colophon public-bundle format/vectors as a tier-4 contract; cut one verifier-only npm reference package over the minimal stable Jinn verification set; establish its demand-gated trusted release lane; cold-install against both platform and product contracts | One target reader declines or fails verification because a mono/full-runner install is required; **or** two independent readers ask for a copyable verification path after receiving a report | Add “Check a bundle”; runner stays source-based |
-| **2. Packaged sample runner** | Repo tinkerers face the 23-distribution build chain and the current sample retains no artifact | Publish one top-level runner over the stable Jinn set; package product assets/sample; persist copied bundle/receipt; open the retained local comparison; preflight supported platforms; cold-registry `npx` test | Two independent repo tinkerers attempt the source quickstart and one is blocked by setup; **or** one converted concierge customer commits to rerun by a named date without operator help | Make no-argument `npx @colophon-claims/cli` primary; retain source link |
+| **1. Reader verifier** | Report readers cannot check a bundle without the full product closure | Accept/reserve Colophon scope and identity boundary; publish the Colophon public-bundle format/vectors as a tier-4 contract; cut one verifier-only npm reference package over the minimal Jinn verification set (first cut: exact stack-canary pin per DR-2026-08-17-c); establish its demand-gated trusted release lane; cold-install against both platform and product contracts | One target reader declines or fails verification because a mono/full-runner install is required; **or** two independent readers ask for a copyable verification path after receiving a report | Add “Check a bundle”; runner stays source-based |
+| **2. Packaged sample runner** | Repo tinkerers face the 23-distribution build chain and the current sample retains no artifact | Publish one top-level runner over the same first-cut Jinn pin; package product assets/sample; persist copied bundle/receipt; open the retained local comparison; preflight supported platforms; cold-registry `npx` test | Two independent repo tinkerers attempt the source quickstart and one is blocked by setup; **or** one converted concierge customer commits to rerun by a named date without operator help | Make no-argument `npx @colophon-claims/cli` primary; retain source link |
 | **3. Own tasks and real agents** | Converted users can run toys but not their own harnesses safely | Local `colophon open` home and guided locked lifecycle; product-owned Claude Code and Codex arm schema/adapters over the existing provisioner/secret-reference contract; `doctor`; SWE-bench and qualified Inspect path; plain cost/network disclosure | Two qualified users who completed or attempted the sample request the same real adapter with named tasks and run dates; **or** two concierge campaigns repeat the same adapter binding and one asks for self-rerun | Add supported tasks/agents copy and cost/Docker disclosure |
 | **4a. Advanced environment** | Docker-heavy users repeat setup failures | Versioned devcontainer for supported OCI/Inspect path | Two qualified campaigns lose a run to the same host/Docker setup gap | Add advanced container setup; never replace zero-Docker sample |
 | **4b. No-Node distribution** | Qualified readers/tinkerers will not or cannot install Node | Standalone signed binary for the measured OS/architecture; preserve verifier conformance | Two qualified adoptions are blocked specifically by Node/npm, or the operator can no longer reach the target reader role with a Node prerequisite | Offer binary beside npm; do not silently switch |
@@ -645,7 +649,7 @@ overrode the start triggers for local implementation of Increments 1–3 on
 
 ## 10. Authorized pre-publication implementation
 
-The operator authorized implementation in the mono without filing GitHub Issues. Implementation may prove the complete local path with local tarballs and an ephemeral registry, but it must stop before public npm publication or site/repository mutation.
+The operator authorized implementation in the mono without filing GitHub Issues. Local tarballs and an ephemeral registry remain valid pre-publication proofs. Public npm publication of the first Colophon cut is now authorized under [DR-2026-08-17-c](../log/decisions/2026-08-17-colophon-first-cut-canary-pin.md), after stack canary exists and `@colophon-claims` is reserved. Site mutation is still a separate gate.
 
 ### 10.1 In scope
 
@@ -834,7 +838,7 @@ deliberately last.
 
 | Risk | Control |
 |---|---|
-| A partial or drifting Jinn release makes Colophon installable but incoherent | Pin one stable platform set exactly; publish a resolved dependency receipt; cold-install only from the registry; fail release on workspace, local, canary, or out-of-set resolution |
+| A partial or drifting Jinn release makes Colophon installable but incoherent | Pin one platform set exactly (first cut: one stack-canary SHA); publish a resolved dependency receipt; cold-install only from the registry; fail release on workspace, local, floating `canary` tag, mixed SHAs, or out-of-set resolution |
 | “One command” hides a large or unsafe dependency closure | Produce a dependency/file/license inventory; assert forbidden runner modules are absent from verifier; cold-install and inspect the resolved tree |
 | Reader trusts npm publisher more than the evidence | Publish provenance/source binding and public format vectors; state what verification cannot prove; keep independent implementations possible |
 | The verifier package itself becomes a supply-chain execution risk | No install lifecycle scripts; trusted publishing/provenance; exact package identity in bundle instructions; never execute bundle content; keep verification offline after install |

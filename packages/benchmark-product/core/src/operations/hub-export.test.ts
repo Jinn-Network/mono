@@ -7,11 +7,13 @@ import { armAdd } from "./arms.js";
 import { createDraft } from "./drafts.js";
 import {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
+  exportCompletenessCertification,
 } from "../runtime/suite-protocol/comparability.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import { computeHarbor021TaskContentHash } from "../runtime/terminal-bench-2/host.js";
 import { TERMINAL_BENCH_2_1_DATASET_ID, TERMINAL_BENCH_2_1_DATASET_REF } from "../runtime/terminal-bench-2-1/manifest.js";
+import { TERMINAL_BENCH_3_0_DATASET_ID, TERMINAL_BENCH_3_0_DATASET_REF, TERMINAL_BENCH_3_0_HUB_VERSION } from "../runtime/terminal-bench-3-0/manifest.js";
 import type { HarborSelectionManifest } from "../runtime/harbor/manifest.js";
 import { initWorkspace } from "./init.js";
 import { runCollect } from "./run-collect.js";
@@ -21,6 +23,7 @@ import { runQuote } from "./run-quote.js";
 import { requireRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { selectTerminalBench21Runtime } from "./terminal-bench-2-1.js";
+import { selectTerminalBench30Runtime } from "./terminal-bench-3-0.js";
 import {
   decideHarborHubExportMode,
   exportHarborHubPackage,
@@ -157,6 +160,15 @@ function clock(): () => string {
   return () => new Date().toISOString();
 }
 
+/** §8.2 clause 2: the certification renders the sealed Matrix's own completeness, or says none is sealed yet. */
+function certificationFor(draftId: string): string {
+  const state = requireRunState(workspaceDir, draftId);
+  const completeness = state.matrixSha256 === undefined
+    ? undefined
+    : parseMatrix(getSealedBytes(workspaceDir, state.matrixSha256)).completeness;
+  return exportCompletenessCertification({ runSha256: state.runSha256!, completeness });
+}
+
 function stubArmJob(draftId: string, armId: string): string {
   const runSha256 = requireRunState(workspaceDir, draftId).runSha256!;
   const jobDir = join(harborArmJobsDir(workspaceDir, runSha256), harborArmJobName(runSha256, armId));
@@ -193,14 +205,29 @@ describe("Harbor Hub export", () => {
     expect(decideHarborHubExportMode({ executionConformance: true, coverage: "full", leaderboardSubmitReady: true })).toBe("leaderboard-submit");
     expect(decideHarborHubExportMode({ executionConformance: true, coverage: "custom", leaderboardSubmitReady: false })).toBe("refused");
     expect(decideHarborHubExportMode({ executionConformance: false, coverage: "full", leaderboardSubmitReady: false })).toBe("refused");
-    const inspection = harborHubExportInstructions("inspection-upload", "/tmp/job");
+    const certification = "complete run of the selection sealed at lock aaaa: 1 of 1 cells judged.";
+    const inspection = harborHubExportInstructions(certification, "inspection-upload", "/tmp/job");
+    expect(inspection.split("\n")[0]).toBe(certification);
     expect(inspection).toContain("harbor upload --public /tmp/job");
     expect(inspection).toContain("Do not run `uv run lb submit`");
     expect(inspection).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
-    const ready = harborHubExportInstructions("leaderboard-submit", "/tmp/job");
+    const ready = harborHubExportInstructions(certification, "leaderboard-submit", "/tmp/job");
+    expect(ready.split("\n")[0]).toBe(certification);
     expect(ready).toContain("harbor upload --public /tmp/job");
     expect(ready).toContain("uv run lb submit <hub-url>");
     expect(ready).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
+    const inspection30 = harborHubExportInstructions(certification, "inspection-upload", "/tmp/job", "terminal-bench-3.0");
+    expect(inspection30.split("\n")[0]).toBe(certification);
+    expect(inspection30).toContain("harbor upload --public /tmp/job");
+    expect(inspection30).toContain("Terminal-Bench 3.0");
+    expect(inspection30).not.toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
+    expect(inspection30).not.toContain("uv run lb submit");
+    const ready30 = harborHubExportInstructions(certification, "leaderboard-submit", "/tmp/job", "terminal-bench-3.0");
+    expect(ready30.split("\n")[0]).toBe(certification);
+    expect(ready30).toContain("harbor upload --public /tmp/job");
+    expect(ready30).toContain("Terminal-Bench 3.0");
+    expect(ready30).not.toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
+    expect(ready30).not.toContain("uv run lb submit");
   });
 
   test("refuses suite-named export without a Harbor Terminal-Bench 2.1 lock", async () => {
@@ -225,6 +252,7 @@ describe("Harbor Hub export", () => {
     expect(exported.result.jobDir).toBe(jobDir);
     expect(existsSync(join(jobDir, "result.json"))).toBe(true);
     expect(existsSync(join(exported.result.exportDir, "job", "result.json"))).toBe(true);
+    expect(exported.result.instructions.split("\n")[0]).toBe(certificationFor("one"));
     expect(exported.result.instructions).toContain("Do not run `uv run lb submit`");
     expect(exported.result.instructions).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
     expect(readFileSync(join(exported.result.exportDir, "INSTRUCTIONS.txt"), "utf8")).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
@@ -264,6 +292,7 @@ describe("Harbor Hub export", () => {
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
     expect(exported.result.mode).toBe("inspection-upload");
+    expect(exported.result.instructions.split("\n")[0]).toBe(certificationFor("full"));
     expect(exported.result.instructions).toContain("Do not run `uv run lb submit`");
     expect(exported.result.instructions).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
   }, 120_000);
@@ -302,8 +331,72 @@ describe("Harbor Hub export", () => {
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
     expect(exported.result.mode).toBe("leaderboard-submit");
+    expect(exported.result.instructions.split("\n")[0]).toBe(exportCompletenessCertification({
+      runSha256: collectedState.runSha256!,
+      completeness: matrix.completeness,
+    }));
     expect(exported.result.instructions).toContain("harbor upload --public");
     expect(exported.result.instructions).toContain("uv run lb submit <hub-url>");
     expect(exported.result.instructions).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
   }, 120_000);
+});
+
+describe("Terminal-Bench 3.0 Hub export", () => {
+  function tb30Request(coverage?: "one_task" | "ten_task" | "full", taskNames?: readonly string[]) {
+    return {
+      executable,
+      registryMetadataPath: metadataPath,
+      datasetRevision: TERMINAL_BENCH_3_0_DATASET_REF,
+      taskMaterialPath: materialPath,
+      nConcurrent: 1,
+      arms,
+      environment: { type: "docker" as const, image, configuration: {} },
+      outputs,
+      ...(coverage === undefined ? {} : { coverage }),
+      ...(taskNames === undefined ? {} : { taskNames }),
+    };
+  }
+
+  beforeEach(() => {
+    writeFileSync(metadataPath, JSON.stringify({
+      name: TERMINAL_BENCH_3_0_DATASET_ID,
+      version: TERMINAL_BENCH_3_0_HUB_VERSION,
+      dataset_version_content_hash: TERMINAL_BENCH_3_0_DATASET_REF,
+      task_ids: names.map((name) => ({
+        org: "terminal-bench",
+        name,
+        ref: `sha256:${computeHarbor021TaskContentHash(join(materialPath, name)).contentHash}`,
+      })),
+    }));
+  });
+
+  test("named-slice export is inspection-only without the 2.1 closed-submissions sentence", async () => {
+    const context = await prepareDraft("one");
+    expect((await selectTerminalBench30Runtime(context, { draftId: "one", ...tb30Request("one_task") })).ok).toBe(true);
+    expect((await runQuote(context, { draftId: "one" })).ok).toBe(true);
+    expect(runLock(context, { draftId: "one" }).ok).toBe(true);
+    stubArmJob("one", "one");
+    const exported = exportHarborHubPackage(context, { draftId: "one", armId: "one" });
+    expect(exported.ok, JSON.stringify(exported)).toBe(true);
+    if (!exported.ok) return;
+    expect(exported.result.mode).toBe("inspection-upload");
+    expect(exported.result.instructions.split("\n")[0]).toBe(certificationFor("one"));
+    expect(exported.result.instructions).toContain("Terminal-Bench 3.0");
+    expect(exported.result.instructions).toContain("harbor upload --public");
+    expect(exported.result.instructions).not.toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
+    expect(exported.result.instructions).not.toContain("uv run lb submit");
+  }, 60_000);
+
+  test("custom coverage refuses the Terminal-Bench 3.0 Hub suite name", async () => {
+    const context = await prepareDraft("custom");
+    expect((await selectTerminalBench30Runtime(context, { draftId: "custom", ...tb30Request(undefined, ["t11"]) })).ok).toBe(true);
+    expect((await runQuote(context, { draftId: "custom" })).ok).toBe(true);
+    expect(runLock(context, { draftId: "custom" }).ok).toBe(true);
+    stubArmJob("custom", "one");
+    const custom = exportHarborHubPackage(context, { draftId: "custom", armId: "one" });
+    expect(custom.ok).toBe(false);
+    if (custom.ok) return;
+    expect(custom.error.code).toBe("conflict");
+    expect(custom.error.detail).toMatch(/cannot wear the Terminal-Bench 3\.0 Hub suite name/);
+  }, 60_000);
 });

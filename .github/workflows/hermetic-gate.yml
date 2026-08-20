@@ -15,37 +15,52 @@ name: hermetic-gate
 # access in the whole pipeline lives in the offline builder
 # `contracts/scripts/build-anvil-snapshot.ts`.
 #
-# This gate needs NO secrets, so it is safe to run on PRs from forks. It posts a
-# single `hermetic-gate` check-run bound to github.sha via the shared poster
-# (operator/scripts/release/post-check-run-verdict.mjs, owned by step 3).
+# This gate needs NO secrets, so it is safe to run on PRs from forks. The
+# required context is the native terminal job `hermetic-gate` (display name
+# equals the ruleset string), the same producer shape as the other nine
+# required checks. GitHub binds that job's check-run to github.sha — on
+# merge_group, the speculative merge the queue evaluates; on push to next,
+# the SHA the publish guard queries. Fork PRs report it without a Checks API
+# POST (fork GITHUB_TOKEN is read-only).
 #
-# NOTE: this workflow is intentionally NOT a required check yet. Marking it
-# required is a separate, human-applied branch-protection step (see the spec's
-# migration plan §13 step 1 + the enable script). Until then it runs and posts
-# its verdict advisorily so the publish guard can begin reading it.
+# The `hermetic-gate` context is a REQUIRED check on `next` from the merge-queue
+# flip onward (DR-2026-08-18-b D3), which fulfills the two-gate redesign's own
+# migration intent. The context is registered by
+# .github/scripts/enable-next-merge-queue.sh and asserted by
+# .github/scripts/branch-protection-audit.mjs.
 
 on:
   pull_request:
+  merge_group:
   push:
     branches:
       - next
       - 'release/*'
 
 # Serialize per-ref so a force-push supersedes an in-flight run rather than
-# racing two verdicts onto overlapping SHAs.
+# racing two gates onto overlapping SHAs — but only on the PR lane, matching
+# the other required-context producers (repository-structure.yml,
+# stack-fixture-immutability.yml). Off the PR lane every run's verdict is wanted:
+# a merge-group entry that loses its gate to a cancellation gets a red context
+# and is ejected, and a superseded push to `next` still leaves the SHA-bound
+# job check the publish guard reads.
 concurrency:
   group: hermetic-gate-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
-  checks: write
-  statuses: write
 
 jobs:
-  hermetic-gate:
+  hermetic:
     name: Hermetic gate (deterministic, snapshot)
     runs-on: ubuntu-latest
+    # A hung step must not burn the merge queue's check-response budget, and must
+    # not hold a runner for the 360-minute default against the plan's concurrent-job
+    # ceiling. Observed green runs land around 12 minutes; the ceiling is generous
+    # enough that a slow-but-real run is never truncated. A timeout is a job
+    # `failure`, so the `hermetic-gate` terminal job still reports the red context.
+    timeout-minutes: 60
     env:
       # The deterministic loop tests the *loop*, not the *agent* (spec §3.1):
       # the prediction-v1-baseline harness needs no API key, so this gate has
@@ -58,10 +73,8 @@ jobs:
       # Their CPU binaries remain bundled in the npm packages.
       ONNXRUNTIME_NODE_INSTALL: skip
       ONNXRUNTIME_NODE_INSTALL_CUDA: skip
-      # The check-run binds to the commit under test. On pull_request,
-      # github.sha is the ephemeral merge commit; github.event.pull_request.head.sha
-      # is the actual PR HEAD the branch-protection / publish guard reasons about.
-      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      # This job's outcome is the suite signal. The required context is the
+      # terminal job `hermetic-gate` below.
     steps:
       - uses: actions/checkout@v7
 
@@ -175,12 +188,20 @@ jobs:
         run: |
           yarn install --immutable
           yarn build
+      # Do NOT pass `--with-deps`. That flag runs apt against the runner image's
+      # Ubuntu mirrors. merge_group run 32272723606 hung 53 minutes on
+      # azure.archive.ubuntu.com (Ign, then stall after mixing archive.ubuntu.com);
+      # the 60-minute job timeout cancelled a still-running apt and ejected the
+      # queue. GitHub-hosted ubuntu-24.04 already ships the Chromium system
+      # libraries; this step only downloads the browser. A hung CDN download must
+      # fail this step, not burn the job budget.
       - name: Install operator console
+        timeout-minutes: 15
         working-directory: apps/operator-console
         run: |
           corepack prepare yarn@4.13.0 --activate
           yarn install --immutable
-          yarn playwright install --with-deps chromium
+          yarn playwright install chromium
 
       - name: App-flow determinism (Playwright, mocked daemon)
         id: appflow
@@ -199,57 +220,28 @@ jobs:
           path: apps/operator-console/test-results/
           retention-days: 7
 
-      # Write the verdict JSON. Reaching this step means every prior step
-      # succeeded — the hermetic suite (which includes the snapshot indexer
-      # round-trip) and the app-flow step both passed; a failure of either
-      # short-circuits the job before here. `if: success()` is explicit so the
-      # green verdict is only ever written on a genuinely green run.
-      - name: Write verdict (success)
-        if: success()
-        run: |
-          cat > "$RUNNER_TEMP/hermetic-verdict.json" <<EOF
-          {
-            "context": "hermetic-gate",
-            "headSha": "${HEAD_SHA}",
-            "conclusion": "success",
-            "scenarios": [
-              { "id": "hermetic-suite", "verdict": "pass", "failClass": null, "notes": "test/hermetic/** (adversarial claim/delivery and exact solution settlement on snapshot bytecode + deterministic RPC fallback + indexer round-trip (local Ponder vs snapshot chain)) green" },
-              { "id": "app-flow-determinism", "verdict": "pass", "failClass": null, "notes": "mocked-daemon console journeys (claim-policy + posting-status) green" },
-              { "id": "operator-console-unit", "verdict": "pass", "failClass": null, "notes": "apps/operator-console handshake + surface-state unit tests green" }
-            ],
-            "summary": "Hermetic gate green on ${HEAD_SHA} — deterministic loop + adversarial conditions on real snapshot bytecode + indexer round-trip + mocked-daemon app-flow journeys."
-          }
-          EOF
+      # This job deliberately ends here: its outcome IS the suite signal. Reaching
+      # the end means the hermetic suite (including the snapshot indexer round-trip),
+      # the app-flow journeys and the console unit tests all passed; a failure of
+      # any of them short-circuits the job. The `hermetic-gate` terminal job reads
+      # `needs.hermetic.result` and is the required context.
 
-      # On any failure, write a failure verdict so the publish guard refuses
-      # rather than silently missing the check. A hermetic red is always a real
-      # code regression (zero external deps), so failClass is product-red.
-      - name: Write verdict (failure)
-        if: failure()
-        run: |
-          cat > "$RUNNER_TEMP/hermetic-verdict.json" <<EOF
-          {
-            "context": "hermetic-gate",
-            "headSha": "${HEAD_SHA}",
-            "conclusion": "failure",
-            "scenarios": [
-              { "id": "hermetic-gate", "verdict": "fail", "failClass": "product-red", "notes": "A hermetic step failed; with zero external dependencies a red is a real code regression. See the job log." }
-            ],
-            "summary": "Hermetic gate FAILED on ${HEAD_SHA} — a deterministic step regressed (product-red)."
-          }
-          EOF
-
-      # Post the verdict as a check-run bound to HEAD_SHA via the shared poster
-      # (owned by step 3). Always runs so both the green and red verdicts land —
-      # EXCEPT on fork PRs, where the GITHUB_TOKEN is read-only regardless of the
-      # declared `checks: write` permission, so the POST would 403 and falsely
-      # redden the job. Forks still get the test results in the job log; the gate
-      # only posts a check-run for same-repo refs (push / same-repo PR). On push
-      # events `github.event.pull_request` is null, so the fork check is skipped.
-      - name: Post hermetic-gate check-run
-        if: always() && github.event.pull_request.head.repo.fork != true
-        working-directory: operator
+  hermetic-gate:
+    # The check-run name GitHub reports is this job's display `name:` below, and that
+    # string is the required-status-check context registered on the `next` ruleset
+    # (DR-2026-08-18-b D3) — keep them in sync. The job exists so the context is
+    # reported even when the suite job is cancelled or its runner dies: an
+    # unreported required context hangs a queue entry until the check-response
+    # timeout ejects it (DR-2026-08-18-b D3/D6). Fork PRs run this job too.
+    name: hermetic-gate
+    needs: [hermetic]
+    if: always()
+    runs-on: ubuntu-latest
+    # One `test` against an upstream result. The bound keeps a wedged runner from
+    # holding the required context open for the 360-minute default.
+    timeout-minutes: 5
+    steps:
+      - name: Require exact hermetic-suite success
         env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GH_TOKEN: ${{ github.token }}
-        run: node scripts/release/post-check-run-verdict.mjs "$RUNNER_TEMP/hermetic-verdict.json"
+          HERMETIC_RESULT: ${{ needs.hermetic.result }}
+        run: test "${HERMETIC_RESULT}" = success

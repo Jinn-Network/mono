@@ -46,7 +46,7 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **43 generated operations**, all shipped through the library and CLI
+contains **41 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -58,7 +58,7 @@ with an explicit shipped/deferred GUI disposition:
 | `authorityGrant` | `colophon authority grant` | Sponsor-only membership or grant change. |
 | `authorityRevoke` | `colophon authority revoke` | Sponsor-only grant or membership revocation. |
 | `authorityShow` | `colophon authority show` | Read the authority policy. |
-| `bindInspectBinaryJudge` | `colophon runtime inspect bind-judge` | Bind sealed binary-judge instruments to exact Run-arm requirements. |
+| `anchoringConfigure` | `colophon anchoring configure` | Replace or clear the workspace anchor provider and endpoint configuration. |
 | `createDraft` | `colophon draft create` | Create a draft, optionally from JSON. |
 | `getDraft` | `colophon draft show` | Read one draft. |
 | `createHumanReviewPackets` | `colophon human-review packet create` | Create blind item packets and visibility receipts before lock. |
@@ -79,6 +79,7 @@ with an explicit shipped/deferred GUI disposition:
 | `runCollect` | `colophon collect` | Seal the terminal Matrix. |
 | `runLaunch` | `colophon launch` | Drive the real local venue. |
 | `runLock` | `colophon lock` | Seal the preregistered Run. |
+| `runAnchor` | `colophon anchor` | Obtain, verify, and store third-party time evidence over the sealed Run or Matrix digest. |
 | `runPreview` | `colophon preview` | Run a disclosed, non-official rehearsal. |
 | `runPublish` | `colophon publish` | Verify and emit one immutable local bundle. |
 | `runQuote` | `colophon quote` | Present size, coverage, cap, and honest estimates. |
@@ -88,11 +89,8 @@ with an explicit shipped/deferred GUI disposition:
 | `runStatus` | `colophon status` | Read durable per-cell and driver status. |
 | `runVerify` | `colophon verify` | Re-derive Matrix, Report, and claim consistency. |
 | `sampleInit` | `colophon sample init` | Attach the bundled three-task benchmark. |
-| `selectInspectEvaluation` | `colophon runtime inspect select` | Select and bind a real Inspect evaluation. |
-| `selectHarborRuntime` | `colophon runtime harbor select` | Select and bind the managed Harbor runtime. |
-| `selectTerminalBench2Runtime` | `colophon runtime terminal-bench-2 select` | Resolve and bind one immutable Terminal-Bench 2 task through Harbor. |
-| `selectTerminalBench21Runtime` | `colophon runtime terminal-bench-2-1 select` | Resolve and bind a named Terminal-Bench 2.1 slice through Harbor. |
-| `exportHarborHubPackage` | `colophon hub export` | Package a retained Harbor Job for Terminal-Bench 2.1 Hub upload without placing the row. |
+| `selectMethod` | `colophon method` | Bind a catalog suite or a method-document file onto a draft. |
+| `exportDerivedBundle` | `colophon export` | Package the locked method's suite-named derived bundle, or refuse. |
 | `updateDraft` | `colophon draft update` | Apply a validated JSON draft patch. |
 
 The path-oriented portable verifier is intentionally outside workspace/GUI
@@ -101,10 +99,8 @@ version sealed into a report to reproduce publication, or its compatible major
 line to receive fixes without changing the bundle-format contract:
 
 ```text
-npx @colophon-claims/verify@1.0.0 <dir>
-npx @colophon-claims/verify@1 <dir>
-npx @colophon-claims/verify@2.0.0 <dir> # binary qualification bundle v4
-npx @colophon-claims/verify@2 <dir>     # compatible v2/v4 reader line
+npx @colophon-claims/verify@0.1.0 <dir>
+npx @colophon-claims/verify@0.1 <dir>
 ```
 
 It reads only the caller-selected immutable bundle, needs no workspace or
@@ -144,7 +140,7 @@ EvaluationSpec, Benchmark, and sealed-store contracts:
 
 ```text
 colophon import item-bank --workspace <dir> --principal <id> \
-  --profile binary-judgment@1 --draft <draftId> \
+  --profile binary-judgment@2 --draft <draftId> \
   --items <items.jsonl> --sources <sources.jsonl> \
   --admissions <admissions.jsonl>
 ```
@@ -173,9 +169,9 @@ candidate truth.
 
 ## Authority and lifecycle behavior
 
-The **nine gated operations** are `lock`, `launch`, `cancel`, `report`,
+The **ten gated operations** are `lock`, `launch`, `cancel`, `report`,
 `publish`, `publication.configure`, `publication.register`,
-`publication.accounting`, and `publication.report`. The founding sponsor receives all nine grants. A delegated agent may perform any of them
+`publication.accounting`, `publication.report`, and `anchoring.configure`. The founding sponsor receives all ten grants. A delegated agent may perform any of them
 only after a sponsor grants it. `authority grant` and
 `authority revoke` are separately sponsor-only, so a delegated agent cannot
 self-escalate. This is local-process policy and attribution, not operating-system

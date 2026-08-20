@@ -22,7 +22,7 @@ import { readDraftDocument } from "./drafts.js";
 import { operate } from "./operate.js";
 import type { OperationResult } from "./result.js";
 
-export const BINARY_ITEM_BANK_PROFILE = "binary-judgment@1" as const;
+export const BINARY_ITEM_BANK_PROFILE = "binary-judgment@2" as const;
 
 export interface ImportBinaryItemBankInput {
   readonly profile: typeof BINARY_ITEM_BANK_PROFILE;
@@ -47,10 +47,10 @@ export interface ImportBinaryItemBankResult {
   readonly replacementLedgerSha256: string;
   readonly excludedItemSha256s: readonly string[];
   readonly nonAdmittedItemSha256s: readonly string[];
-  readonly truthAdmission: "two-human-unanimous" | "operator-only";
+  readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
   readonly publicationGrade: boolean;
   readonly candidateClasses: readonly string[];
-  readonly strata: readonly ("core" | "stress")[];
+  readonly strata: readonly string[];
 }
 
 function bare(digest: string): string {

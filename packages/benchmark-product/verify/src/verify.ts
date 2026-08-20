@@ -13,11 +13,14 @@ import {
   parseMatrix,
   parseReport,
   parseRun,
+  readRunAnchorIntentExtension,
   readRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { verifyMatrix, type InScopeCell, type InScopeVerdict } from "@jinn-network/benchmarking-run";
 import {
+  type AcceptedJudgeModelId,
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
+  BinaryJudgmentSnapshotProbeSchema,
   deriveEvaluationTask,
   parseBinaryJudgmentInstrument,
   parseEvaluationSpec,
@@ -80,7 +83,13 @@ import {
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
 import { PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, BUNDLE_V6_FORMAT } from "./manifest.js";
+import {
+  evaluateIntegrityAnchors,
+  type IntegrityAnchorsReport,
+  type PublicBundleAnchorTrustMaterial,
+} from "./anchor/check.js";
+import { ClaimAnchorProjectionError, deriveClaimAnchors } from "./profile/anchor-claims.js";
 import {
   verifyBinaryJudgmentAdmissionClosure,
   type AdmissionAuthorityRole,
@@ -93,6 +102,8 @@ import {
   BinaryItemBankEntrySchema,
   BinaryItemBankIntakeExtensionSchema,
   BinarySourceManifestEntrySchema,
+  type BinaryItemBankEntry,
+  type BinarySourceManifestEntry,
 } from "./admission/intake.js";
 import {
   BundleAssemblyCellSchema,
@@ -117,10 +128,16 @@ export type PublicBundleVerificationCheck =
   | "trust"
   | "matrix-rederivation"
   | "report-verification"
-  | "claim-consistency";
+  | "claim-consistency"
+  /** Always present for `benchmark-product-public-bundle/6`, never for any earlier closure
+   * (anchor-evidence design §8, §12). */
+  | "integrity-anchors";
 
 export interface LegacyPublicBundleVerificationResult {
-  readonly format: "benchmark-product-public-bundle/2" | "benchmark-product-public-bundle/4";
+  readonly format:
+    | "benchmark-product-public-bundle/2"
+    | "benchmark-product-public-bundle/4"
+    | "benchmark-product-public-bundle/6";
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
   readonly benchmarkSha256: string;
@@ -129,12 +146,18 @@ export interface LegacyPublicBundleVerificationResult {
   readonly reportSha256: string;
   readonly reportEnvelopeSha256: string;
   readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
+  /** Present exactly for the anchored closure: every carried anchor's own outcome plus each
+   * subject's context outcome (anchor-evidence design §8). Statuses are disclosed facts, not a
+   * summary — nothing here is folded into a single verified badge. */
+  readonly anchors?: IntegrityAnchorsReport;
   readonly qualification?: {
     readonly publicationGrade: boolean;
-    readonly truthAdmission: "two-human-unanimous" | "operator-only";
+    readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
     readonly candidateClasses: readonly string[];
-    readonly strata: readonly ["core", "stress"];
-    readonly armCount: 4;
+    readonly strata: readonly string[];
+    // A count that is a constant is not a count (spec §1.6 site 8): a literal here does not
+    // refuse a run with a different arm count, it publishes a false one.
+    readonly armCount: number;
     readonly itemCount: number;
     readonly exclusionCount: number;
   };
@@ -144,7 +167,16 @@ export type PublicBundleVerificationResult =
   | LegacyPublicBundleVerificationResult
   | EvidenceNativePortableBundleVerification;
 
-export interface VerifyPublicBundleDeps extends VerifyBundleSnapshotDeps {}
+export interface VerifyPublicBundleDeps extends VerifyBundleSnapshotDeps {
+  /**
+   * Trust material for the `integrity-anchors` check (anchor-evidence design §8 step 3): timestamp
+   * authority roots, Bitcoin block headers. **Strictly the verifier operator's own configuration.**
+   * This package ships none, so the default outcome for a well-formed proof is `present`, not
+   * `verified`; a chain validated solely against roots a bundle carried would re-import the
+   * self-run problem with extra ceremony.
+   */
+  readonly anchorTrust?: PublicBundleAnchorTrustMaterial;
+}
 
 /**
  * One semantically verified result bound to the exact authenticated bytes used
@@ -285,6 +317,54 @@ function verifyEvidenceNativeSignature(input: EvidenceNativeSignatureVerificatio
   }
 }
 
+/**
+ * The cold verifier's item-bank/source-manifest closure, over already-parsed canonical rows.
+ *
+ * Exported so the closure can be exercised directly. It has to be: a bundle whose cluster key is
+ * decoupled from its declared sources cannot be produced by this repository's own import path,
+ * because the importer's code-unit-least rule is strictly stronger than the membership rule below.
+ * This check exists for bundles produced by other implementations, so its test has to construct
+ * the rows rather than round-trip them through the importer.
+ */
+export function checkItemBankSourceClosure(
+  itemRows: readonly BinaryItemBankEntry[],
+  sourceRows: readonly BinarySourceManifestEntry[],
+): { readonly itemDigests: ReadonlySet<string> } {
+  const itemDigests = new Set<string>();
+  const coveredSourceDigests = new Set<string>();
+  for (const [index, row] of itemRows.entries()) {
+    const item = row.item;
+    const digest = `sha256:${sha256(canonicalJsonBytes(item))}`;
+    if (itemDigests.has(digest)) refuse("record-integrity", "item-bank.jsonl", "item bank contains duplicate payloads");
+    itemDigests.add(digest);
+    const itemSourceDigests = new Set<string>();
+    for (const descriptor of item.sources) {
+      const digestHex = descriptor.digest.sha256;
+      itemSourceDigests.add(`sha256:${digestHex}`);
+      coveredSourceDigests.add(`sha256:${digestHex}`);
+    }
+    // Membership only. The cluster key must name one of this item's own declared sources, or a
+    // bundle could ship provenance decoupled from the sources it claims to draw on. Deliberately
+    // NOT the code-unit-least rule and NOT the timestamp equality: both are enforced once, at
+    // import. Membership is a different property, so this is not a second enforcement point.
+    if (!itemSourceDigests.has(item.provenance.sourceCommitment)) {
+      refuse(
+        "record-integrity",
+        `item-bank.jsonl.${index + 1}.item.provenance.sourceCommitment`,
+        "item provenance sourceCommitment is not one of the item's declared sources",
+      );
+    }
+  }
+  // The covered set is derived from `sources` alone. Folding the cluster key in here would let a
+  // source row count as used when only a cluster key names it, weakening this exact-equality
+  // refusal against an unused source row.
+  const sourceDigests = sourceRows.map((row) => row.provenanceSha256);
+  if (!sameCanonical([...coveredSourceDigests].sort(), [...sourceDigests].sort())) {
+    refuse("record-integrity", "source-manifest.jsonl", "source manifest does not exactly cover item-bank provenance");
+  }
+  return { itemDigests };
+}
+
 /** Verifies a copied public bundle using one authenticated byte snapshot and only bundle-carried
  * public keys. No pathname is reopened after manifest authentication. */
 export async function verifyPublicBundleSnapshot(
@@ -317,6 +397,9 @@ export async function verifyPublicBundleSnapshot(
   const checks: PublicBundleVerificationCheck[] = ["manifest"];
   const manifestPaths = new Set(checked.manifest.files.map((file) => file.path));
   const isV4 = checked.manifest.format === BUNDLE_V4_FORMAT;
+  // The anchored closure is v2's graph plus `anchors/`, so it takes v2's mandatory member list; the
+  // binary qualification projection has its own later anchored allocation and is not this one.
+  const isV6 = checked.manifest.format === BUNDLE_V6_FORMAT;
   const mandatoryFiles = isV4 ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
@@ -336,6 +419,17 @@ export async function verifyPublicBundleSnapshot(
   if (manifestPaths.has("verification/cancel-requested.json")) expectedPaths.add("verification/cancel-requested.json");
   for (const path of manifestPaths) {
     if (/^native\/inspect\/[a-f0-9]{64}\.eval$/u.test(path)) expectedPaths.add(path);
+  }
+  // `anchors/<sha256>.bin` is allowlisted only by the closure version that defines it: an anchor
+  // member in a v2 or v4 bundle is a non-allowlisted file, exactly as it was before this format.
+  const anchorPaths: string[] = [];
+  if (isV6) {
+    for (const path of manifestPaths) {
+      if (/^anchors\/[a-f0-9]{64}\.bin$/u.test(path)) {
+        expectedPaths.add(path);
+        anchorPaths.push(path);
+      }
+    }
   }
   for (const path of manifestPaths) if (!expectedPaths.has(path)) refuse("record-integrity", path, `public bundle contains non-allowlisted file "${path}"`);
   for (const path of expectedPaths) if (!manifestPaths.has(path)) refuse("record-integrity", path, `public bundle closure is missing "${path}"`);
@@ -397,6 +491,57 @@ export async function verifyPublicBundleSnapshot(
   const staticBytes = read("static-bundle.json");
   if (!equalBytes(staticBytes, canonicalJsonBytes(exportStaticBundle(matrix, [report])))) {
     refuse("record-integrity", "static-bundle.json", "static bundle is not the exact platform metadata projection");
+  }
+
+  // ── integrity-anchors (anchor-evidence design §8) ──────────────────────────────────────────
+  //
+  // Evaluated here, before the claim is rebuilt, because an `invalid` anchor is affirmative
+  // evidence of substitution and must be the refusal a reader sees — not a downstream claim
+  // mismatch caused by it. Once nothing is invalid, the same bytes project the claim's anchors
+  // section through the same function the producer used.
+  let anchorReport: IntegrityAnchorsReport | undefined;
+  // Supplied to the claim rebuild only for the anchored closure, and then even when empty: an
+  // empty section and an omitted one are different claims, and §7.3's declared-but-absent bundle
+  // carries the first.
+  let claimAnchors: readonly import("./profile/anchor-claims.js").ClaimAnchor[] | undefined;
+  if (isV6) {
+    const anchorRecords = anchorPaths
+      .map((path) => {
+        const bytes = read(path);
+        const recordSha256 = path.slice("anchors/".length, -".bin".length);
+        if (sha256(bytes) !== recordSha256) {
+          refuse("record-integrity", path, "anchor record digest mismatch");
+        }
+        return { recordSha256, bytes };
+      });
+    anchorReport = evaluateIntegrityAnchors({
+      records: anchorRecords,
+      runSha256: identities.runSha256,
+      matrixSha256: identities.matrixSha256,
+      closeAt: run.closeAt,
+      declaredProfiles: readRunAnchorIntentExtension(run as unknown as Record<string, unknown>)?.providers ?? [],
+      ...(deps.anchorTrust === undefined ? {} : { trust: deps.anchorTrust }),
+    });
+    const firstInvalid = anchorReport.invalid[0];
+    if (firstInvalid !== undefined) {
+      refuse(
+        "record-integrity",
+        `anchors/${firstInvalid.recordSha256}.bin`,
+        `carried anchor is invalid: ${firstInvalid.reason ?? "the proof does not verify"}`,
+      );
+    }
+    try {
+      claimAnchors = deriveClaimAnchors({
+        records: anchorRecords,
+        runSha256: identities.runSha256,
+        matrixSha256: identities.matrixSha256,
+      });
+    } catch (cause) {
+      if (cause instanceof ClaimAnchorProjectionError) {
+        refuse("record-integrity", `anchors/${cause.recordSha256}.bin`, cause.message);
+      }
+      throw cause;
+    }
   }
 
   const assembly = parseAssembly(read("verification/assembly.jsonl"));
@@ -538,23 +683,7 @@ export async function verifyPublicBundleSnapshot(
     strictOrder(sourceRows.map((row) => row.provenanceSha256), "source-manifest.jsonl");
     strictOrder(admissionRows.map((row) => row.itemSha256), "admission-index.jsonl");
     const admittedByItem = new Map(verifiedAdmission.accepted.map((entry) => [entry.itemSha256, entry]));
-    const itemDigests = new Set<string>();
-    const usedProvenance = new Set<string>();
-    for (const [index, row] of itemRows.entries()) {
-      const item = row.item;
-      const digest = `sha256:${sha256(canonicalJsonBytes(item))}`;
-      if (itemDigests.has(digest)) refuse("record-integrity", "item-bank.jsonl", "item bank contains duplicate payloads");
-      itemDigests.add(digest);
-      const provenance = item.provenance;
-      for (const descriptor of provenance) {
-        const digestHex = descriptor.digest.sha256;
-        usedProvenance.add(`sha256:${digestHex}`);
-      }
-    }
-    const sourceDigests = sourceRows.map((row) => row.provenanceSha256);
-    if (!sameCanonical([...usedProvenance].sort(), [...sourceDigests].sort())) {
-      refuse("record-integrity", "source-manifest.jsonl", "source manifest does not exactly cover item-bank provenance");
-    }
+    const { itemDigests } = checkItemBankSourceClosure(itemRows, sourceRows);
     const expectedAdmissions = verifiedAdmission.accepted.map((entry) => ({
       admissionManifestSha256: verifiedAdmission!.manifestSha256,
       itemSha256: entry.itemSha256,
@@ -599,7 +728,7 @@ export async function verifyPublicBundleSnapshot(
       armId: string;
       instrumentSha256: string;
       promptTemplateSha256: string;
-      model: "gpt-5.6-luna";
+      model: AcceptedJudgeModelId;
       generation: ReturnType<typeof parseBinaryJudgmentInstrument>["model"]["generation"];
     }> = [];
     for (const entry of qualification.arms) {
@@ -661,6 +790,25 @@ export async function verifyPublicBundleSnapshot(
       refuse("record-integrity", "evidence-closure", "binary runtime selection arms differ from qualification and Run pins");
     }
     addRole(expectedRoles, binarySelectionRecord.sha256, "runtime-selection");
+    if (binarySelection.snapshotProbeSha256 !== undefined) {
+      const probeHex = binarySelection.snapshotProbeSha256.slice("sha256:".length);
+      const probeBytes = records.get(probeHex);
+      if (probeBytes === undefined) refuse("record-integrity", "evidence-closure", `snapshot-serving probe ${binarySelection.snapshotProbeSha256} is missing`);
+      const probe = parseRecord(probeBytes, BinaryJudgmentSnapshotProbeSchema, `records/${probeHex}.bin`);
+      requireCanonical(probeBytes, probe, `records/${probeHex}.bin`);
+      // This is the cold-verify SECOND COPY of the bind-time rule (spec §1.5 rule 4), not a
+      // second enforcement point (§0.5): a cold verifier re-derives from bytes without trusting
+      // the producer, which is the same reason this package already carries second copies of
+      // other producer-side rules. Freshness (§1.5 rule 3) is deliberately NOT re-checked here —
+      // it scopes to bind, where the bind clock exists.
+      if (!instruments.some((entry) => entry.model === probe.requestedModel)) {
+        refuse("record-integrity", "evidence-closure", "snapshot-serving probe model is not the model of any bound arm");
+      }
+      if (probe.outcome !== "serving") {
+        refuse("record-integrity", "evidence-closure", "snapshot-serving probe outcome is not serving");
+      }
+      addRole(expectedRoles, probeHex, "snapshot-probe");
+    }
     const reviewerBindingMap = new Map<string, string>();
     for (const entry of verifiedAdmission.reachableRecords
       .filter((candidate) => candidate.roles.includes("human-review-verdict"))) {
@@ -1457,8 +1605,12 @@ export async function verifyPublicBundleSnapshot(
       ? { additionalLimitations: INSPECT_SEPARATE_ASSURANCE_LIMITATIONS }
       : {}),
     ...(assembly.header.rehearsal === undefined ? {} : { rehearsal: assembly.header.rehearsal }),
+    ...(claimAnchors === undefined ? {} : { anchors: claimAnchors }),
   });
   checks.push("claim-consistency");
+  // Always present for this closure version, and never for any earlier one: an anchored bundle
+  // whose anchors were stripped is a closure failure above, not a shorter check list here.
+  if (isV6) checks.push("integrity-anchors");
 
   const dissentCellKeys = assembly.cells
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
@@ -1516,13 +1668,15 @@ export async function verifyPublicBundleSnapshot(
       checks,
       ...identities,
       ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
+      ...(anchorReport === undefined ? {} : { anchors: anchorReport }),
       ...(qualification === undefined ? {} : {
         qualification: {
           publicationGrade: qualification.publicationGrade,
           truthAdmission: qualification.truthAdmission,
           candidateClasses: qualification.candidateClasses,
           strata: qualification.strata,
-          armCount: 4 as const,
+          // Derived, not declared (spec §1.6 rule 4): a count that is a constant is not a count.
+          armCount: qualification.arms.length,
           itemCount: qualification.items.length,
           exclusionCount: qualification.exclusions.length,
         },

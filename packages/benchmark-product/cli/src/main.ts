@@ -22,6 +22,7 @@ import {
   type ColophonBuildMetadata,
   type RuntimeTarget,
 } from "./build-metadata.js";
+import { firstCommand, usesPrimaryWrapperHelp } from "./help-routing.js";
 
 export const USAGE = `Colophon — Publish benchmark claims people can check.
 
@@ -34,6 +35,7 @@ Primary commands:
   colophon import item-bank ...    Import admitted binary-judgment item manifests
   colophon bundle verify ...       Verify through the full product
   colophon help --advanced         Show the explicit lifecycle commands
+  colophon method --help           Named suites, --host keys, and --n
 
 No account, API key, funds, or Docker are needed for the bundled sample.
 `;
@@ -144,7 +146,7 @@ export function writeQuickstartCompanions(
     flag: "wx",
     mode: 0o600,
   });
-  writeFileSync(join(outputRoot, "NEXT-STEPS.md"), `# Your Colophon sample\n\nThe bundle in \`./bundle\` passed all six verification checks. Nothing was uploaded.\n\nVerify it again without the full product:\n\n\`\`\`sh\nnpx @colophon-claims/verify@1 ./bundle\n\`\`\`\n\nUse your own work:\n\n\`\`\`sh\ncolophon open\n\`\`\`\n\nReal agent arms use credentials you explicitly grant and may make paid provider calls. Colophon shows that boundary before launch.\n`, {
+  writeFileSync(join(outputRoot, "NEXT-STEPS.md"), `# Your Colophon sample\n\nThe bundle in \`./bundle\` passed all six verification checks. Nothing was uploaded.\n\nVerify it again without the full product:\n\n\`\`\`sh\nnpx @colophon-claims/verify@0.1 ./bundle\n\`\`\`\n\nUse your own work:\n\n\`\`\`sh\ncolophon open\n\`\`\`\n\nReal agent arms use credentials you explicitly grant and may make paid provider calls. Colophon shows that boundary before launch.\n`, {
     encoding: "utf8",
     flag: "wx",
     mode: 0o600,
@@ -316,8 +318,10 @@ export interface ColophonCliContext {
 export async function runColophonCli(argv: readonly string[], context: ColophonCliContext): Promise<CliResult> {
   const json = argv.includes("--json");
   try {
-    // Help is side-effect free even when it follows a command that normally runs work.
-    if (argv.includes("--help")) return result(0, USAGE);
+    if (usesPrimaryWrapperHelp(argv)) {
+      const command = firstCommand(argv);
+      return result(0, command === "help" && argv.includes("--advanced") ? CORE_USAGE : USAGE);
+    }
     if (argv.length === 0) return runDemo([], context.cwd, context.now(), context.progress, context.interactive ?? false, context.agentDataDir, context.buildMetadata, context.runtimeTarget);
     if (argv[0] === "demo") {
       const options = argv.slice(1);
@@ -330,29 +334,34 @@ export async function runColophonCli(argv: readonly string[], context: ColophonC
       return runOpen(options, context.cwd, context.agentDataDir, context.progress);
     }
     if (argv[0] === "help") {
-      const options = argv.slice(1);
-      validateTopLevelOptions(options, { boolean: ["advanced"] });
-      return result(0, has(options, "advanced") ? CORE_USAGE : USAGE);
+      const options = argv.slice(1).filter((token) => token !== "--json");
+      if (options.length === 0) return result(0, USAGE);
+      if (options.length === 1 && options[0] === "--advanced") return result(0, CORE_USAGE);
+      return runCoreFromPublicCli(argv, context);
     }
 
-    const runtimeHost = createDefaultBenchmarkRuntimeHost({
-      openAI: { keyFilePath: () => process.env.BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE },
-      agentDataDir: context.agentDataDir,
-    });
-    return runCoreCli(argv, {
-      cwd: context.cwd,
-      clock: () => context.now().toISOString(),
-      runtimeHost,
-      agentDataDir: context.agentDataDir,
-      progress: context.progress,
-      ...(context.interactive === true
-        ? {
-            subscriptionLogin: context.subscriptionLogin
-              ?? (async (dataDir: string, profile: AgentProfile) => captureQualifiedSubscriptionLogin(dataDir, profile)),
-          }
-        : {}),
-    });
+    return runCoreFromPublicCli(argv, context);
   } catch (cause) {
     return renderTopLevelFailure(cause, json);
   }
+}
+
+function runCoreFromPublicCli(argv: readonly string[], context: ColophonCliContext): Promise<CliResult> {
+  const runtimeHost = createDefaultBenchmarkRuntimeHost({
+    openAI: { keyFilePath: () => process.env.BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE },
+    agentDataDir: context.agentDataDir,
+  });
+  return runCoreCli(argv, {
+    cwd: context.cwd,
+    clock: () => context.now().toISOString(),
+    runtimeHost,
+    agentDataDir: context.agentDataDir,
+    progress: context.progress,
+    ...(context.interactive === true
+      ? {
+          subscriptionLogin: context.subscriptionLogin
+            ?? (async (dataDir: string, profile: AgentProfile) => captureQualifiedSubscriptionLogin(dataDir, profile)),
+        }
+      : {}),
+  });
 }

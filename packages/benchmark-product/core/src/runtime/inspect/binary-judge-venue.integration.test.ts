@@ -72,8 +72,11 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
+// binary-judgment task profile 2.0: the 1.0 oracle is superseded (see
+// task-execution/profiles/fixtures/manifest.sha256.json errata) because its payload carries the
+// 1.0 array-shaped `provenance` and no longer validates against `BinaryJudgmentPayloadSchema`.
 const oracle = JSON.parse(await readFile(new URL(
-  "../../../../../task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings.json",
+  "../../../../../task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings-profile-2.json",
   import.meta.url,
 ), "utf8")) as {
   input: { readonly payload: BinaryJudgmentPayload; readonly instrument: BinaryJudgmentInstrument };

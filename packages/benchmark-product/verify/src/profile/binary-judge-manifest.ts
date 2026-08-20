@@ -1,7 +1,11 @@
 import { z } from "zod";
 import {
+  ACCEPTED_JUDGE_MODEL_IDS,
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
   BinaryJudgmentGenerationSchema,
+  isDatedSnapshotJudgeModel,
+  judgeGenerationProfile,
+  JUDGE_MODEL_PROFILES,
 } from "@jinn-network/task-execution-profiles";
 import { compareCodeUnitStrings } from "@jinn-network/task-execution-protocol";
 
@@ -25,8 +29,22 @@ const Sha256DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 export const InspectBinaryJudgeArmSchema = z.strictObject({
   armId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
   instrumentSha256: Sha256DigestSchema,
-  model: z.literal("gpt-5.6-luna"),
+  model: z.enum(ACCEPTED_JUDGE_MODEL_IDS),
   generation: BinaryJudgmentGenerationSchema,
+}).superRefine((arm, ctx) => {
+  // The third parent-level refinement spec §1.3 requires. The generation union cannot carry its
+  // own discriminator, and here the sibling `model` key lives on this arm object, so the arm is
+  // the parent. Without this, the permissive union alone would admit a reasoning generation block
+  // on a dated snapshot (or vice versa); this is what closes it.
+  const modelProfile = JUDGE_MODEL_PROFILES[arm.model];
+  const generationProfile = judgeGenerationProfile(arm.generation);
+  if (generationProfile !== modelProfile) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["generation"],
+      message: `generation must match the ${modelProfile} profile for model ${arm.model}`,
+    });
+  }
 });
 export type InspectBinaryJudgeArm = z.infer<typeof InspectBinaryJudgeArmSchema>;
 
@@ -61,6 +79,13 @@ export const InspectBinaryJudgeSelectionManifestSchema = z.strictObject({
     location: z.literal("submission-effective-requirements"),
   }),
   arms: z.array(InspectBinaryJudgeArmSchema).min(2),
+  // Optional (spec §1.5 rule 2): required when any bound arm's model is a dated snapshot,
+  // forbidden otherwise. This selection manifest's digest already flows into
+  // `draft.spec.evaluationRuntime.selectionManifestSha256` and from there into the sealed Run at
+  // lock, so the probe is bound into the run's identity with no new plumbing — it is a lock input
+  // by construction. Because the field is optional and absent on every existing selection, every
+  // existing sealed selection stays byte-identical (§0.4).
+  snapshotProbeSha256: Sha256DigestSchema.optional(),
 }).superRefine((manifest, context) => {
   const armIds = manifest.arms.map((arm) => arm.armId);
   if (new Set(armIds).size !== armIds.length) {
@@ -77,6 +102,21 @@ export const InspectBinaryJudgeSelectionManifestSchema = z.strictObject({
   const generation = JSON.stringify(manifest.arms[0]?.generation);
   if (manifest.arms.some((arm) => JSON.stringify(arm.generation) !== generation)) {
     context.addIssue({ code: "custom", path: ["arms"], message: "all arms must share one identical generation block" });
+  }
+  const requiresProbe = manifest.arms.some((arm) => isDatedSnapshotJudgeModel(arm.model));
+  if (requiresProbe && manifest.snapshotProbeSha256 === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["snapshotProbeSha256"],
+      message: "snapshotProbeSha256 is required when any bound arm's model is a dated snapshot",
+    });
+  }
+  if (!requiresProbe && manifest.snapshotProbeSha256 !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["snapshotProbeSha256"],
+      message: "snapshotProbeSha256 is forbidden unless a bound arm's model is a dated snapshot",
+    });
   }
 });
 export type InspectBinaryJudgeSelectionManifest = z.infer<

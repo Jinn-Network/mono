@@ -81,8 +81,8 @@ describe("InspectSelectionManifestSchema", () => {
     }).toEqual({
       manifest: "93408728fc4831f52529f7b229e3e3c60864a87450395dc9057b7379e4a129b6",
       evaluationSpec: "6747bb8a60f628c93b0579d585667351c127cee191ff8afb7bd03b532af0c400",
-      task: "a7ad2ec3b2ac2bf8d6b0b7e153b306f8cd1d48d018c5a534596e92ed6c572870",
-      benchmark: "cc7b46722d363fb027c6316d911bc4b436b4552eb5847e121f47af50157d38d5",
+      task: "3046d2d06470c73aec06888ba9990f952159ad36cc4b28f0d876a7a32b9b374e",
+      benchmark: "2c5196c7f7ab4c9e1910a982727d10938487e104ce1326fc601934b66e1ed42b",
     });
   });
 

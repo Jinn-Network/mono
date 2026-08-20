@@ -7,28 +7,41 @@ export const PUBLIC_BUNDLE_VERIFICATION_CHECKS = [
   "claim-consistency",
 ] as const;
 
-/** V2 claim-package/1 literals are a frozen part of existing bundle bytes. */
-export const PUBLIC_BUNDLE_VERIFIER_MAJOR = "1" as const;
-export const PUBLIC_BUNDLE_V4_VERIFIER_MAJOR = "2" as const;
+/** First public npm line. 0.x does not promise compatibility across minors. */
+export const PUBLIC_BUNDLE_VERIFIER_MAJOR = "0.1" as const;
+export const PUBLIC_BUNDLE_V4_VERIFIER_MAJOR = "0.1" as const;
 
 /** Exact producer-side verifier for byte-for-byte reproduction. */
 export const PUBLIC_BUNDLE_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@1.0.0 <bundle-dir>" as const;
+  "npx @colophon-claims/verify@0.1.0 <bundle-dir>" as const;
 
-/** Compatible major line for fixes that preserve this bundle-format contract. */
+/** Compatible 0.1.x line for fixes that preserve this bundle-format contract. */
 export const PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@1 <bundle-dir>" as const;
+  "npx @colophon-claims/verify@0.1 <bundle-dir>" as const;
 
-export const PUBLIC_BUNDLE_V4_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@2.0.0 <bundle-dir>" as const;
+export const PUBLIC_BUNDLE_V4_VERIFICATION_COMMAND = PUBLIC_BUNDLE_VERIFICATION_COMMAND;
 export const PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@2 <bundle-dir>" as const;
-export const PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@2.0.0 <bundle-dir>" as const;
+  PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
+export const PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND = PUBLIC_BUNDLE_VERIFICATION_COMMAND;
 export const PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@2 <bundle-dir>" as const;
+  PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
+export const PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND = PUBLIC_BUNDLE_VERIFICATION_COMMAND;
+export const PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND =
+  PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
 
-/** Format-scoped commands keep v2 reproduction literals immutable while v4 uses reader2. */
+/**
+ * The anchored closure's check list (anchor-evidence design §8): the six frozen checks plus
+ * `integrity-anchors`, which is **always present** for this format — an anchored bundle whose
+ * anchors were stripped is a closure failure, not a shorter list. Stated as a per-format constant
+ * rather than as an append at the call site, the same way the evidence-native profile states
+ * `EVIDENCE_NATIVE_BUNDLE_V5_CHECKS`.
+ */
+export const PUBLIC_BUNDLE_V6_CHECKS = [
+  ...PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+  "integrity-anchors",
+] as const;
+
+/** Every current format stamps the same first public 0.1 line. */
 export const PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS = {
   [BUNDLE_FORMAT]: {
     command: PUBLIC_BUNDLE_VERIFICATION_COMMAND,
@@ -42,5 +55,9 @@ export const PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS = {
     command: PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
     compatibleCommand: PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   },
+  [BUNDLE_V6_FORMAT]: {
+    command: PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
+    compatibleCommand: PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
+  },
 } as const;
-import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT } from "./manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, BUNDLE_V6_FORMAT } from "./manifest.js";

@@ -25,9 +25,17 @@ The spawned CLI loads registrations and the parser allowlist only from the host-
 Result Evaluation Evidence payload (`buildResultEvaluationPayload`) and publishes it
 **unsigned** to `out/verdict`. The launcher grants no `secretForwards` (`src/launcher.ts`), so
 the sandbox never holds signing key material, and the host-side composition layer refuses any
-grant on the evaluator-sealed input. Signing happens on the **host**: it re-serializes the
-unsigned statement, confirms the reserialized bytes are byte-identical to what the sandbox
-wrote (`client/src/daemon/native-evaluator-composition.ts`, fail-closed on mismatch), and only
-then seals a DSSE envelope with the evaluator Agent's key. `src/sign.ts` (the in-executor
-`secrets/`-file DSSE signer) and its exported `makeSecretsSigner` are unused by this flow; see
-the local-execution-backend design §10.4 for the full reversal rationale.
+grant on the evaluator-sealed input. Signing happens on the **host**: it confirms the sandbox's
+bytes are the attestation family's own exact spelling — `canonicalAttestationJsonBytes`, the
+encoder `buildResultEvaluationPayload` writes with — and then seals a DSSE envelope over *those
+exact bytes* with the evaluator Agent's key
+(`operator/src/daemon/native-evaluator-composition.ts`, fail-closed on mismatch), so the
+signature covers what the evaluator produced rather than a re-serialization of it. `src/sign.ts`
+(the in-executor `secrets/`-file DSSE signer) and its exported `makeSecretsSigner` are unused by
+this flow; see the local-execution-backend design §10.4 for the full reversal rationale.
+
+**Amended 2026-08-12:** the host previously re-serialized the statement with trust-core's compact
+JCS encoder and required that re-serialization to byte-match the sandbox's file. Because this
+harness writes the attestation family's pretty spelling, the two encoders could never agree and
+the guard refused every real harness run. The host now checks the producer's own spelling and
+signs the sandbox's exact bytes.

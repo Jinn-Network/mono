@@ -8,7 +8,7 @@ import { browserCommand, runColophonCli, writeQuickstartCompanions } from "./mai
 
 const TEST_BUILD: ColophonBuildMetadata = {
   kind: BUILD_METADATA_KIND,
-  packageVersion: "1.0.0",
+  packageVersion: "0.1.0",
   sourceCommit: "b".repeat(40),
   qualifiedTargets: ["darwin/arm64", "linux/x64"],
 };
@@ -62,6 +62,31 @@ describe("Colophon install surface", () => {
     const duplicateJson = await runColophonCli(["demo", "--json", "--json"], context);
     expect(duplicateJson).toMatchObject({ exitCode: 2, stderr: "" });
     expect(JSON.parse(duplicateJson.stdout)).toMatchObject({ ok: false, error: { code: "invalid-invocation" } });
+  });
+
+  test("forwards method --help and help method to core verb help", async () => {
+    const methodHelp = await runColophonCli(["method", "--help"], context);
+    expect(methodHelp.exitCode).toBe(0);
+    expect(methodHelp.stdout).toContain("terminal-bench-2.1");
+    expect(methodHelp.stdout).toContain("--host");
+    expect(methodHelp.stdout).not.toContain("colophon demo");
+
+    const helpMethod = await runColophonCli(["help", "method"], context);
+    expect(helpMethod.exitCode).toBe(0);
+    expect(helpMethod.stdout).toContain("terminal-bench-2.1");
+    expect(helpMethod.stdout).toContain("homemade");
+
+    const helpMethodFlag = await runColophonCli(["help", "method", "--help"], context);
+    expect(helpMethodFlag.exitCode).toBe(0);
+    expect(helpMethodFlag.stdout).toContain("terminal-bench-2.1");
+    expect(helpMethodFlag.stdout).not.toContain("colophon demo");
+  });
+
+  test("bare --help stays the primary install surface", async () => {
+    const answer = await runColophonCli(["--help"], context);
+    expect(answer.exitCode).toBe(0);
+    expect(answer.stdout).toContain("colophon demo");
+    expect(answer.stdout).not.toContain("terminal-bench-2.1");
   });
 
   test("keeps malformed JSON-mode invocation failures machine readable", async () => {

@@ -1,5 +1,13 @@
 # Inspect runtime adapter
 
+Inspect is a **framework a sealed method may name**, not a Colophon product
+mode and not an alternative to Harbor
+([DR-2026-08-18-f](../../log/decisions/2026-08-18-colophon-method-cli.md)).
+They compose in the world. Colophon `adapterId` is how a cell is spawned.
+`colophon inspect` is **draft inspect** (resolve arms, benchmark, and
+assurance). Binding an Inspect-shaped document is `colophon method` with a
+file operand, not a rival `runtime inspect` product.
+
 Inspect is an optional evaluation runtime for the Benchmark Product. It is not
 a dependency of the native runtime and it is not a second product lifecycle.
 Both runtimes use the same draft, quote, lock, launch, accounting, Report,
@@ -25,9 +33,31 @@ That per-cell grain is the evidence-atom rule: each Execution Evidence record
 keeps an exclusive native `.eval` log, not a Harbor-copy habit. Selecting a
 supported Inspect **task** is the integration; bringing a completed Inspect
 evaluation is not ([DR-2026-08-17](../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)).
-Batching many samples into one Inspect eval waits on a specified per-sample
+Batching many samples into one Inspect evaluation waits on a specified per-sample
 artifact rule (or an honest shared-log Collection-input rule) and is not
 scheduled here.
+
+## Official suite protocol (Inspect eval)
+
+Inspect task (`colophon runtime inspect select`) stays the first-slice
+integration: select a supported Inspect task, lock a comparison, run one cell.
+It does not write `protocol: "inspect-eval"` and cannot become
+`leaderboardSubmitReady` under that name. `colophon inspect` is draft inspect,
+not either Inspect runtime door.
+
+Inspect eval is a named official-suite protocol
+([DR-2026-08-18-e](../../log/decisions/2026-08-18-inspect-as-specified.md),
+issue [#2745](https://github.com/Jinn-Network/mono/issues/2745)). The operator
+picks the eval; Colophon locks pin, sample catalog, specified epochs, Task-
+default solver, scorers, and native analysis. Wearing the name is not wearing
+GAIA, Cybench, or SWE-bench Verified. Claim of record remains the Colophon
+bundle. Colophon does not place an Inspect Hub row.
+
+Coverage enums are reused: `one_task` | `ten_task` | `full` | `custom` mean
+lexicographic first 1 / first 10 / all / custom **sample ids** from the sealed
+catalog. For this protocol `one_task` is one sample. Specified Inspect epochs
+map onto Jinn replicates; Inspect `--epochs` stays refused inside the worker.
+Eval-set batching remains deferred. Adapter id stays `"inspect"`.
 
 The optional OCI host narrows this further to Python `3.11.9`, Inspect Evals
 `0.16.0`, OpenAI SDK `2.53.0`, `linux/amd64`, and one exact `sampleId`. It can
@@ -87,8 +117,9 @@ continue to report isolation as `unverifiable`.
 
 ## Binary-judgment instrument binding
 
-`runtime inspect bind-judge` is an additive, versioned path for the
-`network.jinn.task-profile.binary-judgment` profile. It does not change the
+A judge binding file is a complete method document, bound by passing it as the
+`method` operand. It is a versioned path for the
+`network.jinn.task-profile.binary-judgment` profile and it does not change the
 existing Inspect selection v1–v4 contracts. Intake must already have imported
 one shared, arm-neutral benchmark. The binding operation leaves those Tasks
 unchanged and puts one exact scalar
@@ -194,11 +225,10 @@ image, and already-sealed instruments:
 Bind it only after the benchmark Tasks and instruments have been sealed:
 
 ```bash
-benchmark-product runtime inspect bind-judge \
+benchmark-product method /absolute/path/to/inspect-judge-binding.json \
   --workspace /absolute/path/to/workspace \
   --principal sponsor-1 \
-  --draft my-draft \
-  --file /absolute/path/to/inspect-judge-binding.json
+  --draft my-draft
 ```
 
 The launcher reconstructs and digest-checks the canonical semantic request from
@@ -317,18 +347,23 @@ preflight validates Docker, the digest-pinned image, dataset bytes, runtime
 identity, broker health, and credential-file metadata without making a model
 request. Preview and official launch make real calls.
 
-Then select it on a mutable draft:
+Then bind it on a mutable draft (`method` takes a complete Inspect document;
+`--slice` / `--host` are catalog-id flags and are refused on a file):
 
 ```bash
-benchmark-product runtime inspect select \
+benchmark-product method \
   --workspace /absolute/path/to/workspace \
   --principal sponsor-1 \
   --draft my-draft \
-  --file /absolute/path/to/inspect-selection.json
+  /absolute/path/to/inspect-selection.json
 ```
 
-The web product exposes the same `selectInspectEvaluation` operation as a raw
-selection form. It does not provide a task, solver, scorer, or sandbox editor.
+The web product exposes `method.bind` as two forms: a catalog suite bind
+(suite id, host JSON, slice / n / ids) and a raw Inspect-document form. It
+does not provide a task, solver, scorer, or sandbox editor. Derived export
+stays unavailable in the browser (local job copy). `colophon method --help`
+names catalog `--host` keys; binding an Inspect file still refuses `--host`
+([DR-2026-08-19](../../log/decisions/2026-08-19-colophon-method-cli-discover.md)).
 
 An unmodified task with parallel Inspect scorers uses the mutually exclusive
 `scoring` form. Each projection selects one scorer value, or one exact top-level
@@ -468,15 +503,20 @@ arbitrary sandbox providers, and runtime-supplied sandbox configuration are
 refused rather than coerced. A task that does not declare the supported Docker
 sandbox cannot opt into it merely through selection JSON.
 
-Inspect epochs are intentionally not configurable. One Jinn repetition is one
-expected cell and invokes Inspect with one epoch. This prevents one sample from
-being counted once as an Inspect epoch and again as a Jinn repetition.
-Parallel Inspect scorers are supported when their resolved public names are
-distinct. Inspect executes them unchanged and retains their raw values,
-answers, explanations, metrics, and reductions only in the native log. An
-Inspect `multi_scorer()` remains one native scorer: its own reduction runs once
-inside Inspect and Jinn never reapplies it. Inspect metrics and epoch reducers
-are pinned native analysis configuration, not per-cell Jinn measurements.
+Inspect epochs are intentionally not configurable **inside Inspect**. One Jinn
+repetition is one expected cell and invokes Inspect with one epoch. Specified
+Inspect eval epochs are Jinn `replicates`, not an Inspect inner loop.
+This prevents one sample from being counted once as an Inspect epoch and again
+as a Jinn repetition. Parallel Inspect scorers are supported when their resolved
+public names are distinct. Inspect executes them unchanged and retains their raw
+values, answers, explanations, metrics, and reductions only in the native log.
+An Inspect `multi_scorer()` remains one native scorer: its own reduction runs
+once inside Inspect and Jinn never reapplies it. Inspect metrics and epoch
+reducers are pinned native analysis configuration, not per-cell Jinn
+measurements. A suite metric of epoch-reduce per sample then sample-aggregate
+remains deferred: the reducer is sealed with the selection but nothing computes
+that number yet, and the headline stays wilson@1 over the Boolean cells. Do not
+read the Boolean cell-vote rate as the official Inspect score.
 
 Jinn projections are narrower. Each selected output becomes one Boolean
 measurement by type-strict comparison with its sealed `passValue`; the sealed
@@ -575,13 +615,22 @@ code cannot choose an endpoint. Every attempt removes its worker, broker,
 private network, capability volume, and credential volume, including on
 cancellation.
 
-The broker accepts only ordered developer/user text and the sealed Luna
-configuration. It refuses tools, images, audio, assistant/tool history,
-structured output, multiple choices, background or streaming responses,
-fallbacks, persisted conversation, metadata, and prompt-cache identifiers. It
-allows one concurrent call and one total call per cell, caps output at 128
-tokens and input at 32 KiB, times out at 120 seconds, and disables both OpenAI
-SDK and Inspect retries. A Jinn resume is a distinct execution attempt.
+The broker accepts only ordered developer/user text and the sealed generation
+configuration of one of two closed judge-model profiles. `reasoning-2026-08`
+accepts the model `gpt-5.6-luna` with a reasoning effort and a 128-token output
+cap. `dated-snapshot-sampling` accepts a dated snapshot drawn from a closed
+literal set, currently `gpt-4o-mini-2024-07-18` alone, at the literal integer
+temperature 0 with a 512-token output cap. The profile is a total function of
+the requested model, and the two generation shapes are mutually exclusive: a
+reasoning block on a dated snapshot, a temperature on the reasoning model, and a
+block carrying keys from both are all refused. Adding a model to either set is a
+code change with a test, never configuration and never a caller-supplied string.
+The broker refuses tools, images, audio, assistant/tool history, structured
+output, multiple choices, background or streaming responses, fallbacks,
+persisted conversation, metadata, and prompt-cache identifiers. It allows one
+concurrent call and one total call per cell, caps output at its profile's token
+cap and input at 32 KiB, times out at 120 seconds, and disables both OpenAI SDK
+and Inspect retries. A Jinn resume is a distinct execution attempt.
 
 The broker uses Inspect's public `ModelAPI` extension and returns Inspect's
 public `(ModelOutput, ModelCall)` form. The genuine `.eval` transcript therefore
@@ -593,9 +642,23 @@ ChatGPT/Codex subscription authentication remains unsupported. Inspect SWE's
 Codex bridge does not reuse a local ChatGPT subscription, and mounting Codex
 state into task code is outside this security contract.
 
-Luna currently exposes only the mutable alias `gpt-5.6-luna`, not a dated
-snapshot. Jinn locks that identifier and rejects a different returned model,
-but cannot prove that OpenAI did not update weights behind an unchanged alias.
+Model identity is disclosed per profile, and the disclosure differs because the
+underlying fact differs. Luna exposes only the mutable alias `gpt-5.6-luna`, not
+a dated snapshot: Jinn locks that identifier and rejects a different returned
+model, but cannot prove that OpenAI did not update weights behind an unchanged
+alias, so every `reasoning-2026-08` observation carries the `mutable-model-alias`
+limitation. A `dated-snapshot-sampling` observation carries no limitation,
+because the mutable-alias caveat is a real limitation of an undated identifier
+and a false claim about a dated one. In its place the observation records the
+snapshot-identity check: the requested model and the model the provider actually
+resolved are recorded as two independently sourced fields, and a run whose
+provider answers with a different model refuses rather than recording the
+provider's answer as though it had been the request. A run that pins a dated
+snapshot additionally requires a pre-run snapshot-serving probe, sealed and
+bound into the run's identity through the runtime selection manifest, which
+refuses at bind if the snapshot is not being served, if the probe post-dates the
+bind clock, or if it is older than 24 hours.
+
 See the official [Luna model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna),
 [latest-model guidance](https://developers.openai.com/api/docs/guides/latest-model),
 and [synchronous cancellation/background behavior](https://developers.openai.com/api/docs/guides/background).

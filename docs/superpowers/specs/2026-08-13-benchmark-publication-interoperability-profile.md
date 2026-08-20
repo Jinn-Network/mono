@@ -4,9 +4,9 @@
 |---|---|
 | **Version** | 0.4 |
 | **Date** | 2026-08-13 |
-| **Amended** | 2026-08-17 — direct-mode job grain ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); official suite protocol and one Job per arm ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)); no §8.4 marketplace rewrite |
+| **Amended** | 2026-08-18 — Colophon method operand ([DR-2026-08-18-f](../../../log/decisions/2026-08-18-colophon-method-cli.md)); Inspect eval named suite protocol ([DR-2026-08-18-e](../../../log/decisions/2026-08-18-inspect-as-specified.md)); DeepSWE v1.1 named protocol ([DR-2026-08-18-d](../../../log/decisions/2026-08-18-deep-swe-v1.1-official-suite.md)); APEX-SWE-dev official suite ([DR-2026-08-18-c](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md)); APEX-Agents official suite ([DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md)); Terminal-Bench 3.0 as a second named Harbor-family protocol ([DR-2026-08-18-b](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)); 2026-08-17 — direct-mode job grain ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); official suite protocol and one Job per arm ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)); SWE-bench Verified official suite ([DR-2026-08-17-e](../../../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)); no §8.4 marketplace rewrite |
 | **Shape** | interoperability profile and design amendment |
-| **Status** | draft; revised after independent design review; §8.3 grain note added 2026-08-17; §8.3 suite protocol added 2026-08-17 |
+| **Status** | draft; revised after independent design review; §8.3 grain note added 2026-08-17; §8.3 suite protocol added 2026-08-17; §8.3 Verified protocol added 2026-08-17; §8.3 APEX-Agents protocol added 2026-08-18; §8.3 APEX-SWE-dev protocol added 2026-08-18; §8.3 DeepSWE v1.1 protocol added 2026-08-18; §8.3 Inspect eval protocol added 2026-08-18 |
 | **Applies to** | any benchmarking product publishing through Jinn, including Colophon |
 | **Depends on** | [stack design principles](./2026-07-30-stack-design-principles.md), [benchmarking application](./2026-07-28-benchmarking-application-design.md), [record discovery](./2026-07-27-record-discovery-protocol-design.md), [evidence publication](./2026-07-25-evidence-publication-design.md), and [execution evidence](./2026-07-23-jinn-execution-evidence-protocol-design.md) |
 | **Companion research** | [Colophon, Harbor, and marketplace publication spike](../../spikes/2026-08-13-colophon-harbor-marketplace-publication.md) |
@@ -128,6 +128,7 @@ The profile follows the stack rule to compose existing standards before inventin
 | Discovery | Jinn Record Discovery source chains and facts profiles | publication ordering and new accounting facts |
 | Harbor execution | Harbor Task, Dataset, Trial, Job, and result/artifact layout | identity mapping and exact artifact retention |
 | Terminal-Bench | Terminal-Bench 2.1 through its official Harbor harness as a named suite protocol; Harbor's published migration mapping for legacy task packages; Terminal-Bench 2.0 one-task path remains a distinct non-2.1 campaign | pin dataset content-hash revision; disclose coverage vs execution conformance; pin original and migrated material when converting |
+| DeepSWE | DeepSWE v1.1 through Pier 0.3.1.x driving mini-swe-agent on the git-pinned `tasks/` tree as a named suite protocol; Harbor 0.21 and Pier+native CLIs remain cousins | pin git commit SHA plus `tasks/` tree SHA; k≥4; disclose coverage vs execution conformance; Pier export is derived, not Hub |
 | Agent trajectory | Harbor's Agent Trajectory Interchange Format (ATIF) | reference it byte-exactly; do not translate it |
 | Test result detail | Harbor-produced CTRF where present | retain as native evidence; do not make it mandatory for all runtimes |
 
@@ -511,6 +512,12 @@ The reusable model records:
 - **venue** — where execution was commissioned, such as direct/self-run or open competition; and
 - **runtime** — how the accepted work was executed, such as Harbor, Inspect, or a native launcher.
 
+The `runtime` axis is an **adapter slot** (how a cell is spawned), not a product
+mode and not a UX fork ([DR-2026-08-18-f](../../../log/decisions/2026-08-18-colophon-method-cli.md)).
+Inspect and Harbor are frameworks a sealed method may name; they are not
+alternative Colophon doors. Official suite vs custom is the same kind of object:
+a method document. Wearing a suite name is conformance of that document.
+
 Do not add combined values such as `harbor-local` or `harbor-marketplace`. A Jinn marketplace
 operator may execute a claimed Submission as a Harbor Trial. The same task package may be run
 directly through Harbor without changing Benchmark identity.
@@ -591,15 +598,43 @@ and [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.
   completed job; folding a Job or eval-set into one Execution Evidence record; wearing an official
   suite name on a custom or cousin method.
 
-**Official suite protocol** (added 2026-08-17, [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)):
+**Official suite protocol** (added 2026-08-17, [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md); Terminal-Bench 3.0 added 2026-08-18, [DR-2026-08-18-b](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md); DeepSWE v1.1 added 2026-08-18, [DR-2026-08-18-d](../../../log/decisions/2026-08-18-deep-swe-v1.1-official-suite.md)):
 
 A publisher who wants to wear a suite name must lock that suite's protocol, not a Colophon-flavored
-cousin on the same tasks. The first named protocol is Terminal-Bench 2.1:
+cousin on the same tasks. Named Harbor-family protocols:
 
-- dataset `terminal-bench/terminal-bench-2-1` at the leaderboard content-hash revision;
+- Terminal-Bench 2.1 — dataset `terminal-bench/terminal-bench-2-1` at the leaderboard content-hash revision;
+- Terminal-Bench 3.0 — dataset `terminal-bench/terminal-bench` at the sealed Hub content-hash pin
+  (never `@latest`; Hub version string recorded beside the hash). TB 2.1, TB 2.0, SWE-bench Verified,
+  Inspect, and Frontier-Bench cannot wear `terminal-bench-3.0`.
+
+Both Terminal-Bench protocols share:
+
 - planned k ≥ 5 trials per selected task as visible replicates, not Harbor inner retry;
 - official env (timeout_multiplier unset or 1.0; no agent/verifier timeout or resource overrides);
 - ATIF trajectories required for Hub packaging.
+
+**DeepSWE v1.1**
+
+- local Harbor-format `tasks/` from `datacurve-ai/deep-swe` at git commit
+  `435ee89ec2f2e2289f33b0da4f992f0b7b7266b9` (`tasks/` tree `66df25a1b382017d0ae014d94cadb2698baaed48`);
+- Pier `0.3.1.x` (adapter id `pier`), agent `mini-swe-agent` only;
+- planned k ≥ 4 trials per selected task as visible replicates, not Pier inner retry;
+- official env (docker or modal; no resource or timeout overrides; 9000s wall-clock sanity bound);
+- ATIF trajectories and per-trial `reward.json` required for Datacurve-ready packaging.
+
+Harbor 0.21, Pier+Claude Code/Codex/gemini-cli/opencode, DeepSWE v1, and k=1 cannot wear this name.
+
+**Inspect eval** ([DR-2026-08-18-e](../../../log/decisions/2026-08-18-inspect-as-specified.md)):
+
+- operator-chosen Inspect eval locked as specified; `datasetId` is the resolved task name;
+- catalog grain is samples; `one_task` / `ten_task` / `full` / `custom` are lexicographic first 1 /
+  first 10 / all / custom sample ids from the sealed catalog (`one_task` = one sample here);
+- specified Inspect epochs map onto Jinn replicates; the worker stays `epochs: 1`;
+- solver is the Task default; `--solver` and `--limit` are not execution-conforming;
+- `leaderboard_submit_ready` means eval complete of the sealed catalog, not an Inspect Hub
+  row. Colophon does not place an Inspect Hub row. A derived Inspect View log bundle is not the
+  claim of record.
 
 Comparability is two-axis and must not be collapsed into one bit. Report v2 gains no new required
 fields. Bind a product-sealed `SuiteProtocolSelection` through the existing Run publication
@@ -607,20 +642,91 @@ extension's `registrationArtifacts`. Surface on the product claim package:
 
 - `execution_conformance` — trial settings match the protocol for the selected tasks;
 - `coverage` — `one_task` | `ten_task` | `full` | `custom`;
-- `leaderboard_submit_ready` — full coverage, execution conformance, ≥5 trials on every dataset
-  task accounted after collect as judged or Harbor-error 0, and ATIF bytes on the retained Harbor
-  job. Quote-time method bits and a job `result.json` are not enough.
+- `leaderboard_submit_ready` — full coverage, execution conformance, the protocol's k on every
+  dataset task accounted after collect as judged or engine-error 0, and the protocol's retained
+  evidence (ATIF bytes on the retained job for the Harbor family; for Inspect eval, Matrix
+  replicates equal to specified epochs with every sample × k judged or unscorable). Quote-time
+  method bits and a job `result.json` are not enough. Limitations sentences are protocol-specific
+  (DeepSWE copy must not say Terminal-Bench or SWE-bench, Inspect copy must say neither, and so on).
 
 Named slices (lexicographic first 1 / first 10 / all from the pinned snapshot) are how a publisher
 runs cheaply. A protocol-faithful slice is not a leaderboard-complete run. When not
-`leaderboard_submit_ready`, Report `limitations[]` carries a canonical sentence.
+`leaderboard_submit_ready`, Report `limitations[]` carries a canonical sentence. Canonical
+Inspect eval limitation copy names Inspect eval, not Terminal-Bench.
 
-**Hub export** is a derived Harbor-shaped artifact of a Colophon-accounted run, not the claim of
-record. The bundle remains what a third party checks. `leaderboard_submit_ready` may emit an
-uploadable job plus submit instructions. A named slice may retain or upload the job for inspection
-and must not be packaged as a leaderboard submission. Custom or unverifiable runs refuse
+**Hub export** is a derived Harbor-shaped artifact of a Colophon-accounted Terminal-Bench 2.1 run,
+not the claim of record. The bundle remains what a third party checks. `leaderboard_submit_ready`
+may emit an uploadable job plus submit instructions. A named slice may retain or upload the job for
+inspection and must not be packaged as a leaderboard submission. Custom or unverifiable runs refuse
 suite-named Hub export. A foreign completed Hub job still cannot be imported as a synthesized TEP
-run. Copy must not claim Colophon placed a leaderboard row while community submissions are closed.
+run. Copy must not claim Colophon placed a leaderboard row. Terminal-Bench 2.1 Hub copy may name
+that community submissions are currently closed; Terminal-Bench 3.0 uses `harbor upload` and must
+not copy that 2.1 sentence.
+
+**Official suite protocol — SWE-bench Verified** (added 2026-08-17,
+[DR-2026-08-17-e](../../../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)):
+
+A second named protocol. Do not wear the Verified name on the cousin
+`import swebench` + Jinn swe-rebench grader path. Official Verified is:
+
+- dataset `princeton-nlp/SWE-bench_Verified` (500 instances) at the sealed
+  HuggingFace revision;
+- planned k = 1 prediction per selected `instance_id` (one cell, one TEP
+  Submission);
+- grade with `python -m swebench.harness.run_evaluation` (`swebench` 4.1.x);
+- default timeout 1800s and no resource/timeout overrides;
+- metric % resolved (errors and empty patches are not resolved).
+
+Comparability bits are the same two-axis product surface. `leaderboard_submit_ready`
+requires full coverage, execution conformance, every instance × 1 accounted
+after collect, and a harness `report.json` per instance. Quote never sets it
+true. Limitation and export copy name **SWE-bench Verified**, not
+Terminal-Bench. Predictions JSONL / `sb submit` is a derived artifact, not
+the claim of record. Inspect-as-specified and the mini-SWE-agent LM track
+are out of this protocol. Terminal-Bench 2.1 is unchanged.
+
+**Official suite protocol — APEX-Agents** (added 2026-08-18,
+[DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md)):
+
+A third named protocol. Do not wear the APEX-Agents name on AA Stirrup,
+Claude Code / Codex as the agent, Harbor, Inspect, SWE-bench Verified /
+swe-rebench, k=8, or the HF demo `max_steps=50`. Official APEX-Agents is:
+
+- dataset `mercor/apex-agents` (480 tasks / 33 worlds) at the sealed
+  HuggingFace revision; identity is `task_id`;
+- planned k = 1 per selected task (one cell, one TEP Submission);
+- Archipelago end-to-end (Docker MCP world + ReAct `react_toolbelt_agent`
+  + snapshot grader) at commit `0cb5c476c219a9df637e0bd37fb86b2361f4ab89`;
+- `maxSteps` 250, `timeoutSeconds` 10800, judge `gemini-3-flash` thinking
+  `low`, web search off;
+- Pass@1 = all binary rubric criteria Met.
+
+Comparability bits are the same two-axis product surface. `leaderboard_submit_ready`
+requires full coverage, execution conformance, every task × 1 accounted
+after collect, and an Archipelago `grades.json` per `task_id`. Quote never
+sets it true. Limitation and export copy name **APEX-Agents**, not
+Terminal-Bench or SWE-bench. Inspection export is a derived artifact, not
+the claim of record. Colophon does not place the Mercor row.
+Inspect-as-specified remains out of this protocol. Terminal-Bench 2.1 and
+SWE-bench Verified are unchanged.
+
+**Third named protocol — APEX-SWE-dev** (added 2026-08-18, [DR-2026-08-18-c](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md)):
+
+The public HuggingFace 50 (`mercor/APEX-SWE`) is **APEX-SWE-dev**, not the 200-task APEX-SWE
+leaderboard. Bind `protocol: "apex-swe-dev"` with k=1, dual Mercor harness wrap (`apx` + their
+`run_e2e.py`), timeout 3600s, and `leaderboard_submit_ready` always false. Report v2 gains no new
+required fields. Export is inspection-upload for named slices with execution conformance; never
+leaderboard-submit. Inspect-as-specified, swe-rebench, Harbor, Pass@3, protocol id `apex-swe`,
+and rubric LM-judge cannot wear this name.
+
+**Pier export** is the DeepSWE analog: a derived Pier job tree for email to Datacurve
+(`serena@datacurve.ai`). Colophon does not place the Datacurve row. Ready / inspection / refuse
+follow the same two-axis bits; refuse if the lock is not `deep-swe-v1.1`.
+
+**Inspect View export** is the analogous derived artifact for Inspect eval: correlated
+per-cell `.eval` logs for `inspect view` / `--bundle-dir` semantics. Ready + `full` may copy a
+suite-named bundle. A named slice is inspection-only. Cousin Inspect select, custom coverage, and
+non-conforming execution refuse suite-named export. This is not an Inspect Hub row.
 
 ### 8.4 Jinn marketplace composition
 

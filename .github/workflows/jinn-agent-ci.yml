@@ -1,35 +1,16 @@
 name: jinn-agent CI
 
+# The workflow-level `paths:` filters this workflow used to carry moved into the
+# `changes` job below. A required merge-queue context must not sit behind a
+# workflow-level filter: a filtered-out workflow never reports on the merge group
+# at all, and the entry hangs until the check-response timeout ejects it. A
+# filtered-out *job* reports success, which is what the queue needs
+# (DR-2026-08-18-b D3/D6).
 on:
   pull_request:
-    paths:
-      - 'apps/jinn-agent/**'
-      - 'plugin/frozen/**'
-      - 'packages/plugin/**'
-      - 'packages/core/**'
-      - 'packages/layer/**'
-      - 'operator/src/solver-types/_swe-rebench-v2-*.ts'
-      - 'operator/src/adapters/mech/ipfs.ts'
-      - 'operator/src/harnesses/impls/swe-rebench-v2-evaluator/**'
-      - 'operator/scripts/stage1-task-creator-acceptance.mjs'
-      - 'operator/package.json'
-      - 'operator/yarn.lock'
-      - '.github/workflows/jinn-agent-ci.yml'
+  merge_group:
   push:
     branches: [next, main]
-    paths:
-      - 'apps/jinn-agent/**'
-      - 'plugin/frozen/**'
-      - 'packages/plugin/**'
-      - 'packages/core/**'
-      - 'packages/layer/**'
-      - 'operator/src/solver-types/_swe-rebench-v2-*.ts'
-      - 'operator/src/adapters/mech/ipfs.ts'
-      - 'operator/src/harnesses/impls/swe-rebench-v2-evaluator/**'
-      - 'operator/scripts/stage1-task-creator-acceptance.mjs'
-      - 'operator/package.json'
-      - 'operator/yarn.lock'
-      - '.github/workflows/jinn-agent-ci.yml'
   workflow_dispatch:
   schedule:
     - cron: '0 7 * * *'
@@ -46,9 +27,121 @@ defaults:
     working-directory: apps/jinn-agent
 
 jobs:
+  changes:
+    # Four workflows run a `changes` job on every event. Without distinct display
+    # names GitHub reports four check runs all called `changes`, and neither a
+    # human nor the branch-protection audit can tell which lane a red one belongs
+    # to. The job *id* stays `changes`: the gate reaches it through `needs`.
+    name: jinn-agent-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        # This job runs no agent command, and the workflow-level `apps/jinn-agent`
+        # default would send its `git` calls into a subdirectory of the checkout.
+        working-directory: .
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          # The merge-base walk and the name-only diff below read the commit and
+          # tree graph and never a blob. Omitting blobs keeps `fetch-depth: 0`
+          # from cloning the full 200MiB pack four times over on every PR and
+          # every queue entry.
+          filter: blob:none
+      - name: Select the jinn-agent lane from the diff
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "${EVENT_NAME}" in
+            pull_request)
+              diff_base="${PR_BASE_SHA}"
+              diff_head="${PR_HEAD_SHA}"
+              ;;
+            merge_group)
+              diff_base="${MG_BASE_SHA}"
+              diff_head="${MG_HEAD_SHA}"
+              ;;
+            push)
+              diff_base="${PUSH_BEFORE_SHA}"
+              diff_head="${PUSH_HEAD_SHA}"
+              ;;
+            *)
+              echo "${EVENT_NAME} carries no diff; selecting the jinn-agent lane"
+              echo 'run=true' >> "${GITHUB_OUTPUT}"
+              exit 0
+              ;;
+          esac
+          # A branch creation sends all-zeros, and a force-push can send a base that
+          # is no longer reachable. Neither can be diffed, so select conservatively
+          # rather than failing a required context.
+          if [ -z "${diff_base}" ] \
+            || [ "${diff_base}" = '0000000000000000000000000000000000000000' ] \
+            || ! git cat-file -e "${diff_base}^{commit}" 2>/dev/null; then
+            echo "no usable diff base (${diff_base:-empty}); selecting the jinn-agent lane"
+            echo 'run=true' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # `diff_head` needs no matching guard: on `merge_group` and `push` it is
+          # the commit this job checked out, and on `pull_request` it is a parent of
+          # the merge commit checked out, which `fetch-depth: 0` fetches in full. Were
+          # it ever unreachable the diff below fails the step under `set -e`, failing
+          # this job and reddening the gate — never a silent unselect.
+          # One extended regular expression per path this workflow used to filter on,
+          # translated faithfully from the deleted globs: `**` is a prefix match, a
+          # single `*` matches within one path segment, and a literal path is anchored
+          # at both ends.
+          patterns=(
+            '^apps/jinn-agent/'
+            '^plugin/frozen/'
+            '^packages/plugin/'
+            '^packages/core/'
+            '^packages/layer/'
+            '^operator/src/solver-types/_swe-rebench-v2-[^/]*\.ts$'
+            '^operator/src/adapters/mech/ipfs\.ts$'
+            '^operator/src/harnesses/impls/swe-rebench-v2-evaluator/'
+            '^operator/scripts/stage1-task-creator-acceptance\.mjs$'
+            '^operator/package\.json$'
+            '^operator/yarn\.lock$'
+            '^\.github/workflows/jinn-agent-ci\.yml$'
+          )
+          printf '%s\n' "${patterns[@]}" > "${RUNNER_TEMP}/selection.ere"
+          # The changed list goes to a file and grep reads the file. Piping it into
+          # `grep -q` is a trap: grep exits on its first match, and once the list
+          # outruns the 64KiB pipe buffer the still-writing producer takes SIGPIPE.
+          # Under `pipefail` that makes the pipeline non-zero, the `if` takes the else
+          # branch, and a genuinely matching diff selects run=false — every job skips
+          # and the gate reports green having run nothing.
+          # `core.quotePath=false` keeps a non-ASCII path unquoted and unescaped, so
+          # the `^`-anchored patterns see the real path.
+          git -c core.quotePath=false diff --no-renames --name-only "${diff_base}...${diff_head}" \
+            > "${RUNNER_TEMP}/changed.txt"
+          echo "changed files: $(wc -l < "${RUNNER_TEMP}/changed.txt")"
+          head -200 "${RUNNER_TEMP}/changed.txt"
+          if grep -qE -f "${RUNNER_TEMP}/selection.ere" "${RUNNER_TEMP}/changed.txt"; then
+            echo 'run=true' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'run=false' >> "${GITHUB_OUTPUT}"
+          fi
+
   generate:
     name: Generate test slices
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    needs: changes
+    if: >-
+      needs.changes.outputs.run == 'true' &&
+      (github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group')
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -105,8 +198,12 @@ jobs:
 
   test:
     name: Test slice ${{ matrix.slice.index }}/4
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
-    needs: generate
+    if: >-
+      needs.changes.outputs.run == 'true' &&
+      (github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group')
+    needs: [changes, generate]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -158,8 +255,9 @@ jobs:
 
   save-durations:
     name: Save merged test durations
-    needs: test
+    needs: [changes, test]
     if: >-
+      needs.changes.outputs.run == 'true' &&
       needs.test.result == 'success' &&
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/next' || github.ref == 'refs/heads/main')
@@ -189,7 +287,16 @@ jobs:
 
   cold-stock-e2e:
     name: Cold-stock Stage 1 product gate
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: changes
+    # Queue-bound `pull_request` is deliberately absent: this is a 60-minute cold
+    # product journey, and the fast PR lane moves it onto the merge group where
+    # the queue runs the full battery before anything lands (DR-2026-08-18-b D3).
+    # PRs targeting `main` (the hotfix lane) keep it — main has no queue to
+    # backstop what the PR lane skips. Nightly schedule, dispatch, and push
+    # lanes are unchanged.
+    if: >-
+      needs.changes.outputs.run == 'true' &&
+      (github.event_name == 'push' || github.event_name == 'merge_group' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'main'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -235,3 +342,91 @@ jobs:
         env:
           JINN_STAGE1_SKIP_CLIENT_BUILD: '1'
         run: bash scripts/cold-stock-e2e.sh
+
+  jinn-agent-gate:
+    # The check-run name GitHub reports is this job's display `name:` below, and that
+    # string is the required-status-check context registered on the `next` ruleset
+    # (DR-2026-08-18-b D3) — keep them in sync.
+    name: jinn-agent-gate
+    needs: [changes, generate, test, save-durations, cold-stock-e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        # This job never checks out, so the workflow-level `apps/jinn-agent` default
+        # would point every `run:` step at a directory that does not exist.
+        working-directory: .
+    steps:
+      - name: Require exact success from every selected jinn-agent job
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          # Empty on every event except pull_request; the cold-stock case below
+          # mirrors the job-level main-carve-out with it.
+          BASE_REF: ${{ github.base_ref }}
+          SELECTED: ${{ needs.changes.outputs.run }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          GENERATE_RESULT: ${{ needs.generate.result }}
+          # A matrix job's `result` is the aggregate over its slices: `success` only
+          # when every slice passed. `save-durations` has always relied on that.
+          TEST_RESULT: ${{ needs.test.result }}
+          SAVE_DURATIONS_RESULT: ${{ needs.save-durations.result }}
+          COLD_STOCK_RESULT: ${{ needs.cold-stock-e2e.result }}
+        run: |
+          set -euo pipefail
+          echo "event=${EVENT_NAME} ref=${REF} selected=${SELECTED} changes=${CHANGES_RESULT}"
+          echo "generate=${GENERATE_RESULT} test=${TEST_RESULT}"
+          echo "save-durations=${SAVE_DURATIONS_RESULT} cold-stock-e2e=${COLD_STOCK_RESULT}"
+          test "${CHANGES_RESULT}" = success
+          # The selection is read from a job output, which is the empty string when the
+          # select step never wrote one. Empty must never be read as "unselected", or a
+          # broken selection step turns into a green gate over a whole skipped lane.
+          case "${SELECTED}" in
+            true|false) ;;
+            *)
+              echo "::error::unparseable selection output: '${SELECTED}'"
+              exit 1
+              ;;
+          esac
+          # The slice jobs carry their own event gate: they run on pull_request, push,
+          # and merge_group, and never on the nightly schedule or a manual dispatch.
+          slice_expected=skipped
+          case "${EVENT_NAME}" in
+            pull_request|push|merge_group)
+              if [ "${SELECTED}" = true ]; then
+                slice_expected=success
+              fi
+              ;;
+          esac
+          test "${GENERATE_RESULT}" = "${slice_expected}"
+          test "${TEST_RESULT}" = "${slice_expected}"
+          # The cold-stock gate runs on every event this workflow accepts EXCEPT
+          # queue-bound pull_request, where the fast PR lane moves its 60-minute
+          # journey onto the merge group (DR-2026-08-18-b D3). PRs targeting `main`
+          # (the hotfix lane) keep it: main has no queue to backstop the fast lane.
+          # On `schedule` and `workflow_dispatch` the changes job has no diff to
+          # read and selects conservatively, which is what keeps the nightly run
+          # running.
+          cold_expected=skipped
+          case "${EVENT_NAME}" in
+            push|merge_group|schedule|workflow_dispatch)
+              if [ "${SELECTED}" = true ]; then
+                cold_expected=success
+              fi
+              ;;
+            pull_request)
+              if [ "${SELECTED}" = true ] && [ "${BASE_REF}" = main ]; then
+                cold_expected=success
+              fi
+              ;;
+          esac
+          test "${COLD_STOCK_RESULT}" = "${cold_expected}"
+          # Duration-cache writes are push-only by design.
+          durations_expected=skipped
+          if [ "${SELECTED}" = true ] \
+            && [ "${EVENT_NAME}" = push ] \
+            && { [ "${REF}" = refs/heads/next ] || [ "${REF}" = refs/heads/main ]; }; then
+            durations_expected=success
+          fi
+          test "${SAVE_DURATIONS_RESULT}" = "${durations_expected}"

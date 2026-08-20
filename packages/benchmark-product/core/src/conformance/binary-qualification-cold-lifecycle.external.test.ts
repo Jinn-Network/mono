@@ -192,7 +192,7 @@ function assertRealTree(path: string): void {
 }
 
 describe("T1 provider-free binary qualification cold lifecycle", () => {
-  test.skipIf(!optedIn)("survives builder deletion and a packed verify@2-only replay", async () => {
+  test.skipIf(!optedIn)("survives builder deletion and a packed verify@0.1-only replay", async () => {
     const registryUrl = process.env.COLOPHON_T1_REGISTRY_URL!;
     const parsedRegistryUrl = new URL(registryUrl);
     expect(parsedRegistryUrl.hostname).toBe("127.0.0.1");
@@ -391,7 +391,7 @@ describe("T1 provider-free binary qualification cold lifecycle", () => {
     mkdirSync(coldReaderDir);
     writeFileSync(join(coldReaderDir, "package.json"), JSON.stringify({
       private: true,
-      dependencies: { "@colophon-claims/verify": "2" },
+      dependencies: { "@colophon-claims/verify": "0.1" },
     }, null, 2), { flag: "wx" });
     writeFileSync(join(coldReaderDir, ".npmrc"), [
       `registry=${registryUrl}`,

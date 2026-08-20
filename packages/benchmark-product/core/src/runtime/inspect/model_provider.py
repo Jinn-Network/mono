@@ -24,7 +24,18 @@ from inspect_ai.model import (
 BROKER_URL = "http://jinn-model-broker:8765/v1/generate-text"
 CAPABILITY_PATH = Path("/run/jinn/broker-capability")
 PROTOCOL = "jinn.network/model-broker/1"
-MODEL = "gpt-5.6-luna"
+# Mirrors JUDGE_MODEL_PROFILES from
+# packages/task-execution/profiles/src/binary-judgment/contracts.ts (spec §1.1/§1.2). Both copies
+# widen in the same PR.
+JUDGE_MODEL_PROFILES = {
+    "gpt-5.6-luna": "reasoning-2026-08",
+    "gpt-4o-mini-2024-07-18": "dated-snapshot-sampling",
+}
+ACCEPTED_MODELS = frozenset(JUDGE_MODEL_PROFILES)
+MAX_OUTPUT_TOKENS_BY_PROFILE = {
+    "reasoning-2026-08": 128,
+    "dated-snapshot-sampling": 512,
+}
 _cell_key = "unconfigured"
 _records: list[dict[str, Any]] = []
 
@@ -70,8 +81,11 @@ class JinnOpenAIModelAPI(ModelAPI):
         return False
 
     async def generate(self, input, tools, tool_choice, config):
-        if self.model_name != MODEL or tools or tool_choice != "none":
-            raise ValueError("jinn-openai supports only the locked Luna text model without tools")
+        if self.model_name not in ACCEPTED_MODELS or tools or tool_choice != "none":
+            raise ValueError("jinn-openai supports only the locked judge models without tools")
+        model = self.model_name
+        profile = JUDGE_MODEL_PROFILES[model]
+        max_output_tokens = MAX_OUTPUT_TOKENS_BY_PROFILE[profile]
         messages: list[dict[str, str]] = []
         for message in input:
             if isinstance(message, ChatMessageSystem):
@@ -80,34 +94,62 @@ class JinnOpenAIModelAPI(ModelAPI):
                 messages.append({"role": "user", "text": text_content(message)})
             else:
                 raise ValueError("jinn-openai refuses assistant and tool history")
-        effort = config.reasoning_effort
-        expected_config = {
-            "max_retries": 0,
-            "max_tokens": 128,
-            "reasoning_effort": effort,
-            "timeout": 120,
-        }
-        if (
-            effort not in {"none", "low"}
-            or config.model_dump(mode="json", exclude_none=True) != expected_config
-        ):
-            raise ValueError("Inspect generation configuration drifted from the sealed Luna arm")
+        if profile == "reasoning-2026-08":
+            effort = config.reasoning_effort
+            expected_config = {
+                "max_retries": 0,
+                "max_tokens": max_output_tokens,
+                "reasoning_effort": effort,
+                "timeout": 120,
+            }
+            if (
+                effort not in {"none", "low"}
+                or config.model_dump(mode="json", exclude_none=True) != expected_config
+            ):
+                raise ValueError("Inspect generation configuration drifted from the sealed judge arm")
+            generation = {
+                "reasoningEffort": effort,
+                "maxOutputTokens": max_output_tokens,
+                "store": False,
+                "background": False,
+                "stream": False,
+                "serviceTier": "default",
+            }
+        else:
+            temperature = config.temperature
+            expected_config = {
+                "max_retries": 0,
+                "max_tokens": max_output_tokens,
+                "temperature": temperature,
+                "timeout": 120,
+            }
+            # config.temperature comes from Inspect's own pydantic-typed GenerateConfig, not raw
+            # JSON, so it may be coerced to float; guard against bool explicitly rather than
+            # requiring the Python type to be exactly int (contrast with the wire-format checks in
+            # broker.py / binary_judge_worker.py, which do require the literal JSON integer 0).
+            if (
+                isinstance(temperature, bool)
+                or temperature != 0
+                or config.model_dump(mode="json", exclude_none=True) != expected_config
+            ):
+                raise ValueError("Inspect generation configuration drifted from the sealed judge arm")
+            generation = {
+                "temperature": 0,
+                "maxOutputTokens": max_output_tokens,
+                "store": False,
+                "background": False,
+                "stream": False,
+                "serviceTier": "default",
+            }
         capability = CAPABILITY_PATH.read_text(encoding="utf-8").strip()
         correlation = f"{_cell_key}:{len(_records) + 1}:{uuid.uuid4()}"
         envelope = {
             "operation": f"{PROTOCOL}:generateText",
             "correlationId": correlation,
             "capability": capability,
-            "model": MODEL,
+            "model": model,
             "messages": messages,
-            "generation": {
-                "reasoningEffort": effort,
-                "maxOutputTokens": 128,
-                "store": False,
-                "background": False,
-                "stream": False,
-                "serviceTier": "default",
-            },
+            "generation": generation,
         }
         started = time.monotonic()
         result = await anyio.to_thread.run_sync(broker_call, envelope)
@@ -123,16 +165,15 @@ class JinnOpenAIModelAPI(ModelAPI):
         if status != "completed":
             raise RuntimeError(f"Jinn model broker terminal: {status}")
         response_body = result.get("responseBody")
-        if not isinstance(response_body, dict) or result.get("resolvedModel") != MODEL:
+        if not isinstance(response_body, dict) or result.get("resolvedModel") != model:
             raise RuntimeError("Jinn model broker response conflicts with the locked model")
-        upstream_request = {
-            "model": MODEL,
+        upstream_request: dict[str, Any] = {
+            "model": model,
             "input": [
                 {"role": message["role"], "content": [{"type": "input_text", "text": message["text"]}]}
                 for message in messages
             ],
-            "reasoning": {"effort": effort},
-            "max_output_tokens": 128,
+            "max_output_tokens": max_output_tokens,
             "store": False,
             "background": False,
             "stream": False,
@@ -140,6 +181,10 @@ class JinnOpenAIModelAPI(ModelAPI):
             "tools": [],
             "tool_choice": "none",
         }
+        if profile == "reasoning-2026-08":
+            upstream_request["reasoning"] = {"effort": effort}
+        else:
+            upstream_request["temperature"] = 0
         output = await model_output_from_openai_responses(response_body)
         call = ModelCall(
             request=upstream_request,

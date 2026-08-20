@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Describes the DSSE v1 envelopes a public bundle carries: report-envelope.json (payloadType application/vnd.jinn.benchmarking.report.v1+json; its decoded payload is byte-identical to report.json) and every verdict record (payloadType application/vnd.in-toto+json over an in-toto Statement v1). Source of truth: parseExactDsseEnvelope in @jinn-network/trust-core src/dsse.ts, which admits exactly these three members. Signatures are Ed25519 over the DSSE pre-authentication encoding 'DSSEv1 ' || len(payloadType) || ' ' || payloadType || ' ' || len(payload) || ' ' || payload (lengths as ASCII decimals, payload as raw decoded bytes). See https://github.com/secure-systems-lab/dsse.",
+  "description": "DSSE v1 signature envelope as carried by benchmark-product public bundles.",
+  "type": "object",
+  "properties": {
+    "payload": { "type": "string", "contentEncoding": "base64", "minLength": 1 },
+    "payloadType": { "type": "string", "minLength": 1 },
+    "signatures": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "keyid": { "type": "string" },
+          "sig": { "type": "string", "contentEncoding": "base64", "minLength": 1 }
+        },
+        "required": ["sig"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["payload", "payloadType", "signatures"],
+  "additionalProperties": false
+}

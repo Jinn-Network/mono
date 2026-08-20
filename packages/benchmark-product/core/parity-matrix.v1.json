@@ -1,15 +1,25 @@
 {
   "schemaVersion": 1,
-  "generatedFrom": "@colophon-claims/core@1.0.0",
+  "generatedFrom": "@colophon-claims/core@0.1.0",
   "entries": [
     {
       "operation": "admitHumanTruth",
       "cliVerb": "human-review admit",
       "authorityGated": false,
-      "description": "Validates two-person unanimous truth or explicit operator-only truth and derives resolution and analysis records.",
+      "description": "Validates two-person unanimous truth, explicit operator-only truth, or screened-operator-sampled truth and derives resolution and analysis records.",
       "gui": {
         "status": "unavailable",
         "reason": "requires local signed-review, roster, and licensed truth evidence files"
+      }
+    },
+    {
+      "operation": "anchoringConfigure",
+      "cliVerb": "anchoring configure",
+      "authorityGated": true,
+      "description": "Replaces or clears the workspace's ordered anchor provider and endpoint configuration, which is what makes later locks anchor automatically (authority-gated).",
+      "gui": {
+        "status": "shipped",
+        "action": "anchoring.configure"
       }
     },
     {
@@ -83,16 +93,6 @@
       }
     },
     {
-      "operation": "bindInspectBinaryJudge",
-      "cliVerb": "runtime inspect bind-judge",
-      "authorityGated": false,
-      "description": "Binds sealed binary judge instruments to Run-arm requirements on an imported benchmark.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires machine-local OCI runtime paths and pre-sealed instrument digests; browser-supplied paths are forbidden"
-      }
-    },
-    {
       "operation": "createDraft",
       "cliVerb": "draft create",
       "authorityGated": false,
@@ -113,13 +113,13 @@
       }
     },
     {
-      "operation": "exportHarborHubPackage",
-      "cliVerb": "hub export",
+      "operation": "exportDerivedBundle",
+      "cliVerb": "export",
       "authorityGated": false,
-      "description": "Packages a retained Harbor Job for Terminal-Bench 2.1 Hub upload without placing the leaderboard row.",
+      "description": "Packages the locked method's suite-named derived bundle, or refuses when the method has none.",
       "gui": {
         "status": "unavailable",
-        "reason": "copies a machine-local Harbor job directory; browser path-based job export is forbidden"
+        "reason": "copies a machine-local job or log directory; browser path-based export is forbidden"
       }
     },
     {
@@ -240,6 +240,16 @@
       "gui": {
         "status": "shipped",
         "action": "publication.status"
+      }
+    },
+    {
+      "operation": "runAnchor",
+      "cliVerb": "anchor",
+      "authorityGated": false,
+      "description": "Obtains third-party time evidence over the run's own sealed Run or Matrix digest from a configured provider, verifies it, and stores it as an AnchorEvidence record.",
+      "gui": {
+        "status": "shipped",
+        "action": "run.anchor"
       }
     },
     {
@@ -373,43 +383,13 @@
       }
     },
     {
-      "operation": "selectHarborRuntime",
-      "cliVerb": "runtime harbor select",
+      "operation": "selectMethod",
+      "cliVerb": "method",
       "authorityGated": false,
-      "description": "Selects and digest-binds a managed Harbor runtime.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured Harbor host paths; browser-supplied paths are forbidden"
-      }
-    },
-    {
-      "operation": "selectInspectEvaluation",
-      "cliVerb": "runtime inspect select",
-      "authorityGated": false,
-      "description": "Selects, probes, and digest-binds an unmodified Inspect evaluation and its runtime configuration.",
+      "description": "Binds a catalog suite or a complete method document onto a draft.",
       "gui": {
         "status": "shipped",
-        "action": "runtime.inspect.select"
-      }
-    },
-    {
-      "operation": "selectTerminalBench21Runtime",
-      "cliVerb": "runtime terminal-bench-2-1 select",
-      "authorityGated": false,
-      "description": "Resolves a named Terminal-Bench 2.1 slice and binds it to the managed Harbor runtime.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured Terminal-Bench 2.1 and Harbor host paths; browser-supplied paths are forbidden"
-      }
-    },
-    {
-      "operation": "selectTerminalBench2Runtime",
-      "cliVerb": "runtime terminal-bench-2 select",
-      "authorityGated": false,
-      "description": "Resolves one immutable Terminal-Bench 2 task and binds it to the managed Harbor runtime.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured Terminal-Bench and Harbor host paths; browser-supplied paths are forbidden"
+        "action": "method.bind"
       }
     },
     {

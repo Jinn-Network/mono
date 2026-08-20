@@ -1,5 +1,6 @@
 import type { MatrixCell, RunRecord } from "@jinn-network/benchmarking-records";
 import { venueIsolationPostureForPolicy } from "./isolation.js";
+import { anchoredPreRegistration, anchoredVenueLimits, type ClaimAnchor } from "./anchor-claims.js";
 
 export const LOCAL_VENUE_LIMITS: readonly string[] = [
   "This is a local, self-run venue: the same operator controls task dispatch, execution, and evaluation.",
@@ -12,8 +13,14 @@ const MULTI = "Run pinning on the harness, model, and loadout axes is enforced b
 export function localVenueLimitsForRun(run: Pick<RunRecord, "policy">): readonly string[] {
   return venueIsolationPostureForPolicy(run.policy.submissionBaseline?.isolationPolicy).inventory.length === 1 ? LOCAL_VENUE_LIMITS : [LOCAL_VENUE_LIMITS[0]!, LOCAL_VENUE_LIMITS[1]!, MULTI, ...LOCAL_VENUE_LIMITS.slice(3)];
 }
-export function buildLocalVenueHonesty(cells: readonly MatrixCell[], run: Pick<RunRecord, "policy">) {
+/** `anchors` is the same derived section the producer used (anchor-evidence §7.4); the conditional
+ * copy is the same pure function on both sides, so claim-consistency stays an exact byte-compare. */
+export function buildLocalVenueHonesty(
+  cells: readonly MatrixCell[],
+  run: Pick<RunRecord, "policy">,
+  anchors: readonly ClaimAnchor[] = [],
+) {
   const counts = { harness: 0, model: 0, loadout: 0, isolation: 0 };
   for (const cell of cells) for (const axis of Object.keys(counts) as Array<keyof typeof counts>) if (cell.verification[axis] === "unverifiable") counts[axis] += 1;
-  return { venue: "self-run" as const, preRegistration: "structural-and-append-order-only" as const, limits: localVenueLimitsForRun(run), unverifiableAxisCounts: counts };
+  return { venue: "self-run" as const, preRegistration: anchoredPreRegistration(anchors), limits: anchoredVenueLimits(localVenueLimitsForRun(run), anchors), unverifiableAxisCounts: counts };
 }

@@ -57,7 +57,7 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import {
-  parseBinaryJudgmentResponse,
+  selectBinaryJudgmentResponseParser,
   type BinaryJudgmentDecision,
   type BinaryJudgmentResponseParse,
 } from "./parse.js";
@@ -355,7 +355,7 @@ function requireBinaryJudgmentTask(
     profileDigest !== BINARY_JUDGMENT_PROFILE_DIGEST.slice("sha256:".length)
     || (task.profile.uri !== undefined && task.profile.uri !== BINARY_JUDGMENT_PROFILE_URI)
   ) {
-    malformed("binary judgment Task does not pin the binary-judgment/1.0 profile");
+    malformed("binary judgment Task does not pin the binary-judgment/2.0 profile");
   }
   if (task.evaluation?.digest?.["sha256"] !== specificationDigest.slice("sha256:".length)) {
     mismatch("binary judgment Task does not bind the evaluated specification");
@@ -535,7 +535,9 @@ function requireJoinedInputs(options: {
   return {
     payload,
     observation,
-    responseParse: parseBinaryJudgmentResponse(options.results.response.bytes),
+    responseParse: selectBinaryJudgmentResponseParser(
+      options.inputs.instrument.response.parser.id,
+    )(options.results.response.bytes),
   };
 }
 
@@ -714,13 +716,15 @@ export function validateBinaryJudgmentCompletedEvaluation(
     || (truthLabel !== "CORRECT" && truthLabel !== "WRONG")
     || typeof outcome["parseValid"] !== "boolean"
     || (outcome["truthAdmission"] !== "two-human-unanimous"
-      && outcome["truthAdmission"] !== "operator-only")
+      && outcome["truthAdmission"] !== "operator-only"
+      && outcome["truthAdmission"] !== "screened-operator-sampled")
     || typeof outcome["itemId"] !== "string"
     || !/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
       .test(outcome["itemId"] as string)
     || typeof outcome["candidateClass"] !== "string"
     || !/^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(outcome["candidateClass"] as string)
-    || (outcome["stratum"] !== "core" && outcome["stratum"] !== "stress")
+    || typeof outcome["stratum"] !== "string"
+    || !/^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(outcome["stratum"] as string)
     || typeof outcome["labelResolutionSha256"] !== "string"
     || !/^sha256:[0-9a-f]{64}$/u.test(outcome["labelResolutionSha256"] as string)
     || typeof outcome["instrumentSha256"] !== "string"

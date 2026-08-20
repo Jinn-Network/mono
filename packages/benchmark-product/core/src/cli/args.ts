@@ -4,13 +4,15 @@
  * policy-optimization CLI this package's structure follows: the dependency
  * graph is an audited list, not a default.
  *
- * Grammar: `<words...> --flag value`, with `--flag=value` and valueless
- * boolean flags also accepted. There are no repeatable flags in this
- * product — a flag supplied twice has no obvious winner, and picking one
- * silently would be picking the wrong one silently just as often as not.
- * Every refusal here throws a `BenchmarkProductError` with code
- * `"invalid-invocation"` (errors.ts, spec §4.3), which `main.ts` catches and
- * renders as an envelope or a stderr line depending on `--json`.
+ * Grammar: GNU-style mix of positional words and `--flag` tokens (they may
+ * interleave), with `--flag=value` and valueless boolean flags also
+ * accepted. `--` ends flag parsing; remaining tokens are words even if they
+ * start with `-`. There are no repeatable flags in this product — a flag
+ * supplied twice has no obvious winner, and picking one silently would be
+ * picking the wrong one silently just as often as not. Every refusal here
+ * throws a `BenchmarkProductError` with code `"invalid-invocation"`
+ * (errors.ts, spec §4.3), which `main.ts` catches and renders as an envelope
+ * or a stderr line depending on `--json`.
  */
 
 import { readFileSync } from "node:fs";
@@ -18,37 +20,49 @@ import { isAbsolute, resolve } from "node:path";
 import { refuse } from "../errors.js";
 
 export interface ParsedArgs {
-  /** Positional words before the first flag, e.g. `["draft", "create"]`. */
+  /** Positional words, e.g. `["draft", "create"]` or `["method", "terminal-bench-2.1"]`. */
   readonly words: readonly string[];
   readonly flags: ReadonlyMap<string, string>;
 }
 
+const BOOLEAN_FLAGS = new Set([
+  "help",
+  "json",
+  "include-native-artifacts",
+  "ack-provider-network-costs",
+]);
+
 /**
- * Splits `argv` into leading positional words and trailing `--flag`
- * tokens. A token after the first flag that does not itself start with
- * `--` is an unexpected positional and refuses; a flag name supplied more
- * than once refuses.
+ * Splits `argv` into positional words and `--flag` tokens. Positionals and
+ * flags may interleave. `--` treats the rest as words (even if they start
+ * with `-`). Boolean flags never consume the next token. A flag name
+ * supplied more than once refuses.
  */
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   const words: string[] = [];
   const flags = new Map<string, string>();
   let index = 0;
 
-  while (index < argv.length && !argv[index]!.startsWith("--")) {
-    words.push(argv[index]!);
-    index += 1;
-  }
-
   while (index < argv.length) {
     const token = argv[index]!;
+    if (token === "--") {
+      words.push(...argv.slice(index + 1));
+      break;
+    }
     if (!token.startsWith("--")) {
-      refuse("invalid-invocation", token, `unexpected argument "${token}"; flags come after the verb`);
+      words.push(token);
+      index += 1;
+      continue;
     }
     const equals = token.indexOf("=");
     const name = equals === -1 ? token.slice(2) : token.slice(2, equals);
     let value: string;
     if (equals !== -1) {
       value = token.slice(equals + 1);
+      index += 1;
+    } else if (BOOLEAN_FLAGS.has(name)) {
+      // Boolean flags never consume the next positional, even if it is not `--…`.
+      value = "";
       index += 1;
     } else {
       const next = argv[index + 1];

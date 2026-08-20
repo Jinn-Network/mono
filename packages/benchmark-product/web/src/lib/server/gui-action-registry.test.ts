@@ -11,18 +11,10 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires a machine-local configured signer key; browser key custody is forbidden",
   admitHumanTruth:
     "requires local signed-review, roster, and licensed truth evidence files",
-  bindInspectBinaryJudge:
-    "requires machine-local OCI runtime paths and pre-sealed instrument digests; browser-supplied paths are forbidden",
-  selectHarborRuntime:
-    "requires server-configured Harbor host paths; browser-supplied paths are forbidden",
-  selectTerminalBench2Runtime:
-    "requires server-configured Terminal-Bench and Harbor host paths; browser-supplied paths are forbidden",
-  selectTerminalBench21Runtime:
-    "requires server-configured Terminal-Bench 2.1 and Harbor host paths; browser-supplied paths are forbidden",
   migrateTerminalBenchLegacyTask:
     "requires server-configured migration input paths; browser-supplied paths are forbidden",
-  exportHarborHubPackage:
-    "copies a machine-local Harbor job directory; browser path-based job export is forbidden",
+  exportDerivedBundle:
+    "copies a machine-local job or log directory; browser path-based export is forbidden",
 } as const;
 
 describe("generated library / CLI / GUI parity", () => {

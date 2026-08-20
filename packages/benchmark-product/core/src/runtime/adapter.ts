@@ -31,6 +31,8 @@ import {
   HARBOR_RUNTIME_EXECUTABLE_ROLE,
   HARBOR_RUNTIME_EVIDENCE_PROFILE,
   HARBOR_SOURCE_MATERIAL_ROLE,
+  PIER_ADAPTER_ID,
+  isHarborCompatibleAdapterId,
 } from "./harbor/manifest.js";
 import {
   HARBOR_ARTIFACT_MANIFEST_ROLE,
@@ -76,6 +78,39 @@ import {
   TerminalBench21SelectionManifestSchema,
   terminalBench21SelectionBytes,
 } from "./terminal-bench-2-1/manifest.js";
+import {
+  TERMINAL_BENCH_3_0_PROFILE,
+  TERMINAL_BENCH_3_0_SELECTION_ROLE,
+  TerminalBench30SelectionManifestSchema,
+  terminalBench30SelectionBytes,
+} from "./terminal-bench-3-0/manifest.js";
+import {
+  SWE_BENCH_HARNESS_ADAPTER_ID,
+  SWE_BENCH_HARNESS_RUNTIME_EVIDENCE_PROFILE,
+  SWE_BENCH_VERIFIED_SELECTION_ROLE,
+  SwebenchVerifiedSelectionManifestSchema,
+  swebenchVerifiedSelectionBytes,
+} from "./swe-bench-verified/manifest.js";
+import {
+  ARCHIPELAGO_ADAPTER_ID,
+  ARCHIPELAGO_RUNTIME_EVIDENCE_PROFILE,
+  APEX_AGENTS_SELECTION_ROLE,
+  ApexAgentsSelectionManifestSchema,
+  apexAgentsSelectionBytes,
+} from "./apex-agents/manifest.js";
+import {
+  APEX_SWE_DEV_ADAPTER_ID,
+  APEX_SWE_DEV_RUNTIME_EVIDENCE_PROFILE,
+  APEX_SWE_DEV_SELECTION_ROLE,
+  ApexSweDevSelectionManifestSchema,
+  apexSweDevSelectionBytes,
+} from "./apex-swe-dev/manifest.js";
+import {
+  DEEP_SWE_V11_PROFILE,
+  DEEP_SWE_V11_SELECTION_ROLE,
+  DeepSweV11SelectionManifestSchema,
+  deepSweV11SelectionBytes,
+} from "./deep-swe-v1.1/manifest.js";
 import {
   SUITE_PROTOCOL_PROFILE,
   SUITE_PROTOCOL_SELECTION_ROLE,
@@ -188,7 +223,7 @@ const inspectBinaryJudgeDefinition: AdapterDefinition = {
   profile: INSPECT_RUNTIME_EVIDENCE_PROFILE,
 };
 
-function isInspectRuntimeAdapterId(adapterId: string): boolean {
+export function isInspectRuntimeAdapterId(adapterId: string): boolean {
   return adapterId === INSPECT_ADAPTER_ID || adapterId === INSPECT_BINARY_JUDGE_ADAPTER_ID;
 }
 
@@ -201,6 +236,50 @@ const harborDefinition: AdapterDefinition = {
   },
   nativeArtifactPublication: "explicit-consent",
   profile: HARBOR_RUNTIME_EVIDENCE_PROFILE,
+};
+
+const pierDefinition: AdapterDefinition = {
+  summary: {
+    id: PIER_ADAPTER_ID,
+    label: "Pier 0.3.1 (DeepSWE v1.1)",
+    available: true,
+    selectionRequired: true,
+  },
+  nativeArtifactPublication: "explicit-consent",
+  profile: HARBOR_RUNTIME_EVIDENCE_PROFILE,
+};
+
+const swebenchHarnessDefinition: AdapterDefinition = {
+  summary: {
+    id: SWE_BENCH_HARNESS_ADAPTER_ID,
+    label: "SWE-bench official harness (Verified)",
+    available: true,
+    selectionRequired: true,
+  },
+  nativeArtifactPublication: "explicit-consent",
+  profile: SWE_BENCH_HARNESS_RUNTIME_EVIDENCE_PROFILE,
+};
+
+const archipelagoDefinition: AdapterDefinition = {
+  summary: {
+    id: ARCHIPELAGO_ADAPTER_ID,
+    label: "Archipelago (APEX-Agents)",
+    available: true,
+    selectionRequired: true,
+  },
+  nativeArtifactPublication: "explicit-consent",
+  profile: ARCHIPELAGO_RUNTIME_EVIDENCE_PROFILE,
+};
+
+const apexSweDevDefinition: AdapterDefinition = {
+  summary: {
+    id: APEX_SWE_DEV_ADAPTER_ID,
+    label: "APEX-SWE-dev (Mercor dual harness)",
+    available: true,
+    selectionRequired: true,
+  },
+  nativeArtifactPublication: "explicit-consent",
+  profile: APEX_SWE_DEV_RUNTIME_EVIDENCE_PROFILE,
 };
 
 function digestMatches(bytes: Uint8Array, descriptor: DigestBearingResourceDescriptor): boolean {
@@ -508,7 +587,49 @@ export function runtimeRegistrationArtifacts(workspaceDir: string, binding: Eval
   if (binding === undefined) return [];
   const selectionBytes = getSealedBytes(workspaceDir, binding.selectionManifestSha256);
   if (isInspectRuntimeAdapterId(binding.adapterId)) return [{ role: INSPECT_SELECTION_CORRELATION_ROLE, artifact: { digest: { sha256: binding.selectionManifestSha256 }, mediaType: "application/json" } }];
-  if (binding.adapterId !== HARBOR_ADAPTER_ID) refuse("venue-unavailable", "spec.evaluationRuntime.adapterId", `evaluation runtime adapter "${binding.adapterId}" is not installed`);
+  if (binding.adapterId === SWE_BENCH_HARNESS_ADAPTER_ID) {
+    const manifest = SwebenchVerifiedSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(selectionBytes)));
+    const profileBytes = swebenchVerifiedSelectionBytes(manifest);
+    const profileSha256 = sha256Hex(profileBytes);
+    if (!Buffer.from(getSealedBytes(workspaceDir, profileSha256)).equals(Buffer.from(profileBytes))) {
+      throw new TypeError("SWE-bench Verified selection CAS bytes do not match the sealed evaluationRuntime");
+    }
+    const suiteBytes = suiteProtocolSelectionBytes(manifest.suite);
+    const suiteSha256 = sha256Hex(suiteBytes);
+    return [
+      { role: SWE_BENCH_VERIFIED_SELECTION_ROLE, artifact: { digest: { sha256: binding.selectionManifestSha256 }, mediaType: "application/json" } },
+      { role: SUITE_PROTOCOL_SELECTION_ROLE, artifact: { digest: { sha256: suiteSha256 }, mediaType: "application/json" } },
+    ].sort((left, right) => `${left.role}\u001f${left.artifact.digest.sha256}`.localeCompare(`${right.role}\u001f${right.artifact.digest.sha256}`));
+  }
+  if (binding.adapterId === ARCHIPELAGO_ADAPTER_ID) {
+    const manifest = ApexAgentsSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(selectionBytes)));
+    const profileBytes = apexAgentsSelectionBytes(manifest);
+    const profileSha256 = sha256Hex(profileBytes);
+    if (!Buffer.from(getSealedBytes(workspaceDir, profileSha256)).equals(Buffer.from(profileBytes))) {
+      throw new TypeError("APEX-Agents selection CAS bytes do not match the sealed evaluationRuntime");
+    }
+    const suiteBytes = suiteProtocolSelectionBytes(manifest.suite);
+    const suiteSha256 = sha256Hex(suiteBytes);
+    return [
+      { role: APEX_AGENTS_SELECTION_ROLE, artifact: { digest: { sha256: binding.selectionManifestSha256 }, mediaType: "application/json" } },
+      { role: SUITE_PROTOCOL_SELECTION_ROLE, artifact: { digest: { sha256: suiteSha256 }, mediaType: "application/json" } },
+    ].sort((left, right) => `${left.role}\u001f${left.artifact.digest.sha256}`.localeCompare(`${right.role}\u001f${right.artifact.digest.sha256}`));
+  }
+  if (binding.adapterId === APEX_SWE_DEV_ADAPTER_ID) {
+    const manifest = ApexSweDevSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(selectionBytes)));
+    const profileBytes = apexSweDevSelectionBytes(manifest);
+    const profileSha256 = sha256Hex(profileBytes);
+    if (!Buffer.from(getSealedBytes(workspaceDir, profileSha256)).equals(Buffer.from(profileBytes))) {
+      throw new TypeError("APEX-SWE-dev selection CAS bytes do not match the sealed evaluationRuntime");
+    }
+    const suiteBytes = suiteProtocolSelectionBytes(manifest.suite);
+    const suiteSha256 = sha256Hex(suiteBytes);
+    return [
+      { role: APEX_SWE_DEV_SELECTION_ROLE, artifact: { digest: { sha256: binding.selectionManifestSha256 }, mediaType: "application/json" } },
+      { role: SUITE_PROTOCOL_SELECTION_ROLE, artifact: { digest: { sha256: suiteSha256 }, mediaType: "application/json" } },
+    ].sort((left, right) => `${left.role}\u001f${left.artifact.digest.sha256}`.localeCompare(`${right.role}\u001f${right.artifact.digest.sha256}`));
+  }
+  if (!isHarborCompatibleAdapterId(binding.adapterId)) refuse("venue-unavailable", "spec.evaluationRuntime.adapterId", `evaluation runtime adapter "${binding.adapterId}" is not installed`);
   const manifest = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(selectionBytes)));
   const result: RegistrationArtifact[] = [{ role: HARBOR_SELECTION_ROLE, artifact: { digest: { sha256: binding.selectionManifestSha256 }, mediaType: "application/json" } }];
   const profileValue = manifest.profiles?.[TERMINAL_BENCH_2_PROFILE];
@@ -532,6 +653,22 @@ export function runtimeRegistrationArtifacts(workspaceDir: string, binding: Eval
     const profileSha256 = sha256Hex(profileBytes);
     if (!Buffer.from(getSealedBytes(workspaceDir, profileSha256)).equals(Buffer.from(profileBytes))) throw new TypeError("Terminal-Bench 2.1 profile CAS bytes do not match the Harbor selection");
     result.push({ role: TERMINAL_BENCH_2_1_SELECTION_ROLE, artifact: { digest: { sha256: profileSha256 }, mediaType: "application/json" } });
+  }
+  const tb30 = manifest.profiles?.[TERMINAL_BENCH_3_0_PROFILE];
+  if (tb30 !== undefined) {
+    const profile = TerminalBench30SelectionManifestSchema.parse(tb30);
+    const profileBytes = terminalBench30SelectionBytes(profile);
+    const profileSha256 = sha256Hex(profileBytes);
+    if (!Buffer.from(getSealedBytes(workspaceDir, profileSha256)).equals(Buffer.from(profileBytes))) throw new TypeError("Terminal-Bench 3.0 profile CAS bytes do not match the Harbor selection");
+    result.push({ role: TERMINAL_BENCH_3_0_SELECTION_ROLE, artifact: { digest: { sha256: profileSha256 }, mediaType: "application/json" } });
+  }
+  const deepswe = manifest.profiles?.[DEEP_SWE_V11_PROFILE];
+  if (deepswe !== undefined) {
+    const profile = DeepSweV11SelectionManifestSchema.parse(deepswe);
+    const profileBytes = deepSweV11SelectionBytes(profile);
+    const profileSha256 = sha256Hex(profileBytes);
+    if (!Buffer.from(getSealedBytes(workspaceDir, profileSha256)).equals(Buffer.from(profileBytes))) throw new TypeError("DeepSWE v1.1 profile CAS bytes do not match the Pier selection");
+    result.push({ role: DEEP_SWE_V11_SELECTION_ROLE, artifact: { digest: { sha256: profileSha256 }, mediaType: "application/json" } });
   }
   const suiteValue = manifest.profiles?.[SUITE_PROTOCOL_PROFILE];
   if (suiteValue !== undefined) {
@@ -670,9 +807,19 @@ function createPublicationAdapter(
   options: RuntimeEvidenceAdapterOptions = {},
 ): RuntimePublicationAdapter {
   const adapterId = binding?.adapterId ?? NATIVE_RUNTIME_ADAPTER_ID;
-  const selectedRuntime = isInspectRuntimeAdapterId(adapterId) || adapterId === HARBOR_ADAPTER_ID;
+  const selectedRuntime = isInspectRuntimeAdapterId(adapterId) || isHarborCompatibleAdapterId(adapterId) || adapterId === SWE_BENCH_HARNESS_ADAPTER_ID || adapterId === ARCHIPELAGO_ADAPTER_ID || adapterId === APEX_SWE_DEV_ADAPTER_ID;
   const expectedSelectionManifestSha256 = selectedRuntime ? binding?.selectionManifestSha256 : undefined;
-  const expectedProfile = isInspectRuntimeAdapterId(adapterId) ? INSPECT_RUNTIME_EVIDENCE_PROFILE : adapterId === HARBOR_ADAPTER_ID ? HARBOR_RUNTIME_EVIDENCE_PROFILE : NATIVE_RUNTIME_EVIDENCE_PROFILE;
+  const expectedProfile = isInspectRuntimeAdapterId(adapterId)
+    ? INSPECT_RUNTIME_EVIDENCE_PROFILE
+    : isHarborCompatibleAdapterId(adapterId)
+      ? HARBOR_RUNTIME_EVIDENCE_PROFILE
+      : adapterId === SWE_BENCH_HARNESS_ADAPTER_ID
+        ? SWE_BENCH_HARNESS_RUNTIME_EVIDENCE_PROFILE
+        : adapterId === ARCHIPELAGO_ADAPTER_ID
+          ? ARCHIPELAGO_RUNTIME_EVIDENCE_PROFILE
+          : adapterId === APEX_SWE_DEV_ADAPTER_ID
+            ? APEX_SWE_DEV_RUNTIME_EVIDENCE_PROFILE
+            : NATIVE_RUNTIME_EVIDENCE_PROFILE;
   const adapter: RuntimePublicationAdapter = {
     adapterId,
     profile: definition.profile,
@@ -681,11 +828,17 @@ function createPublicationAdapter(
       const artifacts = options.registrationArtifacts ?? (() => {
         const selection = options.selectionManifest;
         if (selection === undefined) return [];
-        const role = adapterId === HARBOR_ADAPTER_ID
+        const role = isHarborCompatibleAdapterId(adapterId)
           ? HARBOR_SELECTION_ROLE
-          : isInspectRuntimeAdapterId(adapterId)
-            ? INSPECT_SELECTION_CORRELATION_ROLE
-            : undefined;
+          : adapterId === SWE_BENCH_HARNESS_ADAPTER_ID
+            ? SWE_BENCH_VERIFIED_SELECTION_ROLE
+            : adapterId === ARCHIPELAGO_ADAPTER_ID
+              ? APEX_AGENTS_SELECTION_ROLE
+            : adapterId === APEX_SWE_DEV_ADAPTER_ID
+              ? APEX_SWE_DEV_SELECTION_ROLE
+            : isInspectRuntimeAdapterId(adapterId)
+              ? INSPECT_SELECTION_CORRELATION_ROLE
+              : undefined;
         return role === undefined ? [] : [{
           id: selection.id ?? "runtime-selection-manifest.json",
           role,
@@ -696,7 +849,7 @@ function createPublicationAdapter(
         }];
       })();
       if (isInspectRuntimeAdapterId(adapterId) && expectedSelectionManifestSha256 !== undefined) assertInspectRegistration(expectedSelectionManifestSha256, artifacts);
-      if (adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined) assertHarborRegistration(expectedSelectionManifestSha256, artifacts);
+      if (isHarborCompatibleAdapterId(adapterId) && expectedSelectionManifestSha256 !== undefined) assertHarborRegistration(expectedSelectionManifestSha256, artifacts);
       return artifacts;
     },
     async registration() { return adapter.registrationArtifacts(); },
@@ -709,7 +862,17 @@ function createPublicationAdapter(
       return { correlations, nativeArtifacts: input.nativeArtifacts ?? [] };
     },
     async verify(input) {
-      const prefix = isInspectRuntimeAdapterId(adapterId) ? "inspect" : adapterId === HARBOR_ADAPTER_ID ? "harbor" : "native";
+      const prefix = isInspectRuntimeAdapterId(adapterId)
+        ? "inspect"
+        : isHarborCompatibleAdapterId(adapterId)
+          ? "harbor"
+          : adapterId === SWE_BENCH_HARNESS_ADAPTER_ID
+            ? "swebench-harness"
+            : adapterId === ARCHIPELAGO_ADAPTER_ID
+              ? "archipelago"
+            : adapterId === APEX_SWE_DEV_ADAPTER_ID
+              ? "apex-swe-dev"
+            : "native";
       const correlations = input.dispatch.correlations;
       const nativeArtifacts = input.dispatch.nativeArtifacts;
       return [
@@ -719,11 +882,11 @@ function createPublicationAdapter(
         // Correlations are identity joins and always singular by role. Native artifact role
         // cardinality belongs to the runtime profile: one Harbor Trial commonly has multiple
         // ATIF and log files under the same semantic role, each retained by exact descriptor.
-        roleCheck(correlations, nativeArtifacts, adapterId === HARBOR_ADAPTER_ID),
+        roleCheck(correlations, nativeArtifacts, isHarborCompatibleAdapterId(adapterId)),
         disclosureCheck(nativeArtifacts),
         ...(isInspectRuntimeAdapterId(adapterId) && expectedSelectionManifestSha256 !== undefined ? inspectRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts) : []),
-        ...(adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined ? harborRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts) : []),
-        ...(adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined ? [await harborStructureCheck(expectedSelectionManifestSha256, correlations, nativeArtifacts, input.references)] : []),
+        ...(isHarborCompatibleAdapterId(adapterId) && expectedSelectionManifestSha256 !== undefined ? harborRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts) : []),
+        ...(isHarborCompatibleAdapterId(adapterId) && expectedSelectionManifestSha256 !== undefined ? [await harborStructureCheck(expectedSelectionManifestSha256, correlations, nativeArtifacts, input.references)] : []),
         await exactEvidenceCheck(`${prefix}-exact-native-evidence`, correlations, nativeArtifacts, input.references),
       ];
     },
@@ -735,6 +898,10 @@ const nativeAdapter = legacyAdapter(nativeDefinition);
 const inspectAdapter = legacyAdapter(inspectDefinition);
 const inspectBinaryJudgeAdapter = legacyAdapter(inspectBinaryJudgeDefinition);
 const harborAdapter = legacyAdapter(harborDefinition);
+const pierAdapter = legacyAdapter(pierDefinition);
+const swebenchHarnessAdapter = legacyAdapter(swebenchHarnessDefinition);
+const archipelagoAdapter = legacyAdapter(archipelagoDefinition);
+const apexSweDevAdapter = legacyAdapter(apexSweDevDefinition);
 
 /**
  * Creates the publication-facing adapter for a particular sealed runtime binding. The caller
@@ -749,7 +916,17 @@ export function createRuntimeEvidenceAdapter(
   return createPublicationAdapter({
     summary: adapter.summary,
     nativeArtifactPublication: adapter.nativeArtifactPublication,
-    profile: isInspectRuntimeAdapterId(adapter.summary.id) ? INSPECT_RUNTIME_EVIDENCE_PROFILE : adapter.summary.id === HARBOR_ADAPTER_ID ? HARBOR_RUNTIME_EVIDENCE_PROFILE : NATIVE_RUNTIME_EVIDENCE_PROFILE,
+    profile: isInspectRuntimeAdapterId(adapter.summary.id)
+      ? INSPECT_RUNTIME_EVIDENCE_PROFILE
+      : isHarborCompatibleAdapterId(adapter.summary.id)
+        ? HARBOR_RUNTIME_EVIDENCE_PROFILE
+        : adapter.summary.id === SWE_BENCH_HARNESS_ADAPTER_ID
+          ? SWE_BENCH_HARNESS_RUNTIME_EVIDENCE_PROFILE
+          : adapter.summary.id === ARCHIPELAGO_ADAPTER_ID
+            ? ARCHIPELAGO_RUNTIME_EVIDENCE_PROFILE
+          : adapter.summary.id === APEX_SWE_DEV_ADAPTER_ID
+            ? APEX_SWE_DEV_RUNTIME_EVIDENCE_PROFILE
+          : NATIVE_RUNTIME_EVIDENCE_PROFILE,
   }, binding, options);
 }
 
@@ -758,6 +935,10 @@ const ADAPTERS = new Map<string, EvaluationRuntimeAdapter>([
   [inspectAdapter.summary.id, inspectAdapter],
   [inspectBinaryJudgeAdapter.summary.id, inspectBinaryJudgeAdapter],
   [harborAdapter.summary.id, harborAdapter],
+  [pierAdapter.summary.id, pierAdapter],
+  [swebenchHarnessAdapter.summary.id, swebenchHarnessAdapter],
+  [archipelagoAdapter.summary.id, archipelagoAdapter],
+  [apexSweDevAdapter.summary.id, apexSweDevAdapter],
 ]);
 
 function adapterFor(binding: EvaluationRuntimeBinding | undefined): EvaluationRuntimeAdapter {

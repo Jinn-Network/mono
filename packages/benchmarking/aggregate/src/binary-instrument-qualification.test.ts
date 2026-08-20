@@ -24,8 +24,8 @@ function zeroProjection() {
   };
 }
 
-function qualification(withItems = false): Record<string, unknown> {
-  const armIds = ["arm-a", "arm-b", "arm-c", "arm-d"];
+function qualification(withItems = false, armCount = 4): Record<string, unknown> {
+  const armIds = Array.from({ length: armCount }, (_, index) => `arm-${String.fromCharCode(97 + index)}`);
   const arms = Object.fromEntries(armIds.map((armId, index) => [armId, {
     instrumentSha256: `sha256:${String(index + 1).repeat(64)}`,
     ...zeroProjection(),
@@ -59,6 +59,28 @@ function qualification(withItems = false): Record<string, unknown> {
 describe("binary-instrument public qualification schema", () => {
   test("accepts the complete closed F6 projection", () => {
     expect(validateBinaryInstrumentQualificationProjection(qualification(true))).toEqual({ ok: true });
+  });
+
+  // §1.6: arm cardinality is never a literal count. Sites 5 and 6 must accept any arm set of
+  // size two or more, of distinct instruments, and refuse below the floor of two.
+  test("accepts a two-arm projection", () => {
+    expect(validateBinaryInstrumentQualificationProjection(qualification(true, 2))).toEqual({ ok: true });
+  });
+
+  test("accepts a six-arm projection", () => {
+    expect(validateBinaryInstrumentQualificationProjection(qualification(true, 6))).toEqual({ ok: true });
+  });
+
+  test("refuses a one-arm projection", () => {
+    expect(validateBinaryInstrumentQualificationProjection(qualification(true, 1)).ok).toBe(false);
+  });
+
+  test("refuses N arms binding fewer than N distinct instruments", () => {
+    const collidingInstruments = structuredClone(qualification(true, 3)) as any;
+    // Force arm-b to pin the same instrument as arm-a: three arms, two distinct instruments.
+    collidingInstruments.arms["arm-b"].instrumentSha256 = collidingInstruments.arms["arm-a"].instrumentSha256;
+    collidingInstruments.itemDecisions[1].instrumentSha256 = collidingInstruments.arms["arm-a"].instrumentSha256;
+    expect(validateBinaryInstrumentQualificationProjection(collidingInstruments).ok).toBe(false);
   });
 
   test("rejects conclusion fields, slice drift, and noncanonical rate values", () => {

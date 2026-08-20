@@ -34,6 +34,7 @@ import {
   ClaimPackageSchema,
 } from "../report/claim.js";
 import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../human-review/verification-workspace.js";
+import type { AdmissionAuthorityRole, BinaryJudgmentAdmissionRecordRole } from "../human-review/verification.js";
 import {
   parseBinaryItemBankIntakeExtension,
 } from "../intake/binary-item-bank.js";
@@ -50,7 +51,8 @@ import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/sig
 import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
-import { BUNDLE_V4_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { buildPublicAssets } from "./assets.js";
 import {
   BUNDLE_ASSEMBLY_FORMAT,
@@ -84,6 +86,7 @@ import { INSPECT_ADAPTER_ID, InspectSelectionManifestSchema } from "../runtime/i
 import {
   INSPECT_BINARY_JUDGE_ADAPTER_ID,
   InspectBinaryJudgeSelectionManifestSchema,
+  type InspectBinaryJudgeSelectionManifest,
 } from "../runtime/inspect/binary-judge-manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
@@ -145,6 +148,36 @@ function addRole(
   records.set(sha256, roles);
 }
 
+/**
+ * The evidence-role-to-authority-role mapping for admission trust bindings (spec §6.8a Group
+ * B-bis; packet P6 item E). Exported for direct test coverage: this is the specific NEW logic
+ * this packet adds to the discriminator below, and it is exercised without needing the full
+ * Benchmark/Run/Matrix/Report bundle-materialization fixture.
+ *
+ * Both screened-branch roles map to `truth-reveal-attestor` — the SAME authority role the
+ * per-item reveal receipt already uses (spec §6.6 deliberately reuses the role rather than
+ * minting one), which is also §6.8a Group C's frozen third authority set,
+ * `["truth-reveal-attestor"]`, exactly.
+ */
+export function binaryAdmissionEvidenceRoleToAuthorityRole(
+  role: Extract<
+    BinaryJudgmentAdmissionRecordRole,
+    "reviewer-roster" | "review-reveal-receipt" | "operator-assertion" | "screening-table" | "screening-reveal-receipt"
+  >,
+): AdmissionAuthorityRole {
+  switch (role) {
+    case "reviewer-roster": return "roster-attestor";
+    case "review-reveal-receipt": return "truth-reveal-attestor";
+    case "operator-assertion": return "operator-truth-attestor";
+    case "screening-table": return "truth-reveal-attestor";
+    case "screening-reveal-receipt": return "truth-reveal-attestor";
+    default: {
+      const exhaustive: never = role;
+      throw new Error(`unsupported admission evidence role ${String(exhaustive)}`);
+    }
+  }
+}
+
 function nodeCode(cause: unknown): string | undefined {
   return cause !== null && typeof cause === "object" && "code" in cause
     ? String((cause as { code?: unknown }).code)
@@ -175,7 +208,10 @@ function exactJson<T>(bytes: Uint8Array, schema: { parse(value: unknown): T }, l
 function recordClosure(input: MaterializeBundleInput): {
   readonly files: Map<string, Uint8Array>;
   readonly evidenceRecords: Map<string, Set<BundleV4EvidenceRole>>;
-  readonly format: "benchmark-product-public-bundle/2" | typeof BUNDLE_V4_FORMAT;
+  readonly format:
+    | "benchmark-product-public-bundle/2"
+    | typeof BUNDLE_V4_FORMAT
+    | typeof BUNDLE_V6_FORMAT;
 } {
   const { workspaceDir, draftId, benchmarkSha256, runState } = input;
   if (
@@ -206,6 +242,9 @@ function recordClosure(input: MaterializeBundleInput): {
   const inspectSelectionSha256 = inspectRuntime
     ? draft.spec.evaluationRuntime?.selectionManifestSha256
     : undefined;
+  // Captured when this run is the binary-judge runtime, so the probe's digest (if any) is
+  // available where roles are assembled below without re-parsing the selection bytes.
+  let binaryInspectSelection: InspectBinaryJudgeSelectionManifest | undefined;
   if (inspectRuntime) {
     if (inspectSelectionSha256 === undefined) {
       refuse("record-integrity", "evidence-closure", "Inspect draft has no sealed runtime selection identity");
@@ -221,7 +260,11 @@ function recordClosure(input: MaterializeBundleInput): {
     }
     const selectionBytes = getSealedBytes(workspaceDir, inspectSelectionSha256);
     if (binaryInspectRuntime) {
-      exactJson(selectionBytes, InspectBinaryJudgeSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
+      binaryInspectSelection = exactJson(
+        selectionBytes,
+        InspectBinaryJudgeSelectionManifestSchema,
+        `records/${inspectSelectionSha256}.bin`,
+      );
     } else {
       exactJson(selectionBytes, InspectSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
     }
@@ -256,6 +299,41 @@ function recordClosure(input: MaterializeBundleInput): {
       refuse("record-integrity", "claim-package.json", "claim-package/2 must exactly project the sealed binary-instrument@1 Report result");
     }
   }
+
+  // ── The anchored closure (anchor-evidence design §7.4) ─────────────────────────────────────
+  //
+  // `anchors/<recordSha256>.bin` carries each recorded AnchorEvidence record's exact sealed bytes.
+  // The claim's own `anchors` section must be exactly the projection of those bytes: the section is
+  // sealed into the claim at `report` time, so a mismatch means the two disagree about what this
+  // run is anchored by, and publishing either one over the other would put a claim in front of a
+  // reader that its own carried evidence does not back.
+  const anchorCarriage = readRunAnchorCarriage(workspaceDir, runState);
+  const anchored = anchorCarriage.anchoredClosure;
+  if (anchored && binaryQualification) {
+    refuse(
+      "conflict",
+      "anchors",
+      "the anchored binary-qualification closure is a later allocation; this run carries both a"
+      + " binary qualification projection and an anchor, and no closure version expresses both",
+    );
+  }
+  // Presence is compared, not only contents: an unanchored claim inside an anchored closure is
+  // exactly as wrong as an anchored claim whose section drifted, and an omitted section is not an
+  // empty one.
+  const storedAnchors = (claim as { readonly anchors?: readonly unknown[] }).anchors;
+  const expectedAnchors = anchored ? anchorCarriage.anchors : undefined;
+  if (!Buffer.from(canonicalJsonBytes({ anchors: storedAnchors ?? null } as never)).equals(
+    Buffer.from(canonicalJsonBytes({ anchors: expectedAnchors ?? null } as never)),
+  )) {
+    refuse(
+      "record-integrity",
+      "claim-package.json",
+      "the sealed claim's anchors section is not the projection of the anchors this run records"
+      + " — an anchor obtained after the run was reported is recorded and audited, but this claim"
+      + " predates it and cannot be republished as though it did not",
+    );
+  }
+
   const files = new Map<string, Uint8Array>([
     ["benchmark.json", benchmarkBytes],
     ["run.json", runBytes],
@@ -265,13 +343,19 @@ function recordClosure(input: MaterializeBundleInput): {
     ["claim-package.json", claimBytes],
     ["static-bundle.json", canonicalJsonBytes(exportStaticBundle(matrix, [report]))],
   ]);
+  for (const record of anchorCarriage.records) {
+    files.set(`anchors/${record.recordSha256}.bin`, record.bytes);
+  }
 
   const evidenceRecords = new Map<string, Set<BundleV4EvidenceRole>>();
   const admissionReviewerBindings = new Map<string, string>();
   const admissionAuthorityBindings = new Map<"roster-attestor" | "truth-reveal-attestor" | "operator-truth-attestor", string>();
   let binaryAssetQualification: {
     publicationGrade: boolean;
-    truthAdmission: "two-human-unanimous" | "operator-only";
+    // Type-only widening (packet P6): matches the already-widened source type at
+    // `admission.manifest.truthAdmission`. The screened branch's own materialize.ts logic
+    // (evidence-role mapping, authority-binding discriminators) is out of this packet's scope.
+    truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
     sourceManifestSha256: string;
     admissionManifestSha256: string;
     exclusions: readonly unknown[];
@@ -321,16 +405,20 @@ function recordClosure(input: MaterializeBundleInput): {
         if (prior !== undefined && prior !== keyId) refuse("record-integrity", "qualification.trust", `reviewer ${view.evaluatorId} uses multiple keys`);
         admissionReviewerBindings.set(view.evaluatorId, keyId);
       } else {
-        const role = reachable.roles.find((candidate) => candidate === "reviewer-roster" || candidate === "review-reveal-receipt" || candidate === "operator-assertion");
+        // Widened spec §6.8a Group B-bis (packet P6): the discriminator the spec calls invisible
+        // to both the compiler and the grep sweep, because it switches on nothing and its line
+        // carries none of the family's search tokens. Both screened-branch roles are named here
+        // explicitly so they contribute an authority binding instead of being silently skipped by
+        // `if (role === undefined) continue;` below — which is exactly what made §6.8a's frozen
+        // third authority set unreachable before this fix.
+        const role = reachable.roles.find((candidate): candidate is Parameters<typeof binaryAdmissionEvidenceRoleToAuthorityRole>[0] =>
+          candidate === "reviewer-roster" || candidate === "review-reveal-receipt" || candidate === "operator-assertion"
+          || candidate === "screening-table" || candidate === "screening-reveal-receipt");
         if (role === undefined) continue;
         const envelope = parseDsseEnvelope(bytes);
         const keyId = envelope.signatures[0]?.keyid;
         if (typeof keyId !== "string") refuse("record-integrity", "qualification.trust", `${role} has no signer key id`);
-        const authorityRole = role === "reviewer-roster"
-          ? "roster-attestor" as const
-          : role === "review-reveal-receipt"
-            ? "truth-reveal-attestor" as const
-            : "operator-truth-attestor" as const;
+        const authorityRole = binaryAdmissionEvidenceRoleToAuthorityRole(role);
         const prior = admissionAuthorityBindings.get(authorityRole);
         if (prior !== undefined && prior !== keyId) refuse("record-integrity", "qualification.trust", `${authorityRole} uses multiple keys`);
         admissionAuthorityBindings.set(authorityRole, keyId);
@@ -423,7 +511,19 @@ function recordClosure(input: MaterializeBundleInput): {
     const receipt = receipts.get(taskSha256);
     if (receipt !== undefined) addRole(evidenceRecords, receipt.sha256, "admission-receipt");
   }
-  if (binaryInspectRuntime) addRole(evidenceRecords, inspectSelectionSha256!, "runtime-selection");
+  if (binaryInspectRuntime) {
+    addRole(evidenceRecords, inspectSelectionSha256!, "runtime-selection");
+    // §1.5 rule 5: publish the pre-run snapshot-serving probe as a bundle asset alongside the
+    // selection manifest, so a cold verifier reads the same bytes. Present exactly when the
+    // sealed selection manifest carries `snapshotProbeSha256`.
+    if (binaryInspectSelection?.snapshotProbeSha256 !== undefined) {
+      addRole(
+        evidenceRecords,
+        binaryInspectSelection.snapshotProbeSha256.slice("sha256:".length),
+        "snapshot-probe",
+      );
+    }
+  }
 
   const journal = readRunJournalEntries(workspaceDir, draftId);
   const graph: BundleAssemblyHeader["graph"] = {
@@ -572,6 +672,12 @@ function recordClosure(input: MaterializeBundleInput): {
         ...(entry.evalDeliverySha256 !== undefined ? { evalDeliverySha256: entry.evalDeliverySha256 } : {}),
         ...(entry.verdictSha256 !== undefined ? { verdictSha256: entry.verdictSha256 } : {}),
         ...(entry.evaluationTerminal !== undefined ? { evaluationTerminal: entry.evaluationTerminal } : {}),
+        // Carry the terminal's operational category into the bundle. `evaluationRetries` already
+        // carries the category of every failure that was RETRIED; the failure that exhausted the
+        // budget and terminalized the leg has no retry row, so without this member the accounted
+        // ungradeable cell publishes as an uncategorized absence. Additive and optional: a run
+        // with no categorized could-not-grade terminal seals to identical assembly bytes.
+        ...(entry.failureCategory !== undefined ? { failureCategory: entry.failureCategory } : {}),
       });
       if (entry.verdictSha256 !== undefined) {
         evaluationEvidenceByVerdict.set(
@@ -832,7 +938,13 @@ function recordClosure(input: MaterializeBundleInput): {
   return {
     files,
     evidenceRecords,
-    format: binaryQualification ? BUNDLE_V4_FORMAT : "benchmark-product-public-bundle/2",
+    // Carrying an anchor is what moves a bundle onto the anchored closure. Everything else emits
+    // exactly the version it emitted before this feature existed, byte for byte (§12).
+    format: anchored
+      ? BUNDLE_V6_FORMAT
+      : binaryQualification
+        ? BUNDLE_V4_FORMAT
+        : "benchmark-product-public-bundle/2",
   };
 }
 

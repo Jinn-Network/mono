@@ -1,9 +1,13 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { redirect } from "next/navigation";
 import {
+  anchorAfterLockIfConfigured,
+  anchoringConfigure,
   armAdd,
   armList,
   armRemove,
@@ -17,6 +21,7 @@ import {
   initWorkspace,
   inspectDraft,
   listDrafts,
+  runAnchor,
   runLock,
   publicationAccounting,
   publicationConfigure,
@@ -36,12 +41,12 @@ import {
   runResults,
   runVerify,
   sampleInit,
-  selectInspectEvaluation,
+  selectMethod,
+  isMethodCatalogId,
   profileArmPinning,
   readAgentProfile,
   updateDraft,
   verifyPublicBundle,
-  type SelectInspectEvaluationInput,
 } from "@colophon-claims/core";
 import type { GuiActionState } from "@/lib/action-state";
 import {
@@ -237,14 +242,67 @@ export async function intakeSweBenchAction(_previous: GuiActionState, formData: 
   }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
 }
 
-export async function inspectRuntimeSelectAction(
+async function readHostJson(formData: FormData): Promise<Record<string, unknown>> {
+  const file = formData.get("hostFile");
+  let parsed: unknown;
+  if (file instanceof File && file.size > 0) {
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      throw new ProductContextConfigurationError("hostFile must be valid JSON");
+    }
+  } else {
+    parsed = jsonField(formData, "host");
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new ProductContextConfigurationError("host must be a JSON object");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+export async function methodBindAction(
   _previous: GuiActionState,
   formData: FormData,
 ): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
-  const configuration = jsonField(formData, "configuration") as Omit<SelectInspectEvaluationInput, "draftId">;
+  const catalogRef = optionalField(formData, "ref");
+  const hasConfiguration = field(formData, "configuration").length > 0;
   return executeOperation(
-    (context) => selectInspectEvaluation(context, { draftId, ...configuration } as SelectInspectEvaluationInput),
+    async (context) => {
+      if (catalogRef !== undefined && hasConfiguration) {
+        throw new ProductContextConfigurationError("submit a catalog suite or an Inspect configuration, not both");
+      }
+      if (catalogRef === undefined && !hasConfiguration) {
+        throw new ProductContextConfigurationError("submit a catalog suite or an Inspect configuration");
+      }
+      const dir = mkdtempSync(join(tmpdir(), "colophon-method-"));
+      try {
+        if (hasConfiguration) {
+          const filePath = join(dir, "inspect.json");
+          writeFileSync(filePath, JSON.stringify(jsonField(formData, "configuration")));
+          return await selectMethod(context, { draftId, ref: filePath, cwd: dir });
+        }
+        if (catalogRef === undefined || !isMethodCatalogId(catalogRef)) {
+          throw new ProductContextConfigurationError("ref must be a catalog suite id");
+        }
+        const hostPath = join(dir, "host.json");
+        writeFileSync(hostPath, JSON.stringify(await readHostJson(formData)));
+        const slice = optionalField(formData, "slice");
+        const ids = optionalField(formData, "ids");
+        const n = optionalField(formData, "n");
+        return await selectMethod(context, {
+          draftId,
+          ref: catalogRef,
+          cwd: dir,
+          hostPath,
+          ...(slice === undefined ? {} : { slice }),
+          ...(ids === undefined ? {} : { ids }),
+          ...(n === undefined ? {} : { n }),
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
     { revalidate: ["/workspace", `/workspace/${draftId}`] },
   );
 }
@@ -381,11 +439,62 @@ export async function runQuoteAction(_previous: GuiActionState, formData: FormDa
   return executeOperation((context) => runQuote(context, { draftId }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
 }
 
+/**
+ * Lock, then the anchor-evidence design's §7.2 hook — the same call in the same position as the
+ * CLI's `lock` verb, so the two surfaces cannot disagree about whether a lock anchors.
+ *
+ * The outcome is deliberately discarded. `anchorAfterLockIfConfigured` never throws, audits itself,
+ * and returns a typed result; folding any of it into this action's state would make the rendered
+ * lock outcome depend on a third party being reachable, which is exactly what §7.2 forbids. The
+ * durable record is the audit journal, and `run.anchor` re-run standalone returns the typed result.
+ */
 export async function runLockAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
   const acknowledgement = requireProviderAcknowledgement(draftId, formData);
   if (acknowledgement !== undefined) return acknowledgement;
-  return executeOperation((context) => runLock(context, { draftId }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
+  return executeOperation(async (context) => {
+    const locked = runLock(context, { draftId });
+    if (locked.ok) await anchorAfterLockIfConfigured(context, draftId);
+    return locked;
+  }, { revalidate: ["/workspace", `/workspace/${draftId}`] });
+}
+
+/**
+ * Anchoring is opt-in configuration, and the endpoint is the server's, never the browser's: this
+ * deployment reaches whatever is configured here on every later lock. The form carries only the
+ * decision — apply the server's configured providers, or clear the block.
+ *
+ * The result names the configured **profiles only**. An endpoint is a URL an operator typed, and a
+ * URL can carry userinfo or a key in its path or query; this action's success state is serialized
+ * into the browser, so it carries the fact the operator needs (which providers are configured) and
+ * not the credential-shaped string behind it.
+ */
+export async function anchoringConfigureAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const clearing = field(formData, "clear") === "clear-anchoring";
+  const applied = await executeOperation((context) => {
+    if (clearing) return anchoringConfigure(context, { entries: [] });
+    const configured = readProductServerConfiguration().anchorProviders;
+    if (configured === undefined) throw new ProductContextConfigurationError("The server must configure anchor providers before the GUI can enable anchoring");
+    return anchoringConfigure(context, { entries: configured });
+  }, { revalidate: ["/workspace"] });
+  if (applied.status !== "success") return applied;
+  const anchoring = (applied.result as { readonly anchoring: readonly { readonly providerProfile: string }[] }).anchoring;
+  return { status: "success", result: { providerProfiles: anchoring.map((entry) => entry.providerProfile) } };
+}
+
+/**
+ * Anchors one of a run's own sealed records. Provider and endpoint are resolved from workspace
+ * configuration; the browser names only the draft and which record to anchor.
+ */
+export async function runAnchorAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  const subject = field(formData, "subject");
+  return executeOperation(async (context) => {
+    if (subject !== "lock" && subject !== "matrix") {
+      throw new ProductContextConfigurationError("subject must be lock or matrix");
+    }
+    return runAnchor(context, { draftId, subject });
+  }, { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
 }
 
 /** The browser supplies a locator and draft id only. The workspace is fixed by server config. */
