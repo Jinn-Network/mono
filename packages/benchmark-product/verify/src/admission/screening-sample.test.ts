@@ -187,6 +187,12 @@ describe("refusals", () => {
     const result = computeScreeningSample({ itemSha256s: POOL_5, sampleSeed: SEED, sampleSize: 5 });
     expect(result.sample).toHaveLength(5);
   });
+
+  test("8e. empty sampleSeed refuses", () => {
+    expect(() => computeScreeningSample({ itemSha256s: POOL_5, sampleSeed: "", sampleSize: 1 })).toThrow(
+      ScreeningSampleError,
+    );
+  });
 });
 
 describe("9. frozen cross-language vector", () => {

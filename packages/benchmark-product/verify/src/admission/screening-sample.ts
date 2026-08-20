@@ -118,6 +118,7 @@ export function computeScreeningPoolDigest(itemSha256s: readonly string[]): stri
  * Procedure `screening-sample/1` (§6.5). Refuses (throws `ScreeningSampleError`) when:
  * - `itemSha256s` is empty, contains a duplicate, or contains an entry not matching
  *   `^sha256:[0-9a-f]{64}$`;
+ * - `sampleSeed` is empty;
  * - `sampleSize` is not a positive integer, or exceeds `itemSha256s.length`.
  */
 export function computeScreeningSample(params: ScreeningSampleParams): ScreeningSampleResult {
@@ -134,6 +135,8 @@ export function computeScreeningSample(params: ScreeningSampleParams): Screening
   if (new Set(itemSha256s).size !== itemSha256s.length) {
     fail("itemSha256s", "identity set must not contain duplicate itemSha256 values");
   }
+
+  if (sampleSeed.length === 0) fail("sampleSeed", "must be non-empty");
 
   if (!Number.isInteger(sampleSize) || sampleSize <= 0) {
     fail("sampleSize", `must be a positive integer, got ${JSON.stringify(sampleSize)}`);
