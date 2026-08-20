@@ -24,9 +24,12 @@ import { wilsonInterval } from "./stats/wilson.js";
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const SHA256_URI = /^sha256:[a-f0-9]{64}$/;
-const CANDIDATE_CLASS = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
+// Exported (P5, packet #2837) so `pairwise-disagreement@1` and `paired-majority-delta@1` gate
+// their own `candidateClasses`/`strata` parameters against the identical grammar instead of each
+// carrying a private copy that can drift from the parameter schema's own `pattern` values.
+export const CANDIDATE_CLASS = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
 // §3.1 rule 1: one identifier dialect, not two. Shared shape with `candidateClass`.
-const STRATUM_NAME = CANDIDATE_CLASS;
+export const STRATUM_NAME = CANDIDATE_CLASS;
 
 const INSTRUMENT_REQUIREMENT_KEY = "network.jinn.binary-judgment.instrument";
 const ITEM_COMMITMENT_KEY = "network.jinn.binary-judgment.item-sha256";

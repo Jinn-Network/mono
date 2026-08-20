@@ -21,6 +21,11 @@ import {
   PAIRWISE_DISAGREEMENT_PARAMETER_SCHEMA,
   validatePairwiseDisagreementParameters,
 } from "./pairwise-disagreement-method.js";
+import {
+  computePairedMajorityDelta,
+  PAIRED_MAJORITY_DELTA_PARAMETER_SCHEMA,
+  validatePairedMajorityDeltaParameters,
+} from "./paired-majority-delta-method.js";
 import type { Method, MethodComputeInput, MethodRegistry } from "./method.js";
 import {
   MethodInputError,
@@ -31,7 +36,7 @@ import {
   resolveVerdictOutcome,
 } from "./resolved-inputs.js";
 import { clusteredPairedRateDiffBca, MAX_NONINFERIORITY_RESAMPLES_V1, nonInferiorityIut, nonInferiorityVerdict, pairedCostVerdict, type ExactCostDifference, type NonInferiorityOptions } from "./stats/noninferiority.js";
-import { clusteredPairedDeltaInterval } from "./stats/paired-delta.js";
+import { clusteredPairedDeltaInterval, sourceClusterManifest } from "./stats/paired-delta.js";
 import { pairedMcnemar } from "./stats/paired-mcnemar.js";
 import { provenanceClusterSign } from "./stats/provenance-cluster-sign.js";
 import { avgAtOne, passAtK } from "./stats/pass-at-k.js";
@@ -46,25 +51,6 @@ type SingleSubjectComputeInput = Omit<MethodComputeInput, "subjects"> & {
 type SingleSubjectMethod = Omit<Method, "compute"> & {
   readonly compute?: (input: SingleSubjectComputeInput) => unknown;
 };
-
-function sourceClusterManifest(rates: readonly {
-  readonly taskDigest: string;
-  readonly cluster: readonly ["source" | "sourceCommitment", string];
-}[]): readonly { readonly key: readonly ["source" | "sourceCommitment", string]; readonly members: readonly string[] }[] {
-  const groups = new Map<string, { key: ["source" | "sourceCommitment", string]; members: string[] }>();
-  for (const rate of rates) {
-    const id = JSON.stringify(rate.cluster);
-    const group = groups.get(id) ?? { key: [rate.cluster[0], rate.cluster[1]], members: [] };
-    group.members.push(rate.taskDigest);
-    groups.set(id, group);
-  }
-  return [...groups.values()]
-    .map((group) => ({ ...group, members: group.members.sort(compareCodeUnitStrings) }))
-    .sort((left, right) => {
-      const byTag = compareCodeUnitStrings(left.key[0], right.key[0]);
-      return byTag === 0 ? compareCodeUnitStrings(left.key[1], right.key[1]) : byTag;
-    });
-}
 
 /** Exact reduced rational at a fixed base-ten scale: coefficient / (divisor × 10^scale). */
 function meanExactDecimal(values: readonly { readonly coefficient: bigint; readonly scale: bigint }[]): ExactCostDifference {
@@ -318,6 +304,23 @@ const METHOD_METADATA = {
     clusteringRule: "Task digest plus arm pair; strict majority over registered scientific replicates",
     referenceSet: "registered-non-reference",
     deterministic: true,
+    computeAvailability: "available",
+  }),
+  // spec §7.2a (packet P5, issue #2837): the evidence contrast. requiredInputs is
+  // binary-instrument@1's own eight PLUS task-provenance-source (nine total) — this method
+  // single-sources binary-instrument@1's own reduction (so it reads everything that module
+  // reads) and clusters on task-provenance-source exactly as paired-delta@1 does.
+  // parameterSchema.required is THIRTEEN: binary-instrument@1's nine minus intervalAlpha
+  // (superseded by alpha), plus paired-delta@1's baseline/candidate/seed/resamples/alpha.
+  pairedMajorityDelta: metadata({
+    requiredInputs: [...BINARY_INSTRUMENT_REQUIRED_INPUTS, "task-provenance-source"],
+    parameterSchema: PAIRED_MAJORITY_DELTA_PARAMETER_SCHEMA,
+    outputShape: "paired item-majority rate difference + two-sided clustered BCa interval, per-candidate-class and per-stratum slices, source-cluster manifest, and exclusions",
+    exclusionRule: "exact k-cell Task/arm groups only, in both arms of the pair; an item excluded for either arm is excluded from the pair, with exact cells",
+    clusteringRule: "task-provenance-source",
+    referenceSet: "registered-non-reference",
+    deterministic: true,
+    resamplingProcedure: "xorshift32-v1; sample whole source clusters with replacement; one uint32 draw per cluster position; cluster jackknife acceleration; two passes at alpha/2 and 1-alpha/2 over one seed",
     computeAvailability: "available",
   }),
 } as const;
@@ -1270,6 +1273,17 @@ const pairwiseDisagreementMethod: SingleSubjectMethod = {
   compute: computePairwiseDisagreement,
 };
 
+// versionRobust: false for the same reason pairwiseDisagreementMethod is — the closure it reads
+// (via resolveBinaryInstrumentReduction) is version-pinned.
+const pairedMajorityDeltaMethod: SingleSubjectMethod = {
+  ...METHOD_METADATA.pairedMajorityDelta,
+  id: BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+  version: BENCHMARKING_METHOD_VERSION,
+  versionRobust: false,
+  validateParameters: validatePairedMajorityDeltaParameters,
+  compute: computePairedMajorityDelta,
+};
+
 // --- the registry -------------------------------------------------------------------------------
 
 const SINGLE_SUBJECT_METHODS: readonly SingleSubjectMethod[] = [
@@ -1283,6 +1297,7 @@ const SINGLE_SUBJECT_METHODS: readonly SingleSubjectMethod[] = [
   cleanSubsetMethod,
   binaryInstrumentMethod,
   pairwiseDisagreementMethod,
+  pairedMajorityDeltaMethod,
   bradleyTerryMethod,
 ];
 

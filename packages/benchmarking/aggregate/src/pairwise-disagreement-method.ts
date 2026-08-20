@@ -3,19 +3,15 @@ import type { BinaryInstrumentExcludedItem, BinaryInstrumentItemDecision } from 
 import {
   BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
   BINARY_INSTRUMENT_PARAMETER_SCHEMA,
+  CANDIDATE_CLASS,
   fixed4,
   resolveBinaryInstrumentReduction,
+  STRATUM_NAME,
   type BinaryInstrumentParameters,
   type BinaryInstrumentQualificationComputeInput,
 } from "./binary-instrument-method.js";
 import type { Method } from "./method.js";
 import { wilsonInterval } from "./stats/wilson.js";
-
-// Mirrors binary-instrument-method.ts's CANDIDATE_CLASS/STRATUM_NAME (module-private there, so
-// duplicated here rather than exported — the same "one identifier dialect, not two; shared shape"
-// mirror that file's own §3.1 comment already documents for its own borrowed constants).
-const CANDIDATE_CLASS = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
-const STRATUM_NAME = CANDIDATE_CLASS;
 
 const PAIRWISE_DISAGREEMENT_REQUIRED = [
   "verdictRule",

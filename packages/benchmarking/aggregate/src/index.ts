@@ -77,6 +77,17 @@ export {
 } from "./pairwise-disagreement-method.js";
 export type { PairwiseDisagreementParameters } from "./pairwise-disagreement-method.js";
 
+// --- paired-majority-delta@1: the evidence contrast over item-majority decisions (spec §7.2a) ---
+export {
+  computePairedMajorityDelta,
+  PAIRED_MAJORITY_DELTA_ALPHA,
+  PAIRED_MAJORITY_DELTA_PARAMETER_SCHEMA,
+  PAIRED_MAJORITY_DELTA_RESAMPLES,
+  PAIRED_MAJORITY_DELTA_SEED,
+  validatePairedMajorityDeltaParameters,
+} from "./paired-majority-delta-method.js";
+export type { PairedMajorityDeltaParameters } from "./paired-majority-delta-method.js";
+
 // --- the reference statistics library (design §9.2, adopted from the capability-eval seed) ---
 export { wilsonInterval } from "./stats/wilson.js";
 export type { WilsonInterval } from "./stats/wilson.js";

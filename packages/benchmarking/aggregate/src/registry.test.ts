@@ -71,7 +71,7 @@ describe("createMethodRegistry", () => {
     expect(registry.get("jinn.benchmarking.method/does-not-exist", "1")).toBeUndefined();
   });
 
-  test("registers all eleven methods", () => {
+  test("registers all twelve methods", () => {
     const registry = createMethodRegistry();
     for (const [id, version] of [
       ["jinn.benchmarking.method/wilson", "1"],
@@ -84,6 +84,7 @@ describe("createMethodRegistry", () => {
       ["jinn.benchmarking.method/clean-subset", "1"],
       ["jinn.benchmarking.method/binary-instrument", "1"],
       ["jinn.benchmarking.method/pairwise-disagreement", "1"],
+      ["jinn.benchmarking.method/paired-majority-delta", "1"],
       ["jinn.benchmarking.method/bradley-terry", "1"],
     ] as const) {
       expect(registry.get(id, version), `${id}@${version}`).toBeDefined();
