@@ -161,17 +161,17 @@ jobs:
           command -v npm
           npm --version
       - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-protocol-dist
           path: packages/evidence/protocol/dist
       - name: Restore Evidence Repository distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-repository-dist
           path: packages/evidence/repository/dist
       - name: Restore Execution Evidence Builder distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-execution-evidence-builder-dist
           path: packages/evidence/execution-evidence-builder/dist
@@ -280,7 +280,7 @@ jobs:
           command -v npm
           npm --version
       - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-protocol-dist
           path: packages/evidence/protocol/dist
@@ -326,22 +326,22 @@ jobs:
           command -v npm
           npm --version
       - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-protocol-dist
           path: packages/evidence/protocol/dist
       - name: Restore Evidence Repository distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-repository-dist
           path: packages/evidence/repository/dist
       - name: Restore Execution Recorder distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-execution-recorder-dist
           path: packages/evidence/execution-recorder/dist
       - name: Restore Execution Evidence Builder distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-execution-evidence-builder-dist
           path: packages/evidence/execution-evidence-builder/dist
@@ -391,17 +391,17 @@ jobs:
           command -v npm
           npm --version
       - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-protocol-dist
           path: packages/evidence/protocol/dist
       - name: Restore Evidence Repository distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-repository-dist
           path: packages/evidence/repository/dist
       - name: Restore Evidence Discovery distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-discovery-dist
           path: packages/evidence/discovery/dist
@@ -450,7 +450,7 @@ jobs:
           command -v npm
           npm --version
       - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-protocol-dist
           path: packages/evidence/protocol/dist
@@ -503,12 +503,12 @@ jobs:
           command -v npm
           npm --version
       - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-protocol-dist
           path: packages/evidence/protocol/dist
       - name: Restore Evidence Trace distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-trace-dist
           path: packages/evidence/trace/dist
@@ -562,22 +562,22 @@ jobs:
           command -v npm
           npm --version
       - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-protocol-dist
           path: packages/evidence/protocol/dist
       - name: Restore Evidence Repository distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-repository-dist
           path: packages/evidence/repository/dist
       - name: Restore Evidence Derivation distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-derivation-dist
           path: packages/evidence/derivation/dist
       - name: Restore Evidence Publication distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-publication-dist
           path: packages/evidence/publication/dist
@@ -632,17 +632,17 @@ jobs:
           command -v npm
           npm --version
       - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-protocol-dist
           path: packages/evidence/protocol/dist
       - name: Restore Evidence Repository distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-repository-dist
           path: packages/evidence/repository/dist
       - name: Restore Evidence Discovery distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-discovery-dist
           path: packages/evidence/discovery/dist
@@ -690,32 +690,32 @@ jobs:
           command -v npm
           npm --version
       - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-protocol-dist
           path: packages/evidence/protocol/dist
       - name: Restore Evidence Repository distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-repository-dist
           path: packages/evidence/repository/dist
       - name: Restore Evidence Discovery distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-discovery-dist
           path: packages/evidence/discovery/dist
       - name: Restore Execution Recorder distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-execution-recorder-dist
           path: packages/evidence/execution-recorder/dist
       - name: Restore Execution Evidence Builder distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-execution-evidence-builder-dist
           path: packages/evidence/execution-evidence-builder/dist
       - name: Restore SQLite Evidence Catalog distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: evidence-catalog-sqlite-dist
           path: packages/evidence/catalog-sqlite/dist
@@ -793,7 +793,7 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore all package distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: evidence-*-dist
           path: .evidence-dist

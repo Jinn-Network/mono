@@ -69,7 +69,7 @@ test('the reusable interface grants OIDC only to artifact-only attestation jobs'
     assert.match(block, /id-token: write/u);
     assert.match(block, /attestations: write/u);
     assert.match(block, /artifact-metadata: write/u);
-    assert.match(block, /uses: actions\/download-artifact@v4/u);
+    assert.match(block, /uses: actions\/download-artifact@v8/u);
     assert.match(block, /uses: actions\/attest@v4/u);
     assert.doesNotMatch(block, /actions\/checkout|actions\/setup-node|^\s+-?\s*run:/mu);
   }
@@ -222,7 +222,7 @@ test('artifact attestation downloads immutable build outputs without executing r
 test('external consumer accepts only the downloaded same-run tarball bundle', () => {
   const consumer = jobBlock(platform, 'external_consumer');
   assert.match(consumer, /needs: artifacts/u);
-  assert.match(consumer, /uses: actions\/download-artifact@v4/u);
+  assert.match(consumer, /uses: actions\/download-artifact@v8/u);
   assert.match(consumer, /prepublication-external-consumer\.mjs/u);
   assert.match(consumer, /--manifest "\.platform-verification\/\$\{group\}\/pack\/manifest\.json"/u);
   assert.match(consumer, /--native-manifest \.platform-verification\/native-role-pack\/manifest\.json/u);
