@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Version** | 1.7 |
+| **Version** | 1.8 |
 | **Date** | 2026-08-20 |
 | **Author** | P0 design session (operator + Claude Fable 5); every seam cited path:line against `next` @ `4f4ad46f2` |
-| **Revision** | v1.1 folded in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong: §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert), §8.3 (the singular-Report blast radius). **v1.2 folds in the mechanical constant sweep**, which classified 214 sites across four families and again found the counts short: stratum 11 to 23, arm count 8 to 9, admission **5 to 60** (§6.8a is new and P6 is now the largest packet), singular Report 7 to 35. The sweep also changed one recommendation (§8.3 now prefers N bundles over one bundle carrying N Reports) and produced §10.2, the coverage proof. **v1.3 folds in a delta re-review of v1.2**, which verified all 16 earlier findings closed and raised six more. Three were load-bearing: §1.4's v1.2 conditional was **not implementable** (the limitations function cannot see the model, so the profile is now sealed into the analysis parameters as an optional key whose absent case preserves the golden fixtures byte for byte); §6.8a's role mapping does **not** close in either direction, and `materialize.ts:366` is a site invisible to both the grep and the compiler; §8.3's option-5 residual cost omitted the producer side, and `report` turns out to be single-shot exactly as `publish` is. Two proposed citation corrections were checked and declined with evidence, and final review upheld both. **v1.4 fixes the one defect final review found:** v1.3's seed binding digested the full `rows` array, which is circular, because a row carries `handChecked` and which rows carry it depends on the sample the digest determines. The digest is now over the row **identity** set, and v1.3's claim that the binding survives §6.4's replacements is withdrawn as false. **v1.5 folds in the operator's G1 rulings of 2026-08-20 and is the ratified freeze.** Two picks overturn this document's own recommendations. **G1-D-A goes to (a):** the judge becomes a method-operand file citizen and `runtime inspect bind-judge` is **retired in the same change** — one way, not two; §8.1 freezes the mechanics and a dated amendment to DR-2026-08-18-f records both. **G1-D-B goes to a generalized (b):** the orphaned Inspect View export is wired for the judge adapter, and more consequentially every conforming export's certification is generalized — each certifies completeness against its **own** sealed selection, named by the lock digest, with a catalog suite name as an *additional* badge rather than the only lane that says anything at all. Both land in a new packet, **P10**, not in P1. **R-1 is overturned:** the evidence contrast does not ship on `paired-delta@1`'s per-item mean-rate unit; §7.2a registers **`paired-majority-delta@1`**, a new general-purpose paired contrast over **item-majority** decisions, which is the unit D2 specified and the unit the rest of the report uses. G1-D-C, G1-D-D, G1-D-E, R-2, R-3, and R-4 are ratified as recommended. §11 is rewritten from a checklist into the ratified record. **v1.6 folds in a targeted review of v1.5, which passed seven of its nine checks and returned two defects.** Both were in the two overturned rulings, and both are the same shape: a claim that was true of `next` before the ruling and stops being true once the ruling lands. **N1: the P10 retirement inventory was not full.** `bindInspectBinaryJudge` also leaves the **package-root** facade (`core/src/index.ts`) which a hard-coded public-surface test asserts, and deleting its `OPERATION_TO_GUI` row breaks a **cross-package** byte assertion in `benchmark-product/web`, because `core/src/index.ts:15` re-exports that map as `GUI_CAPABILITY_CATALOG`. The inventory goes from ten sites to **fourteen**, and §10.1's claim that P10 touches only `core` is corrected: **P10 reaches into `web`**. **N2: §8.2's own wiring makes one shipped sentence false**, which §8.2's audit conclusion did not survive. `inspect-view-export.ts:55` asserts a match to Inspect eval execution settings for a named slice; a judge run matches neither. One sentence is forked for the judge lane and the audit conclusion is restated over the correct surface. Five further items are folded: `truthAdmission` is sealed into §7.2a's derived parameters and `intervalAlpha` is superseded by `alpha` with the reason stated; `isInspectRuntimeAdapterId` must gain an export; #2862 to #2864 merged so §10.1's collision table and §9's grammar note are rewritten against `origin/next` @ `a4c9a2d95`; five citations are corrected; and one British spelling is fixed. **v1.7 is the merge revision and changes no ruling.** `origin/next` moved under this branch: the discover train (#2862 to #2864) merged and amended **the same DR** this document's G1 amendment touches. The two amendment sets are disjoint by decision number — theirs at 3 and 9, ours at 6 and 8 — and compose in one file without either clobbering the other; the composition is recorded in the DR itself. The merge also moved `method-catalog.ts` by roughly seven lines, so four citations are refreshed against `origin/next` @ `a4c9a2d95`, and one paragraph is added: the discover train made `--n` catalog-id-only as well, so the file-operand branch now refuses four flags rather than three, which **strengthens** §8.1's consonance argument rather than straining it. **The document is frozen at this revision** |
+| **Revision** | v1.1 folded in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong: §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert), §8.3 (the singular-Report blast radius). **v1.2 folds in the mechanical constant sweep**, which classified 214 sites across four families and again found the counts short: stratum 11 to 23, arm count 8 to 9, admission **5 to 60** (§6.8a is new and P6 is now the largest packet), singular Report 7 to 35. The sweep also changed one recommendation (§8.3 now prefers N bundles over one bundle carrying N Reports) and produced §10.2, the coverage proof. **v1.3 folds in a delta re-review of v1.2**, which verified all 16 earlier findings closed and raised six more. Three were load-bearing: §1.4's v1.2 conditional was **not implementable** (the limitations function cannot see the model, so the profile is now sealed into the analysis parameters as an optional key whose absent case preserves the golden fixtures byte for byte); §6.8a's role mapping does **not** close in either direction, and `materialize.ts:366` is a site invisible to both the grep and the compiler; §8.3's option-5 residual cost omitted the producer side, and `report` turns out to be single-shot exactly as `publish` is. Two proposed citation corrections were checked and declined with evidence, and final review upheld both. **v1.4 fixes the one defect final review found:** v1.3's seed binding digested the full `rows` array, which is circular, because a row carries `handChecked` and which rows carry it depends on the sample the digest determines. The digest is now over the row **identity** set, and v1.3's claim that the binding survives §6.4's replacements is withdrawn as false. **v1.5 folds in the operator's G1 rulings of 2026-08-20 and is the ratified freeze.** Two picks overturn this document's own recommendations. **G1-D-A goes to (a):** the judge becomes a method-operand file citizen and `runtime inspect bind-judge` is **retired in the same change** — one way, not two; §8.1 freezes the mechanics and a dated amendment to DR-2026-08-18-f records both. **G1-D-B goes to a generalized (b):** the orphaned Inspect View export is wired for the judge adapter, and more consequentially every conforming export's certification is generalized — each certifies completeness against its **own** sealed selection, named by the lock digest, with a catalog suite name as an *additional* badge rather than the only lane that says anything at all. Both land in a new packet, **P10**, not in P1. **R-1 is overturned:** the evidence contrast does not ship on `paired-delta@1`'s per-item mean-rate unit; §7.2a registers **`paired-majority-delta@1`**, a new general-purpose paired contrast over **item-majority** decisions, which is the unit D2 specified and the unit the rest of the report uses. G1-D-C, G1-D-D, G1-D-E, R-2, R-3, and R-4 are ratified as recommended. §11 is rewritten from a checklist into the ratified record. **v1.6 folds in a targeted review of v1.5, which passed seven of its nine checks and returned two defects.** Both were in the two overturned rulings, and both are the same shape: a claim that was true of `next` before the ruling and stops being true once the ruling lands. **N1: the P10 retirement inventory was not full.** `bindInspectBinaryJudge` also leaves the **package-root** facade (`core/src/index.ts`) which a hard-coded public-surface test asserts, and deleting its `OPERATION_TO_GUI` row breaks a **cross-package** byte assertion in `benchmark-product/web`, because `core/src/index.ts:15` re-exports that map as `GUI_CAPABILITY_CATALOG`. The inventory goes from ten sites to **fourteen**, and §10.1's claim that P10 touches only `core` is corrected: **P10 reaches into `web`**. **N2: §8.2's own wiring makes one shipped sentence false**, which §8.2's audit conclusion did not survive. `inspect-view-export.ts:55` asserts a match to Inspect eval execution settings for a named slice; a judge run matches neither. One sentence is forked for the judge lane and the audit conclusion is restated over the correct surface. Five further items are folded: `truthAdmission` is sealed into §7.2a's derived parameters and `intervalAlpha` is superseded by `alpha` with the reason stated; `isInspectRuntimeAdapterId` must gain an export; #2862 to #2864 merged so §10.1's collision table and §9's grammar note are rewritten against `origin/next` @ `a4c9a2d95`; five citations are corrected; and one British spelling is fixed. **v1.7 is the merge revision and changes no ruling.** `origin/next` moved under this branch: the discover train (#2862 to #2864) merged and amended **the same DR** this document's G1 amendment touches. The two amendment sets are disjoint by decision number — theirs at 3 and 9, ours at 6 and 8 — and compose in one file without either clobbering the other; the composition is recorded in the DR itself. The merge also moved `method-catalog.ts` by roughly seven lines, so four citations are refreshed against `origin/next` @ `a4c9a2d95`, and one paragraph is added: the discover train made `--n` catalog-id-only as well, so the file-operand branch now refuses four flags rather than three, which **strengthens** §8.1's consonance argument rather than straining it. **The rulings are frozen at v1.7. v1.8 is the G3 erratum patch and changes no ruling.** The eight execution packets (P1 #2877, P2 #2876, P3 #2879, P4 #2880, P5 #2884, P6 #2881, P7 #2875, P10 #2878) each recorded their corrections against this document at their own source, and v1.8 folds all of them into the sections that own them, under §0.6's dated erratum marker. **P5 [#2884](https://github.com/Jinn-Network/mono/pull/2884) is still OPEN at the time this revision is written**; its current PR body is absorbed here, and a follow-up commit is expected after it lands if that body moves. **Three of the findings are class fixes rather than point corrections**, because the same cause produced several instances. **C-1: §7 gains a registry envelope clause (§7.0a).** Four separate errata (E-1's sealed parameter set, E-2's baseline and candidate role assignment, E-6's conflicted accounting, and the claim-projection mirror seam that reaches into `verify` as well as `core`) are one cause: §7 specified each method's science precisely and left the envelope every registered method carries to be rediscovered. **C-2: §10.2 gains a fifth sweep family, F5, for field vocabularies (§10.2).** The four v1.2 families all enumerate *value* vocabularies; E-7 was a mirrored allowlist of payload *field names*, which no value sweep can surface, and it blocked the flagship run outright. The same subsection now records that the F1 command is structurally blind to `.md` and `.mjs`, and that the family list is a floor rather than a closed set. **C-3: §10.1's shared-file inventory is corrected and re-scoped.** Its claim that no P10 file is touched by P1 to P7 is false in three directions, and the inventory is now marked as computed at a point in time, with the recomputation each lane runs at rebase stated as the procedure that replaces trusting it. Thirty-six point errata land beside them, plus two CHIPs that are not contract changes; §0.6 lists the convention, the index, and every erratum's source PR. Certification accounting divergence is issue [#2885](https://github.com/Jinn-Network/mono/issues/2885) (operator option c, still open): one explanatory sentence when the export certification's `runOutcome` disagrees with framework eligibility, not a reconciliation of the two definitions, and not taken here. |
 | **Shape** | `design` (packet P0 of the judge-report implementation program) |
 | **Closes** | [#2842](https://github.com/Jinn-Network/mono/issues/2842) |
 | **Program** | [`2026-08-18-judge-report-implementation-program.md`](../plans/2026-08-18-judge-report-implementation-program.md) |
@@ -60,6 +60,76 @@ bytes genuinely move, and therefore whose digests move, and what regenerates as 
 Where a rule could be enforced at more than one place, this document names exactly one. A rule
 enforced twice drifts; a rule enforced nowhere is prose. The chosen point is always the first place
 where every input the rule reads is simultaneously frozen and in scope.
+
+### 0.6 Erratum convention, added at v1.8
+
+The rulings froze at v1.7 and the execution began. Every packet then found things this document got
+wrong, and each recorded its finding where it found it: in a PR body, in a review verdict, in an
+issue comment. That is the right place to record a finding and the wrong place to leave it, because
+the next reader reads the spec, not eight PR bodies. v1.8 moves all of them here.
+
+**The marker.** Each correction appears in the section that owns the claim, as a bolded lead-in in
+the same shape as this document's own "Correction to v1.x" paragraphs, plus the date and the source:
+
+> **Erratum (2026-08-20, v1.8), from P7's execution in [#2875](https://github.com/Jinn-Network/mono/pull/2875):** one sentence of what was wrong.
+
+**Two standing rules for reading them.**
+
+1. **A class fix outranks its instances.** Where several errata share one cause, v1.8 fixes the
+   cause and cites the instances as evidence for it, rather than patching each instance and leaving
+   the cause to produce more. §7.0a, §10.2's F5 family, and §10.1's re-scoping are the three.
+2. **Nothing dated is retro-edited.** Dated decision records and the program plan keep their bytes.
+   Where execution superseded a line in one of them, the supersession is recorded *here*, in the
+   section that now rules, and the dated document is left alone. §4.5 and §8.2 each carry one.
+
+**Index of v1.8 errata.** Thirty-six point entries plus two CHIPs. A CHIP is recorded so a later
+reader does not re-derive it as a contract; it is not a spec change. Class-fix instances are listed
+so a reviewer checking a PR body against this document can find the sentence, but the class clause
+is what a next method author inherits.
+
+| # | Where | Source | Kind |
+|---|---|---|---|
+| C-1 | §7.0a registry envelope | [#2884](https://github.com/Jinn-Network/mono/pull/2884) E-1, E-2, E-6, mirror seam | class |
+| C-2 | §10.2 F5 field vocabularies | [#2884](https://github.com/Jinn-Network/mono/pull/2884) E-7; [#2880](https://github.com/Jinn-Network/mono/pull/2880) `.mjs`; [#2876](https://github.com/Jinn-Network/mono/pull/2876) pack-smoke `.mjs` | class |
+| C-3 | §10.1 point-in-time inventory | [#2878](https://github.com/Jinn-Network/mono/pull/2878) P10∩P1/P2; [#2877](https://github.com/Jinn-Network/mono/pull/2877) snapshot-probe vs P6 roles | class |
+| 1 | §5.2 integrity-terminal wording | [#2875](https://github.com/Jinn-Network/mono/pull/2875) | point |
+| 2 | §5.6 bundle-evidence plus forward-compat gap | [#2875](https://github.com/Jinn-Network/mono/pull/2875) | point |
+| 3 | §2.7 third payload copy, intake URI, aggregate allow-list | [#2876](https://github.com/Jinn-Network/mono/pull/2876) | point |
+| 4 | §7.2 importer verifies the provenance copy; it does not write it | [#2876](https://github.com/Jinn-Network/mono/pull/2876) | point |
+| 5 | §7.2 calendar strictness enforced once, on the source-manifest row | [#2876](https://github.com/Jinn-Network/mono/pull/2876) | point |
+| 6 | §1.4 `record-integrity` is the wrong refusal name | [#2877](https://github.com/Jinn-Network/mono/pull/2877) | point |
+| 7 | §1.4 / §0.4 one-direction widening | [#2877](https://github.com/Jinn-Network/mono/pull/2877) | point |
+| 8 | §1.7 Python trio plus `INSPECT-RUNTIME.md` | [#2877](https://github.com/Jinn-Network/mono/pull/2877) | point |
+| 9 | §10 row 29 snapshot-probe evidence-role append | [#2877](https://github.com/Jinn-Network/mono/pull/2877) | point |
+| 10 | §8.2 rule 2 is four of five (`apex-swe-export`) | [#2878](https://github.com/Jinn-Network/mono/pull/2878) | point |
+| 11 | §8.1 three sites beyond the frozen fourteen | [#2878](https://github.com/Jinn-Network/mono/pull/2878) | point |
+| 12 | §4.1 rule 5 names the wrong allowlist surface | [#2879](https://github.com/Jinn-Network/mono/pull/2879) | point |
+| 13 | §4.3 fifteen rows, not fourteen | [#2879](https://github.com/Jinn-Network/mono/pull/2879) | point |
+| 14 | §4.5 plan P3-acceptance-3 superseded | [#2879](https://github.com/Jinn-Network/mono/pull/2879) | point |
+| 15 | §4.5 third mirrored parser implementation | [#2879](https://github.com/Jinn-Network/mono/pull/2879) | point |
+| 16 | §3.2 second membership point on the evidence-native carrier | [#2880](https://github.com/Jinn-Network/mono/pull/2880) | point |
+| 17 | §10 row 30 published-caption sites | [#2880](https://github.com/Jinn-Network/mono/pull/2880) | point |
+| 18 | §3.2 `BinaryInstrumentStratum` vacuous alias | [#2880](https://github.com/Jinn-Network/mono/pull/2880) | point |
+| 19 | §6.4 G-1 present-iff replacement-ledger digests | [#2881](https://github.com/Jinn-Network/mono/pull/2881) | point |
+| 20 | §6.4 G-2 assets publication-grade branch on `truthAdmission` | [#2881](https://github.com/Jinn-Network/mono/pull/2881) | point |
+| 21 | §6.5 check (0) coverage half runs last | [#2881](https://github.com/Jinn-Network/mono/pull/2881) | point |
+| 22 | §6.5 identity-set digest must actually deduplicate | [#2881](https://github.com/Jinn-Network/mono/pull/2881) | point |
+| 23 | §6.8a Group B is five sites | [#2881](https://github.com/Jinn-Network/mono/pull/2881) | point |
+| 24 | §6.8a DSSE envelope, not bare canonical JSON | [#2881](https://github.com/Jinn-Network/mono/pull/2881) | point |
+| 25 | §7.1 E-1 `truthAdmission` on `pairwise-disagreement@1` | [#2884](https://github.com/Jinn-Network/mono/pull/2884) | instance of C-1 |
+| 26 | §7.2a E-2 candidate is the evidence-declaring arm | [#2884](https://github.com/Jinn-Network/mono/pull/2884) | instance of C-1 |
+| 27 | §7.2a E-3 neither new method carries `judgeModelProfile` | [#2884](https://github.com/Jinn-Network/mono/pull/2884) | point |
+| 28 | §7.2a E-4 `seed`, `resamples`, `alpha` are frozen derivation constants | [#2884](https://github.com/Jinn-Network/mono/pull/2884) | point |
+| 29 | §7.2a E-5 conformance follows the binary-instrument precedent | [#2884](https://github.com/Jinn-Network/mono/pull/2884) | point |
+| 30 | §7.1 / §7.2a E-6 `conflicted: {count, cellKeys}` | [#2884](https://github.com/Jinn-Network/mono/pull/2884) | instance of C-1 |
+| 31 | §2.2 E-7 aggregate compute-time template-field allowlist | [#2884](https://github.com/Jinn-Network/mono/pull/2884) | instance of C-2 |
+| 32 | §7.5 claim-projection mirror seam (`core` and `verify`, plus `assets.ts`) | [#2884](https://github.com/Jinn-Network/mono/pull/2884) | instance of C-1 |
+| 33 | §7.2a structural pair derivation replaces a literal two-arm refusal | [#2884](https://github.com/Jinn-Network/mono/pull/2884) | point |
+| 34 | §7.5 / §8.3 `DRAFT_SPEC_FIELD_NAMES` must gain `additionalAnalyses` | [#2884](https://github.com/Jinn-Network/mono/pull/2884) | point |
+| 35 | §7.5 `runPublish` pre-existing gap on binary-judgment | [#2884](https://github.com/Jinn-Network/mono/pull/2884) | named hole |
+| 36 | §8.2 certification accounting divergence | [#2885](https://github.com/Jinn-Network/mono/issues/2885) (open) | in-flight, one sentence |
+| CHIP-1 | `inspect-binary-judge.test.ts` timing hazard | [#2884](https://github.com/Jinn-Network/mono/pull/2884) | CHIP, not a contract |
+| CHIP-2 | scanner stale `cli/dist/local-web/` | [#2880](https://github.com/Jinn-Network/mono/pull/2880), [#2884](https://github.com/Jinn-Network/mono/pull/2884) | CHIP, environment |
 
 ---
 
@@ -182,6 +252,21 @@ equality to an enforced one.
 That is P1 acceptance 5's "resolved-model mismatch refuses at collect", and it is the evidence that
 replaces the alias limitation.
 
+**Erratum (2026-08-20, v1.8), from P1's execution in [#2877](https://github.com/Jinn-Network/mono/pull/2877): the refusal is real, and `record-integrity` is the wrong name for it.**
+The rule as implemented refuses in two places and neither of them is `record-integrity`.
+On the recording side it is a Zod `superRefine` on `BinaryJudgmentObservationSchema`
+(`profiles/src/binary-judgment/contracts.ts:750-754`), so a mismatched pair fails at parse and at
+seal, as a validation refusal naming `provider.resolvedModel`. On the replay side it is
+`MethodInputError("binary-binding-mismatch", ...)`
+(`aggregate/src/binary-instrument-method.ts:1452-1457`), the same code the module raises for any
+provider-identity disagreement. `record-integrity` is a `benchmark-product/core` refusal code
+(`core/src/errors.ts:30`) reserved for stored bytes that do not match their digest
+(`workspace/sealed-store.ts:60`, the pinned-executable drift checks, the sealed selection reads);
+no path in this family produces it, and none should, because nothing here is a digest mismatch.
+The frozen **behavior** is unchanged and is exactly what P1 shipped and tested in both cross-model
+directions. Only the type name in the sentence above is wrong. A packet that had implemented the
+sentence literally would have minted a sixth `record-integrity` meaning to satisfy prose.
+
 The aggregate side enforces the same rule and must be widened in lockstep:
 `packages/benchmarking/aggregate/src/binary-instrument-method.ts:1107-1108` hard-compares both
 provider model fields to the single `MODEL_ID` literal (`:46`), and `:1140-1144` requires
@@ -217,6 +302,18 @@ conditional on a value the function cannot see is not a fix.
    `model.requested` (§1.3's cross-arm rule guarantees there is exactly one). Under §0.4 this is a
    compatible widening: adding an **optional** property to a closed object still validates every
    parameter set valid today, seals identical bytes for them, and computes identically.
+
+   **Erratum (2026-08-20, v1.8), from P1's execution in [#2877](https://github.com/Jinn-Network/mono/pull/2877): §0.4 governs one direction, and this key is the first place where the other direction bites.**
+   The widening above is compatible in the direction §0.4 defines, which is old inputs against new
+   code. The opposite direction is not symmetric and this document never said so.
+   `validateBinaryInstrumentParameters` treats any key outside its `required` set as an unknown
+   parameter, so **a verifier built before P1 refuses a post-P1 bundle whose analysis-plan
+   parameters carry `judgeModelProfile`**. That is not a §0.4 breach; it is the honest statement of
+   what the widening buys, and it means the key is readable only by a verifier at or past P1's
+   commit. Compare §5.6's erratum, which is the same asymmetry on the bundle-evidence side and
+   fails with a message naming corruption. **Standing consequence, worth stating once for the
+   family:** compatible widening is a promise to old artifacts, never a promise to old verifiers,
+   and every clause in this document that reads "compatible widening" should be read that way.
 2. **Absent means emit the alias limitation, which is today's behavior byte for byte.** This is not
    a default chosen for convenience. It is what keeps §10.2's fixture ruling 1 true: the two frozen
    144-cell golden fixtures seal parameters with no `judgeModelProfile`, so they emit the same three
@@ -281,6 +378,17 @@ Sealed with the package's existing `sealDocument`. Rules:
 
 Because the field is optional and absent on every existing selection, every existing sealed
 selection stays byte-identical.
+
+**Erratum (2026-08-20, v1.8), from P1's execution in [#2877](https://github.com/Jinn-Network/mono/pull/2877): the probe forced an evidence-role append this section did not list, and §10 had no row for it.**
+The verifier refuses more than one `runtime-selection` record, so the probe could not ride that
+role, and rule 5 above requires it published alongside the selection. `BUNDLE_V4_EVIDENCE_ROLES`
+therefore gains `"snapshot-probe"`, appended last so the frozen role-ordering index is unchanged
+for every existing role. `BUNDLE_V4_EVIDENCE_FORMAT` is unchanged and every existing bundle still
+validates. The shipped `schemas/evidence-catalog.schema.json` describes the older
+`benchmark-product-evidence-catalog/2` format and is untouched. **This is a third contended region
+in `verify/src/schema.ts`**, inside the region §10.1 assigned to P6's evidence-role edits; P1 is
+not confined to `arms` and `armCount`. §10 gains **row 29**. This is also evidence for §10.1's
+re-scoping (C-3): an inventory that listed P1's files as disjoint from P6's missed this line.
 
 ### 1.6 Arm cardinality (new finding, not in the program document)
 
@@ -359,6 +467,30 @@ test is green unmodified with `armCount: 4`.
 | **`verify/src/profile/binary-qualification.ts:15-31`** | **per-profile Report `limitations` (§1.4)**; re-exported through `core/src/run/binary-instrument-profile.ts:64-65,87`, consumed at `report.ts:249` and `verify/src/profile/claim-consistency.ts:53` |
 | `profiles/src/identifiers.ts` | new probe protocol URI |
 
+**Erratum (2026-08-20, v1.8), from P1's execution in [#2877](https://github.com/Jinn-Network/mono/pull/2877): the inventory above is TypeScript-only, and the run does not execute without the Python it omits.**
+The judge executes inside the contained Inspect runtime, and three Python modules mirror the same
+profile map this section freezes. All three change, and none of them is in the table:
+
+| Seam | Change |
+|---|---|
+| `benchmark-product/core/src/runtime/inspect/contained/broker.py` | the profile map, the branched generation validation, and the per-profile token cap |
+| `.../contained/model_provider.py` | the upstream request construction per profile |
+| `.../contained/binary_judge_worker.py` | per-profile observation limitations, and the snapshot-identity assertion built from the semantic request's own model rather than from the provider's answer |
+| `packages/benchmark-product/INSPECT-RUNTIME.md` | the shipped security contract, which described only the Luna configuration, a 128-token cap, and an unconditional mutable-alias limitation |
+
+Without the first three the run **cannot execute at all**: the broker refuses the model, refuses
+the 512-token cap, and requires a `reasoningEffort` key the sampling block does not carry. The
+three modules' source digests ride in the selection manifest and are computed at runtime from the
+files' bytes, so nothing is hand-updated and no fixture pins one.
+
+**The general defect, not the four rows.** This document's seam inventories were built from
+TypeScript reads, and a contained runtime written in another language is invisible to that method
+in exactly the way §10.2's F4 command was until v1.2 added `*.py` to it. The worker's own design
+point is worth carrying forward too: the two sides of the identity pair must be **sourced
+independently**, one from the semantic request and one from the broker record, because deriving
+both from the provider's answer makes the check true by construction at the single point where the
+provider can disagree.
+
 ---
 
 ## 2. Per-item evidence channel (packet P2, issue #2843)
@@ -419,6 +551,32 @@ not a second enforcement point for §2.3's rule (§0.5): §2.3's rule is about t
 binding and is enforced once, at lock. This is a total-function guarantee on a renderer whose
 inputs became optional, and it is what makes `preview` refuse rather than silently rehearse a
 prompt containing the word `undefined`.
+
+**Erratum (2026-08-20, v1.8), erratum E-7, found by P5's execution in [#2884](https://github.com/Jinn-Network/mono/pull/2884): the template-field list has a mirror in `aggregate`, this section did not name it, and the omission blocked the flagship run outright.**
+`aggregate/src/binary-instrument-method.ts` re-validates instrument message segments **at compute
+time** against a hardcoded accepted-field list of `question`, `referenceAnswer`, and
+`candidateAnswer`. `evidence` was absent from it. So an arm whose instrument interpolates evidence
+passed lock, executed, and then threw
+`binary-record-malformed: instrument field segment is unsupported` at report time. Because
+`binary-instrument@1` is the **primary** readout over the same cell set, it threw before either
+cross-arm readout was reached, which means: the panel as designed could not be reported, §7.2a's
+evidence contrast could not be computed at all (its derivation requires exactly one
+evidence-declaring arm, and that arm is the one that throws), and the rehearsal could not exercise
+the real shape either.
+
+**Frozen:** the mirror's accepted set is exactly `BINARY_JUDGMENT_TEMPLATE_FIELDS`, required and
+optional together. **`evidence` joins the accepted set only, and must never join the
+required-interpolation assertion beside it** — that assertion requires the prompt to interpolate
+every solver-visible field, so requiring an optional one would refuse every instrument shipping
+today and move the frozen goldens. `binary-instrument@1` does not bump: every instrument that
+validates today still validates, seals identical bytes, and computes identically.
+
+**The class this belongs to is §10.2's F5**, added at v1.8 for exactly this. Every one of the four
+v1.2 sweep families enumerates a **value** vocabulary (which stratum names are legal, how many
+arms, which admission grades, how many Reports). This is a **field** vocabulary: which payload keys
+an instrument template may interpolate. A sweep built to grep for values cannot surface a mirrored
+allowlist of field names, which is why the profiles-side widening shipped without a matching sweep
+of `aggregate` and nothing caught it until a lane tried to run the real shape.
 
 ### 2.3 The leak-refusal rule: direction and typing
 
@@ -519,6 +677,24 @@ strict copy of the payload schema, and `HumanReviewPacketSchema.item` (`:67`) is
 unchanged, it **refuses every evidence-carrying item on the human-review path**, which is the path
 P6 and the two-human branch both run through. P2 must widen both copies in the same PR, and P2's
 acceptance gains a fixture proving an evidence-carrying item survives packet creation.
+
+**Erratum (2026-08-20, v1.8), from P2's execution in [#2876](https://github.com/Jinn-Network/mono/pull/2876): "both copies" is three copies, and five further seams are missing from the table above.**
+A reviewer checking §2.7 against P2's diff finds more files than this table lists, so they are named
+here:
+
+| Seam | Change |
+|---|---|
+| `verify/src/admission/intake.ts` | a **third** hand-written copy of the payload shape (`ItemPayloadSchema`), which types `BinaryItemBankEntrySchema.item`. The row above says two copies; there are three |
+| `verify/src/admission/intake.ts` | the profile URI pinned as a `z.literal` inside `BinaryItemBankIntakeExtensionSchema.profile`, so the §7.2 URI bump lands here too |
+| `aggregate/src/binary-instrument-method.ts` | the profile URI **and** the profile digest hand-duplicated as bare literals, plus the payload shape re-implemented as an exact-key allow-list. That package deliberately does not depend on `task-execution-profiles`, so nothing in the compiler links these to the real contract; they are updated in place with a comment naming the canonical source |
+| `verify/src/verify.ts` | the cold public-bundle coverage check walked `item.provenance` as an array. It walks `item.sources`, and additionally requires `item.provenance.sourceCommitment` to be covered by a source row. The code-unit-least rule and the timestamp equality are deliberately **not** duplicated here; they stay enforced once, at import (§0.5) |
+| `profiles/scripts/pack-smoke.mjs` | `/1.0/` hardcoded in a loop shared by all four task profiles; the loop is parameterized by version |
+| `architecture/generated/platform-topology.{md,v1.json}` | regenerate from the served-asset rename via `node .github/scripts/generate-architecture.mjs`; never hand-edited |
+
+Three of the six are `aggregate` and `verify` second copies, which is the same shape §10.2 exists
+to bound. The `.mjs` pack-smoke site and the generated topology are neither: they are the same
+structural blind spot §10.2's F1 erratum records at v1.8, where a `--include='*.ts'` sweep cannot
+see a build script or a generated artifact.
 
 ---
 
@@ -636,6 +812,39 @@ the analysis context and the sealed plan disagree, which is exactly the class of
 Zero-denominator strata are unchanged: the slice is emitted with its counts and the interval is
 withheld.
 
+**Erratum (2026-08-20, v1.8), from P4's execution in [#2880](https://github.com/Jinn-Network/mono/pull/2880): the membership rule has a second enforcement point, on the evidence-native carrier, and this section did not anticipate it.**
+`requireContext` is the single point this table names, and it is the single point on the
+reduce-then-project path. **`benchmarking/evidence` does not take that path.** It builds its
+reduction directly and calls `projectBinaryInstrumentQualification` without ever passing through
+`reduceBinaryInstrumentReplicates`, so `requireContext` never runs for it. On that carrier the only
+membership check is `contextIssues` inside the projection validator, which reports through an
+issues list rather than as an `unsupported-vocabulary` failure.
+
+Both surfaces refuse the same drift, so nothing is unguarded. But §0.5 says a rule enforced twice
+drifts, and these two are enforced in different modules with different error shapes, which is
+precisely the condition §0.5 names. **This erratum records the fact and does not unify them**:
+unification is a design decision about which carrier owns the check and what the evidence path's
+error shape should be, not a widening, and P4 correctly widened both consistently rather than
+picking one in an implementation PR. Whoever takes it should note that the choice is between moving
+the evidence path onto `requireContext` and promoting `contextIssues` into a typed failure; they are
+not the same change.
+
+**Erratum (2026-08-20, v1.8), also from P4's execution: two published-caption sites, and §10 had no row for them.**
+`verify/src/assets.ts:372` and `:637` rendered the literal caption `Core and stress buckets` above
+the `byStratum` block, in the published HTML **and** the published Markdown, for every bundle. Over
+four categories that is not a refusal; it is a **published false label**, which §10.2 standing rule
+2 ranks above the refusal sites for exactly the reason it gives. Both now render the sealed
+vocabulary. §10 gains **row 30** for this, which the inventory previously carried only for P10 (row
+27); a reviewer working §10 row by row would otherwise not be told P4 changes published bytes.
+
+**Erratum (2026-08-20, v1.8), also from P4's execution: `BinaryInstrumentStratum` becomes a vacuous alias, deliberately.**
+With the type widened, `export type BinaryInstrumentStratum = string`
+(`aggregate/src/binary-instrument.ts:13`) carries no information. It is **kept**, because it is a
+public export of `@jinn-network/benchmarking-aggregate` and deleting it is a source-breaking API
+change unrelated to this contract. Retiring it belongs to whichever change next touches that
+package's public surface, and it is recorded here so that a reader of §3.1's site table does not
+read the surviving alias as an incomplete widening.
+
 ### 3.3 What this means for the run
 
 For the LoCoMo run the stratum vocabulary is the four source-question categories, declared by the
@@ -665,6 +874,16 @@ not alongside it.
    (`parser-identity.ts:51-57`) gains one `parserAllowlistKey` per new parser. A spec naming an
    unlisted identity is refused by the harness runtime before an adapter is selected. Unchanged
    mechanism.
+
+   **Erratum (2026-08-20, v1.8), from P3's execution in [#2879](https://github.com/Jinn-Network/mono/pull/2879): the second sentence of rule 5 names the wrong surface.**
+   `enforceParserAllowlist` (`evaluation-harness/src/runtime.ts:522`) reads
+   `specification.familyBlock.parser`, which for binary judgment is always the **umbrella**
+   identity. It never reads an instrument's `response.parser`. So the four new allowlist keys
+   declare the full set of response parsers this package can execute, which is true and worth
+   having, but the **live refusal for a response-parser identity is rule 3's, at instrument
+   seal**, not rule 5's at harness runtime. Both are implemented exactly as frozen; only the
+   attribution of which one fires was wrong, and it matters because a reader planning the
+   enforcement point under §0.5 would have picked the surface that cannot see the value.
 6. **Version immutability.** A parser's semantics document is immutable at a version. Any change to
    normative behavior requires a new `version`, hence a new digest and a new allowlist key. Editing
    semantics without bumping the version breaks the build (the existing `parser-identity.test.ts`
@@ -754,6 +973,27 @@ The BOM row is stated explicitly so that a future reader does not "fix" it. Over
 no parser rule by design: the generation block's `maxOutputTokens` bounds it upstream, and a
 truncated response is just bytes.
 
+**Erratum (2026-08-20, v1.8), from P3's execution in [#2879](https://github.com/Jinn-Network/mono/pull/2879): the count is fifteen, and it is pinned here so nobody recounts it.**
+The table above has **fifteen** rows and every one of them ships. P3's lane read this section as
+fourteen cases, which is the kind of miscount an unnumbered table invites, so the number is now
+stated: fifteen cases per contract, except **PC-4, which carries thirteen**, omitting the two rows
+the table itself marks n/a for a JSON-wrapped contract (`token-followed-by-period` and
+`token-embedded-in-word`). The table, not any prose count, is the contract.
+
+**Two rows needed a reading rather than a lookup**, and both readings are recorded here so a later
+fixture author does not re-derive them differently. The `truncated-at-generation-cap` row says only
+"ordinary rules apply; no length rule exists in any parser", so its fixtures use genuinely truncated
+mid-token text whose ordinary evaluation is invalid; that is the only outcome consistent with there
+being no special case. PC-5's four JSON rows say "depends on tokens present", so the fixtures use
+concrete inputs and record what the delimiter rule yields: the object, the fenced object, and the
+array root each contain exactly one delimited `ACCEPT` and parse valid, while the duplicate-member
+input contains both tokens and is invalid.
+
+**Four mechanisms this table structurally cannot express** as a single input-to-output row, and
+which therefore need direct unit coverage rather than a fixture row: PC-4 root versus nested
+duplicate `verdict`, PC-4's escaped member name, PC-5's repeated delimited token, and PC-5's
+underscore adjacency.
+
 ### 4.4 The arm-to-parser map is data, not a repo contract
 
 Which as-found arm uses which parser contract is **arm-pinning data**, sealed per instrument in
@@ -771,6 +1011,39 @@ every judge fixture. The mirrored literals at
 `aggregate/src/binary-instrument-method.ts:64` (`EVALUATION_PARSER_SHA256`) and `:66`
 (`RESPONSE_PARSER_DIGEST`) must be updated in the same commit. PC-1's own semantics document and
 digest do **not** move.
+
+**Erratum (2026-08-20, v1.8), from P3's execution and its review in [#2879](https://github.com/Jinn-Network/mono/pull/2879): that file carries a THIRD mirrored surface, it is a whole second parser implementation, and widening the identity check without it was a shipped-if-merged defect.**
+§4.5 and §10 row 6 name the two **identity** mirrors and nothing else. The same file also carries
+`parseFrozenResponse`, a complete second parser **implementation** hardcoded to PC-1's alphabet. It
+is the replay oracle: `binary-instrument@1` recomputes each cell's decision from the exact judge
+response bytes and refuses any cell whose signed measurements do not reproduce.
+
+Widening the identity check while leaving the behavior at PC-1 is not a tidiness gap. An arm whose
+sealed instrument selected PC-2 through PC-5 would have passed `validateInstrument` and then had
+every one of its cells replayed through the ACCEPT/REJECT alphabet: the adapter records
+`{ACCEPT, parseValid: true}` for `YES`, the oracle computes `{REJECT, parseValid: false}`, and the
+cell dies on `binary-binding-mismatch`. The confirmatory run needs mixed parser identities by
+construction, so this could not have been deferred. It was masked by a fixture builder that encoded
+every cell as a bare `ACCEPT`/`REJECT` token, which made the existing different-parser test prove
+nothing.
+
+**Frozen, structurally:** identity and behavior live in **one** registry row (`{version, digest,
+parse}`) in that file, never in two parallel tables, so a row cannot admit an identity it has no
+behavior for. The mirror's one permitted behavioral liberty is collapsing the source's two invalid
+reasons into one, and it is forced: the signed measurements carry `judgeDecision` and `parseValid`
+and no reason field for a reason to be checked against.
+
+**A third PC-1-only site is correct today and is named so it does not surprise P8.**
+`core/src/bundle/testing/v4-synthetic-fixture.ts:332,550` pins PC-1's identity and calls PC-1's
+parser directly. That is deliberate and unchanged, under §10.2 fixture ruling 3: the shared builder
+gains options and never new defaults, and no packet in this program needed a non-PC-1 synthetic
+bundle. Whoever writes a rehearsal over mixed parser identities parameterizes it then, not now.
+
+**Supersession, recorded here rather than by editing a dated document (§0.6 rule 2).** Program plan
+§4's **P3 acceptance item 3** reads "the umbrella evaluation parser identity is unchanged". §4.5
+rules the opposite and is the frozen text: the umbrella digest moves, by construction, because
+`responseParsers` grows, and that tripwire is the point. The plan file keeps its bytes; this
+paragraph is the record of which line rules.
 
 ---
 
@@ -853,6 +1126,22 @@ infrastructure. They terminalize the cell as `could-not-grade` with `failureCate
 never retried, and are never scored. An integrity failure that gets a retry is an integrity failure
 that gets a second chance to pass, which defeats the check.
 
+**Erratum (2026-08-20, v1.8), from P7's execution in [#2875](https://github.com/Jinn-Network/mono/pull/2875): "with `failureCategory` recorded" is false for the do-not-retry family, and only for that family.**
+`journalCouldNotGrade` only ever receives a `failureCategory` from a **retryable** failure's own
+category, inside `journalEvaluationFailure`'s fallthrough (`core/src/run/drive.ts:404-411`). A
+category outside the retryable three never carries a retryable value at all, so an integrity
+failure's terminal records **no** `failureCategory`.
+
+**The behavior this section actually cares about is intact and is now under test**: integrity
+failures are never retried and are never scored, proven by a test that spends no retry against a
+demonstrably available budget at `maxInfrastructureRetries: 1`. Only the recording clause is
+inaccurate. It is corrected rather than implemented because implementing it is not a widening: it
+first needs a contract decision about **which categories are legal on a terminal**, which is not
+simply the retryable three, and §5.6's seam row for `drive.ts` reads "asserted, not changed", so a
+`test`-shaped packet was the wrong place to take it. Whoever takes that decision should note it is
+the same decision the §5.6 erratum below defers on the verifier side: the published member is
+evidence, not a gate, and narrowing it is a new cold-verifier rule.
+
 ### 5.3 Retry-once, and the accounted unscorable cell
 
 `assurance.overrides.maxInfrastructureRetries` (`core/src/domain/draft.ts:63-64`) is `0 | 1`.
@@ -912,6 +1201,33 @@ digest does not move for P7, no fixtures regenerate, and P7 leaves §10.1's merg
 **P7 verification obligation:** confirm the per-cell `failureCategory` survives into the published
 bundle. If it does not, that gap is the packet's one genuine code change, and it is a bundle-evidence
 change rather than a spec-declaration change.
+
+**Erratum (2026-08-20, v1.8), from P7's execution in [#2875](https://github.com/Jinn-Network/mono/pull/2875): it did NOT survive, the change landed exactly as this obligation anticipated, and it opened a forward-compatibility gap this document must record.**
+`core/src/bundle/materialize.ts` built the assembly `graph.evaluations` edge from the `evaluation`
+journal entry and copied `evaluationTerminal` but not `failureCategory`. The published bundle's only
+evaluation graph is `verification/assembly.jsonl`, and the run journal is not a bundle member
+(`PUBLIC_BUNDLE_FILES`), so a category dropped there is dropped for good. `graph.evaluationRetries`
+carries the category of every failure that **was** retried, but the failure that exhausts the budget
+and terminalizes the leg has no retry row to carry it. That is precisely §5.3's accounted
+ungradeable cell, so it reached the bundle as an **uncategorized absence**: a reader could see that a
+cell could not be graded, but not why. **Frozen:** `materialize.ts` emits `failureCategory` on the
+`graph.evaluations` edge when the journal entry carries one; `verify/src/schema.ts` and
+`verify/schemas/assembly-row.schema.json` gain the optional member. The format literal stays
+`benchmark-product-assembly/2` under §0.4, and the member is published as **evidence, not as a
+gate**: no cold-verifier rule narrows it, for the reason §5.2's erratum gives.
+
+**The direction that does not hold, recorded rather than fixed.** Everything above is old bundles
+against new code, which is the direction §0.4 governs. The forward direction is worse than
+asymmetric, it is **misleading**: a verifier build predating this change **refuses** a bundle that
+carries the new member. `parseAssembly` parses each row through the Zod header schema and then
+byte-compares the re-canonicalized value against the bytes it received (`verify.ts:213`,
+`:244-245`); Zod 4 strips unknown keys by default and `verify/src/schema.ts` declares no
+`.passthrough()`, so an old build silently drops `failureCategory`, re-serializes shorter bytes, and
+refuses with `is not the exact canonical encoding`. **That message names bundle corruption when the
+real cause is a stale verifier**, which is the part that costs someone an afternoon. The format
+literal is deliberately not bumped, because §0.4 and §5.5 forbid it; this is the second instance of
+the asymmetry §1.4's erratum states as a standing rule, and the member is reachable on the
+confirmatory run, which pins `maxInfrastructureRetries: 1`.
 
 ---
 
@@ -1006,6 +1322,35 @@ same-stratum** replacement, and **the ledger must close**. The ledger's `reason`
 values this branch produces, in **both** copies (`verify/src/admission/contracts.ts` and the second
 copy at `verify/src/schema.ts:199`); the existing three values are byte-unchanged in both.
 
+**Erratum (2026-08-20, v1.8), gap G-1, from P6's execution in [#2881](https://github.com/Jinn-Network/mono/pull/2881): this paragraph names ONE schema change where TWO are needed, and with only the one a screened exclusion is unwritable.**
+`HumanReviewReplacementLedgerEntrySchema` carries four **required** per-item two-human digests:
+`reviewVerdictSha256s`, `visibilityReceiptSha256s`, `reviewerRosterSha256`, and
+`revealReceiptSha256`. A screened exclusion has no review verdicts, no visibility receipts, and no
+roster, so widening the `reason` enum alone leaves every non-admitted screened row **refused by the
+schema it is required to appear in**. The rule and its carrier contradict each other in the same
+shape §6.8a's Group A records for `publicationGrade`.
+
+**Frozen, using this document's own present-iff idiom:** the four digests are present **if and only
+if** the entry's reason is a two-human reason, and the verification loop branches on the admission
+mode. This is not merely an acceptable resolution, it is the **only** one consistent with D1: those
+four fields are exactly the per-item two-human apparatus D1 and §6.9 deliberately dropped for this
+mode, so requiring them on a screened exclusion would contradict the ratified shape. Byte-identity
+of existing ledger entries is a first-class proof item rather than a prose claim: a real two-human
+entry, built through `admitHumanTruth` rather than hand-constructed, still carries all four.
+
+**Erratum (2026-08-20, v1.8), gap G-2, from the same execution: the published assets would have overclaimed on a screened bundle, and §6.8 named no site for it.**
+`verify/src/assets.ts` rendered the publication-grade line as a ternary on the `publicationGrade`
+boolean, printing the literal bytes `Yes — two-human unanimous` whenever it was true. A screened
+bundle **is** publication-grade under §6.8, so without this edit a screened bundle publishes a false
+two-human-unanimous claim on its public page. §10.2 standing rule 2 governs. **Frozen:** both the
+HTML and Markdown lines branch on `truthAdmission` across three modes through one exhaustive switch
+with a `never`-typed default; the two existing strings keep their exact bytes; the screened wording
+is `Yes — screened and operator-sampled`, which passes §6.1's overclaim test with no "human", no
+"unanimous", and no "independent", and echoes the mode name so a reader can join it to the
+`Truth admission` field rendered below it. This is the same class as §3's published-caption erratum
+and P10's row 27, and it is the third time in this program that the projecting site was missing from
+an inventory that had the refusing sites.
+
 **Terminology.** D1 says "same-class, same-**category**". This spec says same-**stratum** because
 §3.3 makes stratum the axis that carries category for this run: the bank declares the four
 source-question categories as its stratum vocabulary. Same-stratum is therefore the exact
@@ -1023,6 +1368,24 @@ recomputations are computed over a set the operator chose after the fact, which 
 agreement rate a number about a sample of a sample. This was absent from v1.0 and is the first
 check to run, because every check below reads `rows`.
 
+**Erratum (2026-08-20, v1.8), from P6's execution in [#2881](https://github.com/Jinn-Network/mono/pull/2881): check (0) runs in two halves and the coverage half runs LAST, not first, and the reason is structural rather than a matter of taste.**
+The `1 <= sampleSize <= rows.length` clause is enforced up front, transitively, because
+`computeScreeningSample` refuses a `sampleSize` exceeding the pool on its own. The **pool-coverage**
+clause runs after both the resolution and ledger loops. It has to: the candidate pool is not an
+input to the closure verifier, it is reconstructed as `accepted` union `excluded`, which **is** the
+closure's own admission decision and is only known once both loops have run. Running it earlier
+would mean either accepting a pool the operator declared, which is exactly the self-attested field
+§6.3 removes everywhere else, or digesting the rows to derive it, which is the circularity the
+`poolDigest` paragraph below exists to avoid.
+
+**Ordering is not load-bearing here, and that is why the deviation is acceptable rather than
+tolerated.** The check refuses; it does not gate. Nothing between the two points consumes a coverage
+verdict, so a mis-covered table is refused either way, just later. The sentence "the first check to
+run" above should be read as a statement about what the other four **depend on**, not about
+execution order. One further correction in the same edit: the coverage half was guarded by a
+`!== undefined` type-narrowing conjunct whose false branch silently skipped it, and it now refuses
+instead, because a coverage check with a skip path is not a coverage check.
+
 **(1) Sample membership.** Recomputed by a procedure specified here and implemented in
 `@colophon-claims/verify`, **not** by executing the sealed sampling script. The script's digest
 records what the operator actually ran; the verifier's independent recomputation is what makes the
@@ -1036,6 +1399,17 @@ a verifier.
 > `stream := HMAC-SHA256(key = utf8(sampleSeed || poolDigest), message = utf8(itemSha256))`; sort
 > rows ascending by `stream` compared as 32 unsigned bytes, ties broken by `itemSha256` in code-unit
 > order; the sample is the first `sampleSize` rows.
+
+**Erratum (2026-08-20, v1.8), from P6's execution in [#2881](https://github.com/Jinn-Network/mono/pull/2881): "sorted and unique" means the implementation must actually deduplicate, and it did not.**
+The paragraph above says the identity set is "code-unit sorted **and unique**", and the module
+header said the same, but `computeScreeningPoolDigest` sorted without deduplicating. The dedupe is a
+no-op on every in-repo path, because §6.5(0) already forbids a duplicate `itemSha256` in `rows`, and
+the frozen cross-language vector stays green with it added. It matters for exactly the use this
+procedure is exported for: **R-4 requires the procedure be reimplementable in any language from this
+paragraph**, and an independent implementation that reads "unique" and deduplicates would have
+disagreed with a reference implementation that did not, on the one input where the two differ. A
+cross-language procedure whose reference implementation contradicts its own specification is worse
+than one with no reference implementation, and this is the alignment.
 
 **The key is text, and the digest enters it in exactly the form written above.** Every other value
 in this procedure enters as the UTF-8 bytes of its canonical rendering, including the message, which
@@ -1322,6 +1696,41 @@ evidence roles in three synchronized lists plus two publication-grade derivation
 full site inventory. The G2 fallback in §6's preamble (run `operator-only` with prose disclosure,
 land the branch post-run) is unchanged and is now better justified than when it was written.
 
+**Erratum (2026-08-20, v1.8), from P6's execution in [#2881](https://github.com/Jinn-Network/mono/pull/2881): the sixty-one count held, the four groups are as-built, and Group B is FIVE sites rather than four.**
+This is the one section of this document that survived execution with its central finding intact,
+and the corrections are additions rather than reversals. As built:
+
+| Group | Frozen at v1.3 | As built |
+|---|---|---|
+| **A**, rulings §6.8 could not deliver | three sites | **three, unchanged.** Both `publicationGrade` derivations become `truthAdmission !== "operator-only"` and the `superRefine` branch stays as specified. The `binary-qualification.ts` limitation gains a fourth `BINARY_INSTRUMENT_REPORT_LIMITATIONS` entry, written as a **rendered sentence** rather than this document's bare kebab identifier, because every existing entry in that map is a sentence |
+| **B**, no compiler safety net | four sites | **five.** The fifth is `verification.ts`'s resolutions-and-ledger loop guard, `if (resolution.truthAdmission === "two-human-unanimous")` with an implicit else running the operator-assertion path. It fails open in exactly the same way as the four named, and it is not in the v1.3 table |
+| **B-bis**, the mapping that closes in neither direction | two directions | **two, unchanged**, and the fix confirmed to be one change rather than two: both mappers take the evidence role as an **input** rather than deriving it from the attestor role alone. `authorityPayload` had six positional parameters, so threading a seventh became an options-object conversion in the same edit, and the input-side discriminator is now an exported pure function with direct unit coverage |
+| **C**, evidence with nowhere to live | four items, one declined | **four, unchanged, and the declined item stays declined.** `verify/src/schema.ts`'s `reviewers.length === 1` refusal needed no change, exactly as this section argued, and a test now asserts the zero-reviewer property directly |
+
+**Two clauses of the surrounding text are strengthened by what execution found.** The claim that a
+widened enum plus an untouched `===` chain is **worse** than an unwidened enum is now a shipped
+property rather than an argument: every Group B site is an exhaustive switch over the three-member
+union with a `never`-typed default, so a fourth admission mode is a compile error rather than a
+silent reroute. And three copies of the ledger reason vocabulary stay deliberately **narrow**:
+`AdmitInputSchema.truthAdmission` (which the original recon mislabeled as a reason copy), the
+exclusion-reason derivation ternary, and its downstream type-guard predicate are hardwired to
+two-human review data and structurally cannot produce a `screening-*` value. Widening the first of
+them **alone**, without the Group B fix, would have converted an unwidened-and-refusing gate into a
+widened-and-silently-misrouting one, which is this section's own thesis pointed at itself.
+
+**One mid-lane conformance correction, recorded because a spec reader would otherwise not know it was ever in doubt.**
+§6.3's final sentence, that the table is signed once over the whole record on the existing DSSE
+path, is verbatim and load-bearing. A first implementation sealed the table as bare canonical JSON
+with a digest referenced from the manifest, on the reading that the DSSE path required an
+`attestorRole` on the payload. It does not: `sealRoleEvidence` DSSE-wraps arbitrary bytes under any
+payload type and reads no field from the payload. Bare canonical JSON with a referenced digest is a
+**content commitment, not a signature**, and it silently defeats §6.9's own argument for dropping
+240 per-item signatures, since that argument is precisely that one signature on the whole table
+carries what 240 separate ones would. `screeningTableSha256` names the DSSE envelope digest, exactly
+as `reviewerRosterSha256` and `revealReceiptSha256` already do; that is a producer-and-verifier
+convention rather than a schema constraint, so both frozen schemas are untouched, and a
+bare-canonical table at that digest now refuses.
+
 ### 6.9 Deliberately dropped, recorded so nobody re-adds it
 
 Per-item signatures, visibility and blinding receipts, and the reviewer roster. One key signing 240
@@ -1347,6 +1756,51 @@ and the claim-table rule. **One carrier moved at G1.** The panel comparison is �
 2026-08-20 revision of R-1. D2's **unit** — item-level majority decisions — is what the revision
 protects, and §7.2a states the substitution as the residual departure rather than absorbing it.
 
+### 7.0a Registry envelope (class fix C-1, added at v1.8)
+
+**Every registered method carries an envelope that is not its science.** §7 specified each method's
+statistics, pairing, and withholding precisely, and left the fields every registered method carries
+regardless of those statistics to be rediscovered. Four errata in P5's execution
+([#2884](https://github.com/Jinn-Network/mono/pull/2884), still open at this writing) are one cause:
+
+| Instance | What §7 specified | What the envelope actually requires |
+|---|---|---|
+| **E-1** | §7.1's `parameterSchema.required` as eight entries, omitting `truthAdmission` | The admission grade is sealed into every readout over the same admitted items. A contrast Report whose parameters omit the grade the per-arm Report carries publishes two readouts at different disclosure levels over one cell set, which is the asymmetry §7.4 exists to prevent |
+| **E-2** | §7.2a's `baseline` and `candidate` "name the evidence-declaring arm and its evidence-free twin" with no sign | The inherited estimator builds `{pA: baseline, pB: candidate}` and returns `pB - pA`. Candidate is the evidence-declaring arm; baseline is its evidence-free twin. A positive delta means the evidence-declaring arm agrees more |
+| **E-6** | §7.1's output shape omits conflicted accounting; §7.2a names `conflictedCells: [...]` "as `paired-delta@1` reports them" | `paired-delta@1` reports `conflicted: {count, cellKeys}`. `MethodProjection` declares that field REQUIRED, so under §8.3 each of the N Reports needs it. Omitting it forces the claim builder to publish a false `{count: 0, cellKeys: []}` or to refuse for a condition every sibling merely reports |
+| **Mirror seam (P5 Critical 1)** | §7.5 names `core/src/report/claim.ts` | A claim-package projection lives in **two** files: core's `report/claim.ts` and the standalone verifier's `profile/claim.ts`. `publish` routes through the verifier's copy. `verify/src/assets.ts` carries a **third** `methodProjection` for the rendered bundle assets. Wiring core only strips the new blocks at publish, refuses the headline-or-comparison refine, and then throws on the unknown method id |
+
+**Frozen, so the next method author inherits the envelope instead of re-deriving it.** For any
+method registered into this family's analysis plan:
+
+1. **Sealed parameter set includes the admission grade.** When the method reports over the same
+   admitted items as `binary-instrument@1`, `truthAdmission` is a required derived parameter,
+   identical across the panel. Superfluous-but-uniform is harmless; a published asymmetry costs a
+   method-version bump to fix. `judgeModelProfile` is **not** in this envelope: it is optional on
+   `BINARY_INSTRUMENT_PARAMETER_SCHEMA` to drive that method's limitations output, and a method
+   that emits no limitations must not seal a parameter nothing reads (P5 E-3).
+2. **Role assignment that fixes the estimator's sign is stated, not left positional.** Where a
+   method names `baseline` and `candidate`, the documentation states which arm is which and what a
+   positive value means. Where a method names unordered pairs, it says so and carries neither.
+3. **Conflicted accounting is `conflicted: {count, cellKeys}`**, sourced from the shared reduction,
+   never invented, never a sibling field name. Withholding reasons remain registry-verified output
+   under §7.2's reporting rule.
+4. **Claim projections are mirrored on both core and verify, and the assets renderer is a third
+   copy.** Schema properties, refine branches, the binary-claim exclusion checks, the
+   `exactBinaryClaimControls` allowlist, the `MethodProjection` union, both projection functions,
+   the dispatch arms, the builder's spread, and `verify/schemas/claim-package.schema.json` move
+   together. `assets.ts` carries fact types, projections, and HTML and Markdown renderers, and
+   every `facts.kind` dispatch names each kind explicitly. A proof that never builds a bundle from
+   the new methods cannot see a projection missing from the verifier's half.
+5. **Withholding and exclusions stay the method's science**, but they are published through this
+   envelope: `reasons` when an interval is withheld, exact cell keys when an item-arm is excluded.
+
+The four instances above are evidence for this clause. They are not independent slips to patch in
+isolation. P5's current body ships E-1 as nine parameters (exactly
+`BINARY_INSTRUMENT_PARAMETER_SCHEMA`'s nine), E-2 as the sign convention above, E-6 as the
+registry-universal field, and the mirror seam as the three-file projection. If #2884's body moves
+before it lands, this clause still stands; only the instance citations may need a follow-up.
+
 ### 7.1 Registered: `pairwise-disagreement@1`
 
 **New method id.** `jinn.benchmarking.method/pairwise-disagreement`, added to
@@ -1360,11 +1814,13 @@ requiredInputs:      ["matrix.cells", "referenced-result-evaluations", "exact-ru
                       "exact-analysis-context-bytes", "exact-label-resolution-bytes",
                       "exact-instrument-bytes"]
 parameterSchema:     required ["verdictRule","k","reduction","measurementProfile",
-                               "candidateClasses","strata","parserInvalidPolicy","intervalAlpha"]
-                     (all derived from the draft and sealed evidence, never caller-supplied,
-                      exactly as binary-instrument@1 derives its own)
+                               "candidateClasses","strata","parserInvalidPolicy","intervalAlpha",
+                               "truthAdmission"]
+                     (nine; all derived from the draft and sealed evidence, never caller-supplied,
+                      exactly as binary-instrument@1 derives its own; see §7.0a)
 outputShape:         "per-arm-pair item-majority disagreement counts, rate, Wilson interval,
-                      per-candidate-class and per-stratum slices, and exclusions"
+                      per-candidate-class and per-stratum slices, exclusions, and the
+                      registry-universal conflicted: {count, cellKeys}"
 exclusionRule:       "exact k-cell Task/arm groups only; an item excluded for either arm of a pair
                       is excluded from that pair, with exact cells"
 clusteringRule:      "Task digest plus arm pair; strict majority over registered scientific replicates"
@@ -1418,9 +1874,22 @@ pass per pair. The design's question 3 is about the panel, not about a chosen pa
       ],
       exclusions: [ { taskDigest, armId, reason } ]   // sorted
     }
-  ]
+  ],
+  conflicted: { count, cellKeys }                 // registry envelope, §7.0a; REQUIRED
 }
 ```
+
+**Erratum (2026-08-20, v1.8), erratum E-1, from P5's execution in [#2884](https://github.com/Jinn-Network/mono/pull/2884): the eight-entry `parameterSchema.required` omitted `truthAdmission`.**
+§7.2a seals that key with an argument that is method-agnostic by its own terms. The v1.6 correction
+walked §7.2a and never revisited §7.1's enumeration, and its own "does not carry this error"
+sentence conflates the `requiredInputs` count with the parameter enumeration. **Frozen as nine**,
+exactly `BINARY_INSTRUMENT_PARAMETER_SCHEMA`'s nine, under §7.0a. A superfluous sealed parameter is
+harmless; shipping the asymmetry into a published registry row costs a method version bump to
+fix.
+
+**Erratum (2026-08-20, v1.8), erratum E-6, from the same execution: the output shape omitted the registry-universal `conflicted: {count, cellKeys}`.**
+The field is REQUIRED on `MethodProjection`. Both methods carry it, sourced from the shared
+reduction. This is an instance of §7.0a, not a pairwise-disagreement-specific addition.
 
 **Determinism.** Integer counts plus the package's existing Wilson interval. No resampling, no seed.
 Byte-stable on recompute, which the method-conformance suite asserts.
@@ -1518,6 +1987,27 @@ a row of the source manifest and refuses an unmapped digest or an unused row
 `SourceDescriptor`s and **no instant**, so there is nothing to derive from today. **Frozen:** the
 source-manifest row gains a required `publishedAt`, calendar-strict RFC 3339, and the importer
 copies it onto the payload from the row `sourceCommitment` names.
+
+**Erratum (2026-08-20, v1.8), from P2's execution in [#2876](https://github.com/Jinn-Network/mono/pull/2876): the importer verifies the copy; it does not write it.**
+The sentence above is mechanically impossible. The item bytes are digest-committed by the
+admission closure (`itemSha256`), which is sealed before import, so rewriting the payload at
+import would break the admission join it is checked against. The importer therefore verifies the
+copy the bank author made: `sourceCommitment` must be the code-unit-least digest in the item's
+`sources`, and `timestamp` must equal the `publishedAt` of the row `sourceCommitment` names. The
+frozen structural property is achieved exactly. **The word "copies" in the sentence above is
+withdrawn; the frozen behavior is verify-not-write.**
+
+**Erratum (2026-08-20, v1.8), also from P2's execution: calendar strictness is enforced once, on the source-manifest row.**
+`publishedAt` is checked with `isCalendarStrictRfc3339` from `@jinn-network/benchmarking-records`,
+the repository's single calendar parser and the same function `benchmarking/interop`'s
+`toCalendarStrictRfc3339` delegates to. No second date parser was written and no `Date` parsing
+was introduced. The payload's own `timestamp` is pinned by an RFC 3339 shape regex only,
+documented as a shape pin rather than a calendar evaluation, because `packages/task-execution/profiles`
+cannot depend on `benchmarking/records` without inverting the build order. Sub-second precision is
+excluded from that shape: the value is a source publication instant, and a fraction-admitting
+pattern fails the profiles package's own safe-regex ReDoS pre-filter in
+`task-profile/payload-schema.ts`. §0.5 is why the calendar evaluation lives on the row and not on
+both sides.
 
 Putting the instant on the source row rather than on the item is the load-bearing choice. It makes
 "two items drawn from one source carry the same cluster key and the same timestamp" a **structural**
@@ -1690,8 +2180,9 @@ set". **The derived set is nine**, not seven: `BINARY_INSTRUMENT_PARAMETER_SCHEM
 (`aggregate/src/binary-instrument-method.ts:78-90`) requires `verdictRule`, `k`, `reduction`,
 `measurementProfile`, `candidateClasses`, `strata`, `parserInvalidPolicy`, **`truthAdmission`**, and
 **`intervalAlpha`**. v1.5 dropped both silently, and its own justification for the first seven applies
-to one of them and rules out the other. §7.1 does not carry this error, because it names the count
-rather than enumerating.
+to one of them and rules out the other. **v1.6 said §7.1 does not carry this error because it names
+the count rather than enumerating. That sentence is withdrawn at v1.8:** §7.1 enumerated eight and
+omitted `truthAdmission`, which is E-1 and is now under §7.0a.
 
 The eight that carry over are `binary-instrument@1`'s nine minus `intervalAlpha`, because the majority
 reduction needs them and they must be the *same* values the per-arm headline used or the two readouts
@@ -1717,8 +2208,44 @@ level and `intervalAlpha` does not appear in this method's parameters.**
 
 `baseline` and `candidate` name the evidence-declaring arm and its evidence-free twin, so the method
 computes **one** named pair, not all pairs. That is the deliberate difference from §7.1's
-`pairwise-disagreement@1`, which is a panel question and carries no arm pair; this is a two-arm
-contrast and the design asks it about one pair.
+`pairwise-disagreement@1`, which is a panel question and carries no arm pair; this is a contrast
+about one pair, derived from a roster that may be larger than two (§1.6).
+
+**Erratum (2026-08-20, v1.8), erratum E-2, from P5's execution in [#2884](https://github.com/Jinn-Network/mono/pull/2884): the clause named a pair and assigned no sign.**
+Read positionally, "the evidence-declaring arm and its evidence-free twin" would make the published
+delta `(evidence-free) - (evidence-declaring)`, so a judge that agrees more when given evidence
+would publish a negative headline. The inherited compute site builds
+`{pA: baselineCells..., pB: candidateCells...}` and returns `pB - pA`. **Frozen:** candidate is
+the evidence-declaring arm; baseline is its evidence-free twin; a positive delta means the
+evidence-declaring arm agrees more. Instance of §7.0a.
+
+**Erratum (2026-08-20, v1.8), erratum E-3, from the same execution: neither new method carries the optional `judgeModelProfile`.**
+It is optional on `BINARY_INSTRUMENT_PARAMETER_SCHEMA` and exists to drive binary-instrument's
+limitations output. Neither new method emits limitations, so carrying it would seal a parameter
+nothing reads. This is the envelope's negative clause (§7.0a item 1).
+
+**Erratum (2026-08-20, v1.8), erratum E-4, from the same execution: `seed`, `resamples`, and `alpha` are frozen derivation constants.**
+§7.2a requires all thirteen parameters derived from the draft and the sealed closure and never
+caller-supplied, and the draft carries no source for these three. The precedent is inside the
+function being cloned: `compileBinaryInstrumentProfile` hardcodes `verdictRule`, `reduction`,
+`parserInvalidPolicy`, and `intervalAlpha`. **Frozen:** `alpha` is `0.05`, the value the per-arm
+headline seals as `intervalAlpha`. They are sealed into the plan at lock, before the first judge
+call, so they are pre-registered by construction.
+
+**Erratum (2026-08-20, v1.8), from the same execution (review Critical 2): a literal two-arm refusal is banned by §1.6, and the pair is derived structurally.**
+An earlier reading of "this is a two-arm contrast" refused any roster that was not exactly two
+arms. That is a literal arm count, which §1.6 freezes against for this family, and it banned the
+ratified six-arm flagship panel outright. **Frozen:** the pair is derived in two steps that each
+refuse by name rather than guess. Exactly one arm's instrument must declare evidence; zero or
+two-or-more both refuse. Its twin is the unique other arm whose instrument is identical once the
+evidence interpolation is stripped from both; no match refuses, and more than one match refuses
+naming every candidate. Stripping drops an `evidence` field segment together with the literal that
+introduces it, and merges consecutive literals, so the comparison is over the rendered template
+rather than over how its author split the literal runs. Dropping the field alone would leave a
+dangling "Evidence: " label and no real twin would ever match. `instrumentId` and
+`promptTemplateSha256` are excluded by construction rather than by leniency: both necessarily
+differ between twins. The ambiguity the old ban was protecting against is now a typed refusal on
+genuinely ambiguous rosters instead of a ban on the flagship shape.
 
 **The unit, stated exactly.** For each Task judged in both arms, each arm contributes its
 **item-majority decision** — the strict majority over the exact `k` registered scientific replicates,
@@ -1775,9 +2302,14 @@ slice is emitted with its counts and no interval, matching §3.2.
   byCandidateClass: [ { candidateClass, n, delta, interval, reasons } ],   // sorted
   byStratum:        [ { stratum, n, delta, interval, reasons } ],          // sorted
   exclusions: [ { taskDigest, armId, reason } ],  // sorted, exact cell keys
-  conflictedCells: [ ... ]                        // sorted, as paired-delta@1 reports them
+  conflicted: { count, cellKeys }                 // registry envelope, §7.0a; REQUIRED. Not conflictedCells
 }
 ```
+
+**Erratum (2026-08-20, v1.8), erratum E-6 continued, from P5's execution in [#2884](https://github.com/Jinn-Network/mono/pull/2884): `conflictedCells` was the wrong name, and its own comment contradicted it.**
+The line above previously read `conflictedCells: [ ... ]` with the trailing comment "sorted, as
+`paired-delta@1` reports them", but `paired-delta@1` reports `conflicted: {count, cellKeys}`. The
+field name and the comment cannot both be true. §7.0a settles it.
 
 **`referenceSet: "registered-non-reference"`, argued rather than assumed.** Same argument §7.1 makes
 and the same evidence: the v1 reference set is a frozen conformance corpus, and a method registered
@@ -1797,6 +2329,13 @@ derived from the draft and the sealed closure, this method needs a **third bespo
 the same derivation as `compilePairwiseDisagreementProfile`, plus the `baseline`/`candidate`/`seed`/
 `resamples`/`alpha` resolution — plus a conformance fixture. The two sibling derivations share their
 whole front half and P5 writes them as one function with two callers, not two functions.
+
+**Erratum (2026-08-20, v1.8), erratum E-5, from P5's execution in [#2884](https://github.com/Jinn-Network/mono/pull/2884): conformance coverage follows the binary-instrument precedent, not a new shared-corpus row.**
+The shared corpus driver does not supply `resolveRecordBytes`, which both new methods require, and
+that is why `binary-instrument@1` has no fixture there and appears in neither `method-specs.json`
+nor the exhaustive id list in `fixture-contract.test.ts`. Both new methods follow it: in-package
+conformance suites, and neither is added to those two lists. The sentence "plus a conformance
+fixture" above means those in-package suites, not a row in the shared corpus.
 
 **What is published, and what is not.** Only the item-majority contrast enters the claim table. The
 `paired-delta@1` mean-rate view is **not** published, in the claim table or beside it. One unit
@@ -1861,6 +2400,29 @@ edit in one PR.
 | `core/src/operations/report.ts:165`, `publication-report.ts:313` | one Report record per non-wilson plan entry, in plan order (§8.3) |
 | `core/src/report/claim.ts`, `core/src/run/state.ts`, `core/src/bundle/materialize.ts`, `verify/src/verify.ts`, `verify/src/assets.ts` | the Report-singularity pins itemized in §8.3, each of which must accept N Reports or the fallback is taken |
 | **P2-owned, P5-consumed** | the payload provenance reshape under §7.2 option (A), ratified at G1. P5 does not implement it and must not fork it |
+
+**Erratum (2026-08-20, v1.8), from P5's execution in [#2884](https://github.com/Jinn-Network/mono/pull/2884): seams this table did not name, plus one named hole and one CHIP.**
+
+- **`DRAFT_SPEC_FIELD_NAMES`** (`core/src/operations/drafts.ts`) is a hard allowlist with a typed
+  `unknown draft spec field` refusal. `additionalAnalyses` must join it or §9 item 5's
+  `draft update --file` path, the only surface that can set it, refuses. Absent from this table,
+  from §8.3's site table, and from §10 row 16.
+- **`methodProjection` in `core/src/report/claim.ts`** is a switch over method ids with a throwing
+  default. Both new methods need arms there or the claim package throws. **The same switch exists
+  in `verify/src/profile/claim.ts` and a third in `verify/src/assets.ts`.** That is the mirror seam
+  under §7.0a; this table named only the core copy.
+- **Named hole, `runPublish` is not usable on a binary-judgment run.** It refuses at
+  claim-consistency because the publish path does not thread the Inspect and binary-instrument
+  limitation lines into its exact-disclosure rebuild. The gap is pre-existing and unrelated to P5:
+  it reproduces identically on the same fixture with no additional analyses registered at all. P5's
+  cold-verify proof materializes through its own `reportSelector` seam rather than `runPublish`.
+  This document records the hole; it does not close it, and closing it is not a P5 contract.
+- **CHIP-1, not a contract.** `core/src/operations/inspect-binary-judge.test.ts`'s export test sits
+  at roughly 5.2s against a 5000ms budget, so it lands on either side of the line depending on
+  machine load. P5's body ran it down: every assertion in the file passes; raising only the budget
+  turns the run green; reverting P5's core files to `origin/next` reproduces the same failure; a
+  null-control arm is indistinguishable from base and head. Timing claims about that file need the
+  control arm. Nothing in this spec changes.
 
 ---
 
@@ -2027,6 +2589,24 @@ The first assertion is the one that matters: it is the proof that "unchanged" is
 
 **P10's verification gains one thing v1.5 would have missed:** the PR runs the **`web`** package suite,
 not only `core`'s, because site 14 is in `web` and nothing in `core` would have caught it.
+
+**Erratum (2026-08-20, v1.8), from P10's execution in [#2878](https://github.com/Jinn-Network/mono/pull/2878): three sites beyond the frozen fourteen, found while implementing.**
+A site absent from the inventory is a defect in the inventory, and these three are reported rather
+than absorbed into a silent fifteenth row:
+
+1. `packages/benchmark-product/INSPECT-RUNTIME.md:118-121` and `:225-232`. The prose and the shell
+   example still instructed the retired verb. Both are rewritten to the method-operand form.
+2. `core/src/operations/inspect-binary-judge.test.ts`, the test "exposes the same binding through
+   the additive file-based CLI without launching the runtime". It invoked the retired verb.
+   Deleted, because the byte-identity acceptance test strictly contains its coverage.
+3. The generated operation count moves from 42 to 41, which three hand-maintained assertions pin:
+   `core/src/docs-consistency.test.ts:83` and `:93`, `core/README.md:49`, and the doc comment at
+   `core/src/cli/main.ts:3`. Retiring an operation without these fails `docs-consistency.test.ts`.
+
+One further live-refusal string: `inspect-binary-judge.ts`'s `bind-judge requires an imported
+benchmark` becomes `judge binding requires an imported benchmark`. The protected
+`runtime.inspect.bind-judge` action string is unaffected, since the wrapper survives as an
+internal.
 
 ### 8.2 G1-D-B: judge derived export — **ratified (b), generalized** (recon C3)
 
@@ -2199,10 +2779,22 @@ Rules:
    that recomputed completeness would be a second commitment that can disagree with the artifact it
    describes, which §2.5 refuses by name in a different family and the rule does not weaken here.
 2. **The lock digest is `runState.runSha256`**, the digest of the Run record sealed at `lock`, which
-   transitively binds the selection manifest through `draft.spec.evaluationRuntime`. All five export
-   operations already read it (`hub-export.ts:108-109`, `swebench-export.ts:89-90`,
-   `apex-agents-export.ts:87-88`, `apex-swe-export.ts:81`, `inspect-view-export.ts:90-93`), so this
-   costs no new plumbing in any shape.
+   transitively binds the selection manifest through `draft.spec.evaluationRuntime`.
+
+   **Erratum (2026-08-20, v1.8), from P10's execution in [#2878](https://github.com/Jinn-Network/mono/pull/2878): "all five export operations already read it" is four of five.**
+   That sentence was true for `hub-export.ts`, `swebench-export.ts`, `apex-agents-export.ts`, and
+   `inspect-view-export.ts`. **`apex-swe-export.ts` reads `requireRunState` but has no
+   `runSha256 === undefined` refusal**, so the digest is `string | undefined` there and the
+   certification would have named `undefined` as a lock digest. Resolved by giving
+   `apex-swe-export.ts` the same refusal its four siblings already carry, immediately after
+   `requireRunState`: `APEX-SWE-dev export requires a sealed Run`. §11 ranks publishing a false
+   value rather than refusing as strictly worse than a refusal, and the path is unreachable in
+   production because Mercor harness reports only exist after launch and launch requires lock.
+   This surfaced a gap in existing coverage rather than a behavior regression: the named-export
+   fixture called `runQuote` but never `runLock`. The fixture gained the missing `runLock` call so
+   it matches the real `method -> quote -> lock -> launch` flow, rather than weakening the new
+   refusal to accommodate a shortcut. **Supersession:** the "all five" sentence is withdrawn; the
+   frozen text is four of five plus one refusal added to make the fifth true.
 3. **The third line is the only branch that claims nothing**, and it is honest rather than a hole:
    every shape already handles `matrixSha256 === undefined` for its mode decision, so an export taken
    before `collect` says so in one sentence instead of implying a completeness it cannot see.
@@ -2210,6 +2802,20 @@ Rules:
    badge sentences, never in place of them. A `full`-coverage conforming catalog run reads both lines;
    a nameless run reads the certification and the existing "not a submission" line. That is the
    ruling's "additional badge" in emitted text.
+
+**Erratum (2026-08-20, v1.8), from issue [#2885](https://github.com/Jinn-Network/mono/issues/2885), still open: the certification and the framework eligibility line can disagree, and that is not a defect in either.**
+The universal export completeness certification quotes the sealed matrix's `runOutcome`, and the
+pre-existing suite instructions may print a leaderboard-submit line directly below it. Framework
+eligibility counts an accounted-unscorable cell as done; sealed completeness counts only judged
+cells. A run with one accounted-unscorable cell therefore prints `partial` two lines above
+`submit`. Operator ruling of 2026-08-20 (option c): when and only when the certification's
+`runOutcome` disagrees with the framework eligibility verdict, one explanatory sentence is
+appended stating that the framework's eligibility rule counts accounted-unscorable cells as
+complete and the sealed accounting above is the stricter record. No behavioral coupling: no
+instruction is suppressed or gated, mode decisions and eligibility predicates stay byte-unchanged.
+This is not a reconciliation of the two definitions. #2885 is the implementation issue; v1.8
+records the ruling so a reader of this certification clause does not treat the juxtaposition as a
+spec hole to close here.
 
 #### Frozen: (3) the scoreless-transcripts caveat
 
@@ -2573,6 +3179,9 @@ which is why it is here rather than only in §8.2.
 | 26 | `core/parity-matrix.v1.json` | **P10** | **regenerated**, not hand-edited | §8.1 sites 6 to 8. `bindInspectBinaryJudge` leaves the operations facade, so its row leaves the matrix; `yarn generate:parity` after `yarn build` is the only way it is written. The `parity-matrix.test.ts` `unavailable` list loses the same name in the same PR |
 | 27 | Export instruction text, six builders | **P10** | **published copy changes** | §8.2. One shared `exportCompletenessCertification` line is prepended in every shape and every mode, and **one sentence forks for the judge lane** (`inspect-view-export.ts:55`, corrected at v1.6). Not a digest: `INSTRUCTIONS.txt` is not sealed and enters no join. It **is** published copy, so it is a claim, and it is the third kind of site §10.2's standing rule 2 cares about — one that projects rather than refuses |
 | 28 | Package-root facade and its two assertions (`core/src/index.ts:15,567,611-612`; `core/src/index.test.ts:58`; `web/src/lib/server/gui-action-registry.test.ts:14-15,45`) | **P10** | **no digest**, but a **cross-package** break | **Added at v1.6.** §8.1 sites 11 to 14. The second export surface v1.5 conflated with the operations facade, plus the `GUI_CAPABILITY_CATALOG` re-export that makes a `parity-map.ts` deletion fail a test in `web`. This is the row that puts P10 outside `core` |
+| 29 | `BUNDLE_V4_EVIDENCE_ROLES` gains `"snapshot-probe"` | **P1** | appends last, **format unchanged** | **Added at v1.8.** §1.5. Forced because the verifier refuses more than one `runtime-selection` record. Existing role-ordering index unchanged. Contended with P6's evidence-role edits in the same list |
+| 30 | Published `byStratum` captions (`verify/src/assets.ts` HTML and Markdown) | **P4** | **published copy changes** | **Added at v1.8.** §3.2. The literal `Core and stress buckets` becomes a rendering of the sealed vocabulary. Same class as row 27: not a digest, a claim |
+| 31 | `DRAFT_SPEC_FIELD_NAMES` (`core/src/operations/drafts.ts`) | **P5** | one new allowlist key, **no digest** | **Added at v1.8.** §7.5. `additionalAnalyses` must join the hard allowlist or `draft update --file` refuses. Companion to row 16 |
 
 ### 10.1 Merge ordering (binding on the lane coordinator)
 
@@ -2598,6 +3207,12 @@ G1 amendment touches, so the two amendment sets compose in one file. What that c
 | `core/parity-matrix.v1.json` | **Merged**, and **#2865 will move it again** | **Byte-asserted** by `parity-matrix.test.ts:42-74`. Whichever of P10 and #2865 lands second regenerates |
 | `core/src/cli/parity-matrix.test.ts` | **Merged**; #2865 may touch the hard-coded `unavailable` list again | P10 removes `bindInspectBinaryJudge` from the same literal array |
 | **`web/src/lib/server/gui-action-registry.test.ts`** | **#2865 is the GUI packet, so this is now the live collision.** DR-2026-08-19 decision 8 makes catalog bind available in the draft page, which is what #2865 ships | Both P10 (§8.1 site 14) and #2865 edit `EXPECTED_UNAVAILABLE_REASONS`, which is `toEqual`-asserted at `:45`. **This is the one to sequence.** They do not disagree: #2865 makes the catalog form available and DR-2026-08-19 decision 8 keeps derived export unavailable, while P10 removes the judge row; the conflict is textual |
+
+**v1.8 historical note on that table.** #2865 merged before P10 opened (#2878 records the merge at
+`bf7daaeaa`). The "only #2865 is still open" sentence and the "whichever of P10 and #2865 lands
+second" rule are the inventory as of v1.7. Both packets have since landed. The live open packet
+at v1.8 is P5 [#2884](https://github.com/Jinn-Network/mono/pull/2884). See C-3 above for the
+procedure that replaces trusting any of these collision claims.
 
 **The rule for the coordinator, narrowed: whichever of P10 and #2865 lands second rebases and re-runs
 `yarn generate:parity` after `yarn build`**, and reconciles `EXPECTED_UNAVAILABLE_REASONS` by hand,
@@ -2640,15 +3255,55 @@ are `core/src/{index.ts, index.test.ts}`,
 inspect-view-export.ts}`, `core/src/runtime/inspect/{binary-judge-manifest.ts, host.ts}`,
 `core/src/runtime/{adapter.ts, suite-protocol/comparability.ts}`, the five sibling export builders,
 `core/README.md`, the generated `parity-matrix.v1.json`, and
-**`web/src/lib/server/gui-action-registry.test.ts`**. **Not one of them appears in the eleven rows
-above**, and not one is touched by P1 to P7.
+**`web/src/lib/server/gui-action-registry.test.ts`**.
 
-**Corrected at v1.6: P10 is not confined to `core`.** v1.5's file list said it was, and §8's preamble
+**Erratum (2026-08-20, v1.8), class fix C-3: the claim that not one of those files is touched by P1 to P7 is false, and this inventory is a point-in-time snapshot, not a standing completeness proof.**
+v1.5 and v1.6 both wrote "Not one of them appears in the eleven rows above, and not one is touched
+by P1 to P7." P10's own execution in [#2878](https://github.com/Jinn-Network/mono/pull/2878)
+recorded the opposite, against `origin/next` as it then stood:
+
+- **P1 (#2877) touches four of them:** `INSPECT-RUNTIME.md`,
+  `core/src/operations/inspect-binary-judge.ts`,
+  `core/src/operations/inspect-binary-judge.test.ts`, and
+  `core/src/runtime/inspect/binary-judge-manifest.ts`.
+- **P2 (#2876) touches two more,** `core/README.md` and `core/src/cli/main.ts`, on disjoint lines.
+- **P1 also appends `"snapshot-probe"` to `BUNDLE_V4_EVIDENCE_ROLES`**, which is the list §10.1
+  assigned to P6. That is a third contended region in `verify/src/schema.ts`, not a P10 overlap,
+  and it is why "P1 is confined to `arms` and `armCount`" was also false.
+
+The overlap is real and the substance did not disagree, which is why P10's reconciles were
+textual. The defect is the inventory's completeness claim, not a hidden contract conflict.
+
+**This table is computed at a point in time.** The snapshot above was rebuilt at v1.2 from the
+constant-sweep inventory against `next` @ `4f4ad46f2`, rewritten at v1.6 against `a4c9a2d95`, and
+corrected at v1.8 from the eight execution PR bodies. It has been wrong repeatedly (P10 vs P1
+shared files, P6 vs P10 via `INSPECT-RUNTIME.md` and the evidence-role list, v1.6's claim that
+**#2865 was still the live collision** after #2865 had already merged). **Do not treat it as now
+complete forever.**
+
+**The procedure that replaces trusting it.** Each lane, at rebase onto current `origin/next`,
+computes the overlap itself:
+
+```
+comm -12 \
+  <(git diff --name-only origin/next...HEAD | sort) \
+  <(git diff --name-only origin/next...origin/<other-packet-branch> | sort)
+```
+
+Name-only diffs, current `origin/next` as the left side, not a stale merge base. A `--stat`
+computed against a base predating a merged packet reports that packet's files as reversions. P5's
+body in [#2884](https://github.com/Jinn-Network/mono/pull/2884) measured `comm -12` empty against
+then-current `next`; that measurement is evidence for that moment, not a substitute for the next
+lane repeating it. **#2865 merged before P10 opened** (#2878 records the merge at `bf7daaeaa`);
+the v1.6/v1.7 "only #2865 is still open" row is historical. P10 landed as #2878. P5 is still
+open, so a later rebase of this docs branch may find new overlaps this table does not list.
+
+**Corrected at v1.6 and restated at v1.8: P10 is not confined to `core`.** v1.5's file list said it was, and §8's preamble
 said P10 lives "in `benchmark-product/core/src/cli` and `.../operations`". Both were wrong in the
 same way, and the reason is §8.1 site 14: `core/src/index.ts:15` re-exports `OPERATION_TO_GUI` as
 `GUI_CAPABILITY_CATALOG`, `benchmark-product/web` imports that alias, and a `toEqual` there asserts
 the whole unavailable-reason map. **P10 reaches into `web`**, its PR runs the `web` suite, and its
-live collision is with #2865 rather than with anything in this program.
+historical merge collision was with #2865 rather than with anything in this program.
 
 **Shared fixture builder, a hazard rather than a blocker.**
 `core/src/bundle/testing/v4-synthetic-fixture.ts` is touched by **P1, P2, P4, and P6** and is
@@ -2682,9 +3337,10 @@ and the reviewer can falsify that claim by running the stated command and diffin
 the table. A site in the command's output that is absent from the table is a defect in this spec,
 not a judgment call.
 
-**Status at v1.2: the mechanical sweep is complete and §10.2 is frozen.** It classified 214 sites
-across the four families. The counts below are the coverage proof; the per-family inventories that
-follow are the evidence.
+**Status at v1.2: the mechanical sweep is complete for the four value families and §10.2 froze those four.**
+v1.8 adds **F5**, a fifth family, because a value sweep cannot surface a mirrored allowlist of
+payload field names. The family list is a **floor**, not a closed set: a later packet that finds a
+sixth kind of pin should add F6 rather than stretch F1 through F5.
 
 | Family | Constant pinned | Owning section | Named at v1.1 | Production sites that must change | Confirmed already flexible | Test and fixture sites |
 |---|---|---|---|---|---|---|
@@ -2692,6 +3348,7 @@ follow are the evidence.
 | **F2** | the arm count `4` | §1.6 | 8 | **9** | 6 | 12 |
 | **F3** | `truthAdmission` and its coupled vocabularies | §6.8, §6.8a | 5 | **61** (sweep 60 + 1 at v1.3) | 20 | 22 |
 | **F4** | the singular Report | §8.3 | 7 | **35** under option 4, **19** under option 5 | 8 | 9 |
+| **F5** | payload **field-name** allowlists (`BINARY_JUDGMENT_TEMPLATE_FIELDS` and every mirror) | §2.2 | 0 | **the aggregate compute-time allowlist plus every hand-copied payload-key set** | unknown; grep for values cannot bound it | E-7's regression table |
 
 **The headline is F3.** v1.1 sized the screened-admission branch at five sites and it is sixty. §6.8a
 is the section that finding produced, and it is why P6 is now the program's largest packet rather
@@ -2730,9 +3387,52 @@ grep -rEn 'armCount|\.length\(4\)|[!=]== 4' --include='*.ts' packages/benchmark-
 grep -rEn 'truthAdmission|two-human-unanimous|operator-only|publicationGrade|-attestor|review-(disagreement|indeterminate|incomplete)' --include='*.ts' packages | grep -v '\.test\.'
 # F4  — 240 non-test hits, against 35 production sites
 grep -rEn 'reportSha256|reportEnvelopeSha256|report\.json|analysisPlan|AnalysisSchema|PUBLIC_BUNDLE_FILES' --include='*.ts' --include='*.py' --include='*.json' packages | grep -v '\.test\.'
+# F5  — field-name allowlists; the four commands above cannot bound this family
+grep -rEn 'BINARY_JUDGMENT_(REQUIRED_|OPTIONAL_)?TEMPLATE_FIELDS|question.*referenceAnswer.*candidateAnswer|"question".*"referenceAnswer".*"candidateAnswer"' --include='*.ts' --include='*.mjs' --include='*.md' --include='*.py' --include='*.json' packages | grep -v '\.test\.'
 ```
 
-**F1 and F2 are token families; F3 and F4 are contract families, and the difference decides how they
+**Erratum (2026-08-20, v1.8), class fix C-2: F5, the field-vocabulary family, plus two structural blinds the value greps already had.**
+
+The four v1.2 families all enumerate **value** vocabularies: which stratum names are legal, how many
+arms, which admission grades, how many Reports. **E-7** ([#2884](https://github.com/Jinn-Network/mono/pull/2884))
+was a mirrored allowlist of payload **field names**. `aggregate/src/binary-instrument-method.ts`
+re-validates instrument message segments at compute time against `question`, `referenceAnswer`,
+and `candidateAnswer`; `evidence` was absent. An evidence-declaring arm passed lock, executed, and
+threw `binary-record-malformed: instrument field segment is unsupported` at report time, which
+blocked the flagship run outright. A sweep built to grep for values cannot surface that allowlist.
+**Frozen:** a packet that widens a payload field, a template-field enum, or an exact-key payload
+shape widens every mirror of that field-name set in the same PR, including `aggregate`'s
+compute-time list, `verify`'s hand-written payload copies, and any exact-key allow-list that
+package re-implements because it does not depend on `task-execution-profiles`. §2.2 and §2.7 name
+the instances; this family is the cause.
+
+**The F1 through F4 commands are structurally blind to `.md` and `.mjs`.** v1.2's F4 added `*.py`
+after missing the independent Python verifier; it did not add markdown or the repo's `.mjs` test
+and pack-smoke scripts. Two instances, found by execution rather than by re-running the sweep:
+
+- [#2880](https://github.com/Jinn-Network/mono/pull/2880): `verify/test/claim-schema.test.mjs`
+  carries a `["core","stress"]` test site that F1 cannot see. It needed no change and stayed
+  green. `cli/src/viewer.ts:90` already renders `qualification.strata.join(", ")` dynamically; F1
+  cannot match it because the line contains no `core`-near-`stress` literal. It pins nothing, so
+  the naming obligation is not breached, but a reader checking completeness mechanically will not
+  find it.
+- [#2876](https://github.com/Jinn-Network/mono/pull/2876): `profiles/scripts/pack-smoke.mjs`
+  hardcoded `/1.0/` in a loop shared by all four task profiles. A `--include='*.ts'` sweep cannot
+  see a build script.
+
+F5's command includes `*.mjs` and `*.md` so it does not inherit that blind. The family list remains
+a floor: a sixth kind of pin is F6, not an argument that F5 was incomplete in a way that silently
+expands it.
+
+**CHIP-2, environment, not a contract.** [#2880](https://github.com/Jinn-Network/mono/pull/2880) and
+[#2884](https://github.com/Jinn-Network/mono/pull/2884) both hit a stale gitignored
+`packages/benchmark-product/cli/dist/local-web/` artifact that confuses the recursive
+manifest-catalog scanner. The architecture scanner walks the filesystem rather than git, so a
+nested copy of package manifests reads as uncataloged. Deleting the directory turns the three
+guards green. CI never sees it because `architecture` is a separate job on a fresh checkout.
+Recorded so the next person does not lose an hour treating it as a source defect.
+
+**F1 and F2 are token families; F3 and F4 are contract families, and F5 is a field family; the difference decides how they
 stay covered.** A stratum pin and an arm-count pin always contain their literal, so a grep bounds
 them today and will keep bounding them. "One Report per bundle" and "the admission mode branches
 here" are contracts, not tokens: a **new** singular `read("report.json")`, or a new
@@ -2821,6 +3521,13 @@ table is the option-4 breakdown and §8.3's residual-cost table is option 5's ni
 files. **Corrected at v1.3:** v1.2 said nine across four files and omitted the producer side
 entirely, `publish.ts:81,157`, `materialize.ts:182-186,188-189,198-199,252-253,865`, and
 `claim.ts:723`.
+
+**F5 (v1.8).** The family has no v1.2 inventory. Its first named instance is E-7: the aggregate
+compute-time template-field allowlist in `binary-instrument-method.ts` omitted `evidence`. The
+mirrors are every hand-copied payload-key set: `verify/src/claim.ts` `BINARY_JUDGMENT_PAYLOAD_KEYS`,
+the `claim-package.schema.json` additionalProperties:false object, `lock.ts` `instrumentPayload`,
+and the third payload copy this packet added at §2.7. The family is a floor: a later packet that
+finds a sixth kind of pin adds F6 rather than stretching F5.
 
 #### Citation precision, including two corrections this document declines
 
@@ -2987,8 +3694,11 @@ this document.
   ruling nor v1.4's recon named it. §8.2 rule 7 resolves it by making the judge branch's mode
   unconditional rather than quote-derived, which is also the more honest statement.
 
-**§10.2 is frozen.** The mechanical sweep completed and classified 214 sites across the four
-families; its result is folded into §1.4, §1.6, §3.1, §6.8a, §8.3, §10.1, and the owning seam
-inventories.
+**§10.2 is frozen at four families through v1.7.** The mechanical sweep classified 214 sites
+across F1 through F4; its result is folded into §1.4, §1.6, §3.1, §6.8a, §8.3, §10.1, and the
+owning seam inventories. **v1.8 adds F5** as a fifth family (field-name allowlists) and records
+that F1 through F4 are structurally blind to `.md` and `.mjs`. The family list is a floor, not a
+closed set.
 
-**The whole document is frozen on merge**, at v1.5, with every §11 item ruled.
+**The whole document is frozen on merge**, at v1.5, with every §11 item ruled. Later errata
+(v1.6 through v1.8) are append-only; they do not reopen §11.

@@ -2,17 +2,18 @@
 
 | | |
 |---|---|
-| **Version** | 0.2 |
-| **Date** | 2026-08-19 (v0.1 same day; v0.2 applies independent review) |
+| **Version** | 0.3 |
+| **Date** | 2026-08-19 (v0.1 same day; v0.2 independent review same day; v0.3 2026-08-20 applies §13 rulings) |
 | **Author** | S1 design session (Claude Fable 5, lane coordinator); seam citations read against `next` @ `4f4ad46f2` |
 | **Shape** | `design` (packet S1). Implementation is packet S2 and lands separately |
-| **Status** | proposed — awaits operator ratification of §13's open questions |
+| **Status** | ruled — operator 2026-08-20; §13's six questions are closed ([#2839 comment 5358262402](https://github.com/Jinn-Network/mono/issues/2839#issuecomment-5358262402)) |
 | **Issue** | [#2839](https://github.com/Jinn-Network/mono/issues/2839) (F7 in the original mapping). Part of program parent [#2833](https://github.com/Jinn-Network/mono/issues/2833) |
 | **Design authority** | The experiment design posted in [snap-research/locomo#23](https://github.com/snap-research/locomo/issues/23#issuecomment-5334425775) (2026-08-18), §2 (the six variables) and §8 (what the report may and may not say) |
 | **Depends on** | [judge-report implementation program](../plans/2026-08-18-judge-report-implementation-program.md) §4 (packets S1/S2), §8 (prohibitions), §9 (D3); [benchmark product](./2026-08-05-benchmark-product-design.md); [publication interoperability profile](./2026-08-13-benchmark-publication-interoperability-profile.md); [pluggable integrity providers](./2026-08-17-pluggable-integrity-providers-design.md) (the record/carriage/claim/check pattern this design follows) |
 | **Does not do** | Any judge-path delta. Instrument and model profiles, the evidence channel, parser identities, stratum vocabulary, ungradeable classes, and the screening-model admission branch are packet **P0**'s scope; P0's spec is the authority for every one of them (§12.1). This design cites those surfaces and never redefines them |
 | **Never run-blocking** | Per operator ruling D3 (2026-08-19): S1 designs now, S2 implements during report-writing week, and the confirmatory run never waits on either |
 | **v0.2 changes** | Independent review, verdict *with fixes*. The record design (§3–§5, §7, §8) is unchanged; every fix landed in the closure/bundle-binding analysis and the S2 map. New: §6.5.1 (claim-id collision), §6.5.2 (real refusal mechanisms), §6.5.3 (the five `isV4` sites), §7's G0/steps split, §10.5 (grep pass), §12.2 (anchoring non-goal), Q5/Q6, and T20–T25 |
+| **v0.3 changes** | G3 erratum. §13 flipped from open questions to operator rulings. Cross-references in §2.1, §4.3, §7, §10.3, §10.4, and §12.2 now point at those rulings. No record-schema change. The structural fix named by Q5 is [#2889](https://github.com/Jinn-Network/mono/issues/2889) (design, still open). |
 
 ## 0. Decision in plain language
 
@@ -121,8 +122,8 @@ on every record.
 | `judge-prompt` | The grading instructions |
 
 The set is closed. A seventh variable is a conformance failure, not a tolerated
-extra — see §13 Q1 for the one candidate under discussion and why it is not being
-added here.
+extra. §13 Q1 is ruled: keep six; the evidence condition is carried by the
+evidence-declaring instrument digest; no seventh axis and no public amendment.
 
 ### 2.2 The three statuses
 
@@ -282,7 +283,8 @@ Constraints:
   no single value. `disclosed-by-publisher` therefore means *fixed and stated for the
   items it covers*, and `statement` must name the mixture, including any subset with
   no answer model at all. v1 does not give heterogeneity a structural home; §13 Q6
-  asks whether it should.
+  is ruled: mixed-provenance structure is deferred to v2; v1 carries mixtures in
+  statement text with the status meaning fixed-and-stated for the items it covers.
 
 **Undisclosed.**
 
@@ -580,8 +582,10 @@ closure. The guards therefore split in two, and the split is load-bearing:
   authenticate what it names.
 
 `/2`, `/5`, and `/6` are all covered by G0: the extension is legal on `/7` and on no
-other format, evidence-native and anchored included. §13 Q5 asks whether a later
-allocation should combine anchoring with disclosure.
+other format, evidence-native and anchored included. §13 Q5 is ruled: the
+anchored-plus-disclosure exclusion is accepted; the flagship ships
+disclosure-bearing and unanchored; the structural fix is
+[#2889](https://github.com/Jinn-Network/mono/issues/2889).
 
 1. **Carrier binding.** Read the Report's `DISCLOSURE_SPECIFICATION_EXTENSION` value.
    Refuse if it is absent (its presence on non-`/7` formats is G0's job, not this
@@ -767,7 +771,7 @@ files, and §6.5.3 is the reason.
 | `src/disclosure/state.ts` *(new)* | Workspace-side declaration state: the six entries a sponsor composes before lock. Product state, not a sealed record |
 | `src/operations/disclosure-declare.ts` *(new)* | `disclosure declare` operation: validate the declaration, seal the record, write it to the sealed store, record its digest in run state. `author` is taken from the workspace's **report authority identity** at declare time, which is the same identity `report.author` resolves to, so §7 step 4 holds by construction. Idempotent before lock. After lock the declaration is frozen, with one exception: if the report authority key rotates between lock and report, an **author-only re-seal** is permitted and recorded, because otherwise a rotation would make §7 step 4 unsatisfiable and strand the run |
 | `src/bundle/manifest.ts` | **A second, independent copy of the bundle-format constants lives here** (`core/src/bundle/manifest.ts:25,46,75`), separate from `verify`'s. `BUNDLE_V7_FORMAT` must be added in both or the producer cannot emit what the verifier accepts |
-| `src/bundle/materialize.ts` — format selection | The producer's format ternary (`materialize.ts:879-883`) and its format type union (`:181-182`) currently resolve anchored → `/6`, binaryQualification → `/4`, else `/2`. A disclosure branch is added; §12's non-goal and §13 Q5 govern what happens when disclosure and anchoring are both present |
+| `src/bundle/materialize.ts` — format selection | The producer's format ternary (`materialize.ts:879-883`) and its format type union (`:181-182`) currently resolve anchored → `/6`, binaryQualification → `/4`, else `/2`. A disclosure branch is added; §12's non-goal and §13 Q5's ruling govern what happens when disclosure and anchoring are both present: the combination is refused, and composition is [#2889](https://github.com/Jinn-Network/mono/issues/2889), after this program |
 | `src/bundle/materialize.ts` — **`ROLE_ORDER.slice(0, 12)` must not change** | `materialize.ts:794` derives the v2 catalog from the first twelve roles. Appending leaves it correct; any other edit silently changes what every v2 bundle publishes (§6.2, §11 T20) |
 | `src/report/claim.ts` | `claimSchema` union (`claim.ts:158-161`) gains `/5`; the superRefine chain (`:226-249`) gains a `/5` branch; the `exactKeys` control shape (`:367`) gains `"disclosure"`. This is the producer-side twin of `verify/src/profile/claim.ts` and drifts silently if only one is edited |
 | `src/disclosure/carriage.ts` *(new)* | Mirrors `anchor/carriage.ts`: reads bytes from the sealed store via `getSealedBytes` (never from run state), projects the claim section via the shared `deriveDisclosureSpecification`, and reports whether this run publishes on the `/7` closure. A projection failure is a typed `record-integrity` product refusal |
@@ -780,7 +784,9 @@ files, and §6.5.3 is the reason.
   `packages/benchmark-product/web`. When R1 renders a `/7` bundle it renders the six
   statuses with `measured-here` and `disclosed-by-publisher` visually distinct and
   never merged into one list. Frontend rules apply: spec update in the same PR, no
-  helper-text cruft.
+  helper-text cruft. §13 Q4 is ruled: there is no prose stand-in for this experiment's
+  filled-in record on the site before S2; the standard documentation may be described
+  freely.
 - **Report prose.** The report's own disclosure section is written research-side and
   cites this record; it is not a repository artifact.
 - **External-publisher tooling** (a standalone emitter for publishers with no Jinn
@@ -899,9 +905,13 @@ published.** Two points of accuracy about that:
 
 This is stated as a non-goal rather than a limitation because resolving it means
 allocating a combined closure, which is a larger piece of work than S2 and is not on
-the critical path for the report. §13 Q5 puts the choice to the operator, because for
-a flagship publication the tradeoff — a third-party time proof against a machine-readable
-disclosure — is a product decision, not an engineering one.
+the critical path for the report. §13 Q5 is ruled: the exclusion is accepted; the
+flagship bundle ships disclosure-bearing and unanchored; its timing commitment is the
+freeze post, with an out-of-band OpenTimestamps stamp of the lock digest taken at
+freeze as insurance (recorded on the runbook issue). The structural fix is
+[#2889](https://github.com/Jinn-Network/mono/issues/2889) (compose bundle capabilities
+instead of enumerating closures), timed after this program and before a third
+experiment.
 
 ### 12.3 License law
 
@@ -918,9 +928,17 @@ if ready, or fast-follows within days with the thread post saying so. §6.5's op
 property is what makes that real: without a declaration, the flagship bundle is
 exactly the bundle it is today.
 
-## 13. Open questions
+## 13. Operator rulings
 
-Each needs an operator ruling before S2 begins. None blocks the confirmatory run.
+v0.2 left six questions open. They are **ruled**. Source: the operator comment on
+[#2839](https://github.com/Jinn-Network/mono/issues/2839#issuecomment-5358262402)
+(comment 5358262402), from the 2026-08-20 session, recorded here for the S2
+implementation. S2 proceeds from these rulings. None of the six remains a question,
+and none of them blocks the confirmatory run.
+
+Each block restates the v0.2 question so the mapping is unambiguous, then records the
+ruling. The ruling is the operator's meaning. The v0.2 recommendation is historical
+context only and is not restated as if it were still a pick.
 
 **Q1 — Does the judge's input shape become a seventh variable?**
 The design authority's §2 states six variables. Its §8 makes "the judge's input shape
@@ -928,56 +946,52 @@ is a first-class disclosure entry" a claimable outcome if the evidence-condition
 differs materially from its evidence-free twin. Expanding the vocabulary to seven is a
 change to the posted design and would require a dated public amendment in the thread
 before any outcome is observed (program §1 constraint 1).
-*Recommendation:* keep six. Express input shape inside the `judge-prompt` variable's
-`measured-here` evidence, where the evidence-declaring instrument is already a
-distinct sealed digest from its evidence-free twin. This is fully expressive and needs
-no amendment. Revisit as `specification/v2` after the report publishes, if the result
-warrants it.
+**Ruling:** keep six variables. The evidence condition is carried structurally by the
+evidence-declaring instrument's distinct digest. No seventh axis, and no public
+amendment.
 
 **Q2 — Closure version, or additive inside `/4`?**
 §6.5 recommends a `/7` bump plus claim `/5`. The cheaper alternative — allowing the
 new role additively inside `/4` — avoids one format constant but makes "what a `/4`
 bundle may contain" time-dependent, which the existing one-complete-profile rule
 exists to prevent.
-*Recommendation:* bump. The cost is a handful of constants; the property bought is
-that an older verifier refuses an unknown disclosure rather than ignoring it.
+**Ruling:** bump the closure versions rather than growing the current format
+additively. An older verifier refuses a disclosure-bearing bundle loudly instead of
+silently skipping the record while reporting valid. Fail-closed on unknown claims.
+The installed base is currently zero, so this is good practice rather than protection
+of existing users.
 
 **Q3 — Should `disclosed-by-publisher` carry a retrieval timestamp?**
 A `retrievedAt` on each source would make an assertion auditable against the source's
 own history. It is also itself an unanchored claim by the same author, so it adds a
 field the verifier cannot check.
-*Recommendation:* omit in v1. R5 says nothing derivable is stored; a self-asserted
-timestamp is worse than that — it is unverifiable *and* invites readers to treat it as
-evidence. If the report's reviewers ask for it, add it in `specification/v2` with the
-projection labeling it explicitly as an unanchored assertion.
+**Ruling:** assertions carry no retrieval timestamps. Unverifiable metadata dressing
+an assertion as evidence weakens the measured-versus-asserted line. Statement
+provenance belongs in report prose.
 
 **Q4 — Where does the verification result's `disclosure` block surface for humans?**
 §7 step 11 defines the machine surface. The bundle's own `index.html` and `README.md`
-are S2 (§10.2); the site's report template is R1 (§10.4). If the operator wants the
-six-variable table on the site before S2 lands, R1 needs a fallback that renders it
-from report prose, which would be a second source of truth for the same facts.
-*Recommendation:* do not build the fallback. Either the record ships and the table is
-rendered from it, or the table is prose in the report body and the site does not
-duplicate it.
+are S2 (§10.2); the site's report template is R1 (§10.4).
+**Ruling:** no prose stand-in for this experiment's own filled-in record on the site
+before S2 lands. The disclosure standard itself is public documentation and may be
+described freely at any time. What must not exist is a hand-typed lookalike of this
+experiment's specific record while the sealed instance does not yet exist.
 
 **Q5 — Does the flagship report want integrity anchors, disclosure, or a combined
 closure?** Per §12.2, an anchored qualification bundle is already impossible today and
-`/7` keeps it that way while adding disclosure to the unanchored branch. Three
-options: publish `/7` (disclosure, no anchor); publish `/4` and defer disclosure to a
-later artifact (no anchor either, since anchored + qualification is already refused);
-or allocate a combined closure, which is materially more work than S2 and would move
-the fast-follow date.
-*Recommendation:* publish `/7`. The report's contribution is the disclosure standard,
-and a third-party time proof does nothing for a claim whose whole content is
-"here is what we did and did not measure". But this is a product call about what the
-flagship should carry, so it is the operator's, not this design's.
+`/7` keeps it that way while adding disclosure to the unanchored branch.
+**Ruling:** the anchored-plus-disclosure exclusion is accepted as a recorded non-goal.
+The flagship bundle ships disclosure-bearing and unanchored. Its timing commitment is
+the freeze post, with an out-of-band OpenTimestamps stamp of the lock digest taken at
+freeze as insurance (recorded on the runbook issue). The structural fix is
+[#2889](https://github.com/Jinn-Network/mono/issues/2889) (design: compose bundle
+capabilities instead of enumerating closures), grouped with the anchored lock
+registry, timed after this program and before a third experiment.
 
 **Q6 — Should per-variable heterogeneity get a structural home in `specification/v2`?**
 §4.3 resolves v1 by having `statement` carry the mixture, and §9's `answer-model`
-shows it. The alternative is a per-variable breakdown with item counts, which would
-make heterogeneity machine-readable and countable.
-*Recommendation:* keep prose in v1 and revisit after the report. A structural
-breakdown needs an item-partition vocabulary that would have to agree with the item
-bank's own, and that coupling is exactly the kind of thing §6.4 defers until P0's
-record vocabulary is merged. If reviewers of the published record ask for it, that is
-strong evidence it belongs in v2.
+shows it.
+**Ruling:** mixed-provenance structure is deferred to v2 of the record. v1 carries
+mixtures in the statement text with the status meaning fixed-and-stated for the items
+it covers. Structural per-subset statuses are designed when a second real experiment
+shows what mixtures look like, alongside the composition refactor.
