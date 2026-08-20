@@ -34,7 +34,7 @@ jobs:
   architecture:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7
@@ -52,7 +52,7 @@ jobs:
   binding:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7
@@ -94,7 +94,7 @@ jobs:
     needs: [binding]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7
@@ -145,7 +145,7 @@ jobs:
     needs: [binding]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7
@@ -202,7 +202,7 @@ jobs:
     needs: [binding, projector]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7
@@ -257,7 +257,7 @@ jobs:
     needs: [binding, projector, venue-base]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7
@@ -333,7 +333,7 @@ jobs:
     env:
       JINN_MARKETPLACE_ANVIL_STATE_PATH: ${{ github.workspace }}/operator/test/_support/fixtures/anvil-base-v3-state/state.json
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7
@@ -430,7 +430,7 @@ jobs:
             "$ANVIL_FORK_RESULT"; do
             test "$result" = "success"
           done
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7

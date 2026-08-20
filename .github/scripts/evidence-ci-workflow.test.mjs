@@ -291,11 +291,11 @@ function setupNodeStepsInJob(jobBlock) {
 }
 
 function checkoutStepsInJob(jobBlock) {
-  return [...jobBlock.matchAll(/uses: actions\/checkout@v4/g)];
+  return [...jobBlock.matchAll(/uses: actions\/checkout@v7/g)];
 }
 
 function stepUsesCheckout(step) {
-  return step.lines.some((line) => line.includes("uses: actions/checkout@v4"));
+  return step.lines.some((line) => line.includes("uses: actions/checkout@v7"));
 }
 
 function stepUsesSetupNode(step) {
@@ -483,15 +483,15 @@ test('mutation: unnamed npm step before pack:smoke fails', () => {
 
 test('mutation: anonymous pack:smoke inserted before npm pin in trace job fails', () => {
   const mutant = workflow.replace(
-    '  trace:\n    name: Evidence Trace\n    needs: [foundation]\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4',
-    '  trace:\n    name: Evidence Trace\n    needs: [foundation]\n    runs-on: ubuntu-latest\n    steps:\n      - run: yarn pack:smoke\n      - uses: actions/checkout@v4',
+    '  trace:\n    name: Evidence Trace\n    needs: [foundation]\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v7',
+    '  trace:\n    name: Evidence Trace\n    needs: [foundation]\n    runs-on: ubuntu-latest\n    steps:\n      - run: yarn pack:smoke\n      - uses: actions/checkout@v7',
   );
   expectValidationFailure(mutant, /npm pin step must precede pack:smoke step at index 0/);
 });
 
 test('mutation: remove setup-node from trace job fails', () => {
   const mutant = workflow.replace(
-    /(  trace:[\s\S]*?      - uses: actions\/checkout@v4\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
+    /(  trace:[\s\S]*?      - uses: actions\/checkout@v7\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
     '$1',
   );
   expectValidationFailure(mutant, /trace must have exactly one setup-node step \(found 0\)/);
@@ -510,7 +510,7 @@ test('mutation: duplicate setup-node in architecture job fails', () => {
 
 test('mutation: setup-node before checkout in trace job fails', () => {
   const mutant = workflow.replace(
-    /(  trace:[\s\S]*?steps:\n)(      - uses: actions\/checkout@v4\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
+    /(  trace:[\s\S]*?steps:\n)(      - uses: actions\/checkout@v7\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
     '$1      - uses: actions/setup-node@v7\n        with:\n          node-version: 22.23.1\n$2',
   );
   expectValidationFailure(mutant, /trace checkout must precede setup-node/);
@@ -518,15 +518,15 @@ test('mutation: setup-node before checkout in trace job fails', () => {
 
 test('mutation: duplicate checkout in foundation job fails', () => {
   const mutant = workflow.replace(
-    /(  foundation:[\s\S]*?      - uses: actions\/checkout@v4\n)/,
-    '$1      - uses: actions/checkout@v4\n',
+    /(  foundation:[\s\S]*?      - uses: actions\/checkout@v7\n)/,
+    '$1      - uses: actions/checkout@v7\n',
   );
   expectValidationFailure(mutant, /foundation must have exactly one checkout step \(found 2\)/);
 });
 
 test('mutation: missing checkout in derivation job fails', () => {
   const mutant = workflow.replace(
-    /(  derivation:[\s\S]*?steps:\n)      - uses: actions\/checkout@v4\n/,
+    /(  derivation:[\s\S]*?steps:\n)      - uses: actions\/checkout@v7\n/,
     '$1',
   );
   expectValidationFailure(mutant, /derivation must have exactly one checkout step \(found 0\)/);
