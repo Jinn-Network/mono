@@ -875,7 +875,12 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     conflicted: { count: projection.conflicted.count, cellKeys: [...projection.conflicted.cellKeys] },
     assurance: {
       preset: input.assurance.preset,
-      resolved: { ...resolved },
+      resolved: {
+        independence: resolved.independence,
+        minVerdicts: resolved.minVerdicts,
+        distinctEvaluator: resolved.distinctEvaluator,
+        verdictRule: resolved.verdictRule,
+      },
       disclosure: ASSURANCE_DISCLOSURE,
     },
     disclosures: {
