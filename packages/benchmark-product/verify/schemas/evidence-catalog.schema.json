@@ -26,7 +26,10 @@
                 "solve-output",
                 "evaluation-task",
                 "evaluation-delivery",
-                "verdict"
+                "verdict",
+                "judge-instrument",
+                "analysis-context",
+                "label-resolution"
               ]
             },
             "minItems": 1

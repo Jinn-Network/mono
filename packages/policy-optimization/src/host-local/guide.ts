@@ -9,6 +9,7 @@ import {
   type SealedLiveCampaignInputs,
 } from "../live-campaign-inputs.js";
 import type { PolicyOptimizationObjectivePreset } from "../objective-presets.js";
+import { parseExactNextRunPolicySnapshot } from "../next-run-policy-snapshot.js";
 import {
   assertKnownFlags,
   many,
@@ -21,8 +22,15 @@ import {
 } from "../cli/args.js";
 import { failed, lines, ok, type CliResult } from "../cli/result.js";
 import { PolicyOptimizationError } from "../errors.js";
+import { isAdoptionComponentClass } from "../archive/adoption.js";
+import { prepareLocalCampaignAdoption } from "./live-adoption.js";
 import { sealLocalLoadoutDirectory } from "./loadout-archive.js";
-import { defaultHostStateRoot, ensurePrivateDirectory, secureAtomicWrite } from "./state.js";
+import {
+  defaultHostStateRoot,
+  ensurePrivateDirectory,
+  secureAtomicWrite,
+  withHostAdvisoryLock,
+} from "./state.js";
 import { prepareSweRebenchJourney } from "./swe-rebench-journey.js";
 import { runLiveSweRebenchCampaign } from "./live-swe-rebench-runner.js";
 
@@ -33,6 +41,7 @@ export const JINN_OPTIMIZE_USAGE = `jinn-optimize — local policy optimization 
                                         [--state-dir <dir>] --confirm
   jinn-optimize campaign prepare        --snapshot <next-run-snapshot.json>
                                         --split <split-manifest.json>
+                                        --affected-route <name> [--affected-route <name>…]
                                         --objective <more-tasks-succeed@1|same-success-lower-cost@1>
                                         --baseline-arm <id> --candidate-arm <id>
                                         [--replicates <n>] [--payload-risk <class>…]
@@ -40,10 +49,20 @@ export const JINN_OPTIMIZE_USAGE = `jinn-optimize — local policy optimization 
   jinn-optimize campaign run            --prepared <prepared-campaign-dir|campaign-inputs.json>
                                         [--state-dir <dir>] [--codex-auth <auth.json>]
                                         [--approve-executable-change] --confirm
+  jinn-optimize campaign adopt          --prepared <prepared-campaign-dir>
+                                        --current-loadout <declared-baseline-dir>
+                                        --approve-route <name> [--approve-route <name>…]
+                                        [--approve-payload-class <class>…]
+                                        [--approve-tuple <sha256:digest>]
+                                        [--override-inconclusive --acknowledge-inconclusive-warning
+                                         --reason <text>]
+                                        [--at <rfc3339>] [--state-dir <dir>] [--confirm]
 
-Headless use never starts the guide. Supply an explicit command. Preparation seals campaign
-inputs but does not mutate the daemon or apply a policy. Run dispatches the exact prepared cells,
+Headless use never starts the guide. Supply an explicit command. Preparation seals the explicitly
+declared baseline and campaign inputs but does not apply a policy. Run dispatches the exact prepared cells,
 grades them in pinned containers, and produces a local recommendation; it still never applies it.
+Adoption recomputes that recommendation and prepares exact change and rollback fragments. The
+destination must enforce the expected-current-tuple precondition when someone later applies them.
 The split manifest selects the balanced
 3/3/6 default, a custom explore/confirm allocation, or the test-this-change confirmation-only
 journey.
@@ -64,23 +83,31 @@ export function compilePrepareArguments(argv: readonly string[], cwd: string): {
   if (args.words.join(" ") !== "campaign prepare") throw new Error("not a live campaign prepare command");
   assertKnownFlags(args, [
     "document", "snapshot", "split", "objective", "baseline-arm", "candidate-arm",
-    "replicates", "payload-risk", "state-dir", "confirm",
+    "replicates", "payload-risk", "affected-route", "state-dir", "confirm",
   ]);
   const document = optional(args, "document");
-  const flagged = ["snapshot", "split", "objective", "baseline-arm", "candidate-arm"]
+  const flagged = ["snapshot", "split", "objective", "baseline-arm", "candidate-arm", "affected-route"]
     .some((name) => optional(args, name) !== undefined);
   if (document !== undefined && flagged) throw new Error("--document cannot be combined with flagged campaign inputs");
-  const sealed = document !== undefined
-    ? compileLiveCampaignAuthoringDocument(readBytes(pathFrom(cwd, document)))
-    : compileLiveCampaignInputs({
-      snapshotBytes: readBytes(pathFrom(cwd, required(args, "snapshot"))),
+  let sealed: SealedLiveCampaignInputs;
+  if (document !== undefined) {
+    sealed = compileLiveCampaignAuthoringDocument(readBytes(pathFrom(cwd, document)));
+  } else {
+    const snapshotBytes = readBytes(pathFrom(cwd, required(args, "snapshot")));
+    const snapshot = parseExactNextRunPolicySnapshot(snapshotBytes);
+    const routes = many(args, "affected-route");
+    if (routes.length === 0) throw new Error("at least one --affected-route declaration is required");
+    sealed = compileLiveCampaignInputs({
+      snapshotBytes,
       splitManifestBytes: readBytes(pathFrom(cwd, required(args, "split"))),
+      affectedRoutes: routes.map((route) => ({ taskProfile: snapshot.route.taskProfile, route })),
       objectivePreset: required(args, "objective") as PolicyOptimizationObjectivePreset,
       baselineArm: required(args, "baseline-arm"),
       candidateArm: required(args, "candidate-arm"),
       replicates: positiveInteger(optional(args, "replicates"), "--replicates"),
       candidatePayloadRisks: many(args, "payload-risk"),
     });
+  }
   return {
     sealed,
     stateRoot: defaultHostStateRoot({
@@ -102,6 +129,7 @@ export function liveCampaignConfirmationSummary(sealed: SealedLiveCampaignInputs
     : campaign.pool.exclusions.map((entry) => `  ${entry.id}: ${entry.reason}`);
   return lines(
     `route              ${route}`,
+    `affected routes    ${campaign.affectedRoutes.map((entry) => entry.route ?? entry.taskProfile).join(", ")}`,
     `config revision    ${campaign.configRevision}`,
     `captured seed      ${campaign.seed.digest}`,
     `journey            ${campaign.journey}`,
@@ -166,7 +194,7 @@ async function runPreparedCampaign(
     return failed(lines(
       `prepared campaign  ${paths.preparedRoot}`,
       "work              one solver call and one pinned container grade per prepared cell",
-      "effect            writes evidence and a recommendation; never changes the daemon",
+      "effect            writes evidence and a recommendation; never changes a deployment",
       "Explicit spend confirmation is required; repeat with --confirm.",
     ));
   }
@@ -188,7 +216,78 @@ async function runPreparedCampaign(
     `recommended tuple   ${result.recommendedTupleDigest}`,
     `reasons             ${result.reasonCodes.length === 0 ? "proof gates passed" : result.reasonCodes.join(", ")}`,
     `evidence            ${result.resultPath}`,
-    "No daemon configuration was changed. Adoption remains a separate operator decision.",
+    "No deployment configuration was changed. Adoption remains a separate operator decision.",
+    `Next: jinn-optimize campaign adopt --prepared ${paths.preparedRoot} --current-loadout <declared-baseline-dir> --approve-route <route>`,
+  ));
+}
+
+async function prepareCampaignAdoption(argv: readonly string[], cwd: string): Promise<CliResult> {
+  const args = parseArgs(argv);
+  assertKnownFlags(args, [
+    "prepared", "current-loadout", "approve-route", "approve-tuple", "approve-payload-class",
+    "override-inconclusive", "acknowledge-inconclusive-warning", "reason", "at", "state-dir", "confirm",
+  ]);
+  const paths = preparedRootAndState({
+    cwd,
+    prepared: required(args, "prepared"),
+    ...(optional(args, "state-dir") === undefined ? {} : { stateDir: optional(args, "state-dir") }),
+  });
+  const approvedPayloadClasses = many(args, "approve-payload-class").map((value) => {
+    if (!isAdoptionComponentClass(value)) throw new Error(`unknown adoption payload class ${value}`);
+    return value;
+  });
+  const override = present(args, "override-inconclusive");
+  const overrideReason = optional(args, "reason");
+  if (override && (
+    !present(args, "acknowledge-inconclusive-warning")
+    || overrideReason === undefined
+    || overrideReason.trim() === ""
+  )) {
+    throw new Error("--override-inconclusive requires --acknowledge-inconclusive-warning and a non-empty --reason");
+  }
+  if (!override && (present(args, "acknowledge-inconclusive-warning") || overrideReason !== undefined)) {
+    throw new Error("the inconclusive warning acknowledgement and reason require --override-inconclusive");
+  }
+  const resolved = await withHostAdvisoryLock(paths.stateRoot, async () => prepareLocalCampaignAdoption({
+    preparedRoot: paths.preparedRoot,
+    currentLoadoutPath: pathFrom(cwd, required(args, "current-loadout")),
+    approvedRoutes: many(args, "approve-route"),
+    ...(optional(args, "approve-tuple") === undefined
+      ? {}
+      : { approvedTupleDigest: optional(args, "approve-tuple") }),
+    approvedPayloadClasses,
+    confirmed: present(args, "confirm"),
+    ...(override ? { overrideInconclusive: { reason: overrideReason! } } : {}),
+    adoptedAt: optional(args, "at") ?? new Date().toISOString(),
+  }));
+  const summary = lines(
+    `recommendation      ${resolved.recommendation.status}`,
+    `reasons             ${resolved.recommendation.reasonCodes.length === 0 ? "proof gates passed" : resolved.recommendation.reasonCodes.join(", ")}`,
+    `declared baseline   ${resolved.configRevision}`,
+    `expected tuple      ${resolved.currentTupleDigest}`,
+    `challenger tuple    ${resolved.targetTupleDigest}`,
+    `affected routes     ${resolved.affectedScopes.map((scope) => scope.route).join(", ")}`,
+    `payload classes     ${resolved.payloadClasses.length === 0 ? "none" : resolved.payloadClasses.join(", ")}`,
+    "destination check  not performed; exact current tuple must be checked when applying",
+    "effect             prepared only; no deployment mutation",
+  );
+  if (!("planPath" in resolved)) {
+    return failed(`${summary}Review the exact tuple, routes, and payload classes, then repeat with --confirm.
+`);
+  }
+  return ok(lines(
+    summary.trimEnd(),
+    `shared decision     ${resolved.sharedDecisionId}`,
+    `adoption plan       ${resolved.planPath}`,
+    `local decision log  ${resolved.adoptionLogPath}`,
+    "",
+    "Prepared changes",
+    JSON.stringify(resolved.changes, null, 2),
+    "",
+    "Prepared rollbacks",
+    JSON.stringify(resolved.rollbacks, null, 2),
+    "",
+    "Nothing was applied. The destination must still match the plan's expected baseline.",
   ));
 }
 
@@ -204,6 +303,13 @@ export async function runLiveHostCommand(
       return failed(cause instanceof Error ? cause.message : String(cause));
     }
   }
+  if (argv[0] === "campaign" && argv[1] === "adopt") {
+    try { return await prepareCampaignAdoption(argv, cwd); }
+    catch (cause) {
+      if (cause instanceof PolicyOptimizationError) return failed(`${cause.category}: ${cause.message}`);
+      return failed(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
   if (argv[0] !== "campaign" || argv[1] !== "prepare") return undefined;
   try {
     const prepared = compilePrepareArguments(argv, cwd);
@@ -212,7 +318,7 @@ export async function runLiveHostCommand(
       return failed(`${summary}\nExplicit confirmation is required; repeat with --confirm.`);
     }
     const path = persistLiveCampaignInputs(prepared);
-    return ok(`${summary}prepared at        ${path}\nNo daemon configuration was changed.\n`);
+    return ok(`${summary}prepared at        ${path}\nNo deployment configuration was changed.\n`);
   } catch (cause) {
     if (cause instanceof PolicyOptimizationError) return failed(`${cause.category}: ${cause.message}`);
     return failed(cause instanceof Error ? cause.message : String(cause));
@@ -245,7 +351,7 @@ async function runAdvancedDocumentJourney(input: {
   const confirmation = (await input.io.question("Prepare these exact inputs? Type 'yes' to confirm: ")).trim();
   if (confirmation !== "yes") return failed("campaign preparation cancelled; nothing was written");
   const path = persistLiveCampaignInputs(prepared);
-  return ok(`prepared at        ${path}\nNo daemon configuration was changed.\n`);
+  return ok(`prepared at        ${path}\nNo deployment configuration was changed.\n`);
 }
 
 /**
@@ -263,7 +369,7 @@ export async function runGuidedJourney(input: {
       "Jinn Policy Optimization",
       "",
       "What do you want to do?",
-      "  1  Test a change against the policy you use now",
+      "  1  Test a change against an explicitly declared current policy",
       "  2  Explore possible improvements (guided proposer — not in this first live slice)",
       "  3  Prepare an authored campaign document (advanced)",
     ));
@@ -278,10 +384,15 @@ export async function runGuidedJourney(input: {
       "",
       "This first live journey compares two public learner loadouts on six fresh",
       "SWE-rebench task groups. It prepares exact inputs for review; it does not run",
-      "the solvers, spend money, or change your daemon.",
+      "the solvers, spend money, or change a deployment. The baseline comes from",
+      "the exact inputs you provide; it is not read from a running daemon.",
       "",
     ));
     const routeName = answerOrDefault(await input.io.question("Route name [swe-rebench-v2]: "), "swe-rebench-v2");
+    const sharedRoutes = (await input.io.question(
+      "Other routes using this loadout (comma-separated; blank for only this route): ",
+    )).split(",").map((value) => value.trim()).filter((value) => value !== "");
+    const affectedRoutes = [...new Set([routeName, ...sharedRoutes])];
     const currentPath = (await input.io.question("Current learner loadout directory: ")).trim();
     if (currentPath === "") return failed("the current learner loadout directory is required");
     const candidatePath = (await input.io.question("Changed learner loadout directory: ")).trim();
@@ -305,6 +416,7 @@ export async function runGuidedJourney(input: {
       currentLoadout,
       candidateLoadout,
       routeName,
+      affectedRoutes,
       harness,
       model,
       isolationPolicy,
@@ -318,20 +430,22 @@ export async function runGuidedJourney(input: {
       "Review before confirmation",
       liveCampaignConfirmationSummary(prepared.campaign),
       `task source         ${prepared.source.dataset} / ${prepared.source.split}`,
+      `declared baseline   ${prepared.snapshot.snapshot.seed.digest}`,
+      `affected routes     ${affectedRoutes.join(", ")} (operator-declared)`,
       `current loadout     ${currentLoadout.treeDigest}`,
       `changed loadout     ${candidateLoadout.treeDigest}`,
       `local run plan     ${prepared.runPlan.digest}`,
       `payload consent     ${executable}`,
-      "next action         prepare only; no solver dispatch and no daemon mutation",
+      "next action         prepare only; no solver dispatch and no deployment mutation",
     ));
     const confirmation = (await input.io.question("Prepare these exact inputs? Type 'yes' to confirm: ")).trim();
     if (confirmation !== "yes") return failed("campaign preparation cancelled; no campaign artifacts were written");
     const paths = prepared.persist();
     return ok(lines(
       `prepared at        ${paths.campaign}`,
-      "No solver was dispatched and no daemon configuration was changed.",
+      "No solver was dispatched and no deployment configuration was changed.",
       `Next: jinn-optimize campaign run --prepared ${paths.root} --confirm`,
-      "That next step performs real solver calls and container grades, but still does not change the daemon.",
+      "That next step performs real solver calls and container grades, but still does not change a deployment.",
     ));
   } catch (cause) {
     if (cause instanceof PolicyOptimizationError) return failed(`${cause.category}: ${cause.message}`);

@@ -81,6 +81,7 @@ jobs:
           (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
           (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
           (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
+          (cd packages/task-execution/oci-grader && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
           (cd packages/task-execution/testing && yarn install --immutable && yarn build)
       - name: Verify Policy Optimization
@@ -146,6 +147,7 @@ jobs:
           (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
           (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
           (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
+          (cd packages/task-execution/oci-grader && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)

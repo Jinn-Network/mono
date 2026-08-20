@@ -4,6 +4,7 @@ import { canonicalJsonBytes, type JsonValue } from "@jinn-network/policy-identit
 import { z } from "zod";
 import {
   LIVE_CAMPAIGN_INPUTS_FORMAT_TOKEN,
+  normalizeAffectedRoutes,
   type LiveCampaignInputs,
 } from "../live-campaign-inputs.js";
 import { SAME_OPERATOR_EVALUATION_LIMITATION } from "../recommendation.js";
@@ -19,6 +20,12 @@ const Method = z.strictObject({
 const CampaignSchema = z.strictObject({
   formatToken: z.literal(LIVE_CAMPAIGN_INPUTS_FORMAT_TOKEN),
   route: z.strictObject({ taskProfile: NonEmpty, route: NonEmpty.optional() }),
+  // Optional only for replay of already-prepared v1 artifacts. Every new compiler emits it.
+  affectedRoutes: z.array(z.strictObject({ taskProfile: NonEmpty, route: NonEmpty.optional() })).min(1).optional(),
+  affectedRouteDeclaration: z.strictObject({
+    source: z.literal("operator-declared"),
+    completeness: z.literal("not-independently-proven"),
+  }).optional(),
   configRevision: Digest,
   snapshotDigest: Digest,
   splitManifestDigest: Digest,
@@ -74,5 +81,15 @@ export function parseExactLiveCampaignInputs(bytes: Uint8Array): LiveCampaignInp
     !== parsed.data.executionCells.selection + parsed.data.executionCells.confirmation) {
     throw new HostStateError("state-io", "campaign input cell totals contradict their split");
   }
-  return parsed.data as LiveCampaignInputs;
+  return {
+    ...parsed.data,
+    affectedRoutes: normalizeAffectedRoutes(
+      parsed.data.route,
+      parsed.data.affectedRoutes ?? [parsed.data.route],
+    ),
+    affectedRouteDeclaration: parsed.data.affectedRouteDeclaration ?? {
+      source: "operator-declared",
+      completeness: "not-independently-proven",
+    },
+  } as LiveCampaignInputs;
 }

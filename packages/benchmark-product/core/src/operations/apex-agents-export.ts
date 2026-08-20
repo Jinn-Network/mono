@@ -126,7 +126,11 @@ export function executeExportApexAgentsInspection(
       mkdirSync(exportDir, { recursive: true });
       const output = join(reportRoot, "output");
       if (existsSync(output)) cpSync(output, join(exportDir, "output"), { recursive: true });
-      const certification = exportCompletenessCertification({ runSha256: runState.runSha256, completeness: matrix?.completeness });
+      const certification = exportCompletenessCertification({
+        runSha256: runState.runSha256,
+        completeness: matrix?.completeness,
+        frameworkSubmitReady: mode === "leaderboard-submit",
+      });
       const instructions = apexAgentsExportInstructions(certification, mode, exportDir);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, exportDir };

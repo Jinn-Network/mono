@@ -39,7 +39,7 @@ Reviewer parity (handbook rule 4): agent PRs go through the same review gate as 
 ### Canonical-doc changes (delete if not applicable)
 
 - [ ] Linked GitHub Discussion: `https://github.com/Jinn-Network/mono/discussions/<n>`
-- [ ] CODEOWNERS approval obtained
+- [ ] CODEOWNERS approval obtained (required only if this PR touches a human-surface path in `.github/CODEOWNERS`)
 - [ ] Ran `git grep -l "Canonical references.*<changed-file>"` and re-reviewed downstream docs
 - [ ] Updated downstream docs that needed it (or noted why none did)
 

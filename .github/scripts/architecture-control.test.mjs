@@ -10,6 +10,7 @@ import { loadPlatformCatalog } from './platform-catalog.mjs';
 const implementation = import('./architecture-control.mjs');
 const repoRoot = resolve(import.meta.dirname, '../..');
 const REQUIRED = ['@oaksprout', '@ritsukai'];
+const ARCHITECTURE_OWNERS = '.github/architecture-owners';
 
 function write(path, value = '') {
   mkdirSync(resolve(path, '..'), { recursive: true });
@@ -36,6 +37,7 @@ function completeFixture(catalog = fixtureCatalog()) {
     'packages/marketplace/testing/.keep',
     '.github/workflows/jinn-plugin-split.yml',
     '.github/CODEOWNERS',
+    ARCHITECTURE_OWNERS,
   ]) write(join(root, path));
   const rules = [
     '/architecture/',
@@ -46,10 +48,12 @@ function completeFixture(catalog = fixtureCatalog()) {
     '/packages/marketplace/binding/',
     '/packages/marketplace/testing/',
     '/.github/CODEOWNERS',
+    `/${ARCHITECTURE_OWNERS}`,
     ...catalog.packages.map((pkg) => `/${pkg.path}/`),
     '/docs/fixture-authority.md',
   ];
-  write(join(root, '.github/CODEOWNERS'), `${rules.map((rule) => `${rule} ${REQUIRED.join(' ')}`).join('\n')}\n`);
+  write(join(root, '.github/CODEOWNERS'), '/PRINCIPLES.md @oaksprout @ritsukai\n');
+  write(join(root, ARCHITECTURE_OWNERS), `${rules.map((rule) => `${rule} ${REQUIRED.join(' ')}`).join('\n')}\n`);
   return root;
 }
 
@@ -144,10 +148,10 @@ test('Git candidate inventory excludes ignored machine files and includes intend
     assert.ok(withUntracked.paths.some(({ path }) => (
       path === 'packages/fixture/protocol/schemas/untracked.schema.json'
     )));
-    const codeownersPath = join(root, '.github/CODEOWNERS');
+    const ownersPath = join(root, ARCHITECTURE_OWNERS);
     write(
-      codeownersPath,
-      `${readFileSync(codeownersPath, 'utf8')}/.github/scripts/review-fixture-tool.mjs @attacker\n`,
+      ownersPath,
+      `${readFileSync(ownersPath, 'utf8')}/.github/scripts/review-fixture-tool.mjs @attacker\n`,
     );
     assert.throws(
       () => validateArchitectureControl({ repoRoot: root }),
@@ -235,7 +239,7 @@ test('later CODEOWNERS override and missing required owner are rejected', async 
     await t.test(name, () => {
       const root = completeFixture();
       try {
-        const path = join(root, '.github/CODEOWNERS');
+        const path = join(root, ARCHITECTURE_OWNERS);
         write(path, mutate(readFileSync(path, 'utf8')));
         assert.throws(() => validateArchitectureControl({ repoRoot: root }), pattern);
       } finally {
@@ -249,7 +253,7 @@ test('effective ownership compares as a set and reports canonical owner order', 
   const { validateArchitectureControl } = await implementation;
   const root = completeFixture();
   try {
-    const path = join(root, '.github/CODEOWNERS');
+    const path = join(root, ARCHITECTURE_OWNERS);
     write(path, readFileSync(path, 'utf8').replaceAll('@oaksprout @ritsukai', '@ritsukai @oaksprout'));
     const report = validateArchitectureControl({ repoRoot: root });
     assert.deepEqual(report.requiredOwners, REQUIRED);
@@ -273,8 +277,8 @@ test('new scoped manifest and new public/testing surface cannot arrive uncovered
   await t.test('new public surface directory', () => {
     const root = completeFixture();
     try {
-      const codeownersPath = join(root, '.github/CODEOWNERS');
-      write(codeownersPath, readFileSync(codeownersPath, 'utf8').replace('/packages/fixture/protocol/', '/packages/fixture/protocol/package.json'));
+      const ownersPath = join(root, ARCHITECTURE_OWNERS);
+      write(ownersPath, readFileSync(ownersPath, 'utf8').replace('/packages/fixture/protocol/', '/packages/fixture/protocol/package.json'));
       write(join(root, 'packages/fixture/protocol/testing/new-case.json'), '{}\n');
       assert.throws(() => validateArchitectureControl({ repoRoot: root }), /packages\/fixture\/protocol\/testing/u);
     } finally {
@@ -295,7 +299,7 @@ test('catalog owner groups require exact local GitHub usernames and exact archit
       const root = fixtureRepo({ catalog });
       try {
         for (const path of ['contracts/.keep', 'docs/superpowers/specs/.keep', 'packages/marketplace/binding/.keep', 'packages/marketplace/testing/.keep']) write(join(root, path));
-        write(join(root, '.github/CODEOWNERS'), '/** @oaksprout @ritsukai\n');
+        write(join(root, ARCHITECTURE_OWNERS), '/** @oaksprout @ritsukai\n');
         assert.throws(() => validateArchitectureControl({ repoRoot: root }), pattern);
       } finally {
         rmSync(root, { recursive: true, force: true });
@@ -377,4 +381,29 @@ test('repository coverage enumerates every manifest and all control-path categor
       assert.ok(entries.get(path)?.has('generatorSources'), `repository generator ${path}`);
     }
   }
+});
+
+test('GitHub CODEOWNERS is the human-surface enqueue gate, not the architecture inventory', () => {
+  const github = readFileSync(join(repoRoot, '.github/CODEOWNERS'), 'utf8');
+  const inventory = readFileSync(join(repoRoot, ARCHITECTURE_OWNERS), 'utf8');
+  for (const pattern of [
+    /^\/PRINCIPLES\.md\s/mu,
+    /^\/docs\/press\//mu,
+    /^\/apps\/operator-console\/OPERATOR-APP-SPEC\.md\s/mu,
+    /^\/packages\/indexer\/explorer\/EXPLORER-APP-SPEC\.md\s/mu,
+    /^\/apps\/website\/WEBSITE-APP-SPEC\.md\s/mu,
+    /^\/DESIGN\.md\s/mu,
+    /^\/DESIGN\.json\s/mu,
+    /^\/docs\/engineering\/handbook\.md\s/mu,
+    /^\/log\/decisions\//mu,
+  ]) {
+    assert.match(github, pattern);
+  }
+  assert.doesNotMatch(github, /^\/operator\//mu);
+  assert.doesNotMatch(github, /^\/packages\/\s/mu);
+  assert.doesNotMatch(github, /^\/apps\/operator-console\/app\//mu);
+  assert.doesNotMatch(github, /^\/apps\/website\/app\//mu);
+  assert.match(inventory, /^\/operator\//mu);
+  assert.match(inventory, /^\/packages\//mu);
+  assert.match(inventory, /^\/\.github\/architecture-owners\s/mu);
 });

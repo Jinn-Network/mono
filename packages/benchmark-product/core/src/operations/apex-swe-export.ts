@@ -129,7 +129,12 @@ export function executeExportApexSwePackage(
       rmSync(exportDir, { recursive: true, force: true });
       mkdirSync(exportDir, { recursive: true });
       if (existsSync(reportRoot)) cpSync(reportRoot, join(exportDir, "harness"), { recursive: true });
-      const certification = exportCompletenessCertification({ runSha256: runState.runSha256, completeness: matrix?.completeness });
+      const certification = exportCompletenessCertification({
+        runSha256: runState.runSha256,
+        completeness: matrix?.completeness,
+        // `decideApexSweExportMode` refuses a submit-ready run, so every package here is inspection-only.
+        frameworkSubmitReady: false,
+      });
       const instructions = apexSweExportInstructions(certification, exportDir);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, exportDir };

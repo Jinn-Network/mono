@@ -44,6 +44,7 @@ const DRAFT_SPEC_FIELD_NAMES = new Set([
   "venue",
   "evaluationRuntime",
   "analysis",
+  "additionalAnalyses",
   "anchoring",
 ]);
 

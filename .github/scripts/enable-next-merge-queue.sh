@@ -206,6 +206,12 @@ MAIN_PAYLOAD="$(jq \
 # min_entries_to_merge_wait_minutes is inert at min_entries_to_merge=1 (the
 # queue never waits to accumulate a batch it already has); it is GitHub's
 # default, carried so the API receives a complete parameter set.
+#
+# required_approving_review_count is 0 (DR-2026-08-20): write users enqueue
+# with Merge when ready when required checks are green. CODEOWNER Approve
+# stays via require_code_owner_review on the human-surface set in
+# .github/CODEOWNERS. Re-running this script must not restore a generic
+# approval count of 1.
 NEXT_PAYLOAD="$(jq -n \
   --arg name "${NEXT_RULESET_NAME}" \
   --argjson checks "${CONTEXTS_JSON}" \
@@ -221,7 +227,7 @@ NEXT_PAYLOAD="$(jq -n \
       {
         type: "pull_request",
         parameters: {
-          required_approving_review_count: 1,
+          required_approving_review_count: 0,
           require_code_owner_review: true,
           dismiss_stale_reviews_on_push: true,
           require_last_push_approval: false,

@@ -57,6 +57,7 @@ export {
   defaultArchiveRoot,
   deriveArchive,
   readAdoptionLog,
+  parseAdoptionLog,
   readArchiveProjection,
   writeArchiveProjection,
   type ArchiveLayout,

@@ -613,6 +613,10 @@ describe("derived Inspect View export wiring for the judge lane (§8.2)", () => 
     expect(exported.error.detail).toMatch(/quote the draft first/u);
   });
 
+  // createSyntheticV4BundleFixture does real signing/sealing (~5.2s on a quiet runner,
+  // 2026-08-20 at next c49ed2cdd). Sibling tests in this file are sub-second, so Vitest's
+  // 5s default stays for them. Other fixture callers already set an explicit bound
+  // (v4-materialize 30s–120s, v6-materialize 300s, T1 cold-lifecycle 180s).
   test("a judge draft exports through exportDerivedBundle as shape inspect-view, mode inspection-upload, with the forked sentence and the scoreless-transcripts caveat", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "colophon-inspect-binary-judge-export-"));
     roots.push(workspaceDir);
@@ -661,5 +665,5 @@ describe("derived Inspect View export wiring for the judge lane (§8.2)", () => 
     const onDisk = readFileSync(join(exported.result.exportDir, "INSTRUCTIONS.txt"), "utf8");
     expect(onDisk).toBe(`${exported.result.instructions}\n`);
     expect(onDisk).not.toContain("This run matches Inspect eval execution settings");
-  });
+  }, 30_000);
 });

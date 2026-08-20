@@ -8,6 +8,12 @@ import { previewDisclosureSummaryLine } from "./preview-log.js";
 import { venueIsolationPostureForPolicy } from "./isolation.js";
 import { binaryInstrumentReportLimitations } from "./binary-qualification.js";
 
+/** Mirrors `benchmark-product/core/src/verification/claim-consistency.ts`'s own (unexported)
+ * copy of this exact string. Not imported from core: this package cannot take a package edge
+ * on core, and core already depends on this package. The two copies must stay byte-identical. */
+const PAIRED_ESTIMATE_LIMITATION =
+  "This method estimates an effect; it does not gate one — no verdict, threshold, or selection was registered.";
+
 export interface ClaimRecordIdentities { readonly benchmarkSha256: string; readonly runSha256: string; readonly matrixSha256: string; readonly reportSha256: string | undefined; readonly reportEnvelopeSha256: string; }
 const equal = (left: Uint8Array, right: Uint8Array) => left.length === right.length && left.every((byte, index) => byte === right[index]);
 /** The path of the first field that actually differs, or `undefined` when the two values are
@@ -52,8 +58,30 @@ export function assertClaimConsistency(input: { readonly claim: ClaimPackage; re
   const binaryLimitations = reportRecord.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument
     ? binaryInstrumentReportLimitations((plan?.parameters ?? {}) as Readonly<Record<string, unknown>>)
     : [];
-  const expectedLimitations = [...localVenueLimitsForRun(runRecord), ...(input.additionalLimitations ?? []), ...binaryLimitations, ...(rehearsalLine === undefined ? [] : [rehearsalLine])];
+  // paired-majority-delta@1 carries the same PAIRED_ESTIMATE_LIMITATION as paired-delta@1
+  // (coordinator ruling, packet #2837) -- mirrors core's `verification/claim-consistency.ts`
+  // method-conditional exactly, so the portable rebuild agrees with what `report` sealed.
+  // Computed from `reportRecord.method.id` directly (like this file's own `binaryLimitations`)
+  // rather than threaded through `input.additionalLimitations`.
+  const pairedEstimateLimitation =
+    reportRecord.method.id === BENCHMARKING_METHOD_IDS.pairedDelta
+    || reportRecord.method.id === BENCHMARKING_METHOD_IDS.pairedMajorityDelta
+      ? [PAIRED_ESTIMATE_LIMITATION]
+      : [];
+  const expectedLimitations = [
+    ...localVenueLimitsForRun(runRecord),
+    ...(input.additionalLimitations ?? []),
+    ...binaryLimitations,
+    ...pairedEstimateLimitation,
+    ...(rehearsalLine === undefined ? [] : [rehearsalLine]),
+  ];
   const posture = venueIsolationPostureForPolicy(runRecord.policy.submissionBaseline?.isolationPolicy);
+  // The gate itself is UNCHANGED by the paired-estimate addition (still isolation posture,
+  // caller-supplied additionalLimitations, or the existing binary-instrument arm). Deliberately
+  // not widened to `|| pairedEstimateLimitation.length > 0` -- core left that gate unchanged so
+  // this addition is not responsible for surfacing an unrelated pre-existing gap. For flagship
+  // oci-container runs, `posture.inventory.length > 1` already activates the gate; folding the
+  // line into `expectedLimitations` is what makes expected match the sealed Report.
   if ((posture.inventory.length > 1 || (input.additionalLimitations?.length ?? 0) > 0 || binaryLimitations.length > 0) && !equal(canonicalJsonBytes(reportRecord.limitations ?? []), canonicalJsonBytes(expectedLimitations))) refuse("record-integrity", "claim-consistency", "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history");
   if (rehearsalLine === undefined ? (reportRecord.limitations ?? []).some((line) => line.includes("disposable preview rehearsal(s)")) : !(reportRecord.limitations ?? []).includes(rehearsalLine)) refuse("record-integrity", "claim-consistency", "claim rehearsal and verified Report disclosure disagree");
 }
