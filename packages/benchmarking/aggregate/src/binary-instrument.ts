@@ -251,6 +251,11 @@ export function reduceBinaryInstrumentReplicates(
     fail("invalid-k", `k must be an odd positive safe integer; got ${String(input.k)}`);
   }
   if (input.matrix.cells.length === 0) fail("invalid-subject", "Matrix must contain at least one cell");
+  // Deliberately non-empty + grammar-conforming only, not sorted-and-unique: `input.strata` is
+  // the already-sealed `parameters.strata` (spec §3.1 rule 3), and `validateBinaryInstrumentParameters`
+  // (binary-instrument-method.ts) is the one enforcement point for sorted-and-unique on that value
+  // per spec §0.5. Re-checking it here would be a second enforcement point for a property the
+  // sealed input already carries.
   if (
     !Array.isArray(input.strata)
     || input.strata.length === 0

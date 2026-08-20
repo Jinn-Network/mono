@@ -192,4 +192,65 @@ describe("validateBinaryInstrumentQualificationProjection — declared stratum v
       ]),
     });
   });
+
+  // This validator's `contextIssues` membership check is the only place that refuses an
+  // out-of-vocabulary `context.stratum` on the evidence-native carrier: `benchmarking/evidence`
+  // builds its BinaryInstrumentReduction directly and calls `projectBinaryInstrumentQualification`
+  // without going through `reduceBinaryInstrumentReplicates`, so `requireContext` never runs for
+  // it. "core" is grammar-conforming and was a member of the pre-P4 hardcoded pair, so it stands
+  // in for exactly the drift this packet closes: a legacy-looking value that a literal `core`/
+  // `stress` comparison would silently accept even though it is outside this qualification's
+  // sealed four-category `configuration.strata`.
+  function wireItemContext(stratum: string) {
+    return {
+      analysisContextSha256: `sha256:${"1".repeat(64)}`,
+      truthLabel: "CORRECT" as const,
+      candidateClass: "factuality",
+      stratum,
+      labelResolutionSha256: `sha256:${"2".repeat(64)}`,
+    };
+  }
+
+  test("refuses an itemDecisions[].context.stratum outside the sealed vocabulary", () => {
+    const qualification = structuredClone(fourStratumQualification()) as any;
+    qualification.itemDecisions = [{
+      taskDigest: "a".repeat(64),
+      armId: "arm-a",
+      instrumentSha256: `sha256:${"1".repeat(64)}`,
+      context: wireItemContext("core"),
+      cellKeys: [`${"a".repeat(64)}/arm-a/1`],
+      accepted: 1,
+      rejected: 0,
+      decision: "ACCEPT",
+      unstable: false,
+    }];
+    expect(validateBinaryInstrumentQualificationProjection(qualification)).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        "qualification.itemDecisions.0.context.stratum is invalid",
+      ]),
+    });
+  });
+
+  test("refuses an excluded.items[].context.stratum outside the sealed vocabulary", () => {
+    const qualification = structuredClone(fourStratumQualification()) as any;
+    const cellKey = `${"b".repeat(64)}/arm-a/1`;
+    qualification.excluded = {
+      count: 1,
+      items: [{
+        taskDigest: "b".repeat(64),
+        armId: "arm-a",
+        instrumentSha256: `sha256:${"1".repeat(64)}`,
+        context: wireItemContext("core"),
+        cellKeys: [cellKey],
+        reasons: [{ reason: "missing-evaluation", cellKeys: [cellKey] }],
+      }],
+    };
+    expect(validateBinaryInstrumentQualificationProjection(qualification)).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        "qualification.excluded.items.0.context.stratum is invalid",
+      ]),
+    });
+  });
 });
