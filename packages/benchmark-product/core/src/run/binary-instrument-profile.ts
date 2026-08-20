@@ -33,10 +33,12 @@ import {
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
   BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE,
   BinaryJudgmentPayloadSchema,
+  JUDGE_MODEL_PROFILES,
   parseBinaryJudgmentInstrument,
   parseEvaluationSpec,
   sealBinaryJudgmentInstrument,
   sealEvaluationSpec,
+  type AcceptedJudgeModelId,
 } from "@jinn-network/task-execution-profiles";
 import {
   TASK_EXECUTION_PROTOCOL_URI,
@@ -320,10 +322,7 @@ function deriveAdmissionProfile(input: {
 function validateRuntimeAndArms(input: {
   readonly workspaceDir: string;
   readonly spec: DraftSpec;
-}): void {
-  if (input.spec.arms.length !== 4) {
-    refuse("validation", "spec.arms", "binary-instrument@1 requires exactly four instrument arms");
-  }
+}): { readonly judgeModel: AcceptedJudgeModelId } {
   const runtime = input.spec.evaluationRuntime;
   if (
     runtime?.adapterId !== INSPECT_BINARY_JUDGE_ADAPTER_ID
@@ -343,15 +342,32 @@ function validateRuntimeAndArms(input: {
     refuse("conflict", "spec.evaluationRuntime.selectionManifestSha256", "binary judge selection drifted from the frozen v1 runtime contract");
   }
   const selection = parsed.data;
+
+  // The sealed selection manifest's own schema already supplies the floor of two and the sorted,
+  // unique, distinct-instrument constraints (spec §1.6 rule 1), so the Run's arm count is checked
+  // against the selection's own arm count rather than against a literal.
+  if (input.spec.arms.length !== selection.arms.length) {
+    refuse("validation", "spec.arms", "binary-instrument@1 requires one Run arm per sealed judge selection arm");
+  }
+
   const sortedArmIds = selection.arms.map((arm) => arm.armId).sort(compareCodeUnitStrings);
   const firstGeneration = selection.arms[0]!.generation;
+  const firstModel = selection.arms[0]!.model;
   if (
-    new Set(sortedArmIds).size !== 4
+    new Set(sortedArmIds).size !== selection.arms.length
     || selection.arms.some((arm, index) => arm.armId !== sortedArmIds[index])
     || selection.arms.some((arm) => !sameJson(arm.generation, firstGeneration))
-    || new Set(selection.arms.map((arm) => arm.instrumentSha256)).size !== 4
+    || new Set(selection.arms.map((arm) => arm.instrumentSha256)).size !== selection.arms.length
   ) {
     refuse("conflict", "spec.evaluationRuntime.selectionManifestSha256", "binary judge selection arms must be sorted, distinct, and share one generation block");
+  }
+  // §1.4's profile derivation is a total function of one shared model.requested. The manifest's
+  // own cross-arm rule already pins one shared generation block, which pins one shared profile,
+  // but not literally one shared model id (a profile could in principle admit more than one
+  // accepted model). Enforced here, and nowhere else (§0.5): this is the first point where the
+  // selection is sealed and in scope.
+  if (selection.arms.some((arm) => arm.model !== firstModel)) {
+    refuse("conflict", "spec.evaluationRuntime.selectionManifestSha256", "binary judge selection arms must share one model");
   }
 
   for (const [index, arm] of input.spec.arms.entries()) {
@@ -363,7 +379,7 @@ function validateRuntimeAndArms(input: {
         id: INSPECT_BINARY_JUDGE_LAUNCHER_ID,
         version: INSPECT_BINARY_JUDGE_LAUNCHER_VERSION,
       })
-      || !sameJson(arm.pinning["model"], { id: "gpt-5.6-luna" })
+      || !sameJson(arm.pinning["model"], { id: selected.model })
       || arm.pinning[BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY] !== selected.instrumentSha256
     ) {
       refuse("conflict", `spec.arms.${index}`, "Run arm does not exactly match the sealed Inspect binary-judge selection");
@@ -379,12 +395,14 @@ function validateRuntimeAndArms(input: {
     if (
       instrument.instrumentId !== arm.armId
       || instrument.model.adapter !== "jinn-openai"
-      || instrument.model.requested !== "gpt-5.6-luna"
+      || instrument.model.requested !== selected.model
       || !sameJson(instrument.model.generation, selected.generation)
     ) {
-      refuse("conflict", `spec.arms.${index}.instrument`, "instrument identity, jinn-openai Luna model, or generation settings drifted from the runtime selection");
+      refuse("conflict", `spec.arms.${index}.instrument`, "instrument identity, jinn-openai model, or generation settings drifted from the runtime selection");
     }
   }
+
+  return { judgeModel: firstModel };
 }
 
 export function isBinaryInstrumentSpec(spec: DraftSpec): boolean {
@@ -422,7 +440,7 @@ export function compileBinaryInstrumentProfile(input: {
   if (effectiveVerdictRule !== "sole") {
     refuse("validation", "spec.assurance", "binary-instrument@1 requires resolved verdictRule=sole");
   }
-  validateRuntimeAndArms({ workspaceDir: input.workspaceDir, spec });
+  const { judgeModel } = validateRuntimeAndArms({ workspaceDir: input.workspaceDir, spec });
   const admission = deriveAdmissionProfile(input);
   const parameters: BinaryInstrumentParameters = {
     verdictRule: "sole",
@@ -434,6 +452,12 @@ export function compileBinaryInstrumentProfile(input: {
     parserInvalidPolicy: "reject",
     truthAdmission: admission.truthAdmission,
     intervalAlpha: "0.05",
+    // DERIVED from the arms' shared model.requested (validateRuntimeAndArms), never declared as
+    // an instrument field: declaring it would add a required key to
+    // BinaryJudgmentInstrumentSchema and move every existing instrument's bytes and therefore its
+    // digest (spec §1.2). Optional on the parameter schema, so its presence here is a compatible
+    // widening (§0.4/§10 row 11).
+    judgeModelProfile: JUDGE_MODEL_PROFILES[judgeModel],
   };
   const validation = validateBinaryInstrumentParameters(
     parameters as unknown as Readonly<Record<string, unknown>>,

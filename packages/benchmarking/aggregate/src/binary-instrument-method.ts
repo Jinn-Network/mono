@@ -43,7 +43,23 @@ const INSPECT_LOG_MEDIA_TYPE = "application/vnd.inspect-ai.eval-log+json";
 const ANALYSIS_CONTEXT_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.analysis-context.v1+json";
 const LABEL_RESOLUTION_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.label-resolution.v1+json";
 const LABEL_RESOLUTION_NAME = "label-resolution.json";
-const MODEL_ID = "gpt-5.6-luna";
+
+// Mirrored from packages/task-execution/profiles/src/binary-judgment/contracts.ts, which is the
+// source of truth. `packages/benchmarking/aggregate` deliberately does not depend on
+// `@jinn-network/task-execution-profiles` (see its package.json), so this is a second copy of the
+// closed judge-model profile vocabulary (spec §1.1). Both copies widen in the same PR; a partial
+// widening is how a downstream site refuses what an upstream site accepted.
+const JUDGE_MODEL_PROFILE_IDS = ["dated-snapshot-sampling", "reasoning-2026-08"] as const;
+type JudgeModelProfileId = (typeof JUDGE_MODEL_PROFILE_IDS)[number];
+const JUDGE_MODEL_PROFILES: Readonly<Record<string, JudgeModelProfileId>> = {
+  "gpt-4o-mini-2024-07-18": "dated-snapshot-sampling",
+  "gpt-5.6-luna": "reasoning-2026-08",
+};
+const JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS: Readonly<Record<JudgeModelProfileId, readonly string[]>> = {
+  "dated-snapshot-sampling": [],
+  "reasoning-2026-08": ["mutable-model-alias"],
+};
+
 const EVALUATION_PARSER_ID = "network.jinn.parser.binary-judgment-evaluation";
 const EVALUATION_PARSER_VERSION = "1.0.0";
 const EVALUATION_PARSER_SHA256 = "41b36eaffbac8c78133afd2075ec32fd73ed324395fe281dee525db17653937f";
@@ -108,9 +124,18 @@ export const BINARY_INSTRUMENT_PARAMETER_SCHEMA: Method["parameterSchema"] = {
     parserInvalidPolicy: { enum: ["reject"] },
     truthAdmission: { enum: ["two-human-unanimous", "operator-only"] },
     intervalAlpha: { enum: ["0.05"] },
+    // Optional, spec §1.4. Under the compatible-widening rule (§0.4), adding an OPTIONAL property
+    // to a closed object still validates every parameter set valid today, seals identical bytes
+    // for them, and computes identically. The optionality is the whole design: making this
+    // required, or changing what the absent case means downstream, would move the two frozen
+    // 144-cell golden fixtures' bytes and destroy the compatibility proof this program depends on.
+    // Absent means "emit the alias limitation", which is today's behavior byte for byte.
+    judgeModelProfile: { enum: [...JUDGE_MODEL_PROFILE_IDS] },
   },
   additionalProperties: false,
 };
+
+const OPTIONAL_BINARY_INSTRUMENT_PARAMETERS = new Set(["judgeModelProfile"]);
 
 export interface BinaryInstrumentParameters {
   readonly verdictRule: "sole";
@@ -122,6 +147,9 @@ export interface BinaryInstrumentParameters {
   readonly parserInvalidPolicy: "reject";
   readonly truthAdmission: "two-human-unanimous" | "operator-only";
   readonly intervalAlpha: "0.05";
+  /** Optional (spec §1.4): derived at lock from the arms' shared model.requested. Absent means
+   * "emit the alias limitation", which is today's behavior byte for byte. */
+  readonly judgeModelProfile?: JudgeModelProfileId;
 }
 
 export function validateBinaryInstrumentParameters(
@@ -133,7 +161,7 @@ export function validateBinaryInstrumentParameters(
     if (!Object.hasOwn(parameters, key)) issues.push(`missing required parameter "${key}"`);
   }
   for (const key of Object.keys(parameters)) {
-    if (!required.has(key)) issues.push(`unknown parameter "${key}"`);
+    if (!required.has(key) && !OPTIONAL_BINARY_INSTRUMENT_PARAMETERS.has(key)) issues.push(`unknown parameter "${key}"`);
   }
   if (parameters["verdictRule"] !== "sole") issues.push('parameter "verdictRule" must be "sole"');
   const k = parameters["k"];
@@ -177,6 +205,12 @@ export function validateBinaryInstrumentParameters(
   }
   if (parameters["intervalAlpha"] !== "0.05") {
     issues.push('parameter "intervalAlpha" must be "0.05"');
+  }
+  if (
+    Object.hasOwn(parameters, "judgeModelProfile")
+    && !(JUDGE_MODEL_PROFILE_IDS as readonly string[]).includes(parameters["judgeModelProfile"] as string)
+  ) {
+    issues.push('parameter "judgeModelProfile" must be a declared judge-model profile id');
   }
   return issues.length === 0 ? { ok: true } : { ok: false, issues };
 }
@@ -808,22 +842,25 @@ interface ResolvedArmInstrument {
   readonly document: Readonly<Record<string, unknown>>;
 }
 
-function exactGeneration(value: unknown, digest: string): void {
+// Common to both generation-block variants (spec §1.3).
+const GENERATION_COMMON_KEYS = [
+  "maxOutputTokens", "store", "background", "stream", "serviceTier",
+  "tools", "fallbackModels", "retries", "persistedConversation", "metadata", "promptCacheIdentifier",
+] as const;
+const REASONING_GENERATION_KEYS = [...GENERATION_COMMON_KEYS, "reasoningEffort"] as const;
+const SAMPLING_GENERATION_KEYS = [...GENERATION_COMMON_KEYS, "temperature"] as const;
+
+function exactGeneration(value: unknown, digest: string, profile: JudgeModelProfileId): void {
   if (!isObject(value)) {
     throw new MethodInputError("binary-record-malformed", digest, "instrument generation must be an object");
   }
   requireExactKeys(
     value,
-    [
-      "reasoningEffort", "maxOutputTokens", "store", "background", "stream", "serviceTier",
-      "tools", "fallbackModels", "retries", "persistedConversation", "metadata", "promptCacheIdentifier",
-    ],
+    profile === "reasoning-2026-08" ? REASONING_GENERATION_KEYS : SAMPLING_GENERATION_KEYS,
     digest,
     "instrument.model.generation",
   );
-  if (
-    (value["reasoningEffort"] !== "none" && value["reasoningEffort"] !== "low")
-    || value["maxOutputTokens"] !== 128
+  const commonInvalid = value["maxOutputTokens"] !== (profile === "reasoning-2026-08" ? 128 : 512)
     || value["store"] !== false
     || value["background"] !== false
     || value["stream"] !== false
@@ -835,9 +872,12 @@ function exactGeneration(value: unknown, digest: string): void {
     || value["retries"] !== 0
     || value["persistedConversation"] !== false
     || value["metadata"] !== null
-    || value["promptCacheIdentifier"] !== null
-  ) {
-    throw new MethodInputError("binary-binding-mismatch", digest, "instrument generation drifts from the frozen Luna call policy");
+    || value["promptCacheIdentifier"] !== null;
+  const variantInvalid = profile === "reasoning-2026-08"
+    ? (value["reasoningEffort"] !== "none" && value["reasoningEffort"] !== "low")
+    : value["temperature"] !== 0;
+  if (commonInvalid || variantInvalid) {
+    throw new MethodInputError("binary-binding-mismatch", digest, `instrument generation drifts from the frozen ${profile} call policy`);
   }
 }
 
@@ -910,10 +950,15 @@ function validateInstrument(
     throw new MethodInputError("binary-record-malformed", digest, "instrument.model must be an object");
   }
   requireExactKeys(model, ["adapter", "requested", "generation"], digest, "instrument.model");
-  if (model["adapter"] !== "jinn-openai" || model["requested"] !== MODEL_ID) {
-    throw new MethodInputError("binary-binding-mismatch", digest, "instrument must use the frozen Luna adapter/model");
+  const requestedModel = model["requested"];
+  if (
+    model["adapter"] !== "jinn-openai"
+    || typeof requestedModel !== "string"
+    || !Object.hasOwn(JUDGE_MODEL_PROFILES, requestedModel)
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "instrument must use the jinn-openai adapter and a declared judge model");
   }
-  exactGeneration(model["generation"], digest);
+  exactGeneration(model["generation"], digest, JUDGE_MODEL_PROFILES[requestedModel]!);
   const response = instrument["response"];
   if (!isObject(response)) {
     throw new MethodInputError("binary-record-malformed", digest, "instrument.response must be an object");
@@ -949,15 +994,16 @@ function resolveArmInstruments(
       `binary-instrument@1 parameter k=${k} does not match Run.replicates=${run.replicates}`,
     );
   }
+  // §1.6 rule 2: the Run and Matrix arm sets must be equal, sorted, unique, of distinct
+  // instruments, and of size two or more. Never a literal count.
   const matrixArms = [...new Set(matrix.cells.map((cell) => cell.armId))].sort(compareCodeUnitStrings);
   const runArms = run.arms.map((arm) => arm.armId).sort(compareCodeUnitStrings);
   if (
-    runArms.length !== 4
-    || matrixArms.length !== 4
-    || runArms.length !== matrixArms.length
+    runArms.length < 2
+    || matrixArms.length !== runArms.length
     || runArms.some((armId, index) => armId !== matrixArms[index])
   ) {
-    throw new MethodInputError("binary-binding-mismatch", matrixRunDigest(matrix), "binary-instrument@1 requires exactly four matching Run and Matrix arms");
+    throw new MethodInputError("binary-binding-mismatch", matrixRunDigest(matrix), "binary-instrument@1 requires two or more matching, distinct Run and Matrix arms");
   }
   const instruments = new Map<string, ResolvedArmInstrument>();
   for (const arm of run.arms) {
@@ -978,6 +1024,10 @@ function resolveArmInstruments(
     || matrixArms.some((armId) => !instruments.has(armId))
   ) {
     throw new MethodInputError("binary-binding-mismatch", matrixRunDigest(matrix), "Run arms do not exactly cover Matrix arms");
+  }
+  const instrumentDigests = new Set([...instruments.values()].map((instrument) => instrument.digest));
+  if (instrumentDigests.size !== instruments.size) {
+    throw new MethodInputError("binary-binding-mismatch", matrixRunDigest(matrix), "binary-instrument@1 requires distinct instruments across arms");
   }
   return instruments;
 }
@@ -1041,8 +1091,12 @@ function renderSemanticRequest(
   if (!isObject(model)) {
     throw new MethodInputError("binary-record-malformed", digest, "instrument.model is unavailable for request replay");
   }
+  const requestedModel = model["requested"];
+  if (typeof requestedModel !== "string" || !Object.hasOwn(JUDGE_MODEL_PROFILES, requestedModel)) {
+    throw new MethodInputError("binary-record-malformed", digest, "instrument.model.requested must be a declared judge model for request replay");
+  }
   return {
-    model: MODEL_ID,
+    model: requestedModel,
     messages: rendered,
     generation: model["generation"],
   };
@@ -1098,14 +1152,22 @@ function validateObservation(
   if (response["digest"] !== `sha256:${expected.responseSha256}` || response["mediaType"] !== RESPONSE_MEDIA_TYPE) {
     throw new MethodInputError("binary-binding-mismatch", digest, "judge observation response binding is inconsistent");
   }
+  // The enclosing instrument's own declared model (spec §1.4's snapshot-identity check reads it,
+  // not a global literal): resolveArmInstruments already ran validateInstrument on this document,
+  // so its model.requested is guaranteed to be a declared judge model.
+  const instrumentModelField = expected.instrument.document["model"];
+  const instrumentModel = isObject(instrumentModelField) ? instrumentModelField["requested"] : undefined;
+  if (typeof instrumentModel !== "string" || !Object.hasOwn(JUDGE_MODEL_PROFILES, instrumentModel)) {
+    throw new MethodInputError("binary-record-malformed", digest, "judge observation cannot resolve its instrument's declared model");
+  }
   const provider = observation["provider"];
   if (!isObject(provider)) {
     throw new MethodInputError("binary-record-malformed", digest, "judge observation provider must be an object");
   }
   requireExactKeys(provider, ["requestedModel", "resolvedModel", "responseId", "eventSha256", "usage"], digest, "judge observation provider");
   if (
-    provider["requestedModel"] !== MODEL_ID
-    || provider["resolvedModel"] !== MODEL_ID
+    provider["requestedModel"] !== instrumentModel
+    || provider["resolvedModel"] !== instrumentModel
     || typeof provider["responseId"] !== "string"
     || provider["responseId"].length === 0
   ) {
@@ -1136,12 +1198,14 @@ function validateObservation(
   if (call["count"] !== 1 || call["retries"] !== 0 || call["fallbacks"] !== 0) {
     throw new MethodInputError("binary-binding-mismatch", digest, "judge observation does not describe one frozen call");
   }
+  const expectedLimitations = JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS[JUDGE_MODEL_PROFILES[instrumentModel]!];
+  const limitations = observation["limitations"];
   if (
-    !Array.isArray(observation["limitations"])
-    || observation["limitations"].length !== 1
-    || observation["limitations"][0] !== "mutable-model-alias"
+    !Array.isArray(limitations)
+    || limitations.length !== expectedLimitations.length
+    || limitations.some((value, index) => value !== expectedLimitations[index])
   ) {
-    throw new MethodInputError("binary-binding-mismatch", digest, "judge observation limitations are not the frozen disclosure");
+    throw new MethodInputError("binary-binding-mismatch", digest, "judge observation limitations are not the frozen per-profile disclosure");
   }
 }
 
@@ -1472,6 +1536,8 @@ export function validateBinaryInstrumentQualificationProjection(value: unknown):
   const expectedRoot = ["configuration", "arms", "itemDecisions", "excluded", "conflicted"].sort(compareCodeUnitStrings);
   if (rootKeys.length !== expectedRoot.length || rootKeys.some((key, index) => key !== expectedRoot[index])) issues.push("qualification has an unsupported field set");
   const configuration = value["configuration"];
+  // judgeModelProfile is an optional analysis-plan parameter (spec §1.4) and is never projected
+  // into the published configuration block; it stays a compute-time input only.
   const configurationKeys = ["verdictRule", "k", "reduction", "measurementProfile", "candidateClasses", "strata", "parserInvalidPolicy", "truthAdmission", "intervalAlpha"];
   if (!isObject(configuration) || Object.keys(configuration).sort(compareCodeUnitStrings).join("\0") !== configurationKeys.sort(compareCodeUnitStrings).join("\0")) {
     issues.push("qualification.configuration has an unsupported field set");
@@ -1485,7 +1551,7 @@ export function validateBinaryInstrumentQualificationProjection(value: unknown):
     ? configuration["k"] as number
     : 0;
   const arms = value["arms"];
-  if (!isObject(arms) || Object.keys(arms).length !== 4) issues.push("qualification.arms must contain exactly four arms");
+  if (!isObject(arms) || Object.keys(arms).length < 2) issues.push("qualification.arms must contain two or more arms");
   else for (const [armId, raw] of Object.entries(arms)) {
     if (!CANDIDATE_CLASS.test(armId) || !isObject(raw)) { issues.push(`qualification.arms.${armId} is invalid`); continue; }
     const expected = ["instrumentSha256", "item", "call", "confusion", "agreement", "falseAccept", "falseReject", "instability", "parserInvalid", "byCandidateClass", "byStratum"].sort(compareCodeUnitStrings);
@@ -1507,7 +1573,7 @@ export function validateBinaryInstrumentQualificationProjection(value: unknown):
   const instrumentByArm = new Map(armEntries.flatMap(([armId, arm]) =>
     isObject(arm) && typeof arm["instrumentSha256"] === "string" ? [[armId, arm["instrumentSha256"]] as const] : []));
   if (armIds.some((armId, index) => index > 0 && compareCodeUnitStrings(armIds[index - 1]!, armId) >= 0)) issues.push("qualification.arms must be code-unit sorted and unique");
-  if (new Set(instrumentByArm.values()).size !== 4) issues.push("qualification.arms must bind four distinct instruments");
+  if (new Set(instrumentByArm.values()).size !== armIds.length) issues.push("qualification.arms must bind distinct instruments per arm");
   const decisions = value["itemDecisions"];
   if (!Array.isArray(decisions)) issues.push("qualification.itemDecisions must be an array");
   else for (const [index, raw] of decisions.entries()) {

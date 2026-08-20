@@ -11,7 +11,9 @@ import {
   BINARY_JUDGMENT_OBSERVATION_FORMAT_URI,
   BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+  BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
 } from "../identifiers.js";
+import { compareCodeUnitStrings } from "../order.js";
 import { assertValidDocument, parseJsonDocument } from "../zod-parse.js";
 
 const Sha256DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
@@ -123,7 +125,46 @@ export const BinaryJudgmentMessageSchema = z.strictObject({
 });
 export type BinaryJudgmentMessage = z.infer<typeof BinaryJudgmentMessageSchema>;
 
-export const BinaryJudgmentGenerationSchema = z.strictObject({
+// The closed set of judge-model profiles (spec §1.1). A judge-model profile is a named triple
+// of (accepted model.requested literal set, generation block shape, observation limitations).
+export const JUDGE_MODEL_PROFILE_IDS = ["dated-snapshot-sampling", "reasoning-2026-08"] as const;
+export type JudgeModelProfileId = (typeof JUDGE_MODEL_PROFILE_IDS)[number];
+
+/** Closed literal set. Adding a member is a code change with a test, never configuration. */
+export const DATED_SNAPSHOT_MODELS = ["gpt-4o-mini-2024-07-18"] as const;
+export type DatedSnapshotJudgeModelId = (typeof DATED_SNAPSHOT_MODELS)[number];
+
+/** The profile is a TOTAL FUNCTION of model.requested. The instrument gains no new field. */
+export const JUDGE_MODEL_PROFILES = {
+  "gpt-4o-mini-2024-07-18": "dated-snapshot-sampling",
+  "gpt-5.6-luna": "reasoning-2026-08",
+} as const satisfies Readonly<Record<string, JudgeModelProfileId>>;
+
+export type AcceptedJudgeModelId = keyof typeof JUDGE_MODEL_PROFILES;
+/** Code-unit sorted. */
+export const ACCEPTED_JUDGE_MODEL_IDS = ["gpt-4o-mini-2024-07-18", "gpt-5.6-luna"] as const;
+
+export function judgeModelProfileFor(model: string): JudgeModelProfileId | undefined {
+  return Object.hasOwn(JUDGE_MODEL_PROFILES, model)
+    ? JUDGE_MODEL_PROFILES[model as AcceptedJudgeModelId]
+    : undefined;
+}
+
+export function isDatedSnapshotJudgeModel(model: string): model is DatedSnapshotJudgeModelId {
+  return (DATED_SNAPSHOT_MODELS as readonly string[]).includes(model);
+}
+
+/**
+ * Per-profile observation limitations. A mutable alias is a real limitation of an undated model
+ * id and a false claim about a dated snapshot.
+ */
+export const BINARY_JUDGMENT_OBSERVATION_LIMITATIONS = ["mutable-model-alias"] as const;
+export const JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS = {
+  "dated-snapshot-sampling": [],
+  "reasoning-2026-08": ["mutable-model-alias"],
+} as const satisfies Readonly<Record<JudgeModelProfileId, readonly string[]>>;
+
+export const BinaryJudgmentReasoningGenerationSchema = z.strictObject({
   reasoningEffort: z.enum(["none", "low"]),
   maxOutputTokens: z.literal(128),
   store: z.literal(false),
@@ -137,7 +178,46 @@ export const BinaryJudgmentGenerationSchema = z.strictObject({
   metadata: z.null(),
   promptCacheIdentifier: z.null(),
 });
+export type BinaryJudgmentReasoningGeneration = z.infer<
+  typeof BinaryJudgmentReasoningGenerationSchema
+>;
+
+export const BinaryJudgmentSamplingGenerationSchema = z.strictObject({
+  temperature: z.literal(0),
+  maxOutputTokens: z.literal(512),
+  store: z.literal(false),
+  background: z.literal(false),
+  stream: z.literal(false),
+  serviceTier: z.literal("default"),
+  tools: z.tuple([]),
+  fallbackModels: z.tuple([]),
+  retries: z.literal(0),
+  persistedConversation: z.literal(false),
+  metadata: z.null(),
+  promptCacheIdentifier: z.null(),
+});
+export type BinaryJudgmentSamplingGeneration = z.infer<
+  typeof BinaryJudgmentSamplingGenerationSchema
+>;
+
+// The union cannot carry its own discriminator. The sibling key that decides which variant
+// applies always lives in the parent object (`model.requested` on the instrument, `model` on
+// the semantic request, `model` on the verify package's arm schema), never inside the
+// generation block itself. Profile agreement is therefore enforced by three parent-level
+// `superRefine` checks, one per consumer, and not by this schema.
+export const BinaryJudgmentGenerationSchema = z.union([
+  BinaryJudgmentReasoningGenerationSchema,
+  BinaryJudgmentSamplingGenerationSchema,
+]);
 export type BinaryJudgmentGeneration = z.infer<typeof BinaryJudgmentGenerationSchema>;
+
+/** The profile a generation block's own shape declares; `undefined` when it declares neither. */
+export function judgeGenerationProfile(generation: unknown): JudgeModelProfileId | undefined {
+  if (typeof generation !== "object" || generation === null) return undefined;
+  if (Object.hasOwn(generation, "reasoningEffort")) return "reasoning-2026-08";
+  if (Object.hasOwn(generation, "temperature")) return "dated-snapshot-sampling";
+  return undefined;
+}
 
 export const BINARY_ACCEPT_REJECT_PARSER_ID =
   "network.jinn.parser.binary-accept-reject" as const;
@@ -226,7 +306,7 @@ export const BinaryJudgmentInstrumentSchema = z
     attribution: BinaryJudgmentSourceDescriptorSchema,
     model: z.strictObject({
       adapter: z.literal("jinn-openai"),
-      requested: z.literal("gpt-5.6-luna"),
+      requested: z.enum(ACCEPTED_JUDGE_MODEL_IDS),
       generation: BinaryJudgmentGenerationSchema,
     }),
     response: z.strictObject({
@@ -259,13 +339,34 @@ export const BinaryJudgmentInstrumentSchema = z
         message: `promptTemplateSha256 does not match canonical messages (${expected})`,
       });
     }
+    const modelProfile = JUDGE_MODEL_PROFILES[instrument.model.requested];
+    const generationProfile = judgeGenerationProfile(instrument.model.generation);
+    if (generationProfile !== modelProfile) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["model", "generation"],
+        message:
+          `model.generation must match the ${modelProfile} profile for model.requested `
+          + instrument.model.requested,
+      });
+    }
   });
 export type BinaryJudgmentInstrument = z.infer<typeof BinaryJudgmentInstrumentSchema>;
 
 export const BinaryJudgmentSemanticRequestSchema = z.strictObject({
-  model: z.literal("gpt-5.6-luna"),
+  model: z.enum(ACCEPTED_JUDGE_MODEL_IDS),
   messages: z.array(BinaryJudgmentMessageSchema).min(1),
   generation: BinaryJudgmentGenerationSchema,
+}).superRefine((request, ctx) => {
+  const modelProfile = JUDGE_MODEL_PROFILES[request.model];
+  const generationProfile = judgeGenerationProfile(request.generation);
+  if (generationProfile !== modelProfile) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["generation"],
+      message: `generation must match the ${modelProfile} profile for model ${request.model}`,
+    });
+  }
 });
 export type BinaryJudgmentSemanticRequest = z.infer<typeof BinaryJudgmentSemanticRequestSchema>;
 
@@ -313,6 +414,13 @@ export function binaryJudgmentSemanticRequestDigest(
   return recordDigest(canonicalJsonBytes(buildBinaryJudgmentSemanticRequest(payload, instrument)));
 }
 
+function isSortedUniqueArray(values: readonly string[]): boolean {
+  for (let index = 1; index < values.length; index += 1) {
+    if (compareCodeUnitStrings(values[index - 1]!, values[index]!) >= 0) return false;
+  }
+  return true;
+}
+
 export const BinaryJudgmentObservationSchema = z.strictObject({
   protocol: z.literal(BINARY_JUDGMENT_OBSERVATION_FORMAT_URI),
   taskDigest: Sha256DigestSchema,
@@ -325,8 +433,8 @@ export const BinaryJudgmentObservationSchema = z.strictObject({
     mediaType: z.literal(BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE),
   }),
   provider: z.strictObject({
-    requestedModel: z.literal("gpt-5.6-luna"),
-    resolvedModel: z.literal("gpt-5.6-luna"),
+    requestedModel: z.enum(ACCEPTED_JUDGE_MODEL_IDS),
+    resolvedModel: z.enum(ACCEPTED_JUDGE_MODEL_IDS),
     responseId: NonEmptyStringSchema,
     eventSha256: Sha256DigestSchema,
     usage: z.strictObject({
@@ -340,7 +448,7 @@ export const BinaryJudgmentObservationSchema = z.strictObject({
     retries: z.literal(0),
     fallbacks: z.literal(0),
   }),
-  limitations: z.tuple([z.literal("mutable-model-alias")]),
+  limitations: z.array(z.enum(BINARY_JUDGMENT_OBSERVATION_LIMITATIONS)),
 }).superRefine((observation, ctx) => {
   if (
     observation.provider.usage.totalTokens
@@ -352,8 +460,63 @@ export const BinaryJudgmentObservationSchema = z.strictObject({
       message: "totalTokens must equal inputTokens + outputTokens",
     });
   }
+  if (!isSortedUniqueArray(observation.limitations)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["limitations"],
+      message: "limitations must be code-unit sorted and unique",
+    });
+  }
+  const profile = JUDGE_MODEL_PROFILES[observation.provider.requestedModel];
+  const expectedLimitations = JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS[profile];
+  const matchesProfile = observation.limitations.length === expectedLimitations.length
+    && observation.limitations.every((value, index) => value === expectedLimitations[index]);
+  if (!matchesProfile) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["limitations"],
+      message:
+        `limitations must be exactly ${JSON.stringify(expectedLimitations)} for the ${profile} profile`,
+    });
+  }
+  // Both fields are pinned to a single literal today. Widening them to a closed set without
+  // this check would start accepting a mismatched (requestedModel, resolvedModel) pair that
+  // refuses today, for both profiles alike. This is the evidence that stands in for the
+  // mutable-alias limitation on a dated snapshot: the recorded resolvedModel proves the
+  // provider actually served the requested id.
+  if (observation.provider.resolvedModel !== observation.provider.requestedModel) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["provider", "resolvedModel"],
+      message: "provider.resolvedModel must equal provider.requestedModel",
+    });
+  }
 });
 export type BinaryJudgmentObservation = z.infer<typeof BinaryJudgmentObservationSchema>;
+
+/** Freshness bound for a snapshot-serving probe (spec §1.5 rule 3): frozen at 24 hours. */
+export const SNAPSHOT_PROBE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** A pre-run check confirming a dated snapshot is actually served, sealed as a lock input. */
+export const BinaryJudgmentSnapshotProbeSchema = z.strictObject({
+  protocol: z.literal(BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI),
+  requestedModel: z.enum(DATED_SNAPSHOT_MODELS),
+  resolvedModel: NonEmptyStringSchema,
+  responseId: NonEmptyStringSchema,
+  eventSha256: Sha256DigestSchema,
+  probedAt: z.string().datetime({ offset: true }),
+  outcome: z.enum(["serving", "not-serving"]),
+}).superRefine((probe, ctx) => {
+  const expectedOutcome = probe.resolvedModel === probe.requestedModel ? "serving" : "not-serving";
+  if (probe.outcome !== expectedOutcome) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["outcome"],
+      message: `outcome must be "${expectedOutcome}" given the recorded requestedModel/resolvedModel pair`,
+    });
+  }
+});
+export type BinaryJudgmentSnapshotProbe = z.infer<typeof BinaryJudgmentSnapshotProbeSchema>;
 
 export const BinaryJudgmentTruthLabelSchema = z.enum(["CORRECT", "WRONG"]);
 export type BinaryJudgmentTruthLabel = z.infer<typeof BinaryJudgmentTruthLabelSchema>;
@@ -422,6 +585,24 @@ export function sealBinaryJudgmentObservation(
     BinaryJudgmentObservationSchema,
     value,
     "BinaryJudgmentObservation",
+  ));
+}
+
+export function parseBinaryJudgmentSnapshotProbe(bytes: Uint8Array): BinaryJudgmentSnapshotProbe {
+  return parseJsonDocument(
+    BinaryJudgmentSnapshotProbeSchema,
+    bytes,
+    "BinaryJudgmentSnapshotProbe",
+  );
+}
+
+export function sealBinaryJudgmentSnapshotProbe(
+  value: BinaryJudgmentSnapshotProbe,
+): { bytes: Uint8Array; digest: `sha256:${string}` } {
+  return sealDocument(assertValidDocument(
+    BinaryJudgmentSnapshotProbeSchema,
+    value,
+    "BinaryJudgmentSnapshotProbe",
   ));
 }
 

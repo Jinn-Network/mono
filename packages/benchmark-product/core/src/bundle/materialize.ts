@@ -85,6 +85,7 @@ import { INSPECT_ADAPTER_ID, InspectSelectionManifestSchema } from "../runtime/i
 import {
   INSPECT_BINARY_JUDGE_ADAPTER_ID,
   InspectBinaryJudgeSelectionManifestSchema,
+  type InspectBinaryJudgeSelectionManifest,
 } from "../runtime/inspect/binary-judge-manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
@@ -210,6 +211,9 @@ function recordClosure(input: MaterializeBundleInput): {
   const inspectSelectionSha256 = inspectRuntime
     ? draft.spec.evaluationRuntime?.selectionManifestSha256
     : undefined;
+  // Captured when this run is the binary-judge runtime, so the probe's digest (if any) is
+  // available where roles are assembled below without re-parsing the selection bytes.
+  let binaryInspectSelection: InspectBinaryJudgeSelectionManifest | undefined;
   if (inspectRuntime) {
     if (inspectSelectionSha256 === undefined) {
       refuse("record-integrity", "evidence-closure", "Inspect draft has no sealed runtime selection identity");
@@ -225,7 +229,11 @@ function recordClosure(input: MaterializeBundleInput): {
     }
     const selectionBytes = getSealedBytes(workspaceDir, inspectSelectionSha256);
     if (binaryInspectRuntime) {
-      exactJson(selectionBytes, InspectBinaryJudgeSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
+      binaryInspectSelection = exactJson(
+        selectionBytes,
+        InspectBinaryJudgeSelectionManifestSchema,
+        `records/${inspectSelectionSha256}.bin`,
+      );
     } else {
       exactJson(selectionBytes, InspectSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
     }
@@ -465,7 +473,19 @@ function recordClosure(input: MaterializeBundleInput): {
     const receipt = receipts.get(taskSha256);
     if (receipt !== undefined) addRole(evidenceRecords, receipt.sha256, "admission-receipt");
   }
-  if (binaryInspectRuntime) addRole(evidenceRecords, inspectSelectionSha256!, "runtime-selection");
+  if (binaryInspectRuntime) {
+    addRole(evidenceRecords, inspectSelectionSha256!, "runtime-selection");
+    // §1.5 rule 5: publish the pre-run snapshot-serving probe as a bundle asset alongside the
+    // selection manifest, so a cold verifier reads the same bytes. Present exactly when the
+    // sealed selection manifest carries `snapshotProbeSha256`.
+    if (binaryInspectSelection?.snapshotProbeSha256 !== undefined) {
+      addRole(
+        evidenceRecords,
+        binaryInspectSelection.snapshotProbeSha256.slice("sha256:".length),
+        "snapshot-probe",
+      );
+    }
+  }
 
   const journal = readRunJournalEntries(workspaceDir, draftId);
   const graph: BundleAssemblyHeader["graph"] = {

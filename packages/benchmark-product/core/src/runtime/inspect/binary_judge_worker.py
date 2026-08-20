@@ -15,17 +15,39 @@ from urllib.parse import unquote, urlparse
 
 
 PROTOCOL = "https://spec.jinn.network/binary-judgment/judge-observation/v1"
-MODEL = "gpt-5.6-luna"
+# Mirrors JUDGE_MODEL_PROFILES from
+# packages/task-execution/profiles/src/binary-judgment/contracts.ts (spec §1.1/§1.2). Both copies
+# widen in the same PR.
+JUDGE_MODEL_PROFILES = {
+    "gpt-5.6-luna": "reasoning-2026-08",
+    "gpt-4o-mini-2024-07-18": "dated-snapshot-sampling",
+}
+ACCEPTED_MODELS = frozenset(JUDGE_MODEL_PROFILES)
+MAX_OUTPUT_TOKENS_BY_PROFILE = {
+    "reasoning-2026-08": 128,
+    "dated-snapshot-sampling": 512,
+}
+JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS = {
+    "reasoning-2026-08": ["mutable-model-alias"],
+    "dated-snapshot-sampling": [],
+}
 RESPONSE_MEDIA_TYPE = "text/plain; charset=utf-8"
 SUPPORTED = {
     "inspect-ai": "0.3.255",
     "inspect-evals": "0.16.0",
     "openai": "2.53.0",
 }
-GENERATION_KEYS = {
-    "reasoningEffort", "maxOutputTokens", "store", "background", "stream",
-    "serviceTier", "tools", "fallbackModels", "retries", "persistedConversation",
-    "metadata", "promptCacheIdentifier",
+GENERATION_KEYS_BY_PROFILE = {
+    "reasoning-2026-08": {
+        "reasoningEffort", "maxOutputTokens", "store", "background", "stream",
+        "serviceTier", "tools", "fallbackModels", "retries", "persistedConversation",
+        "metadata", "promptCacheIdentifier",
+    },
+    "dated-snapshot-sampling": {
+        "temperature", "maxOutputTokens", "store", "background", "stream",
+        "serviceTier", "tools", "fallbackModels", "retries", "persistedConversation",
+        "metadata", "promptCacheIdentifier",
+    },
 }
 
 
@@ -67,8 +89,11 @@ def require_runtime(manifest: dict[str, Any]) -> None:
 def validate_semantic_request(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != {"model", "messages", "generation"}:
         raise ValueError("semantic request fields drifted")
-    if value["model"] != MODEL:
+    model = value["model"]
+    if model not in ACCEPTED_MODELS:
         raise ValueError("semantic request model drifted")
+    profile = JUDGE_MODEL_PROFILES[model]
+    max_output_tokens = MAX_OUTPUT_TOKENS_BY_PROFILE[profile]
     messages = value["messages"]
     if not isinstance(messages, list) or not messages:
         raise ValueError("semantic request messages are empty")
@@ -81,10 +106,10 @@ def validate_semantic_request(value: Any) -> dict[str, Any]:
         ):
             raise ValueError("semantic request message drifted")
     generation = value["generation"]
-    if not isinstance(generation, dict) or set(generation) != GENERATION_KEYS:
+    if not isinstance(generation, dict) or set(generation) != GENERATION_KEYS_BY_PROFILE[profile]:
         raise ValueError("semantic request generation fields drifted")
     expected = {
-        "maxOutputTokens": 128,
+        "maxOutputTokens": max_output_tokens,
         "store": False,
         "background": False,
         "stream": False,
@@ -96,8 +121,15 @@ def validate_semantic_request(value: Any) -> dict[str, Any]:
         "metadata": None,
         "promptCacheIdentifier": None,
     }
-    if generation.get("reasoningEffort") not in {"none", "low"}:
-        raise ValueError("semantic request reasoning effort drifted")
+    if profile == "reasoning-2026-08":
+        if generation.get("reasoningEffort") not in {"none", "low"}:
+            raise ValueError("semantic request reasoning effort drifted")
+    else:
+        # isinstance(True, int) is True in Python, so a stray bool masquerading as the literal
+        # temperature 0 must be rejected by type, not just by value.
+        temperature = generation.get("temperature")
+        if type(temperature) is not int or temperature != 0:
+            raise ValueError("semantic request temperature drifted")
     if any(generation.get(key) != expected_value for key, expected_value in expected.items()):
         raise ValueError("semantic request generation policy drifted")
     return value
@@ -125,9 +157,10 @@ def normalized_usage(value: Any) -> dict[str, int]:
 def build_observation(config: dict[str, Any], response: bytes, record: dict[str, Any]) -> dict[str, Any]:
     response_id = record.get("responseId")
     event_digest = record.get("eventDigest")
+    model = record.get("resolvedModel")
     if (
         record.get("status") != "completed"
-        or record.get("resolvedModel") != MODEL
+        or model not in ACCEPTED_MODELS
         or not isinstance(response_id, str)
         or not response_id
         or not isinstance(event_digest, str)
@@ -147,14 +180,14 @@ def build_observation(config: dict[str, Any], response: bytes, record: dict[str,
             "mediaType": RESPONSE_MEDIA_TYPE,
         },
         "provider": {
-            "requestedModel": MODEL,
-            "resolvedModel": MODEL,
+            "requestedModel": model,
+            "resolvedModel": model,
             "responseId": response_id,
             "eventSha256": f"sha256:{event_digest}",
             "usage": normalized_usage(record.get("usage")),
         },
         "call": {"count": 1, "retries": 0, "fallbacks": 0},
-        "limitations": ["mutable-model-alias"],
+        "limitations": JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS[JUDGE_MODEL_PROFILES[model]],
     }
 
 
@@ -163,11 +196,13 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
     request = validate_semantic_request(config["semanticRequest"])
     if config["requestSha256"] != f"sha256:{sha256_bytes(canonical_bytes(request))}":
         raise ValueError("semantic request digest drifted")
+    model = request["model"]
+    profile = JUDGE_MODEL_PROFILES[model]
     arm = config["arm"]
     if (
         arm["armId"] != config["armId"]
         or arm["instrumentSha256"] != config["instrumentSha256"]
-        or arm["model"] != MODEL
+        or arm["model"] != model
         or arm["generation"] != request["generation"]
     ):
         raise ValueError("arm, instrument, model, or generation binding drifted")
@@ -196,9 +231,14 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
         scorer=None,
         name="jinn_binary_judgment",
     )
+    generation_kwargs: dict[str, Any] = (
+        {"reasoning_effort": request["generation"]["reasoningEffort"]}
+        if profile == "reasoning-2026-08"
+        else {"temperature": 0}
+    )
     logs = inspect_eval(
         task,
-        model="jinn-openai/gpt-5.6-luna",
+        model=f"jinn-openai/{model}",
         epochs=1,
         max_tasks=1,
         max_samples=1,
@@ -217,10 +257,10 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
             "jinn.instrument_sha256": config["instrumentSha256"],
             "jinn.semantic_request_sha256": config["requestSha256"],
         },
-        reasoning_effort=request["generation"]["reasoningEffort"],
-        max_tokens=128,
+        max_tokens=request["generation"]["maxOutputTokens"],
         max_retries=0,
         timeout=120,
+        **generation_kwargs,
     )
     if len(logs) != 1:
         raise ValueError("Inspect binary judge returned more than one log")
