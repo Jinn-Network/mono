@@ -3,6 +3,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { generateKeyPairSync, sign as edSign } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   parseBinaryJudgmentAnalysisContext,
@@ -48,7 +49,7 @@ import {
   loadOrCreateEvaluatorSigningKeys,
   sealVerdictStatement,
 } from "../venue/signing.js";
-import { loadOrCreateReportSigningKey, verifyReportEnvelopeSignatures } from "../report/signing.js";
+import { didKeyFromEd25519PublicKey, loadOrCreateReportSigningKey, verifyReportEnvelopeSignatures } from "../report/signing.js";
 import { createDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import {
@@ -746,6 +747,108 @@ describe("binary human truth admission", () => {
     if (result.ok) expect(result.result.resolutions.map((entry) => entry.itemSha256)).toEqual([reserve.packets.itemSha256]);
   });
 
+  // Item 3 (§6.10 byte-compatibility, the ledger byte-identity proof the coordinator specifically
+  // asked for): S1 widened `HumanReviewReplacementLedgerEntrySchema`'s four per-item two-human
+  // digest fields (reviewVerdictSha256s, visibilityReceiptSha256s, reviewerRosterSha256,
+  // revealReceiptSha256) from unconditionally required to present-iff-a-two-human-reason. That is
+  // a compatible widening under §0.4 only if a REAL two-human ledger entry still carries all four
+  // fields, byte for byte, exactly as it did before the schema could express their absence. This
+  // test proves the field SET on a real two-human entry is unchanged (all four present) and, by
+  // contrast, that a real screened entry (built via `admitHumanTruth`, not hand-constructed) never
+  // carries any of the four -- the two ends of the same present-iff rule, both driven by the real
+  // production operation.
+  it("byte-identity: a two-human ledger entry still carries all four review digests; a screened one carries none", async () => {
+    const context = setup();
+    const disputed = await reviewedItem(context, 0, ["CORRECT", "WRONG"]);
+    const reserve = await reviewedItem(context, 1, ["WRONG", "WRONG"]);
+    const twoHumanResult = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "two-human-unanimous",
+      candidates: [
+        publicationCandidate(disputed, 0, 1),
+        publicationCandidate(reserve, 1, 2, { replacesItemSha256: disputed.packets.itemSha256 }),
+      ],
+    });
+    if (!twoHumanResult.ok) throw new Error(twoHumanResult.error.detail);
+    const twoHumanLedger = HumanReviewReplacementLedgerSchema.parse(JSON.parse(new TextDecoder().decode(
+      getSealedBytes(context.workspaceDir, twoHumanResult.result.replacementLedgerSha256.slice("sha256:".length)),
+    )));
+    expect(twoHumanLedger.entries).toHaveLength(1);
+    expect(Object.keys(twoHumanLedger.entries[0]!).sort()).toEqual([
+      "candidateClass", "excludedItemSha256", "excludedPoolPosition", "reason", "replacementItemSha256",
+      "replacementPoolPosition", "reviewVerdictSha256s", "reviewerRosterSha256", "revealReceiptSha256",
+      "stratum", "visibilityReceiptSha256s",
+    ].sort());
+    for (const field of ["reviewVerdictSha256s", "visibilityReceiptSha256s", "reviewerRosterSha256", "revealReceiptSha256"]) {
+      expect(twoHumanLedger.entries[0]).toHaveProperty(field);
+    }
+
+    function screenableItemForByteIdentity(index: number) {
+      const packets = createHumanReviewPackets(context, {
+        draftId: "review-run",
+        item: item(index),
+        evaluatorIds: ["urn:jinn:reviewer:a", "urn:jinn:reviewer:b"],
+      });
+      if (!packets.ok) throw new Error(packets.error.detail);
+      return packets.result;
+    }
+    const screenedDisputed = screenableItemForByteIdentity(2);
+    const screenedReserve = screenableItemForByteIdentity(3);
+    const screenedResult = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "screened-operator-sampled",
+      candidates: [
+        {
+          itemSha256: screenedDisputed.itemSha256,
+          itemId: item(2).itemId,
+          humanReviewEvaluationSpecSha256: screenedDisputed.humanReviewEvaluationSpecSha256,
+          candidateClass: "factual",
+          stratum: "core",
+          poolPosition: 3,
+        },
+        {
+          itemSha256: screenedReserve.itemSha256,
+          itemId: item(3).itemId,
+          humanReviewEvaluationSpecSha256: screenedReserve.humanReviewEvaluationSpecSha256,
+          candidateClass: "factual",
+          stratum: "core",
+          poolPosition: 4,
+          replacesItemSha256: screenedDisputed.itemSha256,
+        },
+      ],
+      screening: {
+        screeningInstrumentSha256: `sha256:${"a".repeat(64)}`,
+        sampleSeed: "synthetic-byte-identity-seed",
+        sampleSize: 2,
+        samplingScriptSha256: `sha256:${"b".repeat(64)}`,
+        rawOutputsSha256: `sha256:${"c".repeat(64)}`,
+        rows: [screenedDisputed, screenedReserve]
+          .map((packets, index) => ({
+            itemSha256: packets.itemSha256,
+            // index 0 (disputed): screen disagrees with the intended label, hand-excludes it.
+            // index 1 (reserve): screen agrees, hand-confirms it -- the admitted replacement.
+            intendedLabel: index === 0 ? "CORRECT" as const : "WRONG" as const,
+            screeningVerdict: "WRONG" as const,
+            handChecked: true,
+            handVerdict: index === 0 ? "exclude" as const : "confirm" as const,
+          }))
+          .sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256)),
+      },
+    });
+    if (!screenedResult.ok) throw new Error(screenedResult.error.detail);
+    const screenedLedger = HumanReviewReplacementLedgerSchema.parse(JSON.parse(new TextDecoder().decode(
+      getSealedBytes(context.workspaceDir, screenedResult.result.replacementLedgerSha256.slice("sha256:".length)),
+    )));
+    expect(screenedLedger.entries).toHaveLength(1);
+    expect(Object.keys(screenedLedger.entries[0]!).sort()).toEqual([
+      "candidateClass", "excludedItemSha256", "excludedPoolPosition", "reason",
+      "replacementItemSha256", "replacementPoolPosition", "stratum",
+    ].sort());
+    for (const field of ["reviewVerdictSha256s", "visibilityReceiptSha256s", "reviewerRosterSha256", "revealReceiptSha256"]) {
+      expect(screenedLedger.entries[0]).not.toHaveProperty(field);
+    }
+  });
+
   it("verifies a replacement-ledger entry carrying a four-category stratum (spec §3.1 site 9)", async () => {
     const context = setup();
     const disputed = await reviewedItem(context, 0, ["CORRECT", "WRONG"]);
@@ -1247,6 +1350,83 @@ describe("binary screened-operator-sampled admission", () => {
       candidates: [screenedCandidate(packets, 0, 1)],
       screening: screeningInput([screeningRow(syntheticDigest("f"), "CORRECT", "CORRECT", false)]),
     })).toMatchObject({ ok: false, error: { code: "validation" } });
+  });
+
+  // Item 4b (RULING C-6, spec §6.3's final sentence + §6.9's argument for dropping 240 per-item
+  // signatures): D1's shape is ONE operator key signing BOTH bank-scoped records. A runtime keyId
+  // cross-check between the table and the receipt is NOT needed, and adding one would be a
+  // redundant pin -- the existing authority path already refuses a two-key screened bundle, and
+  // the mechanism is stronger than an authority-set-shape argument. This test proves the refusal;
+  // it adds no production code.
+  //
+  // The mechanism, mirrored here at the admission-closure level (this workspace's own
+  // `buildBinaryJudgmentAdmissionClosureWorkspacePorts`, `../human-review/verification-workspace.ts`)
+  // and structurally identical to the standalone bundle verifier's own port
+  // (`packages/benchmark-product/verify/src/verify.ts:610-612`): every authority signature must
+  // (1) name a keyId that binds the record's role, AND (2) that keyId must equal the single
+  // report-signing key for the whole workspace/bundle -- so if the table is signed by key A and
+  // the receipt by key B, at most one of the two can ever equal the report key, and the other
+  // fails clause (2) regardless of what any authority-role SET declares. Going through the full
+  // bundle-materialization pipeline to prove this would require re-signing every verdict for the
+  // affected item (the receipt digest is embedded in the resolution, which is embedded in every
+  // verdict's `labelResolutionSha256` measurement) -- an unrelated cascade this admission-closure
+  // level does not need, because `verifyBinaryJudgmentAdmissionClosure` never reads verdicts,
+  // Matrix, or Report at all.
+  it("refuses a screened admission whose table and reveal receipt are signed by different keys (item 4b, RULING C-6)", () => {
+    const context = setup();
+    const packets = screenableItem(context, 0);
+    const result = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "screened-operator-sampled",
+      candidates: [screenedCandidate(packets, 0, 1)],
+      screening: screeningInput([screeningRow(packets.itemSha256, "CORRECT", "CORRECT", true, "confirm")]),
+    });
+    if (!result.ok) throw new Error(result.error.detail);
+    const resolution = parseBinaryJudgmentLabelResolution(getSealedBytes(
+      context.workspaceDir,
+      result.result.resolutions[0]!.labelResolutionSha256.slice("sha256:".length),
+    ));
+    if (resolution.truthAdmission !== "screened-operator-sampled") throw new Error("wrong admission kind");
+
+    // The original receipt: correctly signed under the workspace's single report-signing key.
+    const originalReceiptBytes = getSealedBytes(
+      context.workspaceDir,
+      resolution.screeningRevealReceiptSha256.slice("sha256:".length),
+    );
+    const originalReceiptEnvelope = parseExactDsseEnvelope(originalReceiptBytes);
+    const reportKey = loadOrCreateReportSigningKey(context.workspaceDir);
+    expect(originalReceiptEnvelope.signatures[0]!.keyid).toBe(reportKey.keyId);
+
+    // A SECOND, genuinely different key -- not the workspace's report-signing key -- signs the
+    // exact same receipt payload bytes. The table stays untouched, still signed under the
+    // original single key.
+    const { privateKey: otherPrivateKey, publicKey: otherPublicKey } = generateKeyPairSync("ed25519");
+    const otherKeyId = didKeyFromEd25519PublicKey(otherPublicKey);
+    expect(otherKeyId).not.toBe(reportKey.keyId);
+    const otherSignedReceiptBytes = sealDsseEnvelope({
+      payloadType: originalReceiptEnvelope.payloadType,
+      payloadBytes: originalReceiptEnvelope.payloadBytes,
+      signatures: [{
+        keyid: otherKeyId,
+        signature: new Uint8Array(edSign(null, Buffer.from(
+          dssePreAuthEncoding(originalReceiptEnvelope.payloadType, originalReceiptEnvelope.payloadBytes),
+        ), otherPrivateKey)),
+      }],
+    });
+
+    const overrides = new Map<string, Uint8Array>();
+    const tamperedReceiptSha256 = overlayRecord(overrides, otherSignedReceiptBytes);
+    const tamperedManifestSha256 = rewriteSingleAcceptedResolution(
+      context,
+      result.result.admissionManifestSha256,
+      overrides,
+      (value) => ({ ...value, screeningRevealReceiptSha256: tamperedReceiptSha256 }),
+    );
+
+    expect(() => verifyBinaryJudgmentAdmissionClosure({
+      admissionManifestSha256: tamperedManifestSha256,
+      expectedDraftId: "review-run",
+    }, closurePortsWithOverrides(context, overrides))).toThrow(/authority signature/u);
   });
 });
 

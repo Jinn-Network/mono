@@ -20,6 +20,14 @@ import {
   BUNDLE_V4_EVIDENCE_ROLES,
 } from "./schema.js";
 import { BINARY_JUDGMENT_ADMISSION_RECORD_ROLES } from "./admission/verification.js";
+import {
+  HUMAN_REVIEW_OPERATOR_ASSERTION_PROTOCOL,
+  HUMAN_REVIEW_REVEAL_RECEIPT_PROTOCOL,
+  HumanReviewResponseSchema,
+  SCREENING_REVEAL_RECEIPT_PROTOCOL,
+  SCREENING_TABLE_PROTOCOL,
+  ScreeningRowSchema,
+} from "./admission/contracts.js";
 
 describe("evidence role vocabularies (§6.8a Group C)", () => {
   test("BUNDLE_V4_EVIDENCE_ROLES carries both new roles, appended after snapshot-probe", () => {
@@ -62,5 +70,48 @@ describe("evidence role vocabularies (§6.8a Group C)", () => {
   test("the admission-only subset has no judge-instrument entry, unlike the full list (deliberate, not to be normalized)", () => {
     expect(BUNDLE_V4_EVIDENCE_ROLES).toContain("judge-instrument");
     expect(BUNDLE_V4_ADMISSION_EVIDENCE_ROLES).not.toContain("judge-instrument");
+  });
+});
+
+// Item 4 (§6.10 acceptance 3): "the screening model can never be confused with a human verdict",
+// on the two axes not already covered above (distinct evidence class is this file's own subject).
+describe("the screening model can never be confused with a human verdict (§6.10 acceptance 3)", () => {
+  test("distinct record protocol URIs: neither screening protocol is a human-review protocol", () => {
+    const screeningProtocols = [SCREENING_TABLE_PROTOCOL, SCREENING_REVEAL_RECEIPT_PROTOCOL];
+    const humanProtocols = [HUMAN_REVIEW_REVEAL_RECEIPT_PROTOCOL, HUMAN_REVIEW_OPERATOR_ASSERTION_PROTOCOL];
+    for (const screeningProtocol of screeningProtocols) {
+      expect(humanProtocols).not.toContain(screeningProtocol);
+    }
+    // Named explicitly, not just "not equal": a screened bundle's two record protocols must never
+    // resolve to either `.../reveal-receipt/v1` (the two-human per-item receipt) or
+    // `.../operator-truth-assertion/v1` (the operator-only assertion).
+    expect(SCREENING_TABLE_PROTOCOL).not.toBe("https://spec.jinn.network/binary-judgment/reveal-receipt/v1");
+    expect(SCREENING_REVEAL_RECEIPT_PROTOCOL).not.toBe("https://spec.jinn.network/binary-judgment/reveal-receipt/v1");
+  });
+
+  test("distinct measurement names: a screening row's judgment fields never reuse a human-review verdict's", () => {
+    // §6.3: `handVerdict` deliberately does not reuse `BinaryJudgmentTruthLabelSchema` -- the
+    // hand-check outcome space is confirm-or-exclude only, with no label corrections. This is the
+    // field-name half of that ruling, scoped to the JUDGMENT-bearing fields (not shared identity
+    // fields like `itemSha256`, which every admission record carries regardless of mode and which
+    // is not what could be mistaken for a human finding): `ScreeningRowSchema`'s own disposition
+    // keys (screeningVerdict, handChecked, handVerdict) never collide with
+    // `HumanReviewResponseSchema`'s disposition keys (label, complete), or with the measurement
+    // names `signHumanReviewResponse` seals onto a human verdict statement (truthLabel,
+    // reviewComplete, reviewPacketSha256, visibilityReceiptSha256, responseSha256) -- a screened
+    // admission never emits anything spelled "truthLabel" or "label" as a human finding.
+    const screeningJudgmentFields = ["screeningVerdict", "handChecked", "handVerdict"] as const;
+    const screeningRowFields = new Set(Object.keys(ScreeningRowSchema.shape));
+    for (const field of screeningJudgmentFields) expect(screeningRowFields.has(field)).toBe(true);
+    const humanJudgmentFields = new Set(["label", "complete"]);
+    const humanResponseFields = new Set(Object.keys(HumanReviewResponseSchema.shape));
+    for (const field of humanJudgmentFields) expect(humanResponseFields.has(field)).toBe(true);
+    const humanVerdictMeasurementNames = new Set([
+      "truthLabel", "reviewComplete", "reviewPacketSha256", "visibilityReceiptSha256", "responseSha256",
+    ]);
+    for (const field of screeningJudgmentFields) {
+      expect(humanJudgmentFields.has(field)).toBe(false);
+      expect(humanVerdictMeasurementNames.has(field)).toBe(false);
+    }
   });
 });

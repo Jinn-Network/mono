@@ -59,6 +59,7 @@ import {
   verifyBinaryJudgmentAdmissionClosure,
   type BinaryJudgmentAdmissionClosurePorts,
 } from "./verification.js";
+import { computeScreeningSample } from "./screening-sample.js";
 
 // --- fixture kit -------------------------------------------------------------------------------
 
@@ -493,6 +494,84 @@ describe("verifyBinaryJudgmentAdmissionClosure: screened-operator-sampled (§6.4
       store.ports(),
     ));
     expect(error.message).toMatch(/hand-checked/);
+  });
+
+  // Item 5 (S4): §6.5(1)'s recomputation is the verifier's OWN independent belief about who is
+  // sampled -- R-4 rules that the recomputation is authoritative and the operator's sealed script
+  // is never executed. This test proves the recomputation actually DRIVES the refusal, not merely
+  // that check 2 refuses SOME shape: a five-item pool (bigger than sampleSize) makes membership
+  // genuinely non-trivial, `computeScreeningSample` is called with the SAME table inputs the
+  // closure itself would use to determine the real two-item sample, and the row left unchecked is
+  // deliberately chosen to be a real sample member and NOTHING else (not flagged, agreement is
+  // clean) -- so the refusal can only be explained by the recomputed sample, never by an operator
+  // claim the table never even makes (there is no "declared sample" field to disagree with).
+  test("check 1/2 (sample membership): the recomputed sample, not any operator claim, decides which row needed a hand check", () => {
+    const store = new Store();
+    sealFrozenHumanReviewSpec(store);
+    const poolItems = [1, 2, 3, 4, 5].map((seed) => sealItem(store, seed, "CORRECT"));
+    const sampleSeed = "synthetic-membership-disagreement-seed";
+    const sampleSize = 2;
+    const { sample } = computeScreeningSample({
+      itemSha256s: poolItems.map((item) => item.itemSha256),
+      sampleSeed,
+      sampleSize,
+    });
+    expect(sample).toHaveLength(sampleSize);
+    const sampleSet = new Set(sample);
+
+    // Every row agrees with its own intended label (screeningVerdict === intendedLabel), so
+    // nothing is flagged -- ONLY the recomputed sample can require a hand check here. Every row
+    // OUTSIDE the sample is hand-checked; every row INSIDE it is deliberately left unchecked.
+    const rows = poolItems
+      .map((item) => ({
+        itemSha256: item.itemSha256,
+        intendedLabel: item.truthLabel,
+        screeningVerdict: item.truthLabel,
+        handChecked: !sampleSet.has(item.itemSha256),
+        ...(sampleSet.has(item.itemSha256) ? {} : { handVerdict: "confirm" as const }),
+      }))
+      .sort((left, right) => (left.itemSha256 < right.itemSha256 ? -1 : left.itemSha256 > right.itemSha256 ? 1 : 0));
+
+    const tableValue = ScreeningTableSchema.parse({
+      protocol: SCREENING_TABLE_PROTOCOL,
+      draftId: DRAFT_ID,
+      screeningInstrumentSha256: store.put(new TextEncoder().encode("synthetic screening instrument")),
+      sampleSeed,
+      sampleSize,
+      samplingScriptSha256: store.put(new TextEncoder().encode("synthetic sampling script")),
+      rawOutputsSha256: store.put(new TextEncoder().encode("synthetic raw screening outputs")),
+      rows,
+      sealedAt: ADMITTED_AT,
+    });
+    const tableDigest = store.sealDsse(canonicalJsonBytes(tableValue), SCREENING_TABLE_MEDIA_TYPE, SCREENING_ATTESTOR_KEY);
+    const ledger = store.seal(HumanReviewReplacementLedgerSchema, {
+      protocol: HUMAN_REVIEW_REPLACEMENT_LEDGER_PROTOCOL,
+      draftId: DRAFT_ID,
+      entries: [],
+      sealedAt: ADMITTED_AT,
+    });
+    const manifest = store.seal(BinaryJudgmentAdmissionManifestSchema, {
+      protocol: BINARY_JUDGMENT_ADMISSION_MANIFEST_PROTOCOL,
+      draftId: DRAFT_ID,
+      truthAdmission: "screened-operator-sampled",
+      labelResolutionSha256s: [],
+      analysisContextSha256s: [],
+      excludedItemSha256s: [],
+      replacementLedgerSha256: ledger.digest,
+      screeningTableSha256: tableDigest,
+      admittedAt: ADMITTED_AT,
+    });
+
+    const error = refusal(() => verifyBinaryJudgmentAdmissionClosure(
+      { admissionManifestSha256: manifest.digest, expectedDraftId: DRAFT_ID },
+      store.ports(),
+    ));
+    expect(error.message).toMatch(/hand-checked/);
+    // The refused row is a REAL member of the recomputed sample -- not an arbitrary row, and not
+    // something the table itself declared (it has no "sampled" field at all).
+    const refusedItemSha256 = /row (sha256:[0-9a-f]{64}) is flagged or sampled/.exec(error.message)?.[1];
+    expect(refusedItemSha256).toBeDefined();
+    expect(sampleSet.has(refusedItemSha256 as `sha256:${string}`)).toBe(true);
   });
 
   test("check 3 (sample agreement rate): a mixed sample computes the documented symmetric rate", () => {
