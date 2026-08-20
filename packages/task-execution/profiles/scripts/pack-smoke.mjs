@@ -162,7 +162,14 @@ for (const [profile, version] of [
   }
 }
 
-for (const parser of ["binary-accept-reject", "binary-judgment-evaluation"]) {
+for (const parser of [
+  "binary-accept-reject",
+  "binary-yes-no",
+  "binary-correct-wrong",
+  "binary-json-verdict",
+  "binary-label-in-prose",
+  "binary-judgment-evaluation",
+]) {
   const root = \`@jinn-network/task-execution-profiles/profiles/binary-judgment/parsers/\${parser}/1.0.0\`;
   const bytes = await readFile(fileURLToPath(import.meta.resolve(\`\${root}/semantics.json\`)));
   const pinned = (await readFile(fileURLToPath(import.meta.resolve(\`\${root}/semantics.sha256\`)), "utf8")).trim();

@@ -197,6 +197,187 @@ export const BINARY_ACCEPT_REJECT_PARSER_IDENTITY = {
   digest: BINARY_ACCEPT_REJECT_PARSER_SEALED.digest,
 } as const;
 
+export const BINARY_YES_NO_PARSER_ID = "network.jinn.parser.binary-yes-no" as const;
+export const BINARY_YES_NO_PARSER_VERSION = "1.0.0" as const;
+
+/** Sealed, code-free semantics: PC-1's discipline over the YES/NO alphabet. */
+export function buildBinaryYesNoParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_YES_NO_PARSER_ID,
+      version: BINARY_YES_NO_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+      normalization: "none",
+    },
+    rule: {
+      kind: "whole-output-token",
+      caseSensitive: true,
+      tokens: { ACCEPT: "YES", REJECT: "NO" },
+    },
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_YES_NO_PARSER_SEALED = sealDocument(buildBinaryYesNoParserSemantics());
+export const BINARY_YES_NO_PARSER_IDENTITY = {
+  id: BINARY_YES_NO_PARSER_ID,
+  version: BINARY_YES_NO_PARSER_VERSION,
+  digest: BINARY_YES_NO_PARSER_SEALED.digest,
+} as const;
+
+export const BINARY_CORRECT_WRONG_PARSER_ID =
+  "network.jinn.parser.binary-correct-wrong" as const;
+export const BINARY_CORRECT_WRONG_PARSER_VERSION = "1.0.0" as const;
+
+/** Sealed, code-free semantics: PC-1's discipline over the CORRECT/WRONG alphabet. */
+export function buildBinaryCorrectWrongParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_CORRECT_WRONG_PARSER_ID,
+      version: BINARY_CORRECT_WRONG_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+      normalization: "none",
+    },
+    rule: {
+      kind: "whole-output-token",
+      caseSensitive: true,
+      tokens: { ACCEPT: "CORRECT", REJECT: "WRONG" },
+    },
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_CORRECT_WRONG_PARSER_SEALED = sealDocument(
+  buildBinaryCorrectWrongParserSemantics(),
+);
+export const BINARY_CORRECT_WRONG_PARSER_IDENTITY = {
+  id: BINARY_CORRECT_WRONG_PARSER_ID,
+  version: BINARY_CORRECT_WRONG_PARSER_VERSION,
+  digest: BINARY_CORRECT_WRONG_PARSER_SEALED.digest,
+} as const;
+
+export const BINARY_JSON_VERDICT_PARSER_ID =
+  "network.jinn.parser.binary-json-verdict" as const;
+export const BINARY_JSON_VERDICT_PARSER_VERSION = "1.0.0" as const;
+
+/**
+ * Sealed, code-free semantics for the JSON-wrapped verdict contract: a single strict RFC 8259
+ * object root carrying a `verdict` string member, edge-trimmed to exactly ACCEPT or REJECT.
+ * Deliberately intolerant of code fences, surrounding prose, or a duplicate `verdict` member.
+ */
+export function buildBinaryJsonVerdictParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_JSON_VERDICT_PARSER_ID,
+      version: BINARY_JSON_VERDICT_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+      normalization: "none",
+    },
+    rule: {
+      kind: "json-member-token",
+      caseSensitive: true,
+      tokens: { ACCEPT: "ACCEPT", REJECT: "REJECT" },
+      json: {
+        standard: "RFC 8259",
+        text: "exactly one JSON value after the edge trim, with no leading or trailing content",
+        root: "object",
+        member: "verdict",
+        memberType: "string",
+        memberTrimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+        duplicateMember: "refused",
+        otherMembers: "ignored",
+      },
+    },
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_JSON_VERDICT_PARSER_SEALED = sealDocument(
+  buildBinaryJsonVerdictParserSemantics(),
+);
+export const BINARY_JSON_VERDICT_PARSER_IDENTITY = {
+  id: BINARY_JSON_VERDICT_PARSER_ID,
+  version: BINARY_JSON_VERDICT_PARSER_VERSION,
+  digest: BINARY_JSON_VERDICT_PARSER_SEALED.digest,
+} as const;
+
+export const BINARY_LABEL_IN_PROSE_PARSER_ID =
+  "network.jinn.parser.binary-label-in-prose" as const;
+export const BINARY_LABEL_IN_PROSE_PARSER_VERSION = "1.0.0" as const;
+
+/**
+ * Sealed, code-free semantics for the label-in-prose contract: an untrimmed, delimited
+ * exact-ASCII-token scan for ACCEPT/REJECT. Invalid when both or neither token is present, with
+ * no stemming, case folding, synonyms, or positional preference.
+ */
+export function buildBinaryLabelInProseParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_LABEL_IN_PROSE_PARSER_ID,
+      version: BINARY_LABEL_IN_PROSE_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: [],
+      normalization: "none",
+    },
+    rule: {
+      kind: "delimited-token-scan",
+      caseSensitive: true,
+      tokens: { ACCEPT: "ACCEPT", REJECT: "REJECT" },
+      delimiter:
+        "the code point immediately before and immediately after an occurrence, where one exists, "
+        + "must not be an ASCII letter, an ASCII digit, or U+005F",
+      repeatedToken: "permitted",
+      bothTokens: "invalid",
+      neitherToken: "invalid",
+      positionalPreference: "none",
+    },
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_LABEL_IN_PROSE_PARSER_SEALED = sealDocument(
+  buildBinaryLabelInProseParserSemantics(),
+);
+export const BINARY_LABEL_IN_PROSE_PARSER_IDENTITY = {
+  id: BINARY_LABEL_IN_PROSE_PARSER_ID,
+  version: BINARY_LABEL_IN_PROSE_PARSER_VERSION,
+  digest: BINARY_LABEL_IN_PROSE_PARSER_SEALED.digest,
+} as const;
+
+/**
+ * The complete v1 response-parser registry, code-unit sorted by (id, version). An instrument
+ * SELECTS one member; it never supplies parser configuration. Adding a member changes the
+ * umbrella digest by construction, and that tripwire is the point.
+ */
+export const BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY = [
+  BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_CORRECT_WRONG_PARSER_IDENTITY,
+  BINARY_JSON_VERDICT_PARSER_IDENTITY,
+  BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
+  BINARY_YES_NO_PARSER_IDENTITY,
+] as const;
+export type BinaryJudgmentResponseParserId =
+  (typeof BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY)[number]["id"];
+
 /**
  * The umbrella parser commits the complete v1 response-parser registry and the comparison map.
  * Adding a parser or changing truth semantics therefore changes this document's digest.
@@ -208,7 +389,7 @@ export function buildBinaryJudgmentEvaluationParserSemantics() {
       id: BINARY_JUDGMENT_EVALUATION_PARSER_ID,
       version: BINARY_JUDGMENT_EVALUATION_PARSER_VERSION,
     },
-    responseParsers: [BINARY_ACCEPT_REJECT_PARSER_IDENTITY],
+    responseParsers: [...BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY],
     comparison: {
       ACCEPT: "CORRECT",
       REJECT: "WRONG",
@@ -232,10 +413,37 @@ export function binaryJudgmentPromptTemplateDigest(
   return recordDigest(canonicalJsonBytes(messages));
 }
 
+const REGISTERED_PARSER_IDS = BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY.map(
+  (parser) => parser.id,
+) as [BinaryJudgmentResponseParserId, ...BinaryJudgmentResponseParserId[]];
+
+/**
+ * Closed-registry membership (§4.1 rule 3): `id` must be one of the five registered parsers, and
+ * `version`/`digest` must be exactly that parser's registered pair. An instrument names one
+ * registered identity; it never supplies parser configuration.
+ */
 const ParserIdentitySchema = z.strictObject({
-  id: z.literal(BINARY_ACCEPT_REJECT_PARSER_ID),
-  version: z.literal(BINARY_ACCEPT_REJECT_PARSER_VERSION),
-  digest: z.literal(BINARY_ACCEPT_REJECT_PARSER_IDENTITY.digest),
+  id: z.enum(REGISTERED_PARSER_IDS),
+  version: NonEmptyStringSchema,
+  digest: Sha256DigestSchema,
+}).superRefine((identity, ctx) => {
+  const registered = BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY
+    .find((parser) => parser.id === identity.id);
+  if (registered === undefined) return; // the enum member check already refused this id
+  if (identity.version !== registered.version) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["version"],
+      message: `version does not match the registered ${identity.id} pair (${registered.version})`,
+    });
+  }
+  if (identity.digest !== registered.digest) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["digest"],
+      message: `digest does not match the registered ${identity.id} pair (${registered.digest})`,
+    });
+  }
 });
 
 export const BinaryJudgmentInstrumentSchema = z

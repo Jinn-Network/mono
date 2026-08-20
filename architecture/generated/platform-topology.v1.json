@@ -2018,13 +2018,13 @@
       "authorityDocuments": 32,
       "boundaryPolicies": 26,
       "catalogManifests": 97,
-      "catalogPublicSurfaces": 1330,
+      "catalogPublicSurfaces": 1352,
       "catalogSchema": 2,
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 6,
-      "discoveredFirstPartySurfaces": 4160,
-      "generatedOutputSources": 1392,
+      "discoveredFirstPartySurfaces": 4182,
+      "generatedOutputSources": 1414,
       "generatorSources": 676,
       "marketplaceControl": 2,
       "requiredGates": 25,
@@ -48604,6 +48604,78 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-accept-reject.cases.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-correct-wrong.cases.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-json-verdict.cases.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-label-in-prose.cases.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-yes-no.cases.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/task-execution/evaluator-adapters/fixtures/manifest.sha256.json"
       },
       {
@@ -51036,6 +51108,102 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-correct-wrong"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/semantics.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/semantics.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-json-verdict"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-json-verdict/1.0.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-json-verdict/1.0.0/semantics.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-json-verdict/1.0.0/semantics.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation"
       },
       {
@@ -51073,6 +51241,102 @@
           "@ritsukai"
         ],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/1.0.0/semantics.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-label-in-prose"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0/semantics.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0/semantics.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-yes-no"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-yes-no/1.0.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-yes-no/1.0.0/semantics.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-yes-no/1.0.0/semantics.sha256"
       },
       {
         "categories": [
@@ -65080,6 +65344,51 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-execution-evaluator-adapters",
         "packedTargets": [],
+        "path": "packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-accept-reject.cases.json",
+        "relativeSource": "fixtures/binary-judgment-parsers/binary-accept-reject.cases.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-evaluator-adapters",
+        "packedTargets": [],
+        "path": "packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-correct-wrong.cases.json",
+        "relativeSource": "fixtures/binary-judgment-parsers/binary-correct-wrong.cases.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-evaluator-adapters",
+        "packedTargets": [],
+        "path": "packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-json-verdict.cases.json",
+        "relativeSource": "fixtures/binary-judgment-parsers/binary-json-verdict.cases.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-evaluator-adapters",
+        "packedTargets": [],
+        "path": "packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-label-in-prose.cases.json",
+        "relativeSource": "fixtures/binary-judgment-parsers/binary-label-in-prose.cases.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-evaluator-adapters",
+        "packedTargets": [],
+        "path": "packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-yes-no.cases.json",
+        "relativeSource": "fixtures/binary-judgment-parsers/binary-yes-no.cases.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-evaluator-adapters",
+        "packedTargets": [],
         "path": "packages/task-execution/evaluator-adapters/fixtures/manifest.sha256.json",
         "relativeSource": "fixtures/manifest.sha256.json"
       },
@@ -66232,6 +66541,42 @@
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
         "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/semantics.json",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/semantics.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/semantics.sha256",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/semantics.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-json-verdict/1.0.0/semantics.json",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-json-verdict/1.0.0/semantics.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-json-verdict/1.0.0/semantics.sha256",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-json-verdict/1.0.0/semantics.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/1.0.0/semantics.json",
         "relativeSource": "profiles/binary-judgment/parsers/binary-judgment-evaluation/1.0.0/semantics.json"
       },
@@ -66243,6 +66588,42 @@
         "packedTargets": [],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/1.0.0/semantics.sha256",
         "relativeSource": "profiles/binary-judgment/parsers/binary-judgment-evaluation/1.0.0/semantics.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0/semantics.json",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0/semantics.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0/semantics.sha256",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0/semantics.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-yes-no/1.0.0/semantics.json",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-yes-no/1.0.0/semantics.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-yes-no/1.0.0/semantics.sha256",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-yes-no/1.0.0/semantics.sha256"
       },
       {
         "claim": {

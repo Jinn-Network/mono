@@ -14,7 +14,11 @@ import { buildEvaluationTaskProfile } from "../dist/documents/evaluation-task-1.
 import { buildBinaryJudgmentProfile } from "../dist/documents/binary-judgment-2.0.js";
 import {
   buildBinaryAcceptRejectParserSemantics,
+  buildBinaryCorrectWrongParserSemantics,
+  buildBinaryJsonVerdictParserSemantics,
   buildBinaryJudgmentEvaluationParserSemantics,
+  buildBinaryLabelInProseParserSemantics,
+  buildBinaryYesNoParserSemantics,
 } from "../dist/binary-judgment/contracts.js";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -50,6 +54,34 @@ const DOCUMENTS = [
   {
     dir: join("profiles", "binary-judgment", "parsers", "binary-accept-reject", "1.0.0"),
     build: buildBinaryAcceptRejectParserSemantics,
+    seal: (value) => sealDocument(value),
+    jsonName: "semantics.json",
+    shaName: "semantics.sha256",
+  },
+  {
+    dir: join("profiles", "binary-judgment", "parsers", "binary-yes-no", "1.0.0"),
+    build: buildBinaryYesNoParserSemantics,
+    seal: (value) => sealDocument(value),
+    jsonName: "semantics.json",
+    shaName: "semantics.sha256",
+  },
+  {
+    dir: join("profiles", "binary-judgment", "parsers", "binary-correct-wrong", "1.0.0"),
+    build: buildBinaryCorrectWrongParserSemantics,
+    seal: (value) => sealDocument(value),
+    jsonName: "semantics.json",
+    shaName: "semantics.sha256",
+  },
+  {
+    dir: join("profiles", "binary-judgment", "parsers", "binary-json-verdict", "1.0.0"),
+    build: buildBinaryJsonVerdictParserSemantics,
+    seal: (value) => sealDocument(value),
+    jsonName: "semantics.json",
+    shaName: "semantics.sha256",
+  },
+  {
+    dir: join("profiles", "binary-judgment", "parsers", "binary-label-in-prose", "1.0.0"),
+    build: buildBinaryLabelInProseParserSemantics,
     seal: (value) => sealDocument(value),
     jsonName: "semantics.json",
     shaName: "semantics.sha256",

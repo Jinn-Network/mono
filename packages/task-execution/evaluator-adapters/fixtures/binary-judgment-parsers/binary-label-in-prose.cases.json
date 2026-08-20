@@ -1,0 +1,168 @@
+{
+  "parser": {
+    "id": "network.jinn.parser.binary-label-in-prose",
+    "version": "1.0.0",
+    "digest": "sha256:d53d23afc8734090c8d54c39de8105ead37c3ecad0cf0f454e97a535e5937f10"
+  },
+  "cases": [
+    {
+      "case": "empty-output",
+      "input": {
+        "text": ""
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "whitespace-only",
+      "input": {
+        "text": " \t\r\n"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "edge-newlines-around-valid-token",
+      "input": {
+        "text": "\n  ACCEPT \r\n"
+      },
+      "expect": {
+        "decision": "ACCEPT",
+        "parseValid": true
+      }
+    },
+    {
+      "case": "lowercase-token",
+      "input": {
+        "text": "accept"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "interior-whitespace-in-token",
+      "input": {
+        "text": "ACC EPT"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "token-followed-by-period",
+      "input": {
+        "text": "ACCEPT."
+      },
+      "expect": {
+        "decision": "ACCEPT",
+        "parseValid": true
+      }
+    },
+    {
+      "case": "token-embedded-in-word",
+      "input": {
+        "text": "ACCEPTABLE"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "both-tokens-present",
+      "input": {
+        "text": "ACCEPT REJECT"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "bom-prefixing-valid-token",
+      "input": {
+        "text": "﻿ACCEPT"
+      },
+      "expect": {
+        "decision": "ACCEPT",
+        "parseValid": true
+      }
+    },
+    {
+      "case": "invalid-utf8",
+      "input": {
+        "bytesBase64": "/w=="
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "invalid-utf8"
+      }
+    },
+    {
+      "case": "truncated-at-generation-cap",
+      "input": {
+        "text": "The candidate answer restates the reference, so the verdict is ACCE"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    },
+    {
+      "case": "json-object-with-extra-members",
+      "input": {
+        "text": "{\"verdict\":\"ACCEPT\",\"rationale\":\"the candidate matches\"}"
+      },
+      "expect": {
+        "decision": "ACCEPT",
+        "parseValid": true
+      }
+    },
+    {
+      "case": "json-inside-code-fence",
+      "input": {
+        "text": "```json\n{\"verdict\":\"ACCEPT\",\"rationale\":\"the candidate matches\"}\n```"
+      },
+      "expect": {
+        "decision": "ACCEPT",
+        "parseValid": true
+      }
+    },
+    {
+      "case": "json-array-root",
+      "input": {
+        "text": "[\"ACCEPT\"]"
+      },
+      "expect": {
+        "decision": "ACCEPT",
+        "parseValid": true
+      }
+    },
+    {
+      "case": "duplicate-verdict-member",
+      "input": {
+        "text": "{\"verdict\":\"ACCEPT\",\"verdict\":\"REJECT\"}"
+      },
+      "expect": {
+        "decision": "REJECT",
+        "parseValid": false,
+        "invalidReason": "unexpected-token"
+      }
+    }
+  ]
+}

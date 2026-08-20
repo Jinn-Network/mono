@@ -1349,6 +1349,11 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/verdict-expectation.json | — | — | — |
 | fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/verified-solution.json | — | — | — |
 | fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/verified-verdict.json | — | — | — |
+| fixtures | @jinn-network/task-execution-evaluator-adapters | packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-accept-reject.cases.json | — | — | — |
+| fixtures | @jinn-network/task-execution-evaluator-adapters | packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-correct-wrong.cases.json | — | — | — |
+| fixtures | @jinn-network/task-execution-evaluator-adapters | packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-json-verdict.cases.json | — | — | — |
+| fixtures | @jinn-network/task-execution-evaluator-adapters | packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-label-in-prose.cases.json | — | — | — |
+| fixtures | @jinn-network/task-execution-evaluator-adapters | packages/task-execution/evaluator-adapters/fixtures/binary-judgment-parsers/binary-yes-no.cases.json | — | — | — |
 | fixtures | @jinn-network/task-execution-evaluator-adapters | packages/task-execution/evaluator-adapters/fixtures/manifest.sha256.json | — | — | — |
 | fixtures | @jinn-network/task-execution-evaluator-adapters | packages/task-execution/evaluator-adapters/fixtures/parsers/prediction-market.parser.json | — | — | — |
 | fixtures | @jinn-network/task-execution-evaluator-adapters | packages/task-execution/evaluator-adapters/fixtures/parsers/swe-rebench-v2.parser.json | — | — | — |
@@ -1477,8 +1482,16 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/verdict-rule/golden/threshold-pass.json | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-accept-reject/1.0.0/semantics.json | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-accept-reject/1.0.0/semantics.sha256 | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/semantics.json | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/semantics.sha256 | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-json-verdict/1.0.0/semantics.json | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-json-verdict/1.0.0/semantics.sha256 | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/1.0.0/semantics.json | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/1.0.0/semantics.sha256 | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0/semantics.json | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0/semantics.sha256 | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-yes-no/1.0.0/semantics.json | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-yes-no/1.0.0/semantics.sha256 | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profile/v1/profile.json | — | — | https://spec.jinn.network/profiles/task-profile/v1 |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/binary-judgment/2.0/profile.json | — | — | https://spec.jinn.network/task-profiles/binary-judgment/2.0 |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/binary-judgment/2.0/profile.sha256 | — | — | — |
@@ -1694,7 +1707,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 
 ## Architecture-control ownership
 
-Task 6's validator reports 5008 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 5030 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1702,13 +1715,13 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 32 |
 | boundaryPolicies | 26 |
 | catalogManifests | 97 |
-| catalogPublicSurfaces | 1330 |
+| catalogPublicSurfaces | 1352 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 62 |
 | conformanceSources | 31 |
 | decisionRecords | 6 |
-| discoveredFirstPartySurfaces | 4160 |
-| generatedOutputSources | 1392 |
+| discoveredFirstPartySurfaces | 4182 |
+| generatedOutputSources | 1414 |
 | generatorSources | 676 |
 | marketplaceControl | 2 |
 | requiredGates | 25 |
