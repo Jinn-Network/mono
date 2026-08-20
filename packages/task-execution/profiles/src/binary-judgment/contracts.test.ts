@@ -40,6 +40,7 @@ import {
   BinaryJudgmentPayloadSchema,
   BinaryJudgmentSemanticRequestSchema,
   BinaryJudgmentSnapshotProbeSchema,
+  BinaryJudgmentStratumSchema,
   binaryJudgmentInstrumentDeclaresEvidence,
   binaryJudgmentPromptTemplateDigest,
   binaryJudgmentSemanticRequestDigest,
@@ -968,5 +969,34 @@ describe("binary-judgment instrument seal against the closed parser registry", (
       digest: `sha256:${"0".repeat(64)}`,
     });
     expect(BinaryJudgmentInstrumentSchema.safeParse(candidate).success).toBe(false);
+  });
+});
+
+describe("declared stratum vocabulary (P4)", () => {
+  it("accepts any grammar-conforming stratum name, not just the core/stress pair", () => {
+    for (const name of ["core", "stress", "category-1", "A", "a".repeat(64)]) {
+      expect(BinaryJudgmentStratumSchema.safeParse(name).success).toBe(true);
+    }
+  });
+
+  it("refuses stratum names that do not match the shared identifier grammar", () => {
+    for (const name of ["", "1category", "has space", "-leading", "a".repeat(65)]) {
+      expect(BinaryJudgmentStratumSchema.safeParse(name).success).toBe(false);
+    }
+  });
+
+  it("seals a strict evaluator-only analysis context whose stratum is a four-category name", () => {
+    const itemSha256 = recordDigest(canonicalJsonBytes(payload));
+    const analysisContext = {
+      protocol: BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
+      itemSha256,
+      itemId: payload.itemId,
+      labelResolutionSha256: sha("6"),
+      truthLabel: "WRONG" as const,
+      candidateClass: "temporal",
+      stratum: "category-3",
+    };
+    expect(BinaryJudgmentAnalysisContextSchema.parse(analysisContext)).toStrictEqual(analysisContext);
+    expect(sealBinaryJudgmentAnalysisContext(analysisContext).digest).toMatch(/^sha256:/u);
   });
 });

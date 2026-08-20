@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   canonicalJsonBytes,
+  compareCodeUnitStrings,
   recordDigest,
 } from "@jinn-network/task-execution-profiles";
 import { TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
@@ -213,6 +214,76 @@ describe("importBinaryItemBank", () => {
       admissionIndexJsonl: "",
     });
     expect(rejected).toMatchObject({ ok: false, error: { code: "validation" } });
+  });
+
+  // Spec §3.1 sites 18/19: the declared vocabulary is the observed set, not a registered pair.
+  test("imports a bank declaring four categories, carrying all four in the strata summary", () => {
+    const { context, draftId } = setup();
+    const provenanceSha256 = `sha256:${"e".repeat(64)}` as const;
+    const publishedAt = "2026-03-09T00:00:00Z";
+    const strata = ["category-1", "category-2", "category-3", "category-4"];
+    const items = strata.map((_, index) => ({
+      itemId: `urn:uuid:40000000-0000-4000-8000-00000000000${index + 1}`,
+      question: `Synthetic question ${index + 1}?`,
+      referenceAnswer: "Synthetic reference.",
+      candidateAnswer: `Synthetic candidate ${index + 1}.`,
+      provenance: { sourceCommitment: provenanceSha256, timestamp: publishedAt },
+      sources: [{ digest: { sha256: provenanceSha256.slice("sha256:".length) } }],
+    }));
+    for (const value of items) putSealedBytes(context.workspaceDir, canonicalJsonBytes(value));
+
+    const admitted = admitHumanTruth(context, {
+      draftId,
+      truthAdmission: "operator-only",
+      candidates: items.map((value, index) => ({
+        itemSha256: recordDigest(canonicalJsonBytes(value)),
+        itemId: value.itemId,
+        humanReviewEvaluationSpecSha256: BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest,
+        candidateClass: "synthetic",
+        stratum: strata[index]!,
+        poolPosition: index + 1,
+        operatorTruthLabel: "CORRECT" as const,
+      })),
+    });
+    expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
+    if (!admitted.ok) throw new Error("unreachable");
+
+    const itemsJsonl = renderCanonicalJsonl(items.map((value) => ({ protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL, item: value })));
+    const sources = renderCanonicalJsonl([{
+      protocol: BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
+      provenanceSha256,
+      source: {
+        uri: "https://fixtures.example.test/source.json",
+        digest: { sha256: provenanceSha256.slice("sha256:".length) },
+      },
+      license: {
+        uri: "https://www.apache.org/licenses/LICENSE-2.0.txt",
+        digest: { sha256: "b".repeat(64) },
+      },
+      attribution: {
+        uri: "https://fixtures.example.test/attribution.txt",
+        digest: { sha256: "c".repeat(64) },
+      },
+      publishedAt,
+    }]);
+    const admissions = renderCanonicalJsonl(admitted.result.resolutions.map((resolution) => ({
+      protocol: BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
+      admissionManifestSha256: admitted.result.admissionManifestSha256,
+      itemSha256: resolution.itemSha256,
+      labelResolutionSha256: resolution.labelResolutionSha256,
+      analysisContextSha256: resolution.analysisContextSha256,
+    })).sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256)));
+
+    const imported = importBinaryItemBank(context, {
+      profile: "binary-judgment@2",
+      draftId,
+      itemBankJsonl: itemsJsonl,
+      sourceManifestJsonl: sources,
+      admissionIndexJsonl: admissions,
+    });
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    if (!imported.ok) throw new Error("unreachable");
+    expect(imported.result.strata).toEqual(strata);
   });
 
   test("authenticates human-review exclusion evidence and imports only its later same-slice replacement", async () => {

@@ -154,7 +154,7 @@ export interface LegacyPublicBundleVerificationResult {
     readonly publicationGrade: boolean;
     readonly truthAdmission: "two-human-unanimous" | "operator-only";
     readonly candidateClasses: readonly string[];
-    readonly strata: readonly ["core", "stress"];
+    readonly strata: readonly string[];
     // A count that is a constant is not a count (spec §1.6 site 8): a literal here does not
     // refuse a run with a different arm count, it publishes a false one.
     readonly armCount: number;

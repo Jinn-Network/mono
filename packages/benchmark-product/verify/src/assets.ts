@@ -364,12 +364,23 @@ function comparisonFactsHtml(facts: ComparisonFacts): string {
   return `<p class="paired-estimate">${escapeMarkup(pairedEstimateLine(facts))}</p><dl class="facts"><div><dt>Paired task count</dt><dd>${facts.pairs}</dd></div><div><dt>Candidate minus baseline estimate</dt><dd>${facts.delta === null ? "—" : escapeMarkup(facts.delta)}</dd></div></dl>${intervalHtml}`;
 }
 
+/** The projection is already validated at :294 (validateBinaryInstrumentQualificationProjection),
+ * so `configuration["strata"]` is a sealed, non-empty, sorted-unique, grammar-conforming array. */
+function stratumCaption(configuration: Record<string, unknown>): string {
+  const strata = Array.isArray(configuration["strata"])
+    ? (configuration["strata"] as readonly unknown[])
+        .filter((value): value is string => typeof value === "string")
+    : [];
+  return `Buckets by stratum (${strata.join(", ")})`;
+}
+
 function binaryFactsHtml(facts: BinaryFacts): string {
+  const caption = stratumCaption(facts.qualification.configuration);
   const arms = Object.entries(facts.qualification.arms).map(([armId, arm]) => {
     const rates = ["agreement", "falseAccept", "falseReject", "instability", "parserInvalid"]
       .map((name) => `<tr><th scope="row">${escapeMarkup(name)}</th><td><pre>${escapeMarkup(canonicalText(arm[name]))}</pre></td></tr>`)
       .join("");
-    return `<section class="binary-arm"><h3>${escapeMarkup(armId)}</h3><p>Instrument <span class="digest">${escapeMarkup(String(arm["instrumentSha256"]))}</span></p><h4>Item, call, and confusion denominators</h4><pre>${escapeMarkup(canonicalText({ item: arm["item"], call: arm["call"], confusion: arm["confusion"] }))}</pre><div class="table-scroll" tabindex="0" role="region" aria-label="${escapeMarkup(armId)} qualification rates"><table><caption>Five registered rates with exact denominators and Wilson intervals</caption><thead><tr><th scope="col">Rate</th><th scope="col">Registered result</th></tr></thead><tbody>${rates}</tbody></table></div><h4>Every candidate-class bucket</h4><pre>${escapeMarkup(canonicalText(arm["byCandidateClass"]))}</pre><h4>Core and stress buckets</h4><pre>${escapeMarkup(canonicalText(arm["byStratum"]))}</pre></section>`;
+    return `<section class="binary-arm"><h3>${escapeMarkup(armId)}</h3><p>Instrument <span class="digest">${escapeMarkup(String(arm["instrumentSha256"]))}</span></p><h4>Item, call, and confusion denominators</h4><pre>${escapeMarkup(canonicalText({ item: arm["item"], call: arm["call"], confusion: arm["confusion"] }))}</pre><div class="table-scroll" tabindex="0" role="region" aria-label="${escapeMarkup(armId)} qualification rates"><table><caption>Five registered rates with exact denominators and Wilson intervals</caption><thead><tr><th scope="col">Rate</th><th scope="col">Registered result</th></tr></thead><tbody>${rates}</tbody></table></div><h4>Every candidate-class bucket</h4><pre>${escapeMarkup(canonicalText(arm["byCandidateClass"]))}</pre><h4>${escapeMarkup(caption)}</h4><pre>${escapeMarkup(canonicalText(arm["byStratum"]))}</pre></section>`;
   }).join("");
   return `<p class="neutral">Qualification facts are presented per instrument without comparative conclusions.</p><h3>Registered configuration</h3><pre>${escapeMarkup(canonicalText(facts.qualification.configuration))}</pre>${arms}<h3>Per-item decisions and instability</h3><pre>${escapeMarkup(canonicalText(facts.qualification.itemDecisions))}</pre><h3>Parser-invalid, infrastructure, and other exclusions</h3><pre>${escapeMarkup(canonicalText(facts.qualification.excluded))}</pre>`;
 }
@@ -616,6 +627,7 @@ function comparisonFactsMarkdown(facts: ComparisonFacts): string {
 }
 
 function binaryFactsMarkdown(facts: BinaryFacts): string {
+  const caption = stratumCaption(facts.qualification.configuration);
   return [
     "Qualification facts are presented per instrument without comparative conclusions.",
     "",
@@ -634,7 +646,7 @@ function binaryFactsMarkdown(facts: BinaryFacts): string {
       `- Instability: ${escapeMarkdown(canonicalText(arm["instability"]))}`,
       `- Parser invalid: ${escapeMarkdown(canonicalText(arm["parserInvalid"]))}`,
       `- Every candidate-class bucket: ${escapeMarkdown(canonicalText(arm["byCandidateClass"]))}`,
-      `- Core and stress buckets: ${escapeMarkdown(canonicalText(arm["byStratum"]))}`,
+      `- ${escapeMarkdown(caption)}: ${escapeMarkdown(canonicalText(arm["byStratum"]))}`,
       "",
     ]),
     "### Per-item decisions, instability, and exclusions",

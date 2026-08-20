@@ -64,7 +64,7 @@ interface BinaryJudgmentAnalysisContextView {
   readonly labelResolutionSha256: AdmissionSha256;
   readonly truthLabel: "CORRECT" | "WRONG";
   readonly candidateClass: string;
-  readonly stratum: "core" | "stress";
+  readonly stratum: string;
 }
 
 type BinaryJudgmentLabelResolutionView = {
@@ -73,7 +73,7 @@ type BinaryJudgmentLabelResolutionView = {
   readonly humanReviewEvaluationSpecSha256: AdmissionSha256;
   readonly truthLabel: "CORRECT" | "WRONG";
   readonly candidateClass: string;
-  readonly stratum: "core" | "stress";
+  readonly stratum: string;
   readonly resolvedAt: string;
 } & ({
   readonly truthAdmission: "two-human-unanimous";
@@ -127,7 +127,7 @@ export interface VerifiedBinaryJudgmentAdmissionItem {
   readonly itemId: string;
   readonly truthLabel: "CORRECT" | "WRONG";
   readonly candidateClass: string;
-  readonly stratum: "core" | "stress";
+  readonly stratum: string;
   readonly truthAdmission: "two-human-unanimous" | "operator-only";
   readonly labelResolutionSha256: AdmissionSha256;
   readonly analysisContextSha256: AdmissionSha256;
@@ -137,7 +137,7 @@ export interface VerifiedBinaryJudgmentAdmissionExclusion {
   readonly itemSha256: AdmissionSha256;
   readonly itemId: string;
   readonly candidateClass: string;
-  readonly stratum: "core" | "stress";
+  readonly stratum: string;
   readonly reason: "review-disagreement" | "review-indeterminate" | "review-incomplete";
   readonly replacementItemSha256: AdmissionSha256;
 }
@@ -148,7 +148,7 @@ export interface VerifiedBinaryJudgmentAdmissionClosure {
   readonly replacementLedger: HumanReviewReplacementLedger;
   readonly publicationGrade: boolean;
   readonly classes: readonly string[];
-  readonly strata: readonly ("core" | "stress")[];
+  readonly strata: readonly string[];
   readonly accepted: readonly VerifiedBinaryJudgmentAdmissionItem[];
   readonly excluded: readonly VerifiedBinaryJudgmentAdmissionExclusion[];
   /** Complete, sorted digest inventory reachable from the manifest closure. */

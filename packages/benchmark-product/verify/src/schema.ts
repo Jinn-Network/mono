@@ -178,6 +178,10 @@ export const BundleV4EvidenceCatalogSchema = z.strictObject({
 export type BundleV4EvidenceCatalog = z.infer<typeof BundleV4EvidenceCatalogSchema>;
 
 const PrefixedSha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
+// §3.1 rule 1: the same identifier dialect used for stratum names elsewhere (e.g.
+// `admission/contracts.ts`'s `BinaryJudgmentStratumSchema`). `candidateClasses` below deliberately
+// stays ungrammared: tightening it is outside P4's contract and could refuse bundles written today.
+const IDENTIFIER_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u;
 export const BundleQualificationSchema = z.strictObject({
   format: z.literal(BUNDLE_QUALIFICATION_FORMAT),
   claimSchema: z.literal("benchmark-product.claim-package/2"),
@@ -186,7 +190,10 @@ export const BundleQualificationSchema = z.strictObject({
   publicationGrade: z.boolean(),
   truthAdmission: z.enum(["two-human-unanimous", "operator-only"]),
   candidateClasses: z.array(z.string().min(1)),
-  strata: z.tuple([z.literal("core"), z.literal("stress")]),
+  // Sorted-unique, grammar-conforming, non-empty (spec §3.1 rule 6). BUNDLE_QUALIFICATION_FORMAT
+  // stays at its current version under §0.4: every ["core","stress"] bundle ever written still
+  // validates, byte-identically.
+  strata: z.array(z.string().regex(IDENTIFIER_NAME)).min(1),
   // .min(2), not a literal count (spec §1.6 rule 3). BUNDLE_QUALIFICATION_FORMAT stays at its
   // current version under §0.4: every four-arm bundle ever written still validates,
   // byte-identically.
@@ -217,6 +224,7 @@ export const BundleQualificationSchema = z.strictObject({
     }
   };
   sortedUnique(qualification.candidateClasses, ["candidateClasses"]);
+  sortedUnique(qualification.strata, ["strata"]);
   sortedUnique(qualification.arms.map((entry) => entry.armId), ["arms"]);
   sortedUnique(qualification.items.map((entry) => entry.taskSha256), ["items"]);
   for (const field of ["itemSha256", "labelResolutionSha256", "analysisContextSha256"] as const) {

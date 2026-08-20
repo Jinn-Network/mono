@@ -50,7 +50,7 @@ export interface ImportBinaryItemBankResult {
   readonly truthAdmission: "two-human-unanimous" | "operator-only";
   readonly publicationGrade: boolean;
   readonly candidateClasses: readonly string[];
-  readonly strata: readonly ("core" | "stress")[];
+  readonly strata: readonly string[];
 }
 
 function bare(digest: string): string {

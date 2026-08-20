@@ -162,7 +162,7 @@ function makeFixture(options: {
   readonly truthLabel: BinaryJudgmentTruthLabel;
   readonly response: Uint8Array;
   readonly candidateClass?: string;
-  readonly stratum?: "core" | "stress";
+  readonly stratum?: string;
   readonly taskInstrumentPin?: boolean;
   readonly evidence?: string;
   readonly parser?: BinaryJudgmentInstrument["response"]["parser"];
@@ -454,6 +454,23 @@ describe("binary judgment evaluator", () => {
     },
   );
 
+  // Declared stratum vocabulary (P4, spec §3.2): the delivery-registration path checks grammar
+  // only, not membership in a sealed vocabulary — a four-category name registers exactly like
+  // "core" or "stress" does.
+  test("a delivered outcome whose stratum is a grammar-conforming four-category name registers", async () => {
+    const completed = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("ACCEPT"),
+      stratum: "category-3",
+    }));
+    expect(completed.detailedOutcome).toMatchObject({ stratum: "category-3" });
+    expect(completed.measurements).toContainEqual({
+      name: BINARY_JUDGMENT_MEASUREMENTS.stratum,
+      value: "category-3",
+    });
+    expect(() => validateBinaryJudgmentCompletedEvaluation(completed)).not.toThrow();
+  });
+
   test("the adapter honours the instrument's selected response parser", async () => {
     // Same response bytes ("YES"), two instruments differing only in their sealed
     // response.parser: the PC-2 (binary-yes-no) instrument recognizes it as ACCEPT, while the
@@ -744,6 +761,10 @@ describe("binary judgment evaluator", () => {
     ["candidateClass", "not a closed class", BINARY_JUDGMENT_MEASUREMENTS.candidateClass],
     ["labelResolutionSha256", `sha256:${"A".repeat(64)}`, BINARY_JUDGMENT_MEASUREMENTS.labelResolutionSha256],
     ["instrumentSha256", "sha256:short", BINARY_JUDGMENT_MEASUREMENTS.instrumentSha256],
+    // Declared stratum vocabulary (P4, spec §3.2): the delivery-registration path checks grammar
+    // only. Neither a non-grammar-conforming name nor a non-string value registers.
+    ["stratum", "1bad", BINARY_JUDGMENT_MEASUREMENTS.stratum],
+    ["stratum", 7, BINARY_JUDGMENT_MEASUREMENTS.stratum],
   ] as const)(
     "outcome validation refuses an invalid %s",
     async (field, value, measurementName) => {

@@ -171,6 +171,7 @@ function reductionInput(matrix: MatrixRecord, cells = decisiveInputs(matrix), k 
     contexts: tasks.map((taskDigest) => ({ taskDigest, context: context(taskDigest) })),
     instruments: arms.map((armId) => ({ armId, instrumentSha256: armId === "armA" ? INSTRUMENT_A : INSTRUMENT_B })),
     cells,
+    strata: ["core", "stress"],
   };
 }
 
@@ -362,5 +363,25 @@ describe("reduceBinaryInstrumentReplicates", () => {
       () => reduceBinaryInstrumentReplicates({ ...base, cells: [unsupported, ...base.cells.slice(1)] }),
       "unsupported-vocabulary",
     );
+  });
+
+  // Declared stratum vocabulary (P4, spec §3.2): a context whose stratum is outside the sealed
+  // `strata` vocabulary refuses at method compute, distinct from and in addition to the grammar
+  // refusal enforced at import.
+  test("hard-fails a context whose stratum is outside the sealed strata vocabulary", () => {
+    const matrix = matrixFixture({ tasks: [TASK_A], arms: ["armA"] });
+    const base = reductionInput(matrix);
+    expect(context(TASK_A).stratum).toBe("core");
+    let caught: unknown;
+    try {
+      reduceBinaryInstrumentReplicates({ ...base, strata: ["stress"] });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      name: "BinaryInstrumentReductionError",
+      code: "unsupported-vocabulary",
+      message: "unsupported-vocabulary: contexts[0].context.stratum is not in the sealed stratum vocabulary",
+    });
   });
 });

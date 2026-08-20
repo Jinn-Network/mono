@@ -83,7 +83,7 @@ reviewer and report-authority role mappings needed by a copied bundle.
 
 V4 full HTML and Markdown present all four instruments, item/call/confusion
 counts, five registered rates with denominators and intervals, every declared
-candidate-class and core/stress slice, parser-invalid and instability facts,
+candidate-class and stratum slice, parser-invalid and instability facts,
 truth-admission status, exclusions/replacements, and stored limitations. Its
 badge, social card, and share text are narrower signposts: verified state, exact
 scope, full Report digest, and relative links only. They carry no rate,

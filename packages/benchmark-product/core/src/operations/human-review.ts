@@ -132,7 +132,7 @@ export interface HumanAdmissionCandidateInput {
   readonly itemId: string;
   readonly humanReviewEvaluationSpecSha256: string;
   readonly candidateClass: string;
-  readonly stratum: "core" | "stress";
+  readonly stratum: string;
   readonly poolPosition: number;
   readonly reviewVerdictSha256s?: readonly [string, string];
   readonly reviewers?: readonly [
