@@ -14,18 +14,18 @@ import {
   BINARY_JUDGMENT_PROFILE_DIGEST,
   BINARY_JUDGMENT_PROFILE_DIGEST_HEX,
   buildBinaryJudgmentProfile,
-} from "./binary-judgment-1.0.js";
+} from "./binary-judgment-2.0.js";
 
-describe("binary-judgment/1.0 sealed profile", () => {
+describe("binary-judgment/2.0 sealed profile", () => {
   it("pins a closed payload, one exact instrument requirement, and the three output slots", async () => {
     const profile = buildBinaryJudgmentProfile();
     const sealed = sealTaskProfile(profile);
     const bytes = await readFile(new URL(
-      "../../profiles/task-profiles/binary-judgment/1.0/profile.json",
+      "../../profiles/task-profiles/binary-judgment/2.0/profile.json",
       import.meta.url,
     ));
     const digest = (await readFile(new URL(
-      "../../profiles/task-profiles/binary-judgment/1.0/profile.sha256",
+      "../../profiles/task-profiles/binary-judgment/2.0/profile.sha256",
       import.meta.url,
     ), "utf8")).trim();
 
@@ -59,7 +59,11 @@ describe("binary-judgment/1.0 sealed profile", () => {
       question: "Question?",
       referenceAnswer: "Reference.",
       candidateAnswer: "Candidate.",
-      provenance: [{
+      provenance: {
+        sourceCommitment: `sha256:${"a".repeat(64)}`,
+        timestamp: "2026-03-09T00:00:00Z",
+      },
+      sources: [{
         digest: { sha256: "a".repeat(64) },
       }],
     };
@@ -71,12 +75,12 @@ describe("binary-judgment/1.0 sealed profile", () => {
       { ...valid, reviewerIds: ["one", "two"] },
       {
         ...valid,
-        provenance: [{ ...valid.provenance[0], annotations: { truthLabel: "CORRECT" } }],
+        sources: [{ ...valid.sources[0], annotations: { truthLabel: "CORRECT" } }],
       },
       {
         ...valid,
-        provenance: [{
-          ...valid.provenance[0],
+        sources: [{
+          ...valid.sources[0],
           uri: "https://example.test/stress/wrong",
         }],
       },
@@ -84,5 +88,60 @@ describe("binary-judgment/1.0 sealed profile", () => {
     ]) {
       expect(validate(leaked).ok).toBe(false);
     }
+  });
+
+  it("accepts an optional evidence string and rejects a non-string evidence value", () => {
+    const profile = buildBinaryJudgmentProfile();
+    const validate = compilePayloadValidator(
+      profile.payloadSchema,
+      canonicalJsonBytes(profile.payloadSchema),
+    );
+    const valid = {
+      itemId: "urn:uuid:22222222-2222-4222-8222-222222222222",
+      question: "Question?",
+      referenceAnswer: "Reference.",
+      candidateAnswer: "Candidate.",
+      provenance: {
+        sourceCommitment: `sha256:${"a".repeat(64)}`,
+        timestamp: "2026-03-09T00:00:00Z",
+      },
+      sources: [{
+        digest: { sha256: "a".repeat(64) },
+      }],
+    };
+    expect(validate({
+      ...valid,
+      evidence: "Synthetic passage: the fixture's own words.",
+    })).toStrictEqual({ ok: true });
+    expect(validate({ ...valid, evidence: 42 }).ok).toBe(false);
+  });
+
+  it("rejects the superseded 1.0 array-shaped provenance and an extra key inside provenance", () => {
+    const profile = buildBinaryJudgmentProfile();
+    const validate = compilePayloadValidator(
+      profile.payloadSchema,
+      canonicalJsonBytes(profile.payloadSchema),
+    );
+    const valid = {
+      itemId: "urn:uuid:22222222-2222-4222-8222-222222222222",
+      question: "Question?",
+      referenceAnswer: "Reference.",
+      candidateAnswer: "Candidate.",
+      provenance: {
+        sourceCommitment: `sha256:${"a".repeat(64)}`,
+        timestamp: "2026-03-09T00:00:00Z",
+      },
+      sources: [{
+        digest: { sha256: "a".repeat(64) },
+      }],
+    };
+    expect(validate({
+      ...valid,
+      provenance: [{ digest: { sha256: "a".repeat(64) } }],
+    }).ok).toBe(false);
+    expect(validate({
+      ...valid,
+      provenance: { ...valid.provenance, extra: "leak" },
+    }).ok).toBe(false);
   });
 });

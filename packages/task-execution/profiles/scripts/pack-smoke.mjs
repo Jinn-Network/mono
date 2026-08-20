@@ -94,7 +94,7 @@ if (TASK_PROFILE_FORMAT_URI !== "https://spec.jinn.network/profiles/task-profile
   throw new Error("root import failed");
 }
 if (EVAL_SEMANTICS_VERSION !== "4") throw new Error("semanticsVersion seed mismatch");
-if (BINARY_JUDGMENT_PROFILE_URI !== "https://spec.jinn.network/task-profiles/binary-judgment/1.0") {
+if (BINARY_JUDGMENT_PROFILE_URI !== "https://spec.jinn.network/task-profiles/binary-judgment/2.0") {
   throw new Error("binary-judgment root exports failed");
 }
 if (!BINARY_ACCEPT_REJECT_PARSER_IDENTITY.digest.startsWith("sha256:")) {
@@ -142,18 +142,23 @@ if (
 
 // The four sealed task-profile assets, resolved by subpath export — each matches its own
 // profile.sha256 (program §7.1: profile.json is the exact raw sealed bytes on disk).
-for (const profile of ["repository-work", "prediction-forecast", "evaluation-task", "binary-judgment"]) {
+for (const [profile, version] of [
+  ["repository-work", "1.0"],
+  ["prediction-forecast", "1.0"],
+  ["evaluation-task", "1.0"],
+  ["binary-judgment", "2.0"],
+]) {
   const jsonUrl = import.meta.resolve(
-    \`@jinn-network/task-execution-profiles/profiles/task-profiles/\${profile}/1.0/profile.json\`,
+    \`@jinn-network/task-execution-profiles/profiles/task-profiles/\${profile}/\${version}/profile.json\`,
   );
   const shaUrl = import.meta.resolve(
-    \`@jinn-network/task-execution-profiles/profiles/task-profiles/\${profile}/1.0/profile.sha256\`,
+    \`@jinn-network/task-execution-profiles/profiles/task-profiles/\${profile}/\${version}/profile.sha256\`,
   );
   const bytes = await readFile(fileURLToPath(jsonUrl));
   const pinned = (await readFile(fileURLToPath(shaUrl), "utf8")).trim();
   const actual = \`sha256:\${createHash("sha256").update(bytes).digest("hex")}\`;
   if (actual !== pinned) {
-    throw new Error(\`\${profile}/1.0/profile.json does not match its profile.sha256: \${actual} !== \${pinned}\`);
+    throw new Error(\`\${profile}/\${version}/profile.json does not match its profile.sha256: \${actual} !== \${pinned}\`);
   }
 }
 
@@ -165,7 +170,7 @@ for (const parser of ["binary-accept-reject", "binary-judgment-evaluation"]) {
   if (actual !== pinned) throw new Error(\`\${parser} semantics digest mismatch\`);
 }
 const requestOracleUrl = import.meta.resolve(
-  "@jinn-network/task-execution-profiles/fixtures/binary-judgment-request/golden/unicode-line-endings.json",
+  "@jinn-network/task-execution-profiles/fixtures/binary-judgment-request/golden/unicode-line-endings-profile-2.json",
 );
 const requestOracle = JSON.parse(await readFile(fileURLToPath(requestOracleUrl), "utf8"));
 if (

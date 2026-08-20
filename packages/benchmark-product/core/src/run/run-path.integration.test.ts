@@ -46,6 +46,7 @@ import { runResults } from "../operations/run-results.js";
 import { runStatus } from "../operations/run-status.js";
 import { runVerify } from "../operations/verify.js";
 import { sampleInit } from "../operations/sample.js";
+import type { ClaimPackage } from "../report/claim.js";
 import {
   LEGACY_VERDICT_EVALUATOR_ID,
   createVerdictDsseSigner,
@@ -108,6 +109,9 @@ interface PairedScenario {
   readonly rows: readonly ReturnType<typeof pairedRow>[];
   readonly verdictFor: (instanceId: string, armId: "baseline" | "candidate") => FixtureVerdict;
   readonly providerOutageOnce?: boolean;
+  /** spec §5.3: fails the run's first evaluation submission AND its retry (same cell leg),
+   * exhausting the sealed single-retry budget and terminalizing the cell as could-not-grade. */
+  readonly providerOutageTwice?: boolean;
 }
 
 function utf8(value: unknown): Uint8Array {
@@ -207,7 +211,20 @@ function pairedFixtureVenue(scenario: PairedScenario): LocalVenue {
     readonly verdict: FixtureVerdict;
   }>();
   let sequence = 0;
-  let providerOutageInjected = false;
+  // spec §5.3: `providerOutageOnce` fails the run's first evaluation submission once (the retry
+  // then succeeds); `providerOutageTwice` fails that SAME leg's retry too (the retry budget is
+  // sealed at 1, so a third attempt never happens). Both track the failing task's identity — the
+  // sha256 of the sealed evaluation Task bytes, which is stable across the retry because
+  // `deriveEvaluationTask` is a pure re-derivation of the same solve delivery — so every OTHER
+  // cell's evaluation always succeeds on its own first attempt, and this generalizes the
+  // original one-shot latch without changing its observable behavior.
+  const providerOutageBudget = scenario.providerOutageTwice === true
+    ? 2
+    : scenario.providerOutageOnce === true
+      ? 1
+      : 0;
+  let providerOutageTaskSha256: string | undefined;
+  let providerOutageFailures = 0;
 
   function store(bytes: Uint8Array): string {
     const digest = sha256Hex(bytes);
@@ -233,14 +250,18 @@ function pairedFixtureVenue(scenario: PairedScenario): LocalVenue {
       const attempt = `urn:uuid:00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`;
       const harnessId = submission.requirements?.harness?.id;
       const isEvaluation = harnessId === "evaluation-harness";
-      if (isEvaluation && scenario.providerOutageOnce === true && !providerOutageInjected) {
-        providerOutageInjected = true;
-        return {
-          accepted: false,
-          error: new TaskExecutionError("dependency-unavailable", {
-            detail: "fixture provider temporarily unavailable",
-          }),
-        };
+      if (isEvaluation && providerOutageBudget > 0) {
+        const evaluationTaskSha256 = sha256Hex(taskBytes);
+        if (providerOutageTaskSha256 === undefined) providerOutageTaskSha256 = evaluationTaskSha256;
+        if (evaluationTaskSha256 === providerOutageTaskSha256 && providerOutageFailures < providerOutageBudget) {
+          providerOutageFailures += 1;
+          return {
+            accepted: false,
+            error: new TaskExecutionError("dependency-unavailable", {
+              detail: "fixture provider temporarily unavailable",
+            }),
+          };
+        }
       }
       let outputName: string;
       let outputBytes: Uint8Array;
@@ -369,6 +390,9 @@ function pairedFixtureVenue(scenario: PairedScenario): LocalVenue {
 async function runPairedLifecycle(scenario: PairedScenario): Promise<{
   readonly comparison: PairedComparison;
   readonly bundleDir: string;
+  readonly matrix: ReturnType<typeof parseMatrix>;
+  readonly claimPackage: ClaimPackage;
+  readonly journalEntries: readonly RunJournalEntry[];
   readonly evaluationRecovery?: {
     readonly retryableFailures: number;
     readonly recoveredCells: number;
@@ -397,10 +421,16 @@ async function runPairedLifecycle(scenario: PairedScenario): Promise<{
     armId: "candidate",
     pinning: { harness: { id: PAIRED_CANDIDATE_HARNESS, version: "1" } },
   }).ok).toBe(true);
+  // spec §5.3: both outage knobs need the same sealed single-retry budget — `providerOutageOnce`
+  // to prove the recovered case, `providerOutageTwice` to prove the exhausted case. The budget
+  // itself is fixed at 1 either way, so a single `runResume` call always suffices below.
+  const needsInfrastructureRetryBudget =
+    scenario.providerOutageOnce === true || scenario.providerOutageTwice === true;
+
   expect(updateDraft(context, {
     draftId: scenario.draftId,
     patch: {
-      ...(scenario.providerOutageOnce === true
+      ...(needsInfrastructureRetryBudget
         ? { assurance: { preset: "direct-check", overrides: { maxInfrastructureRetries: 1 } } }
         : {}),
       analysis: {
@@ -420,7 +450,11 @@ async function runPairedLifecycle(scenario: PairedScenario): Promise<{
   expect(runLock(context, { draftId: scenario.draftId }).ok).toBe(true);
   const launched = await runLaunch(context, { draftId: scenario.draftId }, { createVenue });
   expect(launched.ok, JSON.stringify(launched)).toBe(true);
-  if (scenario.providerOutageOnce === true) {
+  if (needsInfrastructureRetryBudget) {
+    // Before the (single) resume: exactly one cell is pending its retry, whether that retry is
+    // about to recover (providerOutageOnce) or exhaust the leg (providerOutageTwice) — the two
+    // scenarios are indistinguishable at this point because only the FIRST failure has happened
+    // so far either way.
     const pending = runStatus(context, { draftId: scenario.draftId });
     expect(pending.ok && pending.result.evaluationRecovery?.pendingCells).toBe(1);
     const resumed = await runResume(context, { draftId: scenario.draftId }, { createVenue });
@@ -429,8 +463,11 @@ async function runPairedLifecycle(scenario: PairedScenario): Promise<{
   const finalStatus = runStatus(context, { draftId: scenario.draftId });
   expect(finalStatus.ok, JSON.stringify(finalStatus)).toBe(true);
   if (!finalStatus.ok) throw new Error("unreachable");
+  // Captured before the workspace is destroyed below (mirrors the Report read further down).
+  const journalEntries = readRunJournalEntries(workspaceDir, scenario.draftId);
   const collected = await runCollect(context, { draftId: scenario.draftId });
   expect(collected.ok, JSON.stringify(collected)).toBe(true);
+  if (!collected.ok) throw new Error("unreachable");
   expect(runResults(context, { draftId: scenario.draftId }).ok).toBe(true);
   const reported = await runReport(context, { draftId: scenario.draftId });
   expect(reported.ok, JSON.stringify(reported)).toBe(true);
@@ -441,10 +478,12 @@ async function runPairedLifecycle(scenario: PairedScenario): Promise<{
   expect(published.ok, JSON.stringify(published)).toBe(true);
   if (!published.ok) throw new Error("unreachable");
 
-  // Read the Report while the authenticated builder store is still present, then sever every
-  // dependency on that store before bundle verification. The detached bundle must survive after
-  // the entire originating workspace (sealed records, keys, journals, and artifacts) is gone.
+  // Read the Report and the sealed Matrix while the authenticated builder store is still
+  // present, then sever every dependency on that store before bundle verification. The detached
+  // bundle must survive after the entire originating workspace (sealed records, keys, journals,
+  // and artifacts) is gone.
   const report = parseReport(getSealedBytes(workspaceDir, reported.result.reportSha256));
+  const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
   const perSubject = (report.results as { readonly perSubject?: readonly { readonly results?: unknown }[] }).perSubject;
   expect(perSubject).toHaveLength(1);
 
@@ -468,6 +507,9 @@ async function runPairedLifecycle(scenario: PairedScenario): Promise<{
   return {
     comparison: perSubject![0]!.results as PairedComparison,
     bundleDir,
+    matrix,
+    claimPackage: reported.result.claimPackage,
+    journalEntries,
     ...(finalStatus.result.evaluationRecovery === undefined
       ? {}
       : { evaluationRecovery: finalStatus.result.evaluationRecovery }),
@@ -742,6 +784,18 @@ describe("paired-delta public lifecycle — P4b Task 8b", () => {
           expect(compact, `${path} leaked result number ${resultNumber}`).not.toContain(resultNumber);
         }
       }
+
+      // Compatible-widening proof (spec §5.6 note in materialize.ts): a run with no categorized
+      // could-not-grade terminal seals to the assembly shape it always did — no evaluation edge
+      // carries a `failureCategory` member when nothing ever terminalized ungradeable.
+      const [headerLine] = readFileSync(
+        join(outcome.bundleDir, "verification", "assembly.jsonl"),
+        "utf8",
+      ).trim().split("\n");
+      const header = JSON.parse(headerLine!);
+      for (const edge of header.graph.evaluations) {
+        expect(edge).not.toHaveProperty("failureCategory");
+      }
     },
     60_000,
   );
@@ -776,6 +830,105 @@ describe("paired-delta public lifecycle — P4b Task 8b", () => {
       expect(header.graph.evaluations).toEqual(expect.arrayContaining([
         expect.objectContaining({ evaluationAttempt: 2, verdictSha256: expect.any(String) }),
       ]));
+    },
+    60_000,
+  );
+
+  test(
+    "two typed provider outages on the same leg terminalize it as could-not-grade, and the accounted unscorable cell survives to the published bundle",
+    async () => {
+      const rows = [pairedRow(1, "example/ungradeable-a"), pairedRow(2, "example/ungradeable-b")];
+      const outcome = await runPairedLifecycle({
+        draftId: "paired-provider-ungradeable",
+        rows,
+        providerOutageTwice: true,
+        verdictFor: () => "pass",
+      });
+
+      // spec §5.3 rule 2: the SECOND failure on the same cell leg terminalizes it — never a
+      // silent retry past the sealed budget, never a recovered verdict.
+      expect(outcome.evaluationRecovery).toMatchObject({
+        retryableFailures: 1,
+        recoveredCells: 0,
+        exhaustedCells: 1,
+      });
+
+      const retryFailures = outcome.journalEntries.filter(
+        (entry): entry is Extract<RunJournalEntry, { kind: "evaluation-retryable-failure" }> =>
+          entry.kind === "evaluation-retryable-failure",
+      );
+      expect(retryFailures).toHaveLength(1);
+      expect(retryFailures[0]).toMatchObject({
+        evaluationAttempt: 1,
+        recoveryAdvice: "new-attempt-required",
+      });
+      const affectedCellKey = retryFailures[0]!.cellKey;
+
+      const evaluationEntriesForCell = outcome.journalEntries.filter(
+        (entry): entry is Extract<RunJournalEntry, { kind: "evaluation" }> =>
+          entry.kind === "evaluation" && entry.cellKey === affectedCellKey,
+      );
+      // Exactly one terminal for the affected leg — no verdict was ever journaled for it, and no
+      // third attempt exists past the exhausted retry budget (spec §5.3 rule 2).
+      expect(evaluationEntriesForCell).toHaveLength(1);
+      expect(evaluationEntriesForCell[0]).toMatchObject({
+        evaluationTerminal: "could-not-grade",
+        evaluationAttempt: 2,
+        failureCategory: "dependency-unavailable",
+      });
+
+      // spec §5.3 rule 3 / assemble.ts:198: the terminal maps to cell outcome "unscorable" —
+      // never a scored verdict (this harness's decision vocabulary is pass/fail; "no verdict at
+      // all" is the exact equivalent of the binary-judgment spec's "never a scored REJECT").
+      const affectedCell = outcome.matrix.cells.find((cell) => cell.cellKey === affectedCellKey);
+      expect(affectedCell?.outcome).toBe("unscorable");
+      expect(affectedCell?.verdicts).toEqual([]);
+
+      // spec §5.4: one ungradeable cell forces the sealed Matrix's full-claim-closure
+      // disclosure — exactly one cell short of expected, never silently rounded away.
+      expect(outcome.matrix.completeness).toMatchObject({ floor: "1", runOutcome: "partial" });
+      expect(outcome.matrix.completeness.expected - outcome.matrix.completeness.judged).toBe(1);
+
+      const affectedArmAttrition = outcome.matrix.attrition.perArm[affectedCell!.armId];
+      expect(affectedArmAttrition?.unscorable).toBeGreaterThan(0);
+
+      // spec §5.4 / claim.ts:677-678: the Claim copies completeness and attrition verbatim from
+      // the Matrix, never a re-derivation that could disagree with the sealed record.
+      expect(outcome.claimPackage.completeness).toEqual(outcome.matrix.completeness);
+      expect(outcome.claimPackage.attrition).toEqual(outcome.matrix.attrition);
+
+      const [headerLine] = readFileSync(
+        join(outcome.bundleDir, "verification", "assembly.jsonl"),
+        "utf8",
+      ).trim().split("\n");
+      const header = JSON.parse(headerLine!);
+      expect(header.graph.evaluationRetries).toEqual([
+        expect.objectContaining({
+          cellKey: affectedCellKey,
+          evaluationAttempt: 1,
+          failureCategory: "dependency-unavailable",
+          recoveryAdvice: "new-attempt-required",
+        }),
+      ]);
+      // spec §5.6's verification obligation: failureCategory must survive onto the TERMINAL edge
+      // in `graph.evaluations` too, not just the retries edge above — this is the coordinator's
+      // materialize.ts change (the packet's one production edit) under test here. No
+      // verdictSha256: this leg never produced one.
+      const terminalEvaluationEdges = header.graph.evaluations.filter(
+        (edge: { readonly cellKey: string }) => edge.cellKey === affectedCellKey,
+      );
+      expect(terminalEvaluationEdges).toEqual([
+        expect.objectContaining({
+          evaluationAttempt: 2,
+          evaluationTerminal: "could-not-grade",
+          failureCategory: "dependency-unavailable",
+        }),
+      ]);
+      expect(terminalEvaluationEdges[0]).not.toHaveProperty("verdictSha256");
+
+      // Cold verifyPublicBundle already ran inside runPairedLifecycle, against the detached
+      // bundle after the source workspace was destroyed, and asserted the same six checks —
+      // partial completeness is a disclosed, cold-verifiable fact, never a refusal (spec §5.4).
     },
     60_000,
   );

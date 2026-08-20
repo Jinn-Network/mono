@@ -41,6 +41,7 @@ const ITEM_A_ID = "urn:uuid:00000000-0000-4000-8000-000000000001";
 const ITEM_B_ID = "urn:uuid:00000000-0000-4000-8000-000000000002";
 const ITEM_C_ID = "urn:uuid:00000000-0000-4000-8000-000000000003";
 const PROVENANCE = sha("a");
+const PUBLISHED_AT = "2026-03-09T00:00:00Z";
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -52,18 +53,20 @@ function item(itemId: string, candidateAnswer: string) {
     question: "Which synthetic answer follows from the synthetic reference?",
     referenceAnswer: "The admitted synthetic answer.",
     candidateAnswer,
-    provenance: [{ digest: { sha256: PROVENANCE.slice("sha256:".length) } }],
+    provenance: { sourceCommitment: PROVENANCE, timestamp: PUBLISHED_AT },
+    sources: [{ digest: { sha256: PROVENANCE.slice("sha256:".length) } }],
   };
 }
 
-function sourceJsonl(): string {
-  return renderCanonicalJsonl([{
+function sourceRow(character: string, publishedAt: string) {
+  const provenanceSha256 = sha(character);
+  return {
     protocol: BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
-    provenanceSha256: PROVENANCE,
+    provenanceSha256,
     source: {
       name: "synthetic-item-source.json",
-      uri: "https://fixtures.example.test/binary/source.json",
-      digest: { sha256: PROVENANCE.slice("sha256:".length) },
+      uri: `https://fixtures.example.test/binary/source-${character}.json`,
+      digest: { sha256: provenanceSha256.slice("sha256:".length) },
       mediaType: "application/json",
     },
     license: {
@@ -78,7 +81,12 @@ function sourceJsonl(): string {
       digest: { sha256: "c".repeat(64) },
       mediaType: "text/plain",
     },
-  }]);
+    publishedAt,
+  };
+}
+
+function sourceJsonl(): string {
+  return renderCanonicalJsonl([sourceRow("a", PUBLISHED_AT)]);
 }
 
 function itemsJsonl(items: readonly ReturnType<typeof item>[]): string {
@@ -233,7 +241,7 @@ describe("convertBinaryItemBank", () => {
       "validation",
     );
 
-    const leaking = { ...admitted, provenance: [{ digest: { sha256: "a".repeat(64) }, uri: "https://secret" }] };
+    const leaking = { ...admitted, sources: [{ digest: { sha256: "a".repeat(64) }, uri: "https://secret" }] };
     expectProductError(
       () => convertBinaryItemBank({
         draftId: "draft-1",
@@ -322,5 +330,135 @@ describe("convertBinaryItemBank", () => {
       }),
       "record-integrity",
     );
+  });
+});
+
+describe("convertBinaryItemBank — evidence uniformity, anti-truth-channel, and provenance verification (§2.4)", () => {
+  test("rejects a source-digest sources entry with no matching source row", () => {
+    const admitted = item(ITEM_A_ID, "answer");
+    const evidence = seedEvidence({ admitted: [admitted] });
+    const unmapped = { ...admitted, sources: [{ digest: { sha256: "f".repeat(64) } }] };
+    const error = expectProductError(
+      () => convert({ itemRows: [unmapped], evidence }),
+      "validation",
+    );
+    expect(error.issues).toEqual([{
+      path: "items.1.item.sources",
+      message: `no source row maps ${sha("f")}`,
+    }]);
+  });
+
+  test("rejects a source row that no item's sources reference as unused", () => {
+    const admitted = item(ITEM_A_ID, "answer");
+    const evidence = seedEvidence({ admitted: [admitted] });
+    const error = expectProductError(
+      () => convert({
+        itemRows: [admitted],
+        evidence,
+        sourceManifestJsonl: renderCanonicalJsonl([sourceRow("a", PUBLISHED_AT), sourceRow("d", "2026-04-01T00:00:00Z")]),
+      }),
+      "validation",
+    );
+    expect(error.issues).toEqual([{ path: "sources", message: `unused source row ${sha("d")}` }]);
+  });
+
+  test("refuses a bank mixing evidence-carrying and evidence-free items", () => {
+    const withEvidence = { ...item(ITEM_A_ID, "answer one"), evidence: "Direct synthetic check one." };
+    const withoutEvidence = item(ITEM_B_ID, "answer two");
+    const evidence = seedEvidence({ admitted: [withEvidence] });
+    const error = expectProductError(
+      () => convert({ itemRows: [withEvidence, withoutEvidence], evidence }),
+      "validation",
+    );
+    expect(error.issues).toEqual([{
+      path: "items",
+      message: "evidence must be present on every item or on none",
+    }]);
+  });
+
+  test("imports cleanly when every item in the bank carries evidence", () => {
+    // Distinct questions, so the anti-truth-channel invariant is not what this case exercises.
+    const first = {
+      ...item(ITEM_A_ID, "answer one"),
+      question: "Which synthetic answer follows from the first synthetic reference?",
+      evidence: "Direct synthetic check one.",
+    };
+    const second = {
+      ...item(ITEM_B_ID, "answer two"),
+      question: "Which synthetic answer follows from the second synthetic reference?",
+      evidence: "Direct synthetic check two.",
+    };
+    const evidence = seedEvidence({ admitted: [first, second] });
+    const result = convert({ itemRows: [first, second], evidence });
+    expect(result.items).toHaveLength(2);
+    expect(result.items.map((entry) => entry.itemId).sort()).toEqual([ITEM_A_ID, ITEM_B_ID]);
+  });
+
+  test("refuses two items sharing question bytes but carrying different evidence", () => {
+    const question = "Shared synthetic question across two colliding items?";
+    const first = { ...item(ITEM_A_ID, "answer one"), question, evidence: "Evidence A." };
+    const second = { ...item(ITEM_B_ID, "answer two"), question, evidence: "Evidence B." };
+    const evidence = seedEvidence({ admitted: [first] });
+    const error = expectProductError(
+      () => convert({ itemRows: [first, second], evidence }),
+      "validation",
+    );
+    expect(error.issues).toEqual([{
+      path: "items.2.item.evidence",
+      message: "items sharing a question must carry identical evidence",
+    }]);
+  });
+
+  test("imports cleanly when two items sharing question bytes carry identical evidence", () => {
+    const question = "Shared synthetic question across two agreeing items?";
+    const first = { ...item(ITEM_A_ID, "answer one"), question, evidence: "Same synthetic evidence." };
+    const second = { ...item(ITEM_B_ID, "answer two"), question, evidence: "Same synthetic evidence." };
+    const evidence = seedEvidence({ admitted: [first, second] });
+    const result = convert({ itemRows: [first, second], evidence });
+    expect(result.items).toHaveLength(2);
+  });
+
+  test("refuses a sourceCommitment that is not the code-unit-least digest among the item's sources", () => {
+    const wrongItem = {
+      itemId: ITEM_A_ID,
+      question: "Which synthetic answer follows from the two-source reference?",
+      referenceAnswer: "The admitted synthetic answer.",
+      candidateAnswer: "answer",
+      // "f" sorts after "a"; the least digest is PROVENANCE ("a"), so naming "f" here is wrong.
+      provenance: { sourceCommitment: sha("f"), timestamp: "2026-05-20T00:00:00Z" },
+      sources: [
+        { digest: { sha256: PROVENANCE.slice("sha256:".length) } },
+        { digest: { sha256: "f".repeat(64) } },
+      ],
+    };
+    const evidence = seedEvidence({ admitted: [item(ITEM_C_ID, "unrelated")] });
+    const error = expectProductError(
+      () => convert({
+        itemRows: [wrongItem],
+        evidence,
+        sourceManifestJsonl: renderCanonicalJsonl([sourceRow("a", PUBLISHED_AT), sourceRow("f", "2026-05-20T00:00:00Z")]),
+      }),
+      "validation",
+    );
+    expect(error.issues).toEqual([{
+      path: "items.1.item.provenance.sourceCommitment",
+      message: "sourceCommitment must be the code-unit-least digest in the item's sources",
+    }]);
+  });
+
+  test("refuses a timestamp that disagrees with the named source row's publishedAt", () => {
+    const wrongTimestamp = {
+      ...item(ITEM_A_ID, "answer"),
+      provenance: { sourceCommitment: PROVENANCE, timestamp: "2099-01-01T00:00:00Z" },
+    };
+    const evidence = seedEvidence({ admitted: [item(ITEM_C_ID, "unrelated")] });
+    const error = expectProductError(
+      () => convert({ itemRows: [wrongTimestamp], evidence }),
+      "validation",
+    );
+    expect(error.issues).toEqual([{
+      path: "items.1.item.provenance.timestamp",
+      message: "timestamp must equal the publishedAt of the source row named by sourceCommitment",
+    }]);
   });
 });

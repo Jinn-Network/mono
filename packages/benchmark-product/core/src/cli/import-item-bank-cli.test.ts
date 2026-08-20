@@ -37,12 +37,14 @@ describe("colophon import item-bank", () => {
     expect(initWorkspace(operationContext).ok).toBe(true);
     expect(createDraft(operationContext, { draftId: "d1", name: "Binary CLI" }).ok).toBe(true);
     const provenanceSha256 = `sha256:${"a".repeat(64)}` as const;
+    const publishedAt = "2026-03-09T00:00:00Z";
     const item = {
       itemId: "urn:uuid:20000000-0000-4000-8000-000000000001",
       question: "Synthetic CLI question?",
       referenceAnswer: "Reference.",
       candidateAnswer: "Candidate.",
-      provenance: [{ digest: { sha256: provenanceSha256.slice("sha256:".length) } }],
+      provenance: { sourceCommitment: provenanceSha256, timestamp: publishedAt },
+      sources: [{ digest: { sha256: provenanceSha256.slice("sha256:".length) } }],
     };
     const itemBytes = canonicalJsonBytes(item);
     const itemSha256 = recordDigest(itemBytes);
@@ -73,6 +75,7 @@ describe("colophon import item-bank", () => {
       source: { uri: "https://fixtures.example.test/source", digest: { sha256: "a".repeat(64) } },
       license: { uri: "https://fixtures.example.test/license", digest: { sha256: "b".repeat(64) } },
       attribution: { uri: "https://fixtures.example.test/attribution", digest: { sha256: "c".repeat(64) } },
+      publishedAt,
     }]));
     writeFileSync(admissionsPath, renderCanonicalJsonl([{
       protocol: BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
@@ -86,7 +89,7 @@ describe("colophon import item-bank", () => {
       "import", "item-bank",
       "--workspace", workspaceDir,
       "--principal", "sponsor-1",
-      "--profile", "binary-judgment@1",
+      "--profile", "binary-judgment@2",
       "--draft", "d1",
       "--items", itemsPath,
       "--sources", sourcesPath,
@@ -107,7 +110,7 @@ describe("colophon import item-bank", () => {
       "import", "item-bank",
       "--workspace", workspaceDir,
       "--principal", "sponsor-1",
-      "--profile", "binary-judgment@2",
+      "--profile", "binary-judgment@1",
       "--draft", "d1",
       "--items", itemsPath,
       "--sources", sourcesPath,
@@ -125,7 +128,7 @@ describe("colophon import item-bank", () => {
       "import", "item-bank",
       "--workspace", workspaceDir,
       "--principal", "sponsor-1",
-      "--profile", "binary-judgment@1",
+      "--profile", "binary-judgment@2",
       "--draft", "d1",
       "--items", itemsPath,
       "--sources", sourcesPath,

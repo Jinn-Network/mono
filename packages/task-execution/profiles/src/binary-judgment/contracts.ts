@@ -14,6 +14,7 @@ import {
   BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
 } from "../identifiers.js";
 import { compareCodeUnitStrings } from "../order.js";
+import { ProfilesError } from "../errors.js";
 import { assertValidDocument, parseJsonDocument } from "../zod-parse.js";
 
 const Sha256DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
@@ -22,6 +23,18 @@ const NonEmptyStringSchema = z.string().min(1);
 export const BinaryJudgmentItemIdSchema = z.string().regex(
   /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
 );
+
+/**
+ * RFC 3339 instant SHAPE, seconds precision, no fractional part. This is a shape pin, not a
+ * calendar evaluation: calendar strictness is enforced once, on the source-manifest row that this
+ * value is copied from (`verify/src/admission/intake.ts`, via `isCalendarStrictRfc3339`), and is
+ * re-checked at read by `resolveBenchmarkTaskProvenance`. Fractional seconds are excluded because
+ * the value is a source publication instant and because a fraction-admitting pattern fails this
+ * package's own safe-regex ReDoS pre-filter (`task-profile/payload-schema.ts`).
+ */
+export const BINARY_JUDGMENT_TIMESTAMP_PATTERN =
+  "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(Z|[+-]\\d{2}:\\d{2})$";
+const Rfc3339InstantShapeSchema = z.string().regex(new RegExp(BINARY_JUDGMENT_TIMESTAMP_PATTERN, "u"));
 
 function decodeCanonicalBase64(value: string): Uint8Array | undefined {
   try {
@@ -69,9 +82,9 @@ export function decodeBinaryJudgmentInlineMaterial(
 }
 
 /**
- * A digest-only in-toto ResourceDescriptor projection for solver-visible provenance. Source
- * names and locators remain in the source manifest because even an innocent-looking URI can
- * become a covert truth/class channel into the judge Task.
+ * A digest-only in-toto ResourceDescriptor projection for solver-visible provenance, carried in
+ * the payload's `sources` list. Source names and locators remain in the source manifest because
+ * even an innocent-looking URI can become a covert truth/class channel into the judge Task.
  */
 export const BinaryJudgmentProvenanceDescriptorSchema = z.strictObject({
   digest: z.strictObject({ sha256: Sha256HexSchema }),
@@ -96,14 +109,24 @@ export const BinaryJudgmentPayloadSchema = z.strictObject({
   question: z.string(),
   referenceAnswer: z.string(),
   candidateAnswer: z.string(),
-  provenance: z.array(BinaryJudgmentProvenanceDescriptorSchema).min(1),
+  evidence: z.string().optional(),
+  provenance: z.strictObject({
+    sourceCommitment: Sha256DigestSchema,
+    timestamp: Rfc3339InstantShapeSchema,
+  }),
+  sources: z.array(BinaryJudgmentProvenanceDescriptorSchema).min(1),
 });
 export type BinaryJudgmentPayload = z.infer<typeof BinaryJudgmentPayloadSchema>;
 
-export const BINARY_JUDGMENT_TEMPLATE_FIELDS = [
+export const BINARY_JUDGMENT_REQUIRED_TEMPLATE_FIELDS = [
   "question",
   "referenceAnswer",
   "candidateAnswer",
+] as const;
+export const BINARY_JUDGMENT_OPTIONAL_TEMPLATE_FIELDS = ["evidence"] as const;
+export const BINARY_JUDGMENT_TEMPLATE_FIELDS = [
+  ...BINARY_JUDGMENT_REQUIRED_TEMPLATE_FIELDS,
+  ...BINARY_JUDGMENT_OPTIONAL_TEMPLATE_FIELDS,
 ] as const;
 export type BinaryJudgmentTemplateField = (typeof BINARY_JUDGMENT_TEMPLATE_FIELDS)[number];
 
@@ -322,7 +345,7 @@ export const BinaryJudgmentInstrumentSchema = z
         if ("field" in segment) usedFields.add(segment.field);
       }
     }
-    for (const field of BINARY_JUDGMENT_TEMPLATE_FIELDS) {
+    for (const field of BINARY_JUDGMENT_REQUIRED_TEMPLATE_FIELDS) {
       if (!usedFields.has(field)) {
         ctx.addIssue({
           code: "custom",
@@ -352,6 +375,20 @@ export const BinaryJudgmentInstrumentSchema = z
     }
   });
 export type BinaryJudgmentInstrument = z.infer<typeof BinaryJudgmentInstrumentSchema>;
+
+/**
+ * The one declaration mechanism (program §2.2): an instrument declares evidence iff at least one
+ * message segment names the `evidence` field. There is deliberately no second mechanism (no
+ * boolean flag, no enum) — callers that need to know whether evidence is in play scan the
+ * segments themselves via this helper rather than trusting a parallel, driftable signal.
+ */
+export function binaryJudgmentInstrumentDeclaresEvidence(
+  instrument: BinaryJudgmentInstrument,
+): boolean {
+  return instrument.messages.some((message) => (
+    message.segments.some((segment) => "field" in segment && segment.field === "evidence")
+  ));
+}
 
 export const BinaryJudgmentSemanticRequestSchema = z.strictObject({
   model: z.enum(ACCEPTED_JUDGE_MODEL_IDS),
@@ -384,10 +421,28 @@ export function renderBinaryJudgmentMessages(
     instrumentInput,
     "BinaryJudgmentInstrument",
   );
+  const payloadFields: Partial<Record<BinaryJudgmentTemplateField, string>> = payload;
+  // Total-function guarantee: `evidence` became optional on the payload, so a renderer that
+  // blindly interpolated could silently emit the literal string "undefined" into a judge prompt.
+  // Refuse before any concatenation instead, through the same ProfilesError shape
+  // `assertValidDocument` produces — this is what makes `preview` refuse rather than rehearsing a
+  // prompt containing "undefined". This is NOT a second enforcement point for the arm-to-bank
+  // evidence rule, which is enforced at lock in another package.
+  for (const message of instrument.messages) {
+    for (const segment of message.segments) {
+      if ("field" in segment && payloadFields[segment.field] === undefined) {
+        throw new ProfilesError(
+          "invalid-document",
+          `BinaryJudgmentPayload failed schema validation: ${segment.field}: instrument segment `
+            + `interpolates ${segment.field} but the payload does not carry it`,
+        );
+      }
+    }
+  }
   return instrument.messages.map((message) => ({
     role: message.role,
     text: message.segments.map((segment) => (
-      "literal" in segment ? segment.literal : payload[segment.field]
+      "literal" in segment ? segment.literal : payloadFields[segment.field]!
     )).join(""),
   }));
 }

@@ -1358,6 +1358,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/admission-receipt/adversarial/unsigned.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/admission-receipt/adversarial/wrong-subject.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/admission-receipt/golden/valid-signed.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings-profile-2.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/composite/adversarial/composite-depth-3.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/composite/adversarial/composite-fanout-33.json | — | — | — |
@@ -1479,8 +1480,8 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/1.0.0/semantics.json | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/1.0.0/semantics.sha256 | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profile/v1/profile.json | — | — | https://spec.jinn.network/profiles/task-profile/v1 |
-| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/binary-judgment/1.0/profile.json | — | — | https://spec.jinn.network/task-profiles/binary-judgment/1.0 |
-| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/binary-judgment/1.0/profile.sha256 | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/binary-judgment/2.0/profile.json | — | — | https://spec.jinn.network/task-profiles/binary-judgment/2.0 |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/binary-judgment/2.0/profile.sha256 | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/evaluation-task/1.0/profile.json | — | — | https://spec.jinn.network/task-profiles/evaluation-task/1.0 |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/evaluation-task/1.0/profile.sha256 | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json | — | — | https://spec.jinn.network/task-profiles/prediction-forecast/1.0 |
@@ -1686,14 +1687,14 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | https://spec.jinn.network/schemas/information-world/v1 | `$id` | schemas | @jinn-network/information-world | packages/environments/information-world/schemas/information-world.schema.json |
 | https://spec.jinn.network/schemas/trace-derivation-statement/v1 | `$id` | schemas | @jinn-network/evidence-trace | packages/evidence/trace/schemas/trace-derivation-statement.schema.json |
 | https://spec.jinn.network/schemas/trace/v1 | `$id` | schemas | @jinn-network/evidence-trace | packages/evidence/trace/schemas/trace.schema.json |
-| https://spec.jinn.network/task-profiles/binary-judgment/1.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/binary-judgment/1.0/profile.json |
+| https://spec.jinn.network/task-profiles/binary-judgment/2.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/binary-judgment/2.0/profile.json |
 | https://spec.jinn.network/task-profiles/evaluation-task/1.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/evaluation-task/1.0/profile.json |
 | https://spec.jinn.network/task-profiles/prediction-forecast/1.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json |
 | https://spec.jinn.network/task-profiles/repository-work/1.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/repository-work/1.0/profile.json |
 
 ## Architecture-control ownership
 
-Task 6's validator reports 5008 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 5009 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1701,13 +1702,13 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 32 |
 | boundaryPolicies | 26 |
 | catalogManifests | 97 |
-| catalogPublicSurfaces | 1329 |
+| catalogPublicSurfaces | 1330 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 62 |
 | conformanceSources | 31 |
 | decisionRecords | 6 |
-| discoveredFirstPartySurfaces | 4160 |
-| generatedOutputSources | 1391 |
+| discoveredFirstPartySurfaces | 4161 |
+| generatedOutputSources | 1392 |
 | generatorSources | 676 |
 | marketplaceControl | 2 |
 | requiredGates | 25 |

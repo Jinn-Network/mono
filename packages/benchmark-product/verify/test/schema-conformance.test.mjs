@@ -64,6 +64,37 @@ test("every golden assembly row validates against assembly-row.schema.json", () 
   }
 });
 
+test("an ungradeable terminal edge carrying failureCategory validates, and the row's declared members match the verifier's own Zod shape", async () => {
+  // The golden bundle has no could-not-grade terminal, so no golden row exercises
+  // `failureCategory` on an `evaluations` edge. Synthesize one from the golden header.
+  const validate = ajv.compile(loadSchema("assembly-row.schema.json"));
+  const header = JSON.parse(
+    readFileSync(join(golden, "verification", "assembly.jsonl"), "utf8").split("\n")[0],
+  );
+  const graded = header.graph.evaluations[0];
+  header.graph.evaluations = [{
+    cellKey: graded.cellKey,
+    evalIndex: graded.evalIndex,
+    evaluationAttempt: 2,
+    evaluator: graded.evaluator,
+    evalTaskSha256: graded.evalTaskSha256,
+    evaluationTerminal: "could-not-grade",
+    failureCategory: "dependency-unavailable",
+  }];
+  assert.equal(validate(header), true, JSON.stringify(validate.errors, null, 1));
+
+  // The instance check above cannot stand alone: these row objects deliberately permit unknown
+  // members, so it would still pass if the schema stopped declaring `failureCategory` at all.
+  // Anti-drift, in this file's own idiom: compare the published property set against the BUILT
+  // Zod shape the verifier actually enforces, so either side drifting breaks this test.
+  const { BundleAssemblyHeaderSchema } = await import("../dist/index.js");
+  assert.deepEqual(
+    Object.keys(loadSchema("assembly-row.schema.json").$defs.header.properties.graph
+      .properties.evaluations.items.properties).sort(),
+    Object.keys(BundleAssemblyHeaderSchema.shape.graph.shape.evaluations.element.shape).sort(),
+  );
+});
+
 test("schema discriminators are pinned to the verifier's own exported literals", async () => {
   // Anti-drift: assert against the BUILT package exports, not string copies, so
   // renaming a format constant in src/ breaks this test rather than silently

@@ -27,7 +27,11 @@ const ANALYSIS_PROTOCOL = "https://spec.jinn.network/binary-judgment/analysis-co
 const SPEC_PROTOCOL = "https://spec.jinn.network/profiles/evaluation-spec/v1";
 const PARSER_ID = "network.jinn.parser.binary-judgment-evaluation";
 const PARSER_VERSION = "1.0.0";
-const TASK_PROFILE_DIGEST = "sha256:40f43e4ab9942f310da716e28ba2c1b8731fdf3c3837bb821573d4d8a0ec259d" as const;
+const TASK_PROFILE_DIGEST = "sha256:ebb34d8362e2cc3135847a5ad6f3ee3d9c2d9922a2b827aa9dfcbaf440b22557" as const;
+const TASK_PROFILE_URI = "https://spec.jinn.network/task-profiles/binary-judgment/2.0" as const;
+// Superseded binary-judgment/1.0 identity, retained only to prove the method refuses it.
+const OLD_TASK_PROFILE_DIGEST = "sha256:40f43e4ab9942f310da716e28ba2c1b8731fdf3c3837bb821573d4d8a0ec259d" as const;
+const OLD_TASK_PROFILE_URI = "https://spec.jinn.network/task-profiles/binary-judgment/1.0" as const;
 const RESPONSE_PARSER_DIGEST = "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073" as const;
 const EVALUATION_METHOD_DIGEST = "sha256:41b36eaffbac8c78133afd2075ec32fd73ed324395fe281dee525db17653937f" as const;
 const RUN_OWNER = "urn:uuid:77777777-7777-5777-8777-777777777777";
@@ -312,6 +316,7 @@ function makeFixture(options: {
   readonly truthAdmission?: "two-human-unanimous" | "operator-only";
   readonly labelTruthAdmission?: "two-human-unanimous" | "operator-only";
   readonly taskProfileDigest?: `sha256:${string}`;
+  readonly taskProfileUri?: string;
   readonly responseParserDigest?: `sha256:${string}`;
   readonly evaluationParserDigest?: `sha256:${string}`;
   readonly extraRunArm?: boolean;
@@ -327,6 +332,10 @@ function makeFixture(options: {
   readonly judgeModel?: string;
   readonly undeclaredModelArm?: string;
   readonly generationMismatchArm?: string;
+  readonly payloadEvidence?: string;
+  readonly invalidPayloadEvidence?: boolean;
+  readonly arrayProvenance?: boolean;
+  readonly extraPayloadField?: boolean;
 } = {}): {
   readonly input: MethodComputeInput;
   readonly matrix: MatrixRecord;
@@ -373,7 +382,13 @@ function makeFixture(options: {
       question: `What is the synthetic answer for ${seed.id}?`,
       referenceAnswer: "reference",
       candidateAnswer: seed.truthLabel === "CORRECT" ? "reference" : "different",
-      provenance: [{ digest: { sha256: sha(`source:${seed.id}`) } }],
+      ...(options.payloadEvidence !== undefined ? { evidence: options.payloadEvidence } : {}),
+      ...(options.invalidPayloadEvidence === true ? { evidence: 123 } : {}),
+      provenance: options.arrayProvenance === true
+        ? [{ digest: { sha256: sha(`source:${seed.id}`) } }]
+        : { sourceCommitment: `sha256:${sha(`source:${seed.id}`)}`, timestamp: "2026-08-14T22:00:00Z" },
+      sources: [{ digest: { sha256: sha(`source:${seed.id}`) } }],
+      ...(options.extraPayloadField === true ? { "https://fixtures.example.test/payload-extra": true } : {}),
     };
     const itemSha256 = resourceDigest(payload);
     const resolvedItemId = options.tamper?.kind === "task-item-id" && seed.id === "correct"
@@ -457,7 +472,7 @@ function makeFixture(options: {
     const taskBytes = sealTask({
       protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       profile: {
-        uri: "https://spec.jinn.network/task-profiles/binary-judgment/1.0",
+        uri: options.taskProfileUri ?? TASK_PROFILE_URI,
         digest: { sha256: (options.taskProfileDigest ?? TASK_PROFILE_DIGEST).slice("sha256:".length) },
         ...(options.extraProfileField === true ? { "https://fixtures.example.test/profile-extra": true } : {}),
       },
@@ -782,6 +797,8 @@ describe("binary-instrument@1 tamper refusals", () => {
     { taskProfileDigest: `sha256:${"f".repeat(64)}` as const },
     { responseParserDigest: `sha256:${"f".repeat(64)}` as const },
     { evaluationParserDigest: `sha256:${"f".repeat(64)}` as const },
+    { taskProfileDigest: OLD_TASK_PROFILE_DIGEST },
+    { taskProfileUri: OLD_TASK_PROFILE_URI },
   ])("rejects drift from frozen profile and parser semantics: %o", (drift) => {
     const fixture = makeFixture(drift);
     const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
@@ -894,6 +911,36 @@ describe("binary-instrument@1 tamper refusals", () => {
     const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
     expect(() => method.compute!(input)).toThrow(expect.objectContaining({
       code: "binary-binding-mismatch",
+    }));
+  });
+
+  test("accepts a Task payload carrying an evidence string", () => {
+    const fixture = makeFixture({ payloadEvidence: "Synthetic supporting evidence text for the fixture item." });
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    expect(() => method.compute!(fixture.input)).not.toThrow();
+  });
+
+  test("rejects a Task payload whose evidence is not a string", () => {
+    const fixture = makeFixture({ invalidPayloadEvidence: true });
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    expect(() => method.compute!(fixture.input)).toThrow(expect.objectContaining({
+      code: "binary-record-malformed",
+    }));
+  });
+
+  test("rejects a Task payload carrying an unknown extra key", () => {
+    const fixture = makeFixture({ extraPayloadField: true });
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    expect(() => method.compute!(fixture.input)).toThrow(expect.objectContaining({
+      code: "binary-record-malformed",
+    }));
+  });
+
+  test("rejects a Task payload whose provenance is the superseded array form", () => {
+    const fixture = makeFixture({ arrayProvenance: true });
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    expect(() => method.compute!(fixture.input)).toThrow(expect.objectContaining({
+      code: "binary-record-malformed",
     }));
   });
 });

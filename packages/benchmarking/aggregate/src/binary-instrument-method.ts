@@ -29,8 +29,10 @@ const CANDIDATE_CLASS = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
 const INSTRUMENT_REQUIREMENT_KEY = "network.jinn.binary-judgment.instrument";
 const ITEM_COMMITMENT_KEY = "network.jinn.binary-judgment.item-sha256";
 const TASK_PROTOCOL = "https://spec.jinn.network/profiles/task-execution/v1";
-const TASK_PROFILE_URI = "https://spec.jinn.network/task-profiles/binary-judgment/1.0";
-const TASK_PROFILE_SHA256 = "40f43e4ab9942f310da716e28ba2c1b8731fdf3c3837bb821573d4d8a0ec259d";
+// Hand-mirrored from packages/task-execution/profiles/src/{identifiers.ts,documents/binary-judgment-2.0.ts}
+// because this package deliberately does not depend on @jinn-network/task-execution-profiles.
+const TASK_PROFILE_URI = "https://spec.jinn.network/task-profiles/binary-judgment/2.0";
+const TASK_PROFILE_SHA256 = "ebb34d8362e2cc3135847a5ad6f3ee3d9c2d9922a2b827aa9dfcbaf440b22557";
 const INSTRUMENT_PROTOCOL = "https://spec.jinn.network/binary-judgment/judge-instrument/v1";
 const OBSERVATION_PROTOCOL = "https://spec.jinn.network/binary-judgment/judge-observation/v1";
 const ANALYSIS_CONTEXT_PROTOCOL = "https://spec.jinn.network/binary-judgment/analysis-context/v1";
@@ -289,18 +291,24 @@ function resolveExactJson(
   return document;
 }
 
+/**
+ * `optional` names keys that may be present or absent without affecting the verdict; every key
+ * not in `expected` or `optional` still fails closed, so an optional slot never widens the set of
+ * admitted unknown fields — it only relaxes presence for the names callers list explicitly.
+ */
 function requireExactKeys(
   value: Record<string, unknown>,
   expected: readonly string[],
   digest: string,
   label: string,
+  optional: readonly string[] = [],
 ): void {
   const actual = Object.keys(value).sort(compareCodeUnitStrings);
   const sortedExpected = [...expected].sort(compareCodeUnitStrings);
-  if (
-    actual.length !== sortedExpected.length
-    || actual.some((key, index) => key !== sortedExpected[index])
-  ) {
+  const optionalSet = new Set(optional);
+  const missingRequired = sortedExpected.some((key) => !actual.includes(key));
+  const unsupported = actual.some((key) => !sortedExpected.includes(key) && !optionalSet.has(key));
+  if (missingRequired || unsupported) {
     throw new MethodInputError("binary-record-malformed", digest, `${label} has an unsupported field set`);
   }
 }
@@ -367,7 +375,9 @@ interface ResolvedBinaryPayload {
   readonly question: string;
   readonly referenceAnswer: string;
   readonly candidateAnswer: string;
-  readonly provenance: readonly Readonly<Record<string, unknown>>[];
+  readonly evidence?: string;
+  readonly provenance: Readonly<Record<string, unknown>>;
+  readonly sources: readonly Readonly<Record<string, unknown>>[];
 }
 
 function validateTaskPayload(value: unknown, digest: string): ResolvedBinaryPayload {
@@ -376,9 +386,10 @@ function validateTaskPayload(value: unknown, digest: string): ResolvedBinaryPayl
   }
   requireExactKeys(
     value,
-    ["itemId", "question", "referenceAnswer", "candidateAnswer", "provenance"],
+    ["itemId", "question", "referenceAnswer", "candidateAnswer", "provenance", "sources"],
     digest,
     "Task.payload",
+    ["evidence"],
   );
   if (
     typeof value["itemId"] !== "string"
@@ -391,16 +402,45 @@ function validateTaskPayload(value: unknown, digest: string): ResolvedBinaryPayl
       throw new MethodInputError("binary-record-malformed", digest, `Task.payload.${key} must be a string`);
     }
   }
-  const provenance = value["provenance"];
-  if (!Array.isArray(provenance) || provenance.length === 0) {
-    throw new MethodInputError("binary-record-malformed", digest, "Task.payload.provenance must be non-empty");
+  if (Object.hasOwn(value, "evidence") && typeof value["evidence"] !== "string") {
+    throw new MethodInputError("binary-record-malformed", digest, "Task.payload.evidence must be a string when present");
   }
-  for (const [index, descriptor] of provenance.entries()) {
+  const provenance = value["provenance"];
+  if (Array.isArray(provenance)) {
+    throw new MethodInputError(
+      "binary-record-malformed",
+      digest,
+      "Task.payload.provenance is the superseded array form; expected a single {sourceCommitment, timestamp} object",
+    );
+  }
+  if (!isObject(provenance)) {
+    throw new MethodInputError("binary-record-malformed", digest, "Task.payload.provenance must be an object");
+  }
+  requireExactKeys(provenance, ["sourceCommitment", "timestamp"], digest, "Task.payload.provenance");
+  if (typeof provenance["sourceCommitment"] !== "string" || !SHA256_URI.test(provenance["sourceCommitment"])) {
+    throw new MethodInputError(
+      "binary-record-malformed",
+      digest,
+      "Task.payload.provenance.sourceCommitment must be sha256:<64 lowercase hex>",
+    );
+  }
+  // Deliberately looser than its `sourceCommitment` sibling: `timestamp` is pinned as a string
+  // only, not to the RFC 3339 shape. The records layer re-reads and re-checks this exact field
+  // calendar-strictly (`resolveBenchmarkTaskProvenance`), so pinning the shape a second time here
+  // would be a duplicate enforcement point that can drift from the one that actually decides.
+  if (typeof provenance["timestamp"] !== "string") {
+    throw new MethodInputError("binary-record-malformed", digest, "Task.payload.provenance.timestamp must be a string");
+  }
+  const sources = value["sources"];
+  if (!Array.isArray(sources) || sources.length === 0) {
+    throw new MethodInputError("binary-record-malformed", digest, "Task.payload.sources must be non-empty");
+  }
+  for (const [index, descriptor] of sources.entries()) {
     if (!isObject(descriptor)) {
-      throw new MethodInputError("binary-record-malformed", digest, `Task.payload.provenance[${index}] must be an object`);
+      throw new MethodInputError("binary-record-malformed", digest, `Task.payload.sources[${index}] must be an object`);
     }
-    requireExactKeys(descriptor, ["digest"], digest, `Task.payload.provenance[${index}]`);
-    requireDigestDescriptor(descriptor, digest, `Task.payload.provenance[${index}]`);
+    requireExactKeys(descriptor, ["digest"], digest, `Task.payload.sources[${index}]`);
+    requireDigestDescriptor(descriptor, digest, `Task.payload.sources[${index}]`);
   }
   return value as unknown as ResolvedBinaryPayload;
 }
@@ -606,7 +646,7 @@ function resolveTaskBinding(
     || digestObjectSha256(profile["digest"], taskWire, "Task.profile.digest") !== TASK_PROFILE_SHA256
     || profile["uri"] !== TASK_PROFILE_URI
   ) {
-    throw new MethodInputError("binary-binding-mismatch", taskWire, "Task does not pin the binary-judgment/1.0 profile");
+    throw new MethodInputError("binary-binding-mismatch", taskWire, "Task does not pin the binary-judgment/2.0 profile");
   }
   const payload = validateTaskPayload(task["payload"], taskWire);
   validateTaskOutputs(task["outputs"], taskWire);

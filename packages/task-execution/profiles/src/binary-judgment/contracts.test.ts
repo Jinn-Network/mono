@@ -17,7 +17,8 @@ import {
   EVAL_SEMANTICS_VERSION,
 } from "../identifiers.js";
 import { sealEvaluationSpec } from "../evaluation-spec/seal.js";
-import { BINARY_JUDGMENT_PROFILE_DIGEST } from "../documents/binary-judgment-1.0.js";
+import { BINARY_JUDGMENT_PROFILE_DIGEST } from "../documents/binary-judgment-2.0.js";
+import { ProfilesError } from "../errors.js";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
   BINARY_ACCEPT_REJECT_PARSER_SEALED,
@@ -30,6 +31,7 @@ import {
   BinaryJudgmentPayloadSchema,
   BinaryJudgmentSemanticRequestSchema,
   BinaryJudgmentSnapshotProbeSchema,
+  binaryJudgmentInstrumentDeclaresEvidence,
   binaryJudgmentPromptTemplateDigest,
   binaryJudgmentSemanticRequestDigest,
   buildBinaryJudgmentSemanticRequest,
@@ -56,6 +58,10 @@ const descriptor = (name: string) => ({
   digest: { sha256: "a".repeat(64) },
 });
 const opaqueProvenance = { digest: { sha256: "a".repeat(64) } };
+const provenanceCommitment = {
+  sourceCommitment: sha("a"),
+  timestamp: "2026-03-09T00:00:00Z",
+};
 const inlineMaterial = (value: unknown) => {
   const bytes = canonicalJsonBytes(value);
   return {
@@ -122,7 +128,34 @@ const payload: BinaryJudgmentPayload = {
   question: "Café e\u0301 or café? 👩🏽‍💻\r\n第二行",
   referenceAnswer: "Use decomposed e\u0301.\n",
   candidateAnswer: "",
-  provenance: [opaqueProvenance],
+  provenance: provenanceCommitment,
+  sources: [opaqueProvenance],
+};
+
+const payloadWithEvidence: BinaryJudgmentPayload = {
+  ...payload,
+  evidence: "Synthetic passage: the fixture's own words.",
+};
+
+const messagesWithEvidence = [
+  messages[0],
+  {
+    role: "user" as const,
+    segments: [
+      { literal: "Evidence:\n" },
+      { field: "evidence" as const },
+      { literal: "\nCandidate:\n" },
+      { field: "candidateAnswer" as const },
+      { literal: "\r\nReturn ACCEPT or REJECT." },
+    ],
+  },
+];
+
+const instrumentWithEvidence: BinaryJudgmentInstrument = {
+  ...instrument,
+  instrumentId: "unicode-lines-evidence",
+  messages: messagesWithEvidence,
+  promptTemplateSha256: binaryJudgmentPromptTemplateDigest(messagesWithEvidence),
 };
 
 const datedSnapshotGeneration: BinaryJudgmentSamplingGeneration = {
@@ -192,7 +225,7 @@ describe("binary-judgment closed contracts", () => {
       .toBe(false);
     expect(BinaryJudgmentPayloadSchema.safeParse({
       ...payload,
-      provenance: [{ ...payload.provenance[0], annotations: { truthLabel: "CORRECT" } }],
+      sources: [{ ...payload.sources[0], annotations: { truthLabel: "CORRECT" } }],
     }).success).toBe(false);
     for (const identifyingField of [
       { name: "wrong" },
@@ -201,11 +234,48 @@ describe("binary-judgment closed contracts", () => {
     ]) {
       expect(BinaryJudgmentPayloadSchema.safeParse({
         ...payload,
-        provenance: [{ ...payload.provenance[0], ...identifyingField }],
+        sources: [{ ...payload.sources[0], ...identifyingField }],
       }).success).toBe(false);
     }
     expect(BinaryJudgmentPayloadSchema.safeParse({ ...payload, itemId: "wrong-stress-17" }).success)
       .toBe(false);
+  });
+
+  it("treats evidence as an optional string that imposes nothing when absent", () => {
+    expect(BinaryJudgmentPayloadSchema.parse(payload)).not.toHaveProperty("evidence");
+    expect(BinaryJudgmentPayloadSchema.safeParse(payloadWithEvidence).success).toBe(true);
+    expect(BinaryJudgmentPayloadSchema.safeParse({ ...payload, evidence: 42 }).success).toBe(false);
+  });
+
+  it("fails closed on an unknown top-level payload key", () => {
+    expect(BinaryJudgmentPayloadSchema.safeParse({ ...payload, extraField: "leak" }).success)
+      .toBe(false);
+  });
+
+  it("rejects the superseded 1.0 array-shaped provenance and requires the 2.0 commitment object", () => {
+    expect(BinaryJudgmentPayloadSchema.safeParse({
+      ...payload,
+      provenance: [opaqueProvenance],
+    }).success).toBe(false);
+    expect(BinaryJudgmentPayloadSchema.safeParse({
+      ...payload,
+      provenance: { ...provenanceCommitment, extra: "leak" },
+    }).success).toBe(false);
+  });
+
+  it("pins provenance.timestamp to a fractional-second-free RFC 3339 shape", () => {
+    expect(BinaryJudgmentPayloadSchema.safeParse({
+      ...payload,
+      provenance: { ...provenanceCommitment, timestamp: "2026-03-09T00:00:00.5Z" },
+    }).success).toBe(false);
+    expect(BinaryJudgmentPayloadSchema.safeParse({
+      ...payload,
+      provenance: { ...provenanceCommitment, timestamp: "2026-03-09T00:00:00Z" },
+    }).success).toBe(true);
+    expect(BinaryJudgmentPayloadSchema.safeParse({
+      ...payload,
+      provenance: { ...provenanceCommitment, timestamp: "2026-03-09T00:00:00+02:00" },
+    }).success).toBe(true);
   });
 
   it("pins every input field, parser identity, generation control, and prompt-template digest", () => {
@@ -235,6 +305,44 @@ describe("binary-judgment closed contracts", () => {
     }).success).toBe(false);
   });
 
+  it("validates an instrument that interpolates only the three required fields, and one that also declares evidence", () => {
+    expect(BinaryJudgmentInstrumentSchema.safeParse(instrument).success).toBe(true);
+    expect(BinaryJudgmentInstrumentSchema.safeParse(instrumentWithEvidence).success).toBe(true);
+    expect(binaryJudgmentInstrumentDeclaresEvidence(instrument)).toBe(false);
+    expect(binaryJudgmentInstrumentDeclaresEvidence(instrumentWithEvidence)).toBe(true);
+  });
+
+  it("renders identical message bytes and digest regardless of an unreferenced evidence field (P2 acceptance 2 leak test)", () => {
+    const withoutEvidence = renderBinaryJudgmentMessages(payload, instrument);
+    const withEvidence = renderBinaryJudgmentMessages(payloadWithEvidence, instrument);
+    expect(withEvidence).toStrictEqual(withoutEvidence);
+    expect(canonicalJsonBytes(withEvidence)).toStrictEqual(canonicalJsonBytes(withoutEvidence));
+    expect(binaryJudgmentSemanticRequestDigest(payloadWithEvidence, instrument))
+      .toBe(binaryJudgmentSemanticRequestDigest(payload, instrument));
+  });
+
+  it("refuses to render a declaring instrument over an evidence-free payload instead of interpolating undefined", () => {
+    expect(() => renderBinaryJudgmentMessages(payload, instrumentWithEvidence)).toThrow(ProfilesError);
+    expect(() => renderBinaryJudgmentMessages(payload, instrumentWithEvidence)).toThrow(
+      /interpolates evidence but the payload does not carry it/,
+    );
+    let thrown: unknown;
+    try {
+      renderBinaryJudgmentMessages(payload, instrumentWithEvidence);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(String((thrown as Error).message)).not.toContain("undefined");
+  });
+
+  it("renders the evidence text in place for a declaring instrument over an evidence-carrying payload", () => {
+    const rendered = renderBinaryJudgmentMessages(payloadWithEvidence, instrumentWithEvidence);
+    expect(rendered[1]).toStrictEqual({
+      role: "user",
+      text: `Evidence:\n${payloadWithEvidence.evidence}\nCandidate:\n\r\nReturn ACCEPT or REJECT.`,
+    });
+  });
+
   it("renders Unicode and mixed line endings byte-for-byte with no normalization or separator", () => {
     expect(renderBinaryJudgmentMessages(payload, instrument)).toStrictEqual([
       {
@@ -252,7 +360,7 @@ describe("binary-judgment closed contracts", () => {
 
   it("matches the published cross-runtime Unicode and line-ending request oracle", async () => {
     const fixture = JSON.parse(await readFile(new URL(
-      "../../fixtures/binary-judgment-request/golden/unicode-line-endings.json",
+      "../../fixtures/binary-judgment-request/golden/unicode-line-endings-profile-2.json",
       import.meta.url,
     ), "utf8")) as {
       input: { payload: BinaryJudgmentPayload; instrument: BinaryJudgmentInstrument };

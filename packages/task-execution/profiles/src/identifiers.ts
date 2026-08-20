@@ -13,7 +13,7 @@ export const PREDICTION_FORECAST_PROFILE_URI =
 export const EVALUATION_TASK_PROFILE_URI = "https://spec.jinn.network/task-profiles/evaluation-task/1.0" as const;
 /** Backend-neutral binary judge work over one question/reference/candidate item. */
 export const BINARY_JUDGMENT_PROFILE_URI =
-  "https://spec.jinn.network/task-profiles/binary-judgment/1.0" as const;
+  "https://spec.jinn.network/task-profiles/binary-judgment/2.0" as const;
 
 // Binary-judgment v1 document-format URIs. These identify byte schemas, not particular records.
 export const BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI =

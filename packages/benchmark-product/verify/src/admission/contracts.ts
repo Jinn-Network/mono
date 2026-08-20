@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import {
+  BINARY_JUDGMENT_TIMESTAMP_PATTERN,
   compareCodeUnitStrings,
 } from "@jinn-network/task-execution-profiles";
 
@@ -28,12 +29,23 @@ const EvaluatorIdentitySchema = IdentitySchema.regex(/^(?:https?:\/\/|urn:)[^\s]
 const CandidateClassSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9._-]{0,63}$/u);
 const BinaryJudgmentTruthLabelSchema = z.enum(["CORRECT", "WRONG"]);
 const BinaryJudgmentStratumSchema = z.enum(["core", "stress"]);
+/**
+ * RFC 3339 instant SHAPE, seconds precision, no fractional part. The pattern is imported from the
+ * profiles package rather than restated, so this mirrored payload copy cannot drift from the
+ * canonical one it mirrors.
+ */
+const BinaryJudgmentTimestampShapeSchema = z.string().regex(new RegExp(BINARY_JUDGMENT_TIMESTAMP_PATTERN, "u"));
 const BinaryJudgmentPayloadSchema = z.strictObject({
   itemId: z.string().regex(/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u),
   question: z.string(),
   referenceAnswer: z.string(),
   candidateAnswer: z.string(),
-  provenance: z.array(z.strictObject({
+  evidence: z.string().optional(),
+  provenance: z.strictObject({
+    sourceCommitment: DigestSchema,
+    timestamp: BinaryJudgmentTimestampShapeSchema,
+  }),
+  sources: z.array(z.strictObject({
     digest: z.strictObject({ sha256: z.string().regex(/^[0-9a-f]{64}$/u) }),
   })).min(1),
 });
