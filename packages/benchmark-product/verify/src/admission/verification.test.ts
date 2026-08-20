@@ -44,6 +44,7 @@ import {
   HUMAN_REVIEW_REPLACEMENT_LEDGER_PROTOCOL,
   SCREENING_REVEAL_RECEIPT_MEDIA_TYPE,
   SCREENING_REVEAL_RECEIPT_PROTOCOL,
+  SCREENING_TABLE_MEDIA_TYPE,
   SCREENING_TABLE_PROTOCOL,
   BinaryJudgmentAdmissionManifestSchema,
   HumanReviewOperatorAssertionSchema,
@@ -248,7 +249,13 @@ interface ScreenedFixtureOptions {
 /** Builds the smallest screened-operator-sampled closure that exercises all five §6.5 checks: two
  * pool items sharing one candidate class/stratum, one accepted (item 0, also the excluded item's
  * replacement) and by default one excluded (item 1). */
-function buildScreenedClosure(options: ScreenedFixtureOptions): { readonly store: Store; readonly manifestSha256: `sha256:${string}` } {
+function buildScreenedClosure(options: ScreenedFixtureOptions): {
+  readonly store: Store;
+  readonly manifestSha256: `sha256:${string}`;
+  /** The bare, parsed table -- exposed so a test can re-seal it under a different (e.g.
+   * non-DSSE) mechanism without reconstructing the object from scratch. */
+  readonly tableValue: z.infer<typeof ScreeningTableSchema>;
+} {
   const store = new Store();
   sealFrozenHumanReviewSpec(store);
 
@@ -274,7 +281,7 @@ function buildScreenedClosure(options: ScreenedFixtureOptions): { readonly store
 
   const samplingScriptSha256 = store.put(new TextEncoder().encode("synthetic sampling script"));
   const rawOutputsSha256 = store.put(new TextEncoder().encode("synthetic raw screening outputs"));
-  const table = store.seal(ScreeningTableSchema, {
+  const tableValue = ScreeningTableSchema.parse({
     protocol: SCREENING_TABLE_PROTOCOL,
     draftId: DRAFT_ID,
     screeningInstrumentSha256: store.put(new TextEncoder().encode("synthetic screening instrument")),
@@ -285,15 +292,21 @@ function buildScreenedClosure(options: ScreenedFixtureOptions): { readonly store
     rows,
     sealedAt: ADMITTED_AT,
   });
+  // Signed once, DSSE-wrapped on the same sealing path as the other admission records (spec
+  // §6.3, final sentence, verbatim; the table schema itself gains no attestorRole field --
+  // `sealRoleEvidence` (core/src/operations/human-review.ts:218-233) wraps arbitrary bytes and
+  // returns the ENVELOPE digest regardless of payload shape). `screeningTableSha256` therefore
+  // names the envelope, exactly like `reviewerRosterSha256`/`revealReceiptSha256` already do.
+  const tableDigest = store.sealDsse(canonicalJsonBytes(tableValue), SCREENING_TABLE_MEDIA_TYPE, SCREENING_ATTESTOR_KEY);
 
-  const revealReceiptSha256 = screeningReveal(store, table.digest);
+  const revealReceiptSha256 = screeningReveal(store, tableDigest);
 
   const labelResolutionSha256s: `sha256:${string}`[] = [];
   const analysisContextSha256s: `sha256:${string}`[] = [];
   const acceptedByIndex = new Map<number, PoolItem>();
   for (const index of options.admittedIndices) {
     const item = items[index]!;
-    const sealed = sealScreenedResolution(store, item, table.digest, revealReceiptSha256);
+    const sealed = sealScreenedResolution(store, item, tableDigest, revealReceiptSha256);
     labelResolutionSha256s.push(sealed.digest);
     analysisContextSha256s.push(sealed.analysisContextSha256);
     acceptedByIndex.set(index, item);
@@ -341,11 +354,11 @@ function buildScreenedClosure(options: ScreenedFixtureOptions): { readonly store
     analysisContextSha256s: [...analysisContextSha256s].sort(),
     excludedItemSha256s: excludedIndices.map((index) => items[index]!.itemSha256).sort(),
     replacementLedgerSha256: ledger.digest,
-    screeningTableSha256: table.digest,
+    screeningTableSha256: tableDigest,
     admittedAt: ADMITTED_AT,
   });
 
-  return { store, manifestSha256: manifest.digest };
+  return { store, manifestSha256: manifest.digest, tableValue };
 }
 
 function refusal(fn: () => void): BinaryJudgmentAdmissionClosureError {
@@ -419,6 +432,34 @@ describe("verifyBinaryJudgmentAdmissionClosure: screened-operator-sampled (§6.4
     expect(result.excluded[0]!.reason).toBe("screening-hand-excluded"); // R-3 tie-break
     expect(result.reachableRecords.some((record) => record.roles.includes("screening-table"))).toBe(true);
     expect(result.reachableRecords.some((record) => record.roles.includes("screening-reveal-receipt"))).toBe(true);
+  });
+
+  test("the table is DSSE-sealed (spec §6.3, final sentence): bare canonical table bytes at screeningTableSha256 refuse", () => {
+    // §6.9's argument for dropping 240 per-item signatures ("one signature on the whole table")
+    // only holds if the table is actually signed once. A bare-canonical-JSON table -- no DSSE
+    // envelope, no signature -- is a content commitment, not a signature, and must refuse exactly
+    // like a malformed roster or reveal receipt would.
+    const { store, manifestSha256, tableValue } = buildScreenedClosure({
+      rows: [
+        { screeningVerdict: "CORRECT", handChecked: true, handVerdict: "confirm" },
+        { screeningVerdict: "WRONG", handChecked: true, handVerdict: "exclude" },
+      ],
+      admittedIndices: [0],
+    });
+    const manifestValue = BinaryJudgmentAdmissionManifestSchema.parse(
+      JSON.parse(new TextDecoder().decode(store.resolve(manifestSha256))),
+    );
+    const bareDigest = store.put(canonicalJsonBytes(tableValue));
+    const retampered = store.seal(BinaryJudgmentAdmissionManifestSchema, {
+      ...manifestValue,
+      screeningTableSha256: bareDigest,
+    });
+
+    const error = refusal(() => verifyBinaryJudgmentAdmissionClosure(
+      { admissionManifestSha256: retampered.digest, expectedDraftId: DRAFT_ID },
+      store.ports(),
+    ));
+    expect(error.message).toMatch(/DSSE/);
   });
 
   test("check 0 (coverage): a table row naming an item outside accepted+excluded refuses", () => {

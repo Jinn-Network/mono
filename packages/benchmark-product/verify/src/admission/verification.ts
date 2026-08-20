@@ -24,6 +24,7 @@ import {
   HUMAN_REVIEW_ROSTER_MEDIA_TYPE,
   HUMAN_REVIEW_VISIBILITY_RECEIPT_MEDIA_TYPE,
   SCREENING_REVEAL_RECEIPT_MEDIA_TYPE,
+  SCREENING_TABLE_MEDIA_TYPE,
   HumanReviewOperatorAssertionSchema,
   HumanReviewPacketSchema,
   HumanReviewReplacementLedgerSchema,
@@ -633,11 +634,25 @@ export function verifyBinaryJudgmentAdmissionClosure(
     if (manifest.screeningTableSha256 === undefined) {
       fail("admissionManifest.screeningTableSha256", "screened admission manifest carries no screening table reference");
     }
-    screeningTable = exactCanonical(
-      ScreeningTableSchema,
-      resolve(state, manifest.screeningTableSha256, "admissionManifest.screeningTableSha256", "screening-table"),
-      "screeningTable",
-    );
+    // The table is signed ONCE, DSSE-sealed on the same path as the other admission records
+    // (spec §6.3, final sentence, verbatim) -- this is what makes §6.9's dropping of 240 per-item
+    // signatures sound ("one key signing 240 rows separately proves nothing beyond one signature
+    // on the whole table"). The table schema carries no attestorRole field (unlike the roster and
+    // reveal receipt), but `sealRoleEvidence` (core/src/operations/human-review.ts:218-233) DSSE-
+    // wraps arbitrary bytes under any payload type regardless of the payload's own shape, so
+    // `screeningTableSha256` names the DSSE ENVELOPE digest, exactly like `reviewerRosterSha256`
+    // and `revealReceiptSha256` already do -- not the bare canonical table bytes. The screened
+    // branch's sole legal authority set is `["truth-reveal-attestor"]` alone (§6.8a Group C), so
+    // that is the one key that signs both the bank-scoped table and the bank-scoped reveal
+    // receipt: "signed once per bank" as D1 describes.
+    screeningTable = authorityPayload(state, {
+      digest: manifest.screeningTableSha256,
+      mediaType: SCREENING_TABLE_MEDIA_TYPE,
+      role: "truth-reveal-attestor",
+      evidenceRole: "screening-table",
+      schema: ScreeningTableSchema,
+      path: "admissionManifest.screeningTableSha256",
+    }).value;
     screeningRowsByItem = new Map(screeningTable.rows.map((row) => [row.itemSha256, row]));
 
     // (1) Sample membership: recomputed by screening-sample/1, never by executing the sealed
