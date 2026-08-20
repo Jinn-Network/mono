@@ -178,7 +178,9 @@ export const BundleV4EvidenceCatalogSchema = z.strictObject({
 export type BundleV4EvidenceCatalog = z.infer<typeof BundleV4EvidenceCatalogSchema>;
 
 const PrefixedSha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
-// §3.1 rule 1: one identifier dialect, not two. Shared shape with `candidateClass`.
+// §3.1 rule 1: the same identifier dialect used for stratum names elsewhere (e.g.
+// `admission/contracts.ts`'s `BinaryJudgmentStratumSchema`). `candidateClasses` below deliberately
+// stays ungrammared: tightening it is outside P4's contract and could refuse bundles written today.
 const IDENTIFIER_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u;
 export const BundleQualificationSchema = z.strictObject({
   format: z.literal(BUNDLE_QUALIFICATION_FORMAT),

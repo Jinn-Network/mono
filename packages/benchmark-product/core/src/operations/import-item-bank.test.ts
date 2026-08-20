@@ -220,13 +220,15 @@ describe("importBinaryItemBank", () => {
   test("imports a bank declaring four categories, carrying all four in the strata summary", () => {
     const { context, draftId } = setup();
     const provenanceSha256 = `sha256:${"e".repeat(64)}` as const;
+    const publishedAt = "2026-03-09T00:00:00Z";
     const strata = ["category-1", "category-2", "category-3", "category-4"];
     const items = strata.map((_, index) => ({
       itemId: `urn:uuid:40000000-0000-4000-8000-00000000000${index + 1}`,
       question: `Synthetic question ${index + 1}?`,
       referenceAnswer: "Synthetic reference.",
       candidateAnswer: `Synthetic candidate ${index + 1}.`,
-      provenance: [{ digest: { sha256: provenanceSha256.slice("sha256:".length) } }],
+      provenance: { sourceCommitment: provenanceSha256, timestamp: publishedAt },
+      sources: [{ digest: { sha256: provenanceSha256.slice("sha256:".length) } }],
     }));
     for (const value of items) putSealedBytes(context.workspaceDir, canonicalJsonBytes(value));
 
@@ -262,6 +264,7 @@ describe("importBinaryItemBank", () => {
         uri: "https://fixtures.example.test/attribution.txt",
         digest: { sha256: "c".repeat(64) },
       },
+      publishedAt,
     }]);
     const admissions = renderCanonicalJsonl(admitted.result.resolutions.map((resolution) => ({
       protocol: BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
@@ -272,7 +275,7 @@ describe("importBinaryItemBank", () => {
     })).sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256)));
 
     const imported = importBinaryItemBank(context, {
-      profile: "binary-judgment@1",
+      profile: "binary-judgment@2",
       draftId,
       itemBankJsonl: itemsJsonl,
       sourceManifestJsonl: sources,

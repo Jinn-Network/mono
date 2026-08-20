@@ -185,6 +185,11 @@ describe("validateBinaryInstrumentQualificationProjection — declared stratum v
   test("refuses a qualification whose byStratum drops a declared slice", () => {
     const dropped = structuredClone(fourStratumQualification()) as any;
     delete dropped.arms["arm-a"].byStratum["category-4"];
-    expect(validateBinaryInstrumentQualificationProjection(dropped).ok).toBe(false);
+    expect(validateBinaryInstrumentQualificationProjection(dropped)).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        "qualification.arms.arm-a.byStratum must exactly match the registered slice vocabulary",
+      ]),
+    });
   });
 });

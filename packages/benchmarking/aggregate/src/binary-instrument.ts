@@ -8,7 +8,7 @@ import {
 const SHA256 = /^[a-f0-9]{64}$/;
 const SHA256_URI = /^sha256:[a-f0-9]{64}$/;
 // §3.1 rule 1: one identifier dialect, not two. Shared shape with `candidateClass`.
-const STRATUM_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u;
+const STRATUM_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
 
 export type BinaryInstrumentDecision = "ACCEPT" | "REJECT";
 export type BinaryInstrumentTruthLabel = "CORRECT" | "WRONG";

@@ -250,10 +250,37 @@ describe("convertBinaryItemBank", () => {
   });
 
   // Spec §3.2: the import path checks grammar only -- there is no declared list to check
-  // membership against at import time, because the list is the observed set.
+  // membership against at import time, because the list is the observed set. Calls
+  // `admitHumanTruth` directly (rather than through `seedEvidence`, which throws on refusal)
+  // so the assertion is against the typed result, not a substring of a serialized envelope.
   test("refuses a non-grammar-conforming stratum at admission with a validation refusal", () => {
-    const items = [item(ITEM_A_ID, "answer")];
-    expect(() => seedEvidence({ admitted: items, strata: ["1bad"] })).toThrow(/validation/u);
+    const workspaceDir = mkdtempSync(join(tmpdir(), "colophon-item-intake-"));
+    roots.push(workspaceDir);
+    const draftId = "draft-1";
+    const context = {
+      workspaceDir,
+      principal: "operator",
+      clock: () => "2026-08-15T09:00:00.000Z",
+    };
+    expect(initWorkspace(context).ok).toBe(true);
+    expect(createDraft(context, { draftId, name: "Synthetic intake" }).ok).toBe(true);
+    const admitted = item(ITEM_A_ID, "answer");
+    const itemSha256 = recordDigest(canonicalJsonBytes(admitted));
+    putSealedBytes(workspaceDir, canonicalJsonBytes(admitted));
+    const result = admitHumanTruth(context, {
+      draftId,
+      truthAdmission: "operator-only",
+      candidates: [{
+        itemSha256,
+        itemId: admitted.itemId,
+        humanReviewEvaluationSpecSha256: BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest,
+        candidateClass: "synthetic",
+        stratum: "1bad",
+        poolPosition: 1,
+        operatorTruthLabel: "CORRECT" as const,
+      }],
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "validation" } });
   });
 
   test("rejects a missing source mapping and does not accept source locators in the strict item payload", () => {
