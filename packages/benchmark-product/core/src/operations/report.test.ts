@@ -1,8 +1,10 @@
 import { cpSync, existsSync, linkSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { generateKeyPairSync } from "node:crypto";
 import { createServer, type Server } from "node:http";
+import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { cellIdempotencyKey, parseBenchmarkAccounting, parseMatrix, parseReport, parseSignedReportRecord } from "@jinn-network/benchmarking-records";
 import { requirementsDigest } from "@jinn-network/benchmarking-local";
@@ -41,9 +43,9 @@ import type { OperationContext } from "./context.js";
 import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { readAuditEntries } from "../audit/journal.js";
-import { materializePublicBundle } from "../bundle/materialize.js";
+import { materializePublicBundle, PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "../bundle/materialize.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { BUNDLE_FORMAT, BUNDLE_V3_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_V3_FORMAT, BUNDLE_V4_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
 import { runCli } from "../cli/main.js";
 import { runCollect } from "./run-collect.js";
 import { runLaunch } from "./run-launch.js";
@@ -82,6 +84,65 @@ function makeClock(): () => string {
 
 function contextFor(clock: () => string, principal = "sponsor-1"): OperationContext {
   return { workspaceDir, principal, clock };
+}
+
+// ── packet P5 proof 1a: the shipped, packaged `external-verify.py` (spec §8.3) ────────────────
+// Invoked at the PACKAGED path (`node_modules/@colophon-claims/verify/scripts/...`), never the
+// repo source path — that packaged copy is the artifact a third party installs, per the verify
+// package's `files` list and `verify/scripts/pack-smoke.mjs`.
+const EXTERNAL_VERIFY_SCRIPT = fileURLToPath(
+  new URL("../../node_modules/@colophon-claims/verify/scripts/external-verify.py", import.meta.url),
+);
+const EXTERNAL_VERIFY_CHECKS = [
+  "manifest-files", "cas-records", "sealed-bytes", "report-signature",
+  "report-pins-matrix", "verdict-signatures", "matrix-verdict-closure",
+  "claim-mirror", "key-derivations",
+] as const;
+
+/** Probed once, exactly as `verify/test/external-walkthrough.test.mjs` does: a directory that
+ * exists but is not a bundle still passes the "is this a directory" and "can openssl sign/verify
+ * Ed25519" gates the script runs before it ever reads bundle.json, so exit code 2 here means only
+ * one thing — python3 or an Ed25519-capable openssl is unavailable — never "not a real bundle". */
+function probeExternalVerifyAvailable(): boolean {
+  const probeDir = mkdtempSync(join(tmpdir(), "bp-p5-extverify-probe-"));
+  try {
+    const probe = spawnSync("python3", [EXTERNAL_VERIFY_SCRIPT, probeDir], { encoding: "utf8" });
+    return probe.error === undefined && probe.status !== 2;
+  } finally {
+    rmSync(probeDir, { recursive: true, force: true });
+  }
+}
+const externalVerifyAvailable = probeExternalVerifyAvailable();
+
+async function runExternalVerify(bundleDir: string): Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }> {
+  return new Promise((resolvePromise) => {
+    const child = spawn("python3", [EXTERNAL_VERIFY_SCRIPT, bundleDir], { stdio: ["ignore", "pipe", "pipe"] });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.once("error", () => resolvePromise({ code: 2, stdout: "", stderr: "spawn error" }));
+    child.once("exit", (code) => resolvePromise({
+      code: code ?? 2,
+      stdout: Buffer.concat(stdout).toString("utf8"),
+      stderr: Buffer.concat(stderr).toString("utf8"),
+    }));
+  });
+}
+
+/** Exit 0 plus one `CHECK <name>: ok` line per check, EXCEPT `claim-mirror`, which the script
+ * itself skips for a comparison-shaped claim ("comparison-shaped claims carry no headline to
+ * mirror") — a skip does not fail the run, so its line is asserted as ok-or-skipped rather than
+ * pinned to one outcome. */
+function assertExternalVerifyAllChecksPass(result: { readonly code: number; readonly stdout: string; readonly stderr: string }): void {
+  expect(result.code, `external-verify.py exited ${result.code}\n${result.stdout}\n${result.stderr}`).toBe(0);
+  for (const check of EXTERNAL_VERIFY_CHECKS) {
+    if (check === "claim-mirror") {
+      expect(result.stdout).toMatch(/CHECK claim-mirror: (ok|skipped)/);
+    } else {
+      expect(result.stdout).toMatch(new RegExp(`CHECK ${check}: ok`));
+    }
+  }
 }
 
 async function servePublicationWorkspace(mount = ""): Promise<string> {
@@ -2018,6 +2079,156 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
         expect(secondPublish.result.additionalBundles?.map((entry) => entry.bundleIdentity).sort())
           .toEqual(published.result.additionalBundles!.map((entry) => entry.bundleIdentity).sort());
       }
+    },
+    30_000,
+  );
+
+  // ── Proof 1a (spec §8.3): the N-bundle cold-verify proof ──────────────────────────────────
+  //
+  // §8.3's entire argument for option 5 over option 4 is that option 5's bundles cold-verify
+  // with the already published, unmodified verifier AND the already published
+  // `external-verify.py`. The three tests below exercise both readers, assert each bundle's own
+  // (non-uniform) format and file list, and give the two-field comparison — the reader-visible
+  // substitute for option 4's internal "one cell set" assertion — its own dedicated test.
+
+  const N2_ADDITIONAL_ANALYSES = [
+    {
+      method: "jinn.benchmarking.method/paired-delta",
+      version: "1",
+      baseline: "baseline",
+      candidate: "sample",
+      parameters: { seed: 123456789, resamples: 1000, alpha: "0.05" },
+    },
+  ] as const;
+
+  test(
+    "packet P5 proof 1a: every published bundle verifies with the shipped JS verifier after the source workspace is deleted, each with its own exact format and file list (no numbering scheme, no bundle claiming files it doesn't have)",
+    async () => {
+      const clock = makeClock();
+      await setUpClosedRun(clock, "draft-1", {
+        evaluationModes: Array(8).fill("no-verdict"),
+        additionalAnalyses: N2_ADDITIONAL_ANALYSES,
+      });
+      const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(reported.ok, JSON.stringify(reported)).toBe(true);
+      if (!reported.ok) return;
+      const published = await runPublish(contextFor(clock), { draftId: "draft-1" });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      if (!published.ok) return;
+
+      const identities = [published.result.bundleIdentity, ...(published.result.additionalBundles ?? []).map((entry) => entry.bundleIdentity)];
+      expect(identities).toHaveLength(2);
+
+      const copiedDirs = identities.map((identity) => {
+        const copied = mkdtempSync(join(tmpdir(), "bp-p5-cold-js-"));
+        cpSync(publicBundlePath(workspaceDir, "draft-1", identity), copied, { recursive: true });
+        return { identity, dir: copied };
+      });
+      try {
+        rmSync(workspaceDir, { recursive: true, force: true });
+        expect(existsSync(workspaceDir)).toBe(false);
+
+        for (const { identity, dir } of copiedDirs) {
+          const verified = await verifyPublicBundle(dir);
+          expect(verified.identity).toBe(identity);
+
+          // Per-bundle format and exact file list — derived from THIS bundle's own manifest, not
+          // asserted uniform across the N bundles (the bundle format is derived from each
+          // Report's own method, and a run can legitimately emit bundles of different formats).
+          const manifest = JSON.parse(readFileSync(join(dir, "bundle.json"), "utf8")) as {
+            readonly format: string;
+            readonly files: ReadonlyArray<{ readonly path: string }>;
+          };
+          expect(verified.format).toBe(manifest.format);
+          expect([BUNDLE_FORMAT, BUNDLE_V4_FORMAT] as readonly string[]).toContain(manifest.format);
+          // PUBLIC_BUNDLE_FILES/V4 name the fixed, non-content-addressed members exactly; the
+          // remainder of the manifest is exactly the evidence catalog's own `records/<sha256>.bin`
+          // entries, never a numbered or otherwise-named extra member.
+          const expectedFixed = manifest.format === BUNDLE_V4_FORMAT ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
+          const paths = manifest.files.map((file) => file.path);
+          const fixedPaths = paths.filter((path) => !path.startsWith("records/"));
+          const recordPaths = paths.filter((path) => path.startsWith("records/"));
+          expect(fixedPaths.sort()).toEqual([...expectedFixed].sort());
+          expect(recordPaths.every((path) => /^records\/[a-f0-9]{64}\.bin$/u.test(path))).toBe(true);
+          // No numbering scheme: a second bundle never carries a "report-2.json"-style member.
+          expect(paths.some((path) => /report-\d+\.json/u.test(path))).toBe(false);
+        }
+      } finally {
+        for (const { dir } of copiedDirs) rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  test.skipIf(!externalVerifyAvailable)(
+    "packet P5 proof 1a: the shipped, packaged external-verify.py accepts every published bundle after the source workspace is deleted",
+    async () => {
+      const clock = makeClock();
+      await setUpClosedRun(clock, "draft-1", {
+        evaluationModes: Array(8).fill("no-verdict"),
+        additionalAnalyses: N2_ADDITIONAL_ANALYSES,
+      });
+      const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(reported.ok, JSON.stringify(reported)).toBe(true);
+      if (!reported.ok) return;
+      const published = await runPublish(contextFor(clock), { draftId: "draft-1" });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      if (!published.ok) return;
+
+      const identities = [published.result.bundleIdentity, ...(published.result.additionalBundles ?? []).map((entry) => entry.bundleIdentity)];
+      expect(identities).toHaveLength(2);
+
+      const copiedDirs = identities.map((identity) => {
+        const copied = mkdtempSync(join(tmpdir(), "bp-p5-cold-ext-"));
+        cpSync(publicBundlePath(workspaceDir, "draft-1", identity), copied, { recursive: true });
+        return copied;
+      });
+      try {
+        rmSync(workspaceDir, { recursive: true, force: true });
+        expect(existsSync(workspaceDir)).toBe(false);
+
+        for (const dir of copiedDirs) {
+          const result = await runExternalVerify(dir);
+          assertExternalVerifyAllChecksPass(result);
+        }
+      } finally {
+        for (const dir of copiedDirs) rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  test(
+    "packet P5 proof 1a: THE two-field comparison — N published bundles share exactly one runSha256 and one matrixSha256 while reportSha256 and bundle identity differ (spec §8.3's reader-visible substitute for option 4's internal one-cell-set assertion)",
+    async () => {
+      const clock = makeClock();
+      await setUpClosedRun(clock, "draft-1", {
+        evaluationModes: Array(8).fill("no-verdict"),
+        additionalAnalyses: N2_ADDITIONAL_ANALYSES,
+      });
+      const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(reported.ok, JSON.stringify(reported)).toBe(true);
+      if (!reported.ok) return;
+      const published = await runPublish(contextFor(clock), { draftId: "draft-1" });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      if (!published.ok) return;
+
+      const identities = [published.result.bundleIdentity, ...(published.result.additionalBundles ?? []).map((entry) => entry.bundleIdentity)];
+      expect(identities).toHaveLength(2);
+      expect(new Set(identities).size).toBe(2); // bundle identity DIFFERS
+
+      // A reader with only the published bundles reads `claim-package.json` out of each and
+      // compares — no workspace, no RunState, nothing internal.
+      const claimRecords = identities.map((identity) => {
+        const claim = JSON.parse(
+          readFileSync(join(publicBundlePath(workspaceDir, "draft-1", identity), "claim-package.json"), "utf8"),
+        ) as { readonly records: { readonly runSha256: string; readonly matrixSha256: string; readonly reportSha256: string } };
+        return claim.records;
+      });
+
+      expect(new Set(claimRecords.map((record) => record.runSha256)).size).toBe(1); // EQUAL
+      expect(new Set(claimRecords.map((record) => record.matrixSha256)).size).toBe(1); // EQUAL
+      expect(new Set(claimRecords.map((record) => record.reportSha256)).size).toBe(2); // DIFFERS
     },
     30_000,
   );

@@ -632,6 +632,24 @@ describe("paired-majority-delta@1 parameter validation", () => {
 });
 
 describe("paired-majority-delta@1 compute", () => {
+  // Packet P5 (issue #2837) acceptance assertion, spec §7.2/§7.2a: this method clusters on
+  // `task-provenance-source`, which resolves through `resolveBenchmarkTaskProvenance`
+  // (`packages/benchmarking/records/src/benchmark/checks.ts`) — the gate the ratified option (A)
+  // reshape (`Task.payload.provenance` -> `{sourceCommitment, timestamp}`) exists to satisfy.
+  // `buildClosure` seals every Task with exactly that regenerated-bank shape (below), so this
+  // asserts the acceptance directly rather than trusting it by inspection: computing over it
+  // must not throw `task-provenance-source-missing`, and every paired Task must actually resolve.
+  test("packet P5 acceptance: computes over the regenerated bank's sourceCommitment+timestamp provenance without a task-provenance-source-missing throw", () => {
+    const closure = buildClosure(ITEMS);
+    expect(() => computeDirect(closure)).not.toThrow();
+    const result = computeDirect(closure);
+    // Every non-excluded paired Task actually resolved and clustered — a silent
+    // task-provenance-source-missing swallow would show up as n=0 / an empty cluster manifest.
+    expect(result["n"]).toBe(6);
+    const clusters = result["clusters"] as { count: number };
+    expect(clusters.count).toBe(2);
+  });
+
   test("the unit is the item-majority decision, {-1, 0, +1} per Task, and the sign is candidate minus baseline", () => {
     const closure = buildClosure(ITEMS);
     const result = computeDirect(closure);
