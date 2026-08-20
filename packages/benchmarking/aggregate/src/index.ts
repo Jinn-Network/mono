@@ -55,14 +55,27 @@ export {
   BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
   BINARY_INSTRUMENT_MEASUREMENTS,
   BINARY_INSTRUMENT_PARAMETER_SCHEMA,
+  fixed4,
+  resolveBinaryInstrumentReduction,
   validateBinaryInstrumentQualificationProjection,
   validateBinaryInstrumentParameters,
   projectBinaryInstrumentQualification,
 } from "./binary-instrument-method.js";
 export type {
   BinaryInstrumentParameters,
+  BinaryInstrumentQualificationComputeInput,
   BinaryInstrumentQualificationProjectionInput,
+  BinaryInstrumentReductionParameters,
+  BinaryInstrumentReductionResolution,
 } from "./binary-instrument-method.js";
+
+// --- pairwise-disagreement@1: all unordered arm-pair item-majority disagreement (spec §7.1) ---
+export {
+  computePairwiseDisagreement,
+  PAIRWISE_DISAGREEMENT_PARAMETER_SCHEMA,
+  validatePairwiseDisagreementParameters,
+} from "./pairwise-disagreement-method.js";
+export type { PairwiseDisagreementParameters } from "./pairwise-disagreement-method.js";
 
 // --- the reference statistics library (design §9.2, adopted from the capability-eval seed) ---
 export { wilsonInterval } from "./stats/wilson.js";

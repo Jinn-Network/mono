@@ -63,7 +63,7 @@ describe("pinned identifiers", () => {
     expect(ASSEMBLY_PROCEDURE_VERSION).toBe("1.0");
   });
 
-  test("the ten registered method URIs are pinned under jinn.benchmarking.method/ at version 1", () => {
+  test("the eleven registered method URIs are pinned under jinn.benchmarking.method/ at version 1", () => {
     expect(Object.values(BENCHMARKING_METHOD_IDS).sort()).toEqual([
       "jinn.benchmarking.method/avg-at-k",
       "jinn.benchmarking.method/binary-instrument",
@@ -72,6 +72,7 @@ describe("pinned identifiers", () => {
       "jinn.benchmarking.method/noninferiority-iut",
       "jinn.benchmarking.method/paired-delta",
       "jinn.benchmarking.method/paired-mcnemar",
+      "jinn.benchmarking.method/pairwise-disagreement",
       "jinn.benchmarking.method/pass-at-k",
       "jinn.benchmarking.method/provenance-cluster-sign",
       "jinn.benchmarking.method/wilson",

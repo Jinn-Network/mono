@@ -16,6 +16,11 @@ import {
   computeBinaryInstrumentQualification,
   validateBinaryInstrumentParameters,
 } from "./binary-instrument-method.js";
+import {
+  computePairwiseDisagreement,
+  PAIRWISE_DISAGREEMENT_PARAMETER_SCHEMA,
+  validatePairwiseDisagreementParameters,
+} from "./pairwise-disagreement-method.js";
 import type { Method, MethodComputeInput, MethodRegistry } from "./method.js";
 import {
   MethodInputError,
@@ -184,6 +189,20 @@ function metadata(input: Omit<MethodMetadata, "validateParameters">): MethodMeta
 }
 
 const VERDICT_RULE_PROPERTY = { enum: ["sole", "unanimous", "any-pass", "majority"] };
+
+/** Shared by binary-instrument@1 and pairwise-disagreement@1 (spec §7.1): the latter
+ * single-sources the former's reduction, so it declares exactly the same required inputs. */
+const BINARY_INSTRUMENT_REQUIRED_INPUTS = [
+  "matrix.cells",
+  "referenced-result-evaluations",
+  "exact-run-bytes",
+  "exact-task-bytes",
+  "exact-evaluation-specification-bytes",
+  "exact-analysis-context-bytes",
+  "exact-label-resolution-bytes",
+  "exact-instrument-bytes",
+] as const;
+
 const METHOD_METADATA = {
   wilson: metadata({
     requiredInputs: ["matrix.cells", "referenced-verdicts"],
@@ -278,21 +297,26 @@ const METHOD_METADATA = {
     computeAvailability: "unavailable",
   }),
   binaryInstrument: metadata({
-    requiredInputs: [
-      "matrix.cells",
-      "referenced-result-evaluations",
-      "exact-run-bytes",
-      "exact-task-bytes",
-      "exact-evaluation-specification-bytes",
-      "exact-analysis-context-bytes",
-      "exact-label-resolution-bytes",
-      "exact-instrument-bytes",
-    ],
+    requiredInputs: BINARY_INSTRUMENT_REQUIRED_INPUTS,
     parameterSchema: BINARY_INSTRUMENT_PARAMETER_SCHEMA,
     outputShape: "per-arm binary qualification with item-majority confusion counts, Wilson intervals, class/stratum slices, parser-invalid calls, instability, and exclusions",
     exclusionRule: "exact k-cell Task/arm groups only; transport absence, inconclusive, conflict, or missing evaluation excludes the item-arm with exact cells",
     clusteringRule: "Task digest plus arm ID; strict majority over registered scientific replicates",
     referenceSet: "v1-reference",
+    deterministic: true,
+    computeAvailability: "available",
+  }),
+  // spec §7.1 (packet P5, issue #2837). requiredInputs is the SAME EIGHT binary-instrument@1
+  // declares, in the same order — this method single-sources binary-instrument@1's own reduction,
+  // so it reads exactly what that module reads. parameterSchema.required is NINE per the
+  // coordinator's ruling on §7.1's under-specification (see pairwise-disagreement-method.ts).
+  pairwiseDisagreement: metadata({
+    requiredInputs: BINARY_INSTRUMENT_REQUIRED_INPUTS,
+    parameterSchema: PAIRWISE_DISAGREEMENT_PARAMETER_SCHEMA,
+    outputShape: "per-arm-pair item-majority disagreement counts, rate, Wilson interval, per-candidate-class and per-stratum slices, and exclusions",
+    exclusionRule: "exact k-cell Task/arm groups only; an item excluded for either arm of a pair is excluded from that pair, with exact cells",
+    clusteringRule: "Task digest plus arm pair; strict majority over registered scientific replicates",
+    referenceSet: "registered-non-reference",
     deterministic: true,
     computeAvailability: "available",
   }),
@@ -1235,6 +1259,17 @@ const binaryInstrumentMethod: SingleSubjectMethod = {
   compute: computeBinaryInstrumentQualification,
 };
 
+// versionRobust: false matches binaryInstrumentMethod — the closure it reads (via
+// resolveBinaryInstrumentReduction) is version-pinned, exactly as binary-instrument@1's own is.
+const pairwiseDisagreementMethod: SingleSubjectMethod = {
+  ...METHOD_METADATA.pairwiseDisagreement,
+  id: BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+  version: BENCHMARKING_METHOD_VERSION,
+  versionRobust: false,
+  validateParameters: validatePairwiseDisagreementParameters,
+  compute: computePairwiseDisagreement,
+};
+
 // --- the registry -------------------------------------------------------------------------------
 
 const SINGLE_SUBJECT_METHODS: readonly SingleSubjectMethod[] = [
@@ -1247,6 +1282,7 @@ const SINGLE_SUBJECT_METHODS: readonly SingleSubjectMethod[] = [
   pairedDeltaMethod,
   cleanSubsetMethod,
   binaryInstrumentMethod,
+  pairwiseDisagreementMethod,
   bradleyTerryMethod,
 ];
 
@@ -1293,8 +1329,9 @@ function subjectScopedMethod(method: SingleSubjectMethod): Method {
 
 const METHODS: readonly Method[] = SINGLE_SUBJECT_METHODS.map(subjectScopedMethod);
 
-/** The method registry: URI + version identification over ten registered methods
- * (nine in the v1 reference set; `bradley-terry@1` registered but not part of it). */
+/** The method registry: URI + version identification over eleven registered methods
+ * (nine in the v1 reference set; `bradley-terry@1` and `pairwise-disagreement@1` registered but
+ * not part of it). */
 export function createMethodRegistry(): MethodRegistry {
   const byKey = new Map(METHODS.map((method) => [`${method.id}@${method.version}`, method]));
   return {
