@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { armAdd } from "./arms.js";
 import { createDraft } from "./drafts.js";
 import {
+  CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE,
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
   exportCompletenessCertification,
 } from "../runtime/suite-protocol/comparability.js";
@@ -258,6 +259,27 @@ describe("Harbor Hub export", () => {
     expect(readFileSync(join(exported.result.exportDir, "INSTRUCTIONS.txt"), "utf8")).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
   }, 60_000);
 
+  test("the divergence explanation rides on the certification and gates no instruction", () => {
+    const runSha256 = "d".repeat(64);
+    const completeness = { expected: 5, judged: 4, runOutcome: "partial" as const };
+    const plain = exportCompletenessCertification({ runSha256, completeness });
+    const explained = exportCompletenessCertification({ runSha256, completeness, frameworkSubmitReady: true });
+    expect(explained).toBe(`${plain} ${CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE}`);
+    for (const mode of ["leaderboard-submit", "inspection-upload"] as const) {
+      for (const protocol of ["terminal-bench-2.1", "terminal-bench-3.0"] as const) {
+        const before = harborHubExportInstructions(plain, mode, "/tmp/job", protocol).split("\n");
+        const after = harborHubExportInstructions(explained, mode, "/tmp/job", protocol).split("\n");
+        // Nothing is suppressed, reordered, or added: the certification is still exactly one line
+        // and every other line is byte-identical.
+        expect(after.slice(1)).toEqual(before.slice(1));
+        expect(after[0]).toBe(explained);
+      }
+    }
+    // The mode decision reads three booleans and no completeness, so the divergent run exports in
+    // the same mode it would have exported in before the explanation existed.
+    expect(decideHarborHubExportMode({ executionConformance: true, coverage: "full", leaderboardSubmitReady: true })).toBe("leaderboard-submit");
+  });
+
   test("custom coverage and missing jobs refuse suite-named Hub export", async () => {
     const context = await prepareDraft("custom");
     expect((await selectTerminalBench21Runtime(context, { draftId: "custom", ...request(undefined, ["t11"]) })).ok).toBe(true);
@@ -334,6 +356,7 @@ describe("Harbor Hub export", () => {
     expect(exported.result.instructions.split("\n")[0]).toBe(exportCompletenessCertification({
       runSha256: collectedState.runSha256!,
       completeness: matrix.completeness,
+      frameworkSubmitReady: true,
     }));
     expect(exported.result.instructions).toContain("harbor upload --public");
     expect(exported.result.instructions).toContain("uv run lb submit <hub-url>");

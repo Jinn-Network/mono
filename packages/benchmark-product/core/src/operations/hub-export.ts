@@ -156,7 +156,11 @@ export function executeExportHarborHubPackage(
       rmSync(exportDir, { recursive: true, force: true });
       mkdirSync(exportDir, { recursive: true });
       cpSync(jobDir, join(exportDir, "job"), { recursive: true });
-      const certification = exportCompletenessCertification({ runSha256: runState.runSha256, completeness: matrix?.completeness });
+      const certification = exportCompletenessCertification({
+        runSha256: runState.runSha256,
+        completeness: matrix?.completeness,
+        frameworkSubmitReady: mode === "leaderboard-submit",
+      });
       const instructions = harborHubExportInstructions(certification, mode, join(exportDir, "job"), protocol);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, jobDir, exportDir };

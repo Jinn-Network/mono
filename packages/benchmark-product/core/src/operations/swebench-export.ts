@@ -136,7 +136,11 @@ export function executeExportSwebenchPredictions(
       }
       const logs = join(reportRoot, "logs");
       if (existsSync(logs)) cpSync(logs, join(exportDir, "logs"), { recursive: true });
-      const certification = exportCompletenessCertification({ runSha256: runState.runSha256, completeness: matrix?.completeness });
+      const certification = exportCompletenessCertification({
+        runSha256: runState.runSha256,
+        completeness: matrix?.completeness,
+        frameworkSubmitReady: mode === "leaderboard-submit",
+      });
       const instructions = swebenchPredictionsExportInstructions(certification, mode, exportDir);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, exportDir };
