@@ -671,7 +671,8 @@ describe("paired-majority-delta@1 compute", () => {
     expect(result["reasons"]).toEqual([]);
     expect(result["interval"]).not.toBeNull();
     const interval = result["interval"] as { lower: string; upper: string; alpha: string };
-    expect(interval.alpha).toBe("0.05");
+    // Fixed-4 like `lower`/`upper` (spec §7.1's exact interval shape).
+    expect(interval.alpha).toBe("0.0500");
     expect(Number(interval.lower)).toBeLessThanOrEqual(Number(result["delta"]));
     expect(Number(interval.upper)).toBeGreaterThanOrEqual(Number(result["delta"]));
     const clusters = result["clusters"] as { count: number; manifest: unknown[] };

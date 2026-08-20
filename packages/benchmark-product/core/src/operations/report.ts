@@ -205,6 +205,23 @@ export function runReport(
       if (primarySelected === undefined) {
         refuse("record-integrity", "run", "sealed Run carries no analysisPlan entry to report from");
       }
+      // The identity assertion the comment above promises (M1). `primaryAnalysisPlanLength` derives
+      // an INDEX from the draft's own shape; without this check "located by identity" would be a
+      // claim about intent rather than about what the code does, and a plan whose primary entry had
+      // drifted from the draft's declared `analysis` would be reported from silently. The draft's
+      // `analysis` is optional, so an absent one has no identity to check against and is skipped.
+      const declaredPrimary = document.spec.analysis;
+      if (
+        declaredPrimary !== undefined
+        && (primarySelected.method !== declaredPrimary.method || primarySelected.version !== declaredPrimary.version)
+      ) {
+        refuse(
+          "record-integrity",
+          "run.analysisPlan",
+          `sealed Run's primary analysisPlan entry is ${primarySelected.method}@${primarySelected.version},`
+          + ` not the draft's declared primary analysis ${declaredPrimary.method}@${declaredPrimary.version}`,
+        );
+      }
       const additionalSelected = planEntries.slice(primaryPlanLength);
       type SealedAnalysisPlanEntry = (typeof planEntries)[number];
 

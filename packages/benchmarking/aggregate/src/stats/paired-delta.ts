@@ -12,6 +12,19 @@
 import { compareCodeUnitStrings } from "@jinn-network/benchmarking-records";
 import { clusteredPairedRateDiffBca, type ClusteredTaskRate } from "./noninferiority.js";
 
+/**
+ * Below this many paired Tasks the interval is WITHHELD rather than manufactured (design §9.3: a
+ * method never manufactures confidence from too little data). Matches the seed library's minN.
+ *
+ * Defined here, beside the estimator it gates, and imported by every method that applies it
+ * (`paired-delta@1` in `registry.ts`, `paired-majority-delta@1` in
+ * `paired-majority-delta-method.ts`). It is CLAIM-BEARING -- both methods print the threshold into
+ * their withholding reason string, so a reader compares the two printed values directly. Two
+ * copies of the literal could drift apart and publish two different thresholds under the same
+ * stated rule, which is exactly the drift one shared constant forecloses.
+ */
+export const MIN_PAIRED_DELTA_TASKS = 5;
+
 export interface PairedDeltaIntervalOptions {
   readonly seed: number;
   readonly resamples: number;

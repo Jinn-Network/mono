@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { cellIdempotencyKey, parseBenchmarkAccounting, parseMatrix, parseReport, parseSignedReportRecord } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION, cellIdempotencyKey, parseBenchmarkAccounting, parseMatrix, parseReport, parseSignedReportRecord } from "@jinn-network/benchmarking-records";
 import { requirementsDigest } from "@jinn-network/benchmarking-local";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, SubmissionUri } from "@jinn-network/task-execution-backend";
@@ -44,6 +44,7 @@ import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { readAuditEntries } from "../audit/journal.js";
 import { materializePublicBundle, PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "../bundle/materialize.js";
+import { createSyntheticV4BundleFixture } from "../bundle/testing/v4-synthetic-fixture.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { BUNDLE_FORMAT, BUNDLE_V3_FORMAT, BUNDLE_V4_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
 import { runCli } from "../cli/main.js";
@@ -1976,11 +1977,16 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
   test(
     "one report invocation emits N sealed Reports and one publish invocation emits N bundles, both single-shot; N distinct identities share one runSha256/matrixSha256",
     async () => {
-      // Only wilson@1, paired-delta@1, and binary-instrument@1 have a claim-package projection
-      // wired (`report/claim.ts`'s methodProjection — the packet brief owns that switch and P5
-      // must not touch it); wilson can never be an additional entry (it is always the primary
-      // head). paired-delta@1 is therefore the one method this test can register as an additional
-      // analysis end-to-end. Real pairing needs task provenance the bundled sample benchmark does
+      // Five methods now have a claim-package projection wired on BOTH sides of the mirror seam
+      // (`report/claim.ts`'s methodProjection in core, and the same switch in verify's own
+      // `profile/claim.ts`): wilson@1, paired-delta@1, binary-instrument@1, and — added by this
+      // packet — pairwise-disagreement@1 and paired-majority-delta@1. wilson can never be an
+      // additional entry (it is always the primary head). This test stays on paired-delta@1
+      // because what it proves is the PACKAGING property (N sealed Reports, N bundles, one shared
+      // run/matrix identity), which is method-agnostic by construction and does not depend on
+      // which method fills the slot. The two new judge methods carry their own end-to-end
+      // cold-verify proof in the sibling test below, which is where their projections are
+      // exercised. Real pairing needs task provenance the bundled sample benchmark does
       // not carry (P4b scoping §6.1), so — exactly like the existing "selected paired method" test
       // above — every evaluation is dispatched "no-verdict", which keeps pairing at zero pairs and
       // sidesteps the provenance gap while still exercising the real produceReport() call.
@@ -2196,6 +2202,95 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
       }
     },
     30_000,
+  );
+
+  test.skipIf(!externalVerifyAvailable)(
+    "packet P5 proof 1b: bundles carrying the TWO NEW judge readouts cold-verify with the packaged external-verify.py after the source workspace is deleted",
+    async () => {
+      // Why this exists as a sibling of proof 1a rather than an extension of it.
+      //
+      // Proof 1a runs on `setUpClosedRun`, which pins `prediction-v1-baseline`/`sample-uniform`.
+      // That is NOT a binary-judgment run, so it cannot reach either method this packet registers,
+      // and 1a therefore only ever exercised methods that were wired before this packet. That is
+      // the E-7 mirror seam applied to this packet's own analysis: a claim-package projection lives
+      // in TWO files (core's `report/claim.ts` and the standalone verifier's `profile/claim.ts`),
+      // publish routes through the verifier's copy (`bundle/verify.ts`), and a proof that never
+      // builds a bundle from the new methods cannot see a projection missing from the verifier's
+      // half. Two were missing — the claim projection AND the bundle-asset projection — and these
+      // bundles did not reach disk at all.
+      //
+      // So this proof drives the real binary-judgment lifecycle, registers both new methods as
+      // pre-registered additional analyses beside the canonical `binary-instrument@1` entry, and
+      // cold-verifies one bundle PER NEW METHOD.
+      const fixture = await createSyntheticV4BundleFixture({
+        workspaceDir,
+        truthAdmission: "operator-only",
+        // `paired-majority-delta@1` derives its pair structurally: exactly one evidence-declaring
+        // arm, and exactly one arm identical to it once the evidence interpolation is stripped.
+        // `withEvidence` is required alongside it — a declaring instrument obliges every bound item
+        // to carry evidence (the §2.3 lock-time leak refusal).
+        withEvidence: true,
+        evidencePair: { declaring: "beta", twin: "alpha" },
+        additionalAnalyses: [
+          { method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: BENCHMARKING_METHOD_VERSION },
+          { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION },
+        ],
+      });
+
+      // Materialized through P5's own `reportSelector` seam rather than `runPublish`. `runPublish`
+      // is NOT usable here: on a binary-judgment run it refuses at claim-consistency because the
+      // publish path does not thread the Inspect and binary-instrument limitation lines into its
+      // exact-disclosure rebuild. That gap is PRE-EXISTING and unrelated to this packet — it
+      // reproduces identically on this same fixture with no additional analyses registered at all,
+      // i.e. with none of this packet's code reachable — so it is reported separately rather than
+      // fixed here. `materializePublicBundle` is the seam this packet actually adds, it writes the
+      // same bundle directory to the same `publicBundlePath`, and the fixture already produces its
+      // own canonical bundle through it.
+      const runState = readRunState(workspaceDir, fixture.draftId);
+      expect(runState).toBeDefined();
+      if (runState === undefined) return;
+
+      const newMethods = [
+        BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+        BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+      ];
+      // Both entries really were sealed into the Run's analysis plan, so the bundles below come
+      // from pre-registered readouts rather than from anything this test invented.
+      expect((runState.additionalReports ?? []).map((entry) => entry.method).sort())
+        .toEqual([...newMethods].sort());
+
+      const copiedByMethod = newMethods.map((method) => {
+        const materialized = materializePublicBundle({
+          workspaceDir,
+          draftId: fixture.draftId,
+          benchmarkSha256: fixture.benchmarkSha256,
+          runState,
+          reportSelector: { method, version: BENCHMARKING_METHOD_VERSION },
+        });
+        const copied = mkdtempSync(join(tmpdir(), "bp-p5-cold-judge-"));
+        cpSync(materialized.bundleDir, copied, { recursive: true });
+        return { method, dir: copied };
+      });
+      try {
+        rmSync(workspaceDir, { recursive: true, force: true });
+        expect(existsSync(workspaceDir)).toBe(false);
+
+        for (const { method, dir } of copiedByMethod) {
+          const claim = JSON.parse(readFileSync(join(dir, "claim-package.json"), "utf8")) as Record<string, unknown>;
+          expect(claim["method"]).toMatchObject({ id: method, version: BENCHMARKING_METHOD_VERSION });
+          // The projection the verifier's half of the mirror was missing is present on disk.
+          expect(
+            method === BENCHMARKING_METHOD_IDS.pairwiseDisagreement
+              ? claim["pairwiseDisagreement"]
+              : claim["pairedMajorityDelta"],
+          ).toBeDefined();
+          assertExternalVerifyAllChecksPass(await runExternalVerify(dir));
+        }
+      } finally {
+        for (const { dir } of copiedByMethod) rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    120_000,
   );
 
   test(

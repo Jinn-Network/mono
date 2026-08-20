@@ -36,7 +36,9 @@ import {
   resolveVerdictOutcome,
 } from "./resolved-inputs.js";
 import { clusteredPairedRateDiffBca, MAX_NONINFERIORITY_RESAMPLES_V1, nonInferiorityIut, nonInferiorityVerdict, pairedCostVerdict, type ExactCostDifference, type NonInferiorityOptions } from "./stats/noninferiority.js";
-import { clusteredPairedDeltaInterval, sourceClusterManifest } from "./stats/paired-delta.js";
+import { clusteredPairedDeltaInterval, sourceClusterManifest,
+  MIN_PAIRED_DELTA_TASKS,
+} from "./stats/paired-delta.js";
 import { pairedMcnemar } from "./stats/paired-mcnemar.js";
 import { provenanceClusterSign } from "./stats/provenance-cluster-sign.js";
 import { avgAtOne, passAtK } from "./stats/pass-at-k.js";
@@ -1117,9 +1119,6 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
 // leg; the cost leg and the intersection-union verdict are deliberately absent — this method
 // estimates an effect, it does not gate one.
 
-/** Below this many paired Tasks the interval is withheld rather than manufactured (design §9.3:
- * a method never manufactures confidence from too little data). Matches the seed library's minN. */
-const MIN_PAIRED_DELTA_TASKS = 5;
 
 const pairedDeltaMethod: SingleSubjectMethod = {
   ...METHOD_METADATA.pairedDelta,
@@ -1344,9 +1343,9 @@ function subjectScopedMethod(method: SingleSubjectMethod): Method {
 
 const METHODS: readonly Method[] = SINGLE_SUBJECT_METHODS.map(subjectScopedMethod);
 
-/** The method registry: URI + version identification over eleven registered methods
- * (nine in the v1 reference set; `bradley-terry@1` and `pairwise-disagreement@1` registered but
- * not part of it). */
+/** The method registry: URI + version identification over twelve registered methods
+ * (nine in the v1 reference set; `bradley-terry@1`, `pairwise-disagreement@1`, and
+ * `paired-majority-delta@1` registered but not part of it). */
 export function createMethodRegistry(): MethodRegistry {
   const byKey = new Map(METHODS.map((method) => [`${method.id}@${method.version}`, method]));
   return {

@@ -163,7 +163,11 @@ function disagreementCount(n: number, disagreements: number, alpha: string): Dis
     n,
     disagreements,
     rate: fixed4(interval.p),
-    interval: { lower: fixed4(interval.lo), upper: fixed4(interval.hi), alpha },
+    // `alpha` is fixed-4 like `lower`/`upper` (spec §7.1's exact interval shape): all three fields
+    // of one interval print at one precision, and the asset layer's own paired-delta@1 rendering
+    // already fixed-4s alpha, so emitting "0.05" here would have made the method output and the
+    // rendered claim disagree on the same number's spelling.
+    interval: { lower: fixed4(interval.lo), upper: fixed4(interval.hi), alpha: fixed4(Number(alpha)) },
   };
 }
 

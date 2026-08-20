@@ -127,6 +127,12 @@ interface ArmConfig {
   readonly armId: string;
   readonly model: AcceptedJudgeModelId;
   readonly generation: typeof generation | typeof samplingGeneration;
+  /** Developer-message preamble (packet #2837, RULING C2). Arms sharing one preamble are
+   * stripped-identical and so are twin candidates for the evidence-declaring arm; arms with
+   * distinct preambles are UNRELATED and must not be paired with it. The family closure pins one
+   * shared model and one shared generation across arms, so the message templates are the only axis
+   * on which two arms of a legal roster can genuinely differ. */
+  readonly preamble?: string;
 }
 
 const DEFAULT_ARM_CONFIGS: readonly ArmConfig[] = (["alpha", "beta", "delta", "gamma"] as const).map(
@@ -207,6 +213,7 @@ function instrument(
     readonly model?: AcceptedJudgeModelId;
     readonly generation?: typeof generation | typeof samplingGeneration;
     readonly declaresEvidence?: boolean;
+    readonly preamble?: string;
   } = {},
 ) {
   const model = options.model ?? "gpt-5.6-luna";
@@ -221,7 +228,7 @@ function instrument(
     ...(options.declaresEvidence ? [{ literal: "\nEvidence: " }, { field: "evidence" }] : []),
   ];
   const messages = [
-    { role: "developer", segments: [{ literal: "Judge only the supplied item. " }] },
+    { role: "developer", segments: [{ literal: options.preamble ?? "Judge only the supplied item. " }] },
     { role: "user", segments: userSegments },
   ];
   const descriptor = {
@@ -397,6 +404,7 @@ function setUpFixture(options: {
       model: armConfig.model,
       generation: armConfig.generation,
       declaresEvidence: declaringArmIds.has(armConfig.armId),
+      preamble: armConfig.preamble,
     });
     store(sealed.bytes);
     return sealed;
@@ -872,14 +880,88 @@ describe("pairwise-disagreement@1 and paired-majority-delta@1 shared derivation 
     expect(validatePairedMajorityDeltaParameters(entry.parameters as Readonly<Record<string, unknown>>).ok).toBe(true);
   });
 
-  test("refuses when more than two arms make the evidence-declaring arm's twin ambiguous", () => {
-    // Default fixture: four arms, "beta" declares evidence.
+  // packet #2837, RULING C2: the derivation is STRUCTURAL, never a literal arm count. §1.6's
+  // no-literal-counts rule is frozen for this family, and the ratified flagship is a six-arm panel,
+  // so an `arms.length !== 2` ban would have banned the flagship shape itself. The four tests below
+  // pin the replacement: ambiguity refuses BY NAME, and an unambiguous six-arm roster resolves.
+  test("refuses when several arms are stripped-identical to the declaring arm, naming every candidate twin", () => {
+    // Default fixture: four arms sharing one preamble, "beta" declares evidence. Stripping beta's
+    // evidence interpolation makes it identical to all three others, so the twin is ambiguous.
     const fixture = setUpFixture({ withItemEvidence: true, declaringArmIds: ["beta"] });
     const draft = withAdditionalAnalyses(fixture.draft, [
       { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION },
     ]);
     expect(() => compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT }))
-      .toThrow(/requires exactly two Run arms/u);
+      .toThrow(/found 3 evidence-free twins for declaring arm "beta".*"alpha".*"delta".*"gamma"/su);
+  });
+
+  test("derives the pair on a SIX-arm panel: one declaring arm, its stripped-identical twin, and four unrelated arms", () => {
+    // The ratified flagship shape. "beta" declares evidence and "alpha" shares its template, so
+    // stripping beta's evidence interpolation makes the two identical. The other four carry
+    // distinct preambles, so none of them is a twin and the pair is unambiguous.
+    const fixture = setUpFixture({
+      withItemEvidence: true,
+      declaringArmIds: ["beta"],
+      arms: [
+        { armId: "alpha", model: "gpt-5.6-luna", generation },
+        { armId: "beta", model: "gpt-5.6-luna", generation },
+        { armId: "delta", model: "gpt-5.6-luna", generation, preamble: "Delta rubric. " },
+        { armId: "epsilon", model: "gpt-5.6-luna", generation, preamble: "Epsilon rubric. " },
+        { armId: "gamma", model: "gpt-5.6-luna", generation, preamble: "Gamma rubric. " },
+        { armId: "zeta", model: "gpt-5.6-luna", generation, preamble: "Zeta rubric. " },
+      ],
+    });
+    const draft = withAdditionalAnalyses(fixture.draft, [
+      { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION },
+    ]);
+    const compiled = compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT });
+    const plan = compiled.plannedRun.record.analysisPlan!;
+    const entry = plan.find((planEntry) => planEntry.method === BENCHMARKING_METHOD_IDS.pairedMajorityDelta)!;
+    const parameters = entry.parameters as Readonly<Record<string, unknown>>;
+    // candidate = the evidence-declaring arm; baseline = its evidence-free twin. Four unrelated
+    // arms are present and none of them is named.
+    expect(parameters["candidate"]).toBe("beta");
+    expect(parameters["baseline"]).toBe("alpha");
+    expect(validatePairedMajorityDeltaParameters(parameters).ok).toBe(true);
+  });
+
+  test("refuses a six-arm panel carrying TWO stripped-identical candidates for the declaring arm", () => {
+    // "alpha" and "zeta" both share "beta"'s template, so stripping beta's evidence interpolation
+    // leaves two equally good twins. The method must refuse rather than pick one.
+    const fixture = setUpFixture({
+      withItemEvidence: true,
+      declaringArmIds: ["beta"],
+      arms: [
+        { armId: "alpha", model: "gpt-5.6-luna", generation },
+        { armId: "beta", model: "gpt-5.6-luna", generation },
+        { armId: "delta", model: "gpt-5.6-luna", generation, preamble: "Delta rubric. " },
+        { armId: "epsilon", model: "gpt-5.6-luna", generation, preamble: "Epsilon rubric. " },
+        { armId: "gamma", model: "gpt-5.6-luna", generation, preamble: "Gamma rubric. " },
+        { armId: "zeta", model: "gpt-5.6-luna", generation },
+      ],
+    });
+    const draft = withAdditionalAnalyses(fixture.draft, [
+      { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION },
+    ]);
+    expect(() => compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT }))
+      .toThrow(/found 2 evidence-free twins for declaring arm "beta".*"alpha".*"zeta"/su);
+  });
+
+  test("refuses when no arm is stripped-identical to the declaring arm", () => {
+    // Two arms, but the non-declaring one carries a different rubric, so it is not beta's twin.
+    const fixture = setUpFixture({
+      withItemEvidence: true,
+      declaringArmIds: ["beta"],
+      arms: [
+        { armId: "alpha", model: "gpt-5.6-luna", generation, preamble: "A different rubric. " },
+        { armId: "beta", model: "gpt-5.6-luna", generation },
+      ],
+    });
+    const draft = withAdditionalAnalyses(fixture.draft, [
+      { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION },
+    ]);
+    expect(() => compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT }))
+      .toThrow(/found no evidence-free twin for declaring arm "beta"/u);
   });
 
   test("refuses when zero arms declare evidence (the twin has no pair to name)", () => {

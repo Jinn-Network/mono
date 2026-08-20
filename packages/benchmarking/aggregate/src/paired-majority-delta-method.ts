@@ -12,7 +12,9 @@ import {
 } from "./binary-instrument-method.js";
 import type { Method } from "./method.js";
 import { resolveTaskProvenance } from "./resolved-inputs.js";
-import { clusteredPairedDeltaInterval, sourceClusterManifest } from "./stats/paired-delta.js";
+import { clusteredPairedDeltaInterval, sourceClusterManifest,
+  MIN_PAIRED_DELTA_TASKS,
+} from "./stats/paired-delta.js";
 import { MAX_NONINFERIORITY_RESAMPLES_V1, type ClusteredTaskRate } from "./stats/noninferiority.js";
 
 /**
@@ -217,14 +219,11 @@ function parametersFrom(input: Readonly<Record<string, unknown>>): PairedMajorit
   return input as unknown as PairedMajorityDeltaParameters;
 }
 
-/** Below this many paired Tasks the interval is withheld rather than manufactured. Inherited
- * unchanged from `paired-delta@1`'s `MIN_PAIRED_DELTA_TASKS` (registry.ts) — spec §7.2a. */
-const MIN_PAIRED_MAJORITY_DELTA_TASKS = 5;
 
 function withholdingReasons(n: number, clusterCount: number): string[] {
   const reasons: string[] = [];
-  if (n < MIN_PAIRED_MAJORITY_DELTA_TASKS) {
-    reasons.push(`fewer than minN=${MIN_PAIRED_MAJORITY_DELTA_TASKS} paired tasks (got ${n})`);
+  if (n < MIN_PAIRED_DELTA_TASKS) {
+    reasons.push(`fewer than minN=${MIN_PAIRED_DELTA_TASKS} paired tasks (got ${n})`);
   }
   if (clusterCount < 2) {
     reasons.push(`fewer than two source clusters (got ${clusterCount})`);
@@ -265,7 +264,9 @@ function deltaProjection(
   return {
     n: rates.length,
     delta: delta === null ? null : fixed4(delta),
-    interval: estimate === undefined ? null : { lower: fixed4(estimate.low), upper: fixed4(estimate.high), alpha },
+    // Fixed-4 `alpha`, matching `lower`/`upper` and `pairwise-disagreement@1` (spec §7.1's exact
+    // interval shape).
+    interval: estimate === undefined ? null : { lower: fixed4(estimate.low), upper: fixed4(estimate.high), alpha: fixed4(Number(alpha)) },
     reasons,
   };
 }

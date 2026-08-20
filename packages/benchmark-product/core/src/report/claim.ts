@@ -167,7 +167,11 @@ const DeltaProjectionSchema = z.object({
 const PairedMajorityDeltaSchema = DeltaProjectionSchema.extend({
   baseline: z.string().min(1),
   candidate: z.string().min(1),
-  clusters: z.object({ count: z.number().int().nonnegative(), manifest: z.unknown() }),
+  // `manifest` is optional (M4): the projection omits the key entirely when the method emitted
+  // none, rather than writing `manifest: undefined` into an object that is canonical-JSON encoded
+  // on both sides of the mirror. Present-and-absent must both be expressible for the two copies to
+  // agree byte-for-byte.
+  clusters: z.object({ count: z.number().int().nonnegative(), manifest: z.unknown().optional() }),
   byCandidateClass: z.array(DeltaProjectionSchema.extend({ candidateClass: z.string().min(1) })),
   byStratum: z.array(DeltaProjectionSchema.extend({ stratum: z.string().min(1) })),
   exclusions: z.array(ExclusionTripleSchema),
@@ -714,7 +718,10 @@ function pairedMajorityDeltaProjection(subjectResults: unknown): MethodProjectio
       delta: shape.delta as string | null,
       interval: shape.interval as PairedMajorityDelta["interval"],
       reasons: [...(shape.reasons as readonly string[])],
-      clusters: { count: shape.clusters.count, manifest: shape.clusters.manifest },
+      clusters: {
+        count: shape.clusters.count,
+        ...(shape.clusters.manifest === undefined ? {} : { manifest: shape.clusters.manifest }),
+      },
       byCandidateClass: shape.byCandidateClass as PairedMajorityDelta["byCandidateClass"],
       byStratum: shape.byStratum as PairedMajorityDelta["byStratum"],
       exclusions: shape.exclusions as PairedMajorityDelta["exclusions"],

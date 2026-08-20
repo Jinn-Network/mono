@@ -634,7 +634,7 @@ describe("pairwise-disagreement@1 compute", () => {
     expect(ab).toMatchObject({ armA: "armA", armB: "armB", n: 3, disagreements: 1 });
     const abWilson = wilsonInterval(1, 3);
     expect(ab!["rate"]).toBe(abWilson.p.toFixed(4));
-    expect(ab!["interval"]).toEqual({ lower: abWilson.lo.toFixed(4), upper: abWilson.hi.toFixed(4), alpha: "0.05" });
+    expect(ab!["interval"]).toEqual({ lower: abWilson.lo.toFixed(4), upper: abWilson.hi.toFixed(4), alpha: "0.0500" });
 
     expect(ac).toMatchObject({ armA: "armA", armB: "armC", n: 4, disagreements: 3 });
     const acWilson = wilsonInterval(3, 4);

@@ -148,7 +148,7 @@ function resolveNonWilsonAnalysisEntry(
     // caller-supplied `analysis.parameters`. Each derivation function refuses on its own if the
     // closure or the arm roster does not satisfy its method's own requirements.
     if (analysis.method === BENCHMARKING_METHOD_IDS.pairwiseDisagreement) {
-      const parameters = compilePairwiseDisagreementProfile({ ...judgeFamilyContext, analysis });
+      const parameters = compilePairwiseDisagreementProfile({ ...judgeFamilyContext, analysis, pathPrefix });
       return {
         method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
         version: BENCHMARKING_METHOD_VERSION,
@@ -156,7 +156,7 @@ function resolveNonWilsonAnalysisEntry(
       };
     }
     if (analysis.method === BENCHMARKING_METHOD_IDS.pairedMajorityDelta) {
-      const parameters = compilePairedMajorityDeltaProfile({ ...judgeFamilyContext, analysis });
+      const parameters = compilePairedMajorityDeltaProfile({ ...judgeFamilyContext, analysis, pathPrefix });
       return {
         method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
         version: BENCHMARKING_METHOD_VERSION,
