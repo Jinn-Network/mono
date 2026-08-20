@@ -657,7 +657,7 @@ export function compilePairwiseDisagreementProfile(input: {
   if (analysis.baseline !== undefined || analysis.candidate !== undefined) {
     refuse(
       "validation",
-      "spec.analysis",
+      input.pathPrefix ?? "spec.analysis",
       "pairwise-disagreement computes all unordered arm pairs in one pass and does not accept baseline or candidate arms",
     );
   }
@@ -797,7 +797,7 @@ export function compilePairedMajorityDeltaProfile(input: {
   if (analysis.baseline !== undefined || analysis.candidate !== undefined) {
     refuse(
       "validation",
-      "spec.analysis",
+      input.pathPrefix ?? "spec.analysis",
       "paired-majority-delta derives its own baseline/candidate from the evidence-declaring arm and does not accept caller-supplied baseline or candidate arms",
     );
   }

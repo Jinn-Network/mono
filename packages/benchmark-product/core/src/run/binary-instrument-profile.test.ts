@@ -1008,14 +1008,55 @@ describe("pairwise-disagreement@1 and paired-majority-delta@1 shared derivation 
     }
   });
 
-  test("both derivations refuse a caller-supplied baseline/candidate — pairwise-disagreement because it is non-comparative, paired-majority-delta because it derives its own pair", () => {
+  test("both derivations refuse a caller-supplied baseline/candidate at spec.additionalAnalyses.i, not spec.analysis — pairwise-disagreement because it is non-comparative, paired-majority-delta because it derives its own pair", () => {
     const fixture = setUpFixture();
+    const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+
+    const pairwiseError = expectProductError(() => compilePairwiseDisagreementProfile({
+      workspaceDir,
+      draft: fixture.draft,
+      benchmark,
+      analysis: {
+        method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+        version: BENCHMARKING_METHOD_VERSION,
+        baseline: "alpha",
+        candidate: "beta",
+      },
+      pathPrefix: "spec.additionalAnalyses.0",
+    }));
+    expect(pairwiseError.code).toBe("validation");
+    expect(pairwiseError.issues).toEqual([{
+      path: "spec.additionalAnalyses.0",
+      message: "pairwise-disagreement computes all unordered arm pairs in one pass and does not accept baseline or candidate arms",
+    }]);
+
+    // Index 1, not 0: proves the refusal uses `pathPrefix` (`spec.additionalAnalyses.${i}`) rather
+    // than a hardcoded additional-analyses[0] path or the primary `"spec.analysis"`.
+    const pairedError = expectProductError(() => compilePairedMajorityDeltaProfile({
+      workspaceDir,
+      draft: fixture.draft,
+      benchmark,
+      analysis: {
+        method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+        version: BENCHMARKING_METHOD_VERSION,
+        baseline: "alpha",
+        candidate: "beta",
+      },
+      pathPrefix: "spec.additionalAnalyses.1",
+    }));
+    expect(pairedError.code).toBe("validation");
+    expect(pairedError.issues).toEqual([{
+      path: "spec.additionalAnalyses.1",
+      message: "paired-majority-delta derives its own baseline/candidate from the evidence-declaring arm and does not accept caller-supplied baseline or candidate arms",
+    }]);
+
+    // The additionalAnalyses compile seam still refuses these entries (message preserved through
+    // planFromSpec's wrap). Direct compiler calls above are what pin the pathPrefix.
     const pairwiseDraft = withAdditionalAnalyses(fixture.draft, [
       { method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: BENCHMARKING_METHOD_VERSION, baseline: "alpha", candidate: "beta" },
     ]);
     expect(() => compileDraft({ workspaceDir, draft: pairwiseDraft, owner: OWNER, closeAt: CLOSE_AT }))
       .toThrow(/pairwise-disagreement computes all unordered arm pairs/u);
-
     const pairedDraft = withAdditionalAnalyses(fixture.draft, [
       { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION, baseline: "alpha", candidate: "beta" },
     ]);

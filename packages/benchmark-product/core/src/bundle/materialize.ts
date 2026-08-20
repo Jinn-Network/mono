@@ -23,7 +23,9 @@ import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import { SubmissionRecordSchema } from "@jinn-network/task-execution-protocol";
 import {
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
+  parseBinaryJudgmentAnalysisContext,
   parseBinaryJudgmentInstrument,
+  parseEvaluationSpec,
 } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes, dssePreAuthEncoding, parseDsseEnvelope } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
@@ -58,6 +60,7 @@ import { buildPublicAssets } from "./assets.js";
 import {
   BUNDLE_ASSEMBLY_FORMAT,
   BUNDLE_EVIDENCE_FORMAT,
+  BUNDLE_EVIDENCE_ROLES,
   BUNDLE_TRUST_FORMAT,
   BUNDLE_VERDICTS_FORMAT,
   BUNDLE_QUALIFICATION_FORMAT,
@@ -119,6 +122,19 @@ export const PUBLIC_BUNDLE_V4_FILES = [
 ] as const;
 
 const ROLE_ORDER: readonly BundleV4EvidenceRole[] = BUNDLE_V4_EVIDENCE_ROLES;
+
+function analysisContextDigestFromEvalSpec(spec: ReturnType<typeof parseEvaluationSpec>): string | undefined {
+  const block = spec.familyBlock;
+  if (typeof block !== "object" || block === null || Array.isArray(block)) return undefined;
+  const testMaterial = (block as { readonly testMaterial?: unknown }).testMaterial;
+  if (!Array.isArray(testMaterial) || testMaterial.length !== 1) return undefined;
+  const entry = testMaterial[0];
+  if (typeof entry !== "object" || entry === null) return undefined;
+  const record = entry as { readonly name?: unknown; readonly digest?: { readonly sha256?: unknown } };
+  if (record.name !== "analysis-context.json" || typeof record.digest?.sha256 !== "string") return undefined;
+  if (!/^[a-f0-9]{64}$/u.test(record.digest.sha256)) return undefined;
+  return record.digest.sha256;
+}
 
 export interface MaterializeBundleInput {
   readonly workspaceDir: string;
@@ -543,11 +559,36 @@ function recordClosure(input: MaterializeBundleInput): {
     }
     const evaluationSpecSha256 = task.evaluation?.digest?.sha256;
     if (evaluationSpecSha256 !== undefined) addRole(evidenceRecords, evaluationSpecSha256, "evaluation-spec");
+    if (binaryInspectRuntime && evaluationSpecSha256 !== undefined) {
+      let spec: ReturnType<typeof parseEvaluationSpec>;
+      try {
+        spec = parseEvaluationSpec(getSealedBytes(workspaceDir, evaluationSpecSha256));
+      } catch {
+        refuse("record-integrity", "evidence-closure", `EvaluationSpec ${evaluationSpecSha256} bytes are invalid`);
+      }
+      const analysisHex = analysisContextDigestFromEvalSpec(spec);
+      if (analysisHex === undefined) {
+        refuse("record-integrity", "evidence-closure", `EvaluationSpec ${evaluationSpecSha256} has no analysis-context`);
+      }
+      addRole(evidenceRecords, analysisHex, "analysis-context");
+      const analysis = parseBinaryJudgmentAnalysisContext(getSealedBytes(workspaceDir, analysisHex));
+      addRole(evidenceRecords, analysis.labelResolutionSha256.slice("sha256:".length), "label-resolution");
+    }
     const receipt = receipts.get(taskSha256);
     if (receipt !== undefined) addRole(evidenceRecords, receipt.sha256, "admission-receipt");
   }
   if (binaryInspectRuntime) {
     addRole(evidenceRecords, inspectSelectionSha256!, "runtime-selection");
+    // Family-method additional-analysis bundles are /2 (no qualification.json) but still
+    // recompute pairwise-disagreement@1 / paired-majority-delta@1, which resolve arm
+    // instruments. The V4 qualification block also addRoles these; the Set is idempotent.
+    for (const arm of run.arms) {
+      const instrumentSha256 = arm.pinning[BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY];
+      if (typeof instrumentSha256 !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(instrumentSha256)) {
+        refuse("record-integrity", "evidence-closure", `Run arm ${arm.armId} has no exact judge-instrument pin`);
+      }
+      addRole(evidenceRecords, instrumentSha256.slice("sha256:".length), "judge-instrument");
+    }
     // §1.5 rule 5: publish the pre-run snapshot-serving probe as a bundle asset alongside the
     // selection manifest, so a cold verifier reads the same bytes. Present exactly when the
     // sealed selection manifest carries `snapshotProbeSha256`.
@@ -890,8 +931,9 @@ function recordClosure(input: MaterializeBundleInput): {
       .sort(([left], [right]) => compareCodeUnitStrings(left, right))
       .map(([sha256, roles]) => ({
         sha256,
-        roles: ROLE_ORDER.slice(0, 12).filter((role) => roles.has(role)),
-      })),
+        roles: BUNDLE_EVIDENCE_ROLES.filter((role) => roles.has(role)),
+      }))
+      .filter((record) => record.roles.length > 0),
   });
   files.set("evidence.json", canonicalJsonBytes(evidenceCatalog));
   for (const record of evidenceCatalog.records) {

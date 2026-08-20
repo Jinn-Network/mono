@@ -2205,7 +2205,7 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
   );
 
   test.skipIf(!externalVerifyAvailable)(
-    "packet P5 proof 1b: bundles carrying the TWO NEW judge readouts cold-verify with the packaged external-verify.py after the source workspace is deleted",
+    "packet P5 proof 1b: bundles carrying the TWO NEW judge readouts cold-verify with verifyPublicBundle and the packaged external-verify.py after the source workspace is deleted",
     async () => {
       // Why this exists as a sibling of proof 1a rather than an extension of it.
       //
@@ -2217,7 +2217,10 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
       // publish routes through the verifier's copy (`bundle/verify.ts`), and a proof that never
       // builds a bundle from the new methods cannot see a projection missing from the verifier's
       // half. Two were missing — the claim projection AND the bundle-asset projection — and these
-      // bundles did not reach disk at all.
+      // bundles did not reach disk at all. A third copy, the portable `assertClaimConsistency`,
+      // must also fold PAIRED_ESTIMATE_LIMITATION for paired-majority-delta@1; packaged
+      // `external-verify.py` skips `claim-mirror` when there is no headline, so Python alone
+      // cannot see that hole. This proof therefore drives BOTH `verifyPublicBundle` and Python.
       //
       // So this proof drives the real binary-judgment lifecycle, registers both new methods as
       // pre-registered additional analyses beside the canonical `binary-instrument@1` entry, and
@@ -2269,13 +2272,13 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
         });
         const copied = mkdtempSync(join(tmpdir(), "bp-p5-cold-judge-"));
         cpSync(materialized.bundleDir, copied, { recursive: true });
-        return { method, dir: copied };
+        return { method, dir: copied, identity: materialized.identity };
       });
       try {
         rmSync(workspaceDir, { recursive: true, force: true });
         expect(existsSync(workspaceDir)).toBe(false);
 
-        for (const { method, dir } of copiedByMethod) {
+        for (const { method, dir, identity } of copiedByMethod) {
           const claim = JSON.parse(readFileSync(join(dir, "claim-package.json"), "utf8")) as Record<string, unknown>;
           expect(claim["method"]).toMatchObject({ id: method, version: BENCHMARKING_METHOD_VERSION });
           // The projection the verifier's half of the mirror was missing is present on disk.
@@ -2284,6 +2287,11 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
               ? claim["pairwiseDisagreement"]
               : claim["pairedMajorityDelta"],
           ).toBeDefined();
+          // JS verifier is the C1 seam (`publish` / `colophon-verify` run this copy). Python is
+          // necessary and not sufficient: `claim-mirror` skips when there is no headline.
+          const verified = await verifyPublicBundle(dir);
+          expect(verified.identity).toBe(identity);
+          expect(verified.checks).toContain("claim-consistency");
           assertExternalVerifyAllChecksPass(await runExternalVerify(dir));
         }
       } finally {
