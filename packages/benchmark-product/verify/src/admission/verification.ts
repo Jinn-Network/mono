@@ -35,6 +35,16 @@ import {
 } from "./contracts.js";
 import { readOrderedAdmissionVerdictMeasurements, readAdmissionVerdictEnvelope } from "./result-evaluation.js";
 
+/**
+ * Two unrelated things in this file are spelled `evidence`, and neither can be renamed.
+ *
+ * This one is the solver-visible per-item evidence passage: the field name is the literal payload
+ * key that `parseBinaryJudgmentPayload` produces, so this view must spell it `evidence` or it
+ * stops describing the bytes it is cast over. The other is the DSSE predicate's `evidence` array
+ * of attached admission records (`predicateView.evidence`, `view.evidence`), which is an in-toto
+ * envelope field name. They never meet: this one only ever reaches a `BinaryJudgmentPayloadView`
+ * bound as `item`, and the DSSE ones only ever reach the verdict-envelope views.
+ */
 interface BinaryJudgmentPayloadView {
   readonly itemId: string;
   readonly question: string;

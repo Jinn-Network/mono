@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import {
+  BINARY_JUDGMENT_TIMESTAMP_PATTERN,
   compareCodeUnitStrings,
 } from "@jinn-network/task-execution-profiles";
 
@@ -29,12 +30,10 @@ const CandidateClassSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9._-]{0,63}$/u)
 const BinaryJudgmentTruthLabelSchema = z.enum(["CORRECT", "WRONG"]);
 const BinaryJudgmentStratumSchema = z.enum(["core", "stress"]);
 /**
- * RFC 3339 instant SHAPE, seconds precision, no fractional part — mirrors
- * `BINARY_JUDGMENT_TIMESTAMP_PATTERN` in
- * `packages/task-execution/profiles/src/binary-judgment/contracts.ts` (the canonical copy). This
- * package must not import a `src/` file from another package, so the regex is restated here.
+ * RFC 3339 instant SHAPE, seconds precision, no fractional part. The pattern is imported from the
+ * profiles package rather than restated, so this mirrored payload copy cannot drift from the
+ * canonical one it mirrors.
  */
-const BINARY_JUDGMENT_TIMESTAMP_PATTERN = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(Z|[+-]\\d{2}:\\d{2})$";
 const BinaryJudgmentTimestampShapeSchema = z.string().regex(new RegExp(BINARY_JUDGMENT_TIMESTAMP_PATTERN, "u"));
 const BinaryJudgmentPayloadSchema = z.strictObject({
   itemId: z.string().regex(/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u),

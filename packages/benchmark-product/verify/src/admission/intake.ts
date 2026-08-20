@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { isCalendarStrictRfc3339 } from "@jinn-network/benchmarking-records";
+import { BINARY_JUDGMENT_TIMESTAMP_PATTERN } from "@jinn-network/task-execution-profiles";
 
 export const BINARY_ITEM_BANK_ENTRY_PROTOCOL = "https://spec.jinn.network/binary-judgment/item-bank-entry/v1" as const;
 export const BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL = "https://spec.jinn.network/binary-judgment/source-manifest-entry/v1" as const;
@@ -11,12 +12,10 @@ export const BINARY_ITEM_BANK_INTAKE_EXTENSION = "https://product.jinn.network/e
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u).transform((value) => value as `sha256:${string}`);
 const Sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u);
 /**
- * RFC 3339 instant SHAPE, seconds precision, no fractional part — mirrors
- * `BINARY_JUDGMENT_TIMESTAMP_PATTERN` in
- * `packages/task-execution/profiles/src/binary-judgment/contracts.ts` (the canonical copy). This
- * package must not import a `src/` file from another package, so the regex is restated here.
+ * RFC 3339 instant SHAPE, seconds precision, no fractional part. The pattern itself is imported
+ * from the profiles package rather than restated, so the payload contract and this manifest row
+ * cannot drift apart. Shape only: calendar strictness is the `publishedAt` refinement below.
  */
-const BINARY_JUDGMENT_TIMESTAMP_PATTERN = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(Z|[+-]\\d{2}:\\d{2})$";
 const BinaryJudgmentTimestampShapeSchema = z.string().regex(new RegExp(BINARY_JUDGMENT_TIMESTAMP_PATTERN, "u"));
 const ItemPayloadSchema = z.strictObject({
   itemId: z.string().regex(/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u),

@@ -554,6 +554,20 @@ describe("binary-instrument@1 lock-time composition", () => {
         benchmark,
       })).not.toThrow();
     });
+
+    // The flagship's actual path: the evidence-declaring arm and its evidence-free twins bound to
+    // one evidence-carrying bank. Proven at lock, not only at the launcher seam, because lock is
+    // where the arm set and the item set are both frozen and both in scope.
+    test("a declaring arm over an evidence-carrying bank locks cleanly alongside its evidence-free twins", () => {
+      const fixture = setUpFixture({ withItemEvidence: true, declaringArmIds: ["beta"] });
+      const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+      const parameters = compileBinaryInstrumentProfile({
+        workspaceDir,
+        draft: fixture.draft,
+        benchmark,
+      });
+      expect(parameters.strata).toStrictEqual(["core", "stress"]);
+    });
   });
 });
 

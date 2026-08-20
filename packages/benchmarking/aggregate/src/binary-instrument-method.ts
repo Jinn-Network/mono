@@ -390,6 +390,10 @@ function validateTaskPayload(value: unknown, digest: string): ResolvedBinaryPayl
       "Task.payload.provenance.sourceCommitment must be sha256:<64 lowercase hex>",
     );
   }
+  // Deliberately looser than its `sourceCommitment` sibling: `timestamp` is pinned as a string
+  // only, not to the RFC 3339 shape. The records layer re-reads and re-checks this exact field
+  // calendar-strictly (`resolveBenchmarkTaskProvenance`), so pinning the shape a second time here
+  // would be a duplicate enforcement point that can drift from the one that actually decides.
   if (typeof provenance["timestamp"] !== "string") {
     throw new MethodInputError("binary-record-malformed", digest, "Task.payload.provenance.timestamp must be a string");
   }
