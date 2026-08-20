@@ -372,8 +372,8 @@ function resultEvaluation(input: {
 function makeFixture(options: {
   readonly expireCell?: string;
   readonly tamper?: Tamper;
-  readonly truthAdmission?: "two-human-unanimous" | "operator-only";
-  readonly labelTruthAdmission?: "two-human-unanimous" | "operator-only";
+  readonly truthAdmission?: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
+  readonly labelTruthAdmission?: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
   readonly taskProfileDigest?: `sha256:${string}`;
   readonly taskProfileUri?: string;
   readonly responseParserDigest?: `sha256:${string}`;
@@ -475,19 +475,23 @@ function makeFixture(options: {
       protocol: "https://spec.jinn.network/binary-judgment/label-resolution/v1",
       itemSha256,
       itemId: resolvedItemId,
-      humanReviewEvaluationSpecSha256: `sha256:${"1".repeat(64)}`,
       truthLabel: labelTruth,
       candidateClass: seed.candidateClass,
       stratum: seed.stratum,
       resolvedAt: "2026-08-14T23:00:00Z",
       truthAdmission: labelTruthAdmission,
       ...(labelTruthAdmission === "two-human-unanimous" ? {
+        humanReviewEvaluationSpecSha256: `sha256:${"1".repeat(64)}`,
         reviewVerdictSha256s: [`sha256:${"2".repeat(64)}`, `sha256:${"3".repeat(64)}`],
         reviewerRosterSha256: `sha256:${"4".repeat(64)}`,
         visibilityReceiptSha256s: [`sha256:${"5".repeat(64)}`, `sha256:${"6".repeat(64)}`],
         revealReceiptSha256: `sha256:${"7".repeat(64)}`,
-      } : {
+      } : labelTruthAdmission === "operator-only" ? {
+        humanReviewEvaluationSpecSha256: `sha256:${"1".repeat(64)}`,
         operatorAssertionSha256: `sha256:${"2".repeat(64)}`,
+      } : {
+        screeningTableSha256: `sha256:${"1".repeat(64)}`,
+        screeningRevealReceiptSha256: `sha256:${"2".repeat(64)}`,
       }),
     }));
     const analysisContextSha256 = put(canonicalJsonBytes({
@@ -764,6 +768,15 @@ describe("binary-instrument@1 registration and parameters", () => {
     }).ok).toBe(false);
     expect(method.validateParameters({ ...PARAMETERS, instrument: "armA" }).ok).toBe(false);
   });
+
+  // spec §6.7 (packet P6): truthAdmission widens to a third value. Existing parameter sets
+  // (PARAMETERS above, at "two-human-unanimous") still validate byte-identically (§0.4).
+  test("accepts the screened-operator-sampled truthAdmission value", () => {
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    expect(method.validateParameters({ ...PARAMETERS, truthAdmission: "screened-operator-sampled" }))
+      .toEqual({ ok: true });
+    expect(method.validateParameters({ ...PARAMETERS, truthAdmission: "not-a-real-mode" }).ok).toBe(false);
+  });
 });
 
 describe("binary-instrument@1 judge-model profile parameter (spec §1.4)", () => {
@@ -901,6 +914,17 @@ describe("binary-instrument@1 qualification oracle", () => {
       expect(result.itemDecisions).toHaveLength(8);
     },
   );
+
+  // spec §6.7 third member (packet P6): screened by a pinned model, sampled and hand-checked by
+  // the operator. No humanReviewEvaluationSpecSha256 on this branch's label resolution.
+  test("accepts the exact screened-operator-sampled label-resolution variant when registered", () => {
+    const fixture = makeFixture({ truthAdmission: "screened-operator-sampled" });
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    const result = method.compute!(fixture.input).perSubject[0]!.results as any;
+
+    expect(result.configuration.truthAdmission).toBe("screened-operator-sampled");
+    expect(result.itemDecisions).toHaveLength(8);
+  });
 });
 
 describe("binary-instrument@1 tamper refusals", () => {

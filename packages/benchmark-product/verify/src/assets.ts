@@ -24,7 +24,7 @@ export interface PublicAssetInput {
   /** Producer-verified binary admission/instrument facts. Required for claim-package/2 only. */
   readonly binaryQualification?: {
     readonly publicationGrade: boolean;
-    readonly truthAdmission: "two-human-unanimous" | "operator-only";
+    readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
     readonly sourceManifestSha256: string;
     readonly admissionManifestSha256: string;
     readonly exclusions: readonly unknown[];

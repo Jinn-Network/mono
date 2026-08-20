@@ -48,6 +48,10 @@ export const BUNDLE_V4_EVIDENCE_ROLES = [
   // frozen role-ordering map used by both the catalog schema's ordering refinement and the bundle
   // writer, so inserting anywhere else would move existing bundles' bytes.
   "snapshot-probe",
+  // Appended after snapshot-probe (spec §6.8a Group C, first bullet; packet P6): the
+  // screened-operator-sampled admission branch's two new sealed records.
+  "screening-table",
+  "screening-reveal-receipt",
 ] as const;
 export type BundleV4EvidenceRole = (typeof BUNDLE_V4_EVIDENCE_ROLES)[number];
 export const BUNDLE_V4_ADMISSION_EVIDENCE_ROLES = [
@@ -56,6 +60,12 @@ export const BUNDLE_V4_ADMISSION_EVIDENCE_ROLES = [
   "human-review-packet", "human-review-response", "human-review-verdict",
   "reviewer-roster", "review-visibility-receipt", "review-reveal-receipt",
   "operator-assertion",
+  // Appended after operator-assertion (spec §6.8a Group C, first bullet; packet P6), matching the
+  // full list above. This subset's relative order intentionally differs from the full list
+  // elsewhere (no judge-instrument, analysis-context/label-resolution swapped) — that is frozen
+  // and is not to be normalized.
+  "screening-table",
+  "screening-reveal-receipt",
 ] as const;
 
 const PublicKeySchema = z.object({
@@ -188,7 +198,12 @@ export const BundleQualificationSchema = z.strictObject({
   sourceManifestSha256: PrefixedSha256Schema,
   admissionManifestSha256: PrefixedSha256Schema,
   publicationGrade: z.boolean(),
-  truthAdmission: z.enum(["two-human-unanimous", "operator-only"]),
+  // Widened spec §6.8 (packet P6): a third admission mode, screened by a pinned model and
+  // sampled/hand-checked by the operator. BUNDLE_QUALIFICATION_FORMAT does not move (§0.4): every
+  // existing document still validates and seals byte-identically. The publicationGrade coupling
+  // for this third branch, and the admission-record/authority-set closure that makes a screened
+  // document constructible at all, are out of this packet's scope (spec §6.8a Group A/C).
+  truthAdmission: z.enum(["two-human-unanimous", "operator-only", "screened-operator-sampled"]),
   candidateClasses: z.array(z.string().min(1)),
   // Sorted-unique, grammar-conforming, non-empty (spec §3.1 rule 6). BUNDLE_QUALIFICATION_FORMAT
   // stays at its current version under §0.4: every ["core","stress"] bundle ever written still
@@ -210,7 +225,14 @@ export const BundleQualificationSchema = z.strictObject({
   exclusions: z.array(z.strictObject({
     itemSha256: PrefixedSha256Schema,
     replacementItemSha256: PrefixedSha256Schema,
-    reason: z.enum(["review-disagreement", "review-indeterminate", "review-incomplete"]),
+    // Widened spec §6.4 (packet P6), second copy of the replacement-ledger reason vocabulary
+    // (the first is `admission/contracts.ts`'s `HumanReviewReplacementLedgerEntrySchema.reason`).
+    // The existing three values are byte-unchanged; the three new values are derived from §6.4's
+    // admission rule (screen disagreed, screen indeterminate, or the hand check excluded it).
+    reason: z.enum([
+      "review-disagreement", "review-indeterminate", "review-incomplete",
+      "screening-disagreement", "screening-indeterminate", "screening-hand-excluded",
+    ]),
   })),
   admissionRecords: z.array(z.strictObject({
     sha256: PrefixedSha256Schema,

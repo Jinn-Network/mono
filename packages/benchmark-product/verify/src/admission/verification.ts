@@ -87,12 +87,17 @@ type BinaryJudgmentLabelResolutionView = {
 });
 
 export type AdmissionSha256 = `sha256:${string}`;
+// Verbatim duplicate of `schema.ts`'s `BUNDLE_V4_ADMISSION_EVIDENCE_ROLES`, hand-kept in sync
+// (spec §6.8a Group C).
 export const BINARY_JUDGMENT_ADMISSION_RECORD_ROLES = [
   "admission-manifest", "replacement-ledger", "source-item", "label-resolution",
   "analysis-context", "human-review-evaluation-spec", "human-review-form",
   "human-review-packet", "human-review-response", "human-review-verdict",
   "reviewer-roster", "review-visibility-receipt", "review-reveal-receipt",
   "operator-assertion",
+  // Appended after operator-assertion (spec §6.8a Group C, first bullet; packet P6).
+  "screening-table",
+  "screening-reveal-receipt",
 ] as const;
 export type BinaryJudgmentAdmissionRecordRole = (typeof BINARY_JUDGMENT_ADMISSION_RECORD_ROLES)[number];
 export type AdmissionAuthorityRole =
@@ -138,7 +143,9 @@ export interface VerifiedBinaryJudgmentAdmissionExclusion {
   readonly itemId: string;
   readonly candidateClass: string;
   readonly stratum: string;
-  readonly reason: "review-disagreement" | "review-indeterminate" | "review-incomplete";
+  readonly reason:
+    | "review-disagreement" | "review-indeterminate" | "review-incomplete"
+    | "screening-disagreement" | "screening-indeterminate" | "screening-hand-excluded";
   readonly replacementItemSha256: AdmissionSha256;
 }
 
@@ -633,7 +640,27 @@ export function verifyBinaryJudgmentAdmissionClosure(
       || replacement.candidateClass !== entry.candidateClass
       || replacement.stratum !== entry.stratum
     ) fail(path, "replacement is not a later admitted reserve in the same class and stratum");
-    const human = verifyHumanEvidence(state, entry, entry.excludedItemSha256, input.expectedDraftId, manifest.admittedAt, path);
+    // The screened branch's ledger-entry verification (recomputing the screening table, the
+    // §6.5 sample, and the per-row admission rule) is out of this packet's scope (spec §6.4,
+    // §6.5) and is not implemented here. This mechanical guard keeps the two-human path below
+    // compiling and byte-identical against the now-optional per-item digests (spec §6.4's
+    // present-iff widening) and fails closed, rather than either failing to compile or silently
+    // mis-verifying a screened entry as a two-human one.
+    if (
+      entry.reviewVerdictSha256s === undefined
+      || entry.visibilityReceiptSha256s === undefined
+      || entry.reviewerRosterSha256 === undefined
+      || entry.revealReceiptSha256 === undefined
+    ) fail(path, "screened ledger entry verification is not yet implemented");
+    // Repackaged, not renamed or recomputed: TypeScript narrows each optional property read above,
+    // but not `entry`'s own declared (still-optional) structural type, so the narrowed fields are
+    // passed on explicitly rather than passing `entry` itself.
+    const human = verifyHumanEvidence(state, {
+      reviewVerdictSha256s: entry.reviewVerdictSha256s,
+      visibilityReceiptSha256s: entry.visibilityReceiptSha256s,
+      reviewerRosterSha256: entry.reviewerRosterSha256,
+      revealReceiptSha256: entry.revealReceiptSha256,
+    }, entry.excludedItemSha256, input.expectedDraftId, manifest.admittedAt, path);
     const derivedReason = expectedExclusionReason(human.reviews);
     if (derivedReason === undefined || derivedReason !== entry.reason) fail(path, "ledger reason does not derive from the two signed reviews");
     excluded.push({

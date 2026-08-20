@@ -159,7 +159,13 @@ export interface HumanAdmissionResolutionSummary {
 
 export interface HumanAdmissionExclusionSummary {
   readonly itemSha256: string;
-  readonly reason: "review-disagreement" | "review-indeterminate" | "review-incomplete";
+  // Widened spec §6.4 (packet P6). This function's own construction path (below) does not yet
+  // produce the three screening-* values — that is the screened admission's own construction
+  // logic, out of this packet's scope — but the public result type stays forward-compatible with
+  // the wider sealed-ledger vocabulary a caller may read via a different path.
+  readonly reason:
+    | "review-disagreement" | "review-indeterminate" | "review-incomplete"
+    | "screening-disagreement" | "screening-indeterminate" | "screening-hand-excluded";
   readonly replacementItemSha256: string;
 }
 

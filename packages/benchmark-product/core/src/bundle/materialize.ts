@@ -321,7 +321,10 @@ function recordClosure(input: MaterializeBundleInput): {
   const admissionAuthorityBindings = new Map<"roster-attestor" | "truth-reveal-attestor" | "operator-truth-attestor", string>();
   let binaryAssetQualification: {
     publicationGrade: boolean;
-    truthAdmission: "two-human-unanimous" | "operator-only";
+    // Type-only widening (packet P6): matches the already-widened source type at
+    // `admission.manifest.truthAdmission`. The screened branch's own materialize.ts logic
+    // (evidence-role mapping, authority-binding discriminators) is out of this packet's scope.
+    truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
     sourceManifestSha256: string;
     admissionManifestSha256: string;
     exclusions: readonly unknown[];
