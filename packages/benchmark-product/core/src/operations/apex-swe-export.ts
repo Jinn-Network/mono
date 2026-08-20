@@ -11,6 +11,7 @@ import {
 import { harnessReportsPresent } from "../runtime/apex-swe-dev/reports.js";
 import {
   APEX_SWE_DEV_SUBMIT_CLOSED_SENTENCE,
+  exportCompletenessCertification,
   type SuiteCoverage,
 } from "../runtime/suite-protocol/comparability.js";
 import { suiteComparabilityForApexSweDevArm } from "../runtime/suite-protocol/from-apex-swe-dev.js";
@@ -45,8 +46,9 @@ export function decideApexSweExportMode(input: {
   return "inspection-upload";
 }
 
-export function apexSweExportInstructions(exportDir: string): string {
+export function apexSweExportInstructions(certification: string, exportDir: string): string {
   return [
+    certification,
     "This run matches APEX-SWE-dev execution settings for the selected named slice of the public 50-task set.",
     `You may inspect the Mercor harness JSON and logs in ${exportDir}`,
     "Do not claim a Mercor APEX-SWE leaderboard row; APEX-SWE-dev cannot wear the 200-task board.",
@@ -79,6 +81,9 @@ export function executeExportApexSwePackage(
         refuse("conflict", `drafts.${input.draftId}.evaluationRuntime`, "APEX-SWE-dev export requires a locked apex-swe-dev runtime");
       }
       const runState = requireRunState(context.workspaceDir, input.draftId);
+      if (runState.runSha256 === undefined) {
+        refuse("conflict", `runs.${input.draftId}`, "APEX-SWE-dev export requires a sealed Run");
+      }
       const quote = runState.suiteQuote;
       if (quote === undefined) {
         refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named APEX-SWE-dev export requires a protocol selection");
@@ -90,11 +95,14 @@ export function executeExportApexSwePackage(
         refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named APEX-SWE-dev export requires protocol apex-swe-dev");
       }
       const reportRoot = apexSweDevReportRoot(artifactsDir(context.workspaceDir), input.draftId);
-      const bits = runState.matrixSha256 === undefined
+      const matrix = runState.matrixSha256 === undefined
+        ? undefined
+        : parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256));
+      const bits = matrix === undefined
         ? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false as const }
         : suiteComparabilityForApexSweDevArm({
           manifest,
-          matrix: parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256)),
+          matrix,
           armId: input.armId,
           reportRoot,
         });
@@ -121,7 +129,8 @@ export function executeExportApexSwePackage(
       rmSync(exportDir, { recursive: true, force: true });
       mkdirSync(exportDir, { recursive: true });
       if (existsSync(reportRoot)) cpSync(reportRoot, join(exportDir, "harness"), { recursive: true });
-      const instructions = apexSweExportInstructions(exportDir);
+      const certification = exportCompletenessCertification({ runSha256: runState.runSha256, completeness: matrix?.completeness });
+      const instructions = apexSweExportInstructions(certification, exportDir);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, exportDir };
 }

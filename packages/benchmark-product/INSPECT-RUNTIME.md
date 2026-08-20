@@ -117,8 +117,9 @@ continue to report isolation as `unverifiable`.
 
 ## Binary-judgment instrument binding
 
-`runtime inspect bind-judge` is an additive, versioned path for the
-`network.jinn.task-profile.binary-judgment` profile. It does not change the
+A judge binding file is a complete method document, bound by passing it as the
+`method` operand. It is a versioned path for the
+`network.jinn.task-profile.binary-judgment` profile and it does not change the
 existing Inspect selection v1–v4 contracts. Intake must already have imported
 one shared, arm-neutral benchmark. The binding operation leaves those Tasks
 unchanged and puts one exact scalar
@@ -224,11 +225,10 @@ image, and already-sealed instruments:
 Bind it only after the benchmark Tasks and instruments have been sealed:
 
 ```bash
-benchmark-product runtime inspect bind-judge \
+benchmark-product method /absolute/path/to/inspect-judge-binding.json \
   --workspace /absolute/path/to/workspace \
   --principal sponsor-1 \
-  --draft my-draft \
-  --file /absolute/path/to/inspect-judge-binding.json
+  --draft my-draft
 ```
 
 The launcher reconstructs and digest-checks the canonical semantic request from

@@ -11,6 +11,7 @@ import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { selectApexAgentsRuntime } from "../../operations/apex-agents.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
+import { exportCompletenessCertification } from "../suite-protocol/comparability.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { namedSliceTaskNames } from "../suite-protocol/manifest.js";
 import { suiteFactsFromAccountedApexRun, suiteQuoteFromApex } from "../suite-protocol/from-apex.js";
@@ -300,6 +301,10 @@ describe("APEX-Agents Archipelago grade and export", () => {
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
     expect(exported.result.mode).toBe("inspection-upload");
+    expect(exported.result.instructions.split("\n")[0]).toBe(exportCompletenessCertification({
+      runSha256: requireRunState(workspaceDir, "one").runSha256!,
+      completeness: undefined,
+    }));
     expect(exported.result.instructions).toMatch(/APEX-Agents/u);
     expect(exported.result.instructions).not.toMatch(/Terminal-Bench/u);
     expect(exported.result.instructions).not.toMatch(/SWE-bench/u);

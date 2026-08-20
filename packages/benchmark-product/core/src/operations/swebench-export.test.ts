@@ -17,12 +17,15 @@ describe("SWE-bench Verified predictions export decision", () => {
   });
 
   test("both instruction modes carry the submit-closed sentence and the right sb-submit posture", () => {
-    const inspection = swebenchPredictionsExportInstructions("inspection-upload", "/tmp/export");
+    const certification = "complete run of the selection sealed at lock aaaa: 1 of 1 cells judged.";
+    const inspection = swebenchPredictionsExportInstructions(certification, "inspection-upload", "/tmp/export");
+    expect(inspection.split("\n")[0]).toBe(certification);
     expect(inspection).toContain("/tmp/export");
     expect(inspection).toContain("Do not run `sb submit`");
     expect(inspection).toContain(SWE_BENCH_VERIFIED_SUBMIT_CLOSED_SENTENCE);
     expect(inspection).not.toMatch(/Terminal-Bench|APEX-Agents/u);
-    const ready = swebenchPredictionsExportInstructions("leaderboard-submit", "/tmp/export");
+    const ready = swebenchPredictionsExportInstructions(certification, "leaderboard-submit", "/tmp/export");
+    expect(ready.split("\n")[0]).toBe(certification);
     expect(ready).toContain("python -m swebench.harness.run_evaluation");
     expect(ready).toContain("sb submit /tmp/export/predictions.jsonl");
     expect(ready).toContain(SWE_BENCH_VERIFIED_SUBMIT_CLOSED_SENTENCE);

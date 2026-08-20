@@ -17,12 +17,15 @@ describe("APEX-Agents inspection export decision", () => {
   });
 
   test("both instruction modes carry the submit-closed sentence and never name a sibling suite", () => {
-    const inspection = apexAgentsExportInstructions("inspection-upload", "/tmp/export");
+    const certification = "complete run of the selection sealed at lock aaaa: 1 of 1 cells judged.";
+    const inspection = apexAgentsExportInstructions(certification, "inspection-upload", "/tmp/export");
+    expect(inspection.split("\n")[0]).toBe(certification);
     expect(inspection).toContain("/tmp/export");
     expect(inspection).toContain("not leaderboard_submit_ready");
     expect(inspection).toContain(APEX_AGENTS_SUBMIT_CLOSED_SENTENCE);
     expect(inspection).not.toMatch(/Terminal-Bench|SWE-bench/u);
-    const ready = apexAgentsExportInstructions("leaderboard-submit", "/tmp/export");
+    const ready = apexAgentsExportInstructions(certification, "leaderboard-submit", "/tmp/export");
+    expect(ready.split("\n")[0]).toBe(certification);
     expect(ready).toContain("/tmp/export");
     expect(ready).toContain(APEX_AGENTS_SUBMIT_CLOSED_SENTENCE);
     expect(ready).not.toMatch(/Terminal-Bench|SWE-bench/u);

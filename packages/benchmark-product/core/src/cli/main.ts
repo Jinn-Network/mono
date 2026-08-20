@@ -1,6 +1,6 @@
 /**
  * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
- * 42 parity operations over the operations facade, plus the path-oriented
+ * 41 parity operations over the operations facade, plus the path-oriented
  * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
@@ -36,7 +36,6 @@ import {
   authorityRevoke,
   authorityShow,
   anchoringConfigure,
-  bindInspectBinaryJudge,
   createDraft,
   getDraft,
   importBinaryItemBank,
@@ -72,7 +71,6 @@ import {
   updateDraft,
   type ArmWarning,
   type AnchorSubject,
-  type BindInspectBinaryJudgeInput,
   type OperationContext,
   type OperationResult,
   type QuotePresentation,
@@ -119,8 +117,6 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --file <response.json> --signer <configured-signer.json>
   human-review admit --workspace <dir> --principal <id> --draft <draftId>
                    --file <admission-manifest.json>
-  runtime inspect bind-judge --workspace <dir> --principal <id> --draft <draftId>
-                   --file <binding.json>
   runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
   method <ref>     --workspace <dir> --principal <id> --draft <draftId>
                    [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
@@ -233,7 +229,6 @@ const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "fi
 const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "n", "host"] as const;
 const METHOD_LIST_FLAGS = ["json"] as const;
 const EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
-const RUNTIME_INSPECT_BIND_JUDGE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "agent", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
@@ -638,23 +633,6 @@ async function handleMethodBind(
     result,
     jsonMode,
     (value) => `bound ${value.official ? "official" : "custom"} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`,
-  );
-}
-
-function handleInspectRuntimeBindJudge(
-  args: ParsedArgs,
-  context: CliContext,
-  jsonMode: boolean,
-): CliResult {
-  assertKnownFlags(args, RUNTIME_INSPECT_BIND_JUDGE_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const draftId = required(args, "draft");
-  const binding = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as BindInspectBinaryJudgeInput["binding"];
-  const result = bindInspectBinaryJudge(opContext, { draftId, binding });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `bound Inspect binary judge ${value.selectionManifestSha256} to draft ${draftId}\n`,
   );
 }
 
@@ -1304,7 +1282,6 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["human-review admit", handleHumanReviewAdmit],
   ["method", handleMethodBind],
   ["export", handleDerivedExport],
-  ["runtime inspect bind-judge", handleInspectRuntimeBindJudge],
   ["runtime terminal-bench migrate", handleTerminalBenchMigration],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],

@@ -11,8 +11,6 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires a machine-local configured signer key; browser key custody is forbidden",
   admitHumanTruth:
     "requires local signed-review, roster, and licensed truth evidence files",
-  bindInspectBinaryJudge:
-    "requires machine-local OCI runtime paths and pre-sealed instrument digests; browser-supplied paths are forbidden",
   migrateTerminalBenchLegacyTask:
     "requires server-configured migration input paths; browser-supplied paths are forbidden",
   exportDerivedBundle:

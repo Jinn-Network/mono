@@ -79,13 +79,21 @@ export function bindInspectBinaryJudge(
     action: "runtime.inspect.bind-judge",
     subject: input.draftId,
     inputs: input,
-    run: () => {
-      const current = readDraftDocument(clockedContext.workspaceDir, input.draftId);
+    run: () => executeBindInspectBinaryJudge(clockedContext, input),
+  });
+}
+
+export function executeBindInspectBinaryJudge(
+  clockedContext: OperationContext,
+  input: BindInspectBinaryJudgeInput,
+): BindInspectBinaryJudgeResult {
+  const at = clockedContext.clock();
+  const current = readDraftDocument(clockedContext.workspaceDir, input.draftId);
       if (!isDraftMutable(current.state)) {
         refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse judge runtime binding");
       }
       if (current.spec.taskSet.kind !== "benchmark") {
-        refuse("conflict", `drafts.${input.draftId}.taskSet`, "bind-judge requires an imported benchmark");
+        refuse("conflict", `drafts.${input.draftId}.taskSet`, "judge binding requires an imported benchmark");
       }
       const parsed = InspectBinaryJudgeBindingRequestSchema.safeParse(input.binding);
       if (!parsed.success) {
@@ -197,6 +205,4 @@ export function bindInspectBinaryJudge(
         selectionManifestSha256,
         instruments: manifest.arms.map(({ armId, instrumentSha256 }) => ({ armId, instrumentSha256 })),
       };
-    },
-  });
 }
