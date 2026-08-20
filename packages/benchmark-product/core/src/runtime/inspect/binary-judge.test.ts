@@ -414,7 +414,7 @@ request=worker.validate_semantic_request(fixture["expect"]["semanticRequest"])
 assert "sha256:"+worker.sha256_bytes(worker.canonical_bytes(request)) == fixture["expect"]["semanticRequestSha256"]
 config={"taskDigest":"sha256:"+"1"*64,"armId":"alpha","replicate":1,"instrumentSha256":"sha256:"+"2"*64,"requestSha256":fixture["expect"]["semanticRequestSha256"]}
 record={"status":"completed","resolvedModel":"gpt-5.6-luna","responseId":"resp_fixture","eventDigest":"3"*64,"usage":{"input_tokens":11,"output_tokens":2,"total_tokens":13}}
-observation=worker.build_observation(config,b" ACCEPT\r\n",record)
+observation=worker.build_observation(config,b" ACCEPT\r\n",record,request["model"])
 assert observation["call"] == {"count":1,"retries":0,"fallbacks":0}
 assert observation["provider"]["usage"] == {"inputTokens":11,"outputTokens":2,"totalTokens":13}
 assert "verdict" not in observation and "decision" not in observation and "brokerProtocol" not in observation
@@ -423,8 +423,12 @@ try:
   raise AssertionError("accepted inconsistent usage")
 except ValueError: pass
 try:
-  worker.build_observation(config,b"ACCEPT",{**record,"status":"budget-rejected"})
+  worker.build_observation(config,b"ACCEPT",{**record,"status":"budget-rejected"},request["model"])
   raise AssertionError("accepted non-completed broker event")
+except ValueError: pass
+try:
+  worker.build_observation(config,b"ACCEPT",{**record,"resolvedModel":"gpt-4o-mini-2024-07-18"},request["model"])
+  raise AssertionError("accepted a resolvedModel that differs from the requested model")
 except ValueError: pass
 print(json.dumps(observation,sort_keys=True,separators=(",",":")))
 `;

@@ -194,7 +194,9 @@ dated_record = {
   "eventDigest": "4" * 64,
   "usage": {"input_tokens": 11, "output_tokens": 2, "total_tokens": 13},
 }
-dated_observation = judge_worker.build_observation(judge_config, b"ACCEPT", dated_record)
+dated_observation = judge_worker.build_observation(
+  judge_config, b"ACCEPT", dated_record, "gpt-4o-mini-2024-07-18"
+)
 assert dated_observation["limitations"] == [], dated_observation
 assert dated_observation["provider"]["requestedModel"] == "gpt-4o-mini-2024-07-18"
 assert dated_observation["provider"]["resolvedModel"] == "gpt-4o-mini-2024-07-18"
@@ -202,17 +204,38 @@ assert dated_observation["provider"]["resolvedModel"] == "gpt-4o-mini-2024-07-18
 # Parallel reasoning-profile coverage: the alias limitation is still emitted, and is a real claim
 # about an undated model id rather than the decorative disclosure it would be on a dated snapshot.
 reasoning_record = {**dated_record, "resolvedModel": "gpt-5.6-luna"}
-reasoning_observation = judge_worker.build_observation(judge_config, b"ACCEPT", reasoning_record)
+reasoning_observation = judge_worker.build_observation(
+  judge_config, b"ACCEPT", reasoning_record, "gpt-5.6-luna"
+)
 assert reasoning_observation["limitations"] == ["mutable-model-alias"], reasoning_observation
 assert reasoning_observation["provider"]["requestedModel"] == "gpt-5.6-luna"
 assert reasoning_observation["provider"]["resolvedModel"] == "gpt-5.6-luna"
 
 try:
-  judge_worker.build_observation(judge_config, b"ACCEPT", {**dated_record, "resolvedModel": "unlisted-model"})
+  judge_worker.build_observation(
+    judge_config, b"ACCEPT", {**dated_record, "resolvedModel": "unlisted-model"}, "gpt-4o-mini-2024-07-18"
+  )
 except ValueError:
   pass
 else:
   raise AssertionError("worker accepted an unlisted resolvedModel")
+
+# The snapshot-identity check proper (spec §1.4): the provider answering with a DECLARED but
+# DIFFERENT model must refuse, not be silently overwritten with its own answer. This case is only
+# expressible because requestedModel and resolvedModel now come from two independent sources.
+try:
+  judge_worker.build_observation(judge_config, b"ACCEPT", reasoning_record, "gpt-4o-mini-2024-07-18")
+except ValueError:
+  pass
+else:
+  raise AssertionError("worker accepted a resolvedModel that differs from the requested model")
+
+try:
+  judge_worker.build_observation(judge_config, b"ACCEPT", dated_record, "unlisted-model")
+except ValueError:
+  pass
+else:
+  raise AssertionError("worker accepted an unlisted requestedModel")
 
 print("dated-snapshot-conformance-ok")
 `;

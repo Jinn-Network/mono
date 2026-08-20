@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
   BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
+  DATED_SNAPSHOT_MODELS,
   SNAPSHOT_PROBE_MAX_AGE_MS,
   sealBinaryJudgmentInstrument,
   sealBinaryJudgmentSnapshotProbe,
@@ -432,8 +433,31 @@ describe("bindInspectBinaryJudge — snapshot-serving probe (spec §1.5)", () =>
   // are forced equal by construction. The runtime check is implemented anyway (spec §1.5 rule 2's
   // "no bound arm's model equals" refusal) because it protects the invariant for whenever
   // DATED_SNAPSHOT_MODELS grows past one member; it cannot be exercised through the public API today.
-  test.skip("refuses a probe whose requestedModel matches no bound arm's model (unreachable: DATED_SNAPSHOT_MODELS has one member)", () => {
-    // Intentionally left unimplemented; see the comment above.
+  // Rather than a skipped placeholder, assert the invariant that makes the case unreachable. This
+  // fails loudly the moment DATED_SNAPSHOT_MODELS grows past one member, which is exactly when the
+  // runtime refusal above stops being unreachable and starts needing a real behavioural test.
+  test("the no-matching-arm refusal is unreachable only while DATED_SNAPSHOT_MODELS has one member", () => {
+    expect(DATED_SNAPSHOT_MODELS).toEqual(["gpt-4o-mini-2024-07-18"]);
+    expect(
+      DATED_SNAPSHOT_MODELS.length,
+      "DATED_SNAPSHOT_MODELS grew: a probe-requiring manifest can now name a model that no bound "
+      + "arm shares, so the 'probe requestedModel does not match any bound arm's model' refusal in "
+      + "bindInspectBinaryJudge is reachable and needs a real behavioural test here.",
+    ).toBe(1);
+
+    // The forcing argument itself, asserted rather than only narrated: every arm of a
+    // probe-requiring manifest carries the one dated-snapshot model the probe can name, so the
+    // probe's requestedModel and the arms' models cannot disagree.
+    const { alpha, beta } = datedSnapshotSetup();
+    const probe = validProbe();
+    const sealed = sealBinaryJudgmentSnapshotProbe(probe);
+    const { manifest } = datedSnapshotBinding(alpha, beta, {
+      snapshotProbeSha256: sealed.digest,
+      snapshotProbe: probe,
+    });
+    expect(manifest.snapshotProbeSha256).toBe(sealed.digest);
+    expect(manifest.arms.every((arm) => arm.model === probe.requestedModel)).toBe(true);
+    expect(new Set(manifest.arms.map((arm) => arm.model))).toEqual(new Set(DATED_SNAPSHOT_MODELS));
   });
 
   test("today's reasoning-model binding with no probe still succeeds unchanged (compatibility proof)", () => {

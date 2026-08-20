@@ -119,9 +119,6 @@ export function bindInspectBinaryJudge(
             "supplied snapshot-serving probe does not seal to manifest.snapshotProbeSha256",
           );
         }
-        // Seal into the workspace CAS now so `materialize` can publish it as a bundle asset
-        // (§1.5 rule 5); the digest is already proven above.
-        putSealedBytes(clockedContext.workspaceDir, sealed.bytes);
         if (!manifest.arms.some((arm) => arm.model === probe.requestedModel)) {
           refuse(
             "conflict",
@@ -156,6 +153,10 @@ export function bindInspectBinaryJudge(
             "probe is older than the snapshot-serving freshness bound",
           );
         }
+        // Persist only after every refusal above has passed, so a refused bind leaves no probe
+        // record behind in the workspace CAS. `materialize` publishes it as a bundle asset from
+        // here (§1.5 rule 5); the digest was proven against the manifest above.
+        putSealedBytes(clockedContext.workspaceDir, sealed.bytes);
       }
       const selectionManifestSha256 = putSealedBytes(
         clockedContext.workspaceDir,

@@ -154,13 +154,25 @@ def normalized_usage(value: Any) -> dict[str, int]:
     }
 
 
-def build_observation(config: dict[str, Any], response: bytes, record: dict[str, Any]) -> dict[str, Any]:
+def build_observation(
+    config: dict[str, Any],
+    response: bytes,
+    record: dict[str, Any],
+    requested_model: str,
+) -> dict[str, Any]:
     response_id = record.get("responseId")
     event_digest = record.get("eventDigest")
-    model = record.get("resolvedModel")
+    # The (requestedModel, resolvedModel) pair is the evidence that replaces the mutable-alias
+    # limitation for a dated snapshot (spec §1.4), so the two sides must come from two different
+    # places: `requested_model` is what this run asked the provider for, `resolved_model` is what
+    # the provider answered with. Deriving both from the provider's answer would make the
+    # snapshot-identity check true by construction, and would record nothing at the one point in
+    # the runtime where the provider is able to disagree.
+    resolved_model = record.get("resolvedModel")
     if (
         record.get("status") != "completed"
-        or model not in ACCEPTED_MODELS
+        or requested_model not in ACCEPTED_MODELS
+        or resolved_model != requested_model
         or not isinstance(response_id, str)
         or not response_id
         or not isinstance(event_digest, str)
@@ -180,14 +192,16 @@ def build_observation(config: dict[str, Any], response: bytes, record: dict[str,
             "mediaType": RESPONSE_MEDIA_TYPE,
         },
         "provider": {
-            "requestedModel": model,
-            "resolvedModel": model,
+            "requestedModel": requested_model,
+            "resolvedModel": resolved_model,
             "responseId": response_id,
             "eventSha256": f"sha256:{event_digest}",
             "usage": normalized_usage(record.get("usage")),
         },
         "call": {"count": 1, "retries": 0, "fallbacks": 0},
-        "limitations": JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS[JUDGE_MODEL_PROFILES[model]],
+        "limitations": JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS[
+            JUDGE_MODEL_PROFILES[requested_model]
+        ],
     }
 
 
@@ -275,7 +289,9 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(completion, str):
         raise ValueError("Inspect binary judge produced no text completion")
     response = completion.encode("utf-8")
-    observation = build_observation(config, response, records[0])
+    # `model` is the semantic request's own model, validated above against the sealed arm; the
+    # broker record supplies the provider's answer independently (spec §1.4).
+    observation = build_observation(config, response, records[0], model)
     (output_dir / "judge-response").write_bytes(response)
     (output_dir / "judge-observation").write_bytes(canonical_bytes(observation))
     shutil.copyfile(native_source, output_dir / "inspect-log")
