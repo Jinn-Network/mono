@@ -67,6 +67,12 @@ export default defineConfig({
     // so without this the suite mutates the operator's real config. See
     // test/_support/isolate-home.ts.
     setupFiles: [fileURLToPath(new URL('./test/_support/isolate-home.ts', import.meta.url))],
+    // Create one per-run registry in the main process: each test file records its home there, and
+    // the teardown removes every recorded home once every worker is gone. A fully-skipped test file
+    // runs no suite, so the per-file `afterAll` sweep above never fires for it; this is what keeps
+    // those files — and a hard-killed worker, and Ctrl-C — from leaving empty homes behind. See
+    // test/_support/global-tmp-root.ts.
+    globalSetup: [fileURLToPath(new URL('./test/_support/global-tmp-root.ts', import.meta.url))],
     exclude,
     alias,
     projects: [

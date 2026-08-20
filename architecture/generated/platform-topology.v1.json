@@ -2028,7 +2028,7 @@
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 6,
-      "discoveredFirstPartySurfaces": 4185,
+      "discoveredFirstPartySurfaces": 4188,
       "generatedOutputSources": 1414,
       "generatorSources": 683,
       "marketplaceControl": 2,
@@ -6679,6 +6679,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "operator/test/_support/global-tmp-root.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "operator/test/_support/harness-ctx.test.ts"
       },
       {
@@ -6800,6 +6810,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/_support/store.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/_support/sweep-tree.ts"
       },
       {
         "categories": [
@@ -9270,6 +9290,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/config/shape-v2.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/config/tmp-isolation.test.ts"
       },
       {
         "categories": [
