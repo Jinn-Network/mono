@@ -128,9 +128,9 @@ test('reusable domain gates do not declare PR-cancelling workflow concurrency', 
 
 test('domain checkouts use the requested SHA with the event SHA fallback', () => {
   for (const { filename, source } of domains.values()) {
-    const checkouts = (source.match(/uses: actions\/checkout@v4/gu) ?? []).length;
+    const checkouts = (source.match(/uses: actions\/checkout@v7/gu) ?? []).length;
     const pinnedCheckouts = (source.match(
-      /uses: actions\/checkout@v4\n\s+with:\n\s+ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}/gu,
+      /uses: actions\/checkout@v7\n\s+with:\n\s+ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}/gu,
     ) ?? []).length;
     assert.ok(checkouts > 0, `${filename} must contain a checkout`);
     assert.equal(
