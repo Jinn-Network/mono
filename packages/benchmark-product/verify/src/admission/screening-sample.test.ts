@@ -77,6 +77,17 @@ describe("computeScreeningPoolDigest", () => {
   test("matches the sha256:<64-hex> shape", () => {
     expect(computeScreeningPoolDigest(POOL_5)).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
+
+  // §6.5 says the identity set is sorted AND unique, and this function is the one that has to mean
+  // it. `computeScreeningSample` refuses duplicates before ever calling here, so the dedupe changes
+  // no in-repo digest -- the frozen cross-language vector below is the proof of that. It matters
+  // because the function is exported for a cross-language implementer to check `poolDigest` in
+  // ISOLATION, where sorting alone would have digested a duplicated identity into a value no other
+  // implementation reproduces.
+  test("digests the identity SET, so a duplicated entry does not change the digest", () => {
+    const duplicated = [...POOL_5, POOL_5[2]!, POOL_5[0]!];
+    expect(computeScreeningPoolDigest(duplicated)).toBe(computeScreeningPoolDigest(POOL_5));
+  });
 });
 
 describe("compareScreeningStreamEntries (tie-break and unsigned-byte ordering)", () => {

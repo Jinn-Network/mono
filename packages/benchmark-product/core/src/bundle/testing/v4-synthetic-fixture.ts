@@ -39,6 +39,7 @@ import {
 } from "@jinn-network/task-execution-profiles";
 import {
   SubmissionRecordSchema,
+  compareCodeUnitStrings,
   sealDelivery,
 } from "@jinn-network/task-execution-protocol";
 import {
@@ -700,6 +701,14 @@ async function admitItems(
         handVerdict: "confirm" as const,
       };
     });
+    // Spec §6.3 requires the table's `rows` to be sorted strictly ascending by `itemSha256`, and
+    // `ScreeningTableSchema` enforces it. Item order is NOT digest order: the default items happen
+    // to digest ascending, but `withEvidence: true` changes every payload and the pair comes out
+    // descending, so emitting them in item order makes `admitHumanTruth` refuse with a schema error
+    // pointing at the table instead of at this builder. Sort a COPY: `rows` stays item-aligned
+    // because `candidates` below indexes into it by position, and desynchronising those two would
+    // pair each candidate's itemId and stratum with another item's digest.
+    const screeningRows = [...rows].sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256));
     const candidates = items.map((item, index) => ({
       itemSha256: rows[index]!.itemSha256,
       itemId: item.itemId,
@@ -718,7 +727,7 @@ async function admitItems(
         sampleSize: rows.length,
         samplingScriptSha256: prefixed(sha256Hex(encoder.encode("synthetic-v4-fixture-sampling-script"))),
         rawOutputsSha256: prefixed(sha256Hex(encoder.encode("synthetic-v4-fixture-raw-screening-outputs"))),
-        rows,
+        rows: screeningRows,
       },
     }), "screened admission");
   }

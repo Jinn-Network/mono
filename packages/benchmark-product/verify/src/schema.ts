@@ -315,8 +315,11 @@ export const BundleQualificationSchema = z.strictObject({
     if (humanEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) !== 0) || (roleCounts.get("operator-assertion") ?? 0) === 0) {
       ctx.addIssue({ code: "custom", path: ["admissionRecords"], message: "operator-only admission must carry operator assertions and no human-review evidence" });
     }
-  } else {
-    // screened-operator-sampled (spec §6.8a Group C, second bullet).
+    // Spec §6.8a Group C, second bullet. Named explicitly rather than left as a bare `else`: this
+    // was the family's last catch-all router, and Group B's doctrine is that a mode-dispatching
+    // branch names the mode it handles, so a fourth admission mode lands in no arm instead of
+    // silently inheriting the screened one's evidence rules.
+  } else if (qualification.truthAdmission === "screened-operator-sampled") {
     if (
       screeningEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) === 0)
       || humanEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) !== 0)

@@ -103,12 +103,17 @@ export function compareScreeningStreamEntries(left: ScreeningStreamEntry, right:
 
 /**
  * `sha256:` followed by the 64 lowercase hex digits of the SHA-256 of the canonical-JSON bytes of
- * `itemSha256s`, code-unit sorted first so the digest does not depend on input order. Does not
- * validate its input; `computeScreeningSample` owns that. Exported because the spec names
- * `poolDigest` directly and a cross-language implementer will want to check it in isolation.
+ * `itemSha256s`, code-unit sorted AND deduplicated, so the digest depends on the identity SET and
+ * not on input order or on repetition. §6.5 says "sorted and unique" and this function is the one
+ * that has to mean it: `computeScreeningSample` refuses duplicates before it ever calls here, so
+ * the dedupe is a no-op on every in-repo path and moves no digest, but this is exported precisely
+ * so a cross-language implementer can check `poolDigest` in ISOLATION, and in isolation "sorted"
+ * alone would have silently accepted a duplicated identity and produced a digest no other
+ * implementation reproduces. Otherwise does not validate its input; `computeScreeningSample`
+ * owns that.
  */
 export function computeScreeningPoolDigest(itemSha256s: readonly string[]): string {
-  const sorted = [...itemSha256s].sort(compareCodeUnitStrings);
+  const sorted = [...new Set(itemSha256s)].sort(compareCodeUnitStrings);
   const bytes = canonicalJsonBytes(sorted);
   const hex = createHash("sha256").update(bytes).digest("hex");
   return `sha256:${hex}`;

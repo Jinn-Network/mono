@@ -918,7 +918,15 @@ export function verifyBinaryJudgmentAdmissionClosure(
   // with a same-class same-stratum replacement, and every replacement is itself an admitted pool
   // member). `sampleSize <= rows.length` (check (0)'s other clause) is enforced transitively:
   // `computeScreeningSample` above refuses a `sampleSize` exceeding the pool size on its own.
-  if (manifest.truthAdmission === "screened-operator-sampled" && screeningTable !== undefined) {
+  if (manifest.truthAdmission === "screened-operator-sampled") {
+    if (screeningTable === undefined) {
+      // Unreachable today: the screened arm resolves the table before any row is admitted and fails
+      // closed when it is absent. Written as a refusal anyway, because the `&& screeningTable !==
+      // undefined` conjunct this replaces was a type-narrowing device whose false branch silently
+      // SKIPPED the coverage check. A coverage check with a skip path is not a coverage check, and a
+      // future caller that reordered the resolution would have been passed rather than refused.
+      fail("screeningTable", "screened admission reached the coverage check with no resolved screening table");
+    }
     const pool = [...acceptedItems, ...excludedItems].sort(compareCodeUnitStrings);
     const rowIdentities = screeningTable.rows.map((row) => row.itemSha256);
     if (!sameStrings(pool, rowIdentities)) {

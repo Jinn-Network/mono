@@ -418,6 +418,40 @@ describe("binary public-bundle/4 producer closure", () => {
       exclusionCount: 0,
     });
   }, 120_000);
+
+  // Packet P6, review finding. §6.3 requires the screening table's `rows` sorted strictly ascending
+  // by `itemSha256`, and the builder emitted them in ITEM order. Those two orders coincide for the
+  // default payloads, so the row above passes either way and the defect is invisible to it. Turning
+  // evidence on changes every payload and therefore every digest: the second item then digests
+  // BELOW the first, the table comes out descending, and `ScreeningTableSchema` refuses from inside
+  // `admitHumanTruth` with an error naming the table rather than this builder. The next consumers
+  // (packets P2 and P5, which both want evidence-declaring payloads) would have hit it first and
+  // spent the debugging. This test pins the configuration that actually exercises the ordering, and
+  // it was confirmed to fail for exactly that refusal before the sort was added.
+  test("a screened admission builds and cold-verifies with evidence-declaring payloads, whose digests do not fall in item order", async () => {
+    const root = mkdtempSync(join(tmpdir(), "binary-v4-screened-evidence-"));
+    roots.push(root);
+    const fixture = await createSyntheticV4BundleFixture({
+      workspaceDir: root,
+      truthAdmission: "screened-operator-sampled",
+      withEvidence: true,
+    });
+
+    const verification = await verifyPublicBundle(fixture.bundle.bundleDir);
+    expect(verification.format).toBe(BUNDLE_V4_FORMAT);
+    if (verification.format !== BUNDLE_V4_FORMAT) {
+      throw new Error(`expected ${BUNDLE_V4_FORMAT}, received ${verification.format}`);
+    }
+    expect(verification.qualification).toEqual({
+      publicationGrade: true,
+      truthAdmission: "screened-operator-sampled",
+      candidateClasses: ["synthetic"],
+      strata: ["core", "stress"],
+      armCount: 4,
+      itemCount: 2,
+      exclusionCount: 0,
+    });
+  }, 120_000);
 });
 
 // spec §1.6 (packet P1): arm cardinality is a floor of two, never a pinned literal four.
