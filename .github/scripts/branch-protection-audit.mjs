@@ -261,12 +261,16 @@ function expectSingleSupplier(branch, facts, types, complaints) {
   }
 }
 
-function expectPullRequestReviews(branch, pull, complaints, { dismissStale }) {
+function expectPullRequestReviews(branch, pull, complaints, { dismissStale, genericApprovals }) {
   if (!pull) {
     complaints.push(`${branch}: no ruleset in effect supplies a pull_request rule`);
     return;
   }
-  if (!Number.isInteger(pull.approvals) || pull.approvals < 1) {
+  if (genericApprovals === 0) {
+    if (pull.approvals !== 0) {
+      complaints.push(`${branch}: pull_request requires ${String(pull.approvals)} approving reviews; exactly 0 is required`);
+    }
+  } else if (!Number.isInteger(pull.approvals) || pull.approvals < 1) {
     complaints.push(`${branch}: pull_request requires ${String(pull.approvals)} approving reviews; at least 1 is required`);
   }
   if (pull.codeOwnerReview !== true) complaints.push(`${branch}: pull_request does not require code-owner review`);
@@ -311,7 +315,7 @@ function expectActiveRulesets(branch, supplying, complaints) {
 
 function evaluateNext(facts, rulesets) {
   const complaints = [];
-  expectPullRequestReviews('next', facts.rules.pull_request, complaints, { dismissStale: true });
+  expectPullRequestReviews('next', facts.rules.pull_request, complaints, { dismissStale: true, genericApprovals: 0 });
   expectRequiredContexts('next', facts.rules.required_status_checks, REQUIRED_CONTEXTS, complaints);
   const queue = facts.rules.merge_queue;
   if (!queue) complaints.push('next: no ruleset in effect supplies a merge_queue rule');
