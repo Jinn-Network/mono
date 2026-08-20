@@ -281,6 +281,14 @@ describe("binary public-bundle/4 producer closure", () => {
   test.each([
     ["operator-only", false],
     ["two-human-unanimous", true],
+    // Packet P6 (spec §6.8a Group B-bis round trip, S4 item 2): before this packet's Group B-bis
+    // fix, a screened bundle's admission evidence was silently dropped by the output-direction
+    // authority-role discriminator (materialize.ts's evidence-role-to-authority-role ternary) and
+    // by the input-direction one (materialize.ts:366's or-chain), so `authorities` came out empty
+    // and the trust-document schema refused it. This row is the first time any test drives that
+    // round trip through the real production `admitHumanTruth` -> `importBinaryItemBank` ->
+    // `runReport` -> `materializePublicBundle` -> `verifyPublicBundle` chain.
+    ["screened-operator-sampled", true],
   ] as const)("materializes a complete provider-free %s admission graph", async (truthAdmission, publicationGrade) => {
     const root = mkdtempSync(join(tmpdir(), `binary-v4-${truthAdmission}-`));
     roots.push(root);
@@ -341,16 +349,46 @@ describe("binary public-bundle/4 producer closure", () => {
     expect([...evidenceByDigest.values()].some((roles) => roles.includes("label-resolution"))).toBe(true);
 
     expect(trust.format).toBe(BUNDLE_V4_TRUST_FORMAT);
-    expect(trust.admission.authorities).toEqual(truthAdmission === "operator-only"
-      ? [expect.objectContaining({ role: "operator-truth-attestor" })]
-      : [
-        expect.objectContaining({ role: "roster-attestor" }),
-        expect.objectContaining({ role: "truth-reveal-attestor" }),
-      ]);
-    expect(trust.admission.reviewers).toHaveLength(truthAdmission === "operator-only" ? 0 : 2);
+    // §6.8a Group C's frozen third authority set is exactly ["truth-reveal-attestor"] alone (S4
+    // item 2, the round-trip proof: this bundle materializes a NON-EMPTY `authorities`, parses
+    // under this third authority set, and -- via the assertions below -- satisfies the third
+    // evidence-role branch: exactly the two screening roles, no human-review evidence, no
+    // operator assertion).
+    expect(trust.admission.authorities).toEqual(
+      truthAdmission === "operator-only"
+        ? [expect.objectContaining({ role: "operator-truth-attestor" })]
+        : truthAdmission === "screened-operator-sampled"
+          ? [expect.objectContaining({ role: "truth-reveal-attestor" })]
+          : [
+            expect.objectContaining({ role: "roster-attestor" }),
+            expect.objectContaining({ role: "truth-reveal-attestor" }),
+          ],
+    );
+    // §6.9 drops the roster: a screened admission registers ZERO reviewers, same as operator-only
+    // (item 4's fourth axis -- this is exactly why `verify/src/schema.ts:123`'s
+    // `reviewers.length === 1` refusal needed no change: both non-two-human modes already produced
+    // the "empty" half of its "empty or a registry of at least two" allowance).
+    expect(trust.admission.reviewers).toHaveLength(truthAdmission === "two-human-unanimous" ? 2 : 0);
     expect(evidence.records.some((record: { roles: string[] }) =>
-      record.roles.includes(truthAdmission === "operator-only" ? "operator-assertion" : "human-review-verdict")))
-      .toBe(true);
+      record.roles.includes(
+        truthAdmission === "operator-only"
+          ? "operator-assertion"
+          : truthAdmission === "screened-operator-sampled"
+            ? "screening-table"
+            : "human-review-verdict",
+      ))).toBe(true);
+    if (truthAdmission === "screened-operator-sampled") {
+      // Item 4 (§6.10 acceptance 3): the screening model can never be confused with a human
+      // verdict. Distinct evidence class -- neither screening role is a human-review role, and no
+      // human-review or operator-assertion evidence is present in a screened bundle.
+      const screenedRoles = new Set(evidence.records.flatMap((record: { roles: string[] }) => record.roles));
+      expect(screenedRoles.has("screening-table")).toBe(true);
+      expect(screenedRoles.has("screening-reveal-receipt")).toBe(true);
+      for (const humanRole of [
+        "human-review-packet", "human-review-response", "human-review-verdict",
+        "reviewer-roster", "review-visibility-receipt", "review-reveal-receipt", "operator-assertion",
+      ]) expect(screenedRoles.has(humanRole)).toBe(false);
+    }
 
     const allPublicBytes = Buffer.concat((manifest.files as Array<{ path: string }>).map((file) =>
       readFileSync(join(bundleDir, file.path))));
@@ -373,6 +411,40 @@ describe("binary public-bundle/4 producer closure", () => {
     expect(verification.qualification).toEqual({
       publicationGrade,
       truthAdmission,
+      candidateClasses: ["synthetic"],
+      strata: ["core", "stress"],
+      armCount: 4,
+      itemCount: 2,
+      exclusionCount: 0,
+    });
+  }, 120_000);
+
+  // Packet P6, review finding. §6.3 requires the screening table's `rows` sorted strictly ascending
+  // by `itemSha256`, and the builder emitted them in ITEM order. Those two orders coincide for the
+  // default payloads, so the row above passes either way and the defect is invisible to it. Turning
+  // evidence on changes every payload and therefore every digest: the second item then digests
+  // BELOW the first, the table comes out descending, and `ScreeningTableSchema` refuses from inside
+  // `admitHumanTruth` with an error naming the table rather than this builder. The next consumers
+  // (packets P2 and P5, which both want evidence-declaring payloads) would have hit it first and
+  // spent the debugging. This test pins the configuration that actually exercises the ordering, and
+  // it was confirmed to fail for exactly that refusal before the sort was added.
+  test("a screened admission builds and cold-verifies with evidence-declaring payloads, whose digests do not fall in item order", async () => {
+    const root = mkdtempSync(join(tmpdir(), "binary-v4-screened-evidence-"));
+    roots.push(root);
+    const fixture = await createSyntheticV4BundleFixture({
+      workspaceDir: root,
+      truthAdmission: "screened-operator-sampled",
+      withEvidence: true,
+    });
+
+    const verification = await verifyPublicBundle(fixture.bundle.bundleDir);
+    expect(verification.format).toBe(BUNDLE_V4_FORMAT);
+    if (verification.format !== BUNDLE_V4_FORMAT) {
+      throw new Error(`expected ${BUNDLE_V4_FORMAT}, received ${verification.format}`);
+    }
+    expect(verification.qualification).toEqual({
+      publicationGrade: true,
+      truthAdmission: "screened-operator-sampled",
       candidateClasses: ["synthetic"],
       strata: ["core", "stress"],
       armCount: 4,

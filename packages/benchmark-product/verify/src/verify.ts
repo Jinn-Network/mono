@@ -152,7 +152,7 @@ export interface LegacyPublicBundleVerificationResult {
   readonly anchors?: IntegrityAnchorsReport;
   readonly qualification?: {
     readonly publicationGrade: boolean;
-    readonly truthAdmission: "two-human-unanimous" | "operator-only";
+    readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
     readonly candidateClasses: readonly string[];
     readonly strata: readonly string[];
     // A count that is a constant is not a count (spec §1.6 site 8): a literal here does not

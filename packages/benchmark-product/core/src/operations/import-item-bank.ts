@@ -47,7 +47,7 @@ export interface ImportBinaryItemBankResult {
   readonly replacementLedgerSha256: string;
   readonly excludedItemSha256s: readonly string[];
   readonly nonAdmittedItemSha256s: readonly string[];
-  readonly truthAdmission: "two-human-unanimous" | "operator-only";
+  readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
   readonly publicationGrade: boolean;
   readonly candidateClasses: readonly string[];
   readonly strata: readonly string[];

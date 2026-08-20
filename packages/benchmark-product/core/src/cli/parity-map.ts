@@ -150,7 +150,7 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
   importSweBenchRows: "Imports SWE-bench rows as a sealed benchmark attached to a draft.",
   createHumanReviewPackets: "Creates blind, digest-bound binary-judgment review packets and visibility receipts.",
   signHumanReviewResponse: "Signs one human response with a configured evaluator identity and stores compact Result Evaluation evidence.",
-  admitHumanTruth: "Validates two-person unanimous truth or explicit operator-only truth and derives resolution and analysis records.",
+  admitHumanTruth: "Validates two-person unanimous truth, explicit operator-only truth, or screened-operator-sampled truth and derives resolution and analysis records.",
   selectMethod: "Binds a catalog suite or a complete method document onto a draft.",
   migrateTerminalBenchLegacyTask: "Transforms a legacy Terminal-Bench task through the pinned Harbor mapper and seals both byte histories.",
   exportDerivedBundle: "Packages the locked method's suite-named derived bundle, or refuses when the method has none.",

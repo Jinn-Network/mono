@@ -586,6 +586,12 @@ function handleHumanReviewAdmit(args: ParsedArgs, context: CliContext, jsonMode:
     ...(request.evidenceEnvelopesBase64 === undefined
       ? {}
       : { evidenceEnvelopesBase64: request.evidenceEnvelopesBase64 }),
+    // H-6 (packet P6): a new top-level field on AdmitHumanTruthInput is silently dropped here
+    // unless explicitly forwarded — this handler reads the whole request object from a file but
+    // only ever spreads the fields named below.
+    ...(request.screening === undefined
+      ? {}
+      : { screening: request.screening }),
   });
   return renderResult(
     result,
