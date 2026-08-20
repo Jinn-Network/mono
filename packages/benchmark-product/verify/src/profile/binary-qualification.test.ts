@@ -235,6 +235,50 @@ describe("binaryInstrumentReportLimitations", () => {
     });
     expect(result).toEqual([BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly]);
   });
+
+  // --- 6-9: screened-operator-sampled (spec §6.8, §6.8a Group A third bullet; packet P6) --------
+
+  test("6: no judgeModelProfile + screened-operator-sampled emits the alias string and the new screened limitation, not the two-human or operator-only strings", () => {
+    const result = binaryInstrumentReportLimitations({ ...base, truthAdmission: "screened-operator-sampled" });
+    expect(result).toEqual([
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.screenedNotIndependentlyLabeled,
+    ]);
+  });
+
+  test("7: dated-snapshot + screened-operator-sampled yields exactly the screened limitation", () => {
+    const result = binaryInstrumentReportLimitations({
+      ...base,
+      truthAdmission: "screened-operator-sampled",
+      judgeModelProfile: "dated-snapshot-sampling",
+    });
+    expect(result).toEqual([BINARY_INSTRUMENT_REPORT_LIMITATIONS.screenedNotIndependentlyLabeled]);
+  });
+
+  test("8: the screened limitation is prose, not the spec's kebab identifier (ruling C-1)", () => {
+    // §6.8 names the limitation `screened-not-independently-labeled` -- that is its NAME. Every
+    // existing entry in this map is a full English sentence, rendered on the public page and
+    // byte-compared at cold verification, so the bare kebab token must never be what gets emitted.
+    expect(BINARY_INSTRUMENT_REPORT_LIMITATIONS.screenedNotIndependentlyLabeled).not.toBe(
+      "screened-not-independently-labeled",
+    );
+    expect(BINARY_INSTRUMENT_REPORT_LIMITATIONS.screenedNotIndependentlyLabeled).toMatch(/^[A-Z].*[.]$/u);
+  });
+
+  test("9: the screened arm is appended after the operator-only arm (ruling C-3): array position for the other three modes is unmoved", () => {
+    // The two frozen 144-cell goldens depend on the existing three entries keeping their indices;
+    // this only asserts the *other* three modes' output is byte-identical to tests 1-5 above,
+    // which is the closest this file can get to that guarantee without re-running the goldens.
+    expect(binaryInstrumentReportLimitations({ ...base, truthAdmission: "two-human-unanimous" })).toEqual([
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.reviewerKeyPerson,
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.cognitiveBlinding,
+    ]);
+    expect(binaryInstrumentReportLimitations({ ...base, truthAdmission: "operator-only" })).toEqual([
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly,
+    ]);
+  });
 });
 
 // --- 6: selection manifest -------------------------------------------------------------------

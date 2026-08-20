@@ -139,10 +139,16 @@ export const BundleV4TrustSchema = z.strictObject({
   const authorityRoles = trust.admission.authorities.map((entry) => entry.role);
   const humanRoles = ["roster-attestor", "truth-reveal-attestor"];
   const operatorRoles = ["operator-truth-attestor"];
+  // Third legal authority set (spec §6.8a Group C, third bullet; packet P6): the screened
+  // branch's ordering receipt (§6.6) presents `truth-reveal-attestor` alone -- neither of the two
+  // existing sets. `AdmissionAuthorityRole` itself stays unchanged (§6.6 deliberately reuses the
+  // role rather than minting one).
+  const screenedRoles = ["truth-reveal-attestor"];
   if (
     JSON.stringify(authorityRoles) !== JSON.stringify(humanRoles)
     && JSON.stringify(authorityRoles) !== JSON.stringify(operatorRoles)
-  ) ctx.addIssue({ code: "custom", path: ["admission", "authorities"], message: "authority bindings must be exactly the human pair or operator-only role" });
+    && JSON.stringify(authorityRoles) !== JSON.stringify(screenedRoles)
+  ) ctx.addIssue({ code: "custom", path: ["admission", "authorities"], message: "authority bindings must be exactly the human pair, the operator-only role, or the screened role alone" });
   if (trust.admission.authorities.some((entry) => entry.keyId !== trust.report.keyId)) ctx.addIssue({ code: "custom", path: ["admission", "authorities"], message: "admission authority must resolve to the carried report-authority public key" });
 });
 export type BundleV4Trust = z.infer<typeof BundleV4TrustSchema>;
@@ -298,13 +304,26 @@ export const BundleQualificationSchema = z.strictObject({
     "human-review-packet", "human-review-response", "human-review-verdict", "reviewer-roster",
     "review-visibility-receipt", "review-reveal-receipt",
   ] as const;
+  // The screened branch's two roles (spec §6.8a Group C, second bullet; packet P6).
+  const screeningEvidenceRoles = ["screening-table", "screening-reveal-receipt"] as const;
   if (qualification.truthAdmission === "two-human-unanimous") {
     if (humanEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) === 0)
       || roleCounts.get("operator-assertion") !== 0) {
       ctx.addIssue({ code: "custom", path: ["admissionRecords"], message: "two-human admission must carry the frozen human-review closure and no operator assertion" });
     }
-  } else if (humanEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) !== 0) || (roleCounts.get("operator-assertion") ?? 0) === 0) {
-    ctx.addIssue({ code: "custom", path: ["admissionRecords"], message: "operator-only admission must carry operator assertions and no human-review evidence" });
+  } else if (qualification.truthAdmission === "operator-only") {
+    if (humanEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) !== 0) || (roleCounts.get("operator-assertion") ?? 0) === 0) {
+      ctx.addIssue({ code: "custom", path: ["admissionRecords"], message: "operator-only admission must carry operator assertions and no human-review evidence" });
+    }
+  } else {
+    // screened-operator-sampled (spec §6.8a Group C, second bullet).
+    if (
+      screeningEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) === 0)
+      || humanEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) !== 0)
+      || (roleCounts.get("operator-assertion") ?? 0) !== 0
+    ) {
+      ctx.addIssue({ code: "custom", path: ["admissionRecords"], message: "screened admission must carry both screening records and no human-review evidence or operator assertion" });
+    }
   }
   if (
     qualification.admissionRecords.length !== qualification.reachableSha256s.length
@@ -312,6 +331,10 @@ export const BundleQualificationSchema = z.strictObject({
   ) ctx.addIssue({ code: "custom", path: ["admissionRecords"], message: "semantic admission roles must exactly cover reachableSha256s" });
   if (qualification.truthAdmission === "two-human-unanimous" && !qualification.publicationGrade) ctx.addIssue({ code: "custom", path: ["publicationGrade"], message: "two-human unanimous truth is publication grade" });
   if (qualification.truthAdmission === "operator-only" && qualification.publicationGrade) ctx.addIssue({ code: "custom", path: ["publicationGrade"], message: "operator-only truth is not publication grade" });
+  // §6.8: the screened branch is publication-grade -- without this branch, §6.8a Group A's fix to
+  // the two publicationGrade derivations (verification.ts, human-review.ts) would have nothing to
+  // enforce against.
+  if (qualification.truthAdmission === "screened-operator-sampled" && !qualification.publicationGrade) ctx.addIssue({ code: "custom", path: ["publicationGrade"], message: "screened-operator-sampled truth is publication grade" });
 });
 export type BundleQualification = z.infer<typeof BundleQualificationSchema>;
 

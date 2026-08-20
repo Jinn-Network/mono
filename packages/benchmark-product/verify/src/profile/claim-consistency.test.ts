@@ -281,4 +281,92 @@ describe("assertClaimConsistency: binary-instrument report limitations (spec §1
       "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history",
     );
   });
+
+  /**
+   * Second-copy coverage for the screened-operator-sampled limitation (spec §6.8a Group A third
+   * bullet; packet P6): `assertClaimConsistency` recomputes limitations from
+   * `binaryInstrumentReportLimitations` (the SAME emitter item B fixes above) and refuses on
+   * mismatch, so this is wiring coverage, not a second implementation of the derivation.
+   */
+  const screenedParameters = { ...binaryParameters, truthAdmission: "screened-operator-sampled" } as const;
+  const screenedRunRecord = {
+    ...binaryRunRecord,
+    analysisPlan: [{
+      method: BENCHMARKING_METHOD_IDS.binaryInstrument,
+      version: BENCHMARKING_METHOD_VERSION,
+      parameters: screenedParameters,
+    }],
+  } as unknown as RunRecord;
+
+  function checkScreened(reportRecord: ReportRecord): void {
+    assertClaimConsistency({
+      claim: buildClaimPackage({
+        draftId: DRAFT_ID,
+        benchmarkSha256: identities.benchmarkSha256,
+        runRecord: screenedRunRecord,
+        runSha256: identities.runSha256,
+        matrixRecord,
+        matrixSha256: identities.matrixSha256,
+        reportRecord,
+        reportSha256: identities.reportSha256!,
+        reportEnvelopeSha256: identities.reportEnvelopeSha256,
+        venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, screenedRunRecord),
+        verificationCommandVerb: "bundle verify",
+        assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+      }),
+      identities,
+      benchmarkRecord: {} as unknown as BenchmarkRecord,
+      runRecord: screenedRunRecord,
+      matrixRecord,
+      reportRecord,
+      draftId: DRAFT_ID,
+      assurancePreset: ASSURANCE_PRESET,
+    });
+  }
+
+  test("accepts a screened Report whose limitations carry the screened-not-independently-labeled disclosure", () => {
+    const correctLimitations = [
+      ...localVenueLimitsForRun(screenedRunRecord),
+      ...binaryInstrumentReportLimitations(screenedParameters),
+    ];
+    expect(correctLimitations).toContain(BINARY_INSTRUMENT_REPORT_LIMITATIONS.screenedNotIndependentlyLabeled);
+    expect(() => checkScreened(binaryReport(correctLimitations))).not.toThrow();
+  });
+
+  test("refuses a screened Report that omits the screened-not-independently-labeled disclosure", () => {
+    const missingLimitations = [
+      ...localVenueLimitsForRun(screenedRunRecord),
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
+    ];
+    let caught: BenchmarkProductError | undefined;
+    try {
+      checkScreened(binaryReport(missingLimitations));
+    } catch (cause) {
+      if (cause instanceof BenchmarkProductError) caught = cause;
+      else throw cause;
+    }
+    expect(caught).toBeDefined();
+    expect(caught?.message).toBe(
+      "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history",
+    );
+  });
+
+  test("refuses a screened Report that instead publishes the operator-only disclosure (emitter/consumer must agree)", () => {
+    const wrongLimitations = [
+      ...localVenueLimitsForRun(screenedRunRecord),
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly,
+    ];
+    let caught: BenchmarkProductError | undefined;
+    try {
+      checkScreened(binaryReport(wrongLimitations));
+    } catch (cause) {
+      if (cause instanceof BenchmarkProductError) caught = cause;
+      else throw cause;
+    }
+    expect(caught).toBeDefined();
+    expect(caught?.message).toBe(
+      "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history",
+    );
+  });
 });

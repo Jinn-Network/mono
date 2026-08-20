@@ -23,6 +23,7 @@ import {
   HUMAN_REVIEW_REVEAL_RECEIPT_MEDIA_TYPE,
   HUMAN_REVIEW_ROSTER_MEDIA_TYPE,
   HUMAN_REVIEW_VISIBILITY_RECEIPT_MEDIA_TYPE,
+  SCREENING_REVEAL_RECEIPT_MEDIA_TYPE,
   HumanReviewOperatorAssertionSchema,
   HumanReviewPacketSchema,
   HumanReviewReplacementLedgerSchema,
@@ -30,10 +31,15 @@ import {
   HumanReviewRevealReceiptSchema,
   HumanReviewRosterSchema,
   HumanReviewVisibilityReceiptSchema,
+  ScreeningRevealReceiptSchema,
+  ScreeningTableSchema,
   type BinaryJudgmentAdmissionManifest,
   type HumanReviewReplacementLedger,
+  type ScreeningRow,
+  type ScreeningTable,
 } from "./contracts.js";
 import { readOrderedAdmissionVerdictMeasurements, readAdmissionVerdictEnvelope } from "./result-evaluation.js";
+import { computeScreeningSample, ScreeningSampleError } from "./screening-sample.js";
 
 /**
  * Two unrelated things in this file are spelled `evidence`, and neither can be renamed.
@@ -58,6 +64,9 @@ interface BinaryJudgmentPayloadView {
   readonly sources: readonly { readonly digest: { readonly sha256: string } }[];
 }
 
+// Checked against §6.7 (packet P6 item H-0): unlike the label-resolution mirror below, this view
+// needs NO third arm. BinaryJudgmentAnalysisContextSchema carries no truthAdmission-conditional
+// field for any of the three admission modes -- it stays a flat, mode-independent shape.
 interface BinaryJudgmentAnalysisContextView {
   readonly itemSha256: AdmissionSha256;
   readonly itemId: string;
@@ -67,23 +76,32 @@ interface BinaryJudgmentAnalysisContextView {
   readonly stratum: string;
 }
 
+// Widened to a third arm (spec §6.7; packet P6 item H-0, handed off by S1). Mirrors
+// `profiles/src/binary-judgment/label-resolution.ts`'s own CommonShape reduction:
+// `humanReviewEvaluationSpecSha256` moved OUT of the common part and into the two branches that
+// still carry it, because a screened row (never hand-checked) has no human-review evaluation.
 type BinaryJudgmentLabelResolutionView = {
   readonly itemSha256: AdmissionSha256;
   readonly itemId: string;
-  readonly humanReviewEvaluationSpecSha256: AdmissionSha256;
   readonly truthLabel: "CORRECT" | "WRONG";
   readonly candidateClass: string;
   readonly stratum: string;
   readonly resolvedAt: string;
 } & ({
   readonly truthAdmission: "two-human-unanimous";
+  readonly humanReviewEvaluationSpecSha256: AdmissionSha256;
   readonly reviewVerdictSha256s: readonly [AdmissionSha256, AdmissionSha256];
   readonly visibilityReceiptSha256s: readonly [AdmissionSha256, AdmissionSha256];
   readonly reviewerRosterSha256: AdmissionSha256;
   readonly revealReceiptSha256: AdmissionSha256;
 } | {
   readonly truthAdmission: "operator-only";
+  readonly humanReviewEvaluationSpecSha256: AdmissionSha256;
   readonly operatorAssertionSha256: AdmissionSha256;
+} | {
+  readonly truthAdmission: "screened-operator-sampled";
+  readonly screeningTableSha256: AdmissionSha256;
+  readonly screeningRevealReceiptSha256: AdmissionSha256;
 });
 
 export type AdmissionSha256 = `sha256:${string}`;
@@ -133,7 +151,7 @@ export interface VerifiedBinaryJudgmentAdmissionItem {
   readonly truthLabel: "CORRECT" | "WRONG";
   readonly candidateClass: string;
   readonly stratum: string;
-  readonly truthAdmission: "two-human-unanimous" | "operator-only";
+  readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
   readonly labelResolutionSha256: AdmissionSha256;
   readonly analysisContextSha256: AdmissionSha256;
 }
@@ -165,6 +183,10 @@ export interface VerifiedBinaryJudgmentAdmissionClosure {
     readonly sha256: AdmissionSha256;
     readonly roles: readonly BinaryJudgmentAdmissionRecordRole[];
   }[];
+  /** Present iff `manifest.truthAdmission === "screened-operator-sampled"` (spec §6.5 check (3)). */
+  readonly screening?: {
+    readonly sampleAgreementRate: number;
+  };
 }
 
 export class BinaryJudgmentAdmissionClosureError extends Error {
@@ -426,19 +448,31 @@ function verifyReview(
   };
 }
 
+interface AuthorityPayloadOptions<T> {
+  readonly digest: string;
+  readonly mediaType: string;
+  readonly role: AdmissionAuthorityRole;
+  /**
+   * The evidence role to resolve under -- supplied by the CALLER rather than reconstructed from
+   * `role` (spec §6.8a Group B-bis; packet P6). `truth-reveal-attestor` signs two different
+   * records depending on admission mode (the two-human per-item reveal receipt, evidence role
+   * `review-reveal-receipt`; the screened bank-scoped reveal receipt, evidence role
+   * `screening-reveal-receipt`), and `AdmissionAuthorityRole` itself deliberately stays a
+   * three-member union (§6.6 reuses the role rather than minting one) -- so an exhaustive switch
+   * over `role` alone cannot distinguish the two. Reconstructing the evidence role from `role`
+   * would resolve a screened reveal receipt under `review-reveal-receipt`, which is exactly the
+   * role the third evidence-set `superRefine` branch (Group C) refuses.
+   */
+  readonly evidenceRole: BinaryJudgmentAdmissionRecordRole;
+  readonly schema: z.ZodType<T>;
+  readonly path: string;
+}
+
 function authorityPayload<T>(
   state: VerificationState,
-  digest: string,
-  mediaType: string,
-  role: AdmissionAuthorityRole,
-  schema: z.ZodType<T>,
-  path: string,
+  options: AuthorityPayloadOptions<T>,
 ): { readonly value: T; readonly keyId: string } {
-  const evidenceRole: BinaryJudgmentAdmissionRecordRole = role === "roster-attestor"
-    ? "reviewer-roster"
-    : role === "truth-reveal-attestor"
-      ? "review-reveal-receipt"
-      : "operator-assertion";
+  const { digest, mediaType, role, evidenceRole, schema, path } = options;
   const envelopeBytes = resolve(state, digest, path, evidenceRole);
   let envelope: ReturnType<typeof parseExactDsseEnvelope>;
   try {
@@ -477,7 +511,14 @@ function verifyHumanEvidence(
   if (reviews[0].itemId !== reviews[1].itemId) fail(path, "review packets disagree on itemId");
   const visibilityDigests = reviews.map((review) => review.visibilityReceiptSha256).sort(compareCodeUnitStrings);
   if (!sameStrings(visibilityDigests, refs.visibilityReceiptSha256s)) fail(path, "declared visibility receipt coverage differs from signed reviews");
-  const rosterEvidence = authorityPayload(state, refs.reviewerRosterSha256, HUMAN_REVIEW_ROSTER_MEDIA_TYPE, "roster-attestor", HumanReviewRosterSchema, `${path}.roster`);
+  const rosterEvidence = authorityPayload(state, {
+    digest: refs.reviewerRosterSha256,
+    mediaType: HUMAN_REVIEW_ROSTER_MEDIA_TYPE,
+    role: "roster-attestor",
+    evidenceRole: "reviewer-roster",
+    schema: HumanReviewRosterSchema,
+    path: `${path}.roster`,
+  });
   const roster = rosterEvidence.value;
   if (roster.attestorRole !== "roster-attestor" || roster.attestorKeyId !== rosterEvidence.keyId || roster.itemSha256 !== expectedItemSha256) {
     fail(path, "roster authority role/key/item binding is invalid");
@@ -491,7 +532,14 @@ function verifyHumanEvidence(
   if (declarations[0].personId === declarations[1].personId || declarations.some((declaration) => declaration.conflicts.length > 0)) {
     fail(path, "roster does not attest distinct conflict-free people");
   }
-  const revealEvidence = authorityPayload(state, refs.revealReceiptSha256, HUMAN_REVIEW_REVEAL_RECEIPT_MEDIA_TYPE, "truth-reveal-attestor", HumanReviewRevealReceiptSchema, `${path}.reveal`);
+  const revealEvidence = authorityPayload(state, {
+    digest: refs.revealReceiptSha256,
+    mediaType: HUMAN_REVIEW_REVEAL_RECEIPT_MEDIA_TYPE,
+    role: "truth-reveal-attestor",
+    evidenceRole: "review-reveal-receipt",
+    schema: HumanReviewRevealReceiptSchema,
+    path: `${path}.reveal`,
+  });
   const reveal = revealEvidence.value;
   if (
     reveal.attestorRole !== "truth-reveal-attestor"
@@ -511,6 +559,28 @@ function expectedExclusionReason(reviews: readonly [VerifiedBinaryJudgmentReview
   if (reviews.some((review) => review.label === "indeterminate")) return "review-indeterminate";
   if (reviews[0].label !== reviews[1].label) return "review-disagreement";
   return undefined;
+}
+
+/**
+ * The screened branch's sibling of `expectedExclusionReason` above, derived from §6.4's admission
+ * rule instead of two signed reviews (spec §6.4, §6.5 check (4)). The seventh copy of the
+ * replacement-ledger reason vocabulary this file carries (contracts.ts's own comment names the
+ * other six and defers this one to S3, "recomputation logic").
+ *
+ * A row this file already knows is admitted returns `undefined` (no exclusion). Among excluded
+ * rows: a FLAGGED row (`screeningVerdict !== intendedLabel`) is always hand-checked in a passing
+ * closure (check (2) requires it), so its reason names the screen's own finding regardless of
+ * that hand check having run -- `screening-indeterminate` when the screen itself was
+ * indeterminate, `screening-disagreement` for a definite-label disagreement. `screening-hand-
+ * excluded` is reserved for the one case a flagged-first read would miss: R-3's tie-break, a row
+ * the screen AGREED with that the hand check overrode to exclude.
+ */
+function expectedScreeningExclusionReason(row: ScreeningRow): "screening-disagreement" | "screening-indeterminate" | "screening-hand-excluded" | undefined {
+  const agreed = row.screeningVerdict === row.intendedLabel;
+  const admitted = row.handChecked ? row.handVerdict === "confirm" : agreed;
+  if (admitted) return undefined;
+  if (!agreed) return row.screeningVerdict === "indeterminate" ? "screening-indeterminate" : "screening-disagreement";
+  return "screening-hand-excluded";
 }
 
 /** The reviewer Result Evaluation verifier shared by admission construction and closure replay. */
@@ -548,6 +618,67 @@ export function verifyBinaryJudgmentAdmissionClosure(
   );
   if (ledger.draftId !== input.expectedDraftId || ledger.sealedAt !== manifest.admittedAt) fail("replacementLedger", "ledger draft/time does not bind the manifest");
 
+  // Screened-operator-sampled admission (spec §6.4, §6.5; packet P6 item A): the table and S2's
+  // `screening-sample/1` recomputation are resolved and checked ONCE per bank, ahead of the
+  // resolutions and ledger loops below, which read `screeningRowsByItem` per item. Checks (1)-(3)
+  // run here, over `rows` alone; check (0)'s coverage half runs after both loops, once
+  // `acceptedItems`/`excludedItems` (the closure's own reconstruction of the frozen bank's
+  // candidate pool -- see the coverage check below) are fully known; check (4) runs per item in
+  // both loops.
+  let screeningTable: ScreeningTable | undefined;
+  let screeningRowsByItem = new Map<string, ScreeningRow>();
+  let screeningSample = new Set<string>();
+  let screeningSampleAgreementRate: number | undefined;
+  if (manifest.truthAdmission === "screened-operator-sampled") {
+    if (manifest.screeningTableSha256 === undefined) {
+      fail("admissionManifest.screeningTableSha256", "screened admission manifest carries no screening table reference");
+    }
+    screeningTable = exactCanonical(
+      ScreeningTableSchema,
+      resolve(state, manifest.screeningTableSha256, "admissionManifest.screeningTableSha256", "screening-table"),
+      "screeningTable",
+    );
+    screeningRowsByItem = new Map(screeningTable.rows.map((row) => [row.itemSha256, row]));
+
+    // (1) Sample membership: recomputed by screening-sample/1, never by executing the sealed
+    // script (R-4). The recomputation is authoritative for checks (2) and (3) below -- there is
+    // no separate "compare against the operator's script" step, because the script is never run.
+    let sampleResult: ReturnType<typeof computeScreeningSample>;
+    try {
+      sampleResult = computeScreeningSample({
+        itemSha256s: screeningTable.rows.map((row) => row.itemSha256),
+        sampleSeed: screeningTable.sampleSeed,
+        sampleSize: screeningTable.sampleSize,
+      });
+    } catch (cause) {
+      fail(
+        "admissionManifest.screeningTableSha256",
+        cause instanceof ScreeningSampleError
+          ? `sample recomputation refused its own input: ${cause.message}`
+          : "sample recomputation (screening-sample/1) failed",
+        cause,
+      );
+    }
+    screeningSample = new Set(sampleResult.sample);
+
+    // (2) Required hand checks: flagged := rows where NOT agreed. Every row in flagged ∪ sample
+    // must carry handChecked === true.
+    for (const row of screeningTable.rows) {
+      const flagged = row.screeningVerdict !== row.intendedLabel;
+      if ((flagged || screeningSample.has(row.itemSha256)) && !row.handChecked) {
+        fail("screeningTable.rows", `row ${row.itemSha256} is flagged or sampled but was never hand-checked`);
+      }
+    }
+
+    // (3) Sample agreement rate -- the one definition (spec §6.5(3)), symmetric on purpose. Every
+    // row in `screeningSample` is hand-checked by check (2) above, so `handVerdict` is defined.
+    const sampleMatches = [...screeningSample].filter((sampledItemSha256) => {
+      const row = screeningRowsByItem.get(sampledItemSha256)!;
+      return (row.screeningVerdict === row.intendedLabel) === (row.handVerdict === "confirm");
+    }).length;
+    screeningSampleAgreementRate = sampleMatches / screeningSample.size;
+  }
+
   const resolutions = manifest.labelResolutionSha256s.map((digest, index) => ({
     digest,
     ...parseProfileRecord<BinaryJudgmentLabelResolutionView>(state, digest, `admissionManifest.labelResolutionSha256s.${index}`, (bytes) => parseBinaryJudgmentLabelResolution(bytes) as BinaryJudgmentLabelResolutionView, "label-resolution"),
@@ -570,7 +701,16 @@ export function verifyBinaryJudgmentAdmissionClosure(
     if (acceptedItems.has(resolution.itemSha256)) fail(path, "item is admitted more than once");
     acceptedItems.add(resolution.itemSha256);
     if (resolution.truthAdmission !== manifest.truthAdmission || resolution.resolvedAt !== manifest.admittedAt) fail(path, "resolution admission kind/time differs from manifest");
-    if (resolution.humanReviewEvaluationSpecSha256 !== BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest) fail(path, "resolution names a different human-review EvaluationSpec");
+    // A screened resolution carries no humanReviewEvaluationSpecSha256 (spec §6.7: a row never
+    // hand-checked has no human-review evaluation), so this equality check only applies to the
+    // two branches that still carry the field. `verifyFrozenHumanReviewSpec` stays unconditional
+    // below regardless: the frozen spec+form are required admission-record roles for every mode
+    // (§6.8a's ratified G-5), not only the two that reference the spec by digest.
+    if (resolution.truthAdmission !== "screened-operator-sampled") {
+      if (resolution.humanReviewEvaluationSpecSha256 !== BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest) {
+        fail(path, "resolution names a different human-review EvaluationSpec");
+      }
+    }
     verifyFrozenHumanReviewSpec(state, path);
     const item = parseProfileRecord<BinaryJudgmentPayloadView>(state, resolution.itemSha256, `${path}.itemSha256`, (bytes) => parseBinaryJudgmentPayload(bytes) as BinaryJudgmentPayloadView, "source-item").value;
     if (item.itemId !== resolution.itemId) fail(path, "resolution itemId differs from exact item record");
@@ -585,23 +725,74 @@ export function verifyBinaryJudgmentAdmissionClosure(
       || context.stratum !== resolution.stratum
     ) fail(path, "analysis context does not exactly project the resolution");
 
-    if (resolution.truthAdmission === "two-human-unanimous") {
-      const human = verifyHumanEvidence(state, resolution, resolution.itemSha256, input.expectedDraftId, manifest.admittedAt, path);
-      if (
-        human.itemId !== resolution.itemId
-        || human.reviews.some((review) => !review.complete || review.label === "indeterminate" || review.label !== resolution.truthLabel)
-      ) fail(path, "admitted human truth is not two complete unanimous reviews");
-    } else {
-      const assertionEvidence = authorityPayload(state, resolution.operatorAssertionSha256, HUMAN_REVIEW_OPERATOR_ASSERTION_MEDIA_TYPE, "operator-truth-attestor", HumanReviewOperatorAssertionSchema, `${path}.operatorAssertion`);
-      const assertion = assertionEvidence.value;
-      if (
-        assertion.attestorRole !== "operator-truth-attestor"
-        || assertion.attestorKeyId !== assertionEvidence.keyId
-        || assertion.itemSha256 !== resolution.itemSha256
-        || assertion.truthLabel !== resolution.truthLabel
-        || assertion.assertedAt !== resolution.resolvedAt
-        || assertion.limitation !== "operator-only-not-publication-grade"
-      ) fail(path, "operator assertion does not exactly bind the non-publication resolution");
+    // Exhaustive switch over the three-member truthAdmission union, never-typed default (spec
+    // §6.8a Group B / this packet's G-3): an unrecognized future mode is a compile error here,
+    // not a silent reroute into the two-human or operator-only path.
+    switch (resolution.truthAdmission) {
+      case "two-human-unanimous": {
+        const human = verifyHumanEvidence(state, resolution, resolution.itemSha256, input.expectedDraftId, manifest.admittedAt, path);
+        if (
+          human.itemId !== resolution.itemId
+          || human.reviews.some((review) => !review.complete || review.label === "indeterminate" || review.label !== resolution.truthLabel)
+        ) fail(path, "admitted human truth is not two complete unanimous reviews");
+        break;
+      }
+      case "operator-only": {
+        const assertionEvidence = authorityPayload(state, {
+          digest: resolution.operatorAssertionSha256,
+          mediaType: HUMAN_REVIEW_OPERATOR_ASSERTION_MEDIA_TYPE,
+          role: "operator-truth-attestor",
+          evidenceRole: "operator-assertion",
+          schema: HumanReviewOperatorAssertionSchema,
+          path: `${path}.operatorAssertion`,
+        });
+        const assertion = assertionEvidence.value;
+        if (
+          assertion.attestorRole !== "operator-truth-attestor"
+          || assertion.attestorKeyId !== assertionEvidence.keyId
+          || assertion.itemSha256 !== resolution.itemSha256
+          || assertion.truthLabel !== resolution.truthLabel
+          || assertion.assertedAt !== resolution.resolvedAt
+          || assertion.limitation !== "operator-only-not-publication-grade"
+        ) fail(path, "operator assertion does not exactly bind the non-publication resolution");
+        break;
+      }
+      case "screened-operator-sampled": {
+        if (resolution.screeningTableSha256 !== manifest.screeningTableSha256) {
+          fail(path, "resolution names a different screening table than the manifest");
+        }
+        const revealEvidence = authorityPayload(state, {
+          digest: resolution.screeningRevealReceiptSha256,
+          mediaType: SCREENING_REVEAL_RECEIPT_MEDIA_TYPE,
+          role: "truth-reveal-attestor",
+          evidenceRole: "screening-reveal-receipt",
+          schema: ScreeningRevealReceiptSchema,
+          path: `${path}.screeningReveal`,
+        });
+        const reveal = revealEvidence.value;
+        if (
+          reveal.attestorRole !== "truth-reveal-attestor"
+          || reveal.attestorKeyId !== revealEvidence.keyId
+          || reveal.draftId !== input.expectedDraftId
+          || reveal.screeningTableSha256 !== resolution.screeningTableSha256
+          || reveal.judgeExecutionState !== "not-started"
+          || reveal.truthFrozenAt !== manifest.admittedAt
+        ) fail(path, "signed screening reveal does not bind the screening table under the same authority");
+        // (4) Per-row admission (spec §6.4): an admitted item's own table row must itself be
+        // admitted, and the resolution's truth label must be the row's intended label -- the
+        // screened branch never corrects a label, only confirms or excludes.
+        const row = screeningRowsByItem.get(resolution.itemSha256);
+        if (row === undefined) fail(path, "accepted screened item has no covering screening-table row");
+        const agreed = row.screeningVerdict === row.intendedLabel;
+        const admitted = row.handChecked ? row.handVerdict === "confirm" : agreed;
+        if (!admitted) fail(path, "admitted screened item's table row is not itself admitted per §6.4's admission rule");
+        if (row.intendedLabel !== resolution.truthLabel) fail(path, "resolution truth label differs from the screening table's intended label");
+        break;
+      }
+      default: {
+        const exhaustive: never = resolution;
+        fail(path, `unsupported truthAdmission ${String((exhaustive as { truthAdmission?: unknown }).truthAdmission)}`);
+      }
     }
     accepted.push({
       itemSha256: prefixed(resolution.itemSha256),
@@ -640,37 +831,84 @@ export function verifyBinaryJudgmentAdmissionClosure(
       || replacement.candidateClass !== entry.candidateClass
       || replacement.stratum !== entry.stratum
     ) fail(path, "replacement is not a later admitted reserve in the same class and stratum");
-    // The screened branch's ledger-entry verification (recomputing the screening table, the
-    // §6.5 sample, and the per-row admission rule) is out of this packet's scope (spec §6.4,
-    // §6.5) and is not implemented here. This mechanical guard keeps the two-human path below
-    // compiling and byte-identical against the now-optional per-item digests (spec §6.4's
-    // present-iff widening) and fails closed, rather than either failing to compile or silently
-    // mis-verifying a screened entry as a two-human one.
-    if (
-      entry.reviewVerdictSha256s === undefined
-      || entry.visibilityReceiptSha256s === undefined
-      || entry.reviewerRosterSha256 === undefined
-      || entry.revealReceiptSha256 === undefined
-    ) fail(path, "screened ledger entry verification is not yet implemented");
-    // Repackaged, not renamed or recomputed: TypeScript narrows each optional property read above,
-    // but not `entry`'s own declared (still-optional) structural type, so the narrowed fields are
-    // passed on explicitly rather than passing `entry` itself.
-    const human = verifyHumanEvidence(state, {
-      reviewVerdictSha256s: entry.reviewVerdictSha256s,
-      visibilityReceiptSha256s: entry.visibilityReceiptSha256s,
-      reviewerRosterSha256: entry.reviewerRosterSha256,
-      revealReceiptSha256: entry.revealReceiptSha256,
-    }, entry.excludedItemSha256, input.expectedDraftId, manifest.admittedAt, path);
-    const derivedReason = expectedExclusionReason(human.reviews);
-    if (derivedReason === undefined || derivedReason !== entry.reason) fail(path, "ledger reason does not derive from the two signed reviews");
+    // Branches on admission mode (spec §6.4, §6.5 check (4); ratified resolution to G-1): a
+    // screened exclusion is verified against the screening table's own per-row admission rule
+    // rather than against two signed reviews. §6.9 deliberately DROPS the four per-item two-human
+    // digests for the screened branch (one signature on the whole table, not 240 on individual
+    // rows), so those four fields are never read here for a screened entry. `operator-only` is
+    // unreachable in this loop body: any operator-only manifest with ledger.entries.length > 0
+    // already refused above, before this loop began.
+    let itemId: string;
+    let derivedReason: string | undefined;
+    switch (manifest.truthAdmission) {
+      case "screened-operator-sampled": {
+        const row = screeningRowsByItem.get(entry.excludedItemSha256);
+        if (row === undefined) fail(path, "excluded item has no covering screening-table row");
+        derivedReason = expectedScreeningExclusionReason(row);
+        const item = parseProfileRecord<BinaryJudgmentPayloadView>(
+          state,
+          entry.excludedItemSha256,
+          `${path}.item`,
+          (bytes) => parseBinaryJudgmentPayload(bytes) as BinaryJudgmentPayloadView,
+          "source-item",
+        ).value;
+        itemId = item.itemId;
+        break;
+      }
+      case "two-human-unanimous": {
+        // TypeScript narrows each optional property read below, but not `entry`'s own declared
+        // (still-optional) structural type, so the narrowed fields are passed on explicitly
+        // rather than passing `entry` itself. Defensive: the schema's own present-iff refinement
+        // (checked at `exactCanonical` above) already guarantees these four digests are present
+        // for a two-human reason, so this guard should be unreachable, not load-bearing.
+        if (
+          entry.reviewVerdictSha256s === undefined
+          || entry.visibilityReceiptSha256s === undefined
+          || entry.reviewerRosterSha256 === undefined
+          || entry.revealReceiptSha256 === undefined
+        ) fail(path, "two-human ledger entry is missing its required review evidence digests");
+        const human = verifyHumanEvidence(state, {
+          reviewVerdictSha256s: entry.reviewVerdictSha256s,
+          visibilityReceiptSha256s: entry.visibilityReceiptSha256s,
+          reviewerRosterSha256: entry.reviewerRosterSha256,
+          revealReceiptSha256: entry.revealReceiptSha256,
+        }, entry.excludedItemSha256, input.expectedDraftId, manifest.admittedAt, path);
+        derivedReason = expectedExclusionReason(human.reviews);
+        itemId = human.itemId;
+        break;
+      }
+      case "operator-only":
+        fail(path, "operator-only admission cannot claim a replacement-ledger entry");
+        break;
+      default: {
+        const exhaustive: never = manifest.truthAdmission;
+        fail(path, `unsupported truthAdmission ${String(exhaustive)}`);
+      }
+    }
+    if (derivedReason === undefined || derivedReason !== entry.reason) fail(path, "ledger reason does not derive from the admitted evidence");
     excluded.push({
       itemSha256: prefixed(entry.excludedItemSha256),
-      itemId: human.itemId,
+      itemId,
       candidateClass: entry.candidateClass,
       stratum: entry.stratum,
       reason: entry.reason,
       replacementItemSha256: prefixed(entry.replacementItemSha256),
     });
+  }
+
+  // (0) Coverage, the other half (spec §6.5 check (0)): the table's rows must cover the frozen
+  // bank's candidate pool EXACTLY. The pool itself is not a separate input to this function --
+  // it is reconstructed as accepted ∪ excluded, the closure's own admission decision, which by
+  // construction is exactly the frozen bank (every candidate item is either admitted or excluded
+  // with a same-class same-stratum replacement, and every replacement is itself an admitted pool
+  // member). `sampleSize <= rows.length` (check (0)'s other clause) is enforced transitively:
+  // `computeScreeningSample` above refuses a `sampleSize` exceeding the pool size on its own.
+  if (manifest.truthAdmission === "screened-operator-sampled" && screeningTable !== undefined) {
+    const pool = [...acceptedItems, ...excludedItems].sort(compareCodeUnitStrings);
+    const rowIdentities = screeningTable.rows.map((row) => row.itemSha256);
+    if (!sameStrings(pool, rowIdentities)) {
+      fail("screeningTable.rows", "screening table rows do not cover the admitted-plus-excluded closure exactly");
+    }
   }
 
   const classes = [...new Set([...accepted.map((entry) => entry.candidateClass), ...excluded.map((entry) => entry.candidateClass)])].sort(compareCodeUnitStrings);
@@ -679,7 +917,12 @@ export function verifyBinaryJudgmentAdmissionClosure(
     manifestSha256: input.admissionManifestSha256,
     manifest,
     replacementLedger: ledger,
-    publicationGrade: manifest.truthAdmission === "two-human-unanimous",
+    // Derived by exclusion, not by equality (spec §6.8a Group A, first bullet; ratified fix):
+    // `=== "two-human-unanimous"` derives `false` for a screened manifest, which is
+    // publication-grade under §6.8, and would make schema.ts's third `superRefine` branch (which
+    // REQUIRES `true`) refuse every screened bundle. `operator-only` is the one mode that is
+    // never publication-grade.
+    publicationGrade: manifest.truthAdmission !== "operator-only",
     classes,
     strata,
     accepted,
@@ -691,5 +934,10 @@ export function verifyBinaryJudgmentAdmissionClosure(
         sha256,
         roles: BINARY_JUDGMENT_ADMISSION_RECORD_ROLES.filter((role) => roles.has(role)),
       })),
+    // Present iff screened (spec §6.5 check (3)): the one definition of the screen-versus-hand
+    // agreement rate on the random sample, so no caller recomputes it independently.
+    ...(screeningSampleAgreementRate === undefined ? {} : {
+      screening: { sampleAgreementRate: screeningSampleAgreementRate },
+    }),
   };
 }
