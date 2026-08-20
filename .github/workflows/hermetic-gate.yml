@@ -28,6 +28,14 @@ name: hermetic-gate
 # migration intent. The context is registered by
 # .github/scripts/enable-next-merge-queue.sh and asserted by
 # .github/scripts/branch-protection-audit.mjs.
+#
+# A required merge-queue context must not sit behind a workflow-level `paths:`
+# filter: a filtered-out workflow never reports on the merge group at all, and
+# the entry hangs until the check-response timeout ejects it. Selection lives in
+# the `changes` job (DR-2026-08-18-b D3/D6). pull_request and merge_group skip
+# the suite when every changed path is on the cannot-affect list in
+# hermetic-selection.mjs. push to next/release always runs the suite: that SHA
+# is the evidence the publish guard queries.
 
 on:
   pull_request:
@@ -52,8 +60,92 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    # Four other required workflows already report a job named `changes`. The
+    # job *id* stays `changes` so the gate reaches it through `needs`.
+    name: hermetic-gate-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          # The merge-base walk and the name-only diff below read the commit and
+          # tree graph and never a blob. Omitting blobs keeps `fetch-depth: 0`
+          # from cloning the full pack on every PR and every queue entry.
+          filter: blob:none
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Select the hermetic suite from the diff
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          case "${EVENT_NAME}" in
+            pull_request)
+              diff_base="${PR_BASE_SHA}"
+              diff_head="${PR_HEAD_SHA}"
+              ;;
+            merge_group)
+              diff_base="${MG_BASE_SHA}"
+              diff_head="${MG_HEAD_SHA}"
+              ;;
+            push)
+              echo 'push to next/release always runs the suite (publish-guard SHA)'
+              echo 'run=true' >> "${GITHUB_OUTPUT}"
+              exit 0
+              ;;
+            *)
+              echo "${EVENT_NAME} carries no diff; selecting the hermetic suite"
+              echo 'run=true' >> "${GITHUB_OUTPUT}"
+              exit 0
+              ;;
+          esac
+          # A branch creation sends all-zeros, and a force-push can send a base that
+          # is no longer reachable. Neither can be diffed, so select conservatively
+          # rather than failing a required context.
+          if [ -z "${diff_base}" ] \
+            || [ "${diff_base}" = '0000000000000000000000000000000000000000' ] \
+            || ! git cat-file -e "${diff_base}^{commit}" 2>/dev/null; then
+            echo "no usable diff base (${diff_base:-empty}); selecting the hermetic suite"
+            echo 'run=true' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # The changed list goes to a file. Piping it into a short-circuiting
+          # consumer is a trap: the producer takes SIGPIPE once the list outruns
+          # the 64KiB pipe buffer, and under pipefail that can unselect a matching
+          # diff. `core.quotePath=false` keeps a non-ASCII path unquoted.
+          # `--no-renames` keeps a rename from printing only its new path.
+          git -c core.quotePath=false diff --no-renames --name-only "${diff_base}...${diff_head}" \
+            > "${RUNNER_TEMP}/changed.txt"
+          echo "changed files: $(wc -l < "${RUNNER_TEMP}/changed.txt")"
+          head -200 "${RUNNER_TEMP}/changed.txt"
+          selection="$(node .github/scripts/hermetic-selection.mjs < "${RUNNER_TEMP}/changed.txt")"
+          echo "${selection}"
+          run="$(jq -r '.run' <<<"${selection}")"
+          case "${run}" in
+            true|false)
+              echo "run=${run}" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "::error::unparseable selection output: '${run}'"
+              exit 1
+              ;;
+          esac
+
   hermetic:
     name: Hermetic gate (deterministic, snapshot)
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     # A hung step must not burn the merge queue's check-response budget, and must
     # not hold a runner for the 360-minute default against the plan's concurrent-job
@@ -234,14 +326,37 @@ jobs:
     # unreported required context hangs a queue entry until the check-response
     # timeout ejects it (DR-2026-08-18-b D3/D6). Fork PRs run this job too.
     name: hermetic-gate
-    needs: [hermetic]
+    needs: [changes, hermetic]
     if: always()
     runs-on: ubuntu-latest
     # One `test` against an upstream result. The bound keeps a wedged runner from
     # holding the required context open for the 360-minute default.
     timeout-minutes: 5
     steps:
-      - name: Require exact hermetic-suite success
+      - name: Require exact success from the selected hermetic suite
         env:
+          SELECTED: ${{ needs.changes.outputs.run }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
           HERMETIC_RESULT: ${{ needs.hermetic.result }}
-        run: test "${HERMETIC_RESULT}" = success
+        run: |
+          set -euo pipefail
+          echo "selected=${SELECTED} changes=${CHANGES_RESULT} hermetic=${HERMETIC_RESULT}"
+          test "${CHANGES_RESULT}" = success
+          # The selection is read from a job output, which is the empty string when the
+          # select step never wrote one. Empty must never be read as "unselected", or a
+          # broken selection step turns into a green gate over a skipped suite.
+          case "${SELECTED}" in
+            true|false) ;;
+            *)
+              echo "::error::unparseable selection output: '${SELECTED}'"
+              exit 1
+              ;;
+          esac
+          # When the suite is selected the bar is unchanged: exact success. When it
+          # is not, the suite job must be exactly `skipped` — a failed or cancelled
+          # job still fails this gate, so unselection can never launder a red.
+          expected=success
+          if [ "${SELECTED}" != true ]; then
+            expected=skipped
+          fi
+          test "${HERMETIC_RESULT}" = "${expected}"

@@ -440,6 +440,108 @@ test('hermetic-gate does not apt-install Playwright system packages on the requi
   );
 });
 
+function selectStepScript(workflow) {
+  const text = sourceOf(workflow);
+  const stepAt = text.indexOf('\n        id: select\n');
+  assert.notEqual(stepAt, -1, `${workflow}: the changes job has no step with id: select`);
+  const marker = '\n        run: |\n';
+  const runAt = text.indexOf(marker, stepAt);
+  assert.notEqual(runAt, -1, `${workflow}: the select step declares no literal run: block`);
+  const lines = [];
+  for (const line of text.slice(runAt + marker.length).split('\n')) {
+    if (line.trim() === '') {
+      lines.push('');
+      continue;
+    }
+    if (!line.startsWith('          ')) break;
+    lines.push(line.slice(10));
+  }
+  while (lines.length > 0 && lines.at(-1) === '') lines.pop();
+  assert.notEqual(lines.length, 0, `${workflow}: the select step's run: block is empty`);
+  return `${lines.join('\n')}\n`;
+}
+
+test('hermetic-gate selects at job level so a cannot-affect diff skips the suite without silencing the required context', () => {
+  const jobs = jobBlocks('hermetic-gate.yml');
+  const changes = jobs.find((job) => job.id === 'changes');
+  assert.notEqual(changes, undefined, 'hermetic-gate.yml must contain a changes job');
+  assert.equal(
+    displayName(changes),
+    'hermetic-gate-changes',
+    'the changes job display name must be unique; four other workflows already report a job named changes',
+  );
+  assert.match(
+    changes.block,
+    /hermetic-selection\.mjs/u,
+    'selection must go through hermetic-selection.mjs so the cannot-affect list is unit-tested, not restated in bash',
+  );
+  assert.match(
+    changes.block,
+    /changed\.txt/u,
+    'the changed list must land in a file; piping it into a short-circuiting consumer SIGPIPEs the producer and can unselect a matching diff',
+  );
+  assert.doesNotMatch(
+    changes.block,
+    /\|[ \t]*grep\b/u,
+    'the changed list must not be piped into grep',
+  );
+
+  const suite = jobs.find((job) => job.id === 'hermetic');
+  assert.notEqual(suite, undefined, 'hermetic-gate.yml must contain the suite job `hermetic`');
+  assert.match(
+    suite.block,
+    /^ {4}if: needs\.changes\.outputs\.run == 'true'[ \t]*$/mu,
+    'the suite must run only when the changes job selects the lane; an unselected required workflow still has to report via the terminal job',
+  );
+
+  const gate = jobs.find((job) => displayName(job) === 'hermetic-gate');
+  assert.notEqual(gate, undefined, 'hermetic-gate.yml must contain a job whose display name is hermetic-gate');
+  assert.match(
+    gate.block,
+    /SELECTED:[ \t]+\$\{\{[ \t]*needs\.changes\.outputs\.run[ \t]*\}\}/u,
+    'the terminal job must read the selection output; empty must never be treated as unselected',
+  );
+  assert.match(
+    gate.block,
+    /case "\$\{SELECTED\}" in\n\s+true\|false\) ;;\n/u,
+    'the gate must validate SELECTED against true|false; an empty output must never be read as an unselected lane',
+  );
+  assert.match(
+    gate.block,
+    /test "\$\{CHANGES_RESULT\}" = success/u,
+    'a failed changes job must redden the required context; unselection cannot launder a red selector',
+  );
+  assert.match(
+    gate.block,
+    /test "\$\{HERMETIC_RESULT\}" = "\$\{expected\}"/u,
+    'when selected the suite must be exact success; when unselected it must be exact skipped',
+  );
+});
+
+test('hermetic-gate push short-circuits to run=true without consulting the path list', () => {
+  // The publish guard queries hermetic-gate on the release SHA. That SHA's
+  // evidence is the push-to-next run. A docs land must still execute the suite
+  // there even though pull_request and merge_group skip the same paths.
+  const script = selectStepScript('hermetic-gate.yml');
+  const pushArm = script.match(/\n[ \t]*push\)\n(?<body>[\s\S]*?)\n[ \t]*;;/u);
+  assert.notEqual(pushArm, null, 'the select step must have a push) arm');
+  assert.match(
+    pushArm.groups.body,
+    /echo 'run=true' >> "\$\{GITHUB_OUTPUT\}"/u,
+    'push to next/release must write run=true',
+  );
+  assert.doesNotMatch(
+    pushArm.groups.body,
+    /hermetic-selection\.mjs/u,
+    'push must not consult the path selector; the publish-guard SHA always runs the suite',
+  );
+  assert.match(
+    pushArm.groups.body,
+    /exit 0/u,
+    'push must return before the git-diff path list is built',
+  );
+});
+
 test('the check-run producer posts its context however the gate job ends', () => {
   for (const member of REQUIRED_CHECK_SET.filter((entry) => entry.kind === 'check-run')) {
     const jobs = jobBlocks(member.workflow);
