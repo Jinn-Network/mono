@@ -127,7 +127,7 @@ export interface ConvertedBinaryItemBank {
   readonly replacementLedger: HumanReviewReplacementLedger;
   readonly publicationGrade: boolean;
   readonly candidateClasses: readonly string[];
-  readonly strata: readonly ("core" | "stress")[];
+  readonly strata: readonly string[];
   readonly items: readonly ConvertedBinaryItem[];
   readonly excludedItemSha256s: readonly `sha256:${string}`[];
   readonly nonAdmittedItemSha256s: readonly `sha256:${string}`[];

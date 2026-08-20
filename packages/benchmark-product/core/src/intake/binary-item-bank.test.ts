@@ -40,6 +40,7 @@ const digest = (value: string) => value as `sha256:${string}`;
 const ITEM_A_ID = "urn:uuid:00000000-0000-4000-8000-000000000001";
 const ITEM_B_ID = "urn:uuid:00000000-0000-4000-8000-000000000002";
 const ITEM_C_ID = "urn:uuid:00000000-0000-4000-8000-000000000003";
+const ITEM_D_ID = "urn:uuid:00000000-0000-4000-8000-000000000004";
 const PROVENANCE = sha("a");
 const PUBLISHED_AT = "2026-03-09T00:00:00Z";
 const roots: string[] = [];
@@ -107,6 +108,9 @@ interface SeededEvidence {
 function seedEvidence(input: {
   readonly draftId?: string;
   readonly admitted: readonly ReturnType<typeof item>[];
+  /** One stratum per admitted item, in order. Defaults to "core" for every item (today's shape,
+   * spec §10.2 ruling 3). */
+  readonly strata?: readonly string[];
 }): SeededEvidence {
   const workspaceDir = mkdtempSync(join(tmpdir(), "colophon-item-intake-"));
   roots.push(workspaceDir);
@@ -118,6 +122,7 @@ function seedEvidence(input: {
   };
   expect(initWorkspace(context).ok).toBe(true);
   expect(createDraft(context, { draftId, name: "Synthetic intake" }).ok).toBe(true);
+  const strata = input.strata ?? input.admitted.map(() => "core");
   const candidates = input.admitted.map((value, index) => {
     const itemSha256 = recordDigest(canonicalJsonBytes(value));
     putSealedBytes(workspaceDir, canonicalJsonBytes(value));
@@ -126,7 +131,7 @@ function seedEvidence(input: {
       itemId: value.itemId,
       humanReviewEvaluationSpecSha256: BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest,
       candidateClass: "synthetic",
-      stratum: "core" as const,
+      stratum: strata[index] ?? "core",
       poolPosition: index + 1,
       operatorTruthLabel: index % 2 === 0 ? "CORRECT" as const : "WRONG" as const,
     };
@@ -230,6 +235,25 @@ describe("convertBinaryItemBank", () => {
       sourceManifestSha256: result.sourceManifest.digest,
       admissionManifestSha256: evidence.admissionManifestSha256,
     });
+  });
+
+  // Spec §3.1 sites 18/19: the declared vocabulary is the observed set, not a registered pair.
+  test("imports a four-category bank, carrying all four declared strata in the summary", () => {
+    const items = [ITEM_A_ID, ITEM_B_ID, ITEM_C_ID, ITEM_D_ID].map((id, index) => item(id, `answer-${index}`));
+    const strata = ["category-1", "category-2", "category-3", "category-4"];
+    const evidence = seedEvidence({ admitted: items, strata });
+
+    const result = convert({ itemRows: items, evidence });
+
+    expect(result.items).toHaveLength(4);
+    expect(result.strata).toEqual(strata);
+  });
+
+  // Spec §3.2: the import path checks grammar only -- there is no declared list to check
+  // membership against at import time, because the list is the observed set.
+  test("refuses a non-grammar-conforming stratum at admission with a validation refusal", () => {
+    const items = [item(ITEM_A_ID, "answer")];
+    expect(() => seedEvidence({ admitted: items, strata: ["1bad"] })).toThrow(/validation/u);
   });
 
   test("rejects a missing source mapping and does not accept source locators in the strict item payload", () => {

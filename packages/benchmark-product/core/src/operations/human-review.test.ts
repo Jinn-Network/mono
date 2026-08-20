@@ -21,6 +21,7 @@ import {
   HumanReviewRevealReceiptSchema,
   HumanReviewRosterSchema,
   HumanReviewReplacementLedgerSchema,
+  HumanReviewReplacementLedgerEntrySchema,
   HumanReviewPacketSchema,
   HumanReviewVisibilityReceiptSchema,
   HUMAN_REVIEW_PACKET_PROTOCOL,
@@ -741,6 +742,36 @@ describe("binary human truth admission", () => {
     if (result.ok) expect(result.result.resolutions.map((entry) => entry.itemSha256)).toEqual([reserve.packets.itemSha256]);
   });
 
+  it("verifies a replacement-ledger entry carrying a four-category stratum (spec §3.1 site 9)", async () => {
+    const context = setup();
+    const disputed = await reviewedItem(context, 0, ["CORRECT", "WRONG"]);
+    const reserve = await reviewedItem(context, 1, ["WRONG", "WRONG"]);
+    const result = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "two-human-unanimous",
+      candidates: [
+        publicationCandidate(disputed, 0, 1, { stratum: "category-3" }),
+        publicationCandidate(reserve, 1, 2, { stratum: "category-3", replacesItemSha256: disputed.packets.itemSha256 }),
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const verifiedClosure = verifyBinaryJudgmentAdmissionClosureInWorkspace({
+      workspaceDir: context.workspaceDir,
+      admissionManifestSha256: result.result.admissionManifestSha256 as AdmissionSha256,
+      expectedDraftId: "review-run",
+    });
+    expect(verifiedClosure.strata).toEqual(["category-3"]);
+    expect(verifiedClosure.excluded).toEqual([{
+      itemSha256: disputed.packets.itemSha256,
+      itemId: item(0).itemId,
+      candidateClass: "factual",
+      stratum: "category-3",
+      reason: "review-disagreement",
+      replacementItemSha256: reserve.packets.itemSha256,
+    }]);
+  });
+
   it("accounts incomplete and indeterminate reviews and rejects wrong-slice or earlier reserves", async () => {
     const context = setup();
     const incomplete = await reviewedItem(context, 0, ["CORRECT", "CORRECT"], [false, true]);
@@ -922,5 +953,30 @@ describe("binary human truth admission", () => {
       admissionManifestSha256: badAssertionManifestSha256,
       expectedDraftId: "review-run",
     }, closurePortsWithOverrides(context, assertionOverrides))).toThrow(/authority signature/u);
+  });
+});
+
+describe("replacement-ledger entry stratum (spec §3.1 site 9)", () => {
+  const digest = (character: string) => `sha256:${character.repeat(64)}`;
+  function replacementLedgerEntry(stratum: string) {
+    return {
+      excludedItemSha256: digest("1"),
+      replacementItemSha256: digest("2"),
+      candidateClass: "factual",
+      stratum,
+      excludedPoolPosition: 1,
+      replacementPoolPosition: 2,
+      reason: "review-disagreement" as const,
+      reviewVerdictSha256s: [digest("3"), digest("4")] as [string, string],
+      visibilityReceiptSha256s: [digest("5"), digest("6")] as [string, string],
+      reviewerRosterSha256: digest("7"),
+      revealReceiptSha256: digest("8"),
+    };
+  }
+
+  it("accepts a four-category stratum and refuses a non-grammar-conforming one", () => {
+    expect(HumanReviewReplacementLedgerEntrySchema.safeParse(replacementLedgerEntry("category-3")).success).toBe(true);
+    expect(HumanReviewReplacementLedgerEntrySchema.safeParse(replacementLedgerEntry("1bad")).success).toBe(false);
+    expect(HumanReviewReplacementLedgerEntrySchema.safeParse(replacementLedgerEntry("")).success).toBe(false);
   });
 });

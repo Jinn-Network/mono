@@ -197,20 +197,22 @@ function binaryZeroProjection() {
   };
 }
 
-function binaryAssetFixture(): PublicAssetInput {
+function binaryAssetFixture(options: { readonly strata?: readonly string[] } = {}): PublicAssetInput {
   const base = fixture();
   const armIds = ["arm-a", "arm-b", "arm-c", "arm-d"];
+  // Default reproduces today's exact two-stratum output byte for byte (spec §10.2 ruling 3).
+  const strata = options.strata ?? ["core", "stress"];
   const qualification = {
     configuration: {
       verdictRule: "sole", k: 1, reduction: "strict-majority", measurementProfile: "binary-instrument@1",
-      candidateClasses: ["factuality"], strata: ["core", "stress"], parserInvalidPolicy: "reject",
+      candidateClasses: ["factuality"], strata, parserInvalidPolicy: "reject",
       truthAdmission: "two-human-unanimous", intervalAlpha: "0.05",
     },
     arms: Object.fromEntries(armIds.map((armId, index) => [armId, {
       instrumentSha256: `sha256:${String(index + 1).repeat(64)}`,
       ...binaryZeroProjection(),
       byCandidateClass: { factuality: binaryZeroProjection() },
-      byStratum: { core: binaryZeroProjection(), stress: binaryZeroProjection() },
+      byStratum: Object.fromEntries(strata.map((name) => [name, binaryZeroProjection()])),
     }])),
     itemDecisions: [],
     excluded: { count: 0, items: [] },
@@ -538,6 +540,23 @@ describe("binary qualification public assets", () => {
       expect(compact).not.toContain("0.0000");
       expect(compact.toLowerCase()).not.toMatch(/\b(?:rate|winner|loser|ranking|preferred|selected)\b/u);
     }
+  });
+
+  test("renders the sealed stratum vocabulary in the byStratum caption, not a hardcoded pair", () => {
+    const twoStratum = buildPublicAssets(binaryAssetFixture());
+    const twoCaption = "Buckets by stratum (core, stress)";
+    expect(text(twoStratum["index.html"])).toContain(twoCaption);
+    // Markdown escapes parentheses (see the existing "\\(armB minus armA\\)" assertion above).
+    expect(text(twoStratum["README.md"])).toContain("Buckets by stratum \\(core, stress\\)");
+
+    const fourCategory = buildPublicAssets(binaryAssetFixture({
+      strata: ["category-1", "category-2", "category-3", "category-4"],
+    }));
+    const fourCaption = "Buckets by stratum (category-1, category-2, category-3, category-4)";
+    expect(text(fourCategory["index.html"])).toContain(fourCaption);
+    expect(text(fourCategory["README.md"])).toContain(
+      "Buckets by stratum \\(category-1, category-2, category-3, category-4\\)",
+    );
   });
 
   test("fails closed when replay-verified admission/instrument facts are absent or attached to a legacy method", () => {

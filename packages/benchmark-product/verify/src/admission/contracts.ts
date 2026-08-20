@@ -26,9 +26,11 @@ const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 const TimestampSchema = z.string().datetime({ offset: true });
 const IdentitySchema = z.string().min(1).max(256);
 const EvaluatorIdentitySchema = IdentitySchema.regex(/^(?:https?:\/\/|urn:)[^\s]+$/u);
-const CandidateClassSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9._-]{0,63}$/u);
+// §3.1 rule 1: one identifier dialect, not two. Shared shape with `candidateClass`.
+const IDENTIFIER_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u;
+const CandidateClassSchema = z.string().regex(IDENTIFIER_NAME);
 const BinaryJudgmentTruthLabelSchema = z.enum(["CORRECT", "WRONG"]);
-const BinaryJudgmentStratumSchema = z.enum(["core", "stress"]);
+const BinaryJudgmentStratumSchema = z.string().regex(IDENTIFIER_NAME);
 /**
  * RFC 3339 instant SHAPE, seconds precision, no fractional part. The pattern is imported from the
  * profiles package rather than restated, so this mirrored payload copy cannot drift from the

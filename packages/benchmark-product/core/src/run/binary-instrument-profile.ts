@@ -299,9 +299,11 @@ function deriveAdmissionProfile(input: {
     refuse("conflict", "binary.admissionManifest", "Benchmark intake and admission manifest digest joins do not match this draft");
   }
 
-  if (!sameJson(verified.strata, ["core", "stress"])) {
-    refuse("conflict", "binary.admissionManifest", "admitted analysis contexts must exactly cover the registered core and stress strata");
-  }
+  // No coverage gate here (spec §3.1 rule 2): the declared vocabulary is derived from
+  // `verified.strata`, not compared against a registered pair, so there is nothing left to
+  // "cover". Its non-empty / sorted / unique / grammar properties are enforced exactly once,
+  // downstream at `validateBinaryInstrumentParameters` (spec §0.5). `candidateClasses`, the
+  // sibling axis two lines below, has never had a gate like this.
   const contextsByItem = new Map(verified.accepted.map((entry) => [
     entry.itemSha256,
     { digest: entry.analysisContextSha256, itemId: entry.itemId },
@@ -315,7 +317,7 @@ function deriveAdmissionProfile(input: {
   });
   return {
     candidateClasses: verified.classes,
-    strata: ["core", "stress"],
+    strata: verified.strata,
     truthAdmission: verified.manifest.truthAdmission,
   };
 }

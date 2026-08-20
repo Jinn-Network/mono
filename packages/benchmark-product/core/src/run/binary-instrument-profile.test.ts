@@ -244,6 +244,52 @@ interface Fixture {
   readonly taskSha256s: readonly string[];
 }
 
+interface AdmissionItemConfig {
+  readonly itemId: string;
+  readonly question: string;
+  readonly referenceAnswer: string;
+  readonly candidateAnswer: string;
+  readonly provenance: {
+    readonly sourceCommitment: `sha256:${string}`;
+    readonly timestamp: string;
+  };
+  readonly sources: readonly { readonly digest: { readonly sha256: string } }[];
+  /** Injected as the payload's `evidence` field only under `withItemEvidence`. */
+  readonly evidenceText: string;
+  readonly truthLabel: "CORRECT" | "WRONG";
+  readonly candidateClass: string;
+  readonly stratum: string;
+}
+
+// Byte-for-byte today's two candidates (spec §10.2 ruling 3): this is the fixture's default, not
+// a new shape.
+const DEFAULT_ADMISSION_ITEMS: readonly AdmissionItemConfig[] = [
+  {
+    itemId: "urn:uuid:00000000-0000-4000-8000-000000000001",
+    question: "Core question",
+    referenceAnswer: "Core reference",
+    candidateAnswer: "Core candidate",
+    evidenceText: "Direct synthetic verification of the core item.",
+    provenance: { sourceCommitment: sha("a"), timestamp: "2026-03-09T00:00:00Z" },
+    sources: [{ digest: { sha256: "a".repeat(64) } }],
+    truthLabel: "CORRECT",
+    candidateClass: "zeta",
+    stratum: "core",
+  },
+  {
+    itemId: "urn:uuid:00000000-0000-4000-8000-000000000002",
+    question: "Stress question",
+    referenceAnswer: "Stress reference",
+    candidateAnswer: "Stress candidate",
+    evidenceText: "Direct synthetic verification of the stress item.",
+    provenance: { sourceCommitment: sha("b"), timestamp: "2026-04-01T00:00:00Z" },
+    sources: [{ digest: { sha256: "b".repeat(64) } }],
+    truthLabel: "WRONG",
+    candidateClass: "alpha",
+    stratum: "stress",
+  },
+];
+
 function setUpFixture(options: {
   readonly arms?: readonly ArmConfig[];
   readonly snapshotProbeSha256?: `sha256:${string}`;
@@ -251,6 +297,7 @@ function setUpFixture(options: {
   readonly withItemEvidence?: boolean;
   /** Arm ids whose instrument should interpolate `evidence`. Default: none declare. */
   readonly declaringArmIds?: readonly string[];
+  readonly items?: readonly AdmissionItemConfig[];
 } = {}): Fixture {
   const withItemEvidence = options.withItemEvidence ?? false;
   const declaringArmIds = new Set(options.declaringArmIds ?? []);
@@ -262,33 +309,11 @@ function setUpFixture(options: {
   expect(initial.ok).toBe(true);
   if (!initial.ok) throw new Error(initial.error.detail);
 
-  const candidates = [
-    {
-      itemId: "urn:uuid:00000000-0000-4000-8000-000000000001",
-      question: "Core question",
-      referenceAnswer: "Core reference",
-      candidateAnswer: "Core candidate",
-      ...(withItemEvidence ? { evidence: "Direct synthetic verification of the core item." } : {}),
-      provenance: { sourceCommitment: sha("a"), timestamp: "2026-03-09T00:00:00Z" },
-      sources: [{ digest: { sha256: "a".repeat(64) } }],
-      truthLabel: "CORRECT" as const,
-      candidateClass: "zeta",
-      stratum: "core" as const,
-    },
-    {
-      itemId: "urn:uuid:00000000-0000-4000-8000-000000000002",
-      question: "Stress question",
-      referenceAnswer: "Stress reference",
-      candidateAnswer: "Stress candidate",
-      ...(withItemEvidence ? { evidence: "Direct synthetic verification of the stress item." } : {}),
-      provenance: { sourceCommitment: sha("b"), timestamp: "2026-04-01T00:00:00Z" },
-      sources: [{ digest: { sha256: "b".repeat(64) } }],
-      truthLabel: "WRONG" as const,
-      candidateClass: "alpha",
-      stratum: "stress" as const,
-    },
-  ].map((entry, index) => {
-    const { truthLabel, candidateClass, stratum, ...payload } = entry;
+  const candidates = (options.items ?? DEFAULT_ADMISSION_ITEMS).map((entry, index) => {
+    const { truthLabel, candidateClass, stratum, evidenceText, ...rest } = entry;
+    // Canonical JSON sorts keys, so appending `evidence` here is byte-identical to declaring it
+    // inline: the default (evidence off) reproduces today's two payloads exactly.
+    const payload = { ...rest, ...(withItemEvidence ? { evidence: evidenceText } : {}) };
     const itemSha256 = store(canonicalJsonBytes(payload));
     return {
       payload,
@@ -492,6 +517,50 @@ describe("binary-instrument@1 lock-time composition", () => {
     expect(compiled.plannedRun.record.analysisPlan).toEqual([
       { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: { verdictRule: "sole" } },
       { method: BENCHMARKING_METHOD_IDS.binaryInstrument, version: BENCHMARKING_METHOD_VERSION, parameters },
+    ]);
+  });
+
+  // Spec §3.1 site 12, the packet's headline: `deriveAdmissionProfile` used to derive
+  // `candidateClasses` dynamically and re-hardcode `strata: ["core","stress"]` on the very next
+  // line, discarding the four-category vocabulary it had just verified. A bank declaring four
+  // categories now locks, and the derived vocabulary -- not a literal pair -- is what gets sealed
+  // into the binary-instrument@1 analysis-plan parameters (§3.1 rule 3; no edit to compile.ts).
+  test("locks a four-category bank and seals the declared stratum vocabulary into the analysis plan", () => {
+    const fourCategoryItems: readonly AdmissionItemConfig[] = ["1", "2", "3", "4"].map((n, index) => ({
+      itemId: `urn:uuid:00000000-0000-4000-8000-00000000000${n}`,
+      question: `Category ${n} question`,
+      referenceAnswer: `Category ${n} reference`,
+      candidateAnswer: `Category ${n} candidate`,
+      evidenceText: `Direct synthetic verification of the category ${n} item.`,
+      provenance: {
+        sourceCommitment: sha((["a", "b", "c", "d"] as const)[index]!),
+        timestamp: "2026-03-09T00:00:00Z",
+      },
+      sources: [{ digest: { sha256: (["a", "b", "c", "d"] as const)[index]!.repeat(64) } }],
+      truthLabel: index % 2 === 0 ? "CORRECT" : "WRONG",
+      candidateClass: "factuality",
+      stratum: `category-${n}`,
+    }));
+    const fixture = setUpFixture({ items: fourCategoryItems });
+    const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+    const parameters = compileBinaryInstrumentProfile({
+      workspaceDir,
+      draft: fixture.draft,
+      benchmark,
+    });
+    expect(parameters.strata).toEqual(["category-1", "category-2", "category-3", "category-4"]);
+
+    const compiled = compileDraft({
+      workspaceDir,
+      draft: fixture.draft,
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-16T09:00:00.000Z",
+    });
+    const binaryInstrumentPlanEntry = compiled.plannedRun.record.analysisPlan!.find(
+      (entry) => entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument,
+    );
+    expect((binaryInstrumentPlanEntry?.parameters as { readonly strata: readonly string[] }).strata).toEqual([
+      "category-1", "category-2", "category-3", "category-4",
     ]);
   });
 
