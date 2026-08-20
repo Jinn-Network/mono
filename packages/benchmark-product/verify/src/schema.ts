@@ -44,6 +44,10 @@ export const BUNDLE_V4_EVIDENCE_ROLES = [
   "review-visibility-receipt",
   "review-reveal-receipt",
   "operator-assertion",
+  // Appended at the very end (spec §1.6 site 9 / §1.5 rule 5): this array's index order is the
+  // frozen role-ordering map used by both the catalog schema's ordering refinement and the bundle
+  // writer, so inserting anywhere else would move existing bundles' bytes.
+  "snapshot-probe",
 ] as const;
 export type BundleV4EvidenceRole = (typeof BUNDLE_V4_EVIDENCE_ROLES)[number];
 export const BUNDLE_V4_ADMISSION_EVIDENCE_ROLES = [
@@ -183,10 +187,13 @@ export const BundleQualificationSchema = z.strictObject({
   truthAdmission: z.enum(["two-human-unanimous", "operator-only"]),
   candidateClasses: z.array(z.string().min(1)),
   strata: z.tuple([z.literal("core"), z.literal("stress")]),
+  // .min(2), not a literal count (spec §1.6 rule 3). BUNDLE_QUALIFICATION_FORMAT stays at its
+  // current version under §0.4: every four-arm bundle ever written still validates,
+  // byte-identically.
   arms: z.array(z.strictObject({
     armId: z.string().min(1),
     instrumentSha256: PrefixedSha256Schema,
-  })).length(4),
+  })).min(2),
   items: z.array(z.strictObject({
     taskSha256: PrefixedSha256Schema,
     itemSha256: PrefixedSha256Schema,
@@ -224,7 +231,8 @@ export const BundleQualificationSchema = z.strictObject({
     }
   }
   sortedUnique(qualification.reachableSha256s, ["reachableSha256s"]);
-  if (new Set(qualification.arms.map((entry) => entry.instrumentSha256)).size !== 4) ctx.addIssue({ code: "custom", path: ["arms"], message: "four arms must bind four distinct instruments" });
+  // Counts against arms.length, not the literal 4 (spec §1.6 rule 3, site 9).
+  if (new Set(qualification.arms.map((entry) => entry.instrumentSha256)).size !== qualification.arms.length) ctx.addIssue({ code: "custom", path: ["arms"], message: "arms must bind one distinct instrument each" });
   for (const [index, item] of qualification.items.entries()) {
     for (const digest of [item.itemSha256, item.labelResolutionSha256, item.analysisContextSha256]) {
       if (!qualification.reachableSha256s.includes(digest)) ctx.addIssue({ code: "custom", path: ["items", index], message: "item graph edge is absent from the authenticated admission closure" });

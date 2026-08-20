@@ -28,6 +28,8 @@ export const BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI =
   "https://spec.jinn.network/binary-judgment/label-resolution/v1" as const;
 export const BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI =
   "https://spec.jinn.network/binary-judgment/parser-semantics/v1" as const;
+export const BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI =
+  "https://spec.jinn.network/binary-judgment/snapshot-serving-probe/v1" as const;
 
 // Binary-judgment requirement and media vocabulary.
 export const BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY =

@@ -64,6 +64,7 @@ import {
   type TaskProfileDocument,
 } from "@jinn-network/task-execution-profiles";
 import type { TaskSpecification } from "@jinn-network/task-execution-protocol";
+import { compareCodeUnitStrings } from "@jinn-network/task-execution-protocol";
 import { makeEvaluationLauncher } from "@jinn-network/task-execution-evaluation-harness/launcher";
 import { defineEvaluatorRegistration } from "@jinn-network/task-execution-evaluation-harness";
 import {
@@ -1154,7 +1155,11 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
           ready: true,
           executable,
           harnessVersions: ["1"],
-          models: ["gpt-5.6-luna"],
+          // Deduplicated, code-unit-sorted arm models from the sealed binary-judge selection: a
+          // dated-snapshot cell would be refused by a probe that still advertised only the
+          // reasoning model (spec §1.6 / P1 change 4).
+          models: [...new Set(inspectBinaryJudgeSelection.arms.map((arm) => arm.model))]
+            .sort(compareCodeUnitStrings),
         };
       },
     };

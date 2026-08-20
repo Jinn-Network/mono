@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, test } from "vitest";
+import { BINARY_INSTRUMENT_MEASUREMENT_PROFILE } from "@jinn-network/benchmarking-aggregate";
 import {
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
@@ -22,7 +23,8 @@ import {
 import { assertClaimConsistency, type ClaimRecordIdentities } from "./claim-consistency.js";
 import { buildClaimPackage, type ClaimPackage } from "./claim.js";
 import { BenchmarkProductError } from "./errors.js";
-import { buildLocalVenueHonesty } from "./run-results.js";
+import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
+import { binaryInstrumentReportLimitations, BINARY_INSTRUMENT_REPORT_LIMITATIONS } from "./binary-qualification.js";
 
 const digest = (fill: string) => fill.repeat(64);
 const DRAFT_ID = "draft-1";
@@ -171,6 +173,112 @@ describe("assertClaimConsistency", () => {
 
     expect(refusal.message).toBe(
       "claim package scope.replicates is not the exact projection of verified facts",
+    );
+  });
+});
+
+/**
+ * Wiring coverage for spec §1.4: `assertClaimConsistency` recomputes the binary-instrument
+ * Report's `limitations` disclosure from the sealed Run's analysis-plan parameters
+ * (`binaryInstrumentReportLimitations`, `./binary-qualification.js`) and refuses when the
+ * published array disagrees. A dated-snapshot run whose Report still carries the alias string —
+ * today's behavior before this packet, and exactly the false disclosure §1.4 exists to close —
+ * must be caught here, at the point the claim is actually published.
+ */
+describe("assertClaimConsistency: binary-instrument report limitations (spec §1.4)", () => {
+  const binaryParameters = {
+    verdictRule: "sole",
+    k: 3,
+    reduction: "strict-majority",
+    measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
+    candidateClasses: ["alpha"],
+    strata: ["core", "stress"],
+    parserInvalidPolicy: "reject",
+    truthAdmission: "operator-only",
+    intervalAlpha: "0.05",
+    judgeModelProfile: "dated-snapshot-sampling",
+  } as const;
+
+  const binaryRunRecord = {
+    arms: [{ armId: "armA", pinning: {} }],
+    replicates: 1,
+    policy: {
+      independence: RESOLVED_ASSURANCE.independence,
+      evaluation: { minVerdicts: RESOLVED_ASSURANCE.minVerdicts, distinctEvaluator: RESOLVED_ASSURANCE.distinctEvaluator },
+      submissionBaseline: {},
+    },
+    analysisPlan: [{
+      method: BENCHMARKING_METHOD_IDS.binaryInstrument,
+      version: BENCHMARKING_METHOD_VERSION,
+      parameters: binaryParameters,
+    }],
+  } as unknown as RunRecord;
+
+  function binaryReport(limitations: readonly string[]): ReportRecord {
+    return {
+      method: { id: BENCHMARKING_METHOD_IDS.binaryInstrument, version: BENCHMARKING_METHOD_VERSION, parameters: {} },
+      preregistered: false,
+      results: { perSubject: [{ results: { conflicted: { count: 0, cellKeys: [] } } }] },
+      disclosures: { perSubject: [] },
+      limitations,
+    } as unknown as ReportRecord;
+  }
+
+  function binaryClaim(reportRecord: ReportRecord): ClaimPackage {
+    return buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord: binaryRunRecord,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord,
+      reportSha256: identities.reportSha256!,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, binaryRunRecord),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+    });
+  }
+
+  function checkBinary(reportRecord: ReportRecord): void {
+    assertClaimConsistency({
+      claim: binaryClaim(reportRecord),
+      identities,
+      benchmarkRecord: {} as unknown as BenchmarkRecord,
+      runRecord: binaryRunRecord,
+      matrixRecord,
+      reportRecord,
+      draftId: DRAFT_ID,
+      assurancePreset: ASSURANCE_PRESET,
+    });
+  }
+
+  test("accepts a dated-snapshot operator-only Report whose limitations already dropped the alias and reviewer-protocol strings", () => {
+    const correctLimitations = [
+      ...localVenueLimitsForRun(binaryRunRecord),
+      ...binaryInstrumentReportLimitations(binaryParameters),
+    ];
+    expect(correctLimitations).not.toContain(BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias);
+    expect(() => checkBinary(binaryReport(correctLimitations))).not.toThrow();
+  });
+
+  test("refuses a dated-snapshot Report that still publishes the mutable-alias limitation", () => {
+    const staleLimitations = [
+      ...localVenueLimitsForRun(binaryRunRecord),
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly,
+    ];
+    let caught: BenchmarkProductError | undefined;
+    try {
+      checkBinary(binaryReport(staleLimitations));
+    } catch (cause) {
+      if (cause instanceof BenchmarkProductError) caught = cause;
+      else throw cause;
+    }
+    expect(caught).toBeDefined();
+    expect(caught?.message).toBe(
+      "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history",
     );
   });
 });

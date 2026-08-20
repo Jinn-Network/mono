@@ -18,7 +18,9 @@ import {
 } from "@jinn-network/benchmarking-records";
 import { verifyMatrix, type InScopeCell, type InScopeVerdict } from "@jinn-network/benchmarking-run";
 import {
+  type AcceptedJudgeModelId,
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
+  BinaryJudgmentSnapshotProbeSchema,
   deriveEvaluationTask,
   parseBinaryJudgmentInstrument,
   parseEvaluationSpec,
@@ -153,7 +155,9 @@ export interface LegacyPublicBundleVerificationResult {
     readonly truthAdmission: "two-human-unanimous" | "operator-only";
     readonly candidateClasses: readonly string[];
     readonly strata: readonly ["core", "stress"];
-    readonly armCount: 4;
+    // A count that is a constant is not a count (spec §1.6 site 8): a literal here does not
+    // refuse a run with a different arm count, it publishes a false one.
+    readonly armCount: number;
     readonly itemCount: number;
     readonly exclusionCount: number;
   };
@@ -724,7 +728,7 @@ export async function verifyPublicBundleSnapshot(
       armId: string;
       instrumentSha256: string;
       promptTemplateSha256: string;
-      model: "gpt-5.6-luna";
+      model: AcceptedJudgeModelId;
       generation: ReturnType<typeof parseBinaryJudgmentInstrument>["model"]["generation"];
     }> = [];
     for (const entry of qualification.arms) {
@@ -786,6 +790,25 @@ export async function verifyPublicBundleSnapshot(
       refuse("record-integrity", "evidence-closure", "binary runtime selection arms differ from qualification and Run pins");
     }
     addRole(expectedRoles, binarySelectionRecord.sha256, "runtime-selection");
+    if (binarySelection.snapshotProbeSha256 !== undefined) {
+      const probeHex = binarySelection.snapshotProbeSha256.slice("sha256:".length);
+      const probeBytes = records.get(probeHex);
+      if (probeBytes === undefined) refuse("record-integrity", "evidence-closure", `snapshot-serving probe ${binarySelection.snapshotProbeSha256} is missing`);
+      const probe = parseRecord(probeBytes, BinaryJudgmentSnapshotProbeSchema, `records/${probeHex}.bin`);
+      requireCanonical(probeBytes, probe, `records/${probeHex}.bin`);
+      // This is the cold-verify SECOND COPY of the bind-time rule (spec §1.5 rule 4), not a
+      // second enforcement point (§0.5): a cold verifier re-derives from bytes without trusting
+      // the producer, which is the same reason this package already carries second copies of
+      // other producer-side rules. Freshness (§1.5 rule 3) is deliberately NOT re-checked here —
+      // it scopes to bind, where the bind clock exists.
+      if (!instruments.some((entry) => entry.model === probe.requestedModel)) {
+        refuse("record-integrity", "evidence-closure", "snapshot-serving probe model is not the model of any bound arm");
+      }
+      if (probe.outcome !== "serving") {
+        refuse("record-integrity", "evidence-closure", "snapshot-serving probe outcome is not serving");
+      }
+      addRole(expectedRoles, probeHex, "snapshot-probe");
+    }
     const reviewerBindingMap = new Map<string, string>();
     for (const entry of verifiedAdmission.reachableRecords
       .filter((candidate) => candidate.roles.includes("human-review-verdict"))) {
@@ -1652,7 +1675,8 @@ export async function verifyPublicBundleSnapshot(
           truthAdmission: qualification.truthAdmission,
           candidateClasses: qualification.candidateClasses,
           strata: qualification.strata,
-          armCount: 4 as const,
+          // Derived, not declared (spec §1.6 rule 4): a count that is a constant is not a count.
+          armCount: qualification.arms.length,
           itemCount: qualification.items.length,
           exclusionCount: qualification.exclusions.length,
         },
