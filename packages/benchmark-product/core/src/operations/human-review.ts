@@ -15,6 +15,7 @@ import {
   recordDigest,
   sealBinaryJudgmentAnalysisContext,
   sealBinaryJudgmentLabelResolution,
+  type BinaryJudgmentLabelResolution,
 } from "@jinn-network/task-execution-profiles";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import { dssePreAuthEncoding, parseExactDsseEnvelope, sealDsseEnvelope } from "@jinn-network/trust-core";
@@ -42,6 +43,10 @@ import {
   HUMAN_REVIEW_VISIBILITY_RECEIPT_PROTOCOL,
   HUMAN_REVIEW_OPERATOR_ASSERTION_PROTOCOL,
   HUMAN_REVIEW_OPERATOR_ASSERTION_MEDIA_TYPE,
+  SCREENING_TABLE_PROTOCOL,
+  SCREENING_TABLE_MEDIA_TYPE,
+  SCREENING_REVEAL_RECEIPT_PROTOCOL,
+  SCREENING_REVEAL_RECEIPT_MEDIA_TYPE,
   HumanReviewOperatorAssertionSchema,
   HumanReviewPacketSchema,
   HumanReviewReplacementLedgerSchema,
@@ -49,8 +54,12 @@ import {
   HumanReviewRevealReceiptSchema,
   HumanReviewRosterSchema,
   HumanReviewVisibilityReceiptSchema,
+  ScreeningRowSchema,
+  ScreeningTableSchema,
+  ScreeningRevealReceiptSchema,
   parseCanonicalHumanReviewBytes,
   sealHumanReviewDocument,
+  type ScreeningRow,
 } from "../human-review/contracts.js";
 import {
   BinaryJudgmentAdmissionClosureError,
@@ -143,12 +152,37 @@ export interface HumanAdmissionCandidateInput {
   readonly replacesItemSha256?: string;
 }
 
+/** One row of the caller-supplied screening table (spec §6.3). Identical shape to the frozen
+ * `ScreeningRowSchema` wire record — reused directly at parse time, not duplicated. */
+export interface AdmitHumanTruthScreeningRowInput {
+  readonly itemSha256: string;
+  readonly intendedLabel: "CORRECT" | "WRONG";
+  readonly screeningVerdict: "CORRECT" | "WRONG" | "indeterminate";
+  readonly handChecked: boolean;
+  readonly handVerdict?: "confirm" | "exclude";
+}
+
+/** Bank-scoped screening-table content (spec §6.3), required if and only if `truthAdmission` is
+ * `"screened-operator-sampled"`. One table, not one per candidate: RULING C-4. */
+export interface AdmitHumanTruthScreeningInput {
+  readonly screeningInstrumentSha256: string;
+  readonly sampleSeed: string;
+  readonly sampleSize: number;
+  readonly samplingScriptSha256: string;
+  readonly rawOutputsSha256: string;
+  readonly rows: readonly AdmitHumanTruthScreeningRowInput[];
+}
+
 export interface AdmitHumanTruthInput {
   readonly draftId: string;
-  readonly truthAdmission: "two-human-unanimous" | "operator-only";
+  readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
   readonly candidates: readonly HumanAdmissionCandidateInput[];
   /** Optional compact Result Evaluation envelopes imported from the file manifest. */
   readonly evidenceEnvelopesBase64?: readonly string[];
+  /** Bank-scoped, not per-candidate (spec §6.3, §6.9): the caller supplies the table's rows and
+   * parameters, and this operation validates, canonicalizes, DSSE-signs under the existing single
+   * authoritySigner, and stores (RULING C-4) — mirroring how the reviewer roster is sealed today. */
+  readonly screening?: AdmitHumanTruthScreeningInput;
 }
 
 export interface HumanAdmissionResolutionSummary {
@@ -190,11 +224,28 @@ const CandidateSchema = z.strictObject({
   replacesItemSha256: DigestSchema.optional(),
 });
 
+// Bank-scoped screening-table input (spec §6.3; packet P6). `rows` reuses S1's frozen
+// `ScreeningRowSchema` directly rather than duplicating its shape or refinement (handVerdict
+// present iff handChecked) — the wire row and the input row are the identical shape.
+const ScreeningInputSchema = z.strictObject({
+  screeningInstrumentSha256: DigestSchema,
+  sampleSeed: z.string().min(1),
+  sampleSize: z.number().int().positive(),
+  samplingScriptSha256: DigestSchema,
+  rawOutputsSha256: DigestSchema,
+  rows: z.array(ScreeningRowSchema),
+});
+
+// Widened spec §6.7 (packet P6): a third admission mode. `screening` present-iff is enforced at
+// runtime inside `admitHumanTruth` (spec §6.9's cross-field rule), matching how the existing two
+// modes' per-candidate requirements (`operatorTruthLabel` vs. `reviewVerdictSha256s`/`reviewers`)
+// are already enforced at runtime rather than in this schema.
 const AdmitInputSchema = z.strictObject({
   draftId: IdentitySchema,
-  truthAdmission: z.enum(["two-human-unanimous", "operator-only"]),
+  truthAdmission: z.enum(["two-human-unanimous", "operator-only", "screened-operator-sampled"]),
   candidates: z.array(CandidateSchema).min(1),
   evidenceEnvelopesBase64: z.array(z.string().min(1)).optional(),
+  screening: ScreeningInputSchema.optional(),
 });
 
 function prefixed(value: string): `sha256:${string}` {
@@ -479,6 +530,48 @@ export function admitHumanTruth(
       putSealedBytes(clocked.workspaceDir, HUMAN_REVIEW_FORM_SEALED.bytes);
       const verificationPorts = buildBinaryJudgmentAdmissionClosureWorkspacePorts(clocked.workspaceDir);
 
+      // Screened-operator-sampled admission (spec §6.3, §6.9; packet P6 item A, RULING C-4):
+      // one bank-scoped table and one bank-scoped reveal receipt, sealed ONCE here — before the
+      // per-candidate loop below, which reads `screeningRowsByItem` to decide each candidate's
+      // admission per §6.4. RULING C-6: both are DSSE-signed via `sealRoleEvidence`, exactly like
+      // the reviewer roster and per-item reveal receipt, under the SAME `authoritySigner` key —
+      // never a second signer, and never bare canonical JSON.
+      if (parsed.truthAdmission === "screened-operator-sampled" && parsed.screening === undefined) {
+        refuse("validation", "screening", "screened-operator-sampled admission requires bank-scoped screening table content");
+      }
+      if (parsed.truthAdmission !== "screened-operator-sampled" && parsed.screening !== undefined) {
+        refuse("validation", "screening", "screening table content is only accepted for screened-operator-sampled admission");
+      }
+      let screeningTableSha256: `sha256:${string}` | undefined;
+      let screeningRevealReceiptSha256: `sha256:${string}` | undefined;
+      let screeningRowsByItem = new Map<string, ScreeningRow>();
+      if (parsed.truthAdmission === "screened-operator-sampled" && parsed.screening !== undefined) {
+        const table = sealHumanReviewDocument(ScreeningTableSchema, {
+          protocol: SCREENING_TABLE_PROTOCOL,
+          draftId: parsed.draftId,
+          screeningInstrumentSha256: parsed.screening.screeningInstrumentSha256,
+          sampleSeed: parsed.screening.sampleSeed,
+          sampleSize: parsed.screening.sampleSize,
+          samplingScriptSha256: parsed.screening.samplingScriptSha256,
+          rawOutputsSha256: parsed.screening.rawOutputsSha256,
+          rows: parsed.screening.rows,
+          sealedAt: at,
+        }, "screening table");
+        screeningTableSha256 = sealRoleEvidence(clocked.workspaceDir, table, SCREENING_TABLE_MEDIA_TYPE, authoritySigner);
+        const reveal = sealHumanReviewDocument(ScreeningRevealReceiptSchema, {
+          protocol: SCREENING_REVEAL_RECEIPT_PROTOCOL,
+          draftId: parsed.draftId,
+          screeningTableSha256,
+          truthFrozenAt: at,
+          judgeExecutionState: "not-started",
+          attestedBy: clocked.principal,
+          attestorKeyId: authoritySigner.keyId,
+          attestorRole: "truth-reveal-attestor",
+        }, "screening reveal receipt");
+        screeningRevealReceiptSha256 = sealRoleEvidence(clocked.workspaceDir, reveal, SCREENING_REVEAL_RECEIPT_MEDIA_TYPE, authoritySigner);
+        screeningRowsByItem = new Map(table.value.rows.map((row) => [row.itemSha256, row] as const));
+      }
+
       const evaluated = [...parsed.candidates]
         .sort((left, right) => left.poolPosition - right.poolPosition)
         .map((candidate) => {
@@ -494,114 +587,153 @@ export function admitHumanTruth(
           if (candidate.humanReviewEvaluationSpecSha256 !== BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest) {
             refuse("validation", "humanReviewEvaluationSpecSha256", "candidate does not bind the registered human-review EvaluationSpec");
           }
-          if (parsed.truthAdmission === "operator-only") {
-            if (candidate.operatorTruthLabel === undefined || candidate.reviewVerdictSha256s !== undefined || candidate.reviewers !== undefined) {
-              refuse("validation", "candidates", "operator-only admission requires one operator truth and forbids publication-grade review evidence");
+          // Exhaustive switch over the three-member truthAdmission union, never-typed default
+          // (spec §6.8a Group B; packet P6 item B). A widened enum plus an untouched === chain is
+          // WORSE than an unwidened one, because the unwidened one refuses and the widened one
+          // proceeds: a fourth admission mode in future must be a compile error here, not a
+          // silent reroute into an existing path.
+          switch (parsed.truthAdmission) {
+            case "operator-only": {
+              if (candidate.operatorTruthLabel === undefined || candidate.reviewVerdictSha256s !== undefined || candidate.reviewers !== undefined) {
+                refuse("validation", "candidates", "operator-only admission requires one operator truth and forbids publication-grade review evidence");
+              }
+              return { candidate, truth: candidate.operatorTruthLabel } as const;
             }
-            return { candidate, truth: candidate.operatorTruthLabel } as const;
-          }
-          if (candidate.operatorTruthLabel !== undefined || candidate.reviewVerdictSha256s === undefined || candidate.reviewers === undefined) {
-            refuse("validation", "candidates", "publication-grade admission requires exactly two review verdicts and two roster declarations");
-          }
-          const verdictDigests = sortedPair(candidate.reviewVerdictSha256s);
-          let reviews: ReturnType<typeof verifyBinaryJudgmentReviewerResult>[];
-          try {
-            reviews = verdictDigests.map((digest) => verifyBinaryJudgmentReviewerResult({
-              verdictSha256: digest,
-              expectedItemSha256: prefixed(candidate.itemSha256),
-            }, verificationPorts));
-          } catch (cause) {
-            if (cause instanceof BinaryJudgmentAdmissionClosureError && cause.cause instanceof BenchmarkProductError && cause.cause.code === "not-found") {
-              throw cause.cause;
+            case "screened-operator-sampled": {
+              // Screened truth comes from the bank-scoped table (spec §6.4), never from
+              // per-candidate operator or review fields.
+              if (candidate.operatorTruthLabel !== undefined || candidate.reviewVerdictSha256s !== undefined || candidate.reviewers !== undefined) {
+                refuse("validation", "candidates", "screened admission forbids operator truth and review evidence; truth comes from the bank-scoped screening table");
+              }
+              const row = screeningRowsByItem.get(candidate.itemSha256);
+              if (row === undefined) refuse("validation", "candidates.itemSha256", "candidate has no covering screening-table row");
+              // Per-row admission rule (spec §6.4): the hand check, when it happened, decides;
+              // otherwise agreement decides. No label correction: an admitted item's truth is
+              // always the row's own intendedLabel, never the screen's verdict.
+              const agreed = row.screeningVerdict === row.intendedLabel;
+              const admitted = row.handChecked ? row.handVerdict === "confirm" : agreed;
+              if (admitted) return { candidate, truth: row.intendedLabel } as const;
+              // R-3's tie-break (spec §6.4): a screen-agreed row the hand check overrode is
+              // `screening-hand-excluded`, distinct from a flagged row's own disagreement or
+              // indeterminate finding.
+              const exclusionReason = !agreed
+                ? (row.screeningVerdict === "indeterminate" ? "screening-indeterminate" as const : "screening-disagreement" as const)
+                : "screening-hand-excluded" as const;
+              return { candidate, exclusionReason } as const;
             }
-            refuse("validation", "reviewVerdictSha256s", cause instanceof Error ? cause.message : "review evidence verification failed");
+            case "two-human-unanimous": {
+              if (candidate.operatorTruthLabel !== undefined || candidate.reviewVerdictSha256s === undefined || candidate.reviewers === undefined) {
+                refuse("validation", "candidates", "publication-grade admission requires exactly two review verdicts and two roster declarations");
+              }
+              const verdictDigests = sortedPair(candidate.reviewVerdictSha256s);
+              let reviews: ReturnType<typeof verifyBinaryJudgmentReviewerResult>[];
+              try {
+                reviews = verdictDigests.map((digest) => verifyBinaryJudgmentReviewerResult({
+                  verdictSha256: digest,
+                  expectedItemSha256: prefixed(candidate.itemSha256),
+                }, verificationPorts));
+              } catch (cause) {
+                if (cause instanceof BinaryJudgmentAdmissionClosureError && cause.cause instanceof BenchmarkProductError && cause.cause.code === "not-found") {
+                  throw cause.cause;
+                }
+                refuse("validation", "reviewVerdictSha256s", cause instanceof Error ? cause.message : "review evidence verification failed");
+              }
+              if (reviews.some((review) => review.itemId !== candidate.itemId)) {
+                refuse("validation", "itemId", "review packets do not bind the candidate itemId");
+              }
+              if (reviews.some((review) => Date.parse(review.completedAt) > Date.parse(at))) {
+                refuse("validation", "reviewVerdictSha256s", "truth reveal cannot precede either completed review");
+              }
+              if (reviews[0]!.evaluatorId === reviews[1]!.evaluatorId || reviews[0]!.keyId === reviews[1]!.keyId) {
+                refuse("validation", "reviewVerdictSha256s", "publication-grade reviews require distinct evaluator identities and keys");
+              }
+              const rosterByEvaluator = new Map(candidate.reviewers.map((reviewer) => [reviewer.evaluatorId, reviewer]));
+              if (rosterByEvaluator.size !== 2 || reviews.some((review) => !rosterByEvaluator.has(review.evaluatorId))) {
+                refuse("validation", "reviewers", "roster declarations must bind the exact two signed evaluator identities");
+              }
+              const declarations = reviews
+                .map((review) => ({ ...rosterByEvaluator.get(review.evaluatorId)!, keyId: review.keyId }))
+                .sort((left, right) => compareCodeUnitStrings(left.evaluatorId, right.evaluatorId));
+              if (declarations[0]!.personId === declarations[1]!.personId) {
+                refuse("validation", "reviewers.personId", "distinct keys do not establish distinct people; roster person ids must differ");
+              }
+              if (declarations.some((entry) => entry.conflicts.length > 0)) {
+                refuse("validation", "reviewers.conflicts", "reviewers with declared conflicts cannot establish publication-grade truth");
+              }
+              const roster = sealHumanReviewDocument(HumanReviewRosterSchema, {
+                protocol: HUMAN_REVIEW_ROSTER_PROTOCOL,
+                itemSha256: candidate.itemSha256,
+                reviewers: declarations,
+                attestedBy: clocked.principal,
+                attestorKeyId: authoritySigner.keyId,
+                attestorRole: "roster-attestor",
+                attestedAt: at,
+              }, "reviewer roster");
+              const reviewerRosterSha256 = sealRoleEvidence(
+                clocked.workspaceDir,
+                roster,
+                HUMAN_REVIEW_ROSTER_MEDIA_TYPE,
+                authoritySigner,
+              );
+              const reveal = sealHumanReviewDocument(HumanReviewRevealReceiptSchema, {
+                protocol: HUMAN_REVIEW_REVEAL_RECEIPT_PROTOCOL,
+                draftId: parsed.draftId,
+                itemSha256: candidate.itemSha256,
+                truthFrozenAt: at,
+                judgeExecutionState: "not-started",
+                attestedBy: clocked.principal,
+                attestorKeyId: authoritySigner.keyId,
+                attestorRole: "truth-reveal-attestor",
+              }, "reveal receipt");
+              const revealReceiptSha256 = sealRoleEvidence(
+                clocked.workspaceDir,
+                reveal,
+                HUMAN_REVIEW_REVEAL_RECEIPT_MEDIA_TYPE,
+                authoritySigner,
+              );
+              const exclusionReason = reviews.some((review) => !review.complete)
+                ? "review-incomplete" as const
+                : reviews.some((review) => review.label === "indeterminate")
+                  ? "review-indeterminate" as const
+                  : reviews[0]!.label !== reviews[1]!.label
+                    ? "review-disagreement" as const
+                    : undefined;
+              return exclusionReason === undefined
+                ? {
+                    candidate,
+                    truth: reviews[0]!.label as "CORRECT" | "WRONG",
+                    reviewVerdictSha256s: verdictDigests,
+                    visibilityReceiptSha256s: sortedPair([
+                      reviews[0]!.visibilityReceiptSha256,
+                      reviews[1]!.visibilityReceiptSha256,
+                    ]),
+                    reviewerRosterSha256,
+                    revealReceiptSha256,
+                  } as const
+                : {
+                    candidate,
+                    exclusionReason,
+                    reviewVerdictSha256s: verdictDigests,
+                    visibilityReceiptSha256s: sortedPair([
+                      reviews[0]!.visibilityReceiptSha256,
+                      reviews[1]!.visibilityReceiptSha256,
+                    ]),
+                    reviewerRosterSha256,
+                    revealReceiptSha256,
+                  } as const;
+            }
+            default: {
+              const exhaustive: never = parsed.truthAdmission;
+              refuse("validation", "truthAdmission", `unsupported truthAdmission ${String(exhaustive)}`);
+            }
           }
-          if (reviews.some((review) => review.itemId !== candidate.itemId)) {
-            refuse("validation", "itemId", "review packets do not bind the candidate itemId");
-          }
-          if (reviews.some((review) => Date.parse(review.completedAt) > Date.parse(at))) {
-            refuse("validation", "reviewVerdictSha256s", "truth reveal cannot precede either completed review");
-          }
-          if (reviews[0]!.evaluatorId === reviews[1]!.evaluatorId || reviews[0]!.keyId === reviews[1]!.keyId) {
-            refuse("validation", "reviewVerdictSha256s", "publication-grade reviews require distinct evaluator identities and keys");
-          }
-          const rosterByEvaluator = new Map(candidate.reviewers.map((reviewer) => [reviewer.evaluatorId, reviewer]));
-          if (rosterByEvaluator.size !== 2 || reviews.some((review) => !rosterByEvaluator.has(review.evaluatorId))) {
-            refuse("validation", "reviewers", "roster declarations must bind the exact two signed evaluator identities");
-          }
-          const declarations = reviews
-            .map((review) => ({ ...rosterByEvaluator.get(review.evaluatorId)!, keyId: review.keyId }))
-            .sort((left, right) => compareCodeUnitStrings(left.evaluatorId, right.evaluatorId));
-          if (declarations[0]!.personId === declarations[1]!.personId) {
-            refuse("validation", "reviewers.personId", "distinct keys do not establish distinct people; roster person ids must differ");
-          }
-          if (declarations.some((entry) => entry.conflicts.length > 0)) {
-            refuse("validation", "reviewers.conflicts", "reviewers with declared conflicts cannot establish publication-grade truth");
-          }
-          const roster = sealHumanReviewDocument(HumanReviewRosterSchema, {
-            protocol: HUMAN_REVIEW_ROSTER_PROTOCOL,
-            itemSha256: candidate.itemSha256,
-            reviewers: declarations,
-            attestedBy: clocked.principal,
-            attestorKeyId: authoritySigner.keyId,
-            attestorRole: "roster-attestor",
-            attestedAt: at,
-          }, "reviewer roster");
-          const reviewerRosterSha256 = sealRoleEvidence(
-            clocked.workspaceDir,
-            roster,
-            HUMAN_REVIEW_ROSTER_MEDIA_TYPE,
-            authoritySigner,
-          );
-          const reveal = sealHumanReviewDocument(HumanReviewRevealReceiptSchema, {
-            protocol: HUMAN_REVIEW_REVEAL_RECEIPT_PROTOCOL,
-            draftId: parsed.draftId,
-            itemSha256: candidate.itemSha256,
-            truthFrozenAt: at,
-            judgeExecutionState: "not-started",
-            attestedBy: clocked.principal,
-            attestorKeyId: authoritySigner.keyId,
-            attestorRole: "truth-reveal-attestor",
-          }, "reveal receipt");
-          const revealReceiptSha256 = sealRoleEvidence(
-            clocked.workspaceDir,
-            reveal,
-            HUMAN_REVIEW_REVEAL_RECEIPT_MEDIA_TYPE,
-            authoritySigner,
-          );
-          const exclusionReason = reviews.some((review) => !review.complete)
-            ? "review-incomplete" as const
-            : reviews.some((review) => review.label === "indeterminate")
-              ? "review-indeterminate" as const
-              : reviews[0]!.label !== reviews[1]!.label
-                ? "review-disagreement" as const
-                : undefined;
-          return exclusionReason === undefined
-            ? {
-                candidate,
-                truth: reviews[0]!.label as "CORRECT" | "WRONG",
-                reviewVerdictSha256s: verdictDigests,
-                visibilityReceiptSha256s: sortedPair([
-                  reviews[0]!.visibilityReceiptSha256,
-                  reviews[1]!.visibilityReceiptSha256,
-                ]),
-                reviewerRosterSha256,
-                revealReceiptSha256,
-              } as const
-            : {
-                candidate,
-                exclusionReason,
-                reviewVerdictSha256s: verdictDigests,
-                visibilityReceiptSha256s: sortedPair([
-                  reviews[0]!.visibilityReceiptSha256,
-                  reviews[1]!.visibilityReceiptSha256,
-                ]),
-                reviewerRosterSha256,
-                revealReceiptSha256,
-              } as const;
         });
 
-      const excluded = evaluated.filter((entry): entry is typeof entry & { exclusionReason: "review-disagreement" | "review-indeterminate" | "review-incomplete" } => "exclusionReason" in entry);
+      const excluded = evaluated.filter((entry): entry is typeof entry & {
+        exclusionReason:
+          | "review-disagreement" | "review-indeterminate" | "review-incomplete"
+          | "screening-disagreement" | "screening-indeterminate" | "screening-hand-excluded";
+      } => "exclusionReason" in entry);
       const accepted = evaluated.filter((entry): entry is typeof entry & { truth: "CORRECT" | "WRONG" } => "truth" in entry);
       const ledgerEntries = excluded.map((entry) => {
         const replacements = accepted.filter((candidate) => candidate.candidate.replacesItemSha256 === entry.candidate.itemSha256);
@@ -616,7 +748,7 @@ export function admitHumanTruth(
         ) {
           refuse("validation", "candidates.replacesItemSha256", "replacement must be a later reserve in the same candidate class and stratum");
         }
-        return {
+        const common = {
           excludedItemSha256: entry.candidate.itemSha256,
           replacementItemSha256: replacement.itemSha256,
           candidateClass: entry.candidate.candidateClass,
@@ -624,11 +756,20 @@ export function admitHumanTruth(
           excludedPoolPosition: entry.candidate.poolPosition,
           replacementPoolPosition: replacement.poolPosition,
           reason: entry.exclusionReason,
-          reviewVerdictSha256s: entry.reviewVerdictSha256s,
-          visibilityReceiptSha256s: entry.visibilityReceiptSha256s,
-          reviewerRosterSha256: entry.reviewerRosterSha256,
-          revealReceiptSha256: entry.revealReceiptSha256,
         };
+        // Per-item two-human digests are present if and only if the reason is a two-human
+        // reason (spec §6.9 deliberately drops them for the screened branch: one signature on
+        // the whole table, not 240 on individual rows). `entry`'s own shape already reflects
+        // this — a screened-excluded entry never carries these four fields at all.
+        return "reviewVerdictSha256s" in entry
+          ? {
+              ...common,
+              reviewVerdictSha256s: entry.reviewVerdictSha256s,
+              visibilityReceiptSha256s: entry.visibilityReceiptSha256s,
+              reviewerRosterSha256: entry.reviewerRosterSha256,
+              revealReceiptSha256: entry.revealReceiptSha256,
+            }
+          : { ...common };
       });
       for (const replacement of accepted.filter((entry) => entry.candidate.replacesItemSha256 !== undefined)) {
         if (!excluded.some((entry) => entry.candidate.itemSha256 === replacement.candidate.replacesItemSha256)) {
@@ -644,58 +785,98 @@ export function admitHumanTruth(
       putSealedBytes(clocked.workspaceDir, ledger.bytes);
 
       const resolutions = accepted.map((entry) => {
-        let resolutionInput;
-        if (parsed.truthAdmission === "operator-only") {
-          const assertion = sealHumanReviewDocument(HumanReviewOperatorAssertionSchema, {
-            protocol: HUMAN_REVIEW_OPERATOR_ASSERTION_PROTOCOL,
-            itemSha256: entry.candidate.itemSha256,
-            truthLabel: entry.truth,
-            assertedBy: clocked.principal,
-            assertedAt: at,
-            attestorKeyId: authoritySigner.keyId,
-            attestorRole: "operator-truth-attestor",
-            limitation: "operator-only-not-publication-grade",
-          }, "operator truth assertion");
-          const operatorAssertionSha256 = sealRoleEvidence(
-            clocked.workspaceDir,
-            assertion,
-            HUMAN_REVIEW_OPERATOR_ASSERTION_MEDIA_TYPE,
-            authoritySigner,
-          );
-          resolutionInput = {
-            protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
-            itemSha256: entry.candidate.itemSha256,
-            itemId: entry.candidate.itemId,
-            humanReviewEvaluationSpecSha256: entry.candidate.humanReviewEvaluationSpecSha256,
-            truthLabel: entry.truth,
-            candidateClass: entry.candidate.candidateClass,
-            stratum: entry.candidate.stratum,
-            truthAdmission: "operator-only" as const,
-            operatorAssertionSha256,
-            resolvedAt: at,
-          };
-        } else {
-          const reviewed = entry as typeof entry & {
-            reviewVerdictSha256s: readonly [`sha256:${string}`, `sha256:${string}`];
-            visibilityReceiptSha256s: readonly [`sha256:${string}`, `sha256:${string}`];
-            reviewerRosterSha256: `sha256:${string}`;
-            revealReceiptSha256: `sha256:${string}`;
-          };
-          resolutionInput = {
-            protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
-            itemSha256: reviewed.candidate.itemSha256,
-            itemId: reviewed.candidate.itemId,
-            humanReviewEvaluationSpecSha256: reviewed.candidate.humanReviewEvaluationSpecSha256,
-            truthLabel: reviewed.truth,
-            candidateClass: reviewed.candidate.candidateClass,
-            stratum: reviewed.candidate.stratum,
-            truthAdmission: "two-human-unanimous" as const,
-            reviewVerdictSha256s: reviewed.reviewVerdictSha256s,
-            reviewerRosterSha256: reviewed.reviewerRosterSha256,
-            visibilityReceiptSha256s: reviewed.visibilityReceiptSha256s,
-            revealReceiptSha256: reviewed.revealReceiptSha256,
-            resolvedAt: at,
-          };
+        // Exhaustive switch, never-typed default (spec §6.8a Group B; packet P6 item C).
+        // `resolutionInput` carries the real discriminated-union type (H-3), not `let x;`
+        // left untyped: a branch producing the wrong shape is a compile error here, not only a
+        // runtime parse failure a callsite away.
+        let resolutionInput: BinaryJudgmentLabelResolution;
+        switch (parsed.truthAdmission) {
+          case "operator-only": {
+            const assertion = sealHumanReviewDocument(HumanReviewOperatorAssertionSchema, {
+              protocol: HUMAN_REVIEW_OPERATOR_ASSERTION_PROTOCOL,
+              itemSha256: entry.candidate.itemSha256,
+              truthLabel: entry.truth,
+              assertedBy: clocked.principal,
+              assertedAt: at,
+              attestorKeyId: authoritySigner.keyId,
+              attestorRole: "operator-truth-attestor",
+              limitation: "operator-only-not-publication-grade",
+            }, "operator truth assertion");
+            const operatorAssertionSha256 = sealRoleEvidence(
+              clocked.workspaceDir,
+              assertion,
+              HUMAN_REVIEW_OPERATOR_ASSERTION_MEDIA_TYPE,
+              authoritySigner,
+            );
+            resolutionInput = {
+              protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
+              itemSha256: entry.candidate.itemSha256,
+              itemId: entry.candidate.itemId,
+              humanReviewEvaluationSpecSha256: entry.candidate.humanReviewEvaluationSpecSha256,
+              truthLabel: entry.truth,
+              candidateClass: entry.candidate.candidateClass,
+              stratum: entry.candidate.stratum,
+              truthAdmission: "operator-only",
+              operatorAssertionSha256,
+              resolvedAt: at,
+            };
+            break;
+          }
+          case "screened-operator-sampled": {
+            // Bank-scoped (spec §6.3, §6.9): the SAME table and reveal receipt digest for every
+            // accepted item in this admission, sealed once above — never per-item. This is an
+            // internal-invariant guard, not a validation error: `parsed.truthAdmission ===
+            // "screened-operator-sampled"` here already implies both digests were sealed above;
+            // it should be unreachable, not load-bearing.
+            if (screeningTableSha256 === undefined || screeningRevealReceiptSha256 === undefined) {
+              refuse("execution", "screening", "internal: screened admission reached resolution construction without a sealed screening table");
+            }
+            resolutionInput = {
+              protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
+              itemSha256: entry.candidate.itemSha256,
+              itemId: entry.candidate.itemId,
+              truthLabel: entry.truth,
+              candidateClass: entry.candidate.candidateClass,
+              stratum: entry.candidate.stratum,
+              truthAdmission: "screened-operator-sampled",
+              screeningTableSha256,
+              screeningRevealReceiptSha256,
+              resolvedAt: at,
+            };
+            break;
+          }
+          case "two-human-unanimous": {
+            // H-4: this cast stays inside the two-human arm only. The screened arm above needs
+            // no cast of `entry` at all — `candidate` and `truth` are present on every member of
+            // `entry`'s union unconditionally, and the bank-scoped digests come from the
+            // enclosing closure, not from `entry`.
+            const reviewed = entry as typeof entry & {
+              reviewVerdictSha256s: readonly [`sha256:${string}`, `sha256:${string}`];
+              visibilityReceiptSha256s: readonly [`sha256:${string}`, `sha256:${string}`];
+              reviewerRosterSha256: `sha256:${string}`;
+              revealReceiptSha256: `sha256:${string}`;
+            };
+            resolutionInput = {
+              protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
+              itemSha256: reviewed.candidate.itemSha256,
+              itemId: reviewed.candidate.itemId,
+              humanReviewEvaluationSpecSha256: reviewed.candidate.humanReviewEvaluationSpecSha256,
+              truthLabel: reviewed.truth,
+              candidateClass: reviewed.candidate.candidateClass,
+              stratum: reviewed.candidate.stratum,
+              truthAdmission: "two-human-unanimous",
+              reviewVerdictSha256s: reviewed.reviewVerdictSha256s,
+              reviewerRosterSha256: reviewed.reviewerRosterSha256,
+              visibilityReceiptSha256s: reviewed.visibilityReceiptSha256s,
+              revealReceiptSha256: reviewed.revealReceiptSha256,
+              resolvedAt: at,
+            };
+            break;
+          }
+          default: {
+            const exhaustive: never = parsed.truthAdmission;
+            refuse("execution", "truthAdmission", `unsupported truthAdmission ${String(exhaustive)}`);
+          }
         }
         const resolution = sealBinaryJudgmentLabelResolution(resolutionInput);
         putSealedBytes(clocked.workspaceDir, resolution.bytes);
@@ -723,6 +904,9 @@ export function admitHumanTruth(
         analysisContextSha256s: resolutions.map((entry) => entry.analysisContextSha256).sort(compareCodeUnitStrings),
         excludedItemSha256s: excluded.map((entry) => entry.candidate.itemSha256).sort(compareCodeUnitStrings),
         replacementLedgerSha256: ledger.digest,
+        // Present if and only if truthAdmission === "screened-operator-sampled" (spec §6.8);
+        // absent for both existing modes, exactly as it is today.
+        ...(screeningTableSha256 === undefined ? {} : { screeningTableSha256 }),
         admittedAt: at,
       }, "admission manifest");
       putSealedBytes(clocked.workspaceDir, manifest.bytes);
@@ -747,7 +931,12 @@ export function admitHumanTruth(
           reason: entry.reason,
           replacementItemSha256: entry.replacementItemSha256,
         })),
-        publicationGrade: parsed.truthAdmission === "two-human-unanimous",
+        // Derived by exclusion, not by equality (spec §6.8a Group A; packet P6 item D): a
+        // screened admission is publication-grade too (spec §6.8), and `=== "two-human-
+        // unanimous"` would derive `false` for it. `operator-only` is the one mode that is never
+        // publication-grade. Matches the verify package's own fix to the same derivation
+        // (`verifyBinaryJudgmentAdmissionClosure`'s `publicationGrade`, S3a).
+        publicationGrade: parsed.truthAdmission !== "operator-only",
       };
     },
   });

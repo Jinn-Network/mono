@@ -34,6 +34,7 @@ import {
   ClaimPackageSchema,
 } from "../report/claim.js";
 import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../human-review/verification-workspace.js";
+import type { AdmissionAuthorityRole, BinaryJudgmentAdmissionRecordRole } from "../human-review/verification.js";
 import {
   parseBinaryItemBankIntakeExtension,
 } from "../intake/binary-item-bank.js";
@@ -145,6 +146,36 @@ function addRole(
   const roles = records.get(sha256) ?? new Set();
   roles.add(role);
   records.set(sha256, roles);
+}
+
+/**
+ * The evidence-role-to-authority-role mapping for admission trust bindings (spec §6.8a Group
+ * B-bis; packet P6 item E). Exported for direct test coverage: this is the specific NEW logic
+ * this packet adds to the discriminator below, and it is exercised without needing the full
+ * Benchmark/Run/Matrix/Report bundle-materialization fixture.
+ *
+ * Both screened-branch roles map to `truth-reveal-attestor` — the SAME authority role the
+ * per-item reveal receipt already uses (spec §6.6 deliberately reuses the role rather than
+ * minting one), which is also §6.8a Group C's frozen third authority set,
+ * `["truth-reveal-attestor"]`, exactly.
+ */
+export function binaryAdmissionEvidenceRoleToAuthorityRole(
+  role: Extract<
+    BinaryJudgmentAdmissionRecordRole,
+    "reviewer-roster" | "review-reveal-receipt" | "operator-assertion" | "screening-table" | "screening-reveal-receipt"
+  >,
+): AdmissionAuthorityRole {
+  switch (role) {
+    case "reviewer-roster": return "roster-attestor";
+    case "review-reveal-receipt": return "truth-reveal-attestor";
+    case "operator-assertion": return "operator-truth-attestor";
+    case "screening-table": return "truth-reveal-attestor";
+    case "screening-reveal-receipt": return "truth-reveal-attestor";
+    default: {
+      const exhaustive: never = role;
+      throw new Error(`unsupported admission evidence role ${String(exhaustive)}`);
+    }
+  }
 }
 
 function nodeCode(cause: unknown): string | undefined {
@@ -374,16 +405,20 @@ function recordClosure(input: MaterializeBundleInput): {
         if (prior !== undefined && prior !== keyId) refuse("record-integrity", "qualification.trust", `reviewer ${view.evaluatorId} uses multiple keys`);
         admissionReviewerBindings.set(view.evaluatorId, keyId);
       } else {
-        const role = reachable.roles.find((candidate) => candidate === "reviewer-roster" || candidate === "review-reveal-receipt" || candidate === "operator-assertion");
+        // Widened spec §6.8a Group B-bis (packet P6): the discriminator the spec calls invisible
+        // to both the compiler and the grep sweep, because it switches on nothing and its line
+        // carries none of the family's search tokens. Both screened-branch roles are named here
+        // explicitly so they contribute an authority binding instead of being silently skipped by
+        // `if (role === undefined) continue;` below — which is exactly what made §6.8a's frozen
+        // third authority set unreachable before this fix.
+        const role = reachable.roles.find((candidate): candidate is Parameters<typeof binaryAdmissionEvidenceRoleToAuthorityRole>[0] =>
+          candidate === "reviewer-roster" || candidate === "review-reveal-receipt" || candidate === "operator-assertion"
+          || candidate === "screening-table" || candidate === "screening-reveal-receipt");
         if (role === undefined) continue;
         const envelope = parseDsseEnvelope(bytes);
         const keyId = envelope.signatures[0]?.keyid;
         if (typeof keyId !== "string") refuse("record-integrity", "qualification.trust", `${role} has no signer key id`);
-        const authorityRole = role === "reviewer-roster"
-          ? "roster-attestor" as const
-          : role === "review-reveal-receipt"
-            ? "truth-reveal-attestor" as const
-            : "operator-truth-attestor" as const;
+        const authorityRole = binaryAdmissionEvidenceRoleToAuthorityRole(role);
         const prior = admissionAuthorityBindings.get(authorityRole);
         if (prior !== undefined && prior !== keyId) refuse("record-integrity", "qualification.trust", `${authorityRole} uses multiple keys`);
         admissionAuthorityBindings.set(authorityRole, keyId);

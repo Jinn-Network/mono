@@ -17,6 +17,8 @@ import {
   HUMAN_REVIEW_REVEAL_RECEIPT_MEDIA_TYPE,
   HUMAN_REVIEW_OPERATOR_ASSERTION_MEDIA_TYPE,
   HUMAN_REVIEW_ROSTER_MEDIA_TYPE,
+  SCREENING_TABLE_MEDIA_TYPE,
+  SCREENING_REVEAL_RECEIPT_MEDIA_TYPE,
   HumanReviewOperatorAssertionSchema,
   HumanReviewRevealReceiptSchema,
   HumanReviewRosterSchema,
@@ -24,6 +26,8 @@ import {
   HumanReviewReplacementLedgerEntrySchema,
   HumanReviewPacketSchema,
   HumanReviewVisibilityReceiptSchema,
+  ScreeningTableSchema,
+  ScreeningRevealReceiptSchema,
   HUMAN_REVIEW_PACKET_PROTOCOL,
   HUMAN_REVIEW_VISIBILITY_RECEIPT_PROTOCOL,
   HUMAN_REVIEW_OMITTED_FIELDS,
@@ -953,6 +957,296 @@ describe("binary human truth admission", () => {
       admissionManifestSha256: badAssertionManifestSha256,
       expectedDraftId: "review-run",
     }, closurePortsWithOverrides(context, assertionOverrides))).toThrow(/authority signature/u);
+  });
+});
+
+// Screened-operator-sampled admission (spec §6.3, §6.4, §6.6; packet P6, S3b). RULING C-4: the
+// screening table and reveal receipt are sealed BY admitHumanTruth from caller-supplied content,
+// exactly as the reviewer roster and per-item reveal receipt are today. RULING C-6: the table is
+// DSSE-signed via sealRoleEvidence, never bare canonical JSON. Every digest and label below is
+// synthetic.
+describe("binary screened-operator-sampled admission", () => {
+  const syntheticDigest = (character: string) => `sha256:${character.repeat(64)}` as const;
+
+  function screenableItem(context: ReturnType<typeof setup>, index: number) {
+    const packets = createHumanReviewPackets(context, {
+      draftId: "review-run",
+      item: item(index),
+      evaluatorIds: ["urn:jinn:reviewer:a", "urn:jinn:reviewer:b"],
+    });
+    if (!packets.ok) throw new Error(packets.error.detail);
+    return packets.result;
+  }
+
+  function screenedCandidate(
+    packets: CreateHumanReviewPacketsResult,
+    index: number,
+    poolPosition: number,
+    extras: Record<string, unknown> = {},
+  ) {
+    return {
+      itemSha256: packets.itemSha256,
+      itemId: item(index).itemId,
+      humanReviewEvaluationSpecSha256: packets.humanReviewEvaluationSpecSha256,
+      candidateClass: "factual",
+      stratum: "core" as const,
+      poolPosition,
+      ...extras,
+    };
+  }
+
+  function screeningRow(
+    itemSha256: string,
+    intendedLabel: "CORRECT" | "WRONG",
+    screeningVerdict: "CORRECT" | "WRONG" | "indeterminate",
+    handChecked: boolean,
+    handVerdict?: "confirm" | "exclude",
+  ) {
+    return {
+      itemSha256,
+      intendedLabel,
+      screeningVerdict,
+      handChecked,
+      ...(handVerdict === undefined ? {} : { handVerdict }),
+    };
+  }
+
+  function sortedRows<T extends { itemSha256: string }>(rows: readonly T[]): T[] {
+    return [...rows].sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256));
+  }
+
+  function screeningInput(rows: ReturnType<typeof screeningRow>[]) {
+    return {
+      screeningInstrumentSha256: syntheticDigest("a"),
+      sampleSeed: "synthetic-screening-seed",
+      sampleSize: 1,
+      samplingScriptSha256: syntheticDigest("b"),
+      rawOutputsSha256: syntheticDigest("c"),
+      rows: sortedRows(rows),
+    };
+  }
+
+  it("admits screened truth from a bank-scoped table when the screen agrees, DSSE-signed once", async () => {
+    const context = setup();
+    const packets = screenableItem(context, 0);
+    const result = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "screened-operator-sampled",
+      candidates: [screenedCandidate(packets, 0, 1)],
+      screening: screeningInput([screeningRow(packets.itemSha256, "CORRECT", "CORRECT", true, "confirm")]),
+    });
+    expect(result).toMatchObject({ ok: true, result: { publicationGrade: true, exclusions: [] } });
+    if (!result.ok) return;
+
+    const resolution = parseBinaryJudgmentLabelResolution(getSealedBytes(
+      context.workspaceDir,
+      result.result.resolutions[0]!.labelResolutionSha256.slice("sha256:".length),
+    ));
+    expect(resolution).toMatchObject({ truthAdmission: "screened-operator-sampled", truthLabel: "CORRECT" });
+    // §6.7: a row never hand-checked has no human-review evaluation — but this test's row WAS
+    // hand-checked, and the screened resolution still carries no humanReviewEvaluationSpecSha256
+    // at all, unconditionally, because the screened branch never references it (truth comes from
+    // the table, not a human-review evaluation).
+    expect("humanReviewEvaluationSpecSha256" in resolution).toBe(false);
+    if (resolution.truthAdmission !== "screened-operator-sampled") throw new Error("wrong admission kind");
+
+    // RULING C-6: the table digest names a DSSE envelope, not bare canonical JSON.
+    const tableEnvelope = parseExactDsseEnvelope(getSealedBytes(
+      context.workspaceDir,
+      resolution.screeningTableSha256.slice("sha256:".length),
+    ));
+    expect(tableEnvelope.payloadType).toBe(SCREENING_TABLE_MEDIA_TYPE);
+    expect(tableEnvelope.signatures).toHaveLength(1);
+    const table = ScreeningTableSchema.parse(JSON.parse(new TextDecoder().decode(tableEnvelope.payloadBytes)));
+    expect(table).toMatchObject({ draftId: "review-run", sampleSeed: "synthetic-screening-seed" });
+    expect(table.rows).toEqual([{
+      itemSha256: packets.itemSha256, intendedLabel: "CORRECT", screeningVerdict: "CORRECT",
+      handChecked: true, handVerdict: "confirm",
+    }]);
+
+    const receiptEnvelope = parseExactDsseEnvelope(getSealedBytes(
+      context.workspaceDir,
+      resolution.screeningRevealReceiptSha256.slice("sha256:".length),
+    ));
+    expect(receiptEnvelope.payloadType).toBe(SCREENING_REVEAL_RECEIPT_MEDIA_TYPE);
+    expect(receiptEnvelope.signatures).toHaveLength(1);
+    const receipt = ScreeningRevealReceiptSchema.parse(JSON.parse(new TextDecoder().decode(receiptEnvelope.payloadBytes)));
+    expect(receipt).toMatchObject({
+      draftId: "review-run",
+      screeningTableSha256: resolution.screeningTableSha256,
+      judgeExecutionState: "not-started",
+      attestorRole: "truth-reveal-attestor",
+    });
+    // Both bank-scoped records are signed by the SAME report signing key.
+    expect(receiptEnvelope.signatures[0]!.keyid).toBe(tableEnvelope.signatures[0]!.keyid);
+
+    const closure = verifyBinaryJudgmentAdmissionClosureInWorkspace({
+      workspaceDir: context.workspaceDir,
+      admissionManifestSha256: result.result.admissionManifestSha256 as AdmissionSha256,
+      expectedDraftId: "review-run",
+    });
+    expect(closure).toMatchObject({
+      publicationGrade: true,
+      accepted: [{ truthAdmission: "screened-operator-sampled", truthLabel: "CORRECT" }],
+      excluded: [],
+      screening: { sampleAgreementRate: 1 },
+    });
+  });
+
+  it("excludes a screen-disagreement row and seals a same-slice reserve replacement", async () => {
+    const context = setup();
+    const disputed = screenableItem(context, 0);
+    const reserve = screenableItem(context, 1);
+    const result = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "screened-operator-sampled",
+      candidates: [
+        screenedCandidate(disputed, 0, 1),
+        screenedCandidate(reserve, 1, 2, { replacesItemSha256: disputed.itemSha256 }),
+      ],
+      screening: screeningInput([
+        screeningRow(disputed.itemSha256, "CORRECT", "WRONG", true, "exclude"),
+        screeningRow(reserve.itemSha256, "WRONG", "WRONG", true, "confirm"),
+      ]),
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        publicationGrade: true,
+        exclusions: [{
+          itemSha256: disputed.itemSha256,
+          reason: "screening-disagreement",
+          replacementItemSha256: reserve.itemSha256,
+        }],
+      },
+    });
+    if (!result.ok) return;
+    expect(result.result.resolutions.map((entry) => entry.itemSha256)).toEqual([reserve.itemSha256]);
+
+    const ledger = HumanReviewReplacementLedgerSchema.parse(JSON.parse(new TextDecoder().decode(
+      getSealedBytes(context.workspaceDir, result.result.replacementLedgerSha256.slice("sha256:".length)),
+    )));
+    expect(ledger.entries).toHaveLength(1);
+    expect(ledger.entries[0]).toMatchObject({ reason: "screening-disagreement" });
+    expect("reviewVerdictSha256s" in ledger.entries[0]!).toBe(false);
+    expect("reviewerRosterSha256" in ledger.entries[0]!).toBe(false);
+
+    const closure = verifyBinaryJudgmentAdmissionClosureInWorkspace({
+      workspaceDir: context.workspaceDir,
+      admissionManifestSha256: result.result.admissionManifestSha256 as AdmissionSha256,
+      expectedDraftId: "review-run",
+    });
+    expect(closure.excluded).toEqual([{
+      itemSha256: disputed.itemSha256,
+      itemId: item(0).itemId,
+      candidateClass: "factual",
+      stratum: "core",
+      reason: "screening-disagreement",
+      replacementItemSha256: reserve.itemSha256,
+    }]);
+  });
+
+  it("excludes an indeterminate screen and, separately, an R-3 hand-excluded tie-break", async () => {
+    const context = setup();
+    const indeterminate = screenableItem(context, 0);
+    const indeterminateReserve = screenableItem(context, 1);
+    const tieBreak = screenableItem(context, 2);
+    const tieBreakReserve = screenableItem(context, 3);
+    const result = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "screened-operator-sampled",
+      candidates: [
+        screenedCandidate(indeterminate, 0, 1),
+        screenedCandidate(indeterminateReserve, 1, 2, { replacesItemSha256: indeterminate.itemSha256 }),
+        screenedCandidate(tieBreak, 2, 3),
+        screenedCandidate(tieBreakReserve, 3, 4, { replacesItemSha256: tieBreak.itemSha256 }),
+      ],
+      screening: screeningInput([
+        screeningRow(indeterminate.itemSha256, "CORRECT", "indeterminate", true, "exclude"),
+        screeningRow(indeterminateReserve.itemSha256, "WRONG", "WRONG", true, "confirm"),
+        // R-3 tie-break: the screen AGREED (WRONG === WRONG), but the hand check overrode it.
+        screeningRow(tieBreak.itemSha256, "WRONG", "WRONG", true, "exclude"),
+        screeningRow(tieBreakReserve.itemSha256, "CORRECT", "CORRECT", true, "confirm"),
+      ]),
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        exclusions: [
+          { itemSha256: indeterminate.itemSha256, reason: "screening-indeterminate" },
+          { itemSha256: tieBreak.itemSha256, reason: "screening-hand-excluded" },
+        ],
+      },
+    });
+    if (!result.ok) throw new Error(result.error.detail);
+    expect(verifyBinaryJudgmentAdmissionClosureInWorkspace({
+      workspaceDir: context.workspaceDir,
+      admissionManifestSha256: result.result.admissionManifestSha256 as AdmissionSha256,
+      expectedDraftId: "review-run",
+    }).excluded.map((entry) => entry.reason)).toEqual(["screening-indeterminate", "screening-hand-excluded"]);
+  });
+
+  it("refuses a screened candidate carrying operator or review fields (item B shape check)", () => {
+    const context = setup();
+    const packets = screenableItem(context, 0);
+    const screening = screeningInput([screeningRow(packets.itemSha256, "CORRECT", "CORRECT", true, "confirm")]);
+    for (const extras of [
+      { operatorTruthLabel: "CORRECT" as const },
+      { reviewVerdictSha256s: [syntheticDigest("1"), syntheticDigest("2")] as [string, string] },
+      {
+        reviewers: [
+          { evaluatorId: "urn:jinn:reviewer:a", personId: "person-a", role: "domain-reviewer", conflicts: [] },
+          { evaluatorId: "urn:jinn:reviewer:b", personId: "person-b", role: "domain-reviewer", conflicts: [] },
+        ],
+      },
+    ]) {
+      expect(admitHumanTruth(context, {
+        draftId: "review-run",
+        truthAdmission: "screened-operator-sampled",
+        candidates: [screenedCandidate(packets, 0, 1, extras)],
+        screening,
+      })).toMatchObject({ ok: false, error: { code: "validation" } });
+    }
+  });
+
+  it("refuses screened-operator-sampled admission without screening table content", () => {
+    const context = setup();
+    const packets = screenableItem(context, 0);
+    expect(admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "screened-operator-sampled",
+      candidates: [screenedCandidate(packets, 0, 1)],
+    })).toMatchObject({ ok: false, error: { code: "validation" } });
+  });
+
+  it("refuses screening table content on a non-screened admission (present-iff, both directions)", () => {
+    const context = setup();
+    const packets = screenableItem(context, 0);
+    expect(admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "operator-only",
+      candidates: [{
+        itemSha256: packets.itemSha256,
+        itemId: item(0).itemId,
+        humanReviewEvaluationSpecSha256: packets.humanReviewEvaluationSpecSha256,
+        candidateClass: "factual",
+        stratum: "core",
+        poolPosition: 1,
+        operatorTruthLabel: "CORRECT" as const,
+      }],
+      screening: screeningInput([screeningRow(packets.itemSha256, "CORRECT", "CORRECT", false)]),
+    })).toMatchObject({ ok: false, error: { code: "validation" } });
+  });
+
+  it("refuses a screened candidate with no covering screening-table row", () => {
+    const context = setup();
+    const packets = screenableItem(context, 0);
+    expect(admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "screened-operator-sampled",
+      candidates: [screenedCandidate(packets, 0, 1)],
+      screening: screeningInput([screeningRow(syntheticDigest("f"), "CORRECT", "CORRECT", false)]),
+    })).toMatchObject({ ok: false, error: { code: "validation" } });
   });
 });
 

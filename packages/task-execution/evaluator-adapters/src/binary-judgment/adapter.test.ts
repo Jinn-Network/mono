@@ -166,6 +166,9 @@ function makeFixture(options: {
   readonly taskInstrumentPin?: boolean;
   readonly evidence?: string;
   readonly parser?: BinaryJudgmentInstrument["response"]["parser"];
+  /** Defaults to "two-human-unanimous", matching every existing call site byte-for-byte (spec
+   * §6.7; packet P6 item F). */
+  readonly truthAdmission?: "two-human-unanimous" | "screened-operator-sampled";
 }): Fixture {
   const candidateClass = options.candidateClass ?? "factual";
   const stratum = options.stratum ?? "core";
@@ -181,21 +184,35 @@ function makeFixture(options: {
   const itemSha256 = recordDigest(canonicalJsonBytes(payload));
   const instrument = makeInstrument(options.parser);
   const sealedInstrument = sealBinaryJudgmentInstrument(instrument);
-  const labelResolution = sealBinaryJudgmentLabelResolution({
-    protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
-    itemSha256,
-    itemId: ITEM_ID,
-    humanReviewEvaluationSpecSha256: sha("5"),
-    truthLabel: options.truthLabel,
-    candidateClass,
-    stratum,
-    truthAdmission: "two-human-unanimous",
-    reviewVerdictSha256s: [sha("6"), sha("7")],
-    reviewerRosterSha256: sha("8"),
-    visibilityReceiptSha256s: [sha("9"), sha("a")],
-    revealReceiptSha256: sha("b"),
-    resolvedAt: "2026-08-15T09:00:00.000Z",
-  });
+  const truthAdmission = options.truthAdmission ?? "two-human-unanimous";
+  const labelResolution = sealBinaryJudgmentLabelResolution(truthAdmission === "screened-operator-sampled"
+    ? {
+      protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
+      itemSha256,
+      itemId: ITEM_ID,
+      truthLabel: options.truthLabel,
+      candidateClass,
+      stratum,
+      truthAdmission: "screened-operator-sampled",
+      screeningTableSha256: sha("5"),
+      screeningRevealReceiptSha256: sha("6"),
+      resolvedAt: "2026-08-15T09:00:00.000Z",
+    }
+    : {
+      protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
+      itemSha256,
+      itemId: ITEM_ID,
+      humanReviewEvaluationSpecSha256: sha("5"),
+      truthLabel: options.truthLabel,
+      candidateClass,
+      stratum,
+      truthAdmission: "two-human-unanimous",
+      reviewVerdictSha256s: [sha("6"), sha("7")],
+      reviewerRosterSha256: sha("8"),
+      visibilityReceiptSha256s: [sha("9"), sha("a")],
+      revealReceiptSha256: sha("b"),
+      resolvedAt: "2026-08-15T09:00:00.000Z",
+    });
   const analysisContext = sealBinaryJudgmentAnalysisContext({
     protocol: BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
     itemSha256,
@@ -783,6 +800,33 @@ describe("binary judgment evaluator", () => {
       })).toThrow(EvaluationOperationalError);
     },
   );
+
+  // spec §6.7 (packet P6 item F): the truthAdmission allowlist widens to a third value. Both
+  // operands of the equality check between detailedOutcome.truthAdmission and the referenced
+  // label resolution's own truthAdmission must agree, so a genuine end-to-end fixture (not an
+  // isolated field mutation) is what actually exercises the widened allowlist.
+  test("outcome validation accepts a screened-operator-sampled label resolution", async () => {
+    const completed = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("ACCEPT"),
+      truthAdmission: "screened-operator-sampled",
+    }));
+    expect((completed.detailedOutcome as Record<string, unknown>)["truthAdmission"])
+      .toBe("screened-operator-sampled");
+    expect(() => validateBinaryJudgmentCompletedEvaluation(completed)).not.toThrow();
+  });
+
+  test("outcome validation refuses an unsupported truthAdmission value entirely", async () => {
+    const completed = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("ACCEPT"),
+    }));
+    const outcome = completed.detailedOutcome as Record<string, unknown>;
+    expect(() => validateBinaryJudgmentCompletedEvaluation({
+      ...completed,
+      detailedOutcome: { ...outcome, truthAdmission: "some-other-mode" },
+    })).toThrow(EvaluationOperationalError);
+  });
 });
 
 describe("binary judgment evaluator through the real evaluation harness", () => {

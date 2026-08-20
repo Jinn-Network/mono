@@ -716,7 +716,8 @@ export function validateBinaryJudgmentCompletedEvaluation(
     || (truthLabel !== "CORRECT" && truthLabel !== "WRONG")
     || typeof outcome["parseValid"] !== "boolean"
     || (outcome["truthAdmission"] !== "two-human-unanimous"
-      && outcome["truthAdmission"] !== "operator-only")
+      && outcome["truthAdmission"] !== "operator-only"
+      && outcome["truthAdmission"] !== "screened-operator-sampled")
     || typeof outcome["itemId"] !== "string"
     || !/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
       .test(outcome["itemId"] as string)
