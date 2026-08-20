@@ -615,13 +615,22 @@ code cannot choose an endpoint. Every attempt removes its worker, broker,
 private network, capability volume, and credential volume, including on
 cancellation.
 
-The broker accepts only ordered developer/user text and the sealed Luna
-configuration. It refuses tools, images, audio, assistant/tool history,
-structured output, multiple choices, background or streaming responses,
-fallbacks, persisted conversation, metadata, and prompt-cache identifiers. It
-allows one concurrent call and one total call per cell, caps output at 128
-tokens and input at 32 KiB, times out at 120 seconds, and disables both OpenAI
-SDK and Inspect retries. A Jinn resume is a distinct execution attempt.
+The broker accepts only ordered developer/user text and the sealed generation
+configuration of one of two closed judge-model profiles. `reasoning-2026-08`
+accepts the model `gpt-5.6-luna` with a reasoning effort and a 128-token output
+cap. `dated-snapshot-sampling` accepts a dated snapshot drawn from a closed
+literal set, currently `gpt-4o-mini-2024-07-18` alone, at the literal integer
+temperature 0 with a 512-token output cap. The profile is a total function of
+the requested model, and the two generation shapes are mutually exclusive: a
+reasoning block on a dated snapshot, a temperature on the reasoning model, and a
+block carrying keys from both are all refused. Adding a model to either set is a
+code change with a test, never configuration and never a caller-supplied string.
+The broker refuses tools, images, audio, assistant/tool history, structured
+output, multiple choices, background or streaming responses, fallbacks,
+persisted conversation, metadata, and prompt-cache identifiers. It allows one
+concurrent call and one total call per cell, caps output at its profile's token
+cap and input at 32 KiB, times out at 120 seconds, and disables both OpenAI SDK
+and Inspect retries. A Jinn resume is a distinct execution attempt.
 
 The broker uses Inspect's public `ModelAPI` extension and returns Inspect's
 public `(ModelOutput, ModelCall)` form. The genuine `.eval` transcript therefore
@@ -633,9 +642,23 @@ ChatGPT/Codex subscription authentication remains unsupported. Inspect SWE's
 Codex bridge does not reuse a local ChatGPT subscription, and mounting Codex
 state into task code is outside this security contract.
 
-Luna currently exposes only the mutable alias `gpt-5.6-luna`, not a dated
-snapshot. Jinn locks that identifier and rejects a different returned model,
-but cannot prove that OpenAI did not update weights behind an unchanged alias.
+Model identity is disclosed per profile, and the disclosure differs because the
+underlying fact differs. Luna exposes only the mutable alias `gpt-5.6-luna`, not
+a dated snapshot: Jinn locks that identifier and rejects a different returned
+model, but cannot prove that OpenAI did not update weights behind an unchanged
+alias, so every `reasoning-2026-08` observation carries the `mutable-model-alias`
+limitation. A `dated-snapshot-sampling` observation carries no limitation,
+because the mutable-alias caveat is a real limitation of an undated identifier
+and a false claim about a dated one. In its place the observation records the
+snapshot-identity check: the requested model and the model the provider actually
+resolved are recorded as two independently sourced fields, and a run whose
+provider answers with a different model refuses rather than recording the
+provider's answer as though it had been the request. A run that pins a dated
+snapshot additionally requires a pre-run snapshot-serving probe, sealed and
+bound into the run's identity through the runtime selection manifest, which
+refuses at bind if the snapshot is not being served, if the probe post-dates the
+bind clock, or if it is older than 24 hours.
+
 See the official [Luna model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna),
 [latest-model guidance](https://developers.openai.com/api/docs/guides/latest-model),
 and [synchronous cancellation/background behavior](https://developers.openai.com/api/docs/guides/background).

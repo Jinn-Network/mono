@@ -25,6 +25,7 @@ import {
   binaryJudgmentPromptTemplateDigest,
   sealBinaryJudgmentInstrument,
   sealEvaluationSpec,
+  type AcceptedJudgeModelId,
 } from "@jinn-network/task-execution-profiles";
 import {
   TASK_EXECUTION_PROTOCOL_URI,
@@ -95,6 +96,36 @@ const generation = {
   metadata: null,
   promptCacheIdentifier: null,
 } as const;
+// The dated-snapshot-sampling generation shape (spec §1.3), for the dated-snapshot judge-model
+// profile tests. Never mixed with `generation` on one arm — the two are the sibling-key-driven
+// generation union's two closed variants.
+const samplingGeneration = {
+  temperature: 0,
+  maxOutputTokens: 512,
+  store: false,
+  background: false,
+  stream: false,
+  serviceTier: "default",
+  tools: [],
+  fallbackModels: [],
+  retries: 0,
+  persistedConversation: false,
+  metadata: null,
+  promptCacheIdentifier: null,
+} as const;
+
+interface ArmConfig {
+  readonly armId: string;
+  readonly model: AcceptedJudgeModelId;
+  readonly generation: typeof generation | typeof samplingGeneration;
+}
+
+const DEFAULT_ARM_CONFIGS: readonly ArmConfig[] = (["alpha", "beta", "delta", "gamma"] as const).map(
+  (armId): ArmConfig => ({ armId, model: "gpt-5.6-luna", generation }),
+);
+const SIX_ARM_CONFIGS: readonly ArmConfig[] = (
+  ["alpha", "beta", "delta", "epsilon", "gamma", "zeta"] as const
+).map((armId): ArmConfig => ({ armId, model: "gpt-5.6-luna", generation }));
 
 let workspaceDir: string;
 
@@ -161,7 +192,16 @@ function evaluationSpec(analysisContextSha256: `sha256:${string}`) {
   });
 }
 
-function instrument(instrumentId: string, options: { readonly declaresEvidence?: boolean } = {}) {
+function instrument(
+  instrumentId: string,
+  options: {
+    readonly model?: AcceptedJudgeModelId;
+    readonly generation?: typeof generation | typeof samplingGeneration;
+    readonly declaresEvidence?: boolean;
+  } = {},
+) {
+  const model = options.model ?? "gpt-5.6-luna";
+  const instrumentGeneration = options.generation ?? generation;
   const userSegments = [
     { literal: "Question: " },
     { field: "question" },
@@ -187,7 +227,7 @@ function instrument(instrumentId: string, options: { readonly declaresEvidence?:
     promptSource: descriptor,
     license: { ...descriptor, uri: "https://www.apache.org/licenses/LICENSE-2.0.txt" },
     attribution: { ...descriptor, uri: "https://fixtures.example.test/attribution" },
-    model: { adapter: "jinn-openai", requested: "gpt-5.6-luna", generation },
+    model: { adapter: "jinn-openai", requested: model, generation: instrumentGeneration },
     response: {
       mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
       parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
@@ -205,6 +245,8 @@ interface Fixture {
 }
 
 function setUpFixture(options: {
+  readonly arms?: readonly ArmConfig[];
+  readonly snapshotProbeSha256?: `sha256:${string}`;
   /** Adds an `evidence` field to every candidate item's payload. Default off. */
   readonly withItemEvidence?: boolean;
   /** Arm ids whose instrument should interpolate `evidence`. Default: none declare. */
@@ -315,9 +357,13 @@ function setUpFixture(options: {
   });
   const benchmarkSha256 = bare(store(benchmark.bytes));
 
-  const armIds = ["alpha", "beta", "delta", "gamma"] as const;
-  const instruments = armIds.map((armId) => {
-    const sealed = instrument(armId, { declaresEvidence: declaringArmIds.has(armId) });
+  const armConfigs = options.arms ?? DEFAULT_ARM_CONFIGS;
+  const instruments = armConfigs.map((armConfig) => {
+    const sealed = instrument(armConfig.armId, {
+      model: armConfig.model,
+      generation: armConfig.generation,
+      declaresEvidence: declaringArmIds.has(armConfig.armId),
+    });
     store(sealed.bytes);
     return sealed;
   });
@@ -350,12 +396,13 @@ function setUpFixture(options: {
       comparison: "exact",
       location: "submission-effective-requirements",
     },
-    arms: armIds.map((armId, index) => ({
-      armId,
+    arms: armConfigs.map((armConfig, index) => ({
+      armId: armConfig.armId,
       instrumentSha256: instruments[index]!.digest,
-      model: "gpt-5.6-luna",
-      generation,
+      model: armConfig.model,
+      generation: armConfig.generation,
     })),
+    ...(options.snapshotProbeSha256 === undefined ? {} : { snapshotProbeSha256: options.snapshotProbeSha256 }),
   } as const;
   const selectionManifestSha256 = putSealedBytes(workspaceDir, canonicalJsonBytes(selection as never));
 
@@ -369,7 +416,7 @@ function setUpFixture(options: {
         armId: arm.armId,
         pinning: {
           harness: { id: INSPECT_BINARY_JUDGE_LAUNCHER_ID, version: INSPECT_BINARY_JUDGE_LAUNCHER_VERSION },
-          model: { id: "gpt-5.6-luna" },
+          model: { id: arm.model },
           [BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY]: arm.instrumentSha256,
         },
       })),
@@ -431,6 +478,9 @@ describe("binary-instrument@1 lock-time composition", () => {
       parserInvalidPolicy: "reject",
       truthAdmission: "operator-only",
       intervalAlpha: "0.05",
+      // Derived from the arms' shared model.requested (spec §1.4 clause 1); this fixture's arms
+      // are all gpt-5.6-luna, so the derived profile is reasoning-2026-08.
+      judgeModelProfile: "reasoning-2026-08",
     });
 
     const compiled = compileDraft({
@@ -491,12 +541,11 @@ describe("binary-instrument@1 lock-time composition", () => {
     }
   });
 
-  test("fails closed on even k, non-sole assurance, arm-count, and scalar instrument-pin drift", () => {
+  test("fails closed on even k, non-sole assurance, and scalar instrument-pin drift", () => {
     const fixture = setUpFixture();
     const drifts: DraftDocument[] = [
       { ...fixture.draft, spec: { ...fixture.draft.spec, replicates: 2 } },
       { ...fixture.draft, spec: { ...fixture.draft.spec, assurance: { preset: "evaluator-panel" } } },
-      { ...fixture.draft, spec: { ...fixture.draft.spec, arms: fixture.draft.spec.arms.slice(0, 3) } },
       {
         ...fixture.draft,
         spec: {
@@ -515,6 +564,98 @@ describe("binary-instrument@1 lock-time composition", () => {
         closeAt: "2026-08-16T09:00:00.000Z",
       })).toThrow();
     }
+  });
+
+  // Spec §1.6 rule 1 / §10.2 ruling 4: the arm-count literal is gone. The real boundary is that
+  // the Run's arm set must match the sealed selection arm-for-arm — a Run arm set that is merely
+  // the wrong SIZE is one instance of that, not a special four-arm rule. This test used to slice
+  // to three arms against a four-arm selection and pass "by coincidence" (spec §10.2); it now
+  // names and asserts the actual boundary, and is paired with a six-arm positive case below that
+  // a literal `4` would have refused.
+  test("a Run arm set that does not match the sealed selection arm-for-arm refuses", () => {
+    const fixture = setUpFixture();
+    expect(() => compileDraft({
+      workspaceDir,
+      draft: { ...fixture.draft, spec: { ...fixture.draft.spec, arms: fixture.draft.spec.arms.slice(0, 3) } },
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-16T09:00:00.000Z",
+    })).toThrow(/one Run arm per sealed judge selection arm/u);
+  });
+
+  test("a Run arm set matching a six-arm sealed selection compiles with armCount six", () => {
+    const fixture = setUpFixture({ arms: SIX_ARM_CONFIGS });
+    const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+    const parameters = compileBinaryInstrumentProfile({
+      workspaceDir,
+      draft: fixture.draft,
+      benchmark,
+    });
+    expect(fixture.draft.spec.arms).toHaveLength(6);
+    expect(parameters.judgeModelProfile).toBe("reasoning-2026-08");
+  });
+
+  test("a Run arm pinning the wrong model against its own selected arm refuses", () => {
+    const fixture = setUpFixture();
+    expect(() => compileDraft({
+      workspaceDir,
+      draft: {
+        ...fixture.draft,
+        spec: {
+          ...fixture.draft.spec,
+          arms: fixture.draft.spec.arms.map((arm, index) => index === 0
+            ? { ...arm, pinning: { ...arm.pinning, model: { id: "gpt-4o-mini-2024-07-18" } } }
+            : arm),
+        },
+      },
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-16T09:00:00.000Z",
+    })).toThrow(/does not exactly match the sealed Inspect binary-judge selection/u);
+  });
+
+  test("compileBinaryInstrumentProfile on a dated-snapshot draft seals judgeModelProfile: dated-snapshot-sampling", () => {
+    const fixture = setUpFixture({
+      arms: [
+        { armId: "alpha", model: "gpt-4o-mini-2024-07-18", generation: samplingGeneration },
+        { armId: "beta", model: "gpt-4o-mini-2024-07-18", generation: samplingGeneration },
+      ],
+      // Nothing on the compile path dereferences this digest: `validateRuntimeAndArms` only
+      // requires the selection manifest to be schema-valid, and the schema only requires
+      // `snapshotProbeSha256` to be PRESENT (not resolvable) when a bound arm's model is a dated
+      // snapshot (spec §1.5 rule 2). Binding a real sealed probe record is round 4b's
+      // (`core/src/operations/inspect-binary-judge.ts`) job.
+      snapshotProbeSha256: sha("9"),
+    });
+    const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+    const parameters = compileBinaryInstrumentProfile({
+      workspaceDir,
+      draft: fixture.draft,
+      benchmark,
+    });
+    expect(parameters.judgeModelProfile).toBe("dated-snapshot-sampling");
+  });
+
+  test("a selection whose arms declare different models refuses at lock", () => {
+    // Today's closed judge-model set is a bijection (one accepted model per profile), so two
+    // different models always carry two different generation shapes, and the sealed selection
+    // manifest's own cross-arm "one identical generation block" refinement
+    // (`InspectBinaryJudgeSelectionManifestSchema`, `@colophon-claims/verify`) already refuses
+    // before the schema parse can even succeed. `validateRuntimeAndArms`'s own model-uniformity
+    // refusal (spec §1.6, change 1 item 5) is therefore unreachable defense-in-depth through this
+    // public surface today, and only becomes independently reachable once a profile admits more
+    // than one accepted model id. This test asserts the observable behavior the spec asks for —
+    // different models refuse at lock — holds now, under whichever refusal actually fires first.
+    const fixture = setUpFixture({
+      arms: [
+        { armId: "alpha", model: "gpt-5.6-luna", generation },
+        { armId: "beta", model: "gpt-4o-mini-2024-07-18", generation: samplingGeneration },
+      ],
+    });
+    const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+    expect(() => compileBinaryInstrumentProfile({
+      workspaceDir,
+      draft: fixture.draft,
+      benchmark,
+    })).toThrow();
   });
 
   test("the shared Tasks remain arm-neutral", () => {
@@ -635,7 +776,42 @@ describe("binary report limitations", () => {
       BINARY_INSTRUMENT_REPORT_LIMITATIONS.reviewerKeyPerson,
       BINARY_INSTRUMENT_REPORT_LIMITATIONS.cognitiveBlinding,
     ]);
-    expect(operator).toEqual([...human, BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly]);
+    // Spec §1.4 clause 4: the two reviewer-protocol strings are claims about a two-reviewer
+    // protocol and are emitted only for truthAdmission === "two-human-unanimous". An
+    // operator-only run has no reviewers and no visibility receipts at all, so `operator` is no
+    // longer `[...human, operatorOnly]` — it drops reviewerKeyPerson and cognitiveBlinding.
+    expect(operator).toEqual([
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly,
+    ]);
     expect(operator.join(" ")).not.toMatch(/\b(?:rank|ranking|select|selection|winner|loser)\b/iu);
+  });
+
+  test("mutableModelAlias is present only for the reasoning-2026-08 profile (spec §1.4 clauses 2-3)", () => {
+    const datedSnapshot = binaryInstrumentReportLimitations({
+      ...base,
+      truthAdmission: "operator-only",
+      judgeModelProfile: "dated-snapshot-sampling",
+    });
+    expect(datedSnapshot).toEqual([BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly]);
+
+    const reasoningExplicit = binaryInstrumentReportLimitations({
+      ...base,
+      truthAdmission: "operator-only",
+      judgeModelProfile: "reasoning-2026-08",
+    });
+    const profileAbsent = binaryInstrumentReportLimitations({
+      ...base,
+      truthAdmission: "operator-only",
+    });
+    // The absent case IS the compatibility proof (spec §1.4 clause 2, §10.2 fixture ruling 1):
+    // every parameter set sealed before this packet has no judgeModelProfile key, and it must
+    // emit byte-identically to the explicit reasoning-2026-08 case, or the two frozen 144-cell
+    // golden fixtures move.
+    expect(profileAbsent).toEqual(reasoningExplicit);
+    expect(profileAbsent).toEqual([
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly,
+    ]);
   });
 });

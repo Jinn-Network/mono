@@ -12,7 +12,7 @@ import {
   parseReport,
 } from "@jinn-network/benchmarking-records";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
-import { verifyPublicBundle } from "@colophon-claims/verify";
+import { BINARY_INSTRUMENT_REPORT_LIMITATIONS, verifyPublicBundle } from "@colophon-claims/verify";
 import {
   canonicalJsonBytes,
   dssePreAuthEncoding,
@@ -379,6 +379,69 @@ describe("binary public-bundle/4 producer closure", () => {
       itemCount: 2,
       exclusionCount: 0,
     });
+  }, 120_000);
+});
+
+// spec §1.6 (packet P1): arm cardinality is a floor of two, never a pinned literal four.
+describe("binary public-bundle/4 arm cardinality (spec §1.6)", () => {
+  test("a six-arm synthetic draft compiles, locks, reports, publishes, and cold-verifies with armCount: 6", async () => {
+    const root = mkdtempSync(join(tmpdir(), "binary-v4-six-arm-"));
+    roots.push(root);
+    const armIds = ["arm-1", "arm-2", "arm-3", "arm-4", "arm-5", "arm-6"];
+    const fixture = await createSyntheticV4BundleFixture({
+      workspaceDir: root,
+      truthAdmission: "operator-only",
+      armIds,
+    });
+    const bundleDir = fixture.bundle.bundleDir;
+    const qualification = json(join(bundleDir, "qualification.json"));
+    expect(qualification.arms).toHaveLength(6);
+    expect((qualification.arms as Array<{ armId: string }>).map((arm) => arm.armId)).toEqual(armIds);
+
+    const verification = await verifyPublicBundle(bundleDir);
+    expect(verification.format).toBe(BUNDLE_V4_FORMAT);
+    if (verification.format !== BUNDLE_V4_FORMAT) {
+      throw new Error(`expected ${BUNDLE_V4_FORMAT}, received ${verification.format}`);
+    }
+    expect(verification.qualification).toEqual({
+      publicationGrade: false,
+      truthAdmission: "operator-only",
+      candidateClasses: ["synthetic"],
+      strata: ["core", "stress"],
+      armCount: 6,
+      itemCount: 2,
+      exclusionCount: 0,
+    });
+  }, 120_000);
+});
+
+// spec §1.5: the pre-run snapshot-serving probe is a lock input, required exactly when a bound
+// arm's model is a dated snapshot, and published as a bundle asset a cold verifier reads.
+describe("binary public-bundle/4 dated-snapshot judge model (spec §1.5)", () => {
+  test("a dated-snapshot four-arm fixture publishes, cold-verifies, carries a snapshot-probe evidence record, and its Report limitations omit the mutable-alias string", async () => {
+    const root = mkdtempSync(join(tmpdir(), "binary-v4-dated-snapshot-"));
+    roots.push(root);
+    const fixture = await createSyntheticV4BundleFixture({
+      workspaceDir: root,
+      truthAdmission: "operator-only",
+      judgeModel: "gpt-4o-mini-2024-07-18",
+    });
+    const bundleDir = fixture.bundle.bundleDir;
+
+    const evidence = json(join(bundleDir, "evidence.json"));
+    const probeRecord = evidenceRecord(evidence, "snapshot-probe");
+    expect(existsSync(join(bundleDir, "records", `${probeRecord.sha256}.bin`))).toBe(true);
+
+    const report = json(join(bundleDir, "report.json"));
+    expect((report.limitations ?? []) as readonly string[])
+      .not.toContain(BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias);
+
+    const verification = await verifyPublicBundle(bundleDir);
+    expect(verification.format).toBe(BUNDLE_V4_FORMAT);
+    if (verification.format !== BUNDLE_V4_FORMAT) {
+      throw new Error(`expected ${BUNDLE_V4_FORMAT}, received ${verification.format}`);
+    }
+    expect(verification.qualification).toMatchObject({ armCount: 4 });
   }, 120_000);
 });
 

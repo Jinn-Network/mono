@@ -12,6 +12,7 @@ import {
   BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
   BINARY_JUDGMENT_OBSERVATION_FORMAT_URI,
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+  BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
   EVALUATION_SPEC_FORMAT_URI,
   EVAL_SEMANTICS_VERSION,
 } from "../identifiers.js";
@@ -28,18 +29,26 @@ import {
   BinaryJudgmentInstrumentSchema,
   BinaryJudgmentObservationSchema,
   BinaryJudgmentPayloadSchema,
+  BinaryJudgmentSemanticRequestSchema,
+  BinaryJudgmentSnapshotProbeSchema,
   binaryJudgmentInstrumentDeclaresEvidence,
   binaryJudgmentPromptTemplateDigest,
   binaryJudgmentSemanticRequestDigest,
   buildBinaryJudgmentSemanticRequest,
   decodeBinaryJudgmentInlineMaterial,
+  isDatedSnapshotJudgeModel,
+  judgeModelProfileFor,
+  parseBinaryJudgmentInstrument,
+  parseBinaryJudgmentSnapshotProbe,
   renderBinaryJudgmentMessages,
   sealBinaryJudgmentAnalysisContext,
   sealBinaryJudgmentEvaluationContext,
   sealBinaryJudgmentInstrument,
   sealBinaryJudgmentObservation,
+  sealBinaryJudgmentSnapshotProbe,
   type BinaryJudgmentInstrument,
   type BinaryJudgmentPayload,
+  type BinaryJudgmentSamplingGeneration,
 } from "./contracts.js";
 
 const sha = (character: string): `sha256:${string}` => `sha256:${character.repeat(64)}`;
@@ -147,6 +156,64 @@ const instrumentWithEvidence: BinaryJudgmentInstrument = {
   instrumentId: "unicode-lines-evidence",
   messages: messagesWithEvidence,
   promptTemplateSha256: binaryJudgmentPromptTemplateDigest(messagesWithEvidence),
+};
+
+const datedSnapshotGeneration: BinaryJudgmentSamplingGeneration = {
+  temperature: 0,
+  maxOutputTokens: 512,
+  store: false,
+  background: false,
+  stream: false,
+  serviceTier: "default",
+  tools: [],
+  fallbackModels: [],
+  retries: 0,
+  persistedConversation: false,
+  metadata: null,
+  promptCacheIdentifier: null,
+};
+
+const datedSnapshotInstrument: BinaryJudgmentInstrument = {
+  ...instrument,
+  instrumentId: "dated-snapshot-sampling",
+  model: {
+    adapter: "jinn-openai",
+    requested: "gpt-4o-mini-2024-07-18",
+    generation: datedSnapshotGeneration,
+  },
+};
+
+const buildObservation = (fields: {
+  requestedModel: string;
+  resolvedModel: string;
+  limitations: string[];
+}) => ({
+  protocol: BINARY_JUDGMENT_OBSERVATION_FORMAT_URI,
+  taskDigest: sha("1"),
+  armId: "strict",
+  replicate: 1,
+  instrumentSha256: sha("2"),
+  requestSha256: sha("3"),
+  response: { digest: sha("4"), mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE },
+  provider: {
+    requestedModel: fields.requestedModel,
+    resolvedModel: fields.resolvedModel,
+    responseId: "resp_synthetic",
+    eventSha256: sha("5"),
+    usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+  },
+  call: { count: 1 as const, retries: 0 as const, fallbacks: 0 as const },
+  limitations: fields.limitations,
+});
+
+const servingProbe = {
+  protocol: BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
+  requestedModel: "gpt-4o-mini-2024-07-18" as const,
+  resolvedModel: "gpt-4o-mini-2024-07-18",
+  responseId: "resp_probe_synthetic",
+  eventSha256: sha("9"),
+  probedAt: "2026-08-20T00:00:00.000Z",
+  outcome: "serving" as const,
 };
 
 describe("binary-judgment closed contracts", () => {
@@ -484,6 +551,144 @@ describe("binary-judgment closed contracts", () => {
     const sealed = sealBinaryJudgmentInstrument(instrument);
     expect(sealed.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(canonicalJsonBytes(instrument)).toEqual(sealed.bytes);
+  });
+});
+
+describe("judge model profiles", () => {
+  it("maps every accepted judge model id to its profile and returns undefined otherwise", () => {
+    expect(judgeModelProfileFor("gpt-5.6-luna")).toBe("reasoning-2026-08");
+    expect(judgeModelProfileFor("gpt-4o-mini-2024-07-18")).toBe("dated-snapshot-sampling");
+    expect(judgeModelProfileFor("gpt-4o-mini")).toBeUndefined();
+    expect(judgeModelProfileFor("")).toBeUndefined();
+    expect(isDatedSnapshotJudgeModel("gpt-4o-mini-2024-07-18")).toBe(true);
+    expect(isDatedSnapshotJudgeModel("gpt-5.6-luna")).toBe(false);
+  });
+
+  it("parses and seals a dated-snapshot instrument using the sampling generation shape", () => {
+    expect(BinaryJudgmentInstrumentSchema.parse(datedSnapshotInstrument))
+      .toStrictEqual(datedSnapshotInstrument);
+    const sealed = sealBinaryJudgmentInstrument(datedSnapshotInstrument);
+    expect(sealed.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+  });
+
+  it("refuses an undeclared model id at both parse and seal (P1 acceptance 5)", () => {
+    const undeclared = {
+      ...datedSnapshotInstrument,
+      model: { ...datedSnapshotInstrument.model, requested: "gpt-4o-mini" },
+    };
+    expect(() => parseBinaryJudgmentInstrument(canonicalJsonBytes(undeclared))).toThrow();
+    expect(() => sealBinaryJudgmentInstrument(undeclared as BinaryJudgmentInstrument)).toThrow();
+  });
+
+  it("refuses generation blocks whose shape disagrees with the model's own profile", () => {
+    expect(BinaryJudgmentInstrumentSchema.safeParse({
+      ...datedSnapshotInstrument,
+      model: { ...datedSnapshotInstrument.model, generation: instrument.model.generation },
+    }).success).toBe(false);
+    expect(BinaryJudgmentInstrumentSchema.safeParse({
+      ...instrument,
+      model: { ...instrument.model, generation: datedSnapshotGeneration },
+    }).success).toBe(false);
+    expect(BinaryJudgmentInstrumentSchema.safeParse({
+      ...instrument,
+      model: {
+        ...instrument.model,
+        generation: { ...instrument.model.generation, temperature: 0 },
+      },
+    }).success).toBe(false);
+    expect(BinaryJudgmentInstrumentSchema.safeParse({
+      ...datedSnapshotInstrument,
+      model: {
+        ...datedSnapshotInstrument.model,
+        generation: { ...datedSnapshotGeneration, temperature: 0.5 },
+      },
+    }).success).toBe(false);
+    expect(BinaryJudgmentInstrumentSchema.safeParse({
+      ...datedSnapshotInstrument,
+      model: {
+        ...datedSnapshotInstrument.model,
+        generation: { ...datedSnapshotGeneration, maxOutputTokens: 128 },
+      },
+    }).success).toBe(false);
+  });
+
+  it("refuses a BinaryJudgmentSemanticRequest whose generation does not match its model", () => {
+    const request = buildBinaryJudgmentSemanticRequest(payload, instrument);
+    expect(BinaryJudgmentSemanticRequestSchema.parse(request)).toStrictEqual(request);
+    expect(BinaryJudgmentSemanticRequestSchema.safeParse({
+      ...request,
+      model: "gpt-4o-mini-2024-07-18",
+    }).success).toBe(false);
+  });
+
+  it("requires observation limitations to match the model's profile exactly", () => {
+    const datedSnapshotEmpty = buildObservation({
+      requestedModel: "gpt-4o-mini-2024-07-18",
+      resolvedModel: "gpt-4o-mini-2024-07-18",
+      limitations: [],
+    });
+    expect(BinaryJudgmentObservationSchema.parse(datedSnapshotEmpty))
+      .toStrictEqual(datedSnapshotEmpty);
+
+    const datedSnapshotWithAlias = buildObservation({
+      requestedModel: "gpt-4o-mini-2024-07-18",
+      resolvedModel: "gpt-4o-mini-2024-07-18",
+      limitations: ["mutable-model-alias"],
+    });
+    expect(BinaryJudgmentObservationSchema.safeParse(datedSnapshotWithAlias).success).toBe(false);
+
+    const reasoningEmpty = buildObservation({
+      requestedModel: "gpt-5.6-luna",
+      resolvedModel: "gpt-5.6-luna",
+      limitations: [],
+    });
+    expect(BinaryJudgmentObservationSchema.safeParse(reasoningEmpty).success).toBe(false);
+
+    const reasoningWithAlias = buildObservation({
+      requestedModel: "gpt-5.6-luna",
+      resolvedModel: "gpt-5.6-luna",
+      limitations: ["mutable-model-alias"],
+    });
+    expect(BinaryJudgmentObservationSchema.parse(reasoningWithAlias))
+      .toStrictEqual(reasoningWithAlias);
+  });
+
+  it("refuses an observation whose resolvedModel differs from its requestedModel (P1 acceptance 5)", () => {
+    const mismatched = buildObservation({
+      requestedModel: "gpt-4o-mini-2024-07-18",
+      resolvedModel: "gpt-5.6-luna",
+      limitations: [],
+    });
+    expect(BinaryJudgmentObservationSchema.safeParse(mismatched).success).toBe(false);
+  });
+
+  it("parses and seals a serving snapshot-serving probe, and enforces outcome derivation", () => {
+    expect(BinaryJudgmentSnapshotProbeSchema.parse(servingProbe)).toStrictEqual(servingProbe);
+    const sealed = sealBinaryJudgmentSnapshotProbe(servingProbe);
+    expect(sealed.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(parseBinaryJudgmentSnapshotProbe(sealed.bytes)).toStrictEqual(servingProbe);
+
+    expect(BinaryJudgmentSnapshotProbeSchema.safeParse({
+      ...servingProbe,
+      outcome: "not-serving",
+    }).success).toBe(false);
+
+    expect(BinaryJudgmentSnapshotProbeSchema.safeParse({
+      ...servingProbe,
+      resolvedModel: "gpt-4o-mini-2024-07-18-preview",
+    }).success).toBe(false);
+
+    const notServingProbe = {
+      ...servingProbe,
+      resolvedModel: "gpt-4o-mini-2024-07-18-preview",
+      outcome: "not-serving" as const,
+    };
+    expect(BinaryJudgmentSnapshotProbeSchema.parse(notServingProbe)).toStrictEqual(notServingProbe);
+
+    expect(BinaryJudgmentSnapshotProbeSchema.safeParse({
+      ...servingProbe,
+      requestedModel: "gpt-5.6-luna",
+    }).success).toBe(false);
   });
 });
 

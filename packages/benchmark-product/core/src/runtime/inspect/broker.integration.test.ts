@@ -8,6 +8,10 @@ import { describe, expect, test } from "vitest";
 const imageDigest = process.env.JINN_INSPECT_OCI_IMAGE;
 const dockerPath = process.env.JINN_DOCKER_PATH ?? "/usr/local/bin/docker";
 
+// This probe exercises the "reasoning-2026-08" judge-model profile (spec §1.1): the model literal
+// and the 128-token cap below are that profile's frozen shape, byte-unchanged from before the
+// profile widening, not an unwidened leftover. The "dated-snapshot-sampling" profile has its own
+// probe below.
 const contractProbe = String.raw`
 import copy
 import httpx
@@ -51,6 +55,9 @@ refused(lambda value: value["messages"].append({"role": "assistant", "text": "hi
 refused(lambda value: value["messages"][0].update(text="x" * (broker.MAX_INPUT_BYTES + 1)), ValueError)
 refused(lambda value: value["generation"].update(maxOutputTokens=129), ValueError)
 refused(lambda value: value["generation"].update(stream=True), ValueError)
+# A dated-snapshot model is a real, accepted model, but the sealed selection manifest requires one
+# generation shape per profile (spec §1.3): a reasoning generation block on it must still refuse.
+refused(lambda value: value.update(model="gpt-4o-mini-2024-07-18"), ValueError)
 
 class RaisingResponses:
   def __init__(self, error): self.error = error
@@ -84,6 +91,155 @@ assert state.generate(request)["status"] == "budget-rejected"
 print("broker-v1-conformance-ok")
 `;
 
+// This probe exercises the "dated-snapshot-sampling" judge-model profile (spec §1.1/§1.3),
+// parallel to the reasoning-profile probe above, over both broker.py and binary_judge_worker.py:
+// a temperature-0/512-token sampling request is accepted; a reasoning-shaped generation block on
+// the dated snapshot is refused; and the emitted observation carries the empty limitations tuple
+// with matching requested/resolved models (spec §1.4), unlike the reasoning profile's alias tuple.
+const datedSnapshotProbe = String.raw`
+import copy
+import sys
+sys.path.insert(0, "/opt/jinn")
+import broker
+import binary_judge_worker as judge_worker
+
+capability = "capability-for-one-attempt"
+request = {
+  "operation": "jinn.network/model-broker/1:generateText",
+  "correlationId": "cell/attempt/call-1",
+  "capability": capability,
+  "model": "gpt-4o-mini-2024-07-18",
+  "messages": [{"role": "developer", "text": "Return one letter."}, {"role": "user", "text": "C"}],
+  "generation": {
+    "temperature": 0,
+    "maxOutputTokens": 512,
+    "store": False,
+    "background": False,
+    "stream": False,
+    "serviceTier": "default",
+  },
+}
+assert broker.validate_request(request, capability) == request
+
+def refused(mutator, error=ValueError):
+  candidate = copy.deepcopy(request)
+  mutator(candidate)
+  try:
+    broker.validate_request(candidate, capability)
+  except error:
+    return
+  raise AssertionError("broker accepted an out-of-contract dated-snapshot request")
+
+refused(lambda value: value["generation"].update(maxOutputTokens=128))
+# isinstance(True, int) is True in Python: a bare bool must not pass as the literal integer 0.
+refused(lambda value: value["generation"].update(temperature=False))
+refused(lambda value: value["generation"].update(temperature=0.0))
+refused(lambda value: value["generation"].update(temperature=1))
+def to_reasoning_shape(value):
+  generation = value["generation"]
+  del generation["temperature"]
+  generation["reasoningEffort"] = "none"
+  generation["maxOutputTokens"] = 128
+refused(to_reasoning_shape)
+
+semantic_request = {
+  "model": "gpt-4o-mini-2024-07-18",
+  "messages": [{"role": "developer", "text": "Return one letter."}, {"role": "user", "text": "C"}],
+  "generation": {
+    "temperature": 0,
+    "maxOutputTokens": 512,
+    "store": False,
+    "background": False,
+    "stream": False,
+    "serviceTier": "default",
+    "tools": [],
+    "fallbackModels": [],
+    "retries": 0,
+    "persistedConversation": False,
+    "metadata": None,
+    "promptCacheIdentifier": None,
+  },
+}
+assert judge_worker.validate_semantic_request(semantic_request) == semantic_request
+
+def semantic_refused(mutator, error=ValueError):
+  candidate = copy.deepcopy(semantic_request)
+  mutator(candidate)
+  try:
+    judge_worker.validate_semantic_request(candidate)
+  except error:
+    return
+  raise AssertionError("worker accepted an out-of-contract dated-snapshot semantic request")
+
+def semantic_to_reasoning_shape(value):
+  generation = value["generation"]
+  del generation["temperature"]
+  generation["reasoningEffort"] = "none"
+  generation["maxOutputTokens"] = 128
+semantic_refused(semantic_to_reasoning_shape)
+semantic_refused(lambda value: value["generation"].update(temperature=False))
+semantic_refused(lambda value: value["generation"].update(maxOutputTokens=128))
+
+judge_config = {
+  "taskDigest": "sha256:" + "1" * 64,
+  "armId": "dated-alpha",
+  "replicate": 1,
+  "instrumentSha256": "sha256:" + "2" * 64,
+  "requestSha256": "sha256:" + "3" * 64,
+}
+dated_record = {
+  "status": "completed",
+  "resolvedModel": "gpt-4o-mini-2024-07-18",
+  "responseId": "resp_dated_snapshot",
+  "eventDigest": "4" * 64,
+  "usage": {"input_tokens": 11, "output_tokens": 2, "total_tokens": 13},
+}
+dated_observation = judge_worker.build_observation(
+  judge_config, b"ACCEPT", dated_record, "gpt-4o-mini-2024-07-18"
+)
+assert dated_observation["limitations"] == [], dated_observation
+assert dated_observation["provider"]["requestedModel"] == "gpt-4o-mini-2024-07-18"
+assert dated_observation["provider"]["resolvedModel"] == "gpt-4o-mini-2024-07-18"
+
+# Parallel reasoning-profile coverage: the alias limitation is still emitted, and is a real claim
+# about an undated model id rather than the decorative disclosure it would be on a dated snapshot.
+reasoning_record = {**dated_record, "resolvedModel": "gpt-5.6-luna"}
+reasoning_observation = judge_worker.build_observation(
+  judge_config, b"ACCEPT", reasoning_record, "gpt-5.6-luna"
+)
+assert reasoning_observation["limitations"] == ["mutable-model-alias"], reasoning_observation
+assert reasoning_observation["provider"]["requestedModel"] == "gpt-5.6-luna"
+assert reasoning_observation["provider"]["resolvedModel"] == "gpt-5.6-luna"
+
+try:
+  judge_worker.build_observation(
+    judge_config, b"ACCEPT", {**dated_record, "resolvedModel": "unlisted-model"}, "gpt-4o-mini-2024-07-18"
+  )
+except ValueError:
+  pass
+else:
+  raise AssertionError("worker accepted an unlisted resolvedModel")
+
+# The snapshot-identity check proper (spec §1.4): the provider answering with a DECLARED but
+# DIFFERENT model must refuse, not be silently overwritten with its own answer. This case is only
+# expressible because requestedModel and resolvedModel now come from two independent sources.
+try:
+  judge_worker.build_observation(judge_config, b"ACCEPT", reasoning_record, "gpt-4o-mini-2024-07-18")
+except ValueError:
+  pass
+else:
+  raise AssertionError("worker accepted a resolvedModel that differs from the requested model")
+
+try:
+  judge_worker.build_observation(judge_config, b"ACCEPT", dated_record, "unlisted-model")
+except ValueError:
+  pass
+else:
+  raise AssertionError("worker accepted an unlisted requestedModel")
+
+print("dated-snapshot-conformance-ok")
+`;
+
 describe.skipIf(imageDigest === undefined)("trusted broker contract", () => {
   test("rejects capability/config abuse and maps provider failures without network", () => {
     const output = execFileSync(dockerPath, [
@@ -92,6 +248,15 @@ describe.skipIf(imageDigest === undefined)("trusted broker contract", () => {
       "--entrypoint=python", imageDigest!, "-c", contractProbe,
     ], { encoding: "utf8" });
     expect(output.trim()).toBe("broker-v1-conformance-ok");
+  }, 30_000);
+
+  test("accepts the dated-snapshot-sampling profile and refuses cross-profile generation blocks", () => {
+    const output = execFileSync(dockerPath, [
+      "run", "--rm", "--pull=never", "--platform=linux/amd64", "--network=none",
+      "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+      "--entrypoint=python", imageDigest!, "-c", datedSnapshotProbe,
+    ], { encoding: "utf8" });
+    expect(output.trim()).toBe("dated-snapshot-conformance-ok");
   }, 30_000);
 
   test("runs verifier operations without a broker, credential descriptor, or network", () => {

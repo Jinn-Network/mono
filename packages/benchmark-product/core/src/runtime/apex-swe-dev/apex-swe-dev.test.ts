@@ -412,8 +412,21 @@ describe("APEX-SWE-dev dual harness and export", () => {
       exportCompletenessCertification({ runSha256: namedRunState.runSha256!, completeness: undefined }),
     );
 
+    // Two distinct refusals guard the custom-coverage draft, and each is pinned by its own detail
+    // so neither can silently start standing in for the other. Unlocked, the sealed-Run guard
+    // fires first: §8.2 clause 2's lock digest has to exist before a certification can name it.
     const customExport = exportApexSwePackage(context, { draftId: "grade", armId: "one" });
     expect(customExport.ok).toBe(false);
+    if (customExport.ok) return;
+    expect(customExport.error.detail).toBe("APEX-SWE-dev export requires a sealed Run");
+
+    // Locked, the same draft reaches the mode decision and refuses on coverage, which is the
+    // refusal that keeps a custom slice from wearing the suite name.
+    expect(runLock(context, { draftId: "grade" }).ok).toBe(true);
+    const lockedCustomExport = exportApexSwePackage(context, { draftId: "grade", armId: "one" });
+    expect(lockedCustomExport.ok).toBe(false);
+    if (lockedCustomExport.ok) return;
+    expect(lockedCustomExport.error.detail).toBe("custom coverage cannot wear the APEX-SWE-dev suite name");
   }, 120_000);
 
   test("refuses without a sealed Run, naming the digest requirement rather than emitting a certification for undefined (§8.2 known wrinkle)", async () => {

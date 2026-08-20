@@ -23,7 +23,7 @@ import {
   parseBinaryJudgmentInstrument,
 } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes, recordDigest } from "@jinn-network/trust-core";
-import { TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
+import { TaskSpecificationSchema, compareCodeUnitStrings } from "@jinn-network/task-execution-protocol";
 import { runtimeHostPath } from "../../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
 import type {
@@ -137,10 +137,9 @@ function selectedArm(
   ) {
     throw new TypeError("binary-judgment cell does not carry the selected Inspect judge harness/version pin");
   }
-  const model = requirements.model as { id?: unknown } | undefined;
-  if (model?.id !== "gpt-5.6-luna") {
-    throw new TypeError("binary-judgment cell must request the exact Luna model");
-  }
+  // Resolve the arm from the instrument digest FIRST: the model check below compares against
+  // the resolved arm's own model, not a fleet-wide literal, so it needs the arm in hand before it
+  // can run (spec §1.6 / P1 change 3a).
   const instrument = requirements[BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY];
   if (typeof instrument !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(instrument)) {
     throw new TypeError("binary-judgment cell carries no exact scalar instrument digest");
@@ -148,6 +147,10 @@ function selectedArm(
   const arm = manifest.arms.find((candidate) => candidate.instrumentSha256 === instrument);
   if (arm === undefined) {
     throw new TypeError("binary-judgment instrument digest is absent from the sealed judge selection");
+  }
+  const model = requirements.model as { id?: unknown } | undefined;
+  if (model?.id !== arm.model) {
+    throw new TypeError("binary-judgment cell must request the exact selected arm's model");
   }
   return arm;
 }
@@ -309,7 +312,14 @@ export function makeInspectBinaryJudgeLauncher(options: {
       runPinning: {
         keys: [
           { key: "harness", inventory: [INSPECT_BINARY_JUDGE_LAUNCHER_ID], posture: "enforced" },
-          { key: "model", inventory: ["gpt-5.6-luna"], posture: "enforced" },
+          {
+            key: "model",
+            // Deduplicated, code-unit-sorted arm models (spec §1.6 / P1 change 3b): a
+            // dated-snapshot cell would be refused by an inventory that still advertised only
+            // the reasoning model.
+            inventory: [...new Set(manifest.arms.map((arm) => arm.model))].sort(compareCodeUnitStrings),
+            posture: "enforced",
+          },
           {
             key: BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
             inventory: manifest.arms.map((arm) => arm.instrumentSha256),

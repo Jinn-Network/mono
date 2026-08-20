@@ -20,9 +20,25 @@ export function binaryInstrumentReportLimitations(
     throw new TypeError(`invalid sealed binary-instrument parameters: ${validation.issues.join("; ")}`);
   }
   return [
-    BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
-    BINARY_INSTRUMENT_REPORT_LIMITATIONS.reviewerKeyPerson,
-    BINARY_INSTRUMENT_REPORT_LIMITATIONS.cognitiveBlinding,
+    // Absent, or any profile other than dated-snapshot-sampling, means "emit the alias
+    // limitation" — today's behavior byte for byte (spec §1.4 clause 2). This is not a default of
+    // convenience: the two frozen 144-cell golden fixtures seal parameters with no
+    // judgeModelProfile, so they must keep emitting this string in this position to stay green
+    // unmodified. Flipping the absent case to "emit nothing" would move those fixtures' bytes and
+    // destroy the compatibility proof this program depends on.
+    ...(parameters["judgeModelProfile"] === "dated-snapshot-sampling"
+      ? []
+      : [BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias]),
+    // reviewerKeyPerson and cognitiveBlinding are claims about a two-reviewer protocol; an
+    // operator-only run has no reviewers and no visibility receipts at all, so emitting them there
+    // is a false limitation (spec §1.4 clause 4). truthAdmission is already a sealed parameter, so
+    // this needs no new key.
+    ...(parameters["truthAdmission"] === "two-human-unanimous"
+      ? [
+        BINARY_INSTRUMENT_REPORT_LIMITATIONS.reviewerKeyPerson,
+        BINARY_INSTRUMENT_REPORT_LIMITATIONS.cognitiveBlinding,
+      ]
+      : []),
     ...(parameters["truthAdmission"] === "operator-only"
       ? [BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly]
       : []),

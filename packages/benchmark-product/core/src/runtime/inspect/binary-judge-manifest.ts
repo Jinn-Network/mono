@@ -9,6 +9,7 @@ import {
   type InspectBinaryJudgeArm,
   type InspectBinaryJudgeSelectionManifest,
 } from "@colophon-claims/verify";
+import { BinaryJudgmentSnapshotProbeSchema } from "@jinn-network/task-execution-profiles";
 import {
   SUPPORTED_OCI_PLATFORM,
 } from "./manifest.js";
@@ -41,6 +42,25 @@ export const InspectBinaryJudgeBindingRequestSchema = z.strictObject({
   schema: z.literal(INSPECT_BINARY_JUDGE_BINDING_REQUEST_SCHEMA),
   manifest: InspectBinaryJudgeSelectionManifestSchema,
   host: InspectBinaryJudgeHostBindingSchema,
+  // Optional (spec §1.5 rules 2-4): required exactly when `manifest.snapshotProbeSha256` is
+  // present, forbidden otherwise. One path, no ambiguity about where the probe bytes come from.
+  snapshotProbe: BinaryJudgmentSnapshotProbeSchema.optional(),
+}).superRefine((value, ctx) => {
+  const requiresProbe = value.manifest.snapshotProbeSha256 !== undefined;
+  if (requiresProbe && value.snapshotProbe === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["snapshotProbe"],
+      message: "snapshotProbe is required when manifest.snapshotProbeSha256 is present",
+    });
+  }
+  if (!requiresProbe && value.snapshotProbe !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["snapshotProbe"],
+      message: "snapshotProbe is forbidden unless manifest.snapshotProbeSha256 is present",
+    });
+  }
 });
 export type InspectBinaryJudgeBindingRequest = z.infer<
   typeof InspectBinaryJudgeBindingRequestSchema

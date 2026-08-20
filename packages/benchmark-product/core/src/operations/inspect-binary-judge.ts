@@ -3,6 +3,8 @@ import { isAbsolute } from "node:path";
 import {
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
   parseBinaryJudgmentInstrument,
+  sealBinaryJudgmentSnapshotProbe,
+  SNAPSHOT_PROBE_MAX_AGE_MS,
 } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { isDraftMutable, transition, type LifecycleState } from "../domain/lifecycle.js";
@@ -91,13 +93,13 @@ export function executeBindInspectBinaryJudge(
         refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse judge runtime binding");
       }
       if (current.spec.taskSet.kind !== "benchmark") {
-        refuse("conflict", `drafts.${input.draftId}.taskSet`, "bind-judge requires an imported benchmark");
+        refuse("conflict", `drafts.${input.draftId}.taskSet`, "judge binding requires an imported benchmark");
       }
       const parsed = InspectBinaryJudgeBindingRequestSchema.safeParse(input.binding);
       if (!parsed.success) {
         refuse("validation", "inspect.binaryJudge.binding", "binary-judge binding does not satisfy the versioned contract");
       }
-      const { manifest, host } = parsed.data;
+      const { manifest, host, snapshotProbe } = parsed.data;
       if (!isAbsolute(host.dockerPath)) {
         refuse("validation", "inspect.binaryJudge.host.dockerPath", "Docker path must be absolute");
       }
@@ -113,6 +115,57 @@ export function executeBindInspectBinaryJudge(
         refuse("conflict", "inspect.binaryJudge.runtime", "selected worker or broker source differs from this product build");
       }
       validateInstrumentClosure(clockedContext.workspaceDir, manifest);
+      if (manifest.snapshotProbeSha256 !== undefined) {
+        // The binding-request schema already guarantees `snapshotProbe` is present exactly when
+        // `manifest.snapshotProbeSha256` is (spec §1.5 rule 2).
+        const probe = snapshotProbe!;
+        const sealed = sealBinaryJudgmentSnapshotProbe(probe);
+        if (sealed.digest !== manifest.snapshotProbeSha256) {
+          refuse(
+            "conflict",
+            "inspect.binaryJudge.snapshotProbe",
+            "supplied snapshot-serving probe does not seal to manifest.snapshotProbeSha256",
+          );
+        }
+        if (!manifest.arms.some((arm) => arm.model === probe.requestedModel)) {
+          refuse(
+            "conflict",
+            "inspect.binaryJudge.snapshotProbe",
+            "probe requestedModel does not match any bound arm's model",
+          );
+        }
+        if (probe.outcome !== "serving") {
+          // §1.5 rule 4: this is the branch where the design changes in public first.
+          refuse(
+            "conflict",
+            "inspect.binaryJudge.snapshotProbe",
+            "probe reports the dated snapshot is not serving",
+          );
+        }
+        // §1.5 rule 3, freshness. The bind clock is `at`, computed once above. The design says
+        // "immediately before the run"; 24 hours is the CHECKABLE bound, and the G4 checklist
+        // keeps the operational discipline tighter. Enforced here, and only here (§0.5).
+        const probedAtMs = Date.parse(probe.probedAt);
+        const atMs = Date.parse(at);
+        if (probedAtMs > atMs) {
+          refuse(
+            "conflict",
+            "inspect.binaryJudge.snapshotProbe",
+            "probe is dated in the future relative to the bind clock",
+          );
+        }
+        if (atMs - probedAtMs > SNAPSHOT_PROBE_MAX_AGE_MS) {
+          refuse(
+            "conflict",
+            "inspect.binaryJudge.snapshotProbe",
+            "probe is older than the snapshot-serving freshness bound",
+          );
+        }
+        // Persist only after every refusal above has passed, so a refused bind leaves no probe
+        // record behind in the workspace CAS. `materialize` publishes it as a bundle asset from
+        // here (§1.5 rule 5); the digest was proven against the manifest above.
+        putSealedBytes(clockedContext.workspaceDir, sealed.bytes);
+      }
       const selectionManifestSha256 = putSealedBytes(
         clockedContext.workspaceDir,
         canonicalJsonBytes(manifest),
