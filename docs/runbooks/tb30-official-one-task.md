@@ -10,8 +10,8 @@ Issue: [#2769](https://github.com/Jinn-Network/mono/issues/2769). Decision:
 ## What this proves
 
 A human operator, on a machine with Harbor 0.21 and Docker, drives the **built
-Colophon CLI** (core `dist/cli/bin.js`) through select → quote → lock → launch →
-collect → Hub export against:
+Colophon CLI** (core `dist/cli/bin.js`) through method → quote → lock → launch →
+collect → export against:
 
 - Dataset id `terminal-bench/terminal-bench`
 - Revision `sha256:a32a61879ea94eb9dc16fa1fbeb398759f0c07ca633d9d1f6aec760207036da3`
@@ -44,7 +44,7 @@ submissions-closed copy.
 ```bash
 uv tool install harbor
 harbor --version   # must print 0.21.x
-command -v harbor  # keep this realpath for selection.json
+command -v harbor  # keep this realpath for host.json
 ```
 
 ## 2. Registry metadata at the pin (metadata only)
@@ -115,7 +115,11 @@ not use a GitHub checkout. Do not rewrite `task.toml`.
 
 Official tasks often pin a registry tag in `task.toml`. Pull and inspect
 **before** select; select itself never talks to Docker. Put `repo@sha256:…`
-in `selection.json` `environment.image`.
+in `host.json` `environment.image`.
+
+`colophon method --help` lists per-suite `--host` keys; `--n` selects the
+first N registry ids (code-point order) and is mutually exclusive with
+`--slice` and `--ids`.
 
 ## 6. Built CLI and workspace
 
@@ -140,14 +144,14 @@ node "$COLOPHON" arm add --workspace "$WS" --principal operator --draft tb30-one
   --arm oracle-a --pinning '{"harness":{"id":"harbor-oracle-a","version":"1.0.0"}}'
 node "$COLOPHON" arm add --workspace "$WS" --principal operator --draft tb30-one \
   --arm oracle-b --pinning '{"harness":{"id":"harbor-oracle-b","version":"1.0.0"}}'
-node "$COLOPHON" runtime terminal-bench-3-0 select --workspace "$WS" --principal operator \
-  --draft tb30-one --file "$WS/selection.json" --json
+node "$COLOPHON" method terminal-bench-3.0 --workspace "$WS" --principal operator \
+  --draft tb30-one --slice 1 --host "$WS/host.json" --json
 node "$COLOPHON" quote --workspace "$WS" --principal operator --draft tb30-one --json
 node "$COLOPHON" lock --workspace "$WS" --principal operator --draft tb30-one
 node "$COLOPHON" launch --workspace "$WS" --principal operator --draft tb30-one
 node "$COLOPHON" collect --workspace "$WS" --principal operator --draft tb30-one --json
-node "$COLOPHON" hub export --workspace "$WS" --principal operator --draft tb30-one --arm oracle-a --json
-node "$COLOPHON" hub export --workspace "$WS" --principal operator --draft tb30-one --arm oracle-b --json
+node "$COLOPHON" export --workspace "$WS" --principal operator --draft tb30-one --arm oracle-a --json
+node "$COLOPHON" export --workspace "$WS" --principal operator --draft tb30-one --arm oracle-b --json
 node "$COLOPHON" report --workspace "$WS" --principal operator --draft tb30-one --json
 ```
 

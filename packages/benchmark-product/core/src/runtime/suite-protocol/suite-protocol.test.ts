@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import {
   coverageFromSelectedNames,
@@ -6,8 +10,10 @@ import {
 } from "./manifest.js";
 import {
   APEX_AGENTS_NOT_LEADERBOARD_READY_LIMITATION,
+  CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE,
   DEEPSWE_NOT_LEADERBOARD_READY_LIMITATION,
   deriveSuiteComparability,
+  exportCompletenessCertification,
   INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION,
   INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
   methodLeaderboardEligible,
@@ -22,6 +28,7 @@ import {
   suiteProtocolDisplayName,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION,
   SUITE_PROTOCOL_IDS,
+  type DeriveSuiteComparabilityInput,
 } from "./comparability.js";
 
 const twelve = ["t00", "t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08", "t09", "t10", "t11"];
@@ -690,3 +697,264 @@ describe("inspect-eval suite protocol", () => {
     expect(officialInspectEvalConformance({ ...base, adapterId: "harbor" })).toBe(false);
   });
 });
+
+describe("exportCompletenessCertification (§8.2 clause 2)", () => {
+  const runSha256 = "a".repeat(64);
+
+  test("complete run states the sealed runOutcome, digest, and counts, computing nothing", () => {
+    expect(exportCompletenessCertification({
+      runSha256,
+      completeness: { expected: 12, judged: 12, runOutcome: "complete" },
+    })).toBe(`complete run of the selection sealed at lock ${runSha256}: 12 of 12 cells judged.`);
+  });
+
+  test("partial run renders the sealed partial outcome and counts as-is, without reconciling them", () => {
+    expect(exportCompletenessCertification({
+      runSha256,
+      completeness: { expected: 12, judged: 7, runOutcome: "partial" },
+    })).toBe(`partial run of the selection sealed at lock ${runSha256}: 7 of 12 cells judged.`);
+  });
+
+  test("cancelled run renders too — the first word is the sealed runOutcome, not a derived label", () => {
+    expect(exportCompletenessCertification({
+      runSha256,
+      completeness: { expected: 12, judged: 3, runOutcome: "cancelled" },
+    })).toBe(`cancelled run of the selection sealed at lock ${runSha256}: 3 of 12 cells judged.`);
+  });
+
+  test("no sealed Matrix states the lock digest without claiming a completeness it cannot see", () => {
+    expect(exportCompletenessCertification({ runSha256 })).toBe(
+      `no sealed Matrix: completeness of the selection sealed at lock ${runSha256} is not yet certified.`,
+    );
+  });
+});
+
+describe("accounting divergence explanation (operator ruling of 2026-08-20, option c)", () => {
+  const runSha256 = "b".repeat(64);
+
+  test("a not-complete outcome under a submit-ready framework verdict appends the one explanatory sentence", () => {
+    expect(exportCompletenessCertification({
+      runSha256,
+      completeness: { expected: 12, judged: 11, runOutcome: "partial" },
+      frameworkSubmitReady: true,
+    })).toBe(
+      `partial run of the selection sealed at lock ${runSha256}: 11 of 12 cells judged. ${CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE}`,
+    );
+    expect(exportCompletenessCertification({
+      runSha256,
+      completeness: { expected: 12, judged: 11, runOutcome: "partial" },
+      frameworkSubmitReady: true,
+    }).includes("\n")).toBe(false);
+    // "not complete" is the condition, not "partial": a cancelled outcome under a submit-ready
+    // verdict is the same divergence and reads the same explanation.
+    expect(exportCompletenessCertification({
+      runSha256,
+      completeness: { expected: 12, judged: 3, runOutcome: "cancelled" },
+      frameworkSubmitReady: true,
+    })).toBe(
+      `cancelled run of the selection sealed at lock ${runSha256}: 3 of 12 cells judged. ${CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE}`,
+    );
+  });
+
+  test("no divergence, no sentence: agreeing lines and an uncertified selection stay one bare line", () => {
+    // Agreement, submit-ready side: nothing to reconcile.
+    expect(exportCompletenessCertification({
+      runSha256,
+      completeness: { expected: 12, judged: 12, runOutcome: "complete" },
+      frameworkSubmitReady: true,
+    })).toBe(`complete run of the selection sealed at lock ${runSha256}: 12 of 12 cells judged.`);
+    // Agreement, not-ready side: the instructions already say this is not a submission.
+    expect(exportCompletenessCertification({
+      runSha256,
+      completeness: { expected: 12, judged: 11, runOutcome: "partial" },
+      frameworkSubmitReady: false,
+    })).toBe(`partial run of the selection sealed at lock ${runSha256}: 11 of 12 cells judged.`);
+    // Omitting the verdict is the not-ready case, so APEX-SWE-dev (never submit-ready) and any
+    // other caller that passes nothing keep their exact bytes.
+    expect(exportCompletenessCertification({
+      runSha256,
+      completeness: { expected: 12, judged: 11, runOutcome: "partial" },
+    })).toBe(`partial run of the selection sealed at lock ${runSha256}: 11 of 12 cells judged.`);
+    // No sealed Matrix quotes no runOutcome, so there is no divergence to explain even if the
+    // caller reports submit-ready.
+    expect(exportCompletenessCertification({ runSha256, frameworkSubmitReady: true })).toBe(
+      `no sealed Matrix: completeness of the selection sealed at lock ${runSha256} is not yet certified.`,
+    );
+  });
+
+  test("eligibility outputs match the origin/next characterization, even with completeness smuggled in", () => {
+    const cases: readonly {
+      readonly name: string;
+      readonly input: DeriveSuiteComparabilityInput;
+      readonly eligible: boolean;
+      readonly ready: boolean;
+    }[] = [
+      {
+        name: "tb2.1 quote-time eligible is not ready",
+        input: { coverage: "full", executionConformance: true, k: 5, selectedCount: 12, datasetCount: 12, atifPresent: true },
+        eligible: true,
+        ready: false,
+      },
+      {
+        name: "tb2.1 collected is ready",
+        input: {
+          coverage: "full", executionConformance: true, k: 5, selectedCount: 12, datasetCount: 12, atifPresent: true,
+          cellsAccounted: true, atifOnRetainedJob: true,
+        },
+        eligible: true,
+        ready: true,
+      },
+      {
+        name: "tb2.1 custom never ready",
+        input: {
+          coverage: "custom", executionConformance: true, k: 5, selectedCount: 3, datasetCount: 12, atifPresent: true,
+          cellsAccounted: true, atifOnRetainedJob: true,
+        },
+        eligible: false,
+        ready: false,
+      },
+      {
+        name: "tb3.0 collected is ready",
+        input: {
+          protocol: "terminal-bench-3.0", coverage: "full", executionConformance: true, k: 5, selectedCount: 12,
+          datasetCount: 12, atifPresent: true, cellsAccounted: true, atifOnRetainedJob: true,
+        },
+        eligible: true,
+        ready: true,
+      },
+      {
+        name: "swe-bench-verified needs harness reports",
+        input: {
+          protocol: "swe-bench-verified", coverage: "full", executionConformance: true, k: 1, selectedCount: 12,
+          datasetCount: 12, atifPresent: false, cellsAccounted: true,
+        },
+        eligible: true,
+        ready: false,
+      },
+      {
+        name: "swe-bench-verified collected is ready",
+        input: {
+          protocol: "swe-bench-verified", coverage: "full", executionConformance: true, k: 1, selectedCount: 12,
+          datasetCount: 12, atifPresent: false, cellsAccounted: true, harnessReportsPresent: true,
+        },
+        eligible: true,
+        ready: true,
+      },
+      {
+        name: "apex-agents collected is ready",
+        input: {
+          protocol: "apex-agents", coverage: "full", executionConformance: true, k: 1, selectedCount: 12,
+          datasetCount: 12, atifPresent: false, cellsAccounted: true, archipelagoGradesPresent: true,
+        },
+        eligible: true,
+        ready: true,
+      },
+      {
+        name: "apex-swe-dev is never method-eligible",
+        input: {
+          protocol: "apex-swe-dev", coverage: "full", executionConformance: true, k: 1, selectedCount: 50,
+          datasetCount: 50, atifPresent: false, cellsAccounted: true, harnessReportsPresent: true,
+        },
+        eligible: false,
+        ready: false,
+      },
+      {
+        name: "deep-swe collected is ready",
+        input: {
+          protocol: "deep-swe-v1.1", coverage: "full", executionConformance: true, k: 4, selectedCount: 12,
+          datasetCount: 12, atifPresent: true, cellsAccounted: true, atifOnRetainedJob: true, rewardOnRetainedJob: true,
+        },
+        eligible: true,
+        ready: true,
+      },
+      {
+        name: "inspect-eval collected is ready",
+        input: {
+          protocol: "inspect-eval", coverage: "full", executionConformance: true, k: 1, selectedCount: 12,
+          datasetCount: 12, atifPresent: false, cellsAccounted: true,
+        },
+        eligible: true,
+        ready: true,
+      },
+    ];
+    for (const c of cases) {
+      expect(methodLeaderboardEligible(c.input), c.name).toBe(c.eligible);
+      expect(deriveSuiteComparability(c.input).leaderboardSubmitReady, c.name).toBe(c.ready);
+      const smuggled = {
+        ...c.input,
+        completeness: { expected: 12, judged: 11, runOutcome: "partial" as const },
+        runOutcome: "partial" as const,
+        judged: 11,
+        frameworkSubmitReady: true,
+      };
+      expect(methodLeaderboardEligible(smuggled), `${c.name} smuggled`).toBe(c.eligible);
+      expect(deriveSuiteComparability(smuggled).leaderboardSubmitReady, `${c.name} smuggled`).toBe(c.ready);
+    }
+  });
+
+  test("eligibility, conformance, and mode-decision function bodies are byte-identical to origin/next", () => {
+    const suiteProtocolDir = dirname(fileURLToPath(import.meta.url));
+    const operationsDir = join(suiteProtocolDir, "../../operations");
+    const files: Readonly<Record<string, string>> = {
+      "comparability.ts": readFileSync(join(suiteProtocolDir, "comparability.ts"), "utf8"),
+      "hub-export.ts": readFileSync(join(operationsDir, "hub-export.ts"), "utf8"),
+      "inspect-view-export.ts": readFileSync(join(operationsDir, "inspect-view-export.ts"), "utf8"),
+      "apex-agents-export.ts": readFileSync(join(operationsDir, "apex-agents-export.ts"), "utf8"),
+      "apex-swe-export.ts": readFileSync(join(operationsDir, "apex-swe-export.ts"), "utf8"),
+      "deepswe-export.ts": readFileSync(join(operationsDir, "deepswe-export.ts"), "utf8"),
+      "swebench-export.ts": readFileSync(join(operationsDir, "swebench-export.ts"), "utf8"),
+    };
+    // SHA-256 of each `export function` body on origin/next (d7d14c1f4). exportCompletenessCertification
+    // is the one function this packet is allowed to change; it is deliberately absent.
+    const originNext = [
+      ["comparability.ts", "methodLeaderboardEligible", "e7b6ef1334df8c1237dc6d17893acbc07ae1d417317dd170d24564dbd65b5f0d"],
+      ["comparability.ts", "deriveSuiteComparability", "46ac518245a6e3e053f1bbcc21ecfe42b0de84b193759ffeb788956ca31995f2"],
+      ["comparability.ts", "suiteLeaderboardLimitation", "2fcd463df00885e356424e811d273c3a1000a6ca42020c74f8ac7baaea8ad86d"],
+      ["comparability.ts", "officialHarborExecutionConformance", "e1ea5f863dbe962be7bdb98432963b5d6f1447d66cadc5c633bfce1f9c324df6"],
+      ["comparability.ts", "officialPierExecutionConformance", "ac59ad9125a9037a321ec1181ab569d0f9cdb47aeebd9edd8f6af617f0793c7d"],
+      ["comparability.ts", "officialSwebenchHarnessConformance", "1f59fc1f40be033638c3e7f2fef3dc2976917f86a91977a808502c00dc54880b"],
+      ["comparability.ts", "officialArchipelagoConformance", "a85b096c19439ea8100536353e8fc05a97c32dac6259d1b5ad6b3a641ac84abd"],
+      ["comparability.ts", "officialApexSweDevConformance", "96d513f3e3c076ff3bf38201cfdb839d63ff42a4720fdb78d6a4a8429124240c"],
+      ["comparability.ts", "officialInspectEvalConformance", "28431986bcd47d33c218d663c6ad19a37b11f17a3873bd112f5aeca34798b665"],
+      ["hub-export.ts", "decideHarborHubExportMode", "6e665145a90dbdcd1d1994187286f434c7441c3033b2c476ed14671f7792276a"],
+      ["hub-export.ts", "harborHubExportInstructions", "71ef2f3df522ae12824434bcbf4664a148c69d0bad6c8214cc2c3a4a97855b15"],
+      ["inspect-view-export.ts", "decideInspectViewExportMode", "ffea3e4a13381b3d70852849024ea73ebfd93afcb2a65fcae923445530f466d8"],
+      ["inspect-view-export.ts", "inspectViewExportInstructions", "b7f9c9d97e6fd4c33e6a84258ad607c6e3acd451a5b2ce238f5e4da5f62e77c5"],
+      ["apex-agents-export.ts", "decideApexAgentsExportMode", "633cc0d280af5caff69e3f94268fba6a493003abfd2ae00ad05d85149ed9f85a"],
+      ["apex-agents-export.ts", "apexAgentsExportInstructions", "386dd56ee49d7b110c9e746196db79287616b7e8fd6bb68a4e04ca076662fe58"],
+      ["apex-swe-export.ts", "decideApexSweExportMode", "40e8f8e3ac357a143e22d2f7cbede8ac86acf22651d2ae3fab4b56a357eeadd4"],
+      ["apex-swe-export.ts", "apexSweExportInstructions", "96abfb4af2c797ee89d78eb0fa7092bad22387afb9f4007aaf6fbe31fa192ef4"],
+      ["deepswe-export.ts", "decideDeepSweExportMode", "0e6411e29ef67a7785c689fb7bf75e7d624466cec0d50d3b19d6a6d4b64dbd1a"],
+      ["deepswe-export.ts", "deepSweExportInstructions", "67bf27a6706789273949a48c89070a07c3b6e5a21fc86cf40107eba8c4db47cb"],
+      ["swebench-export.ts", "decideSwebenchPredictionsExportMode", "1ba169c84291aba9c37274849837cd0d3846301a82603ad5265a32e44d70cdeb"],
+      ["swebench-export.ts", "swebenchPredictionsExportInstructions", "e4ced1b22d3da919d68ee27c6d8239b598c8d68b796fbb0593c923e9f2d231dc"],
+    ] as const;
+    for (const [file, name, digest] of originNext) {
+      const source = files[file];
+      if (source === undefined) throw new Error(`missing fixture file ${file}`);
+      expect(sha256Hex(exportedFunctionSource(source, name)), `${file} ${name}`).toBe(digest);
+    }
+  });
+});
+
+function exportedFunctionSource(source: string, name: string): string {
+  const needle = `export function ${name}(`;
+  const start = source.indexOf(needle);
+  if (start < 0) throw new Error(`missing export function ${name}`);
+  let depth = 0;
+  const open = source.indexOf("{", start);
+  if (open < 0) throw new Error(`missing body for ${name}`);
+  for (let i = open; i < source.length; i += 1) {
+    const ch = source[i];
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error(`unclosed ${name}`);
+}
+
+function sha256Hex(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}

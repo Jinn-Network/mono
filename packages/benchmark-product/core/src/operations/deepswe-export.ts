@@ -8,6 +8,7 @@ import { HarborSelectionManifestSchema, PIER_ADAPTER_ID } from "../runtime/harbo
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import {
   DEEPSWE_CLOSED_SUBMIT_SENTENCE,
+  exportCompletenessCertification,
   type SuiteCoverage,
 } from "../runtime/suite-protocol/comparability.js";
 import { suiteComparabilityForArm, suiteSelectionFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
@@ -43,9 +44,10 @@ export function decideDeepSweExportMode(input: {
   return "inspection";
 }
 
-export function deepSweExportInstructions(mode: DeepSweExportMode, jobDir: string): string {
+export function deepSweExportInstructions(certification: string, mode: DeepSweExportMode, jobDir: string): string {
   if (mode === "ready") {
     return [
+      certification,
       "The locked DeepSWE v1.1 method produced a Pier job that can be emailed to Datacurve.",
       `Retain this job tree: ${jobDir}`,
       "Email serena@datacurve.ai with the derived Pier job package.",
@@ -53,6 +55,7 @@ export function deepSweExportInstructions(mode: DeepSweExportMode, jobDir: strin
     ].join("\n");
   }
   return [
+    certification,
     "This run matches DeepSWE v1.1 execution settings for the selected named slice, but it is not a leaderboard submission.",
     `You may retain the Pier job for inspection: ${jobDir}`,
     "Do not email this package as a Datacurve leaderboard submission; it is not leaderboard_submit_ready.",
@@ -93,11 +96,14 @@ export function exportDeepSwePackage(
         refuse("conflict", `runs.${input.draftId}.suiteQuote`, "suite-named DeepSWE export requires a DeepSWE v1.1 protocol selection");
       }
       const jobDir = join(harborArmJobsDir(context.workspaceDir, runState.runSha256), harborArmJobName(runState.runSha256, input.armId));
-      const assessed = runState.matrixSha256 === undefined
+      const matrix = runState.matrixSha256 === undefined
+        ? undefined
+        : parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256));
+      const assessed = matrix === undefined
         ? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false }
         : suiteComparabilityForArm({
           manifest,
-          matrix: parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256)),
+          matrix,
           armId: input.armId,
           jobDir,
         }) ?? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false };
@@ -118,7 +124,12 @@ export function exportDeepSwePackage(
       rmSync(exportDir, { recursive: true, force: true });
       mkdirSync(exportDir, { recursive: true });
       cpSync(jobDir, join(exportDir, "job"), { recursive: true });
-      const instructions = deepSweExportInstructions(mode, join(exportDir, "job"));
+      const certification = exportCompletenessCertification({
+        runSha256: runState.runSha256,
+        completeness: matrix?.completeness,
+        frameworkSubmitReady: mode === "ready",
+      });
+      const instructions = deepSweExportInstructions(certification, mode, join(exportDir, "job"));
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, jobDir, exportDir };
     },

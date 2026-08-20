@@ -27,6 +27,8 @@ jobs:
       - run: node --test .github/scripts/repository-gitlinks.test.mjs
       - name: Docs key guard
         run: node --test .github/scripts/docs-key-guard.test.mjs
+      - name: Demo-1 sealed pre-run artifacts
+        run: node --test .github/scripts/demo1-historical-artifacts.test.mjs
   identifier-origin:
     name: Identifier origin tripwire
     runs-on: ubuntu-latest
@@ -57,12 +59,28 @@ jobs:
           node --test \
             .github/scripts/evidence-package-inventory.test.mjs \
             .github/scripts/evidence-source-boundaries.test.mjs
+  workflow-selection:
+    name: Workflow selection shell
+    # This test executes the `changes` job scripts of four *other* workflows
+    # (DR-2026-08-18-b D3/D6), so it cannot sit behind any of their selection
+    # gates: an edit to one lane's script would then go unexercised on exactly the
+    # diffs that leave that lane unselected. This workflow runs on every event.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node --test .github/scripts/workflow-selection-shell.test.mjs
   repo-structure-gate:
     # The check-run name GitHub reports is this job's display `name:` below, and that
     # string is the required-status-check context registered on the `next` ruleset
     # (DR-2026-08-18-b D3) — keep them in sync.
     name: repo-structure-gate
-    needs: [gitlinks, identifier-origin, evidence-architecture]
+    needs: [gitlinks, identifier-origin, evidence-architecture, workflow-selection]
     if: always()
     runs-on: ubuntu-latest
     # Three `test`s against upstream results. The bound keeps a wedged runner from
@@ -74,7 +92,9 @@ jobs:
           GITLINKS_RESULT: ${{ needs.gitlinks.result }}
           IDENTIFIER_ORIGIN_RESULT: ${{ needs.identifier-origin.result }}
           EVIDENCE_ARCHITECTURE_RESULT: ${{ needs.evidence-architecture.result }}
+          WORKFLOW_SELECTION_RESULT: ${{ needs.workflow-selection.result }}
         run: |
           test "${GITLINKS_RESULT}" = success
           test "${IDENTIFIER_ORIGIN_RESULT}" = success
           test "${EVIDENCE_ARCHITECTURE_RESULT}" = success
+          test "${WORKFLOW_SELECTION_RESULT}" = success

@@ -82,6 +82,7 @@ describe("live campaign input compilation", () => {
     const common = {
       snapshotBytes: captured.bytes,
       splitManifestBytes: split.bytes,
+      affectedRoutes: [captured.snapshot.route],
       objectivePreset: "more-tasks-succeed@1" as const,
       baselineArm: "current",
       candidateArm: "challenger",
@@ -101,6 +102,7 @@ describe("live campaign input compilation", () => {
       candidateArm: common.candidateArm,
       replicates: common.replicates,
       candidatePayloadRisks: common.candidatePayloadRisks,
+      affectedRoutes: common.affectedRoutes,
     });
     writeFileSync(join(root, "authoring.json"), authoringBytes);
     const flagged = compilePrepareArguments([
@@ -112,6 +114,7 @@ describe("live campaign input compilation", () => {
       "--candidate-arm", common.candidateArm,
       "--replicates", String(common.replicates),
       "--payload-risk", "hook", "--payload-risk", "prompt", "--payload-risk", "hook",
+      "--affected-route", "nightly",
     ], root).sealed;
     const authored = compilePrepareArguments([
       "campaign", "prepare", "--document", "authoring.json",
@@ -143,6 +146,10 @@ describe("live campaign input compilation", () => {
     expect(direct.campaign.evidenceAccess.confirmationGroups).toHaveLength(7);
     expect(direct.campaign.evidenceAccess.challengerSource).toBe("selected-from-exploration");
     expect(direct.campaign.candidatePayloadRisks).toEqual(["hook", "prompt"]);
+    expect(direct.campaign.affectedRouteDeclaration).toEqual({
+      source: "operator-declared",
+      completeness: "not-independently-proven",
+    });
   });
 
   test("compiles a preselected challenger straight into fresh confirmation", () => {
@@ -161,6 +168,7 @@ describe("live campaign input compilation", () => {
       candidateArm: "operator-change",
       replicates: 1,
       candidatePayloadRisks: [],
+      affectedRoutes: [captured.snapshot.route],
     });
     expect(sealed.campaign.journey).toBe("confirm-only");
     expect(sealed.campaign.evidenceAccess.exploration).toEqual({

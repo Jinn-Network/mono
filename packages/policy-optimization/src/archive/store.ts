@@ -141,13 +141,21 @@ export function readArchiveProjection(layout: ArchiveLayout): ArchiveProjection 
 export function readAdoptionLog(layout: ArchiveLayout): AdoptionLog {
   const value = readJsonIfExists(layout.adoptionPath);
   if (value === undefined) return emptyAdoptionLog();
+  return parseAdoptionLog(value, layout.adoptionPath);
+}
+
+/** Validates a decoded adoption log so private hosts can supply no-follow bytes themselves. */
+export function parseAdoptionLog(value: unknown, path = "adoption log"): AdoptionLog {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    refuse("invalid-document", path, "adoption log must be an object");
+  }
   const log = value as AdoptionLog;
   if (log.formatToken !== ADOPTION_RECORD_FORMAT_TOKEN) {
-    refuse("invalid-document", layout.adoptionPath,
+    refuse("invalid-document", path,
       `formatToken must be ${ADOPTION_RECORD_FORMAT_TOKEN}`);
   }
   if (!Array.isArray(log.records)) {
-    refuse("invalid-document", layout.adoptionPath, "records must be an array");
+    refuse("invalid-document", path, "records must be an array");
   }
   return { ...log, nonDerivable: true, records: [...log.records] };
 }

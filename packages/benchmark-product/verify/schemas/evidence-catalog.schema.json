@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Describes evidence.json, format benchmark-product-evidence-catalog/2. Source of truth: BundleEvidenceCatalogSchema in @colophon-claims/verify src/schema.ts (an open object there, so unknown members are permitted here). Every listed sha256 names records/<sha256>.bin, whose exact bytes re-hash to that digest. The verifier additionally requires canonical JSON bytes, unique digests, unique roles per record, and exact two-way closure between declared roles and the roles derived from the evidence graph.",
+  "description": "Content-addressed record catalog of a benchmark-product public bundle (format benchmark-product-evidence-catalog/2).",
+  "type": "object",
+  "properties": {
+    "format": { "const": "benchmark-product-evidence-catalog/2" },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "roles": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "task",
+                "runtime-selection",
+                "evaluation-spec",
+                "admission-receipt",
+                "solve-submission",
+                "run-pinning-evidence",
+                "evaluation-submission",
+                "solve-delivery",
+                "solve-output",
+                "evaluation-task",
+                "evaluation-delivery",
+                "verdict",
+                "judge-instrument",
+                "analysis-context",
+                "label-resolution"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": ["sha256", "roles"]
+      }
+    }
+  },
+  "required": ["format", "records"]
+}

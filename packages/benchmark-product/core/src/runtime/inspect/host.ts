@@ -23,6 +23,10 @@ import {
   InspectEvalSelectionManifestSchema,
   type InspectEvalSelectionManifest,
 } from "../inspect-eval/manifest.js";
+import {
+  InspectBinaryJudgeSelectionManifestSchema,
+  type InspectBinaryJudgeSelectionManifest,
+} from "./binary-judge-manifest.js";
 import { inspectCatalogSnapshotSha256 } from "../inspect-eval/catalog.js";
 import { stripInspectTemplateSampleId } from "../inspect-eval/overlay.js";
 import {
@@ -239,6 +243,22 @@ export function readInspectEvalSelectionManifest(
   }
   const inspectEval = InspectEvalSelectionManifestSchema.safeParse(decoded);
   return inspectEval.success ? inspectEval.data : undefined;
+}
+
+/** Used only by the judge lane of Inspect View export (§8.2 rule 6). */
+export function readInspectBinaryJudgeSelectionManifest(
+  workspaceDir: string,
+  digest: string,
+): InspectBinaryJudgeSelectionManifest | undefined {
+  const bytes = getSealedBytes(workspaceDir, digest);
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(bytes));
+  } catch {
+    return refuse("record-integrity", "inspect.selection", "the sealed Inspect selection manifest is not valid UTF-8 JSON");
+  }
+  const judge = InspectBinaryJudgeSelectionManifestSchema.safeParse(decoded);
+  return judge.success ? judge.data : undefined;
 }
 
 /**

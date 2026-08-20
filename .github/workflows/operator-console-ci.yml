@@ -1,28 +1,120 @@
 name: Operator console CI
 
+# The workflow-level `paths:` filters this workflow used to carry moved into the
+# `changes` job below. A required merge-queue context must not sit behind a
+# workflow-level filter: a filtered-out workflow never reports on the merge group
+# at all, and the entry hangs until the check-response timeout ejects it. A
+# filtered-out *job* reports success, which is what the queue needs
+# (DR-2026-08-18-b D3/D6).
 on:
   pull_request:
-    paths:
-      - "apps/operator-console/**"
-      - "packages/lifecycle-notifications/**"
-      - ".github/workflows/operator-console-ci.yml"
-      - "docs/design/jinn-design-system/project/colors_and_type.css"
-      - "docs/design/jinn-design-system/project/foundations.css"
+  merge_group:
   push:
     branches: [next]
-    paths:
-      - "apps/operator-console/**"
-      - "packages/lifecycle-notifications/**"
-      - ".github/workflows/operator-console-ci.yml"
-      - "docs/design/jinn-design-system/project/colors_and_type.css"
-      - "docs/design/jinn-design-system/project/foundations.css"
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    # Four workflows run a `changes` job on every event. Without distinct display
+    # names GitHub reports four check runs all called `changes`, and neither a
+    # human nor the branch-protection audit can tell which lane a red one belongs
+    # to. The job *id* stays `changes`: the gate reaches it through `needs`.
+    name: console-ci-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          # The merge-base walk and the name-only diff below read the commit and
+          # tree graph and never a blob. Omitting blobs keeps `fetch-depth: 0`
+          # from cloning the full 200MiB pack four times over on every PR and
+          # every queue entry.
+          filter: blob:none
+      - name: Select the console lane from the diff
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "${EVENT_NAME}" in
+            pull_request)
+              diff_base="${PR_BASE_SHA}"
+              diff_head="${PR_HEAD_SHA}"
+              ;;
+            merge_group)
+              diff_base="${MG_BASE_SHA}"
+              diff_head="${MG_HEAD_SHA}"
+              ;;
+            push)
+              diff_base="${PUSH_BEFORE_SHA}"
+              diff_head="${PUSH_HEAD_SHA}"
+              ;;
+            *)
+              echo "${EVENT_NAME} carries no diff; selecting the console lane"
+              echo 'run=true' >> "${GITHUB_OUTPUT}"
+              exit 0
+              ;;
+          esac
+          # A branch creation sends all-zeros, and a force-push can send a base that
+          # is no longer reachable. Neither can be diffed, so select conservatively
+          # rather than failing a required context.
+          if [ -z "${diff_base}" ] \
+            || [ "${diff_base}" = '0000000000000000000000000000000000000000' ] \
+            || ! git cat-file -e "${diff_base}^{commit}" 2>/dev/null; then
+            echo "no usable diff base (${diff_base:-empty}); selecting the console lane"
+            echo 'run=true' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # `diff_head` needs no matching guard: on `merge_group` and `push` it is
+          # the commit this job checked out, and on `pull_request` it is a parent of
+          # the merge commit checked out, which `fetch-depth: 0` fetches in full. Were
+          # it ever unreachable the diff below fails the step under `set -e`, failing
+          # this job and reddening the gate — never a silent unselect.
+          # One extended regular expression per path this workflow used to filter on,
+          # translated faithfully from the deleted globs: `**` is a prefix match, and a
+          # literal path is anchored at both ends.
+          patterns=(
+            '^apps/operator-console/'
+            '^packages/lifecycle-notifications/'
+            '^\.github/workflows/operator-console-ci\.yml$'
+            '^docs/design/jinn-design-system/project/colors_and_type\.css$'
+            '^docs/design/jinn-design-system/project/foundations\.css$'
+          )
+          printf '%s\n' "${patterns[@]}" > "${RUNNER_TEMP}/selection.ere"
+          # The changed list goes to a file and grep reads the file. Piping it into
+          # `grep -q` is a trap: grep exits on its first match, and once the list
+          # outruns the 64KiB pipe buffer the still-writing producer takes SIGPIPE.
+          # Under `pipefail` that makes the pipeline non-zero, the `if` takes the else
+          # branch, and a genuinely matching diff selects run=false — every job skips
+          # and the gate reports green having run nothing.
+          # `core.quotePath=false` keeps a non-ASCII path unquoted and unescaped, so
+          # the `^`-anchored patterns see the real path.
+          git -c core.quotePath=false diff --no-renames --name-only "${diff_base}...${diff_head}" \
+            > "${RUNNER_TEMP}/changed.txt"
+          echo "changed files: $(wc -l < "${RUNNER_TEMP}/changed.txt")"
+          head -200 "${RUNNER_TEMP}/changed.txt"
+          if grep -qE -f "${RUNNER_TEMP}/selection.ere" "${RUNNER_TEMP}/changed.txt"; then
+            echo 'run=true' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'run=false' >> "${GITHUB_OUTPUT}"
+          fi
+
   console:
     name: Build and test
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -51,3 +143,41 @@ jobs:
         working-directory: apps/operator-console
       - run: yarn build
         working-directory: apps/operator-console
+
+  console-ci-gate:
+    # The check-run name GitHub reports is this job's display `name:` below, and that
+    # string is the required-status-check context registered on the `next` ruleset
+    # (DR-2026-08-18-b D3) — keep them in sync.
+    name: console-ci-gate
+    needs: [changes, console]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require exact success from the selected console job
+        env:
+          SELECTED: ${{ needs.changes.outputs.run }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          CONSOLE_RESULT: ${{ needs.console.result }}
+        run: |
+          set -euo pipefail
+          echo "selected=${SELECTED} changes=${CHANGES_RESULT} console=${CONSOLE_RESULT}"
+          test "${CHANGES_RESULT}" = success
+          # The selection is read from a job output, which is the empty string when the
+          # select step never wrote one. Empty must never be read as "unselected", or a
+          # broken selection step turns into a green gate over a whole skipped lane.
+          case "${SELECTED}" in
+            true|false) ;;
+            *)
+              echo "::error::unparseable selection output: '${SELECTED}'"
+              exit 1
+              ;;
+          esac
+          # When the console lane is selected the bar is unchanged: exact success. When
+          # it is not, the job must be exactly `skipped` — a failed or cancelled console
+          # job still fails this gate, so unselection can never launder a red.
+          expected=success
+          if [ "${SELECTED}" != true ]; then
+            expected=skipped
+          fi
+          test "${CONSOLE_RESULT}" = "${expected}"

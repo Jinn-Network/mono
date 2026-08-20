@@ -1,0 +1,148 @@
+{
+  "input": {
+    "payload": {
+      "itemId": "urn:uuid:11111111-1111-4111-8111-111111111111",
+      "question": "Café é or café? 👩🏽‍💻\r\n第二行",
+      "referenceAnswer": "Use decomposed é.\n",
+      "candidateAnswer": "",
+      "provenance": {
+        "sourceCommitment": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "timestamp": "2026-03-09T00:00:00Z"
+      },
+      "sources": [
+        {
+          "digest": {
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    },
+    "instrument": {
+      "protocol": "https://spec.jinn.network/binary-judgment/judge-instrument/v1",
+      "instrumentId": "unicode-lines",
+      "messages": [
+        {
+          "role": "developer",
+          "segments": [
+            {
+              "literal": "Judge exactly.\r\nQuestion:\n"
+            },
+            {
+              "field": "question"
+            },
+            {
+              "literal": "\nReference:\r\n"
+            },
+            {
+              "field": "referenceAnswer"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "segments": [
+            {
+              "literal": "Candidate:\n"
+            },
+            {
+              "field": "candidateAnswer"
+            },
+            {
+              "literal": "\r\nReturn ACCEPT or REJECT."
+            }
+          ]
+        }
+      ],
+      "promptTemplateSha256": "sha256:f139ffb8bbe063959a60493bab7e2067b17686f432192e250678de0f9a63733e",
+      "promptSource": {
+        "name": "prompt",
+        "uri": "https://example.test/prompt",
+        "digest": {
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "license": {
+        "name": "license",
+        "uri": "https://example.test/license",
+        "digest": {
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "attribution": {
+        "name": "attribution",
+        "uri": "https://example.test/attribution",
+        "digest": {
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "model": {
+        "adapter": "jinn-openai",
+        "requested": "gpt-5.6-luna",
+        "generation": {
+          "reasoningEffort": "low",
+          "maxOutputTokens": 128,
+          "store": false,
+          "background": false,
+          "stream": false,
+          "serviceTier": "default",
+          "tools": [],
+          "fallbackModels": [],
+          "retries": 0,
+          "persistedConversation": false,
+          "metadata": null,
+          "promptCacheIdentifier": null
+        }
+      },
+      "response": {
+        "mediaType": "text/plain; charset=utf-8",
+        "parser": {
+          "id": "network.jinn.parser.binary-accept-reject",
+          "version": "1.0.0",
+          "digest": "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073"
+        },
+        "invalidOutputDecision": "REJECT"
+      }
+    }
+  },
+  "expect": {
+    "renderedMessages": [
+      {
+        "role": "developer",
+        "text": "Judge exactly.\r\nQuestion:\nCafé é or café? 👩🏽‍💻\r\n第二行\nReference:\r\nUse decomposed é.\n"
+      },
+      {
+        "role": "user",
+        "text": "Candidate:\n\r\nReturn ACCEPT or REJECT."
+      }
+    ],
+    "semanticRequest": {
+      "model": "gpt-5.6-luna",
+      "messages": [
+        {
+          "role": "developer",
+          "text": "Judge exactly.\r\nQuestion:\nCafé é or café? 👩🏽‍💻\r\n第二行\nReference:\r\nUse decomposed é.\n"
+        },
+        {
+          "role": "user",
+          "text": "Candidate:\n\r\nReturn ACCEPT or REJECT."
+        }
+      ],
+      "generation": {
+        "reasoningEffort": "low",
+        "maxOutputTokens": 128,
+        "store": false,
+        "background": false,
+        "stream": false,
+        "serviceTier": "default",
+        "tools": [],
+        "fallbackModels": [],
+        "retries": 0,
+        "persistedConversation": false,
+        "metadata": null,
+        "promptCacheIdentifier": null
+      }
+    },
+    "canonicalBytesBase64": "eyJnZW5lcmF0aW9uIjp7ImJhY2tncm91bmQiOmZhbHNlLCJmYWxsYmFja01vZGVscyI6W10sIm1heE91dHB1dFRva2VucyI6MTI4LCJtZXRhZGF0YSI6bnVsbCwicGVyc2lzdGVkQ29udmVyc2F0aW9uIjpmYWxzZSwicHJvbXB0Q2FjaGVJZGVudGlmaWVyIjpudWxsLCJyZWFzb25pbmdFZmZvcnQiOiJsb3ciLCJyZXRyaWVzIjowLCJzZXJ2aWNlVGllciI6ImRlZmF1bHQiLCJzdG9yZSI6ZmFsc2UsInN0cmVhbSI6ZmFsc2UsInRvb2xzIjpbXX0sIm1lc3NhZ2VzIjpbeyJyb2xlIjoiZGV2ZWxvcGVyIiwidGV4dCI6Ikp1ZGdlIGV4YWN0bHkuXHJcblF1ZXN0aW9uOlxuQ2Fmw6kgZcyBIG9yIGNhZsOpPyDwn5Gp8J+PveKAjfCfkrtcclxu56ys5LqM6KGMXG5SZWZlcmVuY2U6XHJcblVzZSBkZWNvbXBvc2VkIGXMgS5cbiJ9LHsicm9sZSI6InVzZXIiLCJ0ZXh0IjoiQ2FuZGlkYXRlOlxuXHJcblJldHVybiBBQ0NFUFQgb3IgUkVKRUNULiJ9XSwibW9kZWwiOiJncHQtNS42LWx1bmEifQ==",
+    "semanticRequestSha256": "sha256:9655fa9e54a9e19b9c24d9ea43ee546bd0e57ff1f15474dc80c326b36c65865e"
+  }
+}

@@ -1,0 +1,36 @@
+#!/usr/bin/env node
+// Writes fixtures/manifest.sha256.json in the repo-wide fixture drift-guard
+// shape ({version, entries: [{id, sha256}], errata: []}, ids sorted, the
+// manifest itself excluded), matching .github/scripts/fixture-manifest.mjs.
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const fixturesRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
+// Machine-local junk (e.g. macOS .DS_Store) must never enter the pinned digest
+// set — it varies per machine and would freeze non-reproducible bytes.
+const IGNORED = new Set([".DS_Store", "manifest.sha256.json"]);
+const entries = [];
+const walk = (relative) => {
+  for (const entry of readdirSync(join(fixturesRoot, relative), { withFileTypes: true }).sort(
+    (left, right) => left.name.localeCompare(right.name),
+  )) {
+    if (IGNORED.has(entry.name)) continue;
+    const rel = relative === "" ? entry.name : `${relative}/${entry.name}`;
+    if (entry.isDirectory()) walk(rel);
+    else {
+      entries.push({
+        id: rel,
+        sha256: createHash("sha256").update(readFileSync(join(fixturesRoot, rel))).digest("hex"),
+      });
+    }
+  }
+};
+walk("");
+entries.sort((left, right) => (left.id < right.id ? -1 : 1));
+writeFileSync(
+  join(fixturesRoot, "manifest.sha256.json"),
+  `${JSON.stringify({ entries, errata: [], version: 1 }, null, 2)}\n`,
+);
+console.log(`wrote digest manifest for ${entries.length} fixture files`);

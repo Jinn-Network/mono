@@ -1,0 +1,2846 @@
+{
+  "schema": "jinn.demo1.arm-cells.v1",
+  "status": "REAL DEMO-1 ARM CELLS — pilot scale, not a locked official run",
+  "source": {
+    "benchmark": "skillsbench",
+    "release": "v1.1",
+    "commit": "b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af"
+  },
+  "model": "claude-haiku-4-5-20251001",
+  "agentLocation": "host",
+  "deviation": "The agent runs on the host, not inside the task image. Claude Code authenticates itself there, so no credential is handled or forwarded. The agent therefore works against the host interpreter rather than the task environment; grading always happens inside the pinned image.",
+  "cells": {
+    "bike-rebalance/A-native-skill/r0": {
+      "taskId": "bike-rebalance",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 261,
+      "skills": [
+        {
+          "folder": "geospatial-routing-data",
+          "bodySha256": "46560091aa56a7c81ba726dcedd7c0eeb9c6a9d90e3928205af44791f99360ec"
+        },
+        {
+          "folder": "logistics-rules-to-optimization",
+          "bodySha256": "9ae8184b82e05c99e35d184f8547c33f2e7147ace1c196a51b8f789bf3711875"
+        },
+        {
+          "folder": "routing-subtour-elimination",
+          "bodySha256": "083b105417355fa82c6c4ee01773e0f0e87686f9e945fd05ec3a5ccd8461b027"
+        },
+        {
+          "folder": "scip-opt",
+          "bodySha256": "0e7ceb8b87fe92b1e382600c511a40384bd7b52dfc090675e5662d8feefefd82"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "bike-rebalance/A-native-skill/r1": {
+      "taskId": "bike-rebalance",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 205,
+      "skills": [
+        {
+          "folder": "geospatial-routing-data",
+          "bodySha256": "46560091aa56a7c81ba726dcedd7c0eeb9c6a9d90e3928205af44791f99360ec"
+        },
+        {
+          "folder": "logistics-rules-to-optimization",
+          "bodySha256": "9ae8184b82e05c99e35d184f8547c33f2e7147ace1c196a51b8f789bf3711875"
+        },
+        {
+          "folder": "routing-subtour-elimination",
+          "bodySha256": "083b105417355fa82c6c4ee01773e0f0e87686f9e945fd05ec3a5ccd8461b027"
+        },
+        {
+          "folder": "scip-opt",
+          "bodySha256": "0e7ceb8b87fe92b1e382600c511a40384bd7b52dfc090675e5662d8feefefd82"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "bike-rebalance/A-native-skill/r2": {
+      "taskId": "bike-rebalance",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 280,
+      "skills": [
+        {
+          "folder": "geospatial-routing-data",
+          "bodySha256": "46560091aa56a7c81ba726dcedd7c0eeb9c6a9d90e3928205af44791f99360ec"
+        },
+        {
+          "folder": "logistics-rules-to-optimization",
+          "bodySha256": "9ae8184b82e05c99e35d184f8547c33f2e7147ace1c196a51b8f789bf3711875"
+        },
+        {
+          "folder": "routing-subtour-elimination",
+          "bodySha256": "083b105417355fa82c6c4ee01773e0f0e87686f9e945fd05ec3a5ccd8461b027"
+        },
+        {
+          "folder": "scip-opt",
+          "bodySha256": "0e7ceb8b87fe92b1e382600c511a40384bd7b52dfc090675e5662d8feefefd82"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "bike-rebalance/A-native-skill/r3": {
+      "taskId": "bike-rebalance",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 449,
+      "skills": [
+        {
+          "folder": "geospatial-routing-data",
+          "bodySha256": "46560091aa56a7c81ba726dcedd7c0eeb9c6a9d90e3928205af44791f99360ec"
+        },
+        {
+          "folder": "logistics-rules-to-optimization",
+          "bodySha256": "9ae8184b82e05c99e35d184f8547c33f2e7147ace1c196a51b8f789bf3711875"
+        },
+        {
+          "folder": "routing-subtour-elimination",
+          "bodySha256": "083b105417355fa82c6c4ee01773e0f0e87686f9e945fd05ec3a5ccd8461b027"
+        },
+        {
+          "folder": "scip-opt",
+          "bodySha256": "0e7ceb8b87fe92b1e382600c511a40384bd7b52dfc090675e5662d8feefefd82"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "bike-rebalance/A-native-skill/r4": {
+      "taskId": "bike-rebalance",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 205,
+      "skills": [
+        {
+          "folder": "geospatial-routing-data",
+          "bodySha256": "46560091aa56a7c81ba726dcedd7c0eeb9c6a9d90e3928205af44791f99360ec"
+        },
+        {
+          "folder": "logistics-rules-to-optimization",
+          "bodySha256": "9ae8184b82e05c99e35d184f8547c33f2e7147ace1c196a51b8f789bf3711875"
+        },
+        {
+          "folder": "routing-subtour-elimination",
+          "bodySha256": "083b105417355fa82c6c4ee01773e0f0e87686f9e945fd05ec3a5ccd8461b027"
+        },
+        {
+          "folder": "scip-opt",
+          "bodySha256": "0e7ceb8b87fe92b1e382600c511a40384bd7b52dfc090675e5662d8feefefd82"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "bike-rebalance/B-flat-claude-md/r0": {
+      "taskId": "bike-rebalance",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 378,
+      "skills": [
+        {
+          "folder": "geospatial-routing-data",
+          "bodySha256": "46560091aa56a7c81ba726dcedd7c0eeb9c6a9d90e3928205af44791f99360ec"
+        },
+        {
+          "folder": "logistics-rules-to-optimization",
+          "bodySha256": "9ae8184b82e05c99e35d184f8547c33f2e7147ace1c196a51b8f789bf3711875"
+        },
+        {
+          "folder": "routing-subtour-elimination",
+          "bodySha256": "083b105417355fa82c6c4ee01773e0f0e87686f9e945fd05ec3a5ccd8461b027"
+        },
+        {
+          "folder": "scip-opt",
+          "bodySha256": "0e7ceb8b87fe92b1e382600c511a40384bd7b52dfc090675e5662d8feefefd82"
+        }
+      ],
+      "claudeMdSha256": "9412c7a8b2acc6ae8c5514bebcf6da69c51cb049f0580f9ff3d60717f069acce",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "bike-rebalance/B-flat-claude-md/r1": {
+      "taskId": "bike-rebalance",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 207,
+      "skills": [
+        {
+          "folder": "geospatial-routing-data",
+          "bodySha256": "46560091aa56a7c81ba726dcedd7c0eeb9c6a9d90e3928205af44791f99360ec"
+        },
+        {
+          "folder": "logistics-rules-to-optimization",
+          "bodySha256": "9ae8184b82e05c99e35d184f8547c33f2e7147ace1c196a51b8f789bf3711875"
+        },
+        {
+          "folder": "routing-subtour-elimination",
+          "bodySha256": "083b105417355fa82c6c4ee01773e0f0e87686f9e945fd05ec3a5ccd8461b027"
+        },
+        {
+          "folder": "scip-opt",
+          "bodySha256": "0e7ceb8b87fe92b1e382600c511a40384bd7b52dfc090675e5662d8feefefd82"
+        }
+      ],
+      "claudeMdSha256": "9412c7a8b2acc6ae8c5514bebcf6da69c51cb049f0580f9ff3d60717f069acce",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "video-silence-remover/C-no-instructions/r0": {
+      "taskId": "video-silence-remover",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 237,
+      "skills": [
+        {
+          "folder": "audio-extractor",
+          "bodySha256": "19b5c814e60f3390bb00c5e4eadcd2116050fbea785989e49cbc0a09887689d4"
+        },
+        {
+          "folder": "energy-calculator",
+          "bodySha256": "0e104f9b7ef266e53a995f6f4a7f823ebf046dfb6556bccc5842ccf342cfb93e"
+        },
+        {
+          "folder": "pause-detector",
+          "bodySha256": "2468c59011085e2687c56600af6ddd567b54c681a83d2ed4c06fc16395d3e35f"
+        },
+        {
+          "folder": "report-generator",
+          "bodySha256": "ab47256ca651b0ea0556ec85caa7865efdfd0bc2251193ab42331d0a8437ea33"
+        },
+        {
+          "folder": "segment-combiner",
+          "bodySha256": "1378dd734fef41e1719d2194b2ef7b0251f9b665ebdd6f4e32a0158c3e0dbd5c"
+        },
+        {
+          "folder": "silence-detector",
+          "bodySha256": "f10c7a0643214f6fe04d52db23e3e07489a626ebfe2e10edf7f86c5d959cf050"
+        },
+        {
+          "folder": "video-processor",
+          "bodySha256": "dfbbdb9ebe799222263a9d2f12ac8fb0b77ebe86f531d3c05f9f23d94cfc3e40"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "bike-rebalance/B-flat-claude-md/r2": {
+      "taskId": "bike-rebalance",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 427,
+      "skills": [
+        {
+          "folder": "geospatial-routing-data",
+          "bodySha256": "46560091aa56a7c81ba726dcedd7c0eeb9c6a9d90e3928205af44791f99360ec"
+        },
+        {
+          "folder": "logistics-rules-to-optimization",
+          "bodySha256": "9ae8184b82e05c99e35d184f8547c33f2e7147ace1c196a51b8f789bf3711875"
+        },
+        {
+          "folder": "routing-subtour-elimination",
+          "bodySha256": "083b105417355fa82c6c4ee01773e0f0e87686f9e945fd05ec3a5ccd8461b027"
+        },
+        {
+          "folder": "scip-opt",
+          "bodySha256": "0e7ceb8b87fe92b1e382600c511a40384bd7b52dfc090675e5662d8feefefd82"
+        }
+      ],
+      "claudeMdSha256": "9412c7a8b2acc6ae8c5514bebcf6da69c51cb049f0580f9ff3d60717f069acce",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "bike-rebalance/B-flat-claude-md/r3": {
+      "taskId": "bike-rebalance",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 345,
+      "skills": [
+        {
+          "folder": "geospatial-routing-data",
+          "bodySha256": "46560091aa56a7c81ba726dcedd7c0eeb9c6a9d90e3928205af44791f99360ec"
+        },
+        {
+          "folder": "logistics-rules-to-optimization",
+          "bodySha256": "9ae8184b82e05c99e35d184f8547c33f2e7147ace1c196a51b8f789bf3711875"
+        },
+        {
+          "folder": "routing-subtour-elimination",
+          "bodySha256": "083b105417355fa82c6c4ee01773e0f0e87686f9e945fd05ec3a5ccd8461b027"
+        },
+        {
+          "folder": "scip-opt",
+          "bodySha256": "0e7ceb8b87fe92b1e382600c511a40384bd7b52dfc090675e5662d8feefefd82"
+        }
+      ],
+      "claudeMdSha256": "9412c7a8b2acc6ae8c5514bebcf6da69c51cb049f0580f9ff3d60717f069acce",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "bike-rebalance/B-flat-claude-md/r4": {
+      "taskId": "bike-rebalance",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 310,
+      "skills": [
+        {
+          "folder": "geospatial-routing-data",
+          "bodySha256": "46560091aa56a7c81ba726dcedd7c0eeb9c6a9d90e3928205af44791f99360ec"
+        },
+        {
+          "folder": "logistics-rules-to-optimization",
+          "bodySha256": "9ae8184b82e05c99e35d184f8547c33f2e7147ace1c196a51b8f789bf3711875"
+        },
+        {
+          "folder": "routing-subtour-elimination",
+          "bodySha256": "083b105417355fa82c6c4ee01773e0f0e87686f9e945fd05ec3a5ccd8461b027"
+        },
+        {
+          "folder": "scip-opt",
+          "bodySha256": "0e7ceb8b87fe92b1e382600c511a40384bd7b52dfc090675e5662d8feefefd82"
+        }
+      ],
+      "claudeMdSha256": "9412c7a8b2acc6ae8c5514bebcf6da69c51cb049f0580f9ff3d60717f069acce",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "bike-rebalance/C-no-instructions/r0": {
+      "taskId": "bike-rebalance",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 286,
+      "skills": [
+        {
+          "folder": "geospatial-routing-data",
+          "bodySha256": "46560091aa56a7c81ba726dcedd7c0eeb9c6a9d90e3928205af44791f99360ec"
+        },
+        {
+          "folder": "logistics-rules-to-optimization",
+          "bodySha256": "9ae8184b82e05c99e35d184f8547c33f2e7147ace1c196a51b8f789bf3711875"
+        },
+        {
+          "folder": "routing-subtour-elimination",
+          "bodySha256": "083b105417355fa82c6c4ee01773e0f0e87686f9e945fd05ec3a5ccd8461b027"
+        },
+        {
+          "folder": "scip-opt",
+          "bodySha256": "0e7ceb8b87fe92b1e382600c511a40384bd7b52dfc090675e5662d8feefefd82"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "bike-rebalance/C-no-instructions/r1": {
+      "taskId": "bike-rebalance",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 318,
+      "skills": [
+        {
+          "folder": "geospatial-routing-data",
+          "bodySha256": "46560091aa56a7c81ba726dcedd7c0eeb9c6a9d90e3928205af44791f99360ec"
+        },
+        {
+          "folder": "logistics-rules-to-optimization",
+          "bodySha256": "9ae8184b82e05c99e35d184f8547c33f2e7147ace1c196a51b8f789bf3711875"
+        },
+        {
+          "folder": "routing-subtour-elimination",
+          "bodySha256": "083b105417355fa82c6c4ee01773e0f0e87686f9e945fd05ec3a5ccd8461b027"
+        },
+        {
+          "folder": "scip-opt",
+          "bodySha256": "0e7ceb8b87fe92b1e382600c511a40384bd7b52dfc090675e5662d8feefefd82"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "energy-market-pricing/A-native-skill/r0": {
+      "taskId": "energy-market-pricing",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 611,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "locational-marginal-prices",
+          "bodySha256": "f23e62860d206684462de95c87558924557fa59635d9eb0c10c22833635331b7"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-market-pricing/A-native-skill/r1": {
+      "taskId": "energy-market-pricing",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 779,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "locational-marginal-prices",
+          "bodySha256": "f23e62860d206684462de95c87558924557fa59635d9eb0c10c22833635331b7"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-market-pricing/A-native-skill/r2": {
+      "taskId": "energy-market-pricing",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 547,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "locational-marginal-prices",
+          "bodySha256": "f23e62860d206684462de95c87558924557fa59635d9eb0c10c22833635331b7"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-market-pricing/A-native-skill/r4": {
+      "taskId": "energy-market-pricing",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 361,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "locational-marginal-prices",
+          "bodySha256": "f23e62860d206684462de95c87558924557fa59635d9eb0c10c22833635331b7"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-market-pricing/B-flat-claude-md/r0": {
+      "taskId": "energy-market-pricing",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 755,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "locational-marginal-prices",
+          "bodySha256": "f23e62860d206684462de95c87558924557fa59635d9eb0c10c22833635331b7"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "37400cb5bfb81cd345b543b29e0a7f28af7e501a0b616ea7a51702a388830f5e",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-market-pricing/B-flat-claude-md/r1": {
+      "taskId": "energy-market-pricing",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 866,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "locational-marginal-prices",
+          "bodySha256": "f23e62860d206684462de95c87558924557fa59635d9eb0c10c22833635331b7"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "37400cb5bfb81cd345b543b29e0a7f28af7e501a0b616ea7a51702a388830f5e",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-market-pricing/B-flat-claude-md/r2": {
+      "taskId": "energy-market-pricing",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 309,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "locational-marginal-prices",
+          "bodySha256": "f23e62860d206684462de95c87558924557fa59635d9eb0c10c22833635331b7"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "37400cb5bfb81cd345b543b29e0a7f28af7e501a0b616ea7a51702a388830f5e",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-market-pricing/B-flat-claude-md/r3": {
+      "taskId": "energy-market-pricing",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 822,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "locational-marginal-prices",
+          "bodySha256": "f23e62860d206684462de95c87558924557fa59635d9eb0c10c22833635331b7"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "37400cb5bfb81cd345b543b29e0a7f28af7e501a0b616ea7a51702a388830f5e",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-market-pricing/C-no-instructions/r0": {
+      "taskId": "energy-market-pricing",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 288,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "locational-marginal-prices",
+          "bodySha256": "f23e62860d206684462de95c87558924557fa59635d9eb0c10c22833635331b7"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-market-pricing/C-no-instructions/r1": {
+      "taskId": "energy-market-pricing",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 634,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "locational-marginal-prices",
+          "bodySha256": "f23e62860d206684462de95c87558924557fa59635d9eb0c10c22833635331b7"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "hvac-control/A-native-skill/r0": {
+      "taskId": "hvac-control",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 77,
+      "skills": [
+        {
+          "folder": "excitation-signal-design",
+          "bodySha256": "0a5b669b4ddfee9c40dfd3ea04f0ad7db2f4681745ccc51a73defa2f74149fc9"
+        },
+        {
+          "folder": "first-order-model-fitting",
+          "bodySha256": "decebf0e7fe7d6afcbf92ddc99c6499f232869e887269b1da2250063f2ff31dd"
+        },
+        {
+          "folder": "imc-tuning-rules",
+          "bodySha256": "642527e3dfaeafda3e116f52e7c6366f53851e2bfe07a3cdab8f8dd3bdc00b85"
+        },
+        {
+          "folder": "safety-interlocks",
+          "bodySha256": "cb9972812801274e0d46c30222960925eac3b665899e96bf745b543465f8cf5b"
+        },
+        {
+          "folder": "scipy-curve-fit",
+          "bodySha256": "c951406747f8c79c52d8caf0ba92a9bbf077bcde9aa5eda53eba9fedf7771033"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "hvac-control/A-native-skill/r1": {
+      "taskId": "hvac-control",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 125,
+      "skills": [
+        {
+          "folder": "excitation-signal-design",
+          "bodySha256": "0a5b669b4ddfee9c40dfd3ea04f0ad7db2f4681745ccc51a73defa2f74149fc9"
+        },
+        {
+          "folder": "first-order-model-fitting",
+          "bodySha256": "decebf0e7fe7d6afcbf92ddc99c6499f232869e887269b1da2250063f2ff31dd"
+        },
+        {
+          "folder": "imc-tuning-rules",
+          "bodySha256": "642527e3dfaeafda3e116f52e7c6366f53851e2bfe07a3cdab8f8dd3bdc00b85"
+        },
+        {
+          "folder": "safety-interlocks",
+          "bodySha256": "cb9972812801274e0d46c30222960925eac3b665899e96bf745b543465f8cf5b"
+        },
+        {
+          "folder": "scipy-curve-fit",
+          "bodySha256": "c951406747f8c79c52d8caf0ba92a9bbf077bcde9aa5eda53eba9fedf7771033"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "hvac-control/A-native-skill/r2": {
+      "taskId": "hvac-control",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 76,
+      "skills": [
+        {
+          "folder": "excitation-signal-design",
+          "bodySha256": "0a5b669b4ddfee9c40dfd3ea04f0ad7db2f4681745ccc51a73defa2f74149fc9"
+        },
+        {
+          "folder": "first-order-model-fitting",
+          "bodySha256": "decebf0e7fe7d6afcbf92ddc99c6499f232869e887269b1da2250063f2ff31dd"
+        },
+        {
+          "folder": "imc-tuning-rules",
+          "bodySha256": "642527e3dfaeafda3e116f52e7c6366f53851e2bfe07a3cdab8f8dd3bdc00b85"
+        },
+        {
+          "folder": "safety-interlocks",
+          "bodySha256": "cb9972812801274e0d46c30222960925eac3b665899e96bf745b543465f8cf5b"
+        },
+        {
+          "folder": "scipy-curve-fit",
+          "bodySha256": "c951406747f8c79c52d8caf0ba92a9bbf077bcde9aa5eda53eba9fedf7771033"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "hvac-control/A-native-skill/r3": {
+      "taskId": "hvac-control",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 74,
+      "skills": [
+        {
+          "folder": "excitation-signal-design",
+          "bodySha256": "0a5b669b4ddfee9c40dfd3ea04f0ad7db2f4681745ccc51a73defa2f74149fc9"
+        },
+        {
+          "folder": "first-order-model-fitting",
+          "bodySha256": "decebf0e7fe7d6afcbf92ddc99c6499f232869e887269b1da2250063f2ff31dd"
+        },
+        {
+          "folder": "imc-tuning-rules",
+          "bodySha256": "642527e3dfaeafda3e116f52e7c6366f53851e2bfe07a3cdab8f8dd3bdc00b85"
+        },
+        {
+          "folder": "safety-interlocks",
+          "bodySha256": "cb9972812801274e0d46c30222960925eac3b665899e96bf745b543465f8cf5b"
+        },
+        {
+          "folder": "scipy-curve-fit",
+          "bodySha256": "c951406747f8c79c52d8caf0ba92a9bbf077bcde9aa5eda53eba9fedf7771033"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "hvac-control/A-native-skill/r4": {
+      "taskId": "hvac-control",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 146,
+      "skills": [
+        {
+          "folder": "excitation-signal-design",
+          "bodySha256": "0a5b669b4ddfee9c40dfd3ea04f0ad7db2f4681745ccc51a73defa2f74149fc9"
+        },
+        {
+          "folder": "first-order-model-fitting",
+          "bodySha256": "decebf0e7fe7d6afcbf92ddc99c6499f232869e887269b1da2250063f2ff31dd"
+        },
+        {
+          "folder": "imc-tuning-rules",
+          "bodySha256": "642527e3dfaeafda3e116f52e7c6366f53851e2bfe07a3cdab8f8dd3bdc00b85"
+        },
+        {
+          "folder": "safety-interlocks",
+          "bodySha256": "cb9972812801274e0d46c30222960925eac3b665899e96bf745b543465f8cf5b"
+        },
+        {
+          "folder": "scipy-curve-fit",
+          "bodySha256": "c951406747f8c79c52d8caf0ba92a9bbf077bcde9aa5eda53eba9fedf7771033"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "hvac-control/B-flat-claude-md/r0": {
+      "taskId": "hvac-control",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 140,
+      "skills": [
+        {
+          "folder": "excitation-signal-design",
+          "bodySha256": "0a5b669b4ddfee9c40dfd3ea04f0ad7db2f4681745ccc51a73defa2f74149fc9"
+        },
+        {
+          "folder": "first-order-model-fitting",
+          "bodySha256": "decebf0e7fe7d6afcbf92ddc99c6499f232869e887269b1da2250063f2ff31dd"
+        },
+        {
+          "folder": "imc-tuning-rules",
+          "bodySha256": "642527e3dfaeafda3e116f52e7c6366f53851e2bfe07a3cdab8f8dd3bdc00b85"
+        },
+        {
+          "folder": "safety-interlocks",
+          "bodySha256": "cb9972812801274e0d46c30222960925eac3b665899e96bf745b543465f8cf5b"
+        },
+        {
+          "folder": "scipy-curve-fit",
+          "bodySha256": "c951406747f8c79c52d8caf0ba92a9bbf077bcde9aa5eda53eba9fedf7771033"
+        }
+      ],
+      "claudeMdSha256": "c87b0cfde5d580584cd2277072c73dabb44d0c20a1bc52a44049031b787f6985",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "hvac-control/B-flat-claude-md/r1": {
+      "taskId": "hvac-control",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 73,
+      "skills": [
+        {
+          "folder": "excitation-signal-design",
+          "bodySha256": "0a5b669b4ddfee9c40dfd3ea04f0ad7db2f4681745ccc51a73defa2f74149fc9"
+        },
+        {
+          "folder": "first-order-model-fitting",
+          "bodySha256": "decebf0e7fe7d6afcbf92ddc99c6499f232869e887269b1da2250063f2ff31dd"
+        },
+        {
+          "folder": "imc-tuning-rules",
+          "bodySha256": "642527e3dfaeafda3e116f52e7c6366f53851e2bfe07a3cdab8f8dd3bdc00b85"
+        },
+        {
+          "folder": "safety-interlocks",
+          "bodySha256": "cb9972812801274e0d46c30222960925eac3b665899e96bf745b543465f8cf5b"
+        },
+        {
+          "folder": "scipy-curve-fit",
+          "bodySha256": "c951406747f8c79c52d8caf0ba92a9bbf077bcde9aa5eda53eba9fedf7771033"
+        }
+      ],
+      "claudeMdSha256": "c87b0cfde5d580584cd2277072c73dabb44d0c20a1bc52a44049031b787f6985",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "hvac-control/B-flat-claude-md/r2": {
+      "taskId": "hvac-control",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 78,
+      "skills": [
+        {
+          "folder": "excitation-signal-design",
+          "bodySha256": "0a5b669b4ddfee9c40dfd3ea04f0ad7db2f4681745ccc51a73defa2f74149fc9"
+        },
+        {
+          "folder": "first-order-model-fitting",
+          "bodySha256": "decebf0e7fe7d6afcbf92ddc99c6499f232869e887269b1da2250063f2ff31dd"
+        },
+        {
+          "folder": "imc-tuning-rules",
+          "bodySha256": "642527e3dfaeafda3e116f52e7c6366f53851e2bfe07a3cdab8f8dd3bdc00b85"
+        },
+        {
+          "folder": "safety-interlocks",
+          "bodySha256": "cb9972812801274e0d46c30222960925eac3b665899e96bf745b543465f8cf5b"
+        },
+        {
+          "folder": "scipy-curve-fit",
+          "bodySha256": "c951406747f8c79c52d8caf0ba92a9bbf077bcde9aa5eda53eba9fedf7771033"
+        }
+      ],
+      "claudeMdSha256": "c87b0cfde5d580584cd2277072c73dabb44d0c20a1bc52a44049031b787f6985",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "hvac-control/B-flat-claude-md/r3": {
+      "taskId": "hvac-control",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 180,
+      "skills": [
+        {
+          "folder": "excitation-signal-design",
+          "bodySha256": "0a5b669b4ddfee9c40dfd3ea04f0ad7db2f4681745ccc51a73defa2f74149fc9"
+        },
+        {
+          "folder": "first-order-model-fitting",
+          "bodySha256": "decebf0e7fe7d6afcbf92ddc99c6499f232869e887269b1da2250063f2ff31dd"
+        },
+        {
+          "folder": "imc-tuning-rules",
+          "bodySha256": "642527e3dfaeafda3e116f52e7c6366f53851e2bfe07a3cdab8f8dd3bdc00b85"
+        },
+        {
+          "folder": "safety-interlocks",
+          "bodySha256": "cb9972812801274e0d46c30222960925eac3b665899e96bf745b543465f8cf5b"
+        },
+        {
+          "folder": "scipy-curve-fit",
+          "bodySha256": "c951406747f8c79c52d8caf0ba92a9bbf077bcde9aa5eda53eba9fedf7771033"
+        }
+      ],
+      "claudeMdSha256": "c87b0cfde5d580584cd2277072c73dabb44d0c20a1bc52a44049031b787f6985",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "hvac-control/B-flat-claude-md/r4": {
+      "taskId": "hvac-control",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 184,
+      "skills": [
+        {
+          "folder": "excitation-signal-design",
+          "bodySha256": "0a5b669b4ddfee9c40dfd3ea04f0ad7db2f4681745ccc51a73defa2f74149fc9"
+        },
+        {
+          "folder": "first-order-model-fitting",
+          "bodySha256": "decebf0e7fe7d6afcbf92ddc99c6499f232869e887269b1da2250063f2ff31dd"
+        },
+        {
+          "folder": "imc-tuning-rules",
+          "bodySha256": "642527e3dfaeafda3e116f52e7c6366f53851e2bfe07a3cdab8f8dd3bdc00b85"
+        },
+        {
+          "folder": "safety-interlocks",
+          "bodySha256": "cb9972812801274e0d46c30222960925eac3b665899e96bf745b543465f8cf5b"
+        },
+        {
+          "folder": "scipy-curve-fit",
+          "bodySha256": "c951406747f8c79c52d8caf0ba92a9bbf077bcde9aa5eda53eba9fedf7771033"
+        }
+      ],
+      "claudeMdSha256": "c87b0cfde5d580584cd2277072c73dabb44d0c20a1bc52a44049031b787f6985",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "hvac-control/C-no-instructions/r0": {
+      "taskId": "hvac-control",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 70,
+      "skills": [
+        {
+          "folder": "excitation-signal-design",
+          "bodySha256": "0a5b669b4ddfee9c40dfd3ea04f0ad7db2f4681745ccc51a73defa2f74149fc9"
+        },
+        {
+          "folder": "first-order-model-fitting",
+          "bodySha256": "decebf0e7fe7d6afcbf92ddc99c6499f232869e887269b1da2250063f2ff31dd"
+        },
+        {
+          "folder": "imc-tuning-rules",
+          "bodySha256": "642527e3dfaeafda3e116f52e7c6366f53851e2bfe07a3cdab8f8dd3bdc00b85"
+        },
+        {
+          "folder": "safety-interlocks",
+          "bodySha256": "cb9972812801274e0d46c30222960925eac3b665899e96bf745b543465f8cf5b"
+        },
+        {
+          "folder": "scipy-curve-fit",
+          "bodySha256": "c951406747f8c79c52d8caf0ba92a9bbf077bcde9aa5eda53eba9fedf7771033"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "hvac-control/C-no-instructions/r1": {
+      "taskId": "hvac-control",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 125,
+      "skills": [
+        {
+          "folder": "excitation-signal-design",
+          "bodySha256": "0a5b669b4ddfee9c40dfd3ea04f0ad7db2f4681745ccc51a73defa2f74149fc9"
+        },
+        {
+          "folder": "first-order-model-fitting",
+          "bodySha256": "decebf0e7fe7d6afcbf92ddc99c6499f232869e887269b1da2250063f2ff31dd"
+        },
+        {
+          "folder": "imc-tuning-rules",
+          "bodySha256": "642527e3dfaeafda3e116f52e7c6366f53851e2bfe07a3cdab8f8dd3bdc00b85"
+        },
+        {
+          "folder": "safety-interlocks",
+          "bodySha256": "cb9972812801274e0d46c30222960925eac3b665899e96bf745b543465f8cf5b"
+        },
+        {
+          "folder": "scipy-curve-fit",
+          "bodySha256": "c951406747f8c79c52d8caf0ba92a9bbf077bcde9aa5eda53eba9fedf7771033"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "manufacturing-fjsp-optimization/A-native-skill/r0": {
+      "taskId": "manufacturing-fjsp-optimization",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 291,
+      "skills": [
+        {
+          "folder": "fjsp-baseline-repair-with-downtime-and-policy",
+          "bodySha256": "1d607acb2fb00d8c7637b50e1a03bf63cbbb6c7a06ad34e4abc2e3b1a0ade007"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-fjsp-optimization/A-native-skill/r1": {
+      "taskId": "manufacturing-fjsp-optimization",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 235,
+      "skills": [
+        {
+          "folder": "fjsp-baseline-repair-with-downtime-and-policy",
+          "bodySha256": "1d607acb2fb00d8c7637b50e1a03bf63cbbb6c7a06ad34e4abc2e3b1a0ade007"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-fjsp-optimization/A-native-skill/r2": {
+      "taskId": "manufacturing-fjsp-optimization",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 334,
+      "skills": [
+        {
+          "folder": "fjsp-baseline-repair-with-downtime-and-policy",
+          "bodySha256": "1d607acb2fb00d8c7637b50e1a03bf63cbbb6c7a06ad34e4abc2e3b1a0ade007"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-fjsp-optimization/A-native-skill/r3": {
+      "taskId": "manufacturing-fjsp-optimization",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 258,
+      "skills": [
+        {
+          "folder": "fjsp-baseline-repair-with-downtime-and-policy",
+          "bodySha256": "1d607acb2fb00d8c7637b50e1a03bf63cbbb6c7a06ad34e4abc2e3b1a0ade007"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-fjsp-optimization/A-native-skill/r4": {
+      "taskId": "manufacturing-fjsp-optimization",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 236,
+      "skills": [
+        {
+          "folder": "fjsp-baseline-repair-with-downtime-and-policy",
+          "bodySha256": "1d607acb2fb00d8c7637b50e1a03bf63cbbb6c7a06ad34e4abc2e3b1a0ade007"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-fjsp-optimization/B-flat-claude-md/r0": {
+      "taskId": "manufacturing-fjsp-optimization",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 375,
+      "skills": [
+        {
+          "folder": "fjsp-baseline-repair-with-downtime-and-policy",
+          "bodySha256": "1d607acb2fb00d8c7637b50e1a03bf63cbbb6c7a06ad34e4abc2e3b1a0ade007"
+        }
+      ],
+      "claudeMdSha256": "0101ae10aa869ca2c7744792f754ef904915975b8428dd32c68702976975c892",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-fjsp-optimization/B-flat-claude-md/r1": {
+      "taskId": "manufacturing-fjsp-optimization",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 486,
+      "skills": [
+        {
+          "folder": "fjsp-baseline-repair-with-downtime-and-policy",
+          "bodySha256": "1d607acb2fb00d8c7637b50e1a03bf63cbbb6c7a06ad34e4abc2e3b1a0ade007"
+        }
+      ],
+      "claudeMdSha256": "0101ae10aa869ca2c7744792f754ef904915975b8428dd32c68702976975c892",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-fjsp-optimization/B-flat-claude-md/r2": {
+      "taskId": "manufacturing-fjsp-optimization",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 435,
+      "skills": [
+        {
+          "folder": "fjsp-baseline-repair-with-downtime-and-policy",
+          "bodySha256": "1d607acb2fb00d8c7637b50e1a03bf63cbbb6c7a06ad34e4abc2e3b1a0ade007"
+        }
+      ],
+      "claudeMdSha256": "0101ae10aa869ca2c7744792f754ef904915975b8428dd32c68702976975c892",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-fjsp-optimization/B-flat-claude-md/r3": {
+      "taskId": "manufacturing-fjsp-optimization",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 305,
+      "skills": [
+        {
+          "folder": "fjsp-baseline-repair-with-downtime-and-policy",
+          "bodySha256": "1d607acb2fb00d8c7637b50e1a03bf63cbbb6c7a06ad34e4abc2e3b1a0ade007"
+        }
+      ],
+      "claudeMdSha256": "0101ae10aa869ca2c7744792f754ef904915975b8428dd32c68702976975c892",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-fjsp-optimization/B-flat-claude-md/r4": {
+      "taskId": "manufacturing-fjsp-optimization",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 523,
+      "skills": [
+        {
+          "folder": "fjsp-baseline-repair-with-downtime-and-policy",
+          "bodySha256": "1d607acb2fb00d8c7637b50e1a03bf63cbbb6c7a06ad34e4abc2e3b1a0ade007"
+        }
+      ],
+      "claudeMdSha256": "0101ae10aa869ca2c7744792f754ef904915975b8428dd32c68702976975c892",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-fjsp-optimization/C-no-instructions/r0": {
+      "taskId": "manufacturing-fjsp-optimization",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 533,
+      "skills": [
+        {
+          "folder": "fjsp-baseline-repair-with-downtime-and-policy",
+          "bodySha256": "1d607acb2fb00d8c7637b50e1a03bf63cbbb6c7a06ad34e4abc2e3b1a0ade007"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-fjsp-optimization/C-no-instructions/r1": {
+      "taskId": "manufacturing-fjsp-optimization",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 256,
+      "skills": [
+        {
+          "folder": "fjsp-baseline-repair-with-downtime-and-policy",
+          "bodySha256": "1d607acb2fb00d8c7637b50e1a03bf63cbbb6c7a06ad34e4abc2e3b1a0ade007"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "pddl-airport-planning/A-native-skill/r0": {
+      "taskId": "pddl-airport-planning",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 168,
+      "skills": [
+        {
+          "folder": "pddl-skills",
+          "bodySha256": "96d10934f45ca3e03cd478416683b670bed15802ac39ef232e404ecfaaf67918"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "pddl-airport-planning/A-native-skill/r1": {
+      "taskId": "pddl-airport-planning",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 40,
+      "skills": [
+        {
+          "folder": "pddl-skills",
+          "bodySha256": "96d10934f45ca3e03cd478416683b670bed15802ac39ef232e404ecfaaf67918"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "pddl-airport-planning/A-native-skill/r2": {
+      "taskId": "pddl-airport-planning",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 42,
+      "skills": [
+        {
+          "folder": "pddl-skills",
+          "bodySha256": "96d10934f45ca3e03cd478416683b670bed15802ac39ef232e404ecfaaf67918"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "pddl-airport-planning/A-native-skill/r3": {
+      "taskId": "pddl-airport-planning",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 66,
+      "skills": [
+        {
+          "folder": "pddl-skills",
+          "bodySha256": "96d10934f45ca3e03cd478416683b670bed15802ac39ef232e404ecfaaf67918"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "pddl-airport-planning/A-native-skill/r4": {
+      "taskId": "pddl-airport-planning",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 104,
+      "skills": [
+        {
+          "folder": "pddl-skills",
+          "bodySha256": "96d10934f45ca3e03cd478416683b670bed15802ac39ef232e404ecfaaf67918"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "pddl-airport-planning/B-flat-claude-md/r0": {
+      "taskId": "pddl-airport-planning",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 107,
+      "skills": [
+        {
+          "folder": "pddl-skills",
+          "bodySha256": "96d10934f45ca3e03cd478416683b670bed15802ac39ef232e404ecfaaf67918"
+        }
+      ],
+      "claudeMdSha256": "905f722b9bb420de6b8e41c069b2a01b241aa1fb8aa83d7ff3ab7c2272838cb8",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "pddl-airport-planning/B-flat-claude-md/r1": {
+      "taskId": "pddl-airport-planning",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 115,
+      "skills": [
+        {
+          "folder": "pddl-skills",
+          "bodySha256": "96d10934f45ca3e03cd478416683b670bed15802ac39ef232e404ecfaaf67918"
+        }
+      ],
+      "claudeMdSha256": "905f722b9bb420de6b8e41c069b2a01b241aa1fb8aa83d7ff3ab7c2272838cb8",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "pddl-airport-planning/B-flat-claude-md/r2": {
+      "taskId": "pddl-airport-planning",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 60,
+      "skills": [
+        {
+          "folder": "pddl-skills",
+          "bodySha256": "96d10934f45ca3e03cd478416683b670bed15802ac39ef232e404ecfaaf67918"
+        }
+      ],
+      "claudeMdSha256": "905f722b9bb420de6b8e41c069b2a01b241aa1fb8aa83d7ff3ab7c2272838cb8",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "pddl-airport-planning/B-flat-claude-md/r3": {
+      "taskId": "pddl-airport-planning",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 47,
+      "skills": [
+        {
+          "folder": "pddl-skills",
+          "bodySha256": "96d10934f45ca3e03cd478416683b670bed15802ac39ef232e404ecfaaf67918"
+        }
+      ],
+      "claudeMdSha256": "905f722b9bb420de6b8e41c069b2a01b241aa1fb8aa83d7ff3ab7c2272838cb8",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "pddl-airport-planning/B-flat-claude-md/r4": {
+      "taskId": "pddl-airport-planning",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 43,
+      "skills": [
+        {
+          "folder": "pddl-skills",
+          "bodySha256": "96d10934f45ca3e03cd478416683b670bed15802ac39ef232e404ecfaaf67918"
+        }
+      ],
+      "claudeMdSha256": "905f722b9bb420de6b8e41c069b2a01b241aa1fb8aa83d7ff3ab7c2272838cb8",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "pddl-airport-planning/C-no-instructions/r0": {
+      "taskId": "pddl-airport-planning",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 193,
+      "skills": [
+        {
+          "folder": "pddl-skills",
+          "bodySha256": "96d10934f45ca3e03cd478416683b670bed15802ac39ef232e404ecfaaf67918"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "pddl-airport-planning/C-no-instructions/r1": {
+      "taskId": "pddl-airport-planning",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 168,
+      "skills": [
+        {
+          "folder": "pddl-skills",
+          "bodySha256": "96d10934f45ca3e03cd478416683b670bed15802ac39ef232e404ecfaaf67918"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "suricata-custom-exfil/A-native-skill/r0": {
+      "taskId": "suricata-custom-exfil",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 168,
+      "skills": [
+        {
+          "folder": "pcap-triage-tshark",
+          "bodySha256": "8b8022da6eec91bfaa12053a44853cce3336fe6ac1240234358808ff9f5afaa9"
+        },
+        {
+          "folder": "suricata-offline-evejson",
+          "bodySha256": "21dfe63eb8b1e28ce4bcbd2922ee3bd4a0fd3cfe1adb2602f480bd7c9664ce8d"
+        },
+        {
+          "folder": "suricata-rules-basics",
+          "bodySha256": "e1b3e13944c99d7bde3fad3d269d382a317b47fd3b257e7b235a7550b5e4ac42"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+    },
+    "suricata-custom-exfil/A-native-skill/r1": {
+      "taskId": "suricata-custom-exfil",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 169,
+      "skills": [
+        {
+          "folder": "pcap-triage-tshark",
+          "bodySha256": "8b8022da6eec91bfaa12053a44853cce3336fe6ac1240234358808ff9f5afaa9"
+        },
+        {
+          "folder": "suricata-offline-evejson",
+          "bodySha256": "21dfe63eb8b1e28ce4bcbd2922ee3bd4a0fd3cfe1adb2602f480bd7c9664ce8d"
+        },
+        {
+          "folder": "suricata-rules-basics",
+          "bodySha256": "e1b3e13944c99d7bde3fad3d269d382a317b47fd3b257e7b235a7550b5e4ac42"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+    },
+    "suricata-custom-exfil/A-native-skill/r2": {
+      "taskId": "suricata-custom-exfil",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 90,
+      "skills": [
+        {
+          "folder": "pcap-triage-tshark",
+          "bodySha256": "8b8022da6eec91bfaa12053a44853cce3336fe6ac1240234358808ff9f5afaa9"
+        },
+        {
+          "folder": "suricata-offline-evejson",
+          "bodySha256": "21dfe63eb8b1e28ce4bcbd2922ee3bd4a0fd3cfe1adb2602f480bd7c9664ce8d"
+        },
+        {
+          "folder": "suricata-rules-basics",
+          "bodySha256": "e1b3e13944c99d7bde3fad3d269d382a317b47fd3b257e7b235a7550b5e4ac42"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+    },
+    "suricata-custom-exfil/A-native-skill/r3": {
+      "taskId": "suricata-custom-exfil",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 365,
+      "skills": [
+        {
+          "folder": "pcap-triage-tshark",
+          "bodySha256": "8b8022da6eec91bfaa12053a44853cce3336fe6ac1240234358808ff9f5afaa9"
+        },
+        {
+          "folder": "suricata-offline-evejson",
+          "bodySha256": "21dfe63eb8b1e28ce4bcbd2922ee3bd4a0fd3cfe1adb2602f480bd7c9664ce8d"
+        },
+        {
+          "folder": "suricata-rules-basics",
+          "bodySha256": "e1b3e13944c99d7bde3fad3d269d382a317b47fd3b257e7b235a7550b5e4ac42"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+    },
+    "suricata-custom-exfil/A-native-skill/r4": {
+      "taskId": "suricata-custom-exfil",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 141,
+      "skills": [
+        {
+          "folder": "pcap-triage-tshark",
+          "bodySha256": "8b8022da6eec91bfaa12053a44853cce3336fe6ac1240234358808ff9f5afaa9"
+        },
+        {
+          "folder": "suricata-offline-evejson",
+          "bodySha256": "21dfe63eb8b1e28ce4bcbd2922ee3bd4a0fd3cfe1adb2602f480bd7c9664ce8d"
+        },
+        {
+          "folder": "suricata-rules-basics",
+          "bodySha256": "e1b3e13944c99d7bde3fad3d269d382a317b47fd3b257e7b235a7550b5e4ac42"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+    },
+    "suricata-custom-exfil/B-flat-claude-md/r0": {
+      "taskId": "suricata-custom-exfil",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 163,
+      "skills": [
+        {
+          "folder": "pcap-triage-tshark",
+          "bodySha256": "8b8022da6eec91bfaa12053a44853cce3336fe6ac1240234358808ff9f5afaa9"
+        },
+        {
+          "folder": "suricata-offline-evejson",
+          "bodySha256": "21dfe63eb8b1e28ce4bcbd2922ee3bd4a0fd3cfe1adb2602f480bd7c9664ce8d"
+        },
+        {
+          "folder": "suricata-rules-basics",
+          "bodySha256": "e1b3e13944c99d7bde3fad3d269d382a317b47fd3b257e7b235a7550b5e4ac42"
+        }
+      ],
+      "claudeMdSha256": "98e2254d6e28100b79da90c6c789f92a8a545e69b7a5baac86a01e0f1511f1f8",
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+    },
+    "suricata-custom-exfil/B-flat-claude-md/r1": {
+      "taskId": "suricata-custom-exfil",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 296,
+      "skills": [
+        {
+          "folder": "pcap-triage-tshark",
+          "bodySha256": "8b8022da6eec91bfaa12053a44853cce3336fe6ac1240234358808ff9f5afaa9"
+        },
+        {
+          "folder": "suricata-offline-evejson",
+          "bodySha256": "21dfe63eb8b1e28ce4bcbd2922ee3bd4a0fd3cfe1adb2602f480bd7c9664ce8d"
+        },
+        {
+          "folder": "suricata-rules-basics",
+          "bodySha256": "e1b3e13944c99d7bde3fad3d269d382a317b47fd3b257e7b235a7550b5e4ac42"
+        }
+      ],
+      "claudeMdSha256": "98e2254d6e28100b79da90c6c789f92a8a545e69b7a5baac86a01e0f1511f1f8",
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+    },
+    "suricata-custom-exfil/B-flat-claude-md/r2": {
+      "taskId": "suricata-custom-exfil",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 141,
+      "skills": [
+        {
+          "folder": "pcap-triage-tshark",
+          "bodySha256": "8b8022da6eec91bfaa12053a44853cce3336fe6ac1240234358808ff9f5afaa9"
+        },
+        {
+          "folder": "suricata-offline-evejson",
+          "bodySha256": "21dfe63eb8b1e28ce4bcbd2922ee3bd4a0fd3cfe1adb2602f480bd7c9664ce8d"
+        },
+        {
+          "folder": "suricata-rules-basics",
+          "bodySha256": "e1b3e13944c99d7bde3fad3d269d382a317b47fd3b257e7b235a7550b5e4ac42"
+        }
+      ],
+      "claudeMdSha256": "98e2254d6e28100b79da90c6c789f92a8a545e69b7a5baac86a01e0f1511f1f8",
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+    },
+    "suricata-custom-exfil/B-flat-claude-md/r3": {
+      "taskId": "suricata-custom-exfil",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 174,
+      "skills": [
+        {
+          "folder": "pcap-triage-tshark",
+          "bodySha256": "8b8022da6eec91bfaa12053a44853cce3336fe6ac1240234358808ff9f5afaa9"
+        },
+        {
+          "folder": "suricata-offline-evejson",
+          "bodySha256": "21dfe63eb8b1e28ce4bcbd2922ee3bd4a0fd3cfe1adb2602f480bd7c9664ce8d"
+        },
+        {
+          "folder": "suricata-rules-basics",
+          "bodySha256": "e1b3e13944c99d7bde3fad3d269d382a317b47fd3b257e7b235a7550b5e4ac42"
+        }
+      ],
+      "claudeMdSha256": "98e2254d6e28100b79da90c6c789f92a8a545e69b7a5baac86a01e0f1511f1f8",
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+    },
+    "suricata-custom-exfil/B-flat-claude-md/r4": {
+      "taskId": "suricata-custom-exfil",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 392,
+      "skills": [
+        {
+          "folder": "pcap-triage-tshark",
+          "bodySha256": "8b8022da6eec91bfaa12053a44853cce3336fe6ac1240234358808ff9f5afaa9"
+        },
+        {
+          "folder": "suricata-offline-evejson",
+          "bodySha256": "21dfe63eb8b1e28ce4bcbd2922ee3bd4a0fd3cfe1adb2602f480bd7c9664ce8d"
+        },
+        {
+          "folder": "suricata-rules-basics",
+          "bodySha256": "e1b3e13944c99d7bde3fad3d269d382a317b47fd3b257e7b235a7550b5e4ac42"
+        }
+      ],
+      "claudeMdSha256": "98e2254d6e28100b79da90c6c789f92a8a545e69b7a5baac86a01e0f1511f1f8",
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+    },
+    "suricata-custom-exfil/C-no-instructions/r0": {
+      "taskId": "suricata-custom-exfil",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 362,
+      "skills": [
+        {
+          "folder": "pcap-triage-tshark",
+          "bodySha256": "8b8022da6eec91bfaa12053a44853cce3336fe6ac1240234358808ff9f5afaa9"
+        },
+        {
+          "folder": "suricata-offline-evejson",
+          "bodySha256": "21dfe63eb8b1e28ce4bcbd2922ee3bd4a0fd3cfe1adb2602f480bd7c9664ce8d"
+        },
+        {
+          "folder": "suricata-rules-basics",
+          "bodySha256": "e1b3e13944c99d7bde3fad3d269d382a317b47fd3b257e7b235a7550b5e4ac42"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+    },
+    "suricata-custom-exfil/C-no-instructions/r1": {
+      "taskId": "suricata-custom-exfil",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 143,
+      "skills": [
+        {
+          "folder": "pcap-triage-tshark",
+          "bodySha256": "8b8022da6eec91bfaa12053a44853cce3336fe6ac1240234358808ff9f5afaa9"
+        },
+        {
+          "folder": "suricata-offline-evejson",
+          "bodySha256": "21dfe63eb8b1e28ce4bcbd2922ee3bd4a0fd3cfe1adb2602f480bd7c9664ce8d"
+        },
+        {
+          "folder": "suricata-rules-basics",
+          "bodySha256": "e1b3e13944c99d7bde3fad3d269d382a317b47fd3b257e7b235a7550b5e4ac42"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "jasonish/suricata@sha256:73cf099d6299f75dda2d9d6edcfb8238b7a7322566d6189a69d46442a366b7fa"
+    },
+    "video-silence-remover/A-native-skill/r0": {
+      "taskId": "video-silence-remover",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 281,
+      "skills": [
+        {
+          "folder": "audio-extractor",
+          "bodySha256": "19b5c814e60f3390bb00c5e4eadcd2116050fbea785989e49cbc0a09887689d4"
+        },
+        {
+          "folder": "energy-calculator",
+          "bodySha256": "0e104f9b7ef266e53a995f6f4a7f823ebf046dfb6556bccc5842ccf342cfb93e"
+        },
+        {
+          "folder": "pause-detector",
+          "bodySha256": "2468c59011085e2687c56600af6ddd567b54c681a83d2ed4c06fc16395d3e35f"
+        },
+        {
+          "folder": "report-generator",
+          "bodySha256": "ab47256ca651b0ea0556ec85caa7865efdfd0bc2251193ab42331d0a8437ea33"
+        },
+        {
+          "folder": "segment-combiner",
+          "bodySha256": "1378dd734fef41e1719d2194b2ef7b0251f9b665ebdd6f4e32a0158c3e0dbd5c"
+        },
+        {
+          "folder": "silence-detector",
+          "bodySha256": "f10c7a0643214f6fe04d52db23e3e07489a626ebfe2e10edf7f86c5d959cf050"
+        },
+        {
+          "folder": "video-processor",
+          "bodySha256": "dfbbdb9ebe799222263a9d2f12ac8fb0b77ebe86f531d3c05f9f23d94cfc3e40"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "video-silence-remover/A-native-skill/r1": {
+      "taskId": "video-silence-remover",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 217,
+      "skills": [
+        {
+          "folder": "audio-extractor",
+          "bodySha256": "19b5c814e60f3390bb00c5e4eadcd2116050fbea785989e49cbc0a09887689d4"
+        },
+        {
+          "folder": "energy-calculator",
+          "bodySha256": "0e104f9b7ef266e53a995f6f4a7f823ebf046dfb6556bccc5842ccf342cfb93e"
+        },
+        {
+          "folder": "pause-detector",
+          "bodySha256": "2468c59011085e2687c56600af6ddd567b54c681a83d2ed4c06fc16395d3e35f"
+        },
+        {
+          "folder": "report-generator",
+          "bodySha256": "ab47256ca651b0ea0556ec85caa7865efdfd0bc2251193ab42331d0a8437ea33"
+        },
+        {
+          "folder": "segment-combiner",
+          "bodySha256": "1378dd734fef41e1719d2194b2ef7b0251f9b665ebdd6f4e32a0158c3e0dbd5c"
+        },
+        {
+          "folder": "silence-detector",
+          "bodySha256": "f10c7a0643214f6fe04d52db23e3e07489a626ebfe2e10edf7f86c5d959cf050"
+        },
+        {
+          "folder": "video-processor",
+          "bodySha256": "dfbbdb9ebe799222263a9d2f12ac8fb0b77ebe86f531d3c05f9f23d94cfc3e40"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "video-silence-remover/A-native-skill/r2": {
+      "taskId": "video-silence-remover",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 264,
+      "skills": [
+        {
+          "folder": "audio-extractor",
+          "bodySha256": "19b5c814e60f3390bb00c5e4eadcd2116050fbea785989e49cbc0a09887689d4"
+        },
+        {
+          "folder": "energy-calculator",
+          "bodySha256": "0e104f9b7ef266e53a995f6f4a7f823ebf046dfb6556bccc5842ccf342cfb93e"
+        },
+        {
+          "folder": "pause-detector",
+          "bodySha256": "2468c59011085e2687c56600af6ddd567b54c681a83d2ed4c06fc16395d3e35f"
+        },
+        {
+          "folder": "report-generator",
+          "bodySha256": "ab47256ca651b0ea0556ec85caa7865efdfd0bc2251193ab42331d0a8437ea33"
+        },
+        {
+          "folder": "segment-combiner",
+          "bodySha256": "1378dd734fef41e1719d2194b2ef7b0251f9b665ebdd6f4e32a0158c3e0dbd5c"
+        },
+        {
+          "folder": "silence-detector",
+          "bodySha256": "f10c7a0643214f6fe04d52db23e3e07489a626ebfe2e10edf7f86c5d959cf050"
+        },
+        {
+          "folder": "video-processor",
+          "bodySha256": "dfbbdb9ebe799222263a9d2f12ac8fb0b77ebe86f531d3c05f9f23d94cfc3e40"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "video-silence-remover/A-native-skill/r3": {
+      "taskId": "video-silence-remover",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 381,
+      "skills": [
+        {
+          "folder": "audio-extractor",
+          "bodySha256": "19b5c814e60f3390bb00c5e4eadcd2116050fbea785989e49cbc0a09887689d4"
+        },
+        {
+          "folder": "energy-calculator",
+          "bodySha256": "0e104f9b7ef266e53a995f6f4a7f823ebf046dfb6556bccc5842ccf342cfb93e"
+        },
+        {
+          "folder": "pause-detector",
+          "bodySha256": "2468c59011085e2687c56600af6ddd567b54c681a83d2ed4c06fc16395d3e35f"
+        },
+        {
+          "folder": "report-generator",
+          "bodySha256": "ab47256ca651b0ea0556ec85caa7865efdfd0bc2251193ab42331d0a8437ea33"
+        },
+        {
+          "folder": "segment-combiner",
+          "bodySha256": "1378dd734fef41e1719d2194b2ef7b0251f9b665ebdd6f4e32a0158c3e0dbd5c"
+        },
+        {
+          "folder": "silence-detector",
+          "bodySha256": "f10c7a0643214f6fe04d52db23e3e07489a626ebfe2e10edf7f86c5d959cf050"
+        },
+        {
+          "folder": "video-processor",
+          "bodySha256": "dfbbdb9ebe799222263a9d2f12ac8fb0b77ebe86f531d3c05f9f23d94cfc3e40"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "video-silence-remover/A-native-skill/r4": {
+      "taskId": "video-silence-remover",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 252,
+      "skills": [
+        {
+          "folder": "audio-extractor",
+          "bodySha256": "19b5c814e60f3390bb00c5e4eadcd2116050fbea785989e49cbc0a09887689d4"
+        },
+        {
+          "folder": "energy-calculator",
+          "bodySha256": "0e104f9b7ef266e53a995f6f4a7f823ebf046dfb6556bccc5842ccf342cfb93e"
+        },
+        {
+          "folder": "pause-detector",
+          "bodySha256": "2468c59011085e2687c56600af6ddd567b54c681a83d2ed4c06fc16395d3e35f"
+        },
+        {
+          "folder": "report-generator",
+          "bodySha256": "ab47256ca651b0ea0556ec85caa7865efdfd0bc2251193ab42331d0a8437ea33"
+        },
+        {
+          "folder": "segment-combiner",
+          "bodySha256": "1378dd734fef41e1719d2194b2ef7b0251f9b665ebdd6f4e32a0158c3e0dbd5c"
+        },
+        {
+          "folder": "silence-detector",
+          "bodySha256": "f10c7a0643214f6fe04d52db23e3e07489a626ebfe2e10edf7f86c5d959cf050"
+        },
+        {
+          "folder": "video-processor",
+          "bodySha256": "dfbbdb9ebe799222263a9d2f12ac8fb0b77ebe86f531d3c05f9f23d94cfc3e40"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "video-silence-remover/B-flat-claude-md/r0": {
+      "taskId": "video-silence-remover",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 437,
+      "skills": [
+        {
+          "folder": "audio-extractor",
+          "bodySha256": "19b5c814e60f3390bb00c5e4eadcd2116050fbea785989e49cbc0a09887689d4"
+        },
+        {
+          "folder": "energy-calculator",
+          "bodySha256": "0e104f9b7ef266e53a995f6f4a7f823ebf046dfb6556bccc5842ccf342cfb93e"
+        },
+        {
+          "folder": "pause-detector",
+          "bodySha256": "2468c59011085e2687c56600af6ddd567b54c681a83d2ed4c06fc16395d3e35f"
+        },
+        {
+          "folder": "report-generator",
+          "bodySha256": "ab47256ca651b0ea0556ec85caa7865efdfd0bc2251193ab42331d0a8437ea33"
+        },
+        {
+          "folder": "segment-combiner",
+          "bodySha256": "1378dd734fef41e1719d2194b2ef7b0251f9b665ebdd6f4e32a0158c3e0dbd5c"
+        },
+        {
+          "folder": "silence-detector",
+          "bodySha256": "f10c7a0643214f6fe04d52db23e3e07489a626ebfe2e10edf7f86c5d959cf050"
+        },
+        {
+          "folder": "video-processor",
+          "bodySha256": "dfbbdb9ebe799222263a9d2f12ac8fb0b77ebe86f531d3c05f9f23d94cfc3e40"
+        }
+      ],
+      "claudeMdSha256": "f7be29f8596ad5593a11725b8449ac834e86fbfd0a3af990705798cc0f76848b",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "video-silence-remover/B-flat-claude-md/r1": {
+      "taskId": "video-silence-remover",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 128,
+      "skills": [
+        {
+          "folder": "audio-extractor",
+          "bodySha256": "19b5c814e60f3390bb00c5e4eadcd2116050fbea785989e49cbc0a09887689d4"
+        },
+        {
+          "folder": "energy-calculator",
+          "bodySha256": "0e104f9b7ef266e53a995f6f4a7f823ebf046dfb6556bccc5842ccf342cfb93e"
+        },
+        {
+          "folder": "pause-detector",
+          "bodySha256": "2468c59011085e2687c56600af6ddd567b54c681a83d2ed4c06fc16395d3e35f"
+        },
+        {
+          "folder": "report-generator",
+          "bodySha256": "ab47256ca651b0ea0556ec85caa7865efdfd0bc2251193ab42331d0a8437ea33"
+        },
+        {
+          "folder": "segment-combiner",
+          "bodySha256": "1378dd734fef41e1719d2194b2ef7b0251f9b665ebdd6f4e32a0158c3e0dbd5c"
+        },
+        {
+          "folder": "silence-detector",
+          "bodySha256": "f10c7a0643214f6fe04d52db23e3e07489a626ebfe2e10edf7f86c5d959cf050"
+        },
+        {
+          "folder": "video-processor",
+          "bodySha256": "dfbbdb9ebe799222263a9d2f12ac8fb0b77ebe86f531d3c05f9f23d94cfc3e40"
+        }
+      ],
+      "claudeMdSha256": "f7be29f8596ad5593a11725b8449ac834e86fbfd0a3af990705798cc0f76848b",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "video-silence-remover/B-flat-claude-md/r2": {
+      "taskId": "video-silence-remover",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 169,
+      "skills": [
+        {
+          "folder": "audio-extractor",
+          "bodySha256": "19b5c814e60f3390bb00c5e4eadcd2116050fbea785989e49cbc0a09887689d4"
+        },
+        {
+          "folder": "energy-calculator",
+          "bodySha256": "0e104f9b7ef266e53a995f6f4a7f823ebf046dfb6556bccc5842ccf342cfb93e"
+        },
+        {
+          "folder": "pause-detector",
+          "bodySha256": "2468c59011085e2687c56600af6ddd567b54c681a83d2ed4c06fc16395d3e35f"
+        },
+        {
+          "folder": "report-generator",
+          "bodySha256": "ab47256ca651b0ea0556ec85caa7865efdfd0bc2251193ab42331d0a8437ea33"
+        },
+        {
+          "folder": "segment-combiner",
+          "bodySha256": "1378dd734fef41e1719d2194b2ef7b0251f9b665ebdd6f4e32a0158c3e0dbd5c"
+        },
+        {
+          "folder": "silence-detector",
+          "bodySha256": "f10c7a0643214f6fe04d52db23e3e07489a626ebfe2e10edf7f86c5d959cf050"
+        },
+        {
+          "folder": "video-processor",
+          "bodySha256": "dfbbdb9ebe799222263a9d2f12ac8fb0b77ebe86f531d3c05f9f23d94cfc3e40"
+        }
+      ],
+      "claudeMdSha256": "f7be29f8596ad5593a11725b8449ac834e86fbfd0a3af990705798cc0f76848b",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "video-silence-remover/B-flat-claude-md/r3": {
+      "taskId": "video-silence-remover",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 154,
+      "skills": [
+        {
+          "folder": "audio-extractor",
+          "bodySha256": "19b5c814e60f3390bb00c5e4eadcd2116050fbea785989e49cbc0a09887689d4"
+        },
+        {
+          "folder": "energy-calculator",
+          "bodySha256": "0e104f9b7ef266e53a995f6f4a7f823ebf046dfb6556bccc5842ccf342cfb93e"
+        },
+        {
+          "folder": "pause-detector",
+          "bodySha256": "2468c59011085e2687c56600af6ddd567b54c681a83d2ed4c06fc16395d3e35f"
+        },
+        {
+          "folder": "report-generator",
+          "bodySha256": "ab47256ca651b0ea0556ec85caa7865efdfd0bc2251193ab42331d0a8437ea33"
+        },
+        {
+          "folder": "segment-combiner",
+          "bodySha256": "1378dd734fef41e1719d2194b2ef7b0251f9b665ebdd6f4e32a0158c3e0dbd5c"
+        },
+        {
+          "folder": "silence-detector",
+          "bodySha256": "f10c7a0643214f6fe04d52db23e3e07489a626ebfe2e10edf7f86c5d959cf050"
+        },
+        {
+          "folder": "video-processor",
+          "bodySha256": "dfbbdb9ebe799222263a9d2f12ac8fb0b77ebe86f531d3c05f9f23d94cfc3e40"
+        }
+      ],
+      "claudeMdSha256": "f7be29f8596ad5593a11725b8449ac834e86fbfd0a3af990705798cc0f76848b",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "video-silence-remover/B-flat-claude-md/r4": {
+      "taskId": "video-silence-remover",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 685,
+      "skills": [
+        {
+          "folder": "audio-extractor",
+          "bodySha256": "19b5c814e60f3390bb00c5e4eadcd2116050fbea785989e49cbc0a09887689d4"
+        },
+        {
+          "folder": "energy-calculator",
+          "bodySha256": "0e104f9b7ef266e53a995f6f4a7f823ebf046dfb6556bccc5842ccf342cfb93e"
+        },
+        {
+          "folder": "pause-detector",
+          "bodySha256": "2468c59011085e2687c56600af6ddd567b54c681a83d2ed4c06fc16395d3e35f"
+        },
+        {
+          "folder": "report-generator",
+          "bodySha256": "ab47256ca651b0ea0556ec85caa7865efdfd0bc2251193ab42331d0a8437ea33"
+        },
+        {
+          "folder": "segment-combiner",
+          "bodySha256": "1378dd734fef41e1719d2194b2ef7b0251f9b665ebdd6f4e32a0158c3e0dbd5c"
+        },
+        {
+          "folder": "silence-detector",
+          "bodySha256": "f10c7a0643214f6fe04d52db23e3e07489a626ebfe2e10edf7f86c5d959cf050"
+        },
+        {
+          "folder": "video-processor",
+          "bodySha256": "dfbbdb9ebe799222263a9d2f12ac8fb0b77ebe86f531d3c05f9f23d94cfc3e40"
+        }
+      ],
+      "claudeMdSha256": "f7be29f8596ad5593a11725b8449ac834e86fbfd0a3af990705798cc0f76848b",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "video-silence-remover/C-no-instructions/r1": {
+      "taskId": "video-silence-remover",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 414,
+      "skills": [
+        {
+          "folder": "audio-extractor",
+          "bodySha256": "19b5c814e60f3390bb00c5e4eadcd2116050fbea785989e49cbc0a09887689d4"
+        },
+        {
+          "folder": "energy-calculator",
+          "bodySha256": "0e104f9b7ef266e53a995f6f4a7f823ebf046dfb6556bccc5842ccf342cfb93e"
+        },
+        {
+          "folder": "pause-detector",
+          "bodySha256": "2468c59011085e2687c56600af6ddd567b54c681a83d2ed4c06fc16395d3e35f"
+        },
+        {
+          "folder": "report-generator",
+          "bodySha256": "ab47256ca651b0ea0556ec85caa7865efdfd0bc2251193ab42331d0a8437ea33"
+        },
+        {
+          "folder": "segment-combiner",
+          "bodySha256": "1378dd734fef41e1719d2194b2ef7b0251f9b665ebdd6f4e32a0158c3e0dbd5c"
+        },
+        {
+          "folder": "silence-detector",
+          "bodySha256": "f10c7a0643214f6fe04d52db23e3e07489a626ebfe2e10edf7f86c5d959cf050"
+        },
+        {
+          "folder": "video-processor",
+          "bodySha256": "dfbbdb9ebe799222263a9d2f12ac8fb0b77ebe86f531d3c05f9f23d94cfc3e40"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "energy-market-pricing/A-native-skill/r3": {
+      "taskId": "energy-market-pricing",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 750,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "locational-marginal-prices",
+          "bodySha256": "f23e62860d206684462de95c87558924557fa59635d9eb0c10c22833635331b7"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-market-pricing/B-flat-claude-md/r4": {
+      "taskId": "energy-market-pricing",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 165,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "locational-marginal-prices",
+          "bodySha256": "f23e62860d206684462de95c87558924557fa59635d9eb0c10c22833635331b7"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "37400cb5bfb81cd345b543b29e0a7f28af7e501a0b616ea7a51702a388830f5e",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "multilingual-video-dubbing/A-native-skill/r0": {
+      "taskId": "multilingual-video-dubbing",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 104,
+      "skills": [
+        {
+          "folder": "ffmpeg-audio-processing",
+          "bodySha256": "7064968118e1f54494c64668f647eaa5aa4856dcf536c8cd1fee2ea74b6cab30"
+        },
+        {
+          "folder": "ffmpeg-format-conversion",
+          "bodySha256": "e315fd3f242aca2bbb2d721d5cba0ce8aaa7ea9227ea9b8973390abaa7953b62"
+        },
+        {
+          "folder": "ffmpeg-media-info",
+          "bodySha256": "62c8b09f4b1c5d06fb1a3932586d29973bf4d2e6576a70d3ca0dbc953753318f"
+        },
+        {
+          "folder": "ffmpeg-video-editing",
+          "bodySha256": "2f4682d9d2ac9aeb9c047029d17476760e3e31a1d63374cfca822c458fd3135e"
+        },
+        {
+          "folder": "ffmpeg-video-filters",
+          "bodySha256": "2b7e37c0d8cb6d65da7dc022a929dcfccd587459ec94c237841584cecacd4d89"
+        },
+        {
+          "folder": "text-to-speech",
+          "bodySha256": "e092bc3ec84d4259a16563d1573dd72fe0f9edb53f70c86452c088b589238fc0"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "multilingual-video-dubbing/A-native-skill/r1": {
+      "taskId": "multilingual-video-dubbing",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 131,
+      "skills": [
+        {
+          "folder": "ffmpeg-audio-processing",
+          "bodySha256": "7064968118e1f54494c64668f647eaa5aa4856dcf536c8cd1fee2ea74b6cab30"
+        },
+        {
+          "folder": "ffmpeg-format-conversion",
+          "bodySha256": "e315fd3f242aca2bbb2d721d5cba0ce8aaa7ea9227ea9b8973390abaa7953b62"
+        },
+        {
+          "folder": "ffmpeg-media-info",
+          "bodySha256": "62c8b09f4b1c5d06fb1a3932586d29973bf4d2e6576a70d3ca0dbc953753318f"
+        },
+        {
+          "folder": "ffmpeg-video-editing",
+          "bodySha256": "2f4682d9d2ac9aeb9c047029d17476760e3e31a1d63374cfca822c458fd3135e"
+        },
+        {
+          "folder": "ffmpeg-video-filters",
+          "bodySha256": "2b7e37c0d8cb6d65da7dc022a929dcfccd587459ec94c237841584cecacd4d89"
+        },
+        {
+          "folder": "text-to-speech",
+          "bodySha256": "e092bc3ec84d4259a16563d1573dd72fe0f9edb53f70c86452c088b589238fc0"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "multilingual-video-dubbing/A-native-skill/r2": {
+      "taskId": "multilingual-video-dubbing",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 366,
+      "skills": [
+        {
+          "folder": "ffmpeg-audio-processing",
+          "bodySha256": "7064968118e1f54494c64668f647eaa5aa4856dcf536c8cd1fee2ea74b6cab30"
+        },
+        {
+          "folder": "ffmpeg-format-conversion",
+          "bodySha256": "e315fd3f242aca2bbb2d721d5cba0ce8aaa7ea9227ea9b8973390abaa7953b62"
+        },
+        {
+          "folder": "ffmpeg-media-info",
+          "bodySha256": "62c8b09f4b1c5d06fb1a3932586d29973bf4d2e6576a70d3ca0dbc953753318f"
+        },
+        {
+          "folder": "ffmpeg-video-editing",
+          "bodySha256": "2f4682d9d2ac9aeb9c047029d17476760e3e31a1d63374cfca822c458fd3135e"
+        },
+        {
+          "folder": "ffmpeg-video-filters",
+          "bodySha256": "2b7e37c0d8cb6d65da7dc022a929dcfccd587459ec94c237841584cecacd4d89"
+        },
+        {
+          "folder": "text-to-speech",
+          "bodySha256": "e092bc3ec84d4259a16563d1573dd72fe0f9edb53f70c86452c088b589238fc0"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "multilingual-video-dubbing/A-native-skill/r3": {
+      "taskId": "multilingual-video-dubbing",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 104,
+      "skills": [
+        {
+          "folder": "ffmpeg-audio-processing",
+          "bodySha256": "7064968118e1f54494c64668f647eaa5aa4856dcf536c8cd1fee2ea74b6cab30"
+        },
+        {
+          "folder": "ffmpeg-format-conversion",
+          "bodySha256": "e315fd3f242aca2bbb2d721d5cba0ce8aaa7ea9227ea9b8973390abaa7953b62"
+        },
+        {
+          "folder": "ffmpeg-media-info",
+          "bodySha256": "62c8b09f4b1c5d06fb1a3932586d29973bf4d2e6576a70d3ca0dbc953753318f"
+        },
+        {
+          "folder": "ffmpeg-video-editing",
+          "bodySha256": "2f4682d9d2ac9aeb9c047029d17476760e3e31a1d63374cfca822c458fd3135e"
+        },
+        {
+          "folder": "ffmpeg-video-filters",
+          "bodySha256": "2b7e37c0d8cb6d65da7dc022a929dcfccd587459ec94c237841584cecacd4d89"
+        },
+        {
+          "folder": "text-to-speech",
+          "bodySha256": "e092bc3ec84d4259a16563d1573dd72fe0f9edb53f70c86452c088b589238fc0"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "multilingual-video-dubbing/A-native-skill/r4": {
+      "taskId": "multilingual-video-dubbing",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 113,
+      "skills": [
+        {
+          "folder": "ffmpeg-audio-processing",
+          "bodySha256": "7064968118e1f54494c64668f647eaa5aa4856dcf536c8cd1fee2ea74b6cab30"
+        },
+        {
+          "folder": "ffmpeg-format-conversion",
+          "bodySha256": "e315fd3f242aca2bbb2d721d5cba0ce8aaa7ea9227ea9b8973390abaa7953b62"
+        },
+        {
+          "folder": "ffmpeg-media-info",
+          "bodySha256": "62c8b09f4b1c5d06fb1a3932586d29973bf4d2e6576a70d3ca0dbc953753318f"
+        },
+        {
+          "folder": "ffmpeg-video-editing",
+          "bodySha256": "2f4682d9d2ac9aeb9c047029d17476760e3e31a1d63374cfca822c458fd3135e"
+        },
+        {
+          "folder": "ffmpeg-video-filters",
+          "bodySha256": "2b7e37c0d8cb6d65da7dc022a929dcfccd587459ec94c237841584cecacd4d89"
+        },
+        {
+          "folder": "text-to-speech",
+          "bodySha256": "e092bc3ec84d4259a16563d1573dd72fe0f9edb53f70c86452c088b589238fc0"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "multilingual-video-dubbing/B-flat-claude-md/r0": {
+      "taskId": "multilingual-video-dubbing",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 301,
+      "skills": [
+        {
+          "folder": "ffmpeg-audio-processing",
+          "bodySha256": "7064968118e1f54494c64668f647eaa5aa4856dcf536c8cd1fee2ea74b6cab30"
+        },
+        {
+          "folder": "ffmpeg-format-conversion",
+          "bodySha256": "e315fd3f242aca2bbb2d721d5cba0ce8aaa7ea9227ea9b8973390abaa7953b62"
+        },
+        {
+          "folder": "ffmpeg-media-info",
+          "bodySha256": "62c8b09f4b1c5d06fb1a3932586d29973bf4d2e6576a70d3ca0dbc953753318f"
+        },
+        {
+          "folder": "ffmpeg-video-editing",
+          "bodySha256": "2f4682d9d2ac9aeb9c047029d17476760e3e31a1d63374cfca822c458fd3135e"
+        },
+        {
+          "folder": "ffmpeg-video-filters",
+          "bodySha256": "2b7e37c0d8cb6d65da7dc022a929dcfccd587459ec94c237841584cecacd4d89"
+        },
+        {
+          "folder": "text-to-speech",
+          "bodySha256": "e092bc3ec84d4259a16563d1573dd72fe0f9edb53f70c86452c088b589238fc0"
+        }
+      ],
+      "claudeMdSha256": "bcb3c63d2b688dea55606b2b2ce310a883fbbd2c4cef3279d6fa88359c8645a0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "multilingual-video-dubbing/B-flat-claude-md/r1": {
+      "taskId": "multilingual-video-dubbing",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 222,
+      "skills": [
+        {
+          "folder": "ffmpeg-audio-processing",
+          "bodySha256": "7064968118e1f54494c64668f647eaa5aa4856dcf536c8cd1fee2ea74b6cab30"
+        },
+        {
+          "folder": "ffmpeg-format-conversion",
+          "bodySha256": "e315fd3f242aca2bbb2d721d5cba0ce8aaa7ea9227ea9b8973390abaa7953b62"
+        },
+        {
+          "folder": "ffmpeg-media-info",
+          "bodySha256": "62c8b09f4b1c5d06fb1a3932586d29973bf4d2e6576a70d3ca0dbc953753318f"
+        },
+        {
+          "folder": "ffmpeg-video-editing",
+          "bodySha256": "2f4682d9d2ac9aeb9c047029d17476760e3e31a1d63374cfca822c458fd3135e"
+        },
+        {
+          "folder": "ffmpeg-video-filters",
+          "bodySha256": "2b7e37c0d8cb6d65da7dc022a929dcfccd587459ec94c237841584cecacd4d89"
+        },
+        {
+          "folder": "text-to-speech",
+          "bodySha256": "e092bc3ec84d4259a16563d1573dd72fe0f9edb53f70c86452c088b589238fc0"
+        }
+      ],
+      "claudeMdSha256": "bcb3c63d2b688dea55606b2b2ce310a883fbbd2c4cef3279d6fa88359c8645a0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "multilingual-video-dubbing/B-flat-claude-md/r2": {
+      "taskId": "multilingual-video-dubbing",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 213,
+      "skills": [
+        {
+          "folder": "ffmpeg-audio-processing",
+          "bodySha256": "7064968118e1f54494c64668f647eaa5aa4856dcf536c8cd1fee2ea74b6cab30"
+        },
+        {
+          "folder": "ffmpeg-format-conversion",
+          "bodySha256": "e315fd3f242aca2bbb2d721d5cba0ce8aaa7ea9227ea9b8973390abaa7953b62"
+        },
+        {
+          "folder": "ffmpeg-media-info",
+          "bodySha256": "62c8b09f4b1c5d06fb1a3932586d29973bf4d2e6576a70d3ca0dbc953753318f"
+        },
+        {
+          "folder": "ffmpeg-video-editing",
+          "bodySha256": "2f4682d9d2ac9aeb9c047029d17476760e3e31a1d63374cfca822c458fd3135e"
+        },
+        {
+          "folder": "ffmpeg-video-filters",
+          "bodySha256": "2b7e37c0d8cb6d65da7dc022a929dcfccd587459ec94c237841584cecacd4d89"
+        },
+        {
+          "folder": "text-to-speech",
+          "bodySha256": "e092bc3ec84d4259a16563d1573dd72fe0f9edb53f70c86452c088b589238fc0"
+        }
+      ],
+      "claudeMdSha256": "bcb3c63d2b688dea55606b2b2ce310a883fbbd2c4cef3279d6fa88359c8645a0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "multilingual-video-dubbing/B-flat-claude-md/r3": {
+      "taskId": "multilingual-video-dubbing",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 174,
+      "skills": [
+        {
+          "folder": "ffmpeg-audio-processing",
+          "bodySha256": "7064968118e1f54494c64668f647eaa5aa4856dcf536c8cd1fee2ea74b6cab30"
+        },
+        {
+          "folder": "ffmpeg-format-conversion",
+          "bodySha256": "e315fd3f242aca2bbb2d721d5cba0ce8aaa7ea9227ea9b8973390abaa7953b62"
+        },
+        {
+          "folder": "ffmpeg-media-info",
+          "bodySha256": "62c8b09f4b1c5d06fb1a3932586d29973bf4d2e6576a70d3ca0dbc953753318f"
+        },
+        {
+          "folder": "ffmpeg-video-editing",
+          "bodySha256": "2f4682d9d2ac9aeb9c047029d17476760e3e31a1d63374cfca822c458fd3135e"
+        },
+        {
+          "folder": "ffmpeg-video-filters",
+          "bodySha256": "2b7e37c0d8cb6d65da7dc022a929dcfccd587459ec94c237841584cecacd4d89"
+        },
+        {
+          "folder": "text-to-speech",
+          "bodySha256": "e092bc3ec84d4259a16563d1573dd72fe0f9edb53f70c86452c088b589238fc0"
+        }
+      ],
+      "claudeMdSha256": "bcb3c63d2b688dea55606b2b2ce310a883fbbd2c4cef3279d6fa88359c8645a0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "multilingual-video-dubbing/B-flat-claude-md/r4": {
+      "taskId": "multilingual-video-dubbing",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 192,
+      "skills": [
+        {
+          "folder": "ffmpeg-audio-processing",
+          "bodySha256": "7064968118e1f54494c64668f647eaa5aa4856dcf536c8cd1fee2ea74b6cab30"
+        },
+        {
+          "folder": "ffmpeg-format-conversion",
+          "bodySha256": "e315fd3f242aca2bbb2d721d5cba0ce8aaa7ea9227ea9b8973390abaa7953b62"
+        },
+        {
+          "folder": "ffmpeg-media-info",
+          "bodySha256": "62c8b09f4b1c5d06fb1a3932586d29973bf4d2e6576a70d3ca0dbc953753318f"
+        },
+        {
+          "folder": "ffmpeg-video-editing",
+          "bodySha256": "2f4682d9d2ac9aeb9c047029d17476760e3e31a1d63374cfca822c458fd3135e"
+        },
+        {
+          "folder": "ffmpeg-video-filters",
+          "bodySha256": "2b7e37c0d8cb6d65da7dc022a929dcfccd587459ec94c237841584cecacd4d89"
+        },
+        {
+          "folder": "text-to-speech",
+          "bodySha256": "e092bc3ec84d4259a16563d1573dd72fe0f9edb53f70c86452c088b589238fc0"
+        }
+      ],
+      "claudeMdSha256": "bcb3c63d2b688dea55606b2b2ce310a883fbbd2c4cef3279d6fa88359c8645a0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "multilingual-video-dubbing/C-no-instructions/r0": {
+      "taskId": "multilingual-video-dubbing",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 127,
+      "skills": [
+        {
+          "folder": "ffmpeg-audio-processing",
+          "bodySha256": "7064968118e1f54494c64668f647eaa5aa4856dcf536c8cd1fee2ea74b6cab30"
+        },
+        {
+          "folder": "ffmpeg-format-conversion",
+          "bodySha256": "e315fd3f242aca2bbb2d721d5cba0ce8aaa7ea9227ea9b8973390abaa7953b62"
+        },
+        {
+          "folder": "ffmpeg-media-info",
+          "bodySha256": "62c8b09f4b1c5d06fb1a3932586d29973bf4d2e6576a70d3ca0dbc953753318f"
+        },
+        {
+          "folder": "ffmpeg-video-editing",
+          "bodySha256": "2f4682d9d2ac9aeb9c047029d17476760e3e31a1d63374cfca822c458fd3135e"
+        },
+        {
+          "folder": "ffmpeg-video-filters",
+          "bodySha256": "2b7e37c0d8cb6d65da7dc022a929dcfccd587459ec94c237841584cecacd4d89"
+        },
+        {
+          "folder": "text-to-speech",
+          "bodySha256": "e092bc3ec84d4259a16563d1573dd72fe0f9edb53f70c86452c088b589238fc0"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "multilingual-video-dubbing/C-no-instructions/r1": {
+      "taskId": "multilingual-video-dubbing",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 105,
+      "skills": [
+        {
+          "folder": "ffmpeg-audio-processing",
+          "bodySha256": "7064968118e1f54494c64668f647eaa5aa4856dcf536c8cd1fee2ea74b6cab30"
+        },
+        {
+          "folder": "ffmpeg-format-conversion",
+          "bodySha256": "e315fd3f242aca2bbb2d721d5cba0ce8aaa7ea9227ea9b8973390abaa7953b62"
+        },
+        {
+          "folder": "ffmpeg-media-info",
+          "bodySha256": "62c8b09f4b1c5d06fb1a3932586d29973bf4d2e6576a70d3ca0dbc953753318f"
+        },
+        {
+          "folder": "ffmpeg-video-editing",
+          "bodySha256": "2f4682d9d2ac9aeb9c047029d17476760e3e31a1d63374cfca822c458fd3135e"
+        },
+        {
+          "folder": "ffmpeg-video-filters",
+          "bodySha256": "2b7e37c0d8cb6d65da7dc022a929dcfccd587459ec94c237841584cecacd4d89"
+        },
+        {
+          "folder": "text-to-speech",
+          "bodySha256": "e092bc3ec84d4259a16563d1573dd72fe0f9edb53f70c86452c088b589238fc0"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    }
+  }
+}

@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { armAdd } from "./arms.js";
 import { createDraft } from "./drafts.js";
 import {
+  CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE,
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
+  exportCompletenessCertification,
 } from "../runtime/suite-protocol/comparability.js";
 import { harborArmJobName } from "../runtime/harbor/launcher.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
@@ -159,6 +161,15 @@ function clock(): () => string {
   return () => new Date().toISOString();
 }
 
+/** §8.2 clause 2: the certification renders the sealed Matrix's own completeness, or says none is sealed yet. */
+function certificationFor(draftId: string): string {
+  const state = requireRunState(workspaceDir, draftId);
+  const completeness = state.matrixSha256 === undefined
+    ? undefined
+    : parseMatrix(getSealedBytes(workspaceDir, state.matrixSha256)).completeness;
+  return exportCompletenessCertification({ runSha256: state.runSha256!, completeness });
+}
+
 function stubArmJob(draftId: string, armId: string): string {
   const runSha256 = requireRunState(workspaceDir, draftId).runSha256!;
   const jobDir = join(harborArmJobsDir(workspaceDir, runSha256), harborArmJobName(runSha256, armId));
@@ -195,20 +206,25 @@ describe("Harbor Hub export", () => {
     expect(decideHarborHubExportMode({ executionConformance: true, coverage: "full", leaderboardSubmitReady: true })).toBe("leaderboard-submit");
     expect(decideHarborHubExportMode({ executionConformance: true, coverage: "custom", leaderboardSubmitReady: false })).toBe("refused");
     expect(decideHarborHubExportMode({ executionConformance: false, coverage: "full", leaderboardSubmitReady: false })).toBe("refused");
-    const inspection = harborHubExportInstructions("inspection-upload", "/tmp/job");
+    const certification = "complete run of the selection sealed at lock aaaa: 1 of 1 cells judged.";
+    const inspection = harborHubExportInstructions(certification, "inspection-upload", "/tmp/job");
+    expect(inspection.split("\n")[0]).toBe(certification);
     expect(inspection).toContain("harbor upload --public /tmp/job");
     expect(inspection).toContain("Do not run `uv run lb submit`");
     expect(inspection).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
-    const ready = harborHubExportInstructions("leaderboard-submit", "/tmp/job");
+    const ready = harborHubExportInstructions(certification, "leaderboard-submit", "/tmp/job");
+    expect(ready.split("\n")[0]).toBe(certification);
     expect(ready).toContain("harbor upload --public /tmp/job");
     expect(ready).toContain("uv run lb submit <hub-url>");
     expect(ready).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
-    const inspection30 = harborHubExportInstructions("inspection-upload", "/tmp/job", "terminal-bench-3.0");
+    const inspection30 = harborHubExportInstructions(certification, "inspection-upload", "/tmp/job", "terminal-bench-3.0");
+    expect(inspection30.split("\n")[0]).toBe(certification);
     expect(inspection30).toContain("harbor upload --public /tmp/job");
     expect(inspection30).toContain("Terminal-Bench 3.0");
     expect(inspection30).not.toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
     expect(inspection30).not.toContain("uv run lb submit");
-    const ready30 = harborHubExportInstructions("leaderboard-submit", "/tmp/job", "terminal-bench-3.0");
+    const ready30 = harborHubExportInstructions(certification, "leaderboard-submit", "/tmp/job", "terminal-bench-3.0");
+    expect(ready30.split("\n")[0]).toBe(certification);
     expect(ready30).toContain("harbor upload --public /tmp/job");
     expect(ready30).toContain("Terminal-Bench 3.0");
     expect(ready30).not.toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
@@ -237,10 +253,32 @@ describe("Harbor Hub export", () => {
     expect(exported.result.jobDir).toBe(jobDir);
     expect(existsSync(join(jobDir, "result.json"))).toBe(true);
     expect(existsSync(join(exported.result.exportDir, "job", "result.json"))).toBe(true);
+    expect(exported.result.instructions.split("\n")[0]).toBe(certificationFor("one"));
     expect(exported.result.instructions).toContain("Do not run `uv run lb submit`");
     expect(exported.result.instructions).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
     expect(readFileSync(join(exported.result.exportDir, "INSTRUCTIONS.txt"), "utf8")).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
   }, 60_000);
+
+  test("the divergence explanation rides on the certification and gates no instruction", () => {
+    const runSha256 = "d".repeat(64);
+    const completeness = { expected: 5, judged: 4, runOutcome: "partial" as const };
+    const plain = exportCompletenessCertification({ runSha256, completeness });
+    const explained = exportCompletenessCertification({ runSha256, completeness, frameworkSubmitReady: true });
+    expect(explained).toBe(`${plain} ${CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE}`);
+    for (const mode of ["leaderboard-submit", "inspection-upload"] as const) {
+      for (const protocol of ["terminal-bench-2.1", "terminal-bench-3.0"] as const) {
+        const before = harborHubExportInstructions(plain, mode, "/tmp/job", protocol).split("\n");
+        const after = harborHubExportInstructions(explained, mode, "/tmp/job", protocol).split("\n");
+        // Nothing is suppressed, reordered, or added: the certification is still exactly one line
+        // and every other line is byte-identical.
+        expect(after.slice(1)).toEqual(before.slice(1));
+        expect(after[0]).toBe(explained);
+      }
+    }
+    // The mode decision reads three booleans and no completeness, so the divergent run exports in
+    // the same mode it would have exported in before the explanation existed.
+    expect(decideHarborHubExportMode({ executionConformance: true, coverage: "full", leaderboardSubmitReady: true })).toBe("leaderboard-submit");
+  });
 
   test("custom coverage and missing jobs refuse suite-named Hub export", async () => {
     const context = await prepareDraft("custom");
@@ -276,6 +314,7 @@ describe("Harbor Hub export", () => {
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
     expect(exported.result.mode).toBe("inspection-upload");
+    expect(exported.result.instructions.split("\n")[0]).toBe(certificationFor("full"));
     expect(exported.result.instructions).toContain("Do not run `uv run lb submit`");
     expect(exported.result.instructions).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
   }, 120_000);
@@ -314,6 +353,11 @@ describe("Harbor Hub export", () => {
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
     expect(exported.result.mode).toBe("leaderboard-submit");
+    expect(exported.result.instructions.split("\n")[0]).toBe(exportCompletenessCertification({
+      runSha256: collectedState.runSha256!,
+      completeness: matrix.completeness,
+      frameworkSubmitReady: true,
+    }));
     expect(exported.result.instructions).toContain("harbor upload --public");
     expect(exported.result.instructions).toContain("uv run lb submit <hub-url>");
     expect(exported.result.instructions).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
@@ -359,6 +403,7 @@ describe("Terminal-Bench 3.0 Hub export", () => {
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
     expect(exported.result.mode).toBe("inspection-upload");
+    expect(exported.result.instructions.split("\n")[0]).toBe(certificationFor("one"));
     expect(exported.result.instructions).toContain("Terminal-Bench 3.0");
     expect(exported.result.instructions).toContain("harbor upload --public");
     expect(exported.result.instructions).not.toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);

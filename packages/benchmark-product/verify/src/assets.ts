@@ -24,7 +24,7 @@ export interface PublicAssetInput {
   /** Producer-verified binary admission/instrument facts. Required for claim-package/2 only. */
   readonly binaryQualification?: {
     readonly publicationGrade: boolean;
-    readonly truthAdmission: "two-human-unanimous" | "operator-only";
+    readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
     readonly sourceManifestSha256: string;
     readonly admissionManifestSha256: string;
     readonly exclusions: readonly unknown[];
@@ -80,9 +80,50 @@ interface BinaryFacts {
   readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
 }
 
+/**
+ * `pairwise-disagreement@1`'s rendering projection (packet #2837, spec §7.1), sibling to
+ * `ComparisonFacts`. A panel readout, not a chosen pair: it carries every unordered arm pair the
+ * method computed in one pass, so there is no baseline/candidate here. Intervals are keyed
+ * `{lower, upper, alpha}`, which is this method family's own spelling and NOT `paired-delta@1`'s
+ * `{low, high}`.
+ */
+interface PairwiseDisagreementFacts {
+  readonly kind: "pairwise-disagreement";
+  readonly pairs: readonly {
+    readonly armA: string;
+    readonly armB: string;
+    readonly n: number;
+    readonly disagreements: number;
+    readonly rate: string | null;
+    readonly interval: { readonly lower: string; readonly upper: string; readonly alpha: string } | null;
+  }[];
+  readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
+}
+
+/**
+ * `paired-majority-delta@1`'s rendering projection (packet #2837, spec §7.2a), sibling to
+ * `ComparisonFacts`. `candidate` is the evidence-declaring arm and `baseline` its evidence-free
+ * twin, so a positive `delta` means declaring evidence increased agreement.
+ */
+interface PairedMajorityDeltaFacts {
+  readonly kind: "paired-majority-delta";
+  readonly baseline: string;
+  readonly candidate: string;
+  readonly n: number;
+  readonly delta: string | null;
+  readonly interval: { readonly lower: string; readonly upper: string; readonly alpha: string } | null;
+  readonly reasons: readonly string[];
+  readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
+}
+
 /** What every method branch below must produce for asset rendering. Discriminated by `kind` so
  * the render helpers can narrow rather than re-check shape. */
-type MethodFacts = WilsonFacts | ComparisonFacts | BinaryFacts;
+type MethodFacts =
+  | WilsonFacts
+  | ComparisonFacts
+  | BinaryFacts
+  | PairwiseDisagreementFacts
+  | PairedMajorityDeltaFacts;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -275,6 +316,92 @@ function comparisonProjection(
   };
 }
 
+function judgeInterval(value: unknown, label: string): { readonly lower: string; readonly upper: string; readonly alpha: string } | null {
+  if (value === null || value === undefined) return null;
+  const shape = value as { readonly lower?: unknown; readonly upper?: unknown; readonly alpha?: unknown };
+  if (typeof shape.lower !== "string" || typeof shape.upper !== "string" || typeof shape.alpha !== "string") {
+    throw new Error(`${label}: expected a {lower, upper, alpha} interval`);
+  }
+  return { lower: shape.lower, upper: shape.upper, alpha: shape.alpha };
+}
+
+/** `pairwise-disagreement@1`'s asset projection (packet #2837), sibling to `comparisonProjection`.
+ * Narrow local shape check, same posture as its siblings: a mismatch means the sealed Report was
+ * not produced by this method. */
+function pairwiseDisagreementAssetProjection(subjectResults: unknown, label: string): PairwiseDisagreementFacts {
+  const shape = subjectResults as {
+    readonly pairs?: unknown;
+    readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown };
+  } | undefined;
+  if (
+    !Array.isArray(shape?.pairs)
+    || typeof shape.conflicted?.count !== "number"
+    || !Array.isArray(shape.conflicted.cellKeys)
+  ) {
+    throw new Error(`${label}: expected pairwise-disagreement@1's pairs/conflicted shape`);
+  }
+  const pairs = shape.pairs.map((entry) => {
+    const pair = entry as {
+      readonly armA?: unknown; readonly armB?: unknown; readonly n?: unknown;
+      readonly disagreements?: unknown; readonly rate?: unknown; readonly interval?: unknown;
+    };
+    if (
+      typeof pair.armA !== "string" || typeof pair.armB !== "string"
+      || typeof pair.n !== "number" || typeof pair.disagreements !== "number"
+      || !(typeof pair.rate === "string" || pair.rate === null)
+    ) {
+      throw new Error(`${label}: expected pairwise-disagreement@1's per-pair armA/armB/n/disagreements/rate shape`);
+    }
+    return {
+      armA: pair.armA, armB: pair.armB, n: pair.n, disagreements: pair.disagreements,
+      rate: pair.rate as string | null, interval: judgeInterval(pair.interval, label),
+    };
+  });
+  return {
+    kind: "pairwise-disagreement",
+    pairs,
+    conflicted: {
+      count: shape.conflicted.count,
+      cellKeys: shape.conflicted.cellKeys.map((value) => String(value)),
+    },
+  };
+}
+
+/** `paired-majority-delta@1`'s asset projection (packet #2837), sibling to `comparisonProjection`.
+ * `baseline`/`candidate` come from the method's own output here (unlike `paired-delta@1`, which
+ * reads them from the sealed parameters) because this method DERIVES its pair rather than
+ * accepting one. */
+function pairedMajorityDeltaAssetProjection(subjectResults: unknown, label: string): PairedMajorityDeltaFacts {
+  const shape = subjectResults as {
+    readonly baseline?: unknown; readonly candidate?: unknown; readonly n?: unknown;
+    readonly delta?: unknown; readonly interval?: unknown; readonly reasons?: unknown;
+    readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown };
+  } | undefined;
+  if (
+    typeof shape?.baseline !== "string" || typeof shape.candidate !== "string"
+    || typeof shape.n !== "number"
+    || !(typeof shape.delta === "string" || shape.delta === null)
+    || !Array.isArray(shape.reasons)
+    || typeof shape.conflicted?.count !== "number"
+    || !Array.isArray(shape.conflicted.cellKeys)
+  ) {
+    throw new Error(`${label}: expected paired-majority-delta@1's baseline/candidate/n/delta/reasons/conflicted shape`);
+  }
+  return {
+    kind: "paired-majority-delta",
+    baseline: shape.baseline,
+    candidate: shape.candidate,
+    n: shape.n,
+    delta: shape.delta as string | null,
+    interval: judgeInterval(shape.interval, label),
+    reasons: shape.reasons.map((value) => String(value)),
+    conflicted: {
+      count: shape.conflicted.count,
+      cellKeys: shape.conflicted.cellKeys.map((value) => String(value)),
+    },
+  };
+}
+
 /** Dispatches on the produced method (P4b Task 6) -- mirrors `report/claim.ts`'s
  * `methodProjection`, so the two dispatches read as one pattern. Any method this product has not
  * wired an asset projection for throws rather than silently rendering incomplete facts. */
@@ -295,6 +422,10 @@ function methodProjection(
       const qualification = subjectResults as BinaryFacts["qualification"];
       return { kind: "binary", qualification, conflicted: qualification.conflicted };
     }
+    case BENCHMARKING_METHOD_IDS.pairwiseDisagreement:
+      return pairwiseDisagreementAssetProjection(subjectResults, label);
+    case BENCHMARKING_METHOD_IDS.pairedMajorityDelta:
+      return pairedMajorityDeltaAssetProjection(subjectResults, label);
     default:
       throw new Error(`${label}: method "${method.id}" has no bundle-asset projection`);
   }
@@ -354,6 +485,18 @@ function pairedEstimateLine(facts: ComparisonFacts): string {
   return `Candidate minus baseline estimate (${facts.candidate} minus ${facts.baseline}): ${estimate}. Interval: ${interval}. Alpha: ${facts.alpha}. Paired task count: ${facts.pairs}.`;
 }
 
+/** `paired-majority-delta@1`'s counterpart to `pairedEstimateLine`. Same reading order (direction,
+ * estimate, interval status, alpha, paired count) so the two estimators read alike, but written
+ * against this method's own field spellings: `lower`/`upper` rather than `low`/`high`, `n` rather
+ * than `pairs`, and the alpha carried on the interval rather than alongside it. `candidate` is the
+ * evidence-declaring arm and `baseline` its evidence-free twin. */
+function pairedMajorityDeltaEstimateLine(facts: PairedMajorityDeltaFacts): string {
+  const estimate = facts.delta === null ? "unavailable" : facts.delta;
+  const interval = facts.interval === null ? "withheld" : `${facts.interval.lower} to ${facts.interval.upper}`;
+  const alpha = facts.interval === null ? "not stated" : facts.interval.alpha;
+  return `Candidate minus baseline estimate (${facts.candidate} minus ${facts.baseline}): ${estimate}. Interval: ${interval}. Alpha: ${alpha}. Paired task count: ${facts.n}.`;
+}
+
 /** Full-report (unbounded) rendering of paired-delta@1 facts: pairs, delta, and either the
  * interval bounds or -- when withheld -- every reason string, in full (no truncation budget
  * applies on this surface, unlike the compact assets below). */
@@ -364,12 +507,46 @@ function comparisonFactsHtml(facts: ComparisonFacts): string {
   return `<p class="paired-estimate">${escapeMarkup(pairedEstimateLine(facts))}</p><dl class="facts"><div><dt>Paired task count</dt><dd>${facts.pairs}</dd></div><div><dt>Candidate minus baseline estimate</dt><dd>${facts.delta === null ? "—" : escapeMarkup(facts.delta)}</dd></div></dl>${intervalHtml}`;
 }
 
+function judgeIntervalHtml(
+  interval: { readonly lower: string; readonly upper: string; readonly alpha: string } | null,
+  reasons: readonly string[],
+): string {
+  return interval === null
+    ? `<p>Interval withheld.</p>${list(reasons, "No withheld reason recorded.")}`
+    : `<dl class="facts"><div><dt>Interval lower</dt><dd>${escapeMarkup(interval.lower)}</dd></div><div><dt>Interval upper</dt><dd>${escapeMarkup(interval.upper)}</dd></div><div><dt>Alpha</dt><dd>${escapeMarkup(interval.alpha)}</dd></div></dl>`;
+}
+
+/** Renders every unordered arm pair the panel readout computed. No comparative winner is stated:
+ * the method carries no chosen pair and this asset must not invent one. */
+function pairwiseDisagreementFactsHtml(facts: PairwiseDisagreementFacts): string {
+  if (facts.pairs.length === 0) return "<p>No arm pairs were computed.</p>";
+  const rows = facts.pairs.map((pair) =>
+    `<tr><th scope="row">${escapeMarkup(pair.armA)} vs ${escapeMarkup(pair.armB)}</th><td>${pair.n}</td><td>${pair.disagreements}</td><td>${pair.rate === null ? "—" : escapeMarkup(pair.rate)}</td><td>${pair.interval === null ? "withheld" : `${escapeMarkup(pair.interval.lower)} – ${escapeMarkup(pair.interval.upper)}`}</td></tr>`
+  ).join("");
+  return `<table><caption>Exact pairwise-disagreement@1 values from the sealed Report</caption><thead><tr><th scope="col">Arm pair</th><th scope="col">n</th><th scope="col">Disagreements</th><th scope="col">Rate</th><th scope="col">Interval</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function pairedMajorityDeltaFactsHtml(facts: PairedMajorityDeltaFacts): string {
+  return `<dl class="facts"><div><dt>Candidate (evidence-declaring arm)</dt><dd>${escapeMarkup(facts.candidate)}</dd></div><div><dt>Baseline (evidence-free twin)</dt><dd>${escapeMarkup(facts.baseline)}</dd></div><div><dt>Paired task count</dt><dd>${facts.n}</dd></div><div><dt>Candidate minus baseline estimate</dt><dd>${facts.delta === null ? "—" : escapeMarkup(facts.delta)}</dd></div></dl>${judgeIntervalHtml(facts.interval, facts.reasons)}`;
+}
+
+/** The projection is already validated at :294 (validateBinaryInstrumentQualificationProjection),
+ * so `configuration["strata"]` is a sealed, non-empty, sorted-unique, grammar-conforming array. */
+function stratumCaption(configuration: Record<string, unknown>): string {
+  const strata = Array.isArray(configuration["strata"])
+    ? (configuration["strata"] as readonly unknown[])
+        .filter((value): value is string => typeof value === "string")
+    : [];
+  return `Buckets by stratum (${strata.join(", ")})`;
+}
+
 function binaryFactsHtml(facts: BinaryFacts): string {
+  const caption = stratumCaption(facts.qualification.configuration);
   const arms = Object.entries(facts.qualification.arms).map(([armId, arm]) => {
     const rates = ["agreement", "falseAccept", "falseReject", "instability", "parserInvalid"]
       .map((name) => `<tr><th scope="row">${escapeMarkup(name)}</th><td><pre>${escapeMarkup(canonicalText(arm[name]))}</pre></td></tr>`)
       .join("");
-    return `<section class="binary-arm"><h3>${escapeMarkup(armId)}</h3><p>Instrument <span class="digest">${escapeMarkup(String(arm["instrumentSha256"]))}</span></p><h4>Item, call, and confusion denominators</h4><pre>${escapeMarkup(canonicalText({ item: arm["item"], call: arm["call"], confusion: arm["confusion"] }))}</pre><div class="table-scroll" tabindex="0" role="region" aria-label="${escapeMarkup(armId)} qualification rates"><table><caption>Five registered rates with exact denominators and Wilson intervals</caption><thead><tr><th scope="col">Rate</th><th scope="col">Registered result</th></tr></thead><tbody>${rates}</tbody></table></div><h4>Every candidate-class bucket</h4><pre>${escapeMarkup(canonicalText(arm["byCandidateClass"]))}</pre><h4>Core and stress buckets</h4><pre>${escapeMarkup(canonicalText(arm["byStratum"]))}</pre></section>`;
+    return `<section class="binary-arm"><h3>${escapeMarkup(armId)}</h3><p>Instrument <span class="digest">${escapeMarkup(String(arm["instrumentSha256"]))}</span></p><h4>Item, call, and confusion denominators</h4><pre>${escapeMarkup(canonicalText({ item: arm["item"], call: arm["call"], confusion: arm["confusion"] }))}</pre><div class="table-scroll" tabindex="0" role="region" aria-label="${escapeMarkup(armId)} qualification rates"><table><caption>Five registered rates with exact denominators and Wilson intervals</caption><thead><tr><th scope="col">Rate</th><th scope="col">Registered result</th></tr></thead><tbody>${rates}</tbody></table></div><h4>Every candidate-class bucket</h4><pre>${escapeMarkup(canonicalText(arm["byCandidateClass"]))}</pre><h4>${escapeMarkup(caption)}</h4><pre>${escapeMarkup(canonicalText(arm["byStratum"]))}</pre></section>`;
   }).join("");
   return `<p class="neutral">Qualification facts are presented per instrument without comparative conclusions.</p><h3>Registered configuration</h3><pre>${escapeMarkup(canonicalText(facts.qualification.configuration))}</pre>${arms}<h3>Per-item decisions and instability</h3><pre>${escapeMarkup(canonicalText(facts.qualification.itemDecisions))}</pre><h3>Parser-invalid, infrastructure, and other exclusions</h3><pre>${escapeMarkup(canonicalText(facts.qualification.excluded))}</pre>`;
 }
@@ -377,11 +554,11 @@ function binaryFactsHtml(facts: BinaryFacts): string {
 /** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6). The wilson branch is
  * byte-identical to before this dispatch existed -- `armResultTable` itself is untouched. */
 function armResultsHtml(facts: MethodFacts, wilsonCaption: string): string {
-  return facts.kind === "wilson"
-    ? armResultTable(facts, wilsonCaption)
-    : facts.kind === "comparison"
-      ? comparisonFactsHtml(facts)
-      : binaryFactsHtml(facts);
+  if (facts.kind === "wilson") return armResultTable(facts, wilsonCaption);
+  if (facts.kind === "comparison") return comparisonFactsHtml(facts);
+  if (facts.kind === "pairwise-disagreement") return pairwiseDisagreementFactsHtml(facts);
+  if (facts.kind === "paired-majority-delta") return pairedMajorityDeltaFactsHtml(facts);
+  return binaryFactsHtml(facts);
 }
 
 function attritionRows(input: PublicAssetInput): string {
@@ -449,22 +626,77 @@ function comparisonSectionMarkdown(comparison: PublicComparisonView | undefined)
   return `## What happened, task by task\n\n${descriptive}${sample}\n\n${tasks}\n\n`;
 }
 
-function binaryAdmissionHtml(input: PublicAssetInput): string {
-  const admission = input.binaryQualification;
-  if (admission === undefined) return "";
-  return `<section id="qualification-admission" aria-labelledby="qualification-admission-heading"><h2 id="qualification-admission-heading">Authenticated truth admission and instruments</h2><dl class="facts"><div><dt>Publication grade</dt><dd>${admission.publicationGrade ? "Yes — two-human unanimous" : "No — operator-only"}</dd></div><div><dt>Truth admission</dt><dd>${escapeMarkup(admission.truthAdmission)}</dd></div><div><dt>Source manifest</dt><dd class="digest">${escapeMarkup(admission.sourceManifestSha256)}</dd></div><div><dt>Admission manifest</dt><dd class="digest">${escapeMarkup(admission.admissionManifestSha256)}</dd></div><div><dt>Pre-run exclusions</dt><dd>${admission.exclusions.length}</dd></div></dl><h3>Human disagreement and deterministic replacements</h3><pre>${escapeMarkup(canonicalText(admission.exclusions))}</pre><h3>Exact instrument and prompt-template commitments</h3><pre>${escapeMarkup(canonicalText(admission.instruments))}</pre></section>`;
+/**
+ * Publication-grade wording, keyed on `truthAdmission` (spec §6.8a Group A; ruling C-5) rather
+ * than the `publicationGrade` boolean alone. The boolean-keyed ternary this replaced printed the
+ * literal words "Yes — two-human unanimous" for ANY publication-grade admission, and the
+ * screened-operator-sampled branch is publication-grade under §6.8 -- so the old ternary would
+ * have published a false two-human-unanimous claim for a screened bundle. The two existing
+ * strings below keep their exact bytes (half of the byte-compatibility proof, spec §0.4); the
+ * screened wording is frozen by ruling C-5 and passes §6.1's overclaim test: no "human", no
+ * "unanimous", no "independent". It echoes the mode name so a reader can join it to the "Truth
+ * admission" field rendered immediately below, and stays terse because the full disclosure is the
+ * `screened-not-independently-labeled` limitation prose rendered in the limitations section.
+ */
+function publicationGradeWording(truthAdmission: NonNullable<PublicAssetInput["binaryQualification"]>["truthAdmission"]): {
+  readonly html: string;
+  readonly markdown: string;
+} {
+  switch (truthAdmission) {
+    case "two-human-unanimous":
+      return { html: "Yes — two-human unanimous", markdown: "yes — two-human unanimous" };
+    case "operator-only":
+      return { html: "No — operator-only", markdown: "no — operator-only" };
+    case "screened-operator-sampled":
+      return { html: "Yes — screened and operator-sampled", markdown: "yes — screened and operator-sampled" };
+    default: {
+      const exhaustive: never = truthAdmission;
+      throw new Error(`unsupported truthAdmission ${String(exhaustive)}`);
+    }
+  }
 }
 
-function binaryAdmissionMarkdown(input: PublicAssetInput): string {
+export function binaryAdmissionHtml(input: PublicAssetInput): string {
   const admission = input.binaryQualification;
   if (admission === undefined) return "";
-  return `## Authenticated truth admission and instruments\n\n- Publication grade: ${admission.publicationGrade ? "yes — two-human unanimous" : "no — operator-only"}\n- Truth admission: ${escapeMarkdown(admission.truthAdmission)}\n- Source manifest: ${escapeMarkdown(admission.sourceManifestSha256)}\n- Admission manifest: ${escapeMarkdown(admission.admissionManifestSha256)}\n- Pre-run exclusions: ${admission.exclusions.length}\n\n### Human disagreement and deterministic replacements\n\n    ${escapeMarkdownCode(canonicalText(admission.exclusions))}\n\n### Exact instrument and prompt-template commitments\n\n    ${escapeMarkdownCode(canonicalText(admission.instruments))}\n\n`;
+  return `<section id="qualification-admission" aria-labelledby="qualification-admission-heading"><h2 id="qualification-admission-heading">Authenticated truth admission and instruments</h2><dl class="facts"><div><dt>Publication grade</dt><dd>${publicationGradeWording(admission.truthAdmission).html}</dd></div><div><dt>Truth admission</dt><dd>${escapeMarkup(admission.truthAdmission)}</dd></div><div><dt>Source manifest</dt><dd class="digest">${escapeMarkup(admission.sourceManifestSha256)}</dd></div><div><dt>Admission manifest</dt><dd class="digest">${escapeMarkup(admission.admissionManifestSha256)}</dd></div><div><dt>Pre-run exclusions</dt><dd>${admission.exclusions.length}</dd></div></dl><h3>Human disagreement and deterministic replacements</h3><pre>${escapeMarkup(canonicalText(admission.exclusions))}</pre><h3>Exact instrument and prompt-template commitments</h3><pre>${escapeMarkup(canonicalText(admission.instruments))}</pre></section>`;
+}
+
+export function binaryAdmissionMarkdown(input: PublicAssetInput): string {
+  const admission = input.binaryQualification;
+  if (admission === undefined) return "";
+  return `## Authenticated truth admission and instruments\n\n- Publication grade: ${publicationGradeWording(admission.truthAdmission).markdown}\n- Truth admission: ${escapeMarkdown(admission.truthAdmission)}\n- Source manifest: ${escapeMarkdown(admission.sourceManifestSha256)}\n- Admission manifest: ${escapeMarkdown(admission.admissionManifestSha256)}\n- Pre-run exclusions: ${admission.exclusions.length}\n\n### Human disagreement and deterministic replacements\n\n    ${escapeMarkdownCode(canonicalText(admission.exclusions))}\n\n### Exact instrument and prompt-template commitments\n\n    ${escapeMarkdownCode(canonicalText(admission.instruments))}\n\n`;
 }
 
 function factsHeading(facts: MethodFacts, source: "report" | "claim"): string {
   if (facts.kind === "wilson") return source === "report" ? "Sealed Report arm results" : "Stored claim mirror";
   if (facts.kind === "comparison") return source === "report" ? "Sealed Report paired comparison" : "Stored paired claim mirror";
+  if (facts.kind === "pairwise-disagreement") {
+    return source === "report" ? "Sealed Report pairwise disagreement panel" : "Stored pairwise disagreement mirror";
+  }
+  if (facts.kind === "paired-majority-delta") {
+    return source === "report" ? "Sealed Report evidence contrast" : "Stored evidence contrast mirror";
+  }
   return source === "report" ? "Sealed binary qualification" : "Stored binary qualification";
+}
+
+/** The one neutral sentence each method's index page leads with. Every method needs its own: the
+ * fallthrough used to be binary-instrument's sentence, so a method added without a branch here
+ * would have published "Verified binary-instrument qualification" over a judge readout. */
+function neutralClaimHtml(facts: MethodFacts): string {
+  if (facts.kind === "wilson") {
+    return '<p class="neutral">No comparative winner is stated; wilson@1 reports neutral per-arm facts only.</p>';
+  }
+  if (facts.kind === "comparison") {
+    return `<p class="neutral">${escapeMarkup(pairedEstimateLine(facts))}</p>`;
+  }
+  if (facts.kind === "paired-majority-delta") {
+    return `<p class="neutral">${escapeMarkup(pairedMajorityDeltaEstimateLine(facts))}</p>`;
+  }
+  if (facts.kind === "pairwise-disagreement") {
+    return '<p class="neutral">No comparative winner is stated; pairwise-disagreement@1 reports every unordered arm pair as a panel, with no baseline and no candidate.</p>';
+  }
+  return '<p class="neutral">Verified binary-instrument qualification. Facts are presented per instrument without comparative conclusions.</p>';
 }
 
 function buildIndex(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {
@@ -515,7 +747,7 @@ ${embeddedFontCss()}
 <p class="status" data-run-outcome="${outcome}">${escapeMarkup(status)}</p>
 <h1>Colophon report</h1>
 <p class="lede">${escapeMarkup(scopeLine(input))}</p>
-${reportFacts.kind === "wilson" ? '<p class="neutral">No comparative winner is stated; wilson@1 reports neutral per-arm facts only.</p>' : reportFacts.kind === "comparison" ? `<p class="neutral">${escapeMarkup(pairedEstimateLine(reportFacts))}</p>` : '<p class="neutral">Verified binary-instrument qualification. Facts are presented per instrument without comparative conclusions.</p>'}
+${neutralClaimHtml(reportFacts)}
 </header>
 <main>
 <section class="adverse" aria-labelledby="adverse-heading"><h2 id="adverse-heading">Prominent adverse facts</h2>${list(adverse, "No adverse facts stated.")}</section>${input.comparison === undefined ? "" : `\n${comparisonSectionHtml(input.comparison)}`}
@@ -543,6 +775,9 @@ function compactStatus(input: PublicAssetInput, reportFacts: MethodFacts): strin
 function pairedCompactFragment(facts: MethodFacts): string {
   if (facts.kind === "wilson") return "";
   if (facts.kind === "binary") return "Verified qualification signpost · full evidence at index.html";
+  if (facts.kind === "pairwise-disagreement") {
+    return `Pairwise disagreement panel · ${facts.pairs.length} arm pairs · index.html`;
+  }
   if (facts.delta === null) return "Paired estimate unavailable · read full report at index.html";
   if (facts.interval === null) return "Paired estimate reported; interval withheld · index.html";
   return "Paired estimate and interval in full report · index.html";
@@ -616,6 +851,7 @@ function comparisonFactsMarkdown(facts: ComparisonFacts): string {
 }
 
 function binaryFactsMarkdown(facts: BinaryFacts): string {
+  const caption = stratumCaption(facts.qualification.configuration);
   return [
     "Qualification facts are presented per instrument without comparative conclusions.",
     "",
@@ -634,7 +870,7 @@ function binaryFactsMarkdown(facts: BinaryFacts): string {
       `- Instability: ${escapeMarkdown(canonicalText(arm["instability"]))}`,
       `- Parser invalid: ${escapeMarkdown(canonicalText(arm["parserInvalid"]))}`,
       `- Every candidate-class bucket: ${escapeMarkdown(canonicalText(arm["byCandidateClass"]))}`,
-      `- Core and stress buckets: ${escapeMarkdown(canonicalText(arm["byStratum"]))}`,
+      `- ${escapeMarkdown(caption)}: ${escapeMarkdown(canonicalText(arm["byStratum"]))}`,
       "",
     ]),
     "### Per-item decisions, instability, and exclusions",
@@ -643,14 +879,51 @@ function binaryFactsMarkdown(facts: BinaryFacts): string {
   ].join("\n");
 }
 
+function judgeIntervalMarkdownLines(
+  interval: { readonly lower: string; readonly upper: string; readonly alpha: string } | null,
+  reasons: readonly string[],
+): readonly string[] {
+  return interval === null
+    ? ["- Interval: withheld", ...reasons.map((reason) => `  - ${escapeMarkdown(reason)}`)]
+    : [
+        `- Interval lower: ${escapeMarkdown(interval.lower)}`,
+        `- Interval upper: ${escapeMarkdown(interval.upper)}`,
+        `- Alpha: ${escapeMarkdown(interval.alpha)}`,
+      ];
+}
+
+function pairwiseDisagreementFactsMarkdown(facts: PairwiseDisagreementFacts): string {
+  if (facts.pairs.length === 0) return "No arm pairs were computed.";
+  return [
+    "| Arm pair | n | Disagreements | Rate | Interval |",
+    "| --- | --- | --- | --- | --- |",
+    ...facts.pairs.map((pair) => {
+      const interval = pair.interval === null
+        ? "withheld"
+        : `${escapeMarkdown(pair.interval.lower)} – ${escapeMarkdown(pair.interval.upper)}`;
+      return `| ${escapeMarkdown(pair.armA)} vs ${escapeMarkdown(pair.armB)} | ${pair.n} | ${pair.disagreements} | ${pair.rate === null ? "—" : escapeMarkdown(pair.rate)} | ${interval} |`;
+    }),
+  ].join("\n");
+}
+
+function pairedMajorityDeltaFactsMarkdown(facts: PairedMajorityDeltaFacts): string {
+  return [
+    `- Candidate (evidence-declaring arm): ${escapeMarkdown(facts.candidate)}`,
+    `- Baseline (evidence-free twin): ${escapeMarkdown(facts.baseline)}`,
+    `- Paired task count: ${facts.n}`,
+    `- Candidate minus baseline estimate: ${facts.delta === null ? "—" : escapeMarkdown(facts.delta)}`,
+    ...judgeIntervalMarkdownLines(facts.interval, facts.reasons),
+  ].join("\n");
+}
+
 /** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6), markdown counterpart
  * to `armResultsHtml`. The wilson branch is byte-identical to before this dispatch existed. */
 function armResultsMarkdown(facts: MethodFacts): string {
-  return facts.kind === "wilson"
-    ? markdownArmTable(facts)
-    : facts.kind === "comparison"
-      ? comparisonFactsMarkdown(facts)
-      : binaryFactsMarkdown(facts);
+  if (facts.kind === "wilson") return markdownArmTable(facts);
+  if (facts.kind === "comparison") return comparisonFactsMarkdown(facts);
+  if (facts.kind === "pairwise-disagreement") return pairwiseDisagreementFactsMarkdown(facts);
+  if (facts.kind === "paired-majority-delta") return pairedMajorityDeltaFactsMarkdown(facts);
+  return binaryFactsMarkdown(facts);
 }
 
 function buildReadme(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {

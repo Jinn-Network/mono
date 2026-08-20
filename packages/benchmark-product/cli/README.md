@@ -3,7 +3,7 @@
 Run Colophon's bundled, zero-credential sample:
 
 ```sh
-npx @colophon-claims/cli@1
+npx @colophon-claims/cli@0.1
 ```
 
 The sample needs Node 22 or newer and is qualified on Ubuntu x64 and Apple-silicon macOS arm64. It needs no account, API key, funds, or Docker. It publishes only to a new local directory, verifies the copied bundle after deleting the source workspace, serves the report from a loopback-only viewer, and uploads nothing. Windows and Intel macOS are not yet qualified.
@@ -18,7 +18,7 @@ the core admission and evaluation contracts:
 
 ```sh
 colophon import item-bank --workspace ./colophon-workspace --principal <id> \
-  --profile binary-judgment@1 --draft <draftId> \
+  --profile binary-judgment@2 --draft <draftId> \
   --items ./items.jsonl --sources ./sources.jsonl --admissions ./admissions.jsonl
 ```
 
@@ -50,5 +50,5 @@ doctor proves configuration, not provider acceptance.
 For a received bundle, prefer the smaller reader package:
 
 ```sh
-npx @colophon-claims/verify@2 ./bundle
+npx @colophon-claims/verify@0.1 ./bundle
 ```

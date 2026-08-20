@@ -179,23 +179,31 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   assert.match(source, /needs: verification-selection\n\s+if: needs\.verification-selection\.outputs\.run == 'true'/u);
   assert.match(source, /test "\$\{SELECTION_RESULT\}" = success/u);
   assert.match(source, /test "\$\{VERIFICATION_RESULT\}" = skipped/u);
-  // Selection is diff-driven on both lanes: the pull_request branch keeps the base/head
-  // pair it has always used, and the merge_group branch reads its base off the merge-group
-  // payload so a narrow queue entry stops paying the full battery. Any other event still
-  // verifies in full. The three-dot diff needs unshallow history on both.
+  // Tiered lanes (DR-2026-08-18-b D3). Fast mode is scoped to the lane the merge queue
+  // backstops: a pull request that does not target `main` unselects verification outright
+  // rather than diffing, because the merge group carries the full battery and the queue is
+  // the only path onto `next`. A pull request that DOES target `main` is the hotfix lane —
+  // D2 puts no queue there, so fast mode would delete the verification rather than move it,
+  // and those PRs verify in full. The merge_group lane reads its base off the merge-group
+  // payload and its head as GITHUB_SHA (the commit checkout resolved). Any other event still
+  // verifies in full; the three-dot diff needs unshallow history.
   const selectionJob = sliceJob(source, '  verification-selection:', '  platform-release-surface:');
   assert.match(selectionJob, /fetch-depth: 0/u);
   assert.match(selectionJob, /timeout-minutes: 5/u);
-  assert.match(selectionJob, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/u);
-  assert.match(selectionJob, /HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/u);
+  assert.match(selectionJob, /PR_BASE_REF: \$\{\{ github\.base_ref \}\}/u);
   assert.match(selectionJob, /MG_BASE_SHA: \$\{\{ github\.event\.merge_group\.base_sha \}\}/u);
-  assert.match(selectionJob, /^\s+pull_request\)\n\s+diff_base="\$\{BASE_SHA\}"\n\s+diff_head="\$\{HEAD_SHA\}"/mu);
-  // One source of truth for the merge-group head. `github.sha` is what the checkout above
-  // resolved, so the diff head is by construction the tree being verified;
-  // `merge_group.head_sha` as a second, unbound spelling of the same thing is pinned out.
+  // The base-ref carve-out is asserted as one contiguous block, before the fast-lane
+  // unselect, so a future edit cannot reorder them and silently thin the hotfix lane.
+  assert.match(
+    selectionJob,
+    /^\s+pull_request\)\n\s+if \[ "\$\{PR_BASE_REF\}" = main \]; then\n\s+echo '[^']*'\n\s+echo 'run=true' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0\n\s+fi\n\s+echo 'pr-fast-lane: full verification runs on the merge group'\n\s+echo 'run=false' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0/mu,
+  );
+  // The PR lane must not diff at all — a surviving pull_request base/head pair would mean
+  // fast mode was only half-applied and the PR lane still paid for selection.
+  assert.doesNotMatch(selectionJob, /github\.event\.pull_request\.base\.sha/u);
   assert.match(selectionJob, /^\s+merge_group\)\n\s+diff_base="\$\{MG_BASE_SHA\}"\n\s+diff_head="\$\{GITHUB_SHA\}"/mu);
-  // Scoped to directives: the surrounding prose explains why `merge_group.head_sha` is
-  // not used, and must stay free to name it.
+  // One source of truth for the merge-group head. `github.sha` is what the checkout
+  // resolved; `merge_group.head_sha` as a second spelling is pinned out of directives.
   const selectionDirectives = selectionJob
     .split('\n')
     .filter((line) => !line.trimStart().startsWith('#'))
@@ -219,6 +227,7 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   assert.doesNotMatch(controlJob, /(?:id-token|attestations|artifact-metadata): write/u);
   assert.match(controlJob, /node \.github\/scripts\/generate-architecture\.mjs --check/u);
   assert.match(controlJob, /\.github\/scripts\/benchmark-product-source-boundaries\.test\.mjs/u);
+  assert.match(controlJob, /\.github\/scripts\/colophon-publish-manifest\.test\.mjs/u);
   assert.match(reusableJob, /permissions:\n\s+contents: read\n\s+id-token: write\n\s+attestations: write\n\s+artifact-metadata: write/u);
   assert.doesNotMatch(finalJob, /(?:id-token|attestations|artifact-metadata): write/u);
 });
@@ -226,27 +235,40 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
 test('the selection script resolves its diff endpoints from the event it is given', () => {
   const script = extractSelectionScript(readArchitectureControlWorkflow());
 
+  // Fast lane: a pull request that does not target `main` unselects without diffing.
   const pullRequest = runSelectionScript({
     script,
     env: {
       EVENT_NAME: 'pull_request',
-      BASE_SHA: 'base-from-pull-request',
-      HEAD_SHA: 'head-from-pull-request',
+      PR_BASE_REF: 'next',
       MG_BASE_SHA: '',
       GITHUB_SHA: 'checked-out-sha',
     },
   });
   assert.equal(pullRequest.status, 0, pullRequest.stderr);
-  assert.match(pullRequest.gitArgs, /^base-from-pull-request\.\.\.head-from-pull-request$/mu);
-  assert.match(pullRequest.output, /^run=true$/mu);
+  assert.equal(pullRequest.gitArgs, '');
+  assert.match(pullRequest.output, /^run=false$/mu);
+
+  // Hotfix lane: a pull request targeting `main` verifies in full, still without diffing.
+  const hotfix = runSelectionScript({
+    script,
+    env: {
+      EVENT_NAME: 'pull_request',
+      PR_BASE_REF: 'main',
+      MG_BASE_SHA: '',
+      GITHUB_SHA: 'checked-out-sha',
+    },
+  });
+  assert.equal(hotfix.status, 0, hotfix.stderr);
+  assert.equal(hotfix.gitArgs, '');
+  assert.match(hotfix.output, /^run=true$/mu);
 
   // The merge-group head is `GITHUB_SHA`, not a second payload field.
   const mergeGroup = runSelectionScript({
     script,
     env: {
       EVENT_NAME: 'merge_group',
-      BASE_SHA: '',
-      HEAD_SHA: '',
+      PR_BASE_REF: '',
       MG_BASE_SHA: 'base-from-merge-group',
       GITHUB_SHA: 'checked-out-sha',
     },
@@ -258,7 +280,7 @@ test('the selection script resolves its diff endpoints from the event it is give
   // Any other event verifies in full without consulting a diff at all.
   const dispatch = runSelectionScript({
     script,
-    env: { EVENT_NAME: 'workflow_dispatch', BASE_SHA: '', HEAD_SHA: '', MG_BASE_SHA: '', GITHUB_SHA: 'checked-out-sha' },
+    env: { EVENT_NAME: 'workflow_dispatch', PR_BASE_REF: '', MG_BASE_SHA: '', GITHUB_SHA: 'checked-out-sha' },
   });
   assert.equal(dispatch.status, 0, dispatch.stderr);
   assert.match(dispatch.output, /^run=true$/mu);
@@ -268,18 +290,21 @@ test('the selection script resolves its diff endpoints from the event it is give
 test('the selection script refuses to unselect when a diff endpoint is unresolved', () => {
   const script = extractSelectionScript(readArchitectureControlWorkflow());
 
-  for (const [label, env] of [
-    ['merge_group', { EVENT_NAME: 'merge_group', BASE_SHA: '', HEAD_SHA: '', MG_BASE_SHA: '', GITHUB_SHA: 'checked-out-sha' }],
-    ['pull_request', { EVENT_NAME: 'pull_request', BASE_SHA: 'base-from-pull-request', HEAD_SHA: '', MG_BASE_SHA: '', GITHUB_SHA: '' }],
-  ]) {
-    const unresolved = runSelectionScript({ script, env });
-    assert.notEqual(unresolved.status, 0, `${label}: an unresolved endpoint must red the job`);
-    assert.match(unresolved.stdout, new RegExp(`::error::selection endpoints unresolved on ${label}`, 'u'));
-    // No diff was attempted and no verdict was published — the terminal gate sees a
-    // non-success selection job rather than an unselected battery.
-    assert.equal(unresolved.gitArgs, '', `${label}: no diff should be attempted`);
-    assert.equal(unresolved.output, '', `${label}: no run= verdict should be published`);
-  }
+  // Only the merge-group arm reaches the emptiness guard. The PR fast-lane exits
+  // before it, so an empty SHA on pull_request must not be the thing that reds.
+  const unresolved = runSelectionScript({
+    script,
+    env: {
+      EVENT_NAME: 'merge_group',
+      PR_BASE_REF: '',
+      MG_BASE_SHA: '',
+      GITHUB_SHA: 'checked-out-sha',
+    },
+  });
+  assert.notEqual(unresolved.status, 0, 'merge_group: an unresolved endpoint must red the job');
+  assert.match(unresolved.stdout, /::error::selection endpoints unresolved on merge_group/u);
+  assert.equal(unresolved.gitArgs, '', 'merge_group: no diff should be attempted');
+  assert.equal(unresolved.output, '', 'merge_group: no run= verdict should be published');
 });
 
 test('a failing git diff reds selection instead of silently unselecting verification', () => {

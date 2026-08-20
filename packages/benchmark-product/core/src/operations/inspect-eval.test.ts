@@ -14,6 +14,7 @@ import {
   decideInspectViewExportMode,
   exportInspectViewBundle,
 } from "./inspect-view-export.js";
+import { exportDerivedBundle } from "./method.js";
 import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
 import { requireRunState, writeRunState } from "../run/state.js";
@@ -34,6 +35,7 @@ import { createEvaluationCellRegistry, createLocalProvisioner } from "../venue/p
 import type { OperationContext } from "./context.js";
 import type { LocalVenue } from "../venue/venue.js";
 import {
+  exportCompletenessCertification,
   INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION,
   INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
 } from "../runtime/suite-protocol/comparability.js";
@@ -195,16 +197,37 @@ describe("decideInspectViewExportMode", () => {
 });
 
 describe("Inspect eval official-suite select", () => {
-  test("Inspect task and Inspect eval CLI verbs are distinct", () => {
-    expect(OPERATION_TO_VERB.selectInspectEvaluation).toBe("runtime inspect select");
-    expect(OPERATION_TO_VERB.selectInspectEvalRuntime).toBe("runtime inspect eval select");
-    expect(OPERATION_TO_VERB.exportInspectViewBundle).toBe("runtime inspect eval export");
-    expect(OPERATION_TO_ACTION.selectInspectEvaluation).toBe("runtime.inspect.select");
-    expect(OPERATION_TO_ACTION.selectInspectEvalRuntime).toBe("runtime.inspect.eval.select");
-    expect(OPERATION_TO_ACTION.exportInspectViewBundle).toBe("runtime.inspect.eval.export");
-    expect(CLI_VERB_NAMES).toContain("runtime inspect select");
-    expect(CLI_VERB_NAMES).toContain("runtime inspect eval select");
-    expect(CLI_VERB_NAMES).toContain("runtime inspect eval export");
+  test("Inspect task and Inspect eval CLI verbs retire behind method", () => {
+    expect(OPERATION_TO_VERB.selectInspectEvaluation).toBeUndefined();
+    expect(OPERATION_TO_VERB.selectInspectEvalRuntime).toBeUndefined();
+    expect(OPERATION_TO_VERB.exportInspectViewBundle).toBeUndefined();
+    expect(OPERATION_TO_ACTION.selectInspectEvaluation).toBeUndefined();
+    expect(OPERATION_TO_ACTION.selectInspectEvalRuntime).toBeUndefined();
+    expect(OPERATION_TO_ACTION.exportInspectViewBundle).toBeUndefined();
+    expect(CLI_VERB_NAMES).not.toContain("runtime inspect select");
+    expect(CLI_VERB_NAMES).not.toContain("runtime inspect eval select");
+    expect(CLI_VERB_NAMES).not.toContain("runtime inspect eval export");
+    expect(OPERATION_TO_VERB.selectMethod).toBe("method");
+    expect(OPERATION_TO_VERB.exportDerivedBundle).toBe("export");
+  });
+
+  test("a plain inspect draft still refuses exportDerivedBundle at its own method.ts refuse (unchanged, §8.2 rule 2)", async () => {
+    const context = setup("plain-inspect-export-refuse");
+    const selected = await selectInspectEvalRuntime(context, {
+      draftId: "plain-inspect-export-refuse",
+      coverage: "one_task",
+      pythonPath: "/usr/bin/python3",
+      projectDir: "/tmp/inspect-project",
+      taskReference: "eval.py@hermetic",
+      arms: inspectManifest.arms,
+      scorer: { name: "match", passValue: "C" },
+    });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    const exported = exportDerivedBundle(context, { draftId: "plain-inspect-export-refuse", armId: "control" });
+    expect(exported.ok).toBe(false);
+    if (exported.ok) return;
+    expect(exported.error.detail).toBe("Inspect methods have no suite-named derived bundle");
   });
 
   test("named slices are lexicographic first 1 / first 10 / all; custom cannot be full", async () => {
@@ -671,6 +694,15 @@ describe("Inspect eval official-suite select", () => {
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
     expect(exported.result.mode).toBe("inspection-upload");
+    // §8.2 clause 2: the certification line is first, and no sealed Matrix exists yet (no collect).
+    expect(exported.result.instructions.split("\n")[0]).toBe(exportCompletenessCertification({
+      runSha256: requireRunState(context.workspaceDir, "export-one").runSha256!,
+      completeness: undefined,
+    }));
+    // The Inspect-eval lane's own first sentence is unchanged by the judge lane's fork (§8.2).
+    expect(exported.result.instructions).toContain(
+      "This run matches Inspect eval execution settings for the selected named slice, but it is not eval complete for the sealed catalog.",
+    );
     expect(exported.result.instructions).toContain(INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE);
     expect(existsSync(join(exported.result.exportDir, `${logSha256}.eval`))).toBe(true);
     expect(readFileSync(join(exported.result.exportDir, `${logSha256}.eval`))).toEqual(Buffer.from(logBytes));

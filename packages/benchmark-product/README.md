@@ -45,7 +45,7 @@ local immutable bundle emission only.
 The intended packaged command is:
 
 ```bash
-npx @colophon-claims/cli@1
+npx @colophon-claims/cli@0.1
 ```
 
 It runs the bundled zero-credential comparison, retains its copied bundle and
@@ -55,8 +55,11 @@ a registry command because the packages have not been published.
 For a received bundle, the smaller reader surface is:
 
 ```bash
-npx @colophon-claims/verify@2 ./bundle
+npx @colophon-claims/verify@0.1 ./bundle
 ```
+
+To verify a bundle with tools that are not ours, see
+[`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).
 
 The contributor proof remains available from the mono:
 

@@ -42,7 +42,10 @@ on:
       - ".github/scripts/benchmark-product-package-inventory.test.mjs"
       - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
       - ".github/scripts/benchmark-product-packed-types.test.mjs"
+      - ".github/scripts/colophon-publish-manifest.mjs"
+      - ".github/scripts/colophon-publish-manifest.test.mjs"
       - ".github/workflows/benchmark-product-ci.yml"
+      - ".github/workflows/colophon-npm-publish.yml"
       - "spec/2026-08-13-colophon-self-serve.md"
       - "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
       - "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md"
@@ -51,6 +54,10 @@ on:
       - "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md"
       - "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md"
       - "docs/superpowers/plans/2026-08-13-benchmark-publication-implementation-program.md"
+      # Demo-1's sealed pre-run artifacts. demo1-task-evidence.test.ts round-trips these three
+      # files through the real verifiers and pins their digests, so an edit here must run this
+      # suite even when no package source moves.
+      - "docs/superpowers/plans/demo-report-1/**"
   push:
     branches: [next]
     paths:
@@ -93,7 +100,10 @@ on:
       - ".github/scripts/benchmark-product-package-inventory.test.mjs"
       - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
       - ".github/scripts/benchmark-product-packed-types.test.mjs"
+      - ".github/scripts/colophon-publish-manifest.mjs"
+      - ".github/scripts/colophon-publish-manifest.test.mjs"
       - ".github/workflows/benchmark-product-ci.yml"
+      - ".github/workflows/colophon-npm-publish.yml"
       - "spec/2026-08-13-colophon-self-serve.md"
       - "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
       - "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md"
@@ -102,6 +112,10 @@ on:
       - "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md"
       - "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md"
       - "docs/superpowers/plans/2026-08-13-benchmark-publication-implementation-program.md"
+      # Demo-1's sealed pre-run artifacts. demo1-task-evidence.test.ts round-trips these three
+      # files through the real verifiers and pins their digests, so an edit here must run this
+      # suite even when no package source moves.
+      - "docs/superpowers/plans/demo-report-1/**"
 
 permissions:
   contents: read
@@ -118,6 +132,8 @@ jobs:
         run: node --test .github/scripts/benchmark-product-package-inventory.test.mjs
       - name: Verify source boundaries
         run: node --test .github/scripts/benchmark-product-source-boundaries.test.mjs
+      - name: Verify first-cut Colophon publish pin and Increment 1 catalog
+        run: node --test .github/scripts/colophon-publish-manifest.test.mjs
 
   product:
     needs: [architecture]

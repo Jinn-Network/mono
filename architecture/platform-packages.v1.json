@@ -195,7 +195,7 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 14,
+      "expectedPackageCount": 13,
       "publishPolicies": [
         "private",
         "never"
@@ -220,6 +220,7 @@
         "transitional"
       ],
       "allowedDependencyReleaseGroups": [
+        "colophon-claims-v1",
         "experimental-lifecycle-notifications",
         "experimental-policy",
         "experimental-read-plane",
@@ -227,6 +228,26 @@
         "legacy-product-lines",
         "sealed-platform-v1",
         "transitional-or-private"
+      ],
+      "stackPublished": false,
+      "canary": false,
+      "stable": false
+    },
+    "colophon-claims-v1": {
+      "expectedPackageCount": 1,
+      "publishPolicies": [
+        "independent"
+      ],
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "allowedClassifications": [
+        "product"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "colophon-claims-v1",
+        "implementations-v1",
+        "sealed-platform-v1"
       ],
       "stackPublished": false,
       "canary": false,
@@ -662,10 +683,13 @@
             "status": "approved"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-17-colophon-first-cut-canary-pin.md",
+          "status": "ratified"
+        }
       },
-      "releaseGroup": "transitional-or-private",
-      "publishPolicy": "never",
+      "releaseGroup": "colophon-claims-v1",
+      "publishPolicy": "independent",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmark-product-ci"
@@ -3436,6 +3460,10 @@
           {
             "path": "docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md",
             "status": "draft"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-08-05-policy-optimization-live-host-and-guided-journey-design.md",
+            "status": "approved"
           },
           {
             "path": "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md",

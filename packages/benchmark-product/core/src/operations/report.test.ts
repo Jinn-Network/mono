@@ -1,10 +1,12 @@
 import { cpSync, existsSync, linkSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { generateKeyPairSync } from "node:crypto";
 import { createServer, type Server } from "node:http";
+import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { cellIdempotencyKey, parseBenchmarkAccounting, parseMatrix, parseReport, parseSignedReportRecord } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION, cellIdempotencyKey, parseBenchmarkAccounting, parseMatrix, parseReport, parseSignedReportRecord } from "@jinn-network/benchmarking-records";
 import { requirementsDigest } from "@jinn-network/benchmarking-local";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, SubmissionUri } from "@jinn-network/task-execution-backend";
@@ -16,8 +18,9 @@ import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import { readRunState, writeRunState } from "../run/state.js";
+import { additionalClaimPackagePath } from "../report/claim.js";
 import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource, recordPath } from "../run/publication-source.js";
-import { claimPackageArtifactPath, draftPath, publicationDir, publicationServeRoot, publicBundlesDir, runStatePath } from "../workspace/layout.js";
+import { claimPackageArtifactPath, draftPath, publicationDir, publicationServeRoot, publicBundlePath, publicBundlesDir, runStatePath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
   APEX_SWE_DEV_ADAPTER_ID,
@@ -40,9 +43,10 @@ import type { OperationContext } from "./context.js";
 import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { readAuditEntries } from "../audit/journal.js";
-import { materializePublicBundle } from "../bundle/materialize.js";
+import { materializePublicBundle, PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "../bundle/materialize.js";
+import { createSyntheticV4BundleFixture } from "../bundle/testing/v4-synthetic-fixture.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { BUNDLE_FORMAT, BUNDLE_V3_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_V3_FORMAT, BUNDLE_V4_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
 import { runCli } from "../cli/main.js";
 import { runCollect } from "./run-collect.js";
 import { runLaunch } from "./run-launch.js";
@@ -81,6 +85,65 @@ function makeClock(): () => string {
 
 function contextFor(clock: () => string, principal = "sponsor-1"): OperationContext {
   return { workspaceDir, principal, clock };
+}
+
+// ── packet P5 proof 1a: the shipped, packaged `external-verify.py` (spec §8.3) ────────────────
+// Invoked at the PACKAGED path (`node_modules/@colophon-claims/verify/scripts/...`), never the
+// repo source path — that packaged copy is the artifact a third party installs, per the verify
+// package's `files` list and `verify/scripts/pack-smoke.mjs`.
+const EXTERNAL_VERIFY_SCRIPT = fileURLToPath(
+  new URL("../../node_modules/@colophon-claims/verify/scripts/external-verify.py", import.meta.url),
+);
+const EXTERNAL_VERIFY_CHECKS = [
+  "manifest-files", "cas-records", "sealed-bytes", "report-signature",
+  "report-pins-matrix", "verdict-signatures", "matrix-verdict-closure",
+  "claim-mirror", "key-derivations",
+] as const;
+
+/** Probed once, exactly as `verify/test/external-walkthrough.test.mjs` does: a directory that
+ * exists but is not a bundle still passes the "is this a directory" and "can openssl sign/verify
+ * Ed25519" gates the script runs before it ever reads bundle.json, so exit code 2 here means only
+ * one thing — python3 or an Ed25519-capable openssl is unavailable — never "not a real bundle". */
+function probeExternalVerifyAvailable(): boolean {
+  const probeDir = mkdtempSync(join(tmpdir(), "bp-p5-extverify-probe-"));
+  try {
+    const probe = spawnSync("python3", [EXTERNAL_VERIFY_SCRIPT, probeDir], { encoding: "utf8" });
+    return probe.error === undefined && probe.status !== 2;
+  } finally {
+    rmSync(probeDir, { recursive: true, force: true });
+  }
+}
+const externalVerifyAvailable = probeExternalVerifyAvailable();
+
+async function runExternalVerify(bundleDir: string): Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }> {
+  return new Promise((resolvePromise) => {
+    const child = spawn("python3", [EXTERNAL_VERIFY_SCRIPT, bundleDir], { stdio: ["ignore", "pipe", "pipe"] });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.once("error", () => resolvePromise({ code: 2, stdout: "", stderr: "spawn error" }));
+    child.once("exit", (code) => resolvePromise({
+      code: code ?? 2,
+      stdout: Buffer.concat(stdout).toString("utf8"),
+      stderr: Buffer.concat(stderr).toString("utf8"),
+    }));
+  });
+}
+
+/** Exit 0 plus one `CHECK <name>: ok` line per check, EXCEPT `claim-mirror`, which the script
+ * itself skips for a comparison-shaped claim ("comparison-shaped claims carry no headline to
+ * mirror") — a skip does not fail the run, so its line is asserted as ok-or-skipped rather than
+ * pinned to one outcome. */
+function assertExternalVerifyAllChecksPass(result: { readonly code: number; readonly stdout: string; readonly stderr: string }): void {
+  expect(result.code, `external-verify.py exited ${result.code}\n${result.stdout}\n${result.stderr}`).toBe(0);
+  for (const check of EXTERNAL_VERIFY_CHECKS) {
+    if (check === "claim-mirror") {
+      expect(result.stdout).toMatch(/CHECK claim-mirror: (ok|skipped)/);
+    } else {
+      expect(result.stdout).toMatch(new RegExp(`CHECK ${check}: ok`));
+    }
+  }
 }
 
 async function servePublicationWorkspace(mount = ""): Promise<string> {
@@ -355,6 +418,16 @@ async function setUpClosedRun(
       readonly candidate?: string;
       readonly parameters?: Record<string, unknown>;
     };
+    /** Packet P5 (spec §8.3 option 5): patched onto the draft spec (via updateDraft) before
+     * quote/lock, alongside `analysis` above, so compileDraft's buildAnalysisPlan wrapper appends
+     * these entries after the primary plan. */
+    readonly additionalAnalyses?: readonly {
+      readonly method: string;
+      readonly version: string;
+      readonly baseline?: string;
+      readonly candidate?: string;
+      readonly parameters?: Record<string, unknown>;
+    }[];
   } = {},
 ): Promise<void> {
   initWorkspace(contextFor(clock));
@@ -364,8 +437,14 @@ async function setUpClosedRun(
   if (!sample.ok) throw new Error("unreachable");
   armAdd(contextFor(clock), { draftId, armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
   armAdd(contextFor(clock), { draftId, armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
-  if (options.analysis !== undefined) {
-    const patched = updateDraft(contextFor(clock), { draftId, patch: { analysis: options.analysis } });
+  if (options.analysis !== undefined || options.additionalAnalyses !== undefined) {
+    const patched = updateDraft(contextFor(clock), {
+      draftId,
+      patch: {
+        ...(options.analysis !== undefined ? { analysis: options.analysis } : {}),
+        ...(options.additionalAnalyses !== undefined ? { additionalAnalyses: options.additionalAnalyses } : {}),
+      },
+    });
     expect(patched.ok).toBe(true);
   }
   const quoted = await runQuote(contextFor(clock), { draftId });
@@ -387,8 +466,12 @@ async function setUpClosedRun(
 
 /** The Report-v2 operation consumes the independent accounting closure; it never launches this
  * fixture's backend. Registration after close is deliberately post-hoc. */
-async function setUpPublishedAccounting(clock: () => string, mount = ""): Promise<void> {
-  await setUpClosedRun(clock);
+async function setUpPublishedAccounting(
+  clock: () => string,
+  mount = "",
+  closedRunOptions: Parameters<typeof setUpClosedRun>[2] = {},
+): Promise<void> {
+  await setUpClosedRun(clock, "draft-1", closedRunOptions);
   recordRunPublicationAuthorship("draft-1");
   const publicBaseUrl = await servePublicationWorkspace(mount);
   const configured = await publicationConfigure(contextFor(clock), { draftId: "draft-1", publicBaseUrl });
@@ -509,6 +592,39 @@ describe("publication.report — signed Report v2", () => {
     const repeated = await publicationReport(contextFor(clock), { draftId: "draft-1" });
     expect(repeated).toEqual(published);
   }, 60_000);
+
+  test(
+    "packet P5: with additionalAnalyses registered, publicationReport still pins the PRIMARY entry — never an additional one",
+    async () => {
+      // publicationReport is a genuinely independent, single-Report v2 pipeline (never fans out
+      // to N — the write-once reportPayloadSha256/reportRecordSha256 guard in run/state.ts is
+      // exactly why). Before additionalAnalyses existed, its selection
+      // (`run.analysisPlan?.[run.analysisPlan.length - 1]`) always landed on the primary entry
+      // because the plan was never longer than two. Once additionalAnalyses append more entries,
+      // that same raw last-index read would silently start reporting a DIFFERENT (additional)
+      // method — this draft has no explicit `analysis`, so the primary is wilson, and the
+      // regression this test guards against is publicationReport reporting paired-delta instead.
+      const clock = makeClock();
+      await setUpPublishedAccounting(clock, "", {
+        evaluationModes: Array(8).fill("no-verdict"),
+        additionalAnalyses: [
+          {
+            method: "jinn.benchmarking.method/paired-delta",
+            version: "1",
+            baseline: "baseline",
+            candidate: "sample",
+            parameters: { seed: 1, resamples: 10, alpha: "0.05" },
+          },
+        ],
+      });
+      const published = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      if (!published.ok) return;
+      const signed = parseSignedReportRecord(getSealedBytes(workspaceDir, published.result.reportRecordSha256));
+      expect(signed.payload.method.id).toBe("jinn.benchmarking.method/wilson");
+    },
+    60_000,
+  );
 
   test("leaves accounting complete and report unstarted when an exact-public dependency is unavailable", async () => {
     const clock = makeClock();
@@ -1852,6 +1968,370 @@ describe("runReport — claim-package write failure does not strand the draft", 
       expect(verified.ok, JSON.stringify(verified)).toBe(true);
       if (!verified.ok) return;
       expect(verified.result.checks).toContain("claim-consistency");
+    },
+    30_000,
+  );
+});
+
+describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)", () => {
+  test(
+    "one report invocation emits N sealed Reports and one publish invocation emits N bundles, both single-shot; N distinct identities share one runSha256/matrixSha256",
+    async () => {
+      // Five methods now have a claim-package projection wired on BOTH sides of the mirror seam
+      // (`report/claim.ts`'s methodProjection in core, and the same switch in verify's own
+      // `profile/claim.ts`): wilson@1, paired-delta@1, binary-instrument@1, and — added by this
+      // packet — pairwise-disagreement@1 and paired-majority-delta@1. wilson can never be an
+      // additional entry (it is always the primary head). This test stays on paired-delta@1
+      // because what it proves is the PACKAGING property (N sealed Reports, N bundles, one shared
+      // run/matrix identity), which is method-agnostic by construction and does not depend on
+      // which method fills the slot. The two new judge methods carry their own end-to-end
+      // cold-verify proof in the sibling test below, which is where their projections are
+      // exercised. Real pairing needs task provenance the bundled sample benchmark does
+      // not carry (P4b scoping §6.1), so — exactly like the existing "selected paired method" test
+      // above — every evaluation is dispatched "no-verdict", which keeps pairing at zero pairs and
+      // sidesteps the provenance gap while still exercising the real produceReport() call.
+      const clock = makeClock();
+      await setUpClosedRun(clock, "draft-1", {
+        evaluationModes: Array(8).fill("no-verdict"),
+        additionalAnalyses: [
+          {
+            method: "jinn.benchmarking.method/paired-delta",
+            version: "1",
+            baseline: "baseline",
+            candidate: "sample",
+            parameters: { seed: 123456789, resamples: 1000, alpha: "0.05" },
+          },
+        ],
+      });
+
+      // ── report: ONE invocation, N sealed Reports, ONE transition ──────────────────────────
+      const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(reported.ok, JSON.stringify(reported)).toBe(true);
+      if (!reported.ok) return;
+      expect(reported.result.draft.state).toBe("reported");
+      expect(reported.result.additionalReports).toHaveLength(1);
+
+      const reportShas = [reported.result.reportSha256, ...reported.result.additionalReports!.map((entry) => entry.reportSha256)];
+      expect(new Set(reportShas).size).toBe(2); // N distinct reportSha256 values
+      const reportEnvelopeShas = [reported.result.reportEnvelopeSha256, ...reported.result.additionalReports!.map((entry) => entry.reportEnvelopeSha256)];
+      expect(new Set(reportEnvelopeShas).size).toBe(2);
+
+      const stateAfterReport = readRunState(workspaceDir, "draft-1")!;
+      expect(stateAfterReport.reportSha256).toBe(reported.result.reportSha256);
+      expect(stateAfterReport.additionalReports).toHaveLength(1);
+      // Run state carries the N-1 additional identities keyed by (method, version).
+      expect(stateAfterReport.additionalReports?.map((entry) => `${entry.method}@${entry.version}`)).toEqual([
+        "jinn.benchmarking.method/paired-delta@1",
+      ]);
+
+      // Every additional Report has its own Claim, at its own path, distinct from the canonical
+      // one.
+      const canonicalClaimBytes = readFileSync(claimPackageArtifactPath(workspaceDir, "draft-1"), "utf8");
+      for (const entry of stateAfterReport.additionalReports!) {
+        const claimPath = additionalClaimPackagePath(workspaceDir, "draft-1", entry.method, entry.version);
+        expect(existsSync(claimPath)).toBe(true);
+        const claimBytes = readFileSync(claimPath, "utf8");
+        expect(claimBytes).not.toBe(canonicalClaimBytes);
+        const parsedClaim = JSON.parse(claimBytes) as { records: { reportSha256: string } };
+        expect(parsedClaim.records.reportSha256).toBe(entry.reportSha256);
+      }
+
+      // A second `report` call still refuses illegal-transition, exactly as before this feature.
+      const secondReport = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(secondReport.ok).toBe(false);
+      if (!secondReport.ok) expect(secondReport.error.code).toBe("illegal-transition");
+
+      // ── verify: claim-consistency already resolves by (method, version), so it already works
+      // for a Report that is not the last plan entry — no code changed to make this true. ──────
+      const verified = await runVerify(contextFor(clock), { draftId: "draft-1" });
+      expect(verified.ok, JSON.stringify(verified)).toBe(true);
+      if (verified.ok) {
+        expect(verified.result.checks).toContain("claim-consistency");
+        expect(verified.result.checks).toContain("report-verification");
+        expect(verified.result.additionalReports).toHaveLength(1);
+      }
+
+      // ── publish: ONE invocation, N bundle directories, ONE transition ─────────────────────
+      const published = await runPublish(contextFor(clock), { draftId: "draft-1" });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      if (!published.ok) return;
+      expect(published.result.draft.state).toBe("published-bundle");
+      expect(published.result.additionalBundles).toHaveLength(1);
+
+      const bundleIdentities = [published.result.bundleIdentity, ...published.result.additionalBundles!.map((entry) => entry.bundleIdentity)];
+      expect(new Set(bundleIdentities).size).toBe(2); // N distinct bundle identities
+
+      const stateAfterPublish = readRunState(workspaceDir, "draft-1")!;
+      expect(stateAfterPublish.bundleIdentity).toBe(published.result.bundleIdentity);
+      expect(stateAfterPublish.additionalBundles).toHaveLength(1);
+      expect(stateAfterPublish.additionalBundles?.map((entry) => `${entry.method}@${entry.version}`)).toEqual([
+        "jinn.benchmarking.method/paired-delta@1",
+      ]);
+
+      // Every bundle — canonical and additional — carries the SAME runSha256/matrixSha256: all N
+      // readouts are over the one collected cell set (spec §8.3's decisive disclosure property).
+      for (const identity of bundleIdentities) {
+        const bundleDir = publicBundlePath(workspaceDir, "draft-1", identity);
+        expect(sha256Hex(new Uint8Array(readFileSync(join(bundleDir, "run.json"))))).toBe(stateAfterPublish.runSha256);
+        expect(sha256Hex(new Uint8Array(readFileSync(join(bundleDir, "matrix.json"))))).toBe(stateAfterPublish.matrixSha256);
+      }
+
+      // A second `publish` call behaves as it does today: idempotent re-verification, identical
+      // identities, no state advancement beyond what already happened.
+      const secondPublish = await runPublish(contextFor(clock), { draftId: "draft-1" });
+      expect(secondPublish.ok, JSON.stringify(secondPublish)).toBe(true);
+      if (secondPublish.ok) {
+        expect(secondPublish.result.bundleIdentity).toBe(published.result.bundleIdentity);
+        expect(secondPublish.result.additionalBundles?.map((entry) => entry.bundleIdentity).sort())
+          .toEqual(published.result.additionalBundles!.map((entry) => entry.bundleIdentity).sort());
+      }
+    },
+    30_000,
+  );
+
+  // ── Proof 1a (spec §8.3): the N-bundle cold-verify proof ──────────────────────────────────
+  //
+  // §8.3's entire argument for option 5 over option 4 is that option 5's bundles cold-verify
+  // with the already published, unmodified verifier AND the already published
+  // `external-verify.py`. The three tests below exercise both readers, assert each bundle's own
+  // (non-uniform) format and file list, and give the two-field comparison — the reader-visible
+  // substitute for option 4's internal "one cell set" assertion — its own dedicated test.
+
+  const N2_ADDITIONAL_ANALYSES = [
+    {
+      method: "jinn.benchmarking.method/paired-delta",
+      version: "1",
+      baseline: "baseline",
+      candidate: "sample",
+      parameters: { seed: 123456789, resamples: 1000, alpha: "0.05" },
+    },
+  ] as const;
+
+  test(
+    "packet P5 proof 1a: every published bundle verifies with the shipped JS verifier after the source workspace is deleted, each with its own exact format and file list (no numbering scheme, no bundle claiming files it doesn't have)",
+    async () => {
+      const clock = makeClock();
+      await setUpClosedRun(clock, "draft-1", {
+        evaluationModes: Array(8).fill("no-verdict"),
+        additionalAnalyses: N2_ADDITIONAL_ANALYSES,
+      });
+      const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(reported.ok, JSON.stringify(reported)).toBe(true);
+      if (!reported.ok) return;
+      const published = await runPublish(contextFor(clock), { draftId: "draft-1" });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      if (!published.ok) return;
+
+      const identities = [published.result.bundleIdentity, ...(published.result.additionalBundles ?? []).map((entry) => entry.bundleIdentity)];
+      expect(identities).toHaveLength(2);
+
+      const copiedDirs = identities.map((identity) => {
+        const copied = mkdtempSync(join(tmpdir(), "bp-p5-cold-js-"));
+        cpSync(publicBundlePath(workspaceDir, "draft-1", identity), copied, { recursive: true });
+        return { identity, dir: copied };
+      });
+      try {
+        rmSync(workspaceDir, { recursive: true, force: true });
+        expect(existsSync(workspaceDir)).toBe(false);
+
+        for (const { identity, dir } of copiedDirs) {
+          const verified = await verifyPublicBundle(dir);
+          expect(verified.identity).toBe(identity);
+
+          // Per-bundle format and exact file list — derived from THIS bundle's own manifest, not
+          // asserted uniform across the N bundles (the bundle format is derived from each
+          // Report's own method, and a run can legitimately emit bundles of different formats).
+          const manifest = JSON.parse(readFileSync(join(dir, "bundle.json"), "utf8")) as {
+            readonly format: string;
+            readonly files: ReadonlyArray<{ readonly path: string }>;
+          };
+          expect(verified.format).toBe(manifest.format);
+          expect([BUNDLE_FORMAT, BUNDLE_V4_FORMAT] as readonly string[]).toContain(manifest.format);
+          // PUBLIC_BUNDLE_FILES/V4 name the fixed, non-content-addressed members exactly; the
+          // remainder of the manifest is exactly the evidence catalog's own `records/<sha256>.bin`
+          // entries, never a numbered or otherwise-named extra member.
+          const expectedFixed = manifest.format === BUNDLE_V4_FORMAT ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
+          const paths = manifest.files.map((file) => file.path);
+          const fixedPaths = paths.filter((path) => !path.startsWith("records/"));
+          const recordPaths = paths.filter((path) => path.startsWith("records/"));
+          expect(fixedPaths.sort()).toEqual([...expectedFixed].sort());
+          expect(recordPaths.every((path) => /^records\/[a-f0-9]{64}\.bin$/u.test(path))).toBe(true);
+          // No numbering scheme: a second bundle never carries a "report-2.json"-style member.
+          expect(paths.some((path) => /report-\d+\.json/u.test(path))).toBe(false);
+        }
+      } finally {
+        for (const { dir } of copiedDirs) rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  test.skipIf(!externalVerifyAvailable)(
+    "packet P5 proof 1a: the shipped, packaged external-verify.py accepts every published bundle after the source workspace is deleted",
+    async () => {
+      const clock = makeClock();
+      await setUpClosedRun(clock, "draft-1", {
+        evaluationModes: Array(8).fill("no-verdict"),
+        additionalAnalyses: N2_ADDITIONAL_ANALYSES,
+      });
+      const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(reported.ok, JSON.stringify(reported)).toBe(true);
+      if (!reported.ok) return;
+      const published = await runPublish(contextFor(clock), { draftId: "draft-1" });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      if (!published.ok) return;
+
+      const identities = [published.result.bundleIdentity, ...(published.result.additionalBundles ?? []).map((entry) => entry.bundleIdentity)];
+      expect(identities).toHaveLength(2);
+
+      const copiedDirs = identities.map((identity) => {
+        const copied = mkdtempSync(join(tmpdir(), "bp-p5-cold-ext-"));
+        cpSync(publicBundlePath(workspaceDir, "draft-1", identity), copied, { recursive: true });
+        return copied;
+      });
+      try {
+        rmSync(workspaceDir, { recursive: true, force: true });
+        expect(existsSync(workspaceDir)).toBe(false);
+
+        for (const dir of copiedDirs) {
+          const result = await runExternalVerify(dir);
+          assertExternalVerifyAllChecksPass(result);
+        }
+      } finally {
+        for (const dir of copiedDirs) rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  test.skipIf(!externalVerifyAvailable)(
+    "packet P5 proof 1b: bundles carrying the TWO NEW judge readouts cold-verify with verifyPublicBundle and the packaged external-verify.py after the source workspace is deleted",
+    async () => {
+      // Why this exists as a sibling of proof 1a rather than an extension of it.
+      //
+      // Proof 1a runs on `setUpClosedRun`, which pins `prediction-v1-baseline`/`sample-uniform`.
+      // That is NOT a binary-judgment run, so it cannot reach either method this packet registers,
+      // and 1a therefore only ever exercised methods that were wired before this packet. That is
+      // the E-7 mirror seam applied to this packet's own analysis: a claim-package projection lives
+      // in TWO files (core's `report/claim.ts` and the standalone verifier's `profile/claim.ts`),
+      // publish routes through the verifier's copy (`bundle/verify.ts`), and a proof that never
+      // builds a bundle from the new methods cannot see a projection missing from the verifier's
+      // half. Two were missing — the claim projection AND the bundle-asset projection — and these
+      // bundles did not reach disk at all. A third copy, the portable `assertClaimConsistency`,
+      // must also fold PAIRED_ESTIMATE_LIMITATION for paired-majority-delta@1; packaged
+      // `external-verify.py` skips `claim-mirror` when there is no headline, so Python alone
+      // cannot see that hole. This proof therefore drives BOTH `verifyPublicBundle` and Python.
+      //
+      // So this proof drives the real binary-judgment lifecycle, registers both new methods as
+      // pre-registered additional analyses beside the canonical `binary-instrument@1` entry, and
+      // cold-verifies one bundle PER NEW METHOD.
+      const fixture = await createSyntheticV4BundleFixture({
+        workspaceDir,
+        truthAdmission: "operator-only",
+        // `paired-majority-delta@1` derives its pair structurally: exactly one evidence-declaring
+        // arm, and exactly one arm identical to it once the evidence interpolation is stripped.
+        // `withEvidence` is required alongside it — a declaring instrument obliges every bound item
+        // to carry evidence (the §2.3 lock-time leak refusal).
+        withEvidence: true,
+        evidencePair: { declaring: "beta", twin: "alpha" },
+        additionalAnalyses: [
+          { method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: BENCHMARKING_METHOD_VERSION },
+          { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION },
+        ],
+      });
+
+      // Materialized through P5's own `reportSelector` seam rather than `runPublish`. `runPublish`
+      // is NOT usable here: on a binary-judgment run it refuses at claim-consistency because the
+      // publish path does not thread the Inspect and binary-instrument limitation lines into its
+      // exact-disclosure rebuild. That gap is PRE-EXISTING and unrelated to this packet — it
+      // reproduces identically on this same fixture with no additional analyses registered at all,
+      // i.e. with none of this packet's code reachable — so it is reported separately rather than
+      // fixed here. `materializePublicBundle` is the seam this packet actually adds, it writes the
+      // same bundle directory to the same `publicBundlePath`, and the fixture already produces its
+      // own canonical bundle through it.
+      const runState = readRunState(workspaceDir, fixture.draftId);
+      expect(runState).toBeDefined();
+      if (runState === undefined) return;
+
+      const newMethods = [
+        BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+        BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+      ];
+      // Both entries really were sealed into the Run's analysis plan, so the bundles below come
+      // from pre-registered readouts rather than from anything this test invented.
+      expect((runState.additionalReports ?? []).map((entry) => entry.method).sort())
+        .toEqual([...newMethods].sort());
+
+      const copiedByMethod = newMethods.map((method) => {
+        const materialized = materializePublicBundle({
+          workspaceDir,
+          draftId: fixture.draftId,
+          benchmarkSha256: fixture.benchmarkSha256,
+          runState,
+          reportSelector: { method, version: BENCHMARKING_METHOD_VERSION },
+        });
+        const copied = mkdtempSync(join(tmpdir(), "bp-p5-cold-judge-"));
+        cpSync(materialized.bundleDir, copied, { recursive: true });
+        return { method, dir: copied, identity: materialized.identity };
+      });
+      try {
+        rmSync(workspaceDir, { recursive: true, force: true });
+        expect(existsSync(workspaceDir)).toBe(false);
+
+        for (const { method, dir, identity } of copiedByMethod) {
+          const claim = JSON.parse(readFileSync(join(dir, "claim-package.json"), "utf8")) as Record<string, unknown>;
+          expect(claim["method"]).toMatchObject({ id: method, version: BENCHMARKING_METHOD_VERSION });
+          // The projection the verifier's half of the mirror was missing is present on disk.
+          expect(
+            method === BENCHMARKING_METHOD_IDS.pairwiseDisagreement
+              ? claim["pairwiseDisagreement"]
+              : claim["pairedMajorityDelta"],
+          ).toBeDefined();
+          // JS verifier is the C1 seam (`publish` / `colophon-verify` run this copy). Python is
+          // necessary and not sufficient: `claim-mirror` skips when there is no headline.
+          const verified = await verifyPublicBundle(dir);
+          expect(verified.identity).toBe(identity);
+          expect(verified.checks).toContain("claim-consistency");
+          assertExternalVerifyAllChecksPass(await runExternalVerify(dir));
+        }
+      } finally {
+        for (const { dir } of copiedByMethod) rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
+  test(
+    "packet P5 proof 1a: THE two-field comparison — N published bundles share exactly one runSha256 and one matrixSha256 while reportSha256 and bundle identity differ (spec §8.3's reader-visible substitute for option 4's internal one-cell-set assertion)",
+    async () => {
+      const clock = makeClock();
+      await setUpClosedRun(clock, "draft-1", {
+        evaluationModes: Array(8).fill("no-verdict"),
+        additionalAnalyses: N2_ADDITIONAL_ANALYSES,
+      });
+      const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(reported.ok, JSON.stringify(reported)).toBe(true);
+      if (!reported.ok) return;
+      const published = await runPublish(contextFor(clock), { draftId: "draft-1" });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      if (!published.ok) return;
+
+      const identities = [published.result.bundleIdentity, ...(published.result.additionalBundles ?? []).map((entry) => entry.bundleIdentity)];
+      expect(identities).toHaveLength(2);
+      expect(new Set(identities).size).toBe(2); // bundle identity DIFFERS
+
+      // A reader with only the published bundles reads `claim-package.json` out of each and
+      // compares — no workspace, no RunState, nothing internal.
+      const claimRecords = identities.map((identity) => {
+        const claim = JSON.parse(
+          readFileSync(join(publicBundlePath(workspaceDir, "draft-1", identity), "claim-package.json"), "utf8"),
+        ) as { readonly records: { readonly runSha256: string; readonly matrixSha256: string; readonly reportSha256: string } };
+        return claim.records;
+      });
+
+      expect(new Set(claimRecords.map((record) => record.runSha256)).size).toBe(1); // EQUAL
+      expect(new Set(claimRecords.map((record) => record.matrixSha256)).size).toBe(1); // EQUAL
+      expect(new Set(claimRecords.map((record) => record.reportSha256)).size).toBe(2); // DIFFERS
     },
     30_000,
   );

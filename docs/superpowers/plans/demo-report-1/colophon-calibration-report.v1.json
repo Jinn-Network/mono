@@ -1,0 +1,34 @@
+{
+  "schema": "jinn.colophon.calibration-report.v1",
+  "title": "SkillsBench v1.1 instrument calibration",
+  "claim": "On the admitted SkillsBench v1.1 population, the upstream reference oracle reaches the task's canonical full success and a blank submission does not.",
+  "notADemo1Result": "This report says nothing about skills, CLAUDE.md, or any model. No model executed in the chain that produced it.",
+  "source": {
+    "benchmark": "skillsbench",
+    "release": "v1.1",
+    "commit": "b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af"
+  },
+  "units": 13,
+  "results": {
+    "oracleFullPass": 13,
+    "oracleFullPassRate": 1,
+    "noOpFullPass": 0,
+    "noOpFullPassRate": 0
+  },
+  "digests": {
+    "analysisManifest": "sha256:39799f45cdee6e7079a7b5366fe4768c6a1bdc6f40a526316900fbe6d5e84410",
+    "cohort": "sha256:b2366d42acbc3d054de535b378337aadc5f7a5cd5e7975105fcbbf40074c84d5",
+    "matrix": "sha256:c955ccd5bf27e09a886e9dbae8d9699c284dd72dc0b0c44b24cf95f9c361a114",
+    "report": "sha256:c8b287082f0a37e5c5f716a20758f1fc77ba429ff6d444bdaef50372c5ae5336"
+  },
+  "execution": {
+    "modelArms": 0,
+    "previews": 0,
+    "agentRuns": 0
+  },
+  "verified": {
+    "cohort": true,
+    "matrix": true,
+    "report": true
+  }
+}

@@ -57,6 +57,7 @@ const HOST_LOCAL_ALLOWED_JINN_PACKAGES = [
   '@jinn-network/task-execution-evaluation-harness',
   '@jinn-network/task-execution-evaluator-adapters',
   '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-oci-grader',
   '@jinn-network/task-execution-profiles',
   '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-supervisor',
@@ -343,6 +344,28 @@ test('policy-optimization actually imports the dependencies it declares (positiv
   }
   assert.ok(imported.has('@jinn-network/task-execution-backend-local'),
     'the private live host must positively import the concrete local backend');
+  assert.ok(imported.has('@jinn-network/task-execution-oci-grader'),
+    'the private live host must use the neutral shared OCI grader');
+});
+
+test('the standalone host has no operator control-plane or private-storage coupling', () => {
+  if (!existsSync(sourceRoot)) return;
+  const forbiddenRuntimeReferences = [
+    '/v1/operator/policy-optimization',
+    'JINN_UI_TOKEN',
+    '.jinn-client/ui-token',
+    'daemon-snapshot-client',
+    'fetchDaemonPolicySnapshot',
+    'DaemonSnapshotClient',
+  ];
+  const offenders = files(sourceRoot).flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    return forbiddenRuntimeReferences
+      .filter((reference) => source.includes(reference))
+      .map((reference) => `${relative(root, file)} -> ${reference}`);
+  });
+  assert.deepEqual(offenders, [],
+    'the optimizer must remain a sibling product, not an operator client or storage inspector');
 });
 
 test('policy-optimization implements no private statistics (program ruling R3)', () => {

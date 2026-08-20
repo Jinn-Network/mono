@@ -33,6 +33,7 @@ import type { DurableSourceState } from "@jinn-network/record-discovery-serve";
 import { executePublicationPlan, type PublicationArtifact, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
 import { resolveAssurance } from "../domain/draft.js";
 import { refuse } from "../errors.js";
+import { primaryAnalysisPlanLength } from "../run/compile.js";
 import { buildMethodPorts } from "../report/ports.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
 import { buildWorkspaceTrustDeps } from "../report/trust.js";
@@ -310,7 +311,18 @@ export function publicationReport(
       const document = readDraftDocument(context.workspaceDir, input.draftId);
       if (document.spec.taskSet.kind !== "benchmark") refuse("conflict", `drafts.${input.draftId}.taskSet`, "signed report publication requires a benchmark run");
       const run = parseRun(getSealedBytes(context.workspaceDir, runSha256));
-      const selected = run.analysisPlan?.[run.analysisPlan.length - 1];
+      // PINNED selection (packet P5, spec §8.3): this operation publishes exactly ONE signed
+      // Report v2, always the PRIMARY plan entry — never one of this draft's pre-registered
+      // `additionalAnalyses`. Before `additionalAnalyses` existed, `run.analysisPlan.length - 1`
+      // always resolved to that same primary entry (the plan was never longer than 2), so a raw
+      // last-index read would now silently start reporting a different (additional) method the
+      // moment a draft carries one — doing nothing here would itself be the behavior change.
+      // `primaryAnalysisPlanLength` locates the primary entry by identity instead, kept in
+      // lockstep with `operations/report.ts`'s own selection (spec §8.3: "both become 'select the
+      // named entry', kept in lockstep"). This chain's identities are write-once once established
+      // (`run/state.ts`'s `reportPayloadSha256`/`reportRecordSha256` guard), so it stays
+      // single-Report; it never fans out to N the way `report`/`publish` do.
+      const selected = run.analysisPlan?.[primaryAnalysisPlanLength(document.spec) - 1];
       if (selected === undefined) refuse("record-integrity", "run", "sealed Run carries no analysisPlan entry to report from");
       const previewLog = readPreviewLog(context.workspaceDir, input.draftId);
       const previewLimitation = previewLog !== undefined && previewLog.count > 0 ? previewDisclosureLine(previewLog) : undefined;

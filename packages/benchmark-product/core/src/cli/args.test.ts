@@ -40,9 +40,29 @@ describe("parseArgs", () => {
     expect(args.flags.get("workspace")).toBe("./ws");
   });
 
-  test("a positional word after the first flag refuses invalid-invocation", () => {
-    const error = catchError(() => parseArgs(["draft", "create", "--name", "x", "extra"]));
-    expect(error.code).toBe("invalid-invocation");
+  test("a positional word after a valued flag is still a word", () => {
+    const args = parseArgs(["draft", "create", "--name", "x", "extra"]);
+    expect(args.words).toEqual(["draft", "create", "extra"]);
+    expect(args.flags.get("name")).toBe("x");
+  });
+
+  test("interleaves a valued flag between positional words", () => {
+    const args = parseArgs(["method", "--slice", "1", "terminal-bench-2.1"]);
+    expect(args.words).toEqual(["method", "terminal-bench-2.1"]);
+    expect(args.flags.get("slice")).toBe("1");
+  });
+
+  test("a boolean flag does not consume the following positional word", () => {
+    const args = parseArgs(["method", "--json", "terminal-bench-2.1"]);
+    expect(args.flags.has("json")).toBe(true);
+    expect(args.flags.get("json")).toBe("");
+    expect(args.words).toEqual(["method", "terminal-bench-2.1"]);
+  });
+
+  test("a -- terminator treats remaining tokens as words even when they start with --", () => {
+    const args = parseArgs(["method", "--", "--not-a-flag"]);
+    expect(args.words).toEqual(["method", "--not-a-flag"]);
+    expect(args.flags.size).toBe(0);
   });
 
   test("a repeated flag refuses invalid-invocation", () => {

@@ -66,6 +66,8 @@ export const BENCHMARKING_METHOD_IDS = {
   cleanSubset: "jinn.benchmarking.method/clean-subset",
   binaryInstrument: "jinn.benchmarking.method/binary-instrument",
   bradleyTerry: "jinn.benchmarking.method/bradley-terry",
+  pairwiseDisagreement: "jinn.benchmarking.method/pairwise-disagreement",
+  pairedMajorityDelta: "jinn.benchmarking.method/paired-majority-delta",
 } as const;
 
 /** The v1 registry version every §9.2 method is published at ("@1"). */

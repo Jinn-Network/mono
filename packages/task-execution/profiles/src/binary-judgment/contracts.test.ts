@@ -12,32 +12,53 @@ import {
   BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
   BINARY_JUDGMENT_OBSERVATION_FORMAT_URI,
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+  BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
   EVALUATION_SPEC_FORMAT_URI,
   EVAL_SEMANTICS_VERSION,
 } from "../identifiers.js";
 import { sealEvaluationSpec } from "../evaluation-spec/seal.js";
-import { BINARY_JUDGMENT_PROFILE_DIGEST } from "../documents/binary-judgment-1.0.js";
+import { BINARY_JUDGMENT_PROFILE_DIGEST } from "../documents/binary-judgment-2.0.js";
+import { ProfilesError } from "../errors.js";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
   BINARY_ACCEPT_REJECT_PARSER_SEALED,
+  BINARY_CORRECT_WRONG_PARSER_IDENTITY,
+  BINARY_CORRECT_WRONG_PARSER_SEALED,
+  BINARY_JSON_VERDICT_PARSER_IDENTITY,
+  BINARY_JSON_VERDICT_PARSER_SEALED,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
   BINARY_JUDGMENT_EVALUATION_PARSER_SEALED,
+  BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY,
+  BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
+  BINARY_LABEL_IN_PROSE_PARSER_SEALED,
+  BINARY_YES_NO_PARSER_IDENTITY,
+  BINARY_YES_NO_PARSER_SEALED,
   BinaryJudgmentAnalysisContextSchema,
   BinaryJudgmentEvaluationContextSchema,
   BinaryJudgmentInstrumentSchema,
   BinaryJudgmentObservationSchema,
   BinaryJudgmentPayloadSchema,
+  BinaryJudgmentSemanticRequestSchema,
+  BinaryJudgmentSnapshotProbeSchema,
+  BinaryJudgmentStratumSchema,
+  binaryJudgmentInstrumentDeclaresEvidence,
   binaryJudgmentPromptTemplateDigest,
   binaryJudgmentSemanticRequestDigest,
   buildBinaryJudgmentSemanticRequest,
   decodeBinaryJudgmentInlineMaterial,
+  isDatedSnapshotJudgeModel,
+  judgeModelProfileFor,
+  parseBinaryJudgmentInstrument,
+  parseBinaryJudgmentSnapshotProbe,
   renderBinaryJudgmentMessages,
   sealBinaryJudgmentAnalysisContext,
   sealBinaryJudgmentEvaluationContext,
   sealBinaryJudgmentInstrument,
   sealBinaryJudgmentObservation,
+  sealBinaryJudgmentSnapshotProbe,
   type BinaryJudgmentInstrument,
   type BinaryJudgmentPayload,
+  type BinaryJudgmentSamplingGeneration,
 } from "./contracts.js";
 
 const sha = (character: string): `sha256:${string}` => `sha256:${character.repeat(64)}`;
@@ -47,6 +68,10 @@ const descriptor = (name: string) => ({
   digest: { sha256: "a".repeat(64) },
 });
 const opaqueProvenance = { digest: { sha256: "a".repeat(64) } };
+const provenanceCommitment = {
+  sourceCommitment: sha("a"),
+  timestamp: "2026-03-09T00:00:00Z",
+};
 const inlineMaterial = (value: unknown) => {
   const bytes = canonicalJsonBytes(value);
   return {
@@ -113,7 +138,92 @@ const payload: BinaryJudgmentPayload = {
   question: "Café e\u0301 or café? 👩🏽‍💻\r\n第二行",
   referenceAnswer: "Use decomposed e\u0301.\n",
   candidateAnswer: "",
-  provenance: [opaqueProvenance],
+  provenance: provenanceCommitment,
+  sources: [opaqueProvenance],
+};
+
+const payloadWithEvidence: BinaryJudgmentPayload = {
+  ...payload,
+  evidence: "Synthetic passage: the fixture's own words.",
+};
+
+const messagesWithEvidence = [
+  messages[0],
+  {
+    role: "user" as const,
+    segments: [
+      { literal: "Evidence:\n" },
+      { field: "evidence" as const },
+      { literal: "\nCandidate:\n" },
+      { field: "candidateAnswer" as const },
+      { literal: "\r\nReturn ACCEPT or REJECT." },
+    ],
+  },
+];
+
+const instrumentWithEvidence: BinaryJudgmentInstrument = {
+  ...instrument,
+  instrumentId: "unicode-lines-evidence",
+  messages: messagesWithEvidence,
+  promptTemplateSha256: binaryJudgmentPromptTemplateDigest(messagesWithEvidence),
+};
+
+const datedSnapshotGeneration: BinaryJudgmentSamplingGeneration = {
+  temperature: 0,
+  maxOutputTokens: 512,
+  store: false,
+  background: false,
+  stream: false,
+  serviceTier: "default",
+  tools: [],
+  fallbackModels: [],
+  retries: 0,
+  persistedConversation: false,
+  metadata: null,
+  promptCacheIdentifier: null,
+};
+
+const datedSnapshotInstrument: BinaryJudgmentInstrument = {
+  ...instrument,
+  instrumentId: "dated-snapshot-sampling",
+  model: {
+    adapter: "jinn-openai",
+    requested: "gpt-4o-mini-2024-07-18",
+    generation: datedSnapshotGeneration,
+  },
+};
+
+const buildObservation = (fields: {
+  requestedModel: string;
+  resolvedModel: string;
+  limitations: string[];
+}) => ({
+  protocol: BINARY_JUDGMENT_OBSERVATION_FORMAT_URI,
+  taskDigest: sha("1"),
+  armId: "strict",
+  replicate: 1,
+  instrumentSha256: sha("2"),
+  requestSha256: sha("3"),
+  response: { digest: sha("4"), mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE },
+  provider: {
+    requestedModel: fields.requestedModel,
+    resolvedModel: fields.resolvedModel,
+    responseId: "resp_synthetic",
+    eventSha256: sha("5"),
+    usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+  },
+  call: { count: 1 as const, retries: 0 as const, fallbacks: 0 as const },
+  limitations: fields.limitations,
+});
+
+const servingProbe = {
+  protocol: BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
+  requestedModel: "gpt-4o-mini-2024-07-18" as const,
+  resolvedModel: "gpt-4o-mini-2024-07-18",
+  responseId: "resp_probe_synthetic",
+  eventSha256: sha("9"),
+  probedAt: "2026-08-20T00:00:00.000Z",
+  outcome: "serving" as const,
 };
 
 describe("binary-judgment closed contracts", () => {
@@ -125,7 +235,7 @@ describe("binary-judgment closed contracts", () => {
       .toBe(false);
     expect(BinaryJudgmentPayloadSchema.safeParse({
       ...payload,
-      provenance: [{ ...payload.provenance[0], annotations: { truthLabel: "CORRECT" } }],
+      sources: [{ ...payload.sources[0], annotations: { truthLabel: "CORRECT" } }],
     }).success).toBe(false);
     for (const identifyingField of [
       { name: "wrong" },
@@ -134,11 +244,48 @@ describe("binary-judgment closed contracts", () => {
     ]) {
       expect(BinaryJudgmentPayloadSchema.safeParse({
         ...payload,
-        provenance: [{ ...payload.provenance[0], ...identifyingField }],
+        sources: [{ ...payload.sources[0], ...identifyingField }],
       }).success).toBe(false);
     }
     expect(BinaryJudgmentPayloadSchema.safeParse({ ...payload, itemId: "wrong-stress-17" }).success)
       .toBe(false);
+  });
+
+  it("treats evidence as an optional string that imposes nothing when absent", () => {
+    expect(BinaryJudgmentPayloadSchema.parse(payload)).not.toHaveProperty("evidence");
+    expect(BinaryJudgmentPayloadSchema.safeParse(payloadWithEvidence).success).toBe(true);
+    expect(BinaryJudgmentPayloadSchema.safeParse({ ...payload, evidence: 42 }).success).toBe(false);
+  });
+
+  it("fails closed on an unknown top-level payload key", () => {
+    expect(BinaryJudgmentPayloadSchema.safeParse({ ...payload, extraField: "leak" }).success)
+      .toBe(false);
+  });
+
+  it("rejects the superseded 1.0 array-shaped provenance and requires the 2.0 commitment object", () => {
+    expect(BinaryJudgmentPayloadSchema.safeParse({
+      ...payload,
+      provenance: [opaqueProvenance],
+    }).success).toBe(false);
+    expect(BinaryJudgmentPayloadSchema.safeParse({
+      ...payload,
+      provenance: { ...provenanceCommitment, extra: "leak" },
+    }).success).toBe(false);
+  });
+
+  it("pins provenance.timestamp to a fractional-second-free RFC 3339 shape", () => {
+    expect(BinaryJudgmentPayloadSchema.safeParse({
+      ...payload,
+      provenance: { ...provenanceCommitment, timestamp: "2026-03-09T00:00:00.5Z" },
+    }).success).toBe(false);
+    expect(BinaryJudgmentPayloadSchema.safeParse({
+      ...payload,
+      provenance: { ...provenanceCommitment, timestamp: "2026-03-09T00:00:00Z" },
+    }).success).toBe(true);
+    expect(BinaryJudgmentPayloadSchema.safeParse({
+      ...payload,
+      provenance: { ...provenanceCommitment, timestamp: "2026-03-09T00:00:00+02:00" },
+    }).success).toBe(true);
   });
 
   it("pins every input field, parser identity, generation control, and prompt-template digest", () => {
@@ -168,6 +315,44 @@ describe("binary-judgment closed contracts", () => {
     }).success).toBe(false);
   });
 
+  it("validates an instrument that interpolates only the three required fields, and one that also declares evidence", () => {
+    expect(BinaryJudgmentInstrumentSchema.safeParse(instrument).success).toBe(true);
+    expect(BinaryJudgmentInstrumentSchema.safeParse(instrumentWithEvidence).success).toBe(true);
+    expect(binaryJudgmentInstrumentDeclaresEvidence(instrument)).toBe(false);
+    expect(binaryJudgmentInstrumentDeclaresEvidence(instrumentWithEvidence)).toBe(true);
+  });
+
+  it("renders identical message bytes and digest regardless of an unreferenced evidence field (P2 acceptance 2 leak test)", () => {
+    const withoutEvidence = renderBinaryJudgmentMessages(payload, instrument);
+    const withEvidence = renderBinaryJudgmentMessages(payloadWithEvidence, instrument);
+    expect(withEvidence).toStrictEqual(withoutEvidence);
+    expect(canonicalJsonBytes(withEvidence)).toStrictEqual(canonicalJsonBytes(withoutEvidence));
+    expect(binaryJudgmentSemanticRequestDigest(payloadWithEvidence, instrument))
+      .toBe(binaryJudgmentSemanticRequestDigest(payload, instrument));
+  });
+
+  it("refuses to render a declaring instrument over an evidence-free payload instead of interpolating undefined", () => {
+    expect(() => renderBinaryJudgmentMessages(payload, instrumentWithEvidence)).toThrow(ProfilesError);
+    expect(() => renderBinaryJudgmentMessages(payload, instrumentWithEvidence)).toThrow(
+      /interpolates evidence but the payload does not carry it/,
+    );
+    let thrown: unknown;
+    try {
+      renderBinaryJudgmentMessages(payload, instrumentWithEvidence);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(String((thrown as Error).message)).not.toContain("undefined");
+  });
+
+  it("renders the evidence text in place for a declaring instrument over an evidence-carrying payload", () => {
+    const rendered = renderBinaryJudgmentMessages(payloadWithEvidence, instrumentWithEvidence);
+    expect(rendered[1]).toStrictEqual({
+      role: "user",
+      text: `Evidence:\n${payloadWithEvidence.evidence}\nCandidate:\n\r\nReturn ACCEPT or REJECT.`,
+    });
+  });
+
   it("renders Unicode and mixed line endings byte-for-byte with no normalization or separator", () => {
     expect(renderBinaryJudgmentMessages(payload, instrument)).toStrictEqual([
       {
@@ -185,7 +370,7 @@ describe("binary-judgment closed contracts", () => {
 
   it("matches the published cross-runtime Unicode and line-ending request oracle", async () => {
     const fixture = JSON.parse(await readFile(new URL(
-      "../../fixtures/binary-judgment-request/golden/unicode-line-endings.json",
+      "../../fixtures/binary-judgment-request/golden/unicode-line-endings-profile-2.json",
       import.meta.url,
     ), "utf8")) as {
       input: { payload: BinaryJudgmentPayload; instrument: BinaryJudgmentInstrument };
@@ -377,6 +562,154 @@ describe("binary-judgment closed contracts", () => {
     expect(sealed.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(canonicalJsonBytes(instrument)).toEqual(sealed.bytes);
   });
+
+  it("keeps sealing the PC-1-selecting instrument fixture to its pre-registry digest (compatible widening)", () => {
+    // Adding four sibling parser identities to the closed registry must not move a single byte of
+    // an instrument that already validated and sealed under the single-parser schema. This pins
+    // the exact pre-change digest so any accidental reordering, renaming, or shape drift in the
+    // registry machinery fails loudly here rather than only in a downstream digest join.
+    expect(sealBinaryJudgmentInstrument(instrument).digest).toBe(
+      "sha256:c219dea01080475f573778e8a88bd58166bc5ec57a29f3a7679cb77df733a9a0",
+    );
+  });
+});
+
+describe("judge model profiles", () => {
+  it("maps every accepted judge model id to its profile and returns undefined otherwise", () => {
+    expect(judgeModelProfileFor("gpt-5.6-luna")).toBe("reasoning-2026-08");
+    expect(judgeModelProfileFor("gpt-4o-mini-2024-07-18")).toBe("dated-snapshot-sampling");
+    expect(judgeModelProfileFor("gpt-4o-mini")).toBeUndefined();
+    expect(judgeModelProfileFor("")).toBeUndefined();
+    expect(isDatedSnapshotJudgeModel("gpt-4o-mini-2024-07-18")).toBe(true);
+    expect(isDatedSnapshotJudgeModel("gpt-5.6-luna")).toBe(false);
+  });
+
+  it("parses and seals a dated-snapshot instrument using the sampling generation shape", () => {
+    expect(BinaryJudgmentInstrumentSchema.parse(datedSnapshotInstrument))
+      .toStrictEqual(datedSnapshotInstrument);
+    const sealed = sealBinaryJudgmentInstrument(datedSnapshotInstrument);
+    expect(sealed.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+  });
+
+  it("refuses an undeclared model id at both parse and seal (P1 acceptance 5)", () => {
+    const undeclared = {
+      ...datedSnapshotInstrument,
+      model: { ...datedSnapshotInstrument.model, requested: "gpt-4o-mini" },
+    };
+    expect(() => parseBinaryJudgmentInstrument(canonicalJsonBytes(undeclared))).toThrow();
+    expect(() => sealBinaryJudgmentInstrument(undeclared as BinaryJudgmentInstrument)).toThrow();
+  });
+
+  it("refuses generation blocks whose shape disagrees with the model's own profile", () => {
+    expect(BinaryJudgmentInstrumentSchema.safeParse({
+      ...datedSnapshotInstrument,
+      model: { ...datedSnapshotInstrument.model, generation: instrument.model.generation },
+    }).success).toBe(false);
+    expect(BinaryJudgmentInstrumentSchema.safeParse({
+      ...instrument,
+      model: { ...instrument.model, generation: datedSnapshotGeneration },
+    }).success).toBe(false);
+    expect(BinaryJudgmentInstrumentSchema.safeParse({
+      ...instrument,
+      model: {
+        ...instrument.model,
+        generation: { ...instrument.model.generation, temperature: 0 },
+      },
+    }).success).toBe(false);
+    expect(BinaryJudgmentInstrumentSchema.safeParse({
+      ...datedSnapshotInstrument,
+      model: {
+        ...datedSnapshotInstrument.model,
+        generation: { ...datedSnapshotGeneration, temperature: 0.5 },
+      },
+    }).success).toBe(false);
+    expect(BinaryJudgmentInstrumentSchema.safeParse({
+      ...datedSnapshotInstrument,
+      model: {
+        ...datedSnapshotInstrument.model,
+        generation: { ...datedSnapshotGeneration, maxOutputTokens: 128 },
+      },
+    }).success).toBe(false);
+  });
+
+  it("refuses a BinaryJudgmentSemanticRequest whose generation does not match its model", () => {
+    const request = buildBinaryJudgmentSemanticRequest(payload, instrument);
+    expect(BinaryJudgmentSemanticRequestSchema.parse(request)).toStrictEqual(request);
+    expect(BinaryJudgmentSemanticRequestSchema.safeParse({
+      ...request,
+      model: "gpt-4o-mini-2024-07-18",
+    }).success).toBe(false);
+  });
+
+  it("requires observation limitations to match the model's profile exactly", () => {
+    const datedSnapshotEmpty = buildObservation({
+      requestedModel: "gpt-4o-mini-2024-07-18",
+      resolvedModel: "gpt-4o-mini-2024-07-18",
+      limitations: [],
+    });
+    expect(BinaryJudgmentObservationSchema.parse(datedSnapshotEmpty))
+      .toStrictEqual(datedSnapshotEmpty);
+
+    const datedSnapshotWithAlias = buildObservation({
+      requestedModel: "gpt-4o-mini-2024-07-18",
+      resolvedModel: "gpt-4o-mini-2024-07-18",
+      limitations: ["mutable-model-alias"],
+    });
+    expect(BinaryJudgmentObservationSchema.safeParse(datedSnapshotWithAlias).success).toBe(false);
+
+    const reasoningEmpty = buildObservation({
+      requestedModel: "gpt-5.6-luna",
+      resolvedModel: "gpt-5.6-luna",
+      limitations: [],
+    });
+    expect(BinaryJudgmentObservationSchema.safeParse(reasoningEmpty).success).toBe(false);
+
+    const reasoningWithAlias = buildObservation({
+      requestedModel: "gpt-5.6-luna",
+      resolvedModel: "gpt-5.6-luna",
+      limitations: ["mutable-model-alias"],
+    });
+    expect(BinaryJudgmentObservationSchema.parse(reasoningWithAlias))
+      .toStrictEqual(reasoningWithAlias);
+  });
+
+  it("refuses an observation whose resolvedModel differs from its requestedModel (P1 acceptance 5)", () => {
+    const mismatched = buildObservation({
+      requestedModel: "gpt-4o-mini-2024-07-18",
+      resolvedModel: "gpt-5.6-luna",
+      limitations: [],
+    });
+    expect(BinaryJudgmentObservationSchema.safeParse(mismatched).success).toBe(false);
+  });
+
+  it("parses and seals a serving snapshot-serving probe, and enforces outcome derivation", () => {
+    expect(BinaryJudgmentSnapshotProbeSchema.parse(servingProbe)).toStrictEqual(servingProbe);
+    const sealed = sealBinaryJudgmentSnapshotProbe(servingProbe);
+    expect(sealed.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(parseBinaryJudgmentSnapshotProbe(sealed.bytes)).toStrictEqual(servingProbe);
+
+    expect(BinaryJudgmentSnapshotProbeSchema.safeParse({
+      ...servingProbe,
+      outcome: "not-serving",
+    }).success).toBe(false);
+
+    expect(BinaryJudgmentSnapshotProbeSchema.safeParse({
+      ...servingProbe,
+      resolvedModel: "gpt-4o-mini-2024-07-18-preview",
+    }).success).toBe(false);
+
+    const notServingProbe = {
+      ...servingProbe,
+      resolvedModel: "gpt-4o-mini-2024-07-18-preview",
+      outcome: "not-serving" as const,
+    };
+    expect(BinaryJudgmentSnapshotProbeSchema.parse(notServingProbe)).toStrictEqual(notServingProbe);
+
+    expect(BinaryJudgmentSnapshotProbeSchema.safeParse({
+      ...servingProbe,
+      requestedModel: "gpt-5.6-luna",
+    }).success).toBe(false);
+  });
 });
 
 describe("binary-judgment parser semantics goldens", () => {
@@ -399,7 +732,7 @@ describe("binary-judgment parser semantics goldens", () => {
       });
   });
 
-  it("pins the strict ACCEPT/REJECT and umbrella registry identities to exact on-disk bytes", async () => {
+  it("pins all six sealed parser documents (the five contracts plus the umbrella) to exact on-disk bytes", async () => {
     const cases = [
       {
         root: new URL(
@@ -408,6 +741,38 @@ describe("binary-judgment parser semantics goldens", () => {
         ),
         sealed: BINARY_ACCEPT_REJECT_PARSER_SEALED,
         identity: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      },
+      {
+        root: new URL(
+          "../../profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/",
+          import.meta.url,
+        ),
+        sealed: BINARY_CORRECT_WRONG_PARSER_SEALED,
+        identity: BINARY_CORRECT_WRONG_PARSER_IDENTITY,
+      },
+      {
+        root: new URL(
+          "../../profiles/binary-judgment/parsers/binary-json-verdict/1.0.0/",
+          import.meta.url,
+        ),
+        sealed: BINARY_JSON_VERDICT_PARSER_SEALED,
+        identity: BINARY_JSON_VERDICT_PARSER_IDENTITY,
+      },
+      {
+        root: new URL(
+          "../../profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0/",
+          import.meta.url,
+        ),
+        sealed: BINARY_LABEL_IN_PROSE_PARSER_SEALED,
+        identity: BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
+      },
+      {
+        root: new URL(
+          "../../profiles/binary-judgment/parsers/binary-yes-no/1.0.0/",
+          import.meta.url,
+        ),
+        sealed: BINARY_YES_NO_PARSER_SEALED,
+        identity: BINARY_YES_NO_PARSER_IDENTITY,
       },
       {
         root: new URL(
@@ -425,5 +790,213 @@ describe("binary-judgment parser semantics goldens", () => {
       expect(digest).toBe(vector.sealed.digest);
       expect(vector.identity.digest).toBe(digest);
     }
+  });
+
+  it("keeps PC-1's own sealed semantics document and digest byte-frozen (§4.5: PC-1 does not move)", () => {
+    expect(BINARY_ACCEPT_REJECT_PARSER_SEALED.digest).toBe(
+      "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073",
+    );
+    expect(BINARY_ACCEPT_REJECT_PARSER_IDENTITY.digest).toBe(
+      "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073",
+    );
+  });
+
+  it("freezes the YES/NO parser semantics document (PC-2)", () => {
+    expect(JSON.parse(new TextDecoder().decode(BINARY_YES_NO_PARSER_SEALED.bytes)))
+      .toStrictEqual({
+        protocol: "https://spec.jinn.network/binary-judgment/parser-semantics/v1",
+        parser: {
+          id: "network.jinn.parser.binary-yes-no",
+          version: "1.0.0",
+        },
+        input: {
+          mediaType: "text/plain; charset=utf-8",
+          utf8: "strict",
+          trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+          normalization: "none",
+        },
+        rule: {
+          kind: "whole-output-token",
+          caseSensitive: true,
+          tokens: { ACCEPT: "YES", REJECT: "NO" },
+        },
+        invalidOutputDecision: "REJECT",
+      });
+  });
+
+  it("freezes the CORRECT/WRONG parser semantics document (PC-3)", () => {
+    expect(JSON.parse(new TextDecoder().decode(BINARY_CORRECT_WRONG_PARSER_SEALED.bytes)))
+      .toStrictEqual({
+        protocol: "https://spec.jinn.network/binary-judgment/parser-semantics/v1",
+        parser: {
+          id: "network.jinn.parser.binary-correct-wrong",
+          version: "1.0.0",
+        },
+        input: {
+          mediaType: "text/plain; charset=utf-8",
+          utf8: "strict",
+          trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+          normalization: "none",
+        },
+        rule: {
+          kind: "whole-output-token",
+          caseSensitive: true,
+          tokens: { ACCEPT: "CORRECT", REJECT: "WRONG" },
+        },
+        invalidOutputDecision: "REJECT",
+      });
+  });
+
+  it("freezes the JSON-verdict parser semantics document (PC-4)", () => {
+    expect(JSON.parse(new TextDecoder().decode(BINARY_JSON_VERDICT_PARSER_SEALED.bytes)))
+      .toStrictEqual({
+        protocol: "https://spec.jinn.network/binary-judgment/parser-semantics/v1",
+        parser: {
+          id: "network.jinn.parser.binary-json-verdict",
+          version: "1.0.0",
+        },
+        input: {
+          mediaType: "text/plain; charset=utf-8",
+          utf8: "strict",
+          trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+          normalization: "none",
+        },
+        rule: {
+          kind: "json-member-token",
+          caseSensitive: true,
+          tokens: { ACCEPT: "ACCEPT", REJECT: "REJECT" },
+          json: {
+            standard: "RFC 8259",
+            text: "exactly one JSON value after the edge trim, with no leading or trailing content",
+            root: "object",
+            member: "verdict",
+            memberType: "string",
+            memberTrimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+            duplicateMember: "refused",
+            otherMembers: "ignored",
+          },
+        },
+        invalidOutputDecision: "REJECT",
+      });
+  });
+
+  it("freezes the label-in-prose parser semantics document, with no trim codepoints (PC-5)", () => {
+    expect(JSON.parse(new TextDecoder().decode(BINARY_LABEL_IN_PROSE_PARSER_SEALED.bytes)))
+      .toStrictEqual({
+        protocol: "https://spec.jinn.network/binary-judgment/parser-semantics/v1",
+        parser: {
+          id: "network.jinn.parser.binary-label-in-prose",
+          version: "1.0.0",
+        },
+        input: {
+          mediaType: "text/plain; charset=utf-8",
+          utf8: "strict",
+          trimCodePoints: [],
+          normalization: "none",
+        },
+        rule: {
+          kind: "delimited-token-scan",
+          caseSensitive: true,
+          tokens: { ACCEPT: "ACCEPT", REJECT: "REJECT" },
+          delimiter:
+            "the code point immediately before and immediately after an occurrence, where one exists, "
+            + "must not be an ASCII letter, an ASCII digit, or U+005F",
+          repeatedToken: "permitted",
+          bothTokens: "invalid",
+          neitherToken: "invalid",
+          positionalPreference: "none",
+        },
+        invalidOutputDecision: "REJECT",
+      });
+  });
+
+  it("code-unit sorts the response-parser registry by (id, version)", () => {
+    const ids = BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY.map((parser) => parser.id);
+    const sorted = [...ids].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+    expect(ids).toStrictEqual(sorted);
+    expect(ids).toStrictEqual([
+      "network.jinn.parser.binary-accept-reject",
+      "network.jinn.parser.binary-correct-wrong",
+      "network.jinn.parser.binary-json-verdict",
+      "network.jinn.parser.binary-label-in-prose",
+      "network.jinn.parser.binary-yes-no",
+    ]);
+  });
+
+  it("carries the umbrella document's responseParsers as exactly the registry", () => {
+    const umbrella = JSON.parse(
+      new TextDecoder().decode(BINARY_JUDGMENT_EVALUATION_PARSER_SEALED.bytes),
+    ) as { responseParsers: unknown };
+    expect(umbrella.responseParsers).toStrictEqual(BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY);
+  });
+});
+
+describe("binary-judgment instrument seal against the closed parser registry", () => {
+  const withParser = (parser: unknown) => ({
+    ...instrument,
+    response: { ...instrument.response, parser },
+  });
+
+  it("seals an instrument naming each of the five registered parser identities", () => {
+    for (const identity of BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY) {
+      const candidate = withParser(identity);
+      expect(BinaryJudgmentInstrumentSchema.safeParse(candidate).success).toBe(true);
+      expect(() => sealBinaryJudgmentInstrument(candidate as never)).not.toThrow();
+    }
+  });
+
+  it("refuses a registered id paired with the wrong version", () => {
+    const candidate = withParser({
+      ...BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      version: "1.0.1",
+    });
+    expect(BinaryJudgmentInstrumentSchema.safeParse(candidate).success).toBe(false);
+  });
+
+  it("refuses a registered id paired with the wrong digest", () => {
+    const candidate = withParser({
+      ...BINARY_YES_NO_PARSER_IDENTITY,
+      digest: `sha256:${"0".repeat(64)}`,
+    });
+    expect(BinaryJudgmentInstrumentSchema.safeParse(candidate).success).toBe(false);
+    expect(() => sealBinaryJudgmentInstrument(candidate as never)).toThrow();
+  });
+
+  it("refuses an id that is not a member of the closed registry", () => {
+    const candidate = withParser({
+      id: "network.jinn.parser.binary-unregistered",
+      version: "1.0.0",
+      digest: `sha256:${"0".repeat(64)}`,
+    });
+    expect(BinaryJudgmentInstrumentSchema.safeParse(candidate).success).toBe(false);
+  });
+});
+
+describe("declared stratum vocabulary (P4)", () => {
+  it("accepts any grammar-conforming stratum name, not just the core/stress pair", () => {
+    for (const name of ["core", "stress", "category-1", "A", "a".repeat(64)]) {
+      expect(BinaryJudgmentStratumSchema.safeParse(name).success).toBe(true);
+    }
+  });
+
+  it("refuses stratum names that do not match the shared identifier grammar", () => {
+    for (const name of ["", "1category", "has space", "-leading", "a".repeat(65)]) {
+      expect(BinaryJudgmentStratumSchema.safeParse(name).success).toBe(false);
+    }
+  });
+
+  it("seals a strict evaluator-only analysis context whose stratum is a four-category name", () => {
+    const itemSha256 = recordDigest(canonicalJsonBytes(payload));
+    const analysisContext = {
+      protocol: BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
+      itemSha256,
+      itemId: payload.itemId,
+      labelResolutionSha256: sha("6"),
+      truthLabel: "WRONG" as const,
+      candidateClass: "temporal",
+      stratum: "category-3",
+    };
+    expect(BinaryJudgmentAnalysisContextSchema.parse(analysisContext)).toStrictEqual(analysisContext);
+    expect(sealBinaryJudgmentAnalysisContext(analysisContext).digest).toMatch(/^sha256:/u);
   });
 });

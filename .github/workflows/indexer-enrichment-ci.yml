@@ -110,7 +110,12 @@ jobs:
             echo "FAIL: worker hung (timeout) instead of failing loud at boot"
             exit 1
           fi
-          if ! echo "$OUT" | grep -q "FATAL: cannot connect to Postgres at boot"; then
+          # File read, not a pipe: under pipefail, `grep -q` exiting on its first
+          # match SIGPIPEs the producer once the output exceeds the pipe buffer,
+          # turning a present log line into a spurious red (same defect class as
+          # the selection pipes fixed on #2821, fail-closed variant).
+          printf '%s\n' "$OUT" > "${RUNNER_TEMP}/worker-output.txt"
+          if ! grep -q "FATAL: cannot connect to Postgres at boot" "${RUNNER_TEMP}/worker-output.txt"; then
             echo "FAIL: missing the fail-loud FATAL DB boot log"
             exit 1
           fi

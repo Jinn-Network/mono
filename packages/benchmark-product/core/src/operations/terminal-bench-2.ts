@@ -31,8 +31,12 @@ export interface SelectTerminalBench2RuntimeResult {
 export function selectTerminalBench2Runtime(context: OperationContext, input: SelectTerminalBench2RuntimeInput): Promise<OperationResult<SelectTerminalBench2RuntimeResult>> {
   const at = context.clock();
   const clocked = { ...context, clock: () => at };
-  return operateAsync({ context: clocked, action: "runtime.terminal-bench-2.select", subject: input.draftId, inputs: input, run: async () => {
-    const current = readDraftDocument(context.workspaceDir, input.draftId);
+  return operateAsync({ context: clocked, action: "runtime.terminal-bench-2.select", subject: input.draftId, inputs: input, run: () => executeSelectTerminalBench2Runtime(clocked, input) });
+}
+
+export async function executeSelectTerminalBench2Runtime(context: OperationContext, input: SelectTerminalBench2RuntimeInput): Promise<SelectTerminalBench2RuntimeResult> {
+  const at = context.clock();
+  const current = readDraftDocument(context.workspaceDir, input.draftId);
     if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse Terminal-Bench 2 selection");
     const selected = resolveTerminalBench2Selection(context.workspaceDir, input);
     if (putSealedBytes(context.workspaceDir, terminalBench2SelectionBytes(selected.profile)) !== selected.profileSha256) {
@@ -74,7 +78,6 @@ export function selectTerminalBench2Runtime(context: OperationContext, input: Se
     }) };
     atomicWriteFileSync(draftPath(context.workspaceDir, input.draftId), JSON.stringify(draft, null, 2));
     return { draft, selectionManifestSha256, terminalBench2ProfileSha256: selected.profileSha256 };
-  } });
 }
 
 export type MigrateTerminalBenchLegacyTaskInput = TerminalBenchMigrationRequest;

@@ -8,6 +8,7 @@ import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
 import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
 import {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
+  exportCompletenessCertification,
   suiteProtocolDisplayName,
   type SuiteCoverage,
   type SuiteProtocolId,
@@ -46,6 +47,7 @@ export function decideHarborHubExportMode(input: {
 }
 
 export function harborHubExportInstructions(
+  certification: string,
   mode: HarborHubExportMode,
   jobDir: string,
   protocol: SuiteProtocolId = "terminal-bench-2.1",
@@ -53,12 +55,14 @@ export function harborHubExportInstructions(
   if (protocol === "terminal-bench-3.0") {
     if (mode === "leaderboard-submit") {
       return [
+        certification,
         "The locked Terminal-Bench 3.0 method produced a Harbor job that can be uploaded.",
         `harbor upload --public ${jobDir}`,
         "The Colophon bundle remains the claim of record. Colophon does not place the leaderboard row.",
       ].join("\n");
     }
     return [
+      certification,
       "This run matches Terminal-Bench 3.0 execution settings for the selected named slice, but it is not a leaderboard submission.",
       `You may upload the job for inspection: harbor upload --public ${jobDir}`,
       "Do not submit this package as a Terminal-Bench 3.0 leaderboard row; it is not leaderboard_submit_ready.",
@@ -66,6 +70,7 @@ export function harborHubExportInstructions(
   }
   if (mode === "leaderboard-submit") {
     return [
+      certification,
       "The locked Terminal-Bench 2.1 method produced a Harbor job that can be uploaded.",
       `harbor upload --public ${jobDir}`,
       "Then, from the Terminal-Bench 2.1 leaderboard/ tree:",
@@ -74,6 +79,7 @@ export function harborHubExportInstructions(
     ].join("\n");
   }
   return [
+    certification,
     "This run matches Terminal-Bench 2.1 execution settings for the selected named slice, but it is not a leaderboard submission.",
     `You may upload the job for inspection: harbor upload --public ${jobDir}`,
     "Do not run `uv run lb submit` for this package; it is not leaderboard_submit_ready.",
@@ -90,7 +96,14 @@ export function exportHarborHubPackage(
     action: "runtime.harbor.hub-export",
     subject: input.draftId,
     inputs: input,
-    run: () => {
+    run: () => executeExportHarborHubPackage(context, input),
+  });
+}
+
+export function executeExportHarborHubPackage(
+  context: OperationContext,
+  input: ExportHarborHubPackageInput,
+): ExportHarborHubPackageResult {
       const document = readDraftDocument(context.workspaceDir, input.draftId);
       if (!document.spec.arms.some((arm) => arm.armId === input.armId)) {
         refuse("not-found", `drafts.${input.draftId}.spec.arms.${input.armId}`, "draft has no such arm");
@@ -115,11 +128,14 @@ export function exportHarborHubPackage(
       }
       const protocol = suite.protocol;
       const jobDir = join(harborArmJobsDir(context.workspaceDir, runState.runSha256), harborArmJobName(runState.runSha256, input.armId));
-      const assessed = runState.matrixSha256 === undefined
+      const matrix = runState.matrixSha256 === undefined
+        ? undefined
+        : parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256));
+      const assessed = matrix === undefined
         ? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false }
         : suiteComparabilityForArm({
           manifest,
-          matrix: parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256)),
+          matrix,
           armId: input.armId,
           jobDir,
         }) ?? { executionConformance: quote.executionConformance, coverage: quote.coverage, leaderboardSubmitReady: false };
@@ -140,9 +156,12 @@ export function exportHarborHubPackage(
       rmSync(exportDir, { recursive: true, force: true });
       mkdirSync(exportDir, { recursive: true });
       cpSync(jobDir, join(exportDir, "job"), { recursive: true });
-      const instructions = harborHubExportInstructions(mode, join(exportDir, "job"), protocol);
+      const certification = exportCompletenessCertification({
+        runSha256: runState.runSha256,
+        completeness: matrix?.completeness,
+        frameworkSubmitReady: mode === "leaderboard-submit",
+      });
+      const instructions = harborHubExportInstructions(certification, mode, join(exportDir, "job"), protocol);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });
       return { mode, instructions, jobDir, exportDir };
-    },
-  });
 }

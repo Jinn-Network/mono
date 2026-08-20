@@ -170,8 +170,8 @@ function fixture(overrides: {
         trustBoundary: "workspace-minted public keys; no third-party trust anchor",
       },
       verification: {
-        command: "npx @colophon-claims/verify@1.0.0 <bundle-dir>",
-        compatibleCommand: "npx @colophon-claims/verify@1 <bundle-dir>",
+        command: "npx @colophon-claims/verify@0.1.0 <bundle-dir>",
+        compatibleCommand: "npx @colophon-claims/verify@0.1 <bundle-dir>",
         checks: ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
         trustRoot: "Bundle-carried public keys minted by the self-run workspace.",
       },
@@ -197,20 +197,22 @@ function binaryZeroProjection() {
   };
 }
 
-function binaryAssetFixture(): PublicAssetInput {
+function binaryAssetFixture(options: { readonly strata?: readonly string[] } = {}): PublicAssetInput {
   const base = fixture();
   const armIds = ["arm-a", "arm-b", "arm-c", "arm-d"];
+  // Default reproduces today's exact two-stratum output byte for byte (spec §10.2 ruling 3).
+  const strata = options.strata ?? ["core", "stress"];
   const qualification = {
     configuration: {
       verdictRule: "sole", k: 1, reduction: "strict-majority", measurementProfile: "binary-instrument@1",
-      candidateClasses: ["factuality"], strata: ["core", "stress"], parserInvalidPolicy: "reject",
+      candidateClasses: ["factuality"], strata, parserInvalidPolicy: "reject",
       truthAdmission: "two-human-unanimous", intervalAlpha: "0.05",
     },
     arms: Object.fromEntries(armIds.map((armId, index) => [armId, {
       instrumentSha256: `sha256:${String(index + 1).repeat(64)}`,
       ...binaryZeroProjection(),
       byCandidateClass: { factuality: binaryZeroProjection() },
-      byStratum: { core: binaryZeroProjection(), stress: binaryZeroProjection() },
+      byStratum: Object.fromEntries(strata.map((name) => [name, binaryZeroProjection()])),
     }])),
     itemDecisions: [],
     excluded: { count: 0, items: [] },
@@ -253,8 +255,8 @@ function binaryAssetFixture(): PublicAssetInput {
       conflicted: qualification.conflicted,
       verification: {
         ...base.claim.verification,
-        command: "npx @colophon-claims/verify@2.0.0 <bundle-dir>",
-        compatibleCommand: "npx @colophon-claims/verify@2 <bundle-dir>",
+        command: "npx @colophon-claims/verify@0.1.0 <bundle-dir>",
+        compatibleCommand: "npx @colophon-claims/verify@0.1 <bundle-dir>",
       },
     },
     binaryQualification: {
@@ -540,6 +542,23 @@ describe("binary qualification public assets", () => {
     }
   });
 
+  test("renders the sealed stratum vocabulary in the byStratum caption, not a hardcoded pair", () => {
+    const twoStratum = buildPublicAssets(binaryAssetFixture());
+    const twoCaption = "Buckets by stratum (core, stress)";
+    expect(text(twoStratum["index.html"])).toContain(twoCaption);
+    // Markdown escapes parentheses (see the existing "\\(armB minus armA\\)" assertion above).
+    expect(text(twoStratum["README.md"])).toContain("Buckets by stratum \\(core, stress\\)");
+
+    const fourCategory = buildPublicAssets(binaryAssetFixture({
+      strata: ["category-1", "category-2", "category-3", "category-4"],
+    }));
+    const fourCaption = "Buckets by stratum (category-1, category-2, category-3, category-4)";
+    expect(text(fourCategory["index.html"])).toContain(fourCaption);
+    expect(text(fourCategory["README.md"])).toContain(
+      "Buckets by stratum \\(category-1, category-2, category-3, category-4\\)",
+    );
+  });
+
   test("fails closed when replay-verified admission/instrument facts are absent or attached to a legacy method", () => {
     const binary = binaryAssetFixture();
     expect(() => buildPublicAssets({ ...binary, binaryQualification: undefined })).toThrow(/require exactly one/u);
@@ -647,10 +666,10 @@ describe("Task 6: paired-delta@1 bundle asset dispatch", () => {
       name,
       createHash("sha256").update(bytes).digest("hex"),
     ]))).toEqual({
-      "README.md": "c84a462355d8443fcf549bfa092dc9ca08a4f6395b96b683aea5dcab573a79ef",
+      "README.md": "986050e3332a3f7453b0ba4b2cf2b6b0decb0adf8fc24e6ba880e6c69d33e37d",
       "badge.svg": "cdeb0f812c99cd727165e522d1c59770b3a7c89241d08f139ea954390902f8d6",
-      "index.html": "8df4a0b57d63df324dacf452ddfd90c81466e852137ee44e2a93ff4fd9c76bab",
-      "share.txt": "e93ec44415ee76899b198fe3cdd174fb410c876c48e0835f6f28118fb8200056",
+      "index.html": "98dba3ff104d5219b0677d89e52c508bc65741ebf8e6373cdbdf372415143350",
+      "share.txt": "60e03557bb7b1b1768fba8b0132c9d192f5a6b2107ec2d6e0ebd5f744e476653",
       "social-card.svg": "813c2bfb2760cab5370f56883b71be44041120831cf4b736f07156337c8e26f5",
     });
   });

@@ -11,7 +11,10 @@ import {
   BINARY_JUDGMENT_OBSERVATION_FORMAT_URI,
   BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+  BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
 } from "../identifiers.js";
+import { compareCodeUnitStrings } from "../order.js";
+import { ProfilesError } from "../errors.js";
 import { assertValidDocument, parseJsonDocument } from "../zod-parse.js";
 
 const Sha256DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
@@ -20,6 +23,18 @@ const NonEmptyStringSchema = z.string().min(1);
 export const BinaryJudgmentItemIdSchema = z.string().regex(
   /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
 );
+
+/**
+ * RFC 3339 instant SHAPE, seconds precision, no fractional part. This is a shape pin, not a
+ * calendar evaluation: calendar strictness is enforced once, on the source-manifest row that this
+ * value is copied from (`verify/src/admission/intake.ts`, via `isCalendarStrictRfc3339`), and is
+ * re-checked at read by `resolveBenchmarkTaskProvenance`. Fractional seconds are excluded because
+ * the value is a source publication instant and because a fraction-admitting pattern fails this
+ * package's own safe-regex ReDoS pre-filter (`task-profile/payload-schema.ts`).
+ */
+export const BINARY_JUDGMENT_TIMESTAMP_PATTERN =
+  "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(Z|[+-]\\d{2}:\\d{2})$";
+const Rfc3339InstantShapeSchema = z.string().regex(new RegExp(BINARY_JUDGMENT_TIMESTAMP_PATTERN, "u"));
 
 function decodeCanonicalBase64(value: string): Uint8Array | undefined {
   try {
@@ -67,9 +82,9 @@ export function decodeBinaryJudgmentInlineMaterial(
 }
 
 /**
- * A digest-only in-toto ResourceDescriptor projection for solver-visible provenance. Source
- * names and locators remain in the source manifest because even an innocent-looking URI can
- * become a covert truth/class channel into the judge Task.
+ * A digest-only in-toto ResourceDescriptor projection for solver-visible provenance, carried in
+ * the payload's `sources` list. Source names and locators remain in the source manifest because
+ * even an innocent-looking URI can become a covert truth/class channel into the judge Task.
  */
 export const BinaryJudgmentProvenanceDescriptorSchema = z.strictObject({
   digest: z.strictObject({ sha256: Sha256HexSchema }),
@@ -94,14 +109,24 @@ export const BinaryJudgmentPayloadSchema = z.strictObject({
   question: z.string(),
   referenceAnswer: z.string(),
   candidateAnswer: z.string(),
-  provenance: z.array(BinaryJudgmentProvenanceDescriptorSchema).min(1),
+  evidence: z.string().optional(),
+  provenance: z.strictObject({
+    sourceCommitment: Sha256DigestSchema,
+    timestamp: Rfc3339InstantShapeSchema,
+  }),
+  sources: z.array(BinaryJudgmentProvenanceDescriptorSchema).min(1),
 });
 export type BinaryJudgmentPayload = z.infer<typeof BinaryJudgmentPayloadSchema>;
 
-export const BINARY_JUDGMENT_TEMPLATE_FIELDS = [
+export const BINARY_JUDGMENT_REQUIRED_TEMPLATE_FIELDS = [
   "question",
   "referenceAnswer",
   "candidateAnswer",
+] as const;
+export const BINARY_JUDGMENT_OPTIONAL_TEMPLATE_FIELDS = ["evidence"] as const;
+export const BINARY_JUDGMENT_TEMPLATE_FIELDS = [
+  ...BINARY_JUDGMENT_REQUIRED_TEMPLATE_FIELDS,
+  ...BINARY_JUDGMENT_OPTIONAL_TEMPLATE_FIELDS,
 ] as const;
 export type BinaryJudgmentTemplateField = (typeof BINARY_JUDGMENT_TEMPLATE_FIELDS)[number];
 
@@ -123,7 +148,46 @@ export const BinaryJudgmentMessageSchema = z.strictObject({
 });
 export type BinaryJudgmentMessage = z.infer<typeof BinaryJudgmentMessageSchema>;
 
-export const BinaryJudgmentGenerationSchema = z.strictObject({
+// The closed set of judge-model profiles (spec §1.1). A judge-model profile is a named triple
+// of (accepted model.requested literal set, generation block shape, observation limitations).
+export const JUDGE_MODEL_PROFILE_IDS = ["dated-snapshot-sampling", "reasoning-2026-08"] as const;
+export type JudgeModelProfileId = (typeof JUDGE_MODEL_PROFILE_IDS)[number];
+
+/** Closed literal set. Adding a member is a code change with a test, never configuration. */
+export const DATED_SNAPSHOT_MODELS = ["gpt-4o-mini-2024-07-18"] as const;
+export type DatedSnapshotJudgeModelId = (typeof DATED_SNAPSHOT_MODELS)[number];
+
+/** The profile is a TOTAL FUNCTION of model.requested. The instrument gains no new field. */
+export const JUDGE_MODEL_PROFILES = {
+  "gpt-4o-mini-2024-07-18": "dated-snapshot-sampling",
+  "gpt-5.6-luna": "reasoning-2026-08",
+} as const satisfies Readonly<Record<string, JudgeModelProfileId>>;
+
+export type AcceptedJudgeModelId = keyof typeof JUDGE_MODEL_PROFILES;
+/** Code-unit sorted. */
+export const ACCEPTED_JUDGE_MODEL_IDS = ["gpt-4o-mini-2024-07-18", "gpt-5.6-luna"] as const;
+
+export function judgeModelProfileFor(model: string): JudgeModelProfileId | undefined {
+  return Object.hasOwn(JUDGE_MODEL_PROFILES, model)
+    ? JUDGE_MODEL_PROFILES[model as AcceptedJudgeModelId]
+    : undefined;
+}
+
+export function isDatedSnapshotJudgeModel(model: string): model is DatedSnapshotJudgeModelId {
+  return (DATED_SNAPSHOT_MODELS as readonly string[]).includes(model);
+}
+
+/**
+ * Per-profile observation limitations. A mutable alias is a real limitation of an undated model
+ * id and a false claim about a dated snapshot.
+ */
+export const BINARY_JUDGMENT_OBSERVATION_LIMITATIONS = ["mutable-model-alias"] as const;
+export const JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS = {
+  "dated-snapshot-sampling": [],
+  "reasoning-2026-08": ["mutable-model-alias"],
+} as const satisfies Readonly<Record<JudgeModelProfileId, readonly string[]>>;
+
+export const BinaryJudgmentReasoningGenerationSchema = z.strictObject({
   reasoningEffort: z.enum(["none", "low"]),
   maxOutputTokens: z.literal(128),
   store: z.literal(false),
@@ -137,7 +201,46 @@ export const BinaryJudgmentGenerationSchema = z.strictObject({
   metadata: z.null(),
   promptCacheIdentifier: z.null(),
 });
+export type BinaryJudgmentReasoningGeneration = z.infer<
+  typeof BinaryJudgmentReasoningGenerationSchema
+>;
+
+export const BinaryJudgmentSamplingGenerationSchema = z.strictObject({
+  temperature: z.literal(0),
+  maxOutputTokens: z.literal(512),
+  store: z.literal(false),
+  background: z.literal(false),
+  stream: z.literal(false),
+  serviceTier: z.literal("default"),
+  tools: z.tuple([]),
+  fallbackModels: z.tuple([]),
+  retries: z.literal(0),
+  persistedConversation: z.literal(false),
+  metadata: z.null(),
+  promptCacheIdentifier: z.null(),
+});
+export type BinaryJudgmentSamplingGeneration = z.infer<
+  typeof BinaryJudgmentSamplingGenerationSchema
+>;
+
+// The union cannot carry its own discriminator. The sibling key that decides which variant
+// applies always lives in the parent object (`model.requested` on the instrument, `model` on
+// the semantic request, `model` on the verify package's arm schema), never inside the
+// generation block itself. Profile agreement is therefore enforced by three parent-level
+// `superRefine` checks, one per consumer, and not by this schema.
+export const BinaryJudgmentGenerationSchema = z.union([
+  BinaryJudgmentReasoningGenerationSchema,
+  BinaryJudgmentSamplingGenerationSchema,
+]);
 export type BinaryJudgmentGeneration = z.infer<typeof BinaryJudgmentGenerationSchema>;
+
+/** The profile a generation block's own shape declares; `undefined` when it declares neither. */
+export function judgeGenerationProfile(generation: unknown): JudgeModelProfileId | undefined {
+  if (typeof generation !== "object" || generation === null) return undefined;
+  if (Object.hasOwn(generation, "reasoningEffort")) return "reasoning-2026-08";
+  if (Object.hasOwn(generation, "temperature")) return "dated-snapshot-sampling";
+  return undefined;
+}
 
 export const BINARY_ACCEPT_REJECT_PARSER_ID =
   "network.jinn.parser.binary-accept-reject" as const;
@@ -174,6 +277,187 @@ export const BINARY_ACCEPT_REJECT_PARSER_IDENTITY = {
   digest: BINARY_ACCEPT_REJECT_PARSER_SEALED.digest,
 } as const;
 
+export const BINARY_YES_NO_PARSER_ID = "network.jinn.parser.binary-yes-no" as const;
+export const BINARY_YES_NO_PARSER_VERSION = "1.0.0" as const;
+
+/** Sealed, code-free semantics: PC-1's discipline over the YES/NO alphabet. */
+export function buildBinaryYesNoParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_YES_NO_PARSER_ID,
+      version: BINARY_YES_NO_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+      normalization: "none",
+    },
+    rule: {
+      kind: "whole-output-token",
+      caseSensitive: true,
+      tokens: { ACCEPT: "YES", REJECT: "NO" },
+    },
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_YES_NO_PARSER_SEALED = sealDocument(buildBinaryYesNoParserSemantics());
+export const BINARY_YES_NO_PARSER_IDENTITY = {
+  id: BINARY_YES_NO_PARSER_ID,
+  version: BINARY_YES_NO_PARSER_VERSION,
+  digest: BINARY_YES_NO_PARSER_SEALED.digest,
+} as const;
+
+export const BINARY_CORRECT_WRONG_PARSER_ID =
+  "network.jinn.parser.binary-correct-wrong" as const;
+export const BINARY_CORRECT_WRONG_PARSER_VERSION = "1.0.0" as const;
+
+/** Sealed, code-free semantics: PC-1's discipline over the CORRECT/WRONG alphabet. */
+export function buildBinaryCorrectWrongParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_CORRECT_WRONG_PARSER_ID,
+      version: BINARY_CORRECT_WRONG_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+      normalization: "none",
+    },
+    rule: {
+      kind: "whole-output-token",
+      caseSensitive: true,
+      tokens: { ACCEPT: "CORRECT", REJECT: "WRONG" },
+    },
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_CORRECT_WRONG_PARSER_SEALED = sealDocument(
+  buildBinaryCorrectWrongParserSemantics(),
+);
+export const BINARY_CORRECT_WRONG_PARSER_IDENTITY = {
+  id: BINARY_CORRECT_WRONG_PARSER_ID,
+  version: BINARY_CORRECT_WRONG_PARSER_VERSION,
+  digest: BINARY_CORRECT_WRONG_PARSER_SEALED.digest,
+} as const;
+
+export const BINARY_JSON_VERDICT_PARSER_ID =
+  "network.jinn.parser.binary-json-verdict" as const;
+export const BINARY_JSON_VERDICT_PARSER_VERSION = "1.0.0" as const;
+
+/**
+ * Sealed, code-free semantics for the JSON-wrapped verdict contract: a single strict RFC 8259
+ * object root carrying a `verdict` string member, edge-trimmed to exactly ACCEPT or REJECT.
+ * Deliberately intolerant of code fences, surrounding prose, or a duplicate `verdict` member.
+ */
+export function buildBinaryJsonVerdictParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_JSON_VERDICT_PARSER_ID,
+      version: BINARY_JSON_VERDICT_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+      normalization: "none",
+    },
+    rule: {
+      kind: "json-member-token",
+      caseSensitive: true,
+      tokens: { ACCEPT: "ACCEPT", REJECT: "REJECT" },
+      json: {
+        standard: "RFC 8259",
+        text: "exactly one JSON value after the edge trim, with no leading or trailing content",
+        root: "object",
+        member: "verdict",
+        memberType: "string",
+        memberTrimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+        duplicateMember: "refused",
+        otherMembers: "ignored",
+      },
+    },
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_JSON_VERDICT_PARSER_SEALED = sealDocument(
+  buildBinaryJsonVerdictParserSemantics(),
+);
+export const BINARY_JSON_VERDICT_PARSER_IDENTITY = {
+  id: BINARY_JSON_VERDICT_PARSER_ID,
+  version: BINARY_JSON_VERDICT_PARSER_VERSION,
+  digest: BINARY_JSON_VERDICT_PARSER_SEALED.digest,
+} as const;
+
+export const BINARY_LABEL_IN_PROSE_PARSER_ID =
+  "network.jinn.parser.binary-label-in-prose" as const;
+export const BINARY_LABEL_IN_PROSE_PARSER_VERSION = "1.0.0" as const;
+
+/**
+ * Sealed, code-free semantics for the label-in-prose contract: an untrimmed, delimited
+ * exact-ASCII-token scan for ACCEPT/REJECT. Invalid when both or neither token is present, with
+ * no stemming, case folding, synonyms, or positional preference.
+ */
+export function buildBinaryLabelInProseParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_LABEL_IN_PROSE_PARSER_ID,
+      version: BINARY_LABEL_IN_PROSE_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: [],
+      normalization: "none",
+    },
+    rule: {
+      kind: "delimited-token-scan",
+      caseSensitive: true,
+      tokens: { ACCEPT: "ACCEPT", REJECT: "REJECT" },
+      delimiter:
+        "the code point immediately before and immediately after an occurrence, where one exists, "
+        + "must not be an ASCII letter, an ASCII digit, or U+005F",
+      repeatedToken: "permitted",
+      bothTokens: "invalid",
+      neitherToken: "invalid",
+      positionalPreference: "none",
+    },
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_LABEL_IN_PROSE_PARSER_SEALED = sealDocument(
+  buildBinaryLabelInProseParserSemantics(),
+);
+export const BINARY_LABEL_IN_PROSE_PARSER_IDENTITY = {
+  id: BINARY_LABEL_IN_PROSE_PARSER_ID,
+  version: BINARY_LABEL_IN_PROSE_PARSER_VERSION,
+  digest: BINARY_LABEL_IN_PROSE_PARSER_SEALED.digest,
+} as const;
+
+/**
+ * The complete v1 response-parser registry, code-unit sorted by (id, version). An instrument
+ * SELECTS one member; it never supplies parser configuration. Adding a member changes the
+ * umbrella digest by construction, and that tripwire is the point.
+ */
+export const BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY = [
+  BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_CORRECT_WRONG_PARSER_IDENTITY,
+  BINARY_JSON_VERDICT_PARSER_IDENTITY,
+  BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
+  BINARY_YES_NO_PARSER_IDENTITY,
+] as const;
+export type BinaryJudgmentResponseParserId =
+  (typeof BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY)[number]["id"];
+
 /**
  * The umbrella parser commits the complete v1 response-parser registry and the comparison map.
  * Adding a parser or changing truth semantics therefore changes this document's digest.
@@ -185,7 +469,7 @@ export function buildBinaryJudgmentEvaluationParserSemantics() {
       id: BINARY_JUDGMENT_EVALUATION_PARSER_ID,
       version: BINARY_JUDGMENT_EVALUATION_PARSER_VERSION,
     },
-    responseParsers: [BINARY_ACCEPT_REJECT_PARSER_IDENTITY],
+    responseParsers: [...BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY],
     comparison: {
       ACCEPT: "CORRECT",
       REJECT: "WRONG",
@@ -209,10 +493,37 @@ export function binaryJudgmentPromptTemplateDigest(
   return recordDigest(canonicalJsonBytes(messages));
 }
 
+const REGISTERED_PARSER_IDS = BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY.map(
+  (parser) => parser.id,
+) as [BinaryJudgmentResponseParserId, ...BinaryJudgmentResponseParserId[]];
+
+/**
+ * Closed-registry membership (§4.1 rule 3): `id` must be one of the five registered parsers, and
+ * `version`/`digest` must be exactly that parser's registered pair. An instrument names one
+ * registered identity; it never supplies parser configuration.
+ */
 const ParserIdentitySchema = z.strictObject({
-  id: z.literal(BINARY_ACCEPT_REJECT_PARSER_ID),
-  version: z.literal(BINARY_ACCEPT_REJECT_PARSER_VERSION),
-  digest: z.literal(BINARY_ACCEPT_REJECT_PARSER_IDENTITY.digest),
+  id: z.enum(REGISTERED_PARSER_IDS),
+  version: NonEmptyStringSchema,
+  digest: Sha256DigestSchema,
+}).superRefine((identity, ctx) => {
+  const registered = BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY
+    .find((parser) => parser.id === identity.id);
+  if (registered === undefined) return; // the enum member check already refused this id
+  if (identity.version !== registered.version) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["version"],
+      message: `version does not match the registered ${identity.id} pair (${registered.version})`,
+    });
+  }
+  if (identity.digest !== registered.digest) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["digest"],
+      message: `digest does not match the registered ${identity.id} pair (${registered.digest})`,
+    });
+  }
 });
 
 export const BinaryJudgmentInstrumentSchema = z
@@ -226,7 +537,7 @@ export const BinaryJudgmentInstrumentSchema = z
     attribution: BinaryJudgmentSourceDescriptorSchema,
     model: z.strictObject({
       adapter: z.literal("jinn-openai"),
-      requested: z.literal("gpt-5.6-luna"),
+      requested: z.enum(ACCEPTED_JUDGE_MODEL_IDS),
       generation: BinaryJudgmentGenerationSchema,
     }),
     response: z.strictObject({
@@ -242,7 +553,7 @@ export const BinaryJudgmentInstrumentSchema = z
         if ("field" in segment) usedFields.add(segment.field);
       }
     }
-    for (const field of BINARY_JUDGMENT_TEMPLATE_FIELDS) {
+    for (const field of BINARY_JUDGMENT_REQUIRED_TEMPLATE_FIELDS) {
       if (!usedFields.has(field)) {
         ctx.addIssue({
           code: "custom",
@@ -259,13 +570,48 @@ export const BinaryJudgmentInstrumentSchema = z
         message: `promptTemplateSha256 does not match canonical messages (${expected})`,
       });
     }
+    const modelProfile = JUDGE_MODEL_PROFILES[instrument.model.requested];
+    const generationProfile = judgeGenerationProfile(instrument.model.generation);
+    if (generationProfile !== modelProfile) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["model", "generation"],
+        message:
+          `model.generation must match the ${modelProfile} profile for model.requested `
+          + instrument.model.requested,
+      });
+    }
   });
 export type BinaryJudgmentInstrument = z.infer<typeof BinaryJudgmentInstrumentSchema>;
 
+/**
+ * The one declaration mechanism (program §2.2): an instrument declares evidence iff at least one
+ * message segment names the `evidence` field. There is deliberately no second mechanism (no
+ * boolean flag, no enum) — callers that need to know whether evidence is in play scan the
+ * segments themselves via this helper rather than trusting a parallel, driftable signal.
+ */
+export function binaryJudgmentInstrumentDeclaresEvidence(
+  instrument: BinaryJudgmentInstrument,
+): boolean {
+  return instrument.messages.some((message) => (
+    message.segments.some((segment) => "field" in segment && segment.field === "evidence")
+  ));
+}
+
 export const BinaryJudgmentSemanticRequestSchema = z.strictObject({
-  model: z.literal("gpt-5.6-luna"),
+  model: z.enum(ACCEPTED_JUDGE_MODEL_IDS),
   messages: z.array(BinaryJudgmentMessageSchema).min(1),
   generation: BinaryJudgmentGenerationSchema,
+}).superRefine((request, ctx) => {
+  const modelProfile = JUDGE_MODEL_PROFILES[request.model];
+  const generationProfile = judgeGenerationProfile(request.generation);
+  if (generationProfile !== modelProfile) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["generation"],
+      message: `generation must match the ${modelProfile} profile for model ${request.model}`,
+    });
+  }
 });
 export type BinaryJudgmentSemanticRequest = z.infer<typeof BinaryJudgmentSemanticRequestSchema>;
 
@@ -283,10 +629,28 @@ export function renderBinaryJudgmentMessages(
     instrumentInput,
     "BinaryJudgmentInstrument",
   );
+  const payloadFields: Partial<Record<BinaryJudgmentTemplateField, string>> = payload;
+  // Total-function guarantee: `evidence` became optional on the payload, so a renderer that
+  // blindly interpolated could silently emit the literal string "undefined" into a judge prompt.
+  // Refuse before any concatenation instead, through the same ProfilesError shape
+  // `assertValidDocument` produces — this is what makes `preview` refuse rather than rehearsing a
+  // prompt containing "undefined". This is NOT a second enforcement point for the arm-to-bank
+  // evidence rule, which is enforced at lock in another package.
+  for (const message of instrument.messages) {
+    for (const segment of message.segments) {
+      if ("field" in segment && payloadFields[segment.field] === undefined) {
+        throw new ProfilesError(
+          "invalid-document",
+          `BinaryJudgmentPayload failed schema validation: ${segment.field}: instrument segment `
+            + `interpolates ${segment.field} but the payload does not carry it`,
+        );
+      }
+    }
+  }
   return instrument.messages.map((message) => ({
     role: message.role,
     text: message.segments.map((segment) => (
-      "literal" in segment ? segment.literal : payload[segment.field]
+      "literal" in segment ? segment.literal : payloadFields[segment.field]!
     )).join(""),
   }));
 }
@@ -313,6 +677,13 @@ export function binaryJudgmentSemanticRequestDigest(
   return recordDigest(canonicalJsonBytes(buildBinaryJudgmentSemanticRequest(payload, instrument)));
 }
 
+function isSortedUniqueArray(values: readonly string[]): boolean {
+  for (let index = 1; index < values.length; index += 1) {
+    if (compareCodeUnitStrings(values[index - 1]!, values[index]!) >= 0) return false;
+  }
+  return true;
+}
+
 export const BinaryJudgmentObservationSchema = z.strictObject({
   protocol: z.literal(BINARY_JUDGMENT_OBSERVATION_FORMAT_URI),
   taskDigest: Sha256DigestSchema,
@@ -325,8 +696,8 @@ export const BinaryJudgmentObservationSchema = z.strictObject({
     mediaType: z.literal(BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE),
   }),
   provider: z.strictObject({
-    requestedModel: z.literal("gpt-5.6-luna"),
-    resolvedModel: z.literal("gpt-5.6-luna"),
+    requestedModel: z.enum(ACCEPTED_JUDGE_MODEL_IDS),
+    resolvedModel: z.enum(ACCEPTED_JUDGE_MODEL_IDS),
     responseId: NonEmptyStringSchema,
     eventSha256: Sha256DigestSchema,
     usage: z.strictObject({
@@ -340,7 +711,7 @@ export const BinaryJudgmentObservationSchema = z.strictObject({
     retries: z.literal(0),
     fallbacks: z.literal(0),
   }),
-  limitations: z.tuple([z.literal("mutable-model-alias")]),
+  limitations: z.array(z.enum(BINARY_JUDGMENT_OBSERVATION_LIMITATIONS)),
 }).superRefine((observation, ctx) => {
   if (
     observation.provider.usage.totalTokens
@@ -352,12 +723,69 @@ export const BinaryJudgmentObservationSchema = z.strictObject({
       message: "totalTokens must equal inputTokens + outputTokens",
     });
   }
+  if (!isSortedUniqueArray(observation.limitations)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["limitations"],
+      message: "limitations must be code-unit sorted and unique",
+    });
+  }
+  const profile = JUDGE_MODEL_PROFILES[observation.provider.requestedModel];
+  const expectedLimitations = JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS[profile];
+  const matchesProfile = observation.limitations.length === expectedLimitations.length
+    && observation.limitations.every((value, index) => value === expectedLimitations[index]);
+  if (!matchesProfile) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["limitations"],
+      message:
+        `limitations must be exactly ${JSON.stringify(expectedLimitations)} for the ${profile} profile`,
+    });
+  }
+  // Both fields are pinned to a single literal today. Widening them to a closed set without
+  // this check would start accepting a mismatched (requestedModel, resolvedModel) pair that
+  // refuses today, for both profiles alike. This is the evidence that stands in for the
+  // mutable-alias limitation on a dated snapshot: the recorded resolvedModel proves the
+  // provider actually served the requested id.
+  if (observation.provider.resolvedModel !== observation.provider.requestedModel) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["provider", "resolvedModel"],
+      message: "provider.resolvedModel must equal provider.requestedModel",
+    });
+  }
 });
 export type BinaryJudgmentObservation = z.infer<typeof BinaryJudgmentObservationSchema>;
 
+/** Freshness bound for a snapshot-serving probe (spec §1.5 rule 3): frozen at 24 hours. */
+export const SNAPSHOT_PROBE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** A pre-run check confirming a dated snapshot is actually served, sealed as a lock input. */
+export const BinaryJudgmentSnapshotProbeSchema = z.strictObject({
+  protocol: z.literal(BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI),
+  requestedModel: z.enum(DATED_SNAPSHOT_MODELS),
+  resolvedModel: NonEmptyStringSchema,
+  responseId: NonEmptyStringSchema,
+  eventSha256: Sha256DigestSchema,
+  probedAt: z.string().datetime({ offset: true }),
+  outcome: z.enum(["serving", "not-serving"]),
+}).superRefine((probe, ctx) => {
+  const expectedOutcome = probe.resolvedModel === probe.requestedModel ? "serving" : "not-serving";
+  if (probe.outcome !== expectedOutcome) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["outcome"],
+      message: `outcome must be "${expectedOutcome}" given the recorded requestedModel/resolvedModel pair`,
+    });
+  }
+});
+export type BinaryJudgmentSnapshotProbe = z.infer<typeof BinaryJudgmentSnapshotProbeSchema>;
+
 export const BinaryJudgmentTruthLabelSchema = z.enum(["CORRECT", "WRONG"]);
 export type BinaryJudgmentTruthLabel = z.infer<typeof BinaryJudgmentTruthLabelSchema>;
-export const BinaryJudgmentStratumSchema = z.enum(["core", "stress"]);
+// §3.1 rule 1: one identifier dialect, not two. Shared with `candidateClass` below.
+const IDENTIFIER_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u;
+export const BinaryJudgmentStratumSchema = NonEmptyStringSchema.regex(IDENTIFIER_NAME);
 export type BinaryJudgmentStratum = z.infer<typeof BinaryJudgmentStratumSchema>;
 
 /** Evaluator-only admitted analysis attributes. This document must never be a Task input. */
@@ -369,7 +797,7 @@ export const BinaryJudgmentAnalysisContextSchema = z.strictObject({
   itemId: BinaryJudgmentItemIdSchema,
   labelResolutionSha256: Sha256DigestSchema,
   truthLabel: BinaryJudgmentTruthLabelSchema,
-  candidateClass: NonEmptyStringSchema.regex(/^[A-Za-z][A-Za-z0-9._-]{0,63}$/u),
+  candidateClass: NonEmptyStringSchema.regex(IDENTIFIER_NAME),
   stratum: BinaryJudgmentStratumSchema,
 });
 export type BinaryJudgmentAnalysisContext = z.infer<typeof BinaryJudgmentAnalysisContextSchema>;
@@ -422,6 +850,24 @@ export function sealBinaryJudgmentObservation(
     BinaryJudgmentObservationSchema,
     value,
     "BinaryJudgmentObservation",
+  ));
+}
+
+export function parseBinaryJudgmentSnapshotProbe(bytes: Uint8Array): BinaryJudgmentSnapshotProbe {
+  return parseJsonDocument(
+    BinaryJudgmentSnapshotProbeSchema,
+    bytes,
+    "BinaryJudgmentSnapshotProbe",
+  );
+}
+
+export function sealBinaryJudgmentSnapshotProbe(
+  value: BinaryJudgmentSnapshotProbe,
+): { bytes: Uint8Array; digest: `sha256:${string}` } {
+  return sealDocument(assertValidDocument(
+    BinaryJudgmentSnapshotProbeSchema,
+    value,
+    "BinaryJudgmentSnapshotProbe",
   ));
 }
 

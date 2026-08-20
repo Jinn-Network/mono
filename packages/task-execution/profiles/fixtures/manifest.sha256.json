@@ -22,6 +22,10 @@
       "sha256": "f850ac8d075510f8a5003dab352795fa9fcaa4c9b8d286eae9eaa3a8f00b8a9d"
     },
     {
+      "id": "binary-judgment-request/golden/unicode-line-endings-profile-2.json",
+      "sha256": "41e409ebbbdfb66a18f056fcf3752f8bfda80d0beb1ade329c22e13f90b24c4d"
+    },
+    {
       "id": "binary-judgment-request/golden/unicode-line-endings.json",
       "sha256": "1b6829723ff13df7138158b5bfe101529b9a6d6b34b686f7434d008abeef22a5"
     },
@@ -478,5 +482,12 @@
       "sha256": "2222677838d21824db5fdf1d9cc9af63ae30c731496336c2664dcbf53f52c23e"
     }
   ],
-  "errata": []
+  "errata": [
+    {
+      "id": "binary-judgment-request/golden/unicode-line-endings.json",
+      "supersededBy": "binary-judgment-request/golden/unicode-line-endings-profile-2.json",
+      "date": "2026-08-20",
+      "reason": "binary-judgment task profile 2.0 reshapes payload.provenance into a records-admitted cluster key and renames the digest-descriptor list to sources; the superseded oracle carries the 1.0 payload shape and no longer validates. The rendered request bytes are unchanged."
+    }
+  ]
 }

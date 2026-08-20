@@ -8,7 +8,7 @@ import {
 describe("live SWE-rebench grader program", () => {
   test("versions the sealed-command grader behavior separately from the legacy selector behavior", () => {
     expect(LOCAL_SWE_REBENCH_EVALUATION_METHOD_TOKEN).toBe(
-      "network.jinn.policy-optimization.swe-rebench-oci-evaluator/1.1",
+      "network.jinn.policy-optimization.swe-rebench-oci-evaluator/1.2",
     );
   });
 

@@ -3,9 +3,7 @@
 - **id:** DR-2026-06-03
 - **Date:** 2026-06-03
 - **Author:** opus
-- **Status:** Accepted — the load-bearing set is encoded in `.github/CODEOWNERS`
-  per operator direction (2026-06-03); enforced by the existing "require Code
-  Owner review" branch protection. Handbook/CLAUDE.md follow-ups open.
+- **Status:** Accepted — GitHub path list for enqueue superseded by [DR-2026-08-20](./2026-08-20-human-surface-enqueue-gate.md) (render dirs dropped from the gate; product-canon specs retained). Mechanism (CODEOWNERS + require-code-owner-review) retained on that shrunk set.
 - **Verb:** Steer
 
 ## Summary

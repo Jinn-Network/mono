@@ -99,13 +99,12 @@ const registryRef = metadata.task_ids.find((task) => task.name === taskName)?.re
 if (packageHash !== registryRef) fail(`Packager hash ${packageHash} does not equal registry ref ${registryRef}`);
 
 mkdirSync(workspace, { recursive: true });
-const selectionPath = join(workspace, "selection.json");
-writeFileSync(selectionPath, `${JSON.stringify({
+const hostPath = join(workspace, "host.json");
+writeFileSync(hostPath, `${JSON.stringify({
   executable: harbor,
   registryMetadataPath,
   datasetRevision: TERMINAL_BENCH_2_1_DATASET_REF,
   taskMaterialPath,
-  coverage: "one_task",
   nConcurrent: 1,
   arms: [
     { armId: "oracle-a", agent: { id: "oracle", configuration: {} }, model: { id: "oracle-a", configuration: {} }, jobAgent: { name: "oracle", model_name: "oracle-a" } },
@@ -125,7 +124,7 @@ await colophon(["init", ...common]);
 await colophon(["draft", "create", ...common, "--name", "TB21 one_task pin", "--id", draftId]);
 await colophon(["arm", "add", ...common, "--draft", draftId, "--arm", "oracle-a", "--pinning", JSON.stringify({ harness: { id: "harbor-oracle-a", version: "1.0.0" } })]);
 await colophon(["arm", "add", ...common, "--draft", draftId, "--arm", "oracle-b", "--pinning", JSON.stringify({ harness: { id: "harbor-oracle-b", version: "1.0.0" } })]);
-const selected = parseEnvelope(await colophon(["runtime", "terminal-bench-2-1", "select", ...common, "--draft", draftId, "--file", selectionPath, "--json"]));
+const selected = parseEnvelope(await colophon(["method", "terminal-bench-2.1", ...common, "--draft", draftId, "--slice", "1", "--host", hostPath, "--json"]));
 const quoted = parseEnvelope(await colophon(["quote", ...common, "--draft", draftId, "--json"]));
 const suite = quoted.presentation?.suite;
 if (suite?.executionConformance !== true || suite?.coverage !== "one_task" || suite?.leaderboardSubmitReady !== false) {
@@ -134,8 +133,8 @@ if (suite?.executionConformance !== true || suite?.coverage !== "one_task" || su
 await colophon(["lock", ...common, "--draft", draftId]);
 await colophon(["launch", ...common, "--draft", draftId]);
 await colophon(["collect", ...common, "--draft", draftId, "--json"]);
-const exportA = parseEnvelope(await colophon(["hub", "export", ...common, "--draft", draftId, "--arm", "oracle-a", "--json"]));
-const exportB = parseEnvelope(await colophon(["hub", "export", ...common, "--draft", draftId, "--arm", "oracle-b", "--json"]));
+const exportA = parseEnvelope(await colophon(["export", ...common, "--draft", draftId, "--arm", "oracle-a", "--json"]));
+const exportB = parseEnvelope(await colophon(["export", ...common, "--draft", draftId, "--arm", "oracle-b", "--json"]));
 const reported = parseEnvelope(await colophon(["report", ...common, "--draft", draftId, "--json"]));
 if (!Array.isArray(reported.claimPackage?.limitations) || !reported.claimPackage.limitations.includes(SUITE_NOT_LEADERBOARD_READY_LIMITATION)) {
   fail("report limitations missing the canonical not-leaderboard sentence");

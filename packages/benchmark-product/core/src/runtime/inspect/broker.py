@@ -28,12 +28,22 @@ from openai.types.responses import Response
 
 
 PROTOCOL = "jinn.network/model-broker/1"
-MODEL = "gpt-5.6-luna"
+# Mirrors JUDGE_MODEL_PROFILES from
+# packages/task-execution/profiles/src/binary-judgment/contracts.ts (spec §1.1/§1.2). Both copies
+# widen in the same PR.
+JUDGE_MODEL_PROFILES = {
+    "gpt-5.6-luna": "reasoning-2026-08",
+    "gpt-4o-mini-2024-07-18": "dated-snapshot-sampling",
+}
+ACCEPTED_MODELS = frozenset(JUDGE_MODEL_PROFILES)
+MAX_OUTPUT_TOKENS_BY_PROFILE = {
+    "reasoning-2026-08": 128,
+    "dated-snapshot-sampling": 512,
+}
 SECRET_PATH = Path("/run/secrets/openai-api-key")
 CAPABILITY_PATH = Path("/run/jinn/broker-capability")
 MAX_REQUEST_BYTES = 65_536
 MAX_INPUT_BYTES = 32_768
-MAX_OUTPUT_TOKENS = 128
 TIMEOUT_SECONDS = 120
 
 
@@ -61,8 +71,11 @@ def validate_request(value: Any, expected_capability: str) -> dict[str, Any]:
     capability = value["capability"]
     if not isinstance(capability, str) or not hmac.compare_digest(capability, expected_capability):
         raise PermissionError("invalid per-attempt capability")
-    if value["model"] != MODEL:
+    model = value["model"]
+    if model not in ACCEPTED_MODELS:
         raise ValueError("model is outside the locked broker allowlist")
+    profile = JUDGE_MODEL_PROFILES[model]
+    max_output_tokens = MAX_OUTPUT_TOKENS_BY_PROFILE[profile]
     correlation = value["correlationId"]
     if not isinstance(correlation, str) or not (1 <= len(correlation) <= 256):
         raise ValueError("invalid correlation id")
@@ -79,15 +92,29 @@ def validate_request(value: Any, expected_capability: str) -> dict[str, Any]:
     if input_bytes > MAX_INPUT_BYTES:
         raise ValueError("input byte budget exceeded")
     generation = value["generation"]
-    if not isinstance(generation, dict) or generation != {
-        "reasoningEffort": generation.get("reasoningEffort"),
-        "maxOutputTokens": MAX_OUTPUT_TOKENS,
-        "store": False,
-        "background": False,
-        "stream": False,
-        "serviceTier": "default",
-    } or generation.get("reasoningEffort") not in {"none", "low"}:
-        raise ValueError("generation configuration differs from the locked allowlist")
+    if profile == "reasoning-2026-08":
+        if not isinstance(generation, dict) or generation != {
+            "reasoningEffort": generation.get("reasoningEffort"),
+            "maxOutputTokens": max_output_tokens,
+            "store": False,
+            "background": False,
+            "stream": False,
+            "serviceTier": "default",
+        } or generation.get("reasoningEffort") not in {"none", "low"}:
+            raise ValueError("generation configuration differs from the locked allowlist")
+    else:
+        # isinstance(True, int) is True in Python, so a stray bool masquerading as the literal
+        # temperature 0 must be rejected by type, not just by value.
+        temperature = generation.get("temperature") if isinstance(generation, dict) else None
+        if not isinstance(generation, dict) or generation != {
+            "temperature": temperature,
+            "maxOutputTokens": max_output_tokens,
+            "store": False,
+            "background": False,
+            "stream": False,
+            "serviceTier": "default",
+        } or type(temperature) is not int or temperature != 0:
+            raise ValueError("generation configuration differs from the locked allowlist")
     return value
 
 
@@ -132,15 +159,17 @@ class BrokerState:
             if self.call_count >= 1:
                 return terminal("budget-rejected", detail="one-call budget exhausted")
             self.call_count += 1
+            model = request["model"]
+            profile = JUDGE_MODEL_PROFILES[model]
+            max_output_tokens = MAX_OUTPUT_TOKENS_BY_PROFILE[profile]
             generation = request["generation"]
-            upstream_request = {
-                "model": MODEL,
+            upstream_request: dict[str, Any] = {
+                "model": model,
                 "input": [
                     {"role": message["role"], "content": [{"type": "input_text", "text": message["text"]}]}
                     for message in request["messages"]
                 ],
-                "reasoning": {"effort": generation["reasoningEffort"]},
-                "max_output_tokens": MAX_OUTPUT_TOKENS,
+                "max_output_tokens": max_output_tokens,
                 "store": False,
                 "background": False,
                 "stream": False,
@@ -148,6 +177,12 @@ class BrokerState:
                 "tools": [],
                 "tool_choice": "none",
             }
+            # A dated non-reasoning snapshot has no reasoning effort, and emitting a null or zero
+            # placeholder for one would be a fabricated pin (spec §1.3). Send exactly one of the two.
+            if profile == "reasoning-2026-08":
+                upstream_request["reasoning"] = {"effort": generation["reasoningEffort"]}
+            else:
+                upstream_request["temperature"] = 0
             if self.fake_response is None:
                 response = self.client.responses.create(**upstream_request)
                 body = response.model_dump(mode="json")
@@ -163,11 +198,11 @@ class BrokerState:
             usage = body.get("usage")
             output_tokens = usage.get("output_tokens") if isinstance(usage, dict) else None
             if (
-                resolved_model != MODEL
+                resolved_model != model
                 or body.get("status") != "completed"
                 or not isinstance(output_tokens, int)
                 or output_tokens < 0
-                or output_tokens > MAX_OUTPUT_TOKENS
+                or output_tokens > max_output_tokens
             ):
                 return terminal(
                     "method-conflict",
@@ -246,7 +281,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             self.send_json(404, {"ok": False})
             return
-        self.send_json(200, {"ok": True, "protocol": PROTOCOL, "model": MODEL})
+        self.send_json(200, {"ok": True, "protocol": PROTOCOL, "models": sorted(ACCEPTED_MODELS)})
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path != "/v1/generate-text":

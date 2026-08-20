@@ -18,8 +18,12 @@ import {
 } from "@jinn-network/benchmarking-records";
 import { verifyMatrix, type InScopeCell, type InScopeVerdict } from "@jinn-network/benchmarking-run";
 import {
+  type AcceptedJudgeModelId,
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
+  BINARY_JUDGMENT_PROFILE_URI,
+  BinaryJudgmentSnapshotProbeSchema,
   deriveEvaluationTask,
+  parseBinaryJudgmentAnalysisContext,
   parseBinaryJudgmentInstrument,
   parseEvaluationSpec,
 } from "@jinn-network/task-execution-profiles";
@@ -100,6 +104,8 @@ import {
   BinaryItemBankEntrySchema,
   BinaryItemBankIntakeExtensionSchema,
   BinarySourceManifestEntrySchema,
+  type BinaryItemBankEntry,
+  type BinarySourceManifestEntry,
 } from "./admission/intake.js";
 import {
   BundleAssemblyCellSchema,
@@ -148,10 +154,12 @@ export interface LegacyPublicBundleVerificationResult {
   readonly anchors?: IntegrityAnchorsReport;
   readonly qualification?: {
     readonly publicationGrade: boolean;
-    readonly truthAdmission: "two-human-unanimous" | "operator-only";
+    readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
     readonly candidateClasses: readonly string[];
-    readonly strata: readonly ["core", "stress"];
-    readonly armCount: 4;
+    readonly strata: readonly string[];
+    // A count that is a constant is not a count (spec §1.6 site 8): a literal here does not
+    // refuse a run with a different arm count, it publishes a false one.
+    readonly armCount: number;
     readonly itemCount: number;
     readonly exclusionCount: number;
   };
@@ -211,6 +219,19 @@ function parseRecord<T>(bytes: Uint8Array, schema: { safeParse(value: unknown): 
 
 function requireCanonical<T>(bytes: Uint8Array, value: T, path: string): void {
   if (!equalBytes(bytes, canonicalJsonBytes(value))) refuse("record-integrity", path, `${path} is not the exact canonical encoding`);
+}
+
+function analysisContextDigestFromEvalSpec(spec: ReturnType<typeof parseEvaluationSpec>): string | undefined {
+  const block = spec.familyBlock;
+  if (typeof block !== "object" || block === null || Array.isArray(block)) return undefined;
+  const testMaterial = (block as { readonly testMaterial?: unknown }).testMaterial;
+  if (!Array.isArray(testMaterial) || testMaterial.length !== 1) return undefined;
+  const entry = testMaterial[0];
+  if (typeof entry !== "object" || entry === null) return undefined;
+  const record = entry as { readonly name?: unknown; readonly digest?: { readonly sha256?: unknown } };
+  if (record.name !== "analysis-context.json" || typeof record.digest?.sha256 !== "string") return undefined;
+  if (!/^[a-f0-9]{64}$/u.test(record.digest.sha256)) return undefined;
+  return record.digest.sha256;
 }
 
 function unique(values: readonly string[], path: string): void {
@@ -309,6 +330,54 @@ function verifyEvidenceNativeSignature(input: EvidenceNativeSignatureVerificatio
   } catch {
     return false;
   }
+}
+
+/**
+ * The cold verifier's item-bank/source-manifest closure, over already-parsed canonical rows.
+ *
+ * Exported so the closure can be exercised directly. It has to be: a bundle whose cluster key is
+ * decoupled from its declared sources cannot be produced by this repository's own import path,
+ * because the importer's code-unit-least rule is strictly stronger than the membership rule below.
+ * This check exists for bundles produced by other implementations, so its test has to construct
+ * the rows rather than round-trip them through the importer.
+ */
+export function checkItemBankSourceClosure(
+  itemRows: readonly BinaryItemBankEntry[],
+  sourceRows: readonly BinarySourceManifestEntry[],
+): { readonly itemDigests: ReadonlySet<string> } {
+  const itemDigests = new Set<string>();
+  const coveredSourceDigests = new Set<string>();
+  for (const [index, row] of itemRows.entries()) {
+    const item = row.item;
+    const digest = `sha256:${sha256(canonicalJsonBytes(item))}`;
+    if (itemDigests.has(digest)) refuse("record-integrity", "item-bank.jsonl", "item bank contains duplicate payloads");
+    itemDigests.add(digest);
+    const itemSourceDigests = new Set<string>();
+    for (const descriptor of item.sources) {
+      const digestHex = descriptor.digest.sha256;
+      itemSourceDigests.add(`sha256:${digestHex}`);
+      coveredSourceDigests.add(`sha256:${digestHex}`);
+    }
+    // Membership only. The cluster key must name one of this item's own declared sources, or a
+    // bundle could ship provenance decoupled from the sources it claims to draw on. Deliberately
+    // NOT the code-unit-least rule and NOT the timestamp equality: both are enforced once, at
+    // import. Membership is a different property, so this is not a second enforcement point.
+    if (!itemSourceDigests.has(item.provenance.sourceCommitment)) {
+      refuse(
+        "record-integrity",
+        `item-bank.jsonl.${index + 1}.item.provenance.sourceCommitment`,
+        "item provenance sourceCommitment is not one of the item's declared sources",
+      );
+    }
+  }
+  // The covered set is derived from `sources` alone. Folding the cluster key in here would let a
+  // source row count as used when only a cluster key names it, weakening this exact-equality
+  // refusal against an unused source row.
+  const sourceDigests = sourceRows.map((row) => row.provenanceSha256);
+  if (!sameCanonical([...coveredSourceDigests].sort(), [...sourceDigests].sort())) {
+    refuse("record-integrity", "source-manifest.jsonl", "source manifest does not exactly cover item-bank provenance");
+  }
+  return { itemDigests };
 }
 
 /** Verifies a copied public bundle using one authenticated byte snapshot and only bundle-carried
@@ -629,23 +698,7 @@ export async function verifyPublicBundleSnapshot(
     strictOrder(sourceRows.map((row) => row.provenanceSha256), "source-manifest.jsonl");
     strictOrder(admissionRows.map((row) => row.itemSha256), "admission-index.jsonl");
     const admittedByItem = new Map(verifiedAdmission.accepted.map((entry) => [entry.itemSha256, entry]));
-    const itemDigests = new Set<string>();
-    const usedProvenance = new Set<string>();
-    for (const [index, row] of itemRows.entries()) {
-      const item = row.item;
-      const digest = `sha256:${sha256(canonicalJsonBytes(item))}`;
-      if (itemDigests.has(digest)) refuse("record-integrity", "item-bank.jsonl", "item bank contains duplicate payloads");
-      itemDigests.add(digest);
-      const provenance = item.provenance;
-      for (const descriptor of provenance) {
-        const digestHex = descriptor.digest.sha256;
-        usedProvenance.add(`sha256:${digestHex}`);
-      }
-    }
-    const sourceDigests = sourceRows.map((row) => row.provenanceSha256);
-    if (!sameCanonical([...usedProvenance].sort(), [...sourceDigests].sort())) {
-      refuse("record-integrity", "source-manifest.jsonl", "source manifest does not exactly cover item-bank provenance");
-    }
+    const { itemDigests } = checkItemBankSourceClosure(itemRows, sourceRows);
     const expectedAdmissions = verifiedAdmission.accepted.map((entry) => ({
       admissionManifestSha256: verifiedAdmission!.manifestSha256,
       itemSha256: entry.itemSha256,
@@ -690,7 +743,7 @@ export async function verifyPublicBundleSnapshot(
       armId: string;
       instrumentSha256: string;
       promptTemplateSha256: string;
-      model: "gpt-5.6-luna";
+      model: AcceptedJudgeModelId;
       generation: ReturnType<typeof parseBinaryJudgmentInstrument>["model"]["generation"];
     }> = [];
     for (const entry of qualification.arms) {
@@ -752,6 +805,25 @@ export async function verifyPublicBundleSnapshot(
       refuse("record-integrity", "evidence-closure", "binary runtime selection arms differ from qualification and Run pins");
     }
     addRole(expectedRoles, binarySelectionRecord.sha256, "runtime-selection");
+    if (binarySelection.snapshotProbeSha256 !== undefined) {
+      const probeHex = binarySelection.snapshotProbeSha256.slice("sha256:".length);
+      const probeBytes = records.get(probeHex);
+      if (probeBytes === undefined) refuse("record-integrity", "evidence-closure", `snapshot-serving probe ${binarySelection.snapshotProbeSha256} is missing`);
+      const probe = parseRecord(probeBytes, BinaryJudgmentSnapshotProbeSchema, `records/${probeHex}.bin`);
+      requireCanonical(probeBytes, probe, `records/${probeHex}.bin`);
+      // This is the cold-verify SECOND COPY of the bind-time rule (spec §1.5 rule 4), not a
+      // second enforcement point (§0.5): a cold verifier re-derives from bytes without trusting
+      // the producer, which is the same reason this package already carries second copies of
+      // other producer-side rules. Freshness (§1.5 rule 3) is deliberately NOT re-checked here —
+      // it scopes to bind, where the bind clock exists.
+      if (!instruments.some((entry) => entry.model === probe.requestedModel)) {
+        refuse("record-integrity", "evidence-closure", "snapshot-serving probe model is not the model of any bound arm");
+      }
+      if (probe.outcome !== "serving") {
+        refuse("record-integrity", "evidence-closure", "snapshot-serving probe outcome is not serving");
+      }
+      addRole(expectedRoles, probeHex, "snapshot-probe");
+    }
     const reviewerBindingMap = new Map<string, string>();
     for (const entry of verifiedAdmission.reachableRecords
       .filter((candidate) => candidate.roles.includes("human-review-verdict"))) {
@@ -831,6 +903,97 @@ export async function verifyPublicBundleSnapshot(
       } catch {
         refuse("record-integrity", "evidence-closure", `${coord.cellKey} EvaluationSpec bytes are invalid`);
       }
+    }
+  }
+
+  // Binary-judgment Tasks (the family that includes binary-instrument@1 and the two judge
+  // readouts) catalog a runtime-selection, arm instruments, analysis-context, and
+  // label-resolution even when the Report is not binary-instrument@1 and there is therefore no
+  // qualification.json. The V4 qualification block above already expects those roles; this is
+  // the same producer-side `binaryInspectRuntime` catalog for the non-V4 additional-analysis
+  // bundles. Snapshot-probe is V4-only (stripped from the /2 catalog).
+  if (
+    qualification === undefined
+    && [...taskSpecs.values()].some((task) => task.profile.uri === BINARY_JUDGMENT_PROFILE_URI)
+  ) {
+    const registeredSelections = readRunPublicationExtension(run as unknown as Record<string, unknown>)
+      ?.registrationArtifacts.filter((artifact) => artifact.role === INSPECT_SELECTION_CORRELATION_ROLE) ?? [];
+    if (
+      registeredSelections.length !== 1
+      || registeredSelections[0]!.artifact.mediaType !== "application/json"
+    ) {
+      refuse("record-integrity", "evidence-closure", "binary Run must register exactly one JSON Inspect runtime selection");
+    }
+    const registeredSelectionSha256 = registeredSelections[0]!.artifact.digest.sha256;
+    const selectionBytes = records.get(registeredSelectionSha256);
+    if (selectionBytes === undefined) {
+      refuse("record-integrity", "evidence-closure", "binary runtime-selection bytes are missing");
+    }
+    const binarySelection = parseRecord(
+      selectionBytes,
+      InspectBinaryJudgeSelectionManifestSchema,
+      `records/${registeredSelectionSha256}.bin`,
+    );
+    requireCanonical(selectionBytes, binarySelection, `records/${registeredSelectionSha256}.bin`);
+    addRole(expectedRoles, registeredSelectionSha256, "runtime-selection");
+    for (const arm of run.arms) {
+      const instrumentSha256 = arm.pinning[BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY];
+      if (typeof instrumentSha256 !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(instrumentSha256)) {
+        refuse("record-integrity", "evidence-closure", `Run arm ${arm.armId} has no exact judge-instrument pin`);
+      }
+      const instrumentHex = instrumentSha256.slice("sha256:".length);
+      const instrumentBytes = records.get(instrumentHex);
+      if (instrumentBytes === undefined) {
+        refuse("record-integrity", "evidence-closure", `instrument ${instrumentSha256} is missing`);
+      }
+      let instrument: ReturnType<typeof parseBinaryJudgmentInstrument>;
+      try {
+        instrument = parseBinaryJudgmentInstrument(instrumentBytes);
+      } catch (cause) {
+        refuse(
+          "record-integrity",
+          "evidence-closure",
+          `instrument ${instrumentSha256} is invalid: ${cause instanceof Error ? cause.message : String(cause)}`,
+        );
+      }
+      requireCanonical(instrumentBytes, instrument as never, `records/${instrumentHex}.bin`);
+      addRole(expectedRoles, instrumentHex, "judge-instrument");
+    }
+    for (const task of taskSpecs.values()) {
+      if (task.profile.uri !== BINARY_JUDGMENT_PROFILE_URI) continue;
+      const specSha256 = task.evaluation?.digest?.sha256;
+      if (typeof specSha256 !== "string") {
+        refuse("record-integrity", "evidence-closure", "binary Task has no EvaluationSpec digest");
+      }
+      const spec = evaluationSpecs.get(specSha256);
+      if (spec === undefined) {
+        refuse("record-integrity", "evidence-closure", `EvaluationSpec ${specSha256} is not in the catalog`);
+      }
+      const analysisHex = analysisContextDigestFromEvalSpec(spec);
+      if (analysisHex === undefined) {
+        refuse("record-integrity", "evidence-closure", `EvaluationSpec ${specSha256} has no analysis-context`);
+      }
+      const analysisBytes = records.get(analysisHex);
+      if (analysisBytes === undefined) {
+        refuse("record-integrity", "evidence-closure", `analysis context ${analysisHex} is missing`);
+      }
+      let analysis: ReturnType<typeof parseBinaryJudgmentAnalysisContext>;
+      try {
+        analysis = parseBinaryJudgmentAnalysisContext(analysisBytes);
+      } catch (cause) {
+        refuse(
+          "record-integrity",
+          "evidence-closure",
+          `analysis context ${analysisHex} is invalid: ${cause instanceof Error ? cause.message : String(cause)}`,
+        );
+      }
+      requireCanonical(analysisBytes, analysis, `records/${analysisHex}.bin`);
+      addRole(expectedRoles, analysisHex, "analysis-context");
+      const labelHex = analysis.labelResolutionSha256.slice("sha256:".length);
+      if (records.get(labelHex) === undefined) {
+        refuse("record-integrity", "evidence-closure", `label resolution ${analysis.labelResolutionSha256} is missing`);
+      }
+      addRole(expectedRoles, labelHex, "label-resolution");
     }
   }
 
@@ -1084,8 +1247,14 @@ export async function verifyPublicBundleSnapshot(
           || edge.evalAttempt !== undefined || edge.evalDeliverySha256 !== undefined
           || edge.evaluationTerminal !== undefined
         ) refuse("record-integrity", "evidence-closure", "same-execution Inspect score carries false separate-evaluator lineage");
-        if (qualification !== undefined) {
-          // Binary Tasks are deliberately runtime-neutral and carry no generic Inspect summary.
+        // Binary Tasks (binary-instrument@1 and the two judge-family readouts that share its
+        // execution) are runtime-neutral and carry no generic Inspect summary. `qualification.json`
+        // is present only for binary-instrument@1's V4 bundle; pairwise-disagreement@1 and
+        // paired-majority-delta@1 ride the same Binary Tasks without that file, so the
+        // discriminator is the Task profile URI (with qualification.json as the V4 alias).
+        const binaryJudgmentCell = qualification !== undefined
+          || taskSpecs.get(cell.taskDigest)?.profile.uri === BINARY_JUDGMENT_PROFILE_URI;
+        if (binaryJudgmentCell) {
           // The solve Delivery plus signed verdict are joined here; verifyReport is the sole
           // authority that replays its exact response/observation/instrument semantics below.
           if (solveDeliveryByCell.get(cell.cellKey) === undefined) {
@@ -1357,7 +1526,9 @@ export async function verifyPublicBundleSnapshot(
       const verdictBytes = records.get(declared.sha256);
       if (verdictBytes === undefined) refuse("record-integrity", "evidence-closure", `verdict ${declared.sha256} bytes are missing`);
       const view = readVerdictEnvelope(verdictBytes);
-      if (qualification === undefined && declared.relationship === "same-execution-scorer" && (
+      const binaryJudgmentCell = qualification !== undefined
+        || taskSpecs.get(cell.taskDigest)?.profile.uri === BINARY_JUDGMENT_PROFILE_URI;
+      if (!binaryJudgmentCell && declared.relationship === "same-execution-scorer" && (
         view.evaluatorExtensions?.["jinn.network/relationship"] !== "same-execution-scorer"
         || !view.limitations?.includes("same-execution-scorer")
       )) {
@@ -1618,7 +1789,8 @@ export async function verifyPublicBundleSnapshot(
           truthAdmission: qualification.truthAdmission,
           candidateClasses: qualification.candidateClasses,
           strata: qualification.strata,
-          armCount: 4 as const,
+          // Derived, not declared (spec §1.6 rule 4): a count that is a constant is not a count.
+          armCount: qualification.arms.length,
           itemCount: qualification.items.length,
           exclusionCount: qualification.exclusions.length,
         },

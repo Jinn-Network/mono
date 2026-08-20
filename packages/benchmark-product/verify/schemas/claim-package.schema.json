@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Describes claim-package.json (claimSchema benchmark-product.claim-package/1, or /2 for binary-qualification bundles). Source of truth: ClaimPackageWireSchema in @colophon-claims/verify src/profile/claim.ts (an open object there, so unknown members are permitted here). Every number is extracted verbatim from the sealed records the claim cites, never recomputed; the verifier rebuilds the whole package from verified facts and byte-compares it, so schema validity never substitutes for that recomputation. A claim carries exactly one method projection -- the wilson headline, the paired-delta comparison, pairwise-disagreement's panel, paired-majority-delta's contrast, or binary-instrument's qualification -- never neither.",
+  "description": "Standalone claim package of a benchmark-product public bundle.",
+  "type": "object",
+  "properties": {
+    "claimSchema": {
+      "enum": ["benchmark-product.claim-package/1", "benchmark-product.claim-package/2"]
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "draftId": { "type": "string", "minLength": 1 },
+        "benchmarkSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "taskCount": { "type": "integer", "minimum": 0 },
+        "arms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "armId": { "type": "string", "minLength": 1 },
+              "pinning": { "type": "object" }
+            },
+            "required": ["armId", "pinning"]
+          }
+        },
+        "replicates": { "type": "integer", "minimum": 1 },
+        "venue": { "const": "self-run" }
+      },
+      "required": ["draftId", "benchmarkSha256", "taskCount", "arms", "replicates", "venue"]
+    },
+    "records": {
+      "type": "object",
+      "properties": {
+        "benchmarkSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "runSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "matrixSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "reportSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "reportEnvelopeSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "required": ["benchmarkSha256", "runSha256", "matrixSha256", "reportSha256", "reportEnvelopeSha256"]
+    },
+    "method": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "parameters": { "type": "object" },
+        "preregistered": { "type": "boolean" }
+      },
+      "required": ["id", "version", "parameters", "preregistered"]
+    },
+    "results": {},
+    "headline": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "n": { "type": "integer", "minimum": 0 },
+          "passRate": { "type": "string" },
+          "wilsonInterval": {
+            "type": "object",
+            "properties": {
+              "low": { "type": "string" },
+              "high": { "type": "string" }
+            },
+            "required": ["low", "high"]
+          }
+        },
+        "required": ["n", "passRate", "wilsonInterval"]
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "properties": {
+        "pairs": { "type": "integer", "minimum": 0 },
+        "delta": { "type": ["string", "null"] },
+        "interval": {
+          "type": ["object", "null"],
+          "properties": {
+            "alpha": { "type": "string" },
+            "low": { "type": "string" },
+            "high": { "type": "string" }
+          },
+          "required": ["alpha", "low", "high"]
+        },
+        "reasons": { "type": "array", "items": { "type": "string" } },
+        "pairing": {
+          "type": "object",
+          "properties": { "taskDigests": { "type": "array", "items": { "type": "string" } } },
+          "required": ["taskDigests"]
+        },
+        "clustering": {
+          "type": "object",
+          "properties": {
+            "basis": { "type": "string" },
+            "clusters": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["basis", "clusters"]
+        },
+        "excluded": { "$ref": "#/$defs/conflicted" },
+        "conflicted": { "$ref": "#/$defs/conflicted" },
+        "bootstrap": {}
+      },
+      "required": ["pairs", "delta", "interval", "reasons", "pairing", "clustering", "excluded", "conflicted"]
+    },
+    "completeness": {},
+    "attrition": {},
+    "conflicted": { "$ref": "#/$defs/conflicted" },
+    "assurance": {
+      "type": "object",
+      "properties": {
+        "preset": { "type": "string", "minLength": 1 },
+        "resolved": {
+          "type": "object",
+          "properties": {
+            "independence": { "enum": ["gating", "disclosed"] },
+            "minVerdicts": { "type": "integer", "minimum": 1 },
+            "distinctEvaluator": { "type": "boolean" },
+            "verdictRule": { "enum": ["sole", "majority", "unanimous"] }
+          },
+          "required": ["independence", "minVerdicts", "distinctEvaluator", "verdictRule"]
+        },
+        "disclosure": { "type": "string", "minLength": 1 }
+      },
+      "required": ["preset", "resolved", "disclosure"]
+    },
+    "disclosures": {
+      "type": "object",
+      "properties": {
+        "perSubject": { "type": "array" },
+        "integrityTierCounts": {
+          "type": "object",
+          "properties": {
+            "re-derivable": { "type": "integer", "minimum": 0 },
+            "attested-only": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["re-derivable", "attested-only"]
+        },
+        "pinningUnverifiableCounts": {
+          "type": "object",
+          "properties": {
+            "harness": { "type": "integer", "minimum": 0 },
+            "model": { "type": "integer", "minimum": 0 },
+            "loadout": { "type": "integer", "minimum": 0 },
+            "isolation": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["harness", "model", "loadout", "isolation"]
+        }
+      },
+      "required": ["perSubject", "integrityTierCounts", "pinningUnverifiableCounts"]
+    },
+    "limitations": { "type": "array", "items": { "type": "string" } },
+    "venueHonesty": {},
+    "verification": {
+      "type": "object",
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "compatibleCommand": { "type": "string", "minLength": 1 },
+        "checks": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        },
+        "trustRoot": { "type": "string", "minLength": 1 }
+      },
+      "required": ["command", "compatibleCommand", "checks", "trustRoot"]
+    },
+    "rehearsal": {
+      "type": "object",
+      "properties": {
+        "previewCount": { "type": "integer", "minimum": 1 },
+        "timestamps": {
+          "type": "array",
+          "items": { "type": "string", "format": "date-time" },
+          "minItems": 1
+        }
+      },
+      "required": ["previewCount", "timestamps"]
+    },
+    "qualification": {},
+    "pairwiseDisagreement": {
+      "type": "object",
+      "properties": {
+        "pairs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "armA": { "type": "string", "minLength": 1 },
+              "armB": { "type": "string", "minLength": 1 },
+              "n": { "type": "integer", "minimum": 0 },
+              "disagreements": { "type": "integer", "minimum": 0 },
+              "rate": { "type": ["string", "null"] },
+              "interval": { "$ref": "#/$defs/judgeInterval" },
+              "byCandidateClass": { "type": "array", "items": { "type": "object" } },
+              "byStratum": { "type": "array", "items": { "type": "object" } },
+              "exclusions": { "type": "array", "items": { "$ref": "#/$defs/exclusionTriple" } }
+            },
+            "required": ["armA", "armB", "n", "disagreements", "rate", "interval", "byCandidateClass", "byStratum", "exclusions"]
+          }
+        },
+        "conflicted": { "$ref": "#/$defs/conflicted" }
+      },
+      "required": ["pairs", "conflicted"]
+    },
+    "pairedMajorityDelta": {
+      "type": "object",
+      "properties": {
+        "baseline": { "type": "string", "minLength": 1 },
+        "candidate": { "type": "string", "minLength": 1 },
+        "n": { "type": "integer", "minimum": 0 },
+        "delta": { "type": ["string", "null"] },
+        "interval": { "$ref": "#/$defs/judgeInterval" },
+        "reasons": { "type": "array", "items": { "type": "string" } },
+        "clusters": {
+          "type": "object",
+          "properties": { "count": { "type": "integer", "minimum": 0 }, "manifest": {} },
+          "required": ["count"]
+        },
+        "byCandidateClass": { "type": "array", "items": { "type": "object" } },
+        "byStratum": { "type": "array", "items": { "type": "object" } },
+        "exclusions": { "type": "array", "items": { "$ref": "#/$defs/exclusionTriple" } },
+        "conflicted": { "$ref": "#/$defs/conflicted" }
+      },
+      "required": ["baseline", "candidate", "n", "delta", "interval", "reasons", "clusters", "byCandidateClass", "byStratum", "exclusions", "conflicted"]
+    }
+  },
+  "required": [
+    "claimSchema",
+    "scope",
+    "records",
+    "method",
+    "results",
+    "completeness",
+    "attrition",
+    "conflicted",
+    "assurance",
+    "disclosures",
+    "limitations",
+    "venueHonesty",
+    "verification"
+  ],
+  "anyOf": [
+    { "required": ["headline"] },
+    { "required": ["comparison"] },
+    { "required": ["pairwiseDisagreement"] },
+    { "required": ["pairedMajorityDelta"] }
+  ],
+  "$defs": {
+    "judgeInterval": {
+      "$comment": "pairwise-disagreement@1 and paired-majority-delta@1 key their intervals {lower, upper, alpha}, NOT paired-delta@1's {low, high, alpha}.",
+      "type": ["object", "null"],
+      "properties": {
+        "lower": { "type": "string" },
+        "upper": { "type": "string" },
+        "alpha": { "type": "string" }
+      },
+      "required": ["lower", "upper", "alpha"]
+    },
+    "exclusionTriple": {
+      "type": "object",
+      "properties": {
+        "taskDigest": { "type": "string", "minLength": 1 },
+        "armId": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "required": ["taskDigest", "armId", "reason"]
+    },
+    "conflicted": {
+      "type": "object",
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "cellKeys": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["count", "cellKeys"]
+    }
+  }
+}

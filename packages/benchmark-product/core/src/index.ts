@@ -257,39 +257,14 @@ export {
   readHarnessReport as readApexSweDevHarnessReport,
 } from "./runtime/apex-swe-dev/reports.js";
 export {
-  DEEP_SWE_V11_AGENT_ID,
-  DEEP_SWE_V11_DATASET_ID,
-  DEEP_SWE_V11_DEFAULT_REPLICATES,
-  DEEP_SWE_V11_GIT_SHA,
-  DEEP_SWE_V11_PROFILE,
-  DEEP_SWE_V11_SELECTION_ROLE,
-  DEEP_SWE_V11_TASK_COUNT,
-  DEEP_SWE_V11_TASKS_TREE_SHA,
-  DeepSweV11SelectionManifestSchema,
-  deepSweV11SelectionBytes,
-} from "./runtime/deep-swe-v1.1/manifest.js";
-export type { DeepSweV11SelectionManifest } from "./runtime/deep-swe-v1.1/manifest.js";
-export { computeGitTreeSha } from "./runtime/deep-swe-v1.1/git-tree-sha.js";
-export { resolveDeepSweV11Selection } from "./runtime/deep-swe-v1.1/host.js";
-export type {
-  DeepSweV11SelectionRequest,
-  DeepSweV11SelectionResolution,
-} from "./runtime/deep-swe-v1.1/host.js";
-export {
   COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE,
   APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION,
   APEX_SWE_DEV_SUBMIT_CLOSED_SENTENCE,
-  DEEPSWE_CLOSED_SUBMIT_SENTENCE,
-  DEEPSWE_NOT_LEADERBOARD_READY_LIMITATION,
-  INSPECT_EVAL_NOT_LEADERBOARD_READY_LIMITATION,
-  INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION,
   SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0,
   deriveSuiteComparability,
   methodLeaderboardEligible,
   officialHarborExecutionConformance,
-  officialInspectEvalConformance,
-  officialPierExecutionConformance,
   officialSwebenchHarnessConformance,
   SWE_BENCH_VERIFIED_NOT_LEADERBOARD_READY_LIMITATION,
   SWE_BENCH_VERIFIED_SUBMIT_CLOSED_SENTENCE,
@@ -411,6 +386,153 @@ export {
   demo1PreRunFreezeV3Digest,
   verifyDemo1PreRunFreezeV3,
 } from "./method/demo1-prerun-v3.js";
+export {
+  SKILLSBENCH_V1_1_SOURCE,
+} from "./method/skillsbench-source.js";
+export type { SkillsBenchPinnedTask } from "./method/skillsbench-source.js";
+export {
+  SKILLSBENCH_RESOURCE_CLASSES,
+  SKILLSBENCH_NETWORK_MODES,
+  SKILLSBENCH_TASK_BUNDLE_UNIT_SCHEMA,
+  buildSkillsBenchUnit,
+  canonicalSkillsBenchUnitBytes,
+  classifySkillsBenchResource,
+  skillsBenchUnitDigest,
+  verifySkillsBenchUnit,
+  verifySkillsBenchUnitBodies,
+} from "./method/skillsbench-unit.js";
+export type {
+  SkillsBenchEntry,
+  SkillsBenchNetworkMode,
+  SkillsBenchResource,
+  SkillsBenchResourceClass,
+  SkillsBenchSkill,
+  SkillsBenchUnit,
+  SkillsBenchUnitBuildInput,
+} from "./method/skillsbench-unit.js";
+export {
+  SKILLSBENCH_CLUSTER_EDGE_CLASSES,
+  SKILLSBENCH_CLUSTER_POLICY,
+  deriveSkillsBenchClusters,
+  skillsBenchClusterId,
+  skillsBenchClusterOf,
+  verifySkillsBenchClusterGraph,
+} from "./method/skillsbench-clusters.js";
+export type {
+  SkillsBenchCluster,
+  SkillsBenchClusterEdge,
+  SkillsBenchClusterEdgeClass,
+  SkillsBenchClusterGraph,
+  SkillsBenchClusterInput,
+} from "./method/skillsbench-clusters.js";
+export {
+  SKILLSBENCH_ADMISSION_CHECKS,
+  SKILLSBENCH_ADMISSION_POLICY,
+  SKILLSBENCH_CONFLICTING_INSTRUCTION_PATHS,
+  SKILLSBENCH_REQUIRED_CLUSTERS,
+  SKILLSBENCH_REQUIRED_UNITS,
+  SKILLSBENCH_STATIC_CHECKS,
+  assessSkillsBenchStaticAdmission,
+} from "./method/skillsbench-admission.js";
+export type {
+  SkillsBenchAdmissionCheck,
+  SkillsBenchAdmissionInput,
+  SkillsBenchCapacity,
+  SkillsBenchCheckResult,
+  SkillsBenchCheckStatus,
+  SkillsBenchStaticAdmission,
+  SkillsBenchUnitVerdict,
+} from "./method/skillsbench-admission.js";
+export {
+  SKILLSBENCH_CLAUDE_MD_TRANSFORM,
+  SKILLSBENCH_ARMS,
+  SKILLSBENCH_TREATMENT_SCHEMA,
+  buildSkillsBenchClaudeMd,
+  buildSkillsBenchTreatment,
+  canonicalSkillsBenchTreatmentBytes,
+  skillsBenchFlattenSpan,
+  verifySkillsBenchClaudeMdBodies,
+  verifySkillsBenchTreatment,
+} from "./method/skillsbench-treatment.js";
+export type {
+  SkillsBenchArm,
+  SkillsBenchArmFile,
+  SkillsBenchArmPlan,
+  SkillsBenchTreatment,
+  SkillsBenchTreatmentInput,
+} from "./method/skillsbench-treatment.js";
+export {
+  DEMO1_PRE_RUN_FREEZE_V4_SCHEMA,
+  buildDemo1PreRunFreezeV4,
+  canonicalDemo1PreRunFreezeV4Bytes,
+  demo1PreRunFreezeV4AsE2Input,
+  demo1PreRunFreezeV4Digest,
+  verifyDemo1PreRunFreezeV4,
+} from "./method/skillsbench-prerun-v4.js";
+export type {
+  Demo1PreRunFreezeV4,
+  Demo1PreRunFreezeV4Input,
+} from "./method/skillsbench-prerun-v4.js";
+export {
+  SKILLSBENCH_DENIED_HOSTS,
+  SKILLSBENCH_EGRESS_POLICY,
+  deriveSkillsBenchEgressPlan,
+  extractEgressHosts,
+  isDeniedEgressHost,
+  verifySkillsBenchEgressPlan,
+} from "./method/skillsbench-egress.js";
+export type {
+  SkillsBenchEgressDecision,
+  SkillsBenchEgressInput,
+  SkillsBenchEgressPlan,
+} from "./method/skillsbench-egress.js";
+export {
+  SKILLSBENCH_DEFAULT_FULL_SUCCESS,
+  SKILLSBENCH_REWARD_CONTRACT,
+  judgeSkillsBenchControls,
+  parseSkillsBenchCtrf,
+  readSkillsBenchReward,
+} from "./method/skillsbench-reward.js";
+export type {
+  SkillsBenchCtrfSummary,
+  SkillsBenchOutcome,
+  SkillsBenchRewardInput,
+  SkillsBenchRewardReading,
+} from "./method/skillsbench-reward.js";
+export {
+  SKILLSBENCH_PARTITION_POLICY,
+  partitionSkillsBenchPools,
+  verifySkillsBenchPartition,
+} from "./method/skillsbench-partition.js";
+export type {
+  SkillsBenchPartition,
+  SkillsBenchPartitionUnit,
+  SkillsBenchSelectedUnit,
+} from "./method/skillsbench-partition.js";
+export {
+  NATIVE_SNAPSHOT_ALGORITHM,
+  NativeSnapshotRefusedError,
+  NativeSourceMutatedError,
+  STRICT_SNAPSHOT_POLICY,
+  createFilesystemNativeSnapshotPort,
+  createProcessNativeLauncher,
+} from "./runtime/native-ports.js";
+export type {
+  FilesystemSnapshotOptions,
+  ProcessLauncherOptions,
+} from "./runtime/native-ports.js";
+export {
+  SKILLSBENCH_PLUGIN_DIR,
+  SKILLSBENCH_RESOURCE_ROOT,
+  SKILLSBENCH_WORKSPACE_LAYOUT,
+  materializeSkillsBenchWorkspace,
+  verifySkillsBenchWorkspaceTriple,
+} from "./runtime/skillsbench-workspace.js";
+export type {
+  SkillsBenchWorkspace,
+  SkillsBenchWorkspaceFile,
+  SkillsBenchWorkspaceInput,
+} from "./runtime/skillsbench-workspace.js";
 export type {
   Demo1PreRunFreezeV3,
   Demo1PreRunFreezeV3CandidateInventory,
@@ -581,7 +703,6 @@ export type { AuthorityPolicy, GatedOperation, Principal } from "./authority/pol
 
 // The operations facade (spec §5.1) — the boundary every surface calls.
 export {
-  anchoringConfigure,
   armAdd,
   armList,
   armRemove,
@@ -590,7 +711,6 @@ export {
   authorityRevoke,
   authorityShow,
   BINARY_ITEM_BANK_PROFILE,
-  bindInspectBinaryJudge,
   createDraft,
   getDraft,
   importBinaryItemBank,
@@ -606,11 +726,12 @@ export {
   publicationRegister,
   publicationReport,
   publicationStatus,
-  runAnchor,
   runCancel,
   runCollect,
   runLaunch,
   runLock,
+  runAnchor,
+  anchoringConfigure,
   runPreview,
   runPublish,
   runQuote,
@@ -620,29 +741,12 @@ export {
   runStatus,
   runVerify,
   sampleInit,
-  selectInspectEvaluation,
-  selectInspectEvalRuntime,
-  exportInspectViewBundle,
-  selectHarborRuntime,
-  selectTerminalBench2Runtime,
-  selectTerminalBench21Runtime,
-  selectTerminalBench30Runtime,
-  selectSwebenchVerifiedRuntime,
-  selectApexAgentsRuntime,
-  selectApexSweDevRuntime,
-  selectDeepSweV11Runtime,
+  selectMethod,
+  exportDerivedBundle,
   migrateTerminalBenchLegacyTask,
-  exportHarborHubPackage,
-  exportSwebenchPredictions,
-  exportApexAgentsInspection,
-  exportApexSwePackage,
-  exportDeepSwePackage,
   updateDraft,
 } from "./operations/index.js";
 export type {
-  AnchoringConfigureInput,
-  AnchoringConfigureResult,
-  AnchorSubject,
   ArmAddInput,
   ArmInspection,
   ArmRemoveInput,
@@ -650,8 +754,6 @@ export type {
   ArmWarning,
   AuthorityGrantInput,
   AuthorityRevokeInput,
-  BindInspectBinaryJudgeInput,
-  BindInspectBinaryJudgeResult,
   BenchmarkInspection,
   BenchmarkInspectionItem,
   CreateDraftInput,
@@ -689,9 +791,6 @@ export type {
   QuoteCoverageRefusal,
   QuoteEstimatedWallTime,
   QuotePresentation,
-  RunAnchorDeps,
-  RunAnchorInput,
-  RunAnchorResult,
   RunCancelDeps,
   RunCancelInput,
   RunCancelResult,
@@ -701,6 +800,11 @@ export type {
   RunLaunchInput,
   RunLaunchResult,
   RunLockInput,
+  RunAnchorInput,
+  RunAnchorResult,
+  AnchorSubject,
+  AnchoringConfigureInput,
+  AnchoringConfigureResult,
   RunLockResult,
   RunPreviewDeps,
   RunPreviewInput,
@@ -720,35 +824,10 @@ export type {
   RunResumeInput,
   RunResumeResult,
   RunStatusCell,
-  SelectTerminalBench2RuntimeInput,
-  SelectTerminalBench2RuntimeResult,
-  SelectTerminalBench21RuntimeInput,
-  SelectTerminalBench21RuntimeResult,
-  SelectTerminalBench30RuntimeInput,
-  SelectTerminalBench30RuntimeResult,
-  SelectSwebenchVerifiedRuntimeInput,
-  SelectSwebenchVerifiedRuntimeResult,
-  SelectApexAgentsRuntimeInput,
-  SelectApexAgentsRuntimeResult,
-  SelectApexSweDevRuntimeInput,
-  SelectApexSweDevRuntimeResult,
-  SelectDeepSweV11RuntimeInput,
-  SelectDeepSweV11RuntimeResult,
-  ExportHarborHubPackageInput,
-  ExportHarborHubPackageResult,
-  HarborHubExportMode,
-  ExportSwebenchPredictionsInput,
-  ExportSwebenchPredictionsResult,
-  SwebenchPredictionsExportMode,
-  ExportApexAgentsInput,
-  ExportApexAgentsResult,
-  ApexAgentsExportMode,
-  ExportApexSwePackageInput,
-  ExportApexSwePackageResult,
-  ApexSweExportMode,
-  ExportDeepSwePackageInput,
-  ExportDeepSwePackageResult,
-  DeepSweExportMode,
+  SelectMethodInput,
+  SelectMethodResult,
+  ExportDerivedBundleInput,
+  ExportDerivedBundleResult,
   RunStatusCounts,
   RunDriverStatus,
   RunStatusResult,
@@ -758,13 +837,6 @@ export type {
   SampleInitInput,
   SampleInitResult,
   SampleInitTaskSummary,
-  SelectInspectEvaluationInput,
-  SelectInspectEvaluationResult,
-  SelectInspectEvalRuntimeInput,
-  SelectInspectEvalRuntimeResult,
-  ExportInspectViewBundleInput,
-  ExportInspectViewBundleResult,
-  InspectViewExportMode,
   UpdateDraftInput,
   VenueHonesty,
 } from "./operations/index.js";
@@ -779,6 +851,10 @@ export { LOCAL_VENUE_LIMITS } from "./operations/index.js";
 // operation audits itself.
 export { anchorAfterLockIfConfigured } from "./operations/run-anchor.js";
 export type { AnchorAfterLockOutcome } from "./operations/run-anchor.js";
+
+// Method catalog listing is CLI/GUI discovery, not a facade operation (DR-2026-08-19; parity stays 40).
+export { METHOD_CATALOG, isMethodCatalogId, listMethodCatalog } from "./operations/method-catalog.js";
+
 
 // BP-40: deletion-portable public bundle verification uses only bundle-carried bytes/public keys.
 export { verifyPublicBundle } from "./bundle/verify.js";
@@ -838,4 +914,4 @@ export { USAGE, runCli } from "./cli/main.js";
 export type { CliContext, CliResult } from "./cli/result.js";
 
 /** The product core's own version, mirrored from package.json. */
-export const PRODUCT_VERSION = "1.0.0";
+export const PRODUCT_VERSION = "0.1.0";

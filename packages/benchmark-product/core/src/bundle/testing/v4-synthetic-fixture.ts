@@ -21,18 +21,25 @@ import {
   BINARY_JUDGMENT_LABEL_RESOLUTION_MEDIA_TYPE,
   BINARY_JUDGMENT_OBSERVATION_MEDIA_TYPE,
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+  BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
   VERDICT_DSSE_PAYLOAD_TYPE,
   binaryJudgmentPromptTemplateDigest,
   binaryJudgmentSemanticRequestDigest,
+  isDatedSnapshotJudgeModel,
+  JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS,
+  JUDGE_MODEL_PROFILES,
   parseBinaryJudgmentAnalysisContext,
   parseBinaryJudgmentInstrument,
   parseBinaryJudgmentLabelResolution,
   parseBinaryJudgmentObservation,
   sealBinaryJudgmentInstrument,
   sealBinaryJudgmentObservation,
+  sealBinaryJudgmentSnapshotProbe,
+  type AcceptedJudgeModelId,
 } from "@jinn-network/task-execution-profiles";
 import {
   SubmissionRecordSchema,
+  compareCodeUnitStrings,
   sealDelivery,
 } from "@jinn-network/task-execution-protocol";
 import {
@@ -95,7 +102,7 @@ import {
 import type { LocalVenue } from "../../venue/venue.js";
 import { materializePublicBundle, type MaterializedBundle } from "../materialize.js";
 
-export type SyntheticV4TruthAdmission = "operator-only" | "two-human-unanimous";
+export type SyntheticV4TruthAdmission = "operator-only" | "two-human-unanimous" | "screened-operator-sampled";
 export type SyntheticV4Scenario = "minimal" | "qualification-144";
 
 export interface SyntheticV4BundleFixture {
@@ -121,6 +128,8 @@ const decoder = new TextDecoder("utf-8", { fatal: true });
 const encoder = new TextEncoder();
 const DRAFT_ID = "binary-publication";
 const EVALUATED_AT = "2026-08-15T12:30:00.000Z";
+// Stays the reasoning variant: this is the default judge model's generation shape, and every
+// existing caller of createSyntheticV4BundleFixture depends on its bytes being unchanged.
 const generation: InspectBinaryJudgeSelectionManifest["arms"][number]["generation"] = {
   reasoningEffort: "low",
   maxOutputTokens: 128,
@@ -135,6 +144,29 @@ const generation: InspectBinaryJudgeSelectionManifest["arms"][number]["generatio
   metadata: null,
   promptCacheIdentifier: null,
 } as const;
+
+// The dated-snapshot-sampling profile's generation shape (spec §1.3). Only reachable when a
+// caller opts into `judgeModel: "gpt-4o-mini-2024-07-18"`.
+const samplingGeneration: InspectBinaryJudgeSelectionManifest["arms"][number]["generation"] = {
+  temperature: 0,
+  maxOutputTokens: 512,
+  store: false,
+  background: false,
+  stream: false,
+  serviceTier: "default",
+  tools: [],
+  fallbackModels: [],
+  retries: 0,
+  persistedConversation: false,
+  metadata: null,
+  promptCacheIdentifier: null,
+} as const;
+
+function generationForJudgeModel(
+  judgeModel: AcceptedJudgeModelId,
+): InspectBinaryJudgeSelectionManifest["arms"][number]["generation"] {
+  return JUDGE_MODEL_PROFILES[judgeModel] === "dated-snapshot-sampling" ? samplingGeneration : generation;
+}
 
 function requireOk<T>(
   result: { readonly ok: true; readonly result: T } | { readonly ok: false; readonly error: { readonly detail: string } },
@@ -153,11 +185,52 @@ interface SyntheticFixtureItem {
   readonly question: string;
   readonly referenceAnswer: string;
   readonly candidateAnswer: string;
-  readonly provenance: readonly [{ readonly digest: { readonly sha256: string } }];
+  /** Bare hex digest of the one source row this item cites; see `SYNTHETIC_SOURCE_DIGESTS`. */
+  readonly sourceDigestHex: string;
   readonly truthLabel: "CORRECT" | "WRONG";
   readonly stratum: "core" | "stress";
   readonly reviewLabels?: readonly ["CORRECT" | "WRONG", "CORRECT" | "WRONG"];
   readonly replacesItemId?: string;
+}
+
+// Three distinct synthetic source rows, cycled across items by position, so the bank spans more
+// than one publication instant instead of every item citing the same source/timestamp pair.
+const SYNTHETIC_SOURCE_DIGESTS = ["a".repeat(64), "e".repeat(64), "f".repeat(64)] as const;
+const SYNTHETIC_SOURCE_PUBLISHED_AT = [
+  "2026-03-09T00:00:00Z",
+  "2026-04-01T00:00:00Z",
+  "2026-05-20T00:00:00Z",
+] as const;
+
+function sourceDigestForPosition(position: number): string {
+  return SYNTHETIC_SOURCE_DIGESTS[position % SYNTHETIC_SOURCE_DIGESTS.length]!;
+}
+
+function sourcePublishedAt(sourceDigestHex: string): string {
+  const position = SYNTHETIC_SOURCE_DIGESTS.indexOf(sourceDigestHex as typeof SYNTHETIC_SOURCE_DIGESTS[number]);
+  if (position === -1) throw new Error(`no synthetic source row for digest ${sourceDigestHex}`);
+  return SYNTHETIC_SOURCE_PUBLISHED_AT[position]!;
+}
+
+/**
+ * The exact binary-judgment/2.0 item payload shape. `withEvidence` is opt-in and defaults off
+ * everywhere it is threaded through, so existing callers see no behavior change; when on, the
+ * evidence string is derived from the item's own question so the §2.4 anti-truth-channel
+ * invariant (identical question implies identical evidence) holds by construction.
+ */
+function buildItemPayload(item: SyntheticFixtureItem, withEvidence: boolean) {
+  return {
+    itemId: item.itemId,
+    question: item.question,
+    referenceAnswer: item.referenceAnswer,
+    candidateAnswer: item.candidateAnswer,
+    ...(withEvidence ? { evidence: `Synthetic evidence for: ${item.question}` } : {}),
+    provenance: {
+      sourceCommitment: prefixed(item.sourceDigestHex),
+      timestamp: sourcePublishedAt(item.sourceDigestHex),
+    },
+    sources: [{ digest: { sha256: item.sourceDigestHex } }],
+  };
 }
 
 const DISPUTED_ITEM_ID = "urn:uuid:40000000-0000-4000-8000-000000000000";
@@ -171,7 +244,7 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
       question: "Does the synthetic core statement match its reference?",
       referenceAnswer: "The synthetic core statement is correct.",
       candidateAnswer: "The synthetic core statement is correct.",
-      provenance: [{ digest: { sha256: "a".repeat(64) } }],
+      sourceDigestHex: sourceDigestForPosition(0),
       truthLabel: "CORRECT" as const,
       stratum: "core" as const,
     },
@@ -180,7 +253,7 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
       question: "Does the synthetic stress statement match its reference?",
       referenceAnswer: "The synthetic stress statement is correct.",
       candidateAnswer: "The synthetic stress statement is deliberately wrong.",
-      provenance: [{ digest: { sha256: "a".repeat(64) } }],
+      sourceDigestHex: sourceDigestForPosition(1),
       truthLabel: "WRONG" as const,
       stratum: "stress" as const,
     },
@@ -196,7 +269,7 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
     question: "Does the disputed synthetic reserve-control statement match its reference?",
     referenceAnswer: "The disputed synthetic reserve-control statement is correct.",
     candidateAnswer: "The disputed synthetic reserve-control statement is correct.",
-    provenance: [{ digest: { sha256: "a".repeat(64) } }],
+    sourceDigestHex: sourceDigestForPosition(0),
     truthLabel: "CORRECT",
     stratum: "core",
     reviewLabels: ["CORRECT", "WRONG"],
@@ -208,7 +281,7 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
     candidateAnswer: truthLabel === "CORRECT"
       ? `Synthetic qualification reference T${index}.`
       : `Deliberately different synthetic qualification answer T${index}.`,
-    provenance: [{ digest: { sha256: "a".repeat(64) } }],
+    sourceDigestHex: sourceDigestForPosition(index + 1),
     truthLabel,
     stratum: index < 6 ? "core" : "stress",
     reviewLabels: [truthLabel, truthLabel],
@@ -251,9 +324,27 @@ function syntheticCellOutcome(
   return token;
 }
 
-function instrument(armId: string) {
+/**
+ * `templateArmId` and `declaresEvidence` are OPTIONS-ONLY and default to the pre-existing
+ * behaviour (packet P5): omitted, every byte this builder emits is unchanged, so every existing
+ * caller's fixture digests are untouched.
+ *
+ * They exist to build an EVIDENCE TWIN PAIR, which `paired-majority-delta@1` requires and this
+ * fixture could not previously express. Each arm normally gets its own rubric preamble and its own
+ * promptSource/attribution URIs, so no two arms are ever identical once evidence is stripped and
+ * the twin derivation would find no pair. Passing the same `templateArmId` to two arms gives them
+ * one shared template identity, and passing `declaresEvidence` to one of the two adds the evidence
+ * interpolation to that one. `instrumentId` stays the arm's own id either way, which the sealed
+ * selection requires and which the twin test deliberately excludes from comparison.
+ */
+function instrument(
+  armId: string,
+  judgeModel: AcceptedJudgeModelId,
+  options: { readonly templateArmId?: string; readonly declaresEvidence?: boolean } = {},
+) {
+  const templateArmId = options.templateArmId ?? armId;
   const messages = [
-    { role: "developer", segments: [{ literal: `Synthetic ${armId} rubric. Judge only the supplied item. ` }] },
+    { role: "developer", segments: [{ literal: `Synthetic ${templateArmId} rubric. Judge only the supplied item. ` }] },
     {
       role: "user",
       segments: [
@@ -263,12 +354,13 @@ function instrument(armId: string) {
         { field: "referenceAnswer" },
         { literal: "\nCandidate: " },
         { field: "candidateAnswer" },
+        ...(options.declaresEvidence ? [{ literal: "\nEvidence: " }, { field: "evidence" }] : []),
       ],
     },
   ] as const;
   const descriptor = {
-    uri: `https://fixtures.example.test/${armId}/prompt`,
-    digest: { sha256: sha256Hex(encoder.encode(`synthetic-${armId}-prompt`)) },
+    uri: `https://fixtures.example.test/${templateArmId}/prompt`,
+    digest: { sha256: sha256Hex(encoder.encode(`synthetic-${templateArmId}-prompt`)) },
   };
   return sealBinaryJudgmentInstrument({
     protocol: BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
@@ -281,10 +373,10 @@ function instrument(armId: string) {
       digest: { sha256: sha256Hex(encoder.encode("Apache-2.0 fixture metadata only")) },
     },
     attribution: {
-      uri: `https://fixtures.example.test/${armId}/attribution`,
-      digest: { sha256: sha256Hex(encoder.encode(`synthetic-${armId}-attribution`)) },
+      uri: `https://fixtures.example.test/${templateArmId}/attribution`,
+      digest: { sha256: sha256Hex(encoder.encode(`synthetic-${templateArmId}-attribution`)) },
     },
-    model: { adapter: "jinn-openai", requested: "gpt-5.6-luna", generation },
+    model: { adapter: "jinn-openai", requested: judgeModel, generation: generationForJudgeModel(judgeModel) },
     response: {
       mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
       parser: {
@@ -301,9 +393,9 @@ function parseJson(bytes: Uint8Array): Record<string, any> {
   return JSON.parse(decoder.decode(bytes)) as Record<string, any>;
 }
 
-function makeCapabilities(instrumentSha256s: readonly string[]) {
+function makeCapabilities(instrumentSha256s: readonly string[], judgeModel: AcceptedJudgeModelId) {
   return {
-    taskProfiles: ["https://spec.jinn.network/task-profiles/binary-judgment/1.0"],
+    taskProfiles: ["https://spec.jinn.network/task-profiles/binary-judgment/2.0"],
     inputMediaTypes: ["application/json"],
     outputMediaTypes: [BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE, BINARY_JUDGMENT_OBSERVATION_MEDIA_TYPE],
     cancel: false,
@@ -320,7 +412,7 @@ function makeCapabilities(instrumentSha256s: readonly string[]) {
     runPinning: {
       keys: [
         { key: "harness", inventory: [INSPECT_BINARY_JUDGE_LAUNCHER_ID], posture: "enforced" as const },
-        { key: "model", inventory: ["gpt-5.6-luna"], posture: "enforced" as const },
+        { key: "model", inventory: [judgeModel], posture: "enforced" as const },
         { key: "isolationPolicy", inventory: ["oci-container"], posture: "enforced" as const },
         { key: BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY, inventory: [...instrumentSha256s], posture: "enforced" as const },
       ],
@@ -337,6 +429,7 @@ function syntheticInspectVenue(
   workspaceDir: string,
   instrumentSha256s: readonly string[],
   scenario: SyntheticV4Scenario,
+  judgeModel: AcceptedJudgeModelId,
 ): LocalVenue {
   const [{ key }] = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: INSPECT_EMBEDDED_EVALUATOR_ID }]);
   const artifacts = new Map<string, Uint8Array>();
@@ -356,7 +449,7 @@ function syntheticInspectVenue(
 
   const backend: ProxiedBackend = {
     async capabilities() {
-      return makeCapabilities(instrumentSha256s);
+      return makeCapabilities(instrumentSha256s, judgeModel);
     },
     async submit(taskBytes, submissionBytes) {
       const submission = SubmissionRecordSchema.parse(parseJson(submissionBytes));
@@ -386,14 +479,16 @@ function syntheticInspectVenue(
         requestSha256: binaryJudgmentSemanticRequestDigest(task.payload, parsedInstrument),
         response: { digest: responseSha256, mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE },
         provider: {
-          requestedModel: "gpt-5.6-luna",
-          resolvedModel: "gpt-5.6-luna",
+          requestedModel: parsedInstrument.model.requested,
+          resolvedModel: parsedInstrument.model.requested,
           responseId: `synthetic-no-provider-${counter + 1}`,
           eventSha256: recordDigest(canonicalJsonBytes({ cellKey, source: "provider-free-fixture" })),
           usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
         },
         call: { count: 1, retries: 0, fallbacks: 0 },
-        limitations: ["mutable-model-alias"],
+        limitations: [
+          ...JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS[JUDGE_MODEL_PROFILES[parsedInstrument.model.requested]],
+        ],
       }).bytes;
       const responseHex = store(responseBytes);
       const observationHex = store(observationBytes);
@@ -576,11 +671,12 @@ async function admitItems(
   context: OperationContext,
   truthAdmission: SyntheticV4TruthAdmission,
   scenario: SyntheticV4Scenario,
+  withEvidence: boolean,
 ) {
   const items = fixtureItems(scenario);
   if (truthAdmission === "operator-only") {
     const candidates = items.map((item, index) => {
-      const { truthLabel, stratum, reviewLabels: _reviewLabels, replacesItemId: _replacesItemId, ...payload } = item;
+      const payload = buildItemPayload(item, withEvidence);
       const itemSha256 = recordDigest(canonicalJsonBytes(payload));
       putSealedBytes(context.workspaceDir, canonicalJsonBytes(payload));
       return {
@@ -588,9 +684,9 @@ async function admitItems(
         itemId: payload.itemId,
         humanReviewEvaluationSpecSha256: BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest,
         candidateClass: "synthetic",
-        stratum,
+        stratum: item.stratum,
         poolPosition: index + 1,
-        operatorTruthLabel: truthLabel,
+        operatorTruthLabel: item.truthLabel,
       };
     });
     return requireOk(admitHumanTruth(context, {
@@ -598,6 +694,61 @@ async function admitItems(
       truthAdmission,
       candidates,
     }), "operator admission");
+  }
+
+  // Screened-operator-sampled (spec §6.3, §6.4; packet P6, S4 item 1). Sequenced AFTER the
+  // operator-only arm's early return and BEFORE the two-human code below, exactly like
+  // operator-only: this branch is unreachable for either existing truthAdmission value, so their
+  // code paths -- and therefore their `context.clock()` call sequence -- are byte-for-byte
+  // unchanged (H-1: a screened arm that seals extra records consumes extra clock ticks ONLY if it
+  // runs before an existing seal; it never runs at all for the other two modes). The screen is
+  // built to agree with every item's own intended label and hand-confirm every row -- a clean,
+  // always-admitted table with a full sample and a 1.0 agreement rate is all a shared bundle-
+  // materialization fixture needs; the refusal paths (disagreement, indeterminate, tie-break,
+  // partial sample, coverage) are exercised directly against `admitHumanTruth` and the standalone
+  // verifier elsewhere, not through this shared builder.
+  if (truthAdmission === "screened-operator-sampled") {
+    const rows = items.map((item) => {
+      const payload = buildItemPayload(item, withEvidence);
+      const itemSha256 = recordDigest(canonicalJsonBytes(payload));
+      putSealedBytes(context.workspaceDir, canonicalJsonBytes(payload));
+      return {
+        itemSha256,
+        intendedLabel: item.truthLabel,
+        screeningVerdict: item.truthLabel,
+        handChecked: true,
+        handVerdict: "confirm" as const,
+      };
+    });
+    // Spec §6.3 requires the table's `rows` to be sorted strictly ascending by `itemSha256`, and
+    // `ScreeningTableSchema` enforces it. Item order is NOT digest order: the default items happen
+    // to digest ascending, but `withEvidence: true` changes every payload and the pair comes out
+    // descending, so emitting them in item order makes `admitHumanTruth` refuse with a schema error
+    // pointing at the table instead of at this builder. Sort a COPY: `rows` stays item-aligned
+    // because `candidates` below indexes into it by position, and desynchronising those two would
+    // pair each candidate's itemId and stratum with another item's digest.
+    const screeningRows = [...rows].sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256));
+    const candidates = items.map((item, index) => ({
+      itemSha256: rows[index]!.itemSha256,
+      itemId: item.itemId,
+      humanReviewEvaluationSpecSha256: BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest,
+      candidateClass: "synthetic",
+      stratum: item.stratum,
+      poolPosition: index + 1,
+    }));
+    return requireOk(admitHumanTruth(context, {
+      draftId: DRAFT_ID,
+      truthAdmission,
+      candidates,
+      screening: {
+        screeningInstrumentSha256: prefixed(sha256Hex(encoder.encode("synthetic-v4-fixture-screening-instrument"))),
+        sampleSeed: "synthetic-v4-fixture-screening-seed",
+        sampleSize: rows.length,
+        samplingScriptSha256: prefixed(sha256Hex(encoder.encode("synthetic-v4-fixture-sampling-script"))),
+        rawOutputsSha256: prefixed(sha256Hex(encoder.encode("synthetic-v4-fixture-raw-screening-outputs"))),
+        rows: screeningRows,
+      },
+    }), "screened admission");
   }
 
   const reviewers = ["urn:jinn:reviewer:a", "urn:jinn:reviewer:b"] as const;
@@ -608,7 +759,7 @@ async function admitItems(
   const candidates = [];
   const itemSha256ById = new Map<string, string>();
   for (const [index, item] of items.entries()) {
-    const { truthLabel, stratum, reviewLabels: _reviewLabels, replacesItemId: _replacesItemId, ...payload } = item;
+    const payload = buildItemPayload(item, withEvidence);
     const packets = requireOk(createHumanReviewPackets(context, {
       draftId: DRAFT_ID,
       item: payload,
@@ -622,7 +773,7 @@ async function admitItems(
         activeEvaluatorId: packet.reviewerId,
         packetSha256: packet.packetSha256,
         visibilityReceiptSha256: packet.visibilityReceiptSha256,
-        label: item.reviewLabels?.[reviewerIndex] ?? truthLabel,
+        label: item.reviewLabels?.[reviewerIndex] ?? item.truthLabel,
         complete: true,
         completedAt: context.clock(),
       }), `human verdict ${index}/${reviewerIndex}`));
@@ -639,7 +790,7 @@ async function admitItems(
       itemId: payload.itemId,
       humanReviewEvaluationSpecSha256: packets.humanReviewEvaluationSpecSha256,
       candidateClass: "synthetic",
-      stratum,
+      stratum: item.stratum,
       poolPosition: index + 1,
       reviewVerdictSha256s: [verdicts[0]!.verdictSha256, verdicts[1]!.verdictSha256] as [string, string],
       reviewers: reviewerRoster,
@@ -661,10 +812,47 @@ export async function createSyntheticV4BundleFixture(input: {
   readonly workspaceDir: string;
   readonly truthAdmission: SyntheticV4TruthAdmission;
   readonly scenario?: SyntheticV4Scenario;
+  /** Opt-in only; defaults off so every existing caller is unaffected. See `buildItemPayload`. */
+  readonly withEvidence?: boolean;
   /** Test-only seam: corrupt the exact intake bytes before the real import operation parses them. */
   readonly mutateIntake?: (intake: SyntheticV4IntakeBytes) => SyntheticV4IntakeBytes;
+  /** Defaults to the four frozen arms ["alpha","beta","delta","gamma"]. */
+  readonly armIds?: readonly string[];
+  /** Defaults to "gpt-5.6-luna" (the reasoning-2026-08 profile). */
+  readonly judgeModel?: "gpt-5.6-luna" | "gpt-4o-mini-2024-07-18";
+  /**
+   * Builds an EVIDENCE TWIN PAIR (packet P5): `declaring`'s instrument interpolates `evidence`,
+   * `twin`'s is identical to it once that interpolation is stripped. OPTIONS-ONLY and defaults
+   * off, so every existing caller's bytes are unchanged. Required by `paired-majority-delta@1`,
+   * which derives its `candidate`/`baseline` pair structurally and refuses a roster where the
+   * declaring arm has no unique twin. Pass `withEvidence: true` alongside it: an instrument that
+   * interpolates evidence requires every bound item to carry evidence (the §2.3 lock-time leak
+   * refusal).
+   */
+  readonly evidencePair?: { readonly declaring: string; readonly twin: string };
+  /**
+   * Extra pre-registered analyses sealed into the Run's analysis plan beside the canonical
+   * `binary-instrument@1` entry (packet P5, spec §8.3 option 5). OPTIONS-ONLY, defaults to none.
+   */
+  readonly additionalAnalyses?: readonly { readonly method: string; readonly version: string }[];
 }): Promise<SyntheticV4BundleFixture> {
   const scenario = input.scenario ?? "minimal";
+  const withEvidence = input.withEvidence ?? false;
+  const judgeModel: AcceptedJudgeModelId = input.judgeModel ?? "gpt-5.6-luna";
+  const armIds = input.armIds ?? ["alpha", "beta", "delta", "gamma"];
+  if (scenario === "qualification-144") {
+    // The qualification-144 outcome table is a 12-row x 4-column matrix indexed by arm
+    // position (spec §10.2's fixture ruling), so this scenario keeps its four named arms.
+    // Six-arm coverage uses the "minimal" scenario instead, whose outcome is arm-agnostic.
+    const matchesFrozenArms = armIds.length === qualificationArms.length
+      && armIds.every((armId, index) => armId === qualificationArms[index]);
+    if (!matchesFrozenArms) {
+      throw new Error(
+        'scenario "qualification-144" requires its four frozen arms '
+        + `[${qualificationArms.join(", ")}]; use scenario "minimal" for other arm counts`,
+      );
+    }
+  }
   let tick = Date.parse("2026-08-15T11:00:00.000Z");
   const context: OperationContext = {
     workspaceDir: input.workspaceDir,
@@ -677,19 +865,20 @@ export async function createSyntheticV4BundleFixture(input: {
   };
   requireOk(initWorkspace(context), "workspace init");
   requireOk(createDraft(context, { draftId: DRAFT_ID, name: "Synthetic binary publication" }), "draft create");
-  const admission = await admitItems(context, input.truthAdmission, scenario);
+  const admission = await admitItems(context, input.truthAdmission, scenario, withEvidence);
   const items = fixtureItems(scenario);
+  const usedSourceDigests = [...new Set(items.map((item) => item.sourceDigestHex))].sort();
   const exactIntake: SyntheticV4IntakeBytes = {
-    itemBankJsonl: renderCanonicalJsonl(items.map(({ truthLabel: _truthLabel, stratum: _stratum, reviewLabels: _reviewLabels, replacesItemId: _replacesItemId, ...item }) => ({
+    itemBankJsonl: renderCanonicalJsonl(items.map((item) => ({
       protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL,
-      item,
+      item: buildItemPayload(item, withEvidence),
     }))),
-    sourceManifestJsonl: renderCanonicalJsonl([{
+    sourceManifestJsonl: renderCanonicalJsonl(usedSourceDigests.map((hex) => ({
       protocol: BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
-      provenanceSha256: prefixed("a".repeat(64)),
+      provenanceSha256: prefixed(hex),
       source: {
-        uri: "https://fixtures.example.test/synthetic-source.json",
-        digest: { sha256: "a".repeat(64) },
+        uri: `https://fixtures.example.test/synthetic-source-${hex.slice(0, 8)}.json`,
+        digest: { sha256: hex },
       },
       license: {
         uri: "https://fixtures.example.test/licenses/apache-2.0.txt",
@@ -699,7 +888,8 @@ export async function createSyntheticV4BundleFixture(input: {
         uri: "https://fixtures.example.test/synthetic-attribution.txt",
         digest: { sha256: "c".repeat(64) },
       },
-    }]),
+      publishedAt: sourcePublishedAt(hex),
+    }))),
     admissionIndexJsonl: renderCanonicalJsonl([...admission.resolutions]
       .sort((left, right) => left.itemSha256 < right.itemSha256 ? -1 : left.itemSha256 > right.itemSha256 ? 1 : 0)
       .map((resolution) => ({
@@ -712,7 +902,7 @@ export async function createSyntheticV4BundleFixture(input: {
   };
   const intake = input.mutateIntake?.(exactIntake) ?? exactIntake;
   const imported = requireOk(importBinaryItemBank(context, {
-    profile: "binary-judgment@1",
+    profile: "binary-judgment@2",
     draftId: DRAFT_ID,
     itemBankJsonl: intake.itemBankJsonl,
     sourceManifestJsonl: intake.sourceManifestJsonl,
@@ -720,9 +910,39 @@ export async function createSyntheticV4BundleFixture(input: {
     description: "Provider-free synthetic evidence; no benchmark dataset content.",
   }), "binary item-bank import");
 
-  const arms = ["alpha", "beta", "delta", "gamma"] as const;
-  const instruments = arms.map((armId) => instrument(armId));
+  const arms = armIds;
+  const evidencePair = input.evidencePair;
+  const instruments = arms.map((armId) => {
+    if (evidencePair === undefined) return instrument(armId, judgeModel);
+    // Both halves of the pair share ONE template identity; only the declaring half interpolates
+    // evidence. Every other arm keeps its own rubric, so it is not a twin candidate.
+    if (armId === evidencePair.declaring) {
+      return instrument(armId, judgeModel, { templateArmId: evidencePair.twin, declaresEvidence: true });
+    }
+    if (armId === evidencePair.twin) {
+      return instrument(armId, judgeModel, { templateArmId: evidencePair.twin });
+    }
+    return instrument(armId, judgeModel);
+  });
   for (const sealed of instruments) putSealedBytes(input.workspaceDir, sealed.bytes);
+
+  // §1.5 rule 2: required when any bound arm's model is a dated snapshot, forbidden otherwise.
+  // Sealed into the workspace CAS here so the published bundle carries it as a "snapshot-probe"
+  // evidence record alongside the selection manifest.
+  let snapshotProbeSha256: `sha256:${string}` | undefined;
+  if (isDatedSnapshotJudgeModel(judgeModel)) {
+    const sealedProbe = sealBinaryJudgmentSnapshotProbe({
+      protocol: BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
+      requestedModel: judgeModel,
+      resolvedModel: judgeModel,
+      responseId: "synthetic-snapshot-probe-1",
+      eventSha256: recordDigest(canonicalJsonBytes({ source: "synthetic-snapshot-probe" })),
+      probedAt: context.clock(),
+      outcome: "serving",
+    });
+    putSealedBytes(input.workspaceDir, sealedProbe.bytes);
+    snapshotProbeSha256 = sealedProbe.digest;
+  }
   const selection: InspectBinaryJudgeSelectionManifest = {
     schema: INSPECT_BINARY_JUDGE_SELECTION_SCHEMA,
     runtime: {
@@ -755,9 +975,10 @@ export async function createSyntheticV4BundleFixture(input: {
     arms: arms.map((armId, index) => ({
       armId,
       instrumentSha256: instruments[index]!.digest,
-      model: "gpt-5.6-luna",
-      generation,
+      model: judgeModel,
+      generation: generationForJudgeModel(judgeModel),
     })),
+    ...(snapshotProbeSha256 === undefined ? {} : { snapshotProbeSha256 }),
   };
   const selectionManifestSha256 = putSealedBytes(input.workspaceDir, canonicalJsonBytes(selection));
   for (const [index, armId] of arms.entries()) {
@@ -766,7 +987,7 @@ export async function createSyntheticV4BundleFixture(input: {
       armId,
       pinning: {
         harness: { id: INSPECT_BINARY_JUDGE_LAUNCHER_ID, version: INSPECT_BINARY_JUDGE_LAUNCHER_VERSION },
-        model: { id: "gpt-5.6-luna" },
+        model: { id: judgeModel },
         [BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY]: instruments[index]!.digest,
       },
     }), `arm ${armId}`);
@@ -785,11 +1006,17 @@ export async function createSyntheticV4BundleFixture(input: {
         method: BENCHMARKING_METHOD_IDS.binaryInstrument,
         version: BENCHMARKING_METHOD_VERSION,
       },
+      // `additionalAnalyses` is a SIBLING of `analysis` on the spec (domain/draft.ts), not a member
+      // of it. Omitted entirely when the caller passes none, so the stored draft's specSha256 is
+      // unchanged for every existing caller.
+      ...(input.additionalAnalyses === undefined
+        ? {}
+        : { additionalAnalyses: input.additionalAnalyses.map((entry) => ({ ...entry })) }),
     },
   }), "draft binary profile");
 
   const instrumentSha256s = instruments.map((entry) => entry.digest);
-  const createVenue = () => syntheticInspectVenue(input.workspaceDir, instrumentSha256s, scenario);
+  const createVenue = () => syntheticInspectVenue(input.workspaceDir, instrumentSha256s, scenario, judgeModel);
   requireOk(await runQuote(context, { draftId: DRAFT_ID }, { createVenue }), "quote");
   requireOk(runLock(context, { draftId: DRAFT_ID }), "lock");
   requireOk(await runLaunch(context, { draftId: DRAFT_ID }, { createVenue }), "launch");

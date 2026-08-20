@@ -9,7 +9,21 @@
  * to the existing estimator or its pinned oracle.
  */
 
+import { compareCodeUnitStrings } from "@jinn-network/benchmarking-records";
 import { clusteredPairedRateDiffBca, type ClusteredTaskRate } from "./noninferiority.js";
+
+/**
+ * Below this many paired Tasks the interval is WITHHELD rather than manufactured (design §9.3: a
+ * method never manufactures confidence from too little data). Matches the seed library's minN.
+ *
+ * Defined here, beside the estimator it gates, and imported by every method that applies it
+ * (`paired-delta@1` in `registry.ts`, `paired-majority-delta@1` in
+ * `paired-majority-delta-method.ts`). It is CLAIM-BEARING -- both methods print the threshold into
+ * their withholding reason string, so a reader compares the two printed values directly. Two
+ * copies of the literal could drift apart and publish two different thresholds under the same
+ * stated rule, which is exactly the drift one shared constant forecloses.
+ */
+export const MIN_PAIRED_DELTA_TASKS = 5;
 
 export interface PairedDeltaIntervalOptions {
   readonly seed: number;
@@ -45,6 +59,35 @@ function sameClusterManifest(
       || cluster.members.length !== candidate.members.length) return false;
     return cluster.members.every((member, memberIndex) => member === candidate.members[memberIndex]);
   });
+}
+
+/**
+ * The source-cluster manifest every clustered-paired-delta consumer publishes alongside its
+ * interval (spec §7.2a: "nothing about the resampler, the cluster manifest, or the jackknife
+ * acceleration is reimplemented"). Single-sourced here so `paired-delta@1`
+ * (`registry.ts`, packet P5's precedent) and `paired-majority-delta@1`
+ * (`paired-majority-delta-method.ts`, packet P5, issue #2837) publish the identical grouping
+ * rather than two independent implementations of one published artifact. Grouping-key order
+ * (source-tag then value) and member order (task-digest code-unit order) are both stable so the
+ * manifest is byte-reproducible across callers and recomputes.
+ */
+export function sourceClusterManifest(rates: readonly {
+  readonly taskDigest: string;
+  readonly cluster: readonly ["source" | "sourceCommitment", string];
+}[]): readonly { readonly key: readonly ["source" | "sourceCommitment", string]; readonly members: readonly string[] }[] {
+  const groups = new Map<string, { key: ["source" | "sourceCommitment", string]; members: string[] }>();
+  for (const rate of rates) {
+    const id = JSON.stringify(rate.cluster);
+    const group = groups.get(id) ?? { key: [rate.cluster[0], rate.cluster[1]], members: [] };
+    group.members.push(rate.taskDigest);
+    groups.set(id, group);
+  }
+  return [...groups.values()]
+    .map((group) => ({ ...group, members: group.members.sort(compareCodeUnitStrings) }))
+    .sort((left, right) => {
+      const byTag = compareCodeUnitStrings(left.key[0], right.key[0]);
+      return byTag === 0 ? compareCodeUnitStrings(left.key[1], right.key[1]) : byTag;
+    });
 }
 
 export function clusteredPairedDeltaInterval(

@@ -2,6 +2,26 @@
   "version": 1,
   "entries": [
     {
+      "id": "binary-judgment-parsers/binary-accept-reject.cases.json",
+      "sha256": "bfda59104ab67138ea63393872b9f14273a6397c1b54d8f3cf5e3bd10ece070c"
+    },
+    {
+      "id": "binary-judgment-parsers/binary-correct-wrong.cases.json",
+      "sha256": "54841c5e5a7ed8c73e8c3981beca0a28d42f0fd4b441bdc382c88f5a8c3726e0"
+    },
+    {
+      "id": "binary-judgment-parsers/binary-json-verdict.cases.json",
+      "sha256": "7997c19517b157b64a1543eefb859b0c685ae823450360ce6dd0fc89817e3614"
+    },
+    {
+      "id": "binary-judgment-parsers/binary-label-in-prose.cases.json",
+      "sha256": "bb2826f25443af89d2c7bb09bf8d83190aedd360a8ae99241bbe6fa2de895b4d"
+    },
+    {
+      "id": "binary-judgment-parsers/binary-yes-no.cases.json",
+      "sha256": "2ca3c09b60d51ae28f22309f8c8311373d85bbde9b0e5e4936030d2a87f3d16b"
+    },
+    {
       "id": "parsers/prediction-market.parser.json",
       "sha256": "fdf33b359e1d142a372b374abddab4e582fd4cbff5a32e53de9333a5515c2d1a"
     },

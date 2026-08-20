@@ -2,8 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | 0.2 |
+| **Version** | 0.3 |
 | **Date** | 2026-08-07 |
+| **Amended** | 2026-08-19 — catalog `method.bind` form ([DR-2026-08-19](../../../log/decisions/2026-08-19-colophon-method-cli-discover.md)) |
 | **Author** | Packet BP-30, amended by packet BP-31 of the standalone benchmarking product implementation program |
 | **Shape** | `feat` |
 | **Status** | draft |
@@ -176,9 +177,11 @@ Covers the design spec §4.6 Benchmark-draft row. The **Quote** sub-surface
     `armRemove` / `arm remove`, `armUpdate` / `arm update`
   - task intake → `importSweBenchRows` / `import swebench`,
     `sampleInit` / `sample init`
-  - evaluation runtime selection → `selectInspectEvaluation` /
-    `runtime inspect select`; the form selects an existing task and runtime
-    configuration and is not an authoring environment
+  - evaluation runtime selection → `selectMethod` / `method`; two shipped
+    forms, not an authoring environment: (1) catalog suite bind — suite id
+    from `METHOD_CATALOG`, host JSON, `--slice` / `--n` / `--ids`; (2)
+    Inspect-shaped method document. Submitting both refuses. Derived export
+    stays unavailable (local job copy) ([DR-2026-08-19](../../../log/decisions/2026-08-19-colophon-method-cli-discover.md))
   - preview → `runPreview` / `preview` — ungated, non-advancing; every
     rendered preview artifact leads with the "rehearsal — not official
     evidence" marker (design spec §7.2, BP-20 addendum) so it cannot be

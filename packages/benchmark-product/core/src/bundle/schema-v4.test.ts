@@ -117,6 +117,23 @@ describe("public bundle v4 contracts", () => {
     expect(BundleV4TrustSchema.safeParse(wrongAuthority).success).toBe(false);
   });
 
+  test("strata: widens from the frozen core/stress pair to a declared, grammar-conforming vocabulary", () => {
+    const base = operatorQualification();
+    expect(BundleQualificationSchema.safeParse(base).success).toBe(true);
+
+    const fourCategory = { ...base, strata: ["category-1", "category-2", "category-3", "category-4"] };
+    expect(BundleQualificationSchema.safeParse(fourCategory).success).toBe(true);
+
+    expect(BundleQualificationSchema.safeParse({ ...base, strata: [] }).success).toBe(false);
+    expect(BundleQualificationSchema.safeParse({ ...base, strata: ["stress", "core"] }).success).toBe(false);
+    expect(BundleQualificationSchema.safeParse({ ...base, strata: ["core", "core"] }).success).toBe(false);
+    expect(BundleQualificationSchema.safeParse({ ...base, strata: ["not a valid stratum!"] }).success).toBe(false);
+
+    // The bundle document version does not move under the compatible-widening rule (spec §0.4,
+    // §3.1 rule 6): every ["core","stress"] bundle ever written still validates byte-identically.
+    expect(BUNDLE_QUALIFICATION_FORMAT).toBe("benchmark-product-binary-qualification/1");
+  });
+
   test("freezes evidence-record and role order", () => {
     const valid = {
       format: BUNDLE_V4_EVIDENCE_FORMAT,

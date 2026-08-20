@@ -83,7 +83,7 @@ reviewer and report-authority role mappings needed by a copied bundle.
 
 V4 full HTML and Markdown present all four instruments, item/call/confusion
 counts, five registered rates with denominators and intervals, every declared
-candidate-class and core/stress slice, parser-invalid and instability facts,
+candidate-class and stratum slice, parser-invalid and instability facts,
 truth-admission status, exclusions/replacements, and stored limitations. Its
 badge, social card, and share text are narrower signposts: verified state, exact
 scope, full Report digest, and relative links only. They carry no rate,
@@ -147,16 +147,16 @@ certificate chain carried inside the bundle is archival convenience and is
 never used to validate. Verification never contacts an anchor provider and
 never upgrades a pending proof.
 
-Anchored bundles pin the same verifier contract v4 does:
+Anchored bundles pin the same first public line:
 
 ```bash
-npx @colophon-claims/verify@2 <bundle-dir>
+npx @colophon-claims/verify@0.1 <bundle-dir>
 ```
 
 Supply your own trust material to reach `verified`:
 
 ```bash
-npx @colophon-claims/verify@2 <bundle-dir> \
+npx @colophon-claims/verify@0.1 <bundle-dir> \
   --tsa-root ./authority-root.pem \
   --ots-headers ./bitcoin-headers.txt
 ```
@@ -198,21 +198,21 @@ owner.
 
 ## Portable verification
 
+Verification with your own tools — no Jinn code at all — is specified in
+[`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md): the check split, the
+DSSE and digest rules, the JSON Schemas shipped under the reader package's
+`schemas/`, and the conformance kit under
+`verify/fixtures/public-bundle-conformance-v1/` whose tampered variants an
+external verifier must reject.
+
 Use the smaller reader package, without the product or source workspace:
 
 ```bash
-npx @colophon-claims/verify@1 <bundle-dir>
+npx @colophon-claims/verify@0.1 <bundle-dir>
 ```
 
-Binary qualification v4 pins the new verifier contract instead:
-
-```bash
-npx @colophon-claims/verify@2 <bundle-dir>
-```
-
-Claim-package/1 and public-bundle/2 continue to carry the literal
-`@1.0.0`/`@1` commands. Claim-package/2 and public-bundle/4 carry the literal
-`@2.0.0`/`@2` commands. Both lines return the same six top-level check names in
+Claim-package/1, claim-package/2, public-bundle/2, and public-bundle/4 stamp the
+same first public line: `@0.1.0` / `@0.1`. Both formats return the same six top-level check names in
 the order below; v4 expands those checks internally rather than adding a seventh
 top-level result.
 

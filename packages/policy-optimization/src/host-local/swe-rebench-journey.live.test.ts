@@ -21,6 +21,7 @@ test.skipIf(process.env["JINN_POLICY_OPTIMIZATION_REAL_SOURCE"] !== "1")(
       currentLoadout: liveLoadout(root, "current", "Current public policy.\n"),
       candidateLoadout: liveLoadout(root, "candidate", "Candidate public policy.\n"),
       routeName: "swe-rebench-v2",
+      affectedRoutes: ["swe-rebench-v2"],
       harness: "codex",
       model: "gpt-real-source-probe",
       isolationPolicy: "unrestricted",

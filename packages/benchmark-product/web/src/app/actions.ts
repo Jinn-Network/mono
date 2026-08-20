@@ -1,7 +1,9 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { redirect } from "next/navigation";
 import {
   anchorAfterLockIfConfigured,
@@ -39,12 +41,12 @@ import {
   runResults,
   runVerify,
   sampleInit,
-  selectInspectEvaluation,
+  selectMethod,
+  isMethodCatalogId,
   profileArmPinning,
   readAgentProfile,
   updateDraft,
   verifyPublicBundle,
-  type SelectInspectEvaluationInput,
 } from "@colophon-claims/core";
 import type { GuiActionState } from "@/lib/action-state";
 import {
@@ -240,14 +242,67 @@ export async function intakeSweBenchAction(_previous: GuiActionState, formData: 
   }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
 }
 
-export async function inspectRuntimeSelectAction(
+async function readHostJson(formData: FormData): Promise<Record<string, unknown>> {
+  const file = formData.get("hostFile");
+  let parsed: unknown;
+  if (file instanceof File && file.size > 0) {
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      throw new ProductContextConfigurationError("hostFile must be valid JSON");
+    }
+  } else {
+    parsed = jsonField(formData, "host");
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new ProductContextConfigurationError("host must be a JSON object");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+export async function methodBindAction(
   _previous: GuiActionState,
   formData: FormData,
 ): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
-  const configuration = jsonField(formData, "configuration") as Omit<SelectInspectEvaluationInput, "draftId">;
+  const catalogRef = optionalField(formData, "ref");
+  const hasConfiguration = field(formData, "configuration").length > 0;
   return executeOperation(
-    (context) => selectInspectEvaluation(context, { draftId, ...configuration } as SelectInspectEvaluationInput),
+    async (context) => {
+      if (catalogRef !== undefined && hasConfiguration) {
+        throw new ProductContextConfigurationError("submit a catalog suite or an Inspect configuration, not both");
+      }
+      if (catalogRef === undefined && !hasConfiguration) {
+        throw new ProductContextConfigurationError("submit a catalog suite or an Inspect configuration");
+      }
+      const dir = mkdtempSync(join(tmpdir(), "colophon-method-"));
+      try {
+        if (hasConfiguration) {
+          const filePath = join(dir, "inspect.json");
+          writeFileSync(filePath, JSON.stringify(jsonField(formData, "configuration")));
+          return await selectMethod(context, { draftId, ref: filePath, cwd: dir });
+        }
+        if (catalogRef === undefined || !isMethodCatalogId(catalogRef)) {
+          throw new ProductContextConfigurationError("ref must be a catalog suite id");
+        }
+        const hostPath = join(dir, "host.json");
+        writeFileSync(hostPath, JSON.stringify(await readHostJson(formData)));
+        const slice = optionalField(formData, "slice");
+        const ids = optionalField(formData, "ids");
+        const n = optionalField(formData, "n");
+        return await selectMethod(context, {
+          draftId,
+          ref: catalogRef,
+          cwd: dir,
+          hostPath,
+          ...(slice === undefined ? {} : { slice }),
+          ...(ids === undefined ? {} : { ids }),
+          ...(n === undefined ? {} : { n }),
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
     { revalidate: ["/workspace", `/workspace/${draftId}`] },
   );
 }

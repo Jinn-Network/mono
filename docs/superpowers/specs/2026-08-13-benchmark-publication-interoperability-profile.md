@@ -4,7 +4,7 @@
 |---|---|
 | **Version** | 0.4 |
 | **Date** | 2026-08-13 |
-| **Amended** | 2026-08-18 — Inspect eval named suite protocol ([DR-2026-08-18-e](../../../log/decisions/2026-08-18-inspect-as-specified.md)); DeepSWE v1.1 named protocol ([DR-2026-08-18-d](../../../log/decisions/2026-08-18-deep-swe-v1.1-official-suite.md)); APEX-SWE-dev official suite ([DR-2026-08-18-c](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md)); APEX-Agents official suite ([DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md)); Terminal-Bench 3.0 as a second named Harbor-family protocol ([DR-2026-08-18-b](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)); 2026-08-17 — direct-mode job grain ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); official suite protocol and one Job per arm ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)); SWE-bench Verified official suite ([DR-2026-08-17-e](../../../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)); no §8.4 marketplace rewrite |
+| **Amended** | 2026-08-18 — Colophon method operand ([DR-2026-08-18-f](../../../log/decisions/2026-08-18-colophon-method-cli.md)); Inspect eval named suite protocol ([DR-2026-08-18-e](../../../log/decisions/2026-08-18-inspect-as-specified.md)); DeepSWE v1.1 named protocol ([DR-2026-08-18-d](../../../log/decisions/2026-08-18-deep-swe-v1.1-official-suite.md)); APEX-SWE-dev official suite ([DR-2026-08-18-c](../../../log/decisions/2026-08-18-apex-swe-dev-official-suite.md)); APEX-Agents official suite ([DR-2026-08-18](../../../log/decisions/2026-08-18-apex-agents-official-suite.md)); Terminal-Bench 3.0 as a second named Harbor-family protocol ([DR-2026-08-18-b](../../../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)); 2026-08-17 — direct-mode job grain ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); official suite protocol and one Job per arm ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)); SWE-bench Verified official suite ([DR-2026-08-17-e](../../../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)); no §8.4 marketplace rewrite |
 | **Shape** | interoperability profile and design amendment |
 | **Status** | draft; revised after independent design review; §8.3 grain note added 2026-08-17; §8.3 suite protocol added 2026-08-17; §8.3 Verified protocol added 2026-08-17; §8.3 APEX-Agents protocol added 2026-08-18; §8.3 APEX-SWE-dev protocol added 2026-08-18; §8.3 DeepSWE v1.1 protocol added 2026-08-18; §8.3 Inspect eval protocol added 2026-08-18 |
 | **Applies to** | any benchmarking product publishing through Jinn, including Colophon |
@@ -511,6 +511,12 @@ The reusable model records:
 
 - **venue** — where execution was commissioned, such as direct/self-run or open competition; and
 - **runtime** — how the accepted work was executed, such as Harbor, Inspect, or a native launcher.
+
+The `runtime` axis is an **adapter slot** (how a cell is spawned), not a product
+mode and not a UX fork ([DR-2026-08-18-f](../../../log/decisions/2026-08-18-colophon-method-cli.md)).
+Inspect and Harbor are frameworks a sealed method may name; they are not
+alternative Colophon doors. Official suite vs custom is the same kind of object:
+a method document. Wearing a suite name is conformance of that document.
 
 Do not add combined values such as `harbor-local` or `harbor-marketplace`. A Jinn marketplace
 operator may execute a claimed Submission as a Harbor Trial. The same task package may be run

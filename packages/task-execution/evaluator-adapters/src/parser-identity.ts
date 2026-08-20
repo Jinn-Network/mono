@@ -4,7 +4,11 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  BINARY_CORRECT_WRONG_PARSER_IDENTITY,
+  BINARY_JSON_VERDICT_PARSER_IDENTITY,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
+  BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
+  BINARY_YES_NO_PARSER_IDENTITY,
   parserAllowlistKey,
   type ParserIdentity,
 } from "@jinn-network/task-execution-profiles";
@@ -44,6 +48,24 @@ export const BINARY_JUDGMENT_PARSER: ParserIdentity = Object.freeze({
 });
 
 /**
+ * These four identities are, like `BINARY_JUDGMENT_PARSER` above, generated and sealed by the
+ * profiles package from the same response-parser registry. Keep the oracle single-sourced there
+ * rather than copying a semantics fixture into this adapter package.
+ */
+export const BINARY_YES_NO_PARSER: ParserIdentity = Object.freeze({
+  ...BINARY_YES_NO_PARSER_IDENTITY,
+});
+export const BINARY_CORRECT_WRONG_PARSER: ParserIdentity = Object.freeze({
+  ...BINARY_CORRECT_WRONG_PARSER_IDENTITY,
+});
+export const BINARY_JSON_VERDICT_PARSER: ParserIdentity = Object.freeze({
+  ...BINARY_JSON_VERDICT_PARSER_IDENTITY,
+});
+export const BINARY_LABEL_IN_PROSE_PARSER: ParserIdentity = Object.freeze({
+  ...BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
+});
+
+/**
  * The deployment-side execution allowlist this package contributes. A host merges it into
  * `EvaluationHarnessDeployment.parserAllowlist`; a spec naming any other parser identity is
  * refused by the harness runtime before an adapter is selected.
@@ -51,6 +73,10 @@ export const BINARY_JUDGMENT_PARSER: ParserIdentity = Object.freeze({
 export function evaluatorAdaptersParserAllowlist(): ReadonlySet<string> {
   return new Set([
     parserAllowlistKey(BINARY_JUDGMENT_PARSER),
+    parserAllowlistKey(BINARY_YES_NO_PARSER),
+    parserAllowlistKey(BINARY_CORRECT_WRONG_PARSER),
+    parserAllowlistKey(BINARY_JSON_VERDICT_PARSER),
+    parserAllowlistKey(BINARY_LABEL_IN_PROSE_PARSER),
     parserAllowlistKey(SWE_REBENCH_PARSER),
     parserAllowlistKey(PREDICTION_PARSER),
   ]);

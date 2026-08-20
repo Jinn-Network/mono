@@ -223,7 +223,7 @@ const inspectBinaryJudgeDefinition: AdapterDefinition = {
   profile: INSPECT_RUNTIME_EVIDENCE_PROFILE,
 };
 
-function isInspectRuntimeAdapterId(adapterId: string): boolean {
+export function isInspectRuntimeAdapterId(adapterId: string): boolean {
   return adapterId === INSPECT_ADAPTER_ID || adapterId === INSPECT_BINARY_JUDGE_ADAPTER_ID;
 }
 

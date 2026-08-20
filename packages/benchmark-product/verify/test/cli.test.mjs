@@ -22,6 +22,8 @@ test("usage exits 2 and states the exit contract", async () => {
   const result = await invoke([]);
   assert.equal(result.code, 2);
   assert.match(result.stderr, /Exit 0: valid bundle; 1: invalid bundle; 2: usage or operational failure/);
+  assert.match(result.stderr, /spec\.jinn\.network/);
+  assert.match(result.stderr, /not hosted/);
 });
 
 test("a missing bundle exits 1 with machine-readable invalid-bundle output", async () => {
@@ -30,7 +32,7 @@ test("a missing bundle exits 1 with machine-readable invalid-bundle output", asy
   assert.equal(result.code, 1);
   assert.deepEqual(JSON.parse(result.stdout), {
     ok: false,
-    verifierVersion: "2.0.0",
+    verifierVersion: "0.1.0",
     supportedFormats: [
       "benchmark-product-public-bundle/2",
       "benchmark-product-public-bundle/4",
@@ -70,6 +72,8 @@ test("human success names all six checks and states the verification limit", asy
   assert.match(output, /Format: benchmark-product-public-bundle\/4/);
   assert.match(output, /does not prove that the machine that produced the/);
   assert.match(output, /No files were uploaded/);
+  assert.match(output, /spec\.jinn\.network/);
+  assert.match(output, /not hosted/);
 });
 
 test("human summary reports the actual passed count against the fixed six-check catalog", async () => {

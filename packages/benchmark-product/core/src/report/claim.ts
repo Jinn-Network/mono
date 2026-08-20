@@ -47,8 +47,9 @@ import {
   anchoredTrustRoot,
 } from "@colophon-claims/verify";
 import type { ClaimAnchor } from "@colophon-claims/verify";
+import { join } from "node:path";
 import { atomicWriteFileSync } from "../fs/atomic.js";
-import { claimPackageArtifactPath } from "../workspace/layout.js";
+import { artifactsDir, claimPackageArtifactPath } from "../workspace/layout.js";
 import type { VenueHonesty } from "../operations/run-results.js";
 
 export const CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/1";
@@ -61,9 +62,9 @@ export const BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.c
  */
 export const ANCHORED_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/4";
 export const BINARY_QUALIFICATION_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@2.0.0 <bundle-dir>" as const;
+  "npx @colophon-claims/verify@0.1.0 <bundle-dir>" as const;
 export const BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@2 <bundle-dir>" as const;
+  "npx @colophon-claims/verify@0.1 <bundle-dir>" as const;
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/, "must be a lowercase sha256 hex digest");
 
@@ -108,6 +109,73 @@ const ComparisonSchema = z.object({
   excluded: ConflictedSchema,
   conflicted: ConflictedSchema,
   bootstrap: z.unknown(),
+});
+
+/** `pairwise-disagreement@1` and `paired-majority-delta@1` (packet #2837, spec §7.1/§7.2a) both
+ * report intervals keyed `{lower, upper, alpha}` -- NOT `PairedIntervalSchema`'s `{low, high,
+ * alpha}`, which is `paired-delta@1`'s own key spelling. Reusing `PairedIntervalSchema` here would
+ * silently drop `lower`/`upper` at parse time (zod strips unrecognized keys by default) rather than
+ * refuse. */
+const JudgeIntervalSchema = z.object({ lower: z.string(), upper: z.string(), alpha: z.string() });
+
+const ExclusionTripleSchema = z.object({
+  taskDigest: z.string().min(1),
+  armId: z.string().min(1),
+  reason: z.string().min(1),
+});
+
+/**
+ * `pairwise-disagreement@1`'s panel projection (spec §7.1), sibling to `comparison`/`headline`/
+ * `qualification` (BP-13 method dispatch). Carried verbatim from the method's own compute() output
+ * (`aggregate/src/pairwise-disagreement-method.ts`'s `computePairwiseDisagreement`) — never
+ * recomputed, per this module's header. No `baseline`/`candidate`: the method computes all
+ * unordered arm pairs in one pass and carries no chosen pair.
+ */
+const DisagreementCountSchema = z.object({
+  n: z.number().int().nonnegative(),
+  disagreements: z.number().int().nonnegative(),
+  rate: z.string().nullable(),
+  interval: JudgeIntervalSchema.nullable(),
+});
+
+const PairwiseDisagreementSchema = z.object({
+  pairs: z.array(DisagreementCountSchema.extend({
+    armA: z.string().min(1),
+    armB: z.string().min(1),
+    byCandidateClass: z.array(DisagreementCountSchema.extend({ candidateClass: z.string().min(1) })),
+    byStratum: z.array(DisagreementCountSchema.extend({ stratum: z.string().min(1) })),
+    exclusions: z.array(ExclusionTripleSchema),
+  })),
+  conflicted: ConflictedSchema,
+});
+
+/**
+ * `paired-majority-delta@1`'s evidence-contrast projection (spec §7.2a), sibling to `comparison`/
+ * `pairwiseDisagreement`. Carried verbatim from the method's own compute() output (`aggregate/src/
+ * paired-majority-delta-method.ts`'s `computePairedMajorityDelta`) — never recomputed. `baseline`
+ * is the evidence-declaring arm's evidence-free twin and `candidate` is the evidence-declaring arm
+ * itself (coordinator ruling, packet #2837): a positive `delta` means declaring evidence increased
+ * agreement.
+ */
+const DeltaProjectionSchema = z.object({
+  n: z.number().int().nonnegative(),
+  delta: z.string().nullable(),
+  interval: JudgeIntervalSchema.nullable(),
+  reasons: z.array(z.string()),
+});
+
+const PairedMajorityDeltaSchema = DeltaProjectionSchema.extend({
+  baseline: z.string().min(1),
+  candidate: z.string().min(1),
+  // `manifest` is optional (M4): the projection omits the key entirely when the method emitted
+  // none, rather than writing `manifest: undefined` into an object that is canonical-JSON encoded
+  // on both sides of the mirror. Present-and-absent must both be expressible for the two copies to
+  // agree byte-for-byte.
+  clusters: z.object({ count: z.number().int().nonnegative(), manifest: z.unknown().optional() }),
+  byCandidateClass: z.array(DeltaProjectionSchema.extend({ candidateClass: z.string().min(1) })),
+  byStratum: z.array(DeltaProjectionSchema.extend({ stratum: z.string().min(1) })),
+  exclusions: z.array(ExclusionTripleSchema),
+  conflicted: ConflictedSchema,
 });
 
 const IntegrityTierCountsSchema = z.object({
@@ -208,6 +276,12 @@ const ClaimPackageWireSchema = z.object({
   /** P4b Task 5: present only for a paired-delta@1 Report, sibling to `headline`. See
    * `ComparisonSchema`'s own comment. */
   comparison: ComparisonSchema.optional(),
+  /** packet #2837: present only for a pairwise-disagreement@1 Report, sibling to `comparison`. See
+   * `PairwiseDisagreementSchema`'s own comment. */
+  pairwiseDisagreement: PairwiseDisagreementSchema.optional(),
+  /** packet #2837: present only for a paired-majority-delta@1 Report, sibling to `comparison`. See
+   * `PairedMajorityDeltaSchema`'s own comment. */
+  pairedMajorityDelta: PairedMajorityDeltaSchema.optional(),
   /** binary-instrument@1's complete per-subject F6 result. This is copied exactly; it is not a
    * headline, comparison, threshold, selection, or ranking projection. */
   qualification: z.unknown().optional(),
@@ -250,10 +324,16 @@ const ClaimPackageWireSchema = z.object({
         path: ["qualification"],
       });
     }
-    if (claim.headline === undefined && claim.comparison === undefined) {
+    if (
+      claim.headline === undefined
+      && claim.comparison === undefined
+      && claim.pairwiseDisagreement === undefined
+      && claim.pairedMajorityDelta === undefined
+    ) {
       ctx.addIssue({
         code: "custom",
-        message: "claim package must carry either headline (wilson@1) or comparison (paired-delta@1)",
+        message: "claim package must carry headline (wilson@1), comparison (paired-delta@1), "
+          + "pairwiseDisagreement (pairwise-disagreement@1), or pairedMajorityDelta (paired-majority-delta@1)",
         path: ["headline"],
       });
     }
@@ -261,7 +341,7 @@ const ClaimPackageWireSchema = z.object({
       claim.verification.command !== PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
       || claim.verification.compatibleCommand !== PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
     ) {
-      ctx.addIssue({ code: "custom", message: "anchored claim package must pin verifier 2.0.0/@2", path: ["verification"] });
+      ctx.addIssue({ code: "custom", message: "anchored claim package must pin verifier 0.1.0/@0.1", path: ["verification"] });
     }
     if (
       claim.verification.checks.length !== READER_ANCHORED_VERIFICATION_CHECKS.length
@@ -276,10 +356,16 @@ const ClaimPackageWireSchema = z.object({
     return;
   }
   if (claim.claimSchema === CLAIM_PACKAGE_SCHEMA_ID) {
-    if (claim.headline === undefined && claim.comparison === undefined) {
+    if (
+      claim.headline === undefined
+      && claim.comparison === undefined
+      && claim.pairwiseDisagreement === undefined
+      && claim.pairedMajorityDelta === undefined
+    ) {
       ctx.addIssue({
         code: "custom",
-        message: "claim package must carry either headline (wilson@1) or comparison (paired-delta@1)",
+        message: "claim package must carry headline (wilson@1), comparison (paired-delta@1), "
+          + "pairwiseDisagreement (pairwise-disagreement@1), or pairedMajorityDelta (paired-majority-delta@1)",
         path: ["headline"],
       });
     }
@@ -291,6 +377,8 @@ const ClaimPackageWireSchema = z.object({
     || claim.qualification === undefined
     || claim.headline !== undefined
     || claim.comparison !== undefined
+    || claim.pairwiseDisagreement !== undefined
+    || claim.pairedMajorityDelta !== undefined
   ) {
     ctx.addIssue({
       code: "custom",
@@ -337,7 +425,7 @@ const ClaimPackageWireSchema = z.object({
     claim.verification.command !== BINARY_QUALIFICATION_VERIFICATION_COMMAND
     || claim.verification.compatibleCommand !== BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
   ) {
-    ctx.addIssue({ code: "custom", message: "binary claim package must pin verifier 2.0.0/@2", path: ["verification"] });
+    ctx.addIssue({ code: "custom", message: "binary claim package must pin verifier 0.1.0/@0.1", path: ["verification"] });
   }
   if (
     claim.verification.checks.length !== READER_VERIFICATION_CHECKS.length
@@ -362,9 +450,13 @@ function exactBinaryClaimControls(input: Record<string, unknown>): boolean {
   const assurance = input.assurance;
   const disclosures = input.disclosures;
   const verification = input.verification;
-  // `anchors` is admitted here so a binary claim that grew one reaches the schema-level refine and
-  // is refused by name, rather than collapsing into the generic control-shape failure.
-  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors"])
+  // `anchors`, `pairwiseDisagreement`, and `pairedMajorityDelta` are admitted here so a binary
+  // claim that grew one of them reaches the schema-level refine and is refused BY NAME (both
+  // fields are checked there, alongside `headline`/`comparison`), rather than collapsing into the
+  // generic control-shape failure. Neither field is ever set on an actual binary-instrument claim
+  // (`methodProjection`'s dispatch is exclusive), so admitting them here is defense in depth, not
+  // a widening any real claim exercises.
+  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "pairwiseDisagreement", "pairedMajorityDelta"])
     && exactKeys(scope, ["draftId", "benchmarkSha256", "taskCount", "arms", "replicates", "venue"])
     && Array.isArray((scope as { arms?: unknown }).arms)
     && ((scope as { arms: unknown[] }).arms).every((arm) => exactKeys(arm, ["armId", "pinning"]))
@@ -441,14 +533,20 @@ export interface BuildClaimPackageInput {
 }
 
 type Comparison = z.infer<typeof ComparisonSchema>;
+type PairwiseDisagreement = z.infer<typeof PairwiseDisagreementSchema>;
+type PairedMajorityDelta = z.infer<typeof PairedMajorityDeltaSchema>;
 
-/** What every method branch below must produce: EITHER `headline` (wilson@1) OR `comparison`
- * (paired-delta@1), plus the top-level `conflicted` block every claim carries regardless of
- * method. */
+/** What every method branch below must produce: EXACTLY ONE of `headline` (wilson@1),
+ * `comparison` (paired-delta@1), `qualification` (binary-instrument@1),
+ * `pairwiseDisagreement` (pairwise-disagreement@1), or `pairedMajorityDelta`
+ * (paired-majority-delta@1) — plus the top-level `conflicted` block every claim carries
+ * regardless of method. */
 interface MethodProjection {
   readonly headline?: Record<string, unknown>;
   readonly comparison?: Comparison;
   readonly qualification?: unknown;
+  readonly pairwiseDisagreement?: PairwiseDisagreement;
+  readonly pairedMajorityDelta?: PairedMajorityDelta;
   readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
 }
 
@@ -545,6 +643,94 @@ function binaryQualificationProjection(subjectResults: unknown): MethodProjectio
   };
 }
 
+/** `pairwise-disagreement@1`'s panel projection (packet #2837, spec §7.1), sibling to
+ * `comparisonProjection`. Carried verbatim from the method's own compute() output
+ * (`aggregate/src/pairwise-disagreement-method.ts`'s `computePairwiseDisagreement`) — never
+ * recomputed. Same narrow, local-shape-check posture as `wilsonProjection`/`comparisonProjection`:
+ * a mismatch here means the sealed Report was not produced by pairwise-disagreement@1. This
+ * method's own output (`aggregate/src/pairwise-disagreement-method.ts`) already carries `pairs`
+ * and top-level `conflicted` and nothing else, so the whole object is carried through rather than
+ * field-by-field reassembled the way `comparisonProjection` does for its richer sibling shape. */
+function pairwiseDisagreementProjection(subjectResults: unknown): MethodProjection {
+  const shape = subjectResults as
+    | { readonly pairs?: unknown; readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown } }
+    | undefined;
+  if (
+    !Array.isArray(shape?.pairs)
+    || typeof shape.conflicted?.count !== "number"
+    || !Array.isArray(shape.conflicted.cellKeys)
+  ) {
+    throw new Error("claim package: Report results do not carry pairwise-disagreement@1's pairs/conflicted shape");
+  }
+  const conflicted = { count: shape.conflicted.count, cellKeys: shape.conflicted.cellKeys as readonly string[] };
+  return {
+    pairwiseDisagreement: {
+      pairs: shape.pairs as PairwiseDisagreement["pairs"],
+      conflicted: { count: conflicted.count, cellKeys: [...conflicted.cellKeys] },
+    },
+    conflicted,
+  };
+}
+
+/** `paired-majority-delta@1`'s evidence-contrast projection (packet #2837, spec §7.2a), sibling to
+ * `comparisonProjection`/`pairwiseDisagreementProjection`. Carried verbatim from the method's own
+ * compute() output (`aggregate/src/paired-majority-delta-method.ts`'s
+ * `computePairedMajorityDelta`) — never recomputed. Same narrow, local-shape-check posture as its
+ * siblings: a mismatch here means the sealed Report was not produced by paired-majority-delta@1. */
+function pairedMajorityDeltaProjection(subjectResults: unknown): MethodProjection {
+  const shape = subjectResults as
+    | {
+        readonly baseline?: unknown;
+        readonly candidate?: unknown;
+        readonly n?: unknown;
+        readonly delta?: unknown;
+        readonly interval?: unknown;
+        readonly reasons?: unknown;
+        readonly clusters?: { readonly count?: unknown; readonly manifest?: unknown };
+        readonly byCandidateClass?: unknown;
+        readonly byStratum?: unknown;
+        readonly exclusions?: unknown;
+        readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown };
+      }
+    | undefined;
+  if (
+    typeof shape?.baseline !== "string"
+    || typeof shape.candidate !== "string"
+    || typeof shape.n !== "number"
+    || !(typeof shape.delta === "string" || shape.delta === null)
+    || typeof shape.interval !== "object"
+    || !Array.isArray(shape.reasons)
+    || typeof shape.clusters?.count !== "number"
+    || !Array.isArray(shape.byCandidateClass)
+    || !Array.isArray(shape.byStratum)
+    || !Array.isArray(shape.exclusions)
+    || typeof shape.conflicted?.count !== "number"
+    || !Array.isArray(shape.conflicted.cellKeys)
+  ) {
+    throw new Error("claim package: Report results do not carry paired-majority-delta@1's baseline/candidate/delta shape");
+  }
+  const conflicted = { count: shape.conflicted.count, cellKeys: shape.conflicted.cellKeys as readonly string[] };
+  return {
+    pairedMajorityDelta: {
+      baseline: shape.baseline,
+      candidate: shape.candidate,
+      n: shape.n,
+      delta: shape.delta as string | null,
+      interval: shape.interval as PairedMajorityDelta["interval"],
+      reasons: [...(shape.reasons as readonly string[])],
+      clusters: {
+        count: shape.clusters.count,
+        ...(shape.clusters.manifest === undefined ? {} : { manifest: shape.clusters.manifest }),
+      },
+      byCandidateClass: shape.byCandidateClass as PairedMajorityDelta["byCandidateClass"],
+      byStratum: shape.byStratum as PairedMajorityDelta["byStratum"],
+      exclusions: shape.exclusions as PairedMajorityDelta["exclusions"],
+      conflicted: { count: conflicted.count, cellKeys: [...conflicted.cellKeys] },
+    },
+    conflicted,
+  };
+}
+
 /** Dispatches on the produced Report's method (P4b Task 5) — the claim package's headline/
  * comparison projection is no longer a mandatory wilson@1 gate. Any method this product has not
  * wired a projection for throws rather than silently building an incomplete claim. */
@@ -560,6 +746,16 @@ function methodProjection(reportRecord: ReportRecord): MethodProjection {
         throw new Error(`claim package: binary-instrument version "${reportRecord.method.version}" is not supported`);
       }
       return binaryQualificationProjection(subjectResults);
+    case BENCHMARKING_METHOD_IDS.pairwiseDisagreement:
+      if (reportRecord.method.version !== BENCHMARKING_METHOD_VERSION) {
+        throw new Error(`claim package: pairwise-disagreement version "${reportRecord.method.version}" is not supported`);
+      }
+      return pairwiseDisagreementProjection(subjectResults);
+    case BENCHMARKING_METHOD_IDS.pairedMajorityDelta:
+      if (reportRecord.method.version !== BENCHMARKING_METHOD_VERSION) {
+        throw new Error(`claim package: paired-majority-delta version "${reportRecord.method.version}" is not supported`);
+      }
+      return pairedMajorityDeltaProjection(subjectResults);
     default:
       throw new Error(`claim package: method "${reportRecord.method.id}" has no claim-package projection`);
   }
@@ -715,12 +911,45 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
         }
       : {}),
     ...(projection.comparison !== undefined ? { comparison: projection.comparison } : {}),
+    ...(projection.pairwiseDisagreement !== undefined ? { pairwiseDisagreement: projection.pairwiseDisagreement } : {}),
+    ...(projection.pairedMajorityDelta !== undefined ? { pairedMajorityDelta: projection.pairedMajorityDelta } : {}),
     ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   };
 }
 
-/** Validates and atomically writes the claim package to `claimPackageArtifactPath`. */
-export function writeClaimPackage(workspaceDir: string, draftId: string, claim: ClaimPackage): void {
+/** Filesystem-safe, deterministic key for an additional (non-canonical) Claim's sibling path
+ * (packet P5, spec §8.3 option 5), derived from the `(method, version)` pair that produced it.
+ * Method ids reaching this point are always registered/code-controlled identifiers (an
+ * unregistered id refuses at `run/compile.ts` before a Run can seal), so this sanitization is
+ * defense in depth rather than the load-bearing safety property. */
+export function additionalClaimPackageKey(method: string, version: string): string {
+  const safe = (value: string) => value.replace(/[^A-Za-z0-9._-]/g, "_");
+  return `${safe(method)}@${safe(version)}`;
+}
+
+/** `<ws>/artifacts/<draftId>/claims/<method>@<version>.json` — sibling Claim path for an
+ * additional plan entry (packet P5). The canonical first report's Claim keeps its original fixed
+ * `claimPackageArtifactPath`; only N-1 additional Claims land here, so no existing reader of the
+ * canonical path needs to change. */
+export function additionalClaimPackagePath(workspaceDir: string, draftId: string, method: string, version: string): string {
+  return join(artifactsDir(workspaceDir), draftId, "claims", `${additionalClaimPackageKey(method, version)}.json`);
+}
+
+/**
+ * Validates and atomically writes the claim package. Absent `selector`, writes to the canonical
+ * `claimPackageArtifactPath` — byte-identical to every call site before `selector` existed. A
+ * present `selector` (packet P5's additional plan entries) writes to that entry's own sibling path
+ * instead, so N Claims from one `report` invocation land at N distinct paths.
+ */
+export function writeClaimPackage(
+  workspaceDir: string,
+  draftId: string,
+  claim: ClaimPackage,
+  selector?: { readonly method: string; readonly version: string },
+): void {
   const validated = ClaimPackageSchema.parse(claim);
-  atomicWriteFileSync(claimPackageArtifactPath(workspaceDir, draftId), canonicalJsonBytes(validated));
+  const path = selector === undefined
+    ? claimPackageArtifactPath(workspaceDir, draftId)
+    : additionalClaimPackagePath(workspaceDir, draftId, selector.method, selector.version);
+  atomicWriteFileSync(path, canonicalJsonBytes(validated));
 }

@@ -23,17 +23,21 @@ import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import { SubmissionRecordSchema } from "@jinn-network/task-execution-protocol";
 import {
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
+  parseBinaryJudgmentAnalysisContext,
   parseBinaryJudgmentInstrument,
+  parseEvaluationSpec,
 } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes, dssePreAuthEncoding, parseDsseEnvelope } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { parseDraftDocument } from "../domain/draft.js";
 import { atomicWriteFileSync, fsyncDirectorySync } from "../fs/atomic.js";
 import {
+  additionalClaimPackagePath,
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ClaimPackageSchema,
 } from "../report/claim.js";
 import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../human-review/verification-workspace.js";
+import type { AdmissionAuthorityRole, BinaryJudgmentAdmissionRecordRole } from "../human-review/verification.js";
 import {
   parseBinaryItemBankIntakeExtension,
 } from "../intake/binary-item-bank.js";
@@ -56,6 +60,7 @@ import { buildPublicAssets } from "./assets.js";
 import {
   BUNDLE_ASSEMBLY_FORMAT,
   BUNDLE_EVIDENCE_FORMAT,
+  BUNDLE_EVIDENCE_ROLES,
   BUNDLE_TRUST_FORMAT,
   BUNDLE_VERDICTS_FORMAT,
   BUNDLE_QUALIFICATION_FORMAT,
@@ -85,6 +90,7 @@ import { INSPECT_ADAPTER_ID, InspectSelectionManifestSchema } from "../runtime/i
 import {
   INSPECT_BINARY_JUDGE_ADAPTER_ID,
   InspectBinaryJudgeSelectionManifestSchema,
+  type InspectBinaryJudgeSelectionManifest,
 } from "../runtime/inspect/binary-judge-manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
@@ -117,11 +123,55 @@ export const PUBLIC_BUNDLE_V4_FILES = [
 
 const ROLE_ORDER: readonly BundleV4EvidenceRole[] = BUNDLE_V4_EVIDENCE_ROLES;
 
+function analysisContextDigestFromEvalSpec(spec: ReturnType<typeof parseEvaluationSpec>): string | undefined {
+  const block = spec.familyBlock;
+  if (typeof block !== "object" || block === null || Array.isArray(block)) return undefined;
+  const testMaterial = (block as { readonly testMaterial?: unknown }).testMaterial;
+  if (!Array.isArray(testMaterial) || testMaterial.length !== 1) return undefined;
+  const entry = testMaterial[0];
+  if (typeof entry !== "object" || entry === null) return undefined;
+  const record = entry as { readonly name?: unknown; readonly digest?: { readonly sha256?: unknown } };
+  if (record.name !== "analysis-context.json" || typeof record.digest?.sha256 !== "string") return undefined;
+  if (!/^[a-f0-9]{64}$/u.test(record.digest.sha256)) return undefined;
+  return record.digest.sha256;
+}
+
 export interface MaterializeBundleInput {
   readonly workspaceDir: string;
   readonly draftId: string;
   readonly benchmarkSha256: string;
   readonly runState: RunState;
+  /** Packet P5 (spec §8.3 option 5): which sealed Report (and its own Claim) this bundle
+   * materializes from, when the run's analysis plan carries more than the canonical entry. Absent
+   * selects the canonical `reportSha256`/`reportEnvelopeSha256` pair and the canonical Claim path
+   * — byte-identical to every bundle materialized before this field existed. Present selects the
+   * matching `(method, version)` sibling from `runState.additionalReports` and that sibling's own
+   * Claim path (`report/claim.ts`'s `additionalClaimPackagePath`). */
+  readonly reportSelector?: { readonly method: string; readonly version: string };
+}
+
+/** Resolves which sealed Report identity pair this bundle materializes from (module header). */
+function resolveReportIdentity(
+  runState: RunState,
+  draftId: string,
+  reportSelector: MaterializeBundleInput["reportSelector"],
+): { readonly reportSha256: string; readonly reportEnvelopeSha256: string } {
+  if (reportSelector === undefined) {
+    // Unreachable when the combined presence check above has already refused — kept as a type
+    // narrowing, not a new runtime branch.
+    return { reportSha256: runState.reportSha256!, reportEnvelopeSha256: runState.reportEnvelopeSha256! };
+  }
+  const match = (runState.additionalReports ?? []).find(
+    (entry) => entry.method === reportSelector.method && entry.version === reportSelector.version,
+  );
+  if (match === undefined) {
+    refuse(
+      "conflict",
+      `runs.${draftId}.additionalReports`,
+      `no additional Report is recorded for "${reportSelector.method}@${reportSelector.version}"`,
+    );
+  }
+  return { reportSha256: match.reportSha256, reportEnvelopeSha256: match.reportEnvelopeSha256 };
 }
 
 export interface MaterializeBundleDeps {
@@ -144,6 +194,36 @@ function addRole(
   const roles = records.get(sha256) ?? new Set();
   roles.add(role);
   records.set(sha256, roles);
+}
+
+/**
+ * The evidence-role-to-authority-role mapping for admission trust bindings (spec §6.8a Group
+ * B-bis; packet P6 item E). Exported for direct test coverage: this is the specific NEW logic
+ * this packet adds to the discriminator below, and it is exercised without needing the full
+ * Benchmark/Run/Matrix/Report bundle-materialization fixture.
+ *
+ * Both screened-branch roles map to `truth-reveal-attestor` — the SAME authority role the
+ * per-item reveal receipt already uses (spec §6.6 deliberately reuses the role rather than
+ * minting one), which is also §6.8a Group C's frozen third authority set,
+ * `["truth-reveal-attestor"]`, exactly.
+ */
+export function binaryAdmissionEvidenceRoleToAuthorityRole(
+  role: Extract<
+    BinaryJudgmentAdmissionRecordRole,
+    "reviewer-roster" | "review-reveal-receipt" | "operator-assertion" | "screening-table" | "screening-reveal-receipt"
+  >,
+): AdmissionAuthorityRole {
+  switch (role) {
+    case "reviewer-roster": return "roster-attestor";
+    case "review-reveal-receipt": return "truth-reveal-attestor";
+    case "operator-assertion": return "operator-truth-attestor";
+    case "screening-table": return "truth-reveal-attestor";
+    case "screening-reveal-receipt": return "truth-reveal-attestor";
+    default: {
+      const exhaustive: never = role;
+      throw new Error(`unsupported admission evidence role ${String(exhaustive)}`);
+    }
+  }
 }
 
 function nodeCode(cause: unknown): string | undefined {
@@ -181,22 +261,22 @@ function recordClosure(input: MaterializeBundleInput): {
     | typeof BUNDLE_V4_FORMAT
     | typeof BUNDLE_V6_FORMAT;
 } {
-  const { workspaceDir, draftId, benchmarkSha256, runState } = input;
+  const { workspaceDir, draftId, benchmarkSha256, runState, reportSelector } = input;
   if (
     runState.runSha256 === undefined
     || runState.matrixSha256 === undefined
-    || runState.reportSha256 === undefined
-    || runState.reportEnvelopeSha256 === undefined
     || runState.reportedAt === undefined
+    || (reportSelector === undefined && (runState.reportSha256 === undefined || runState.reportEnvelopeSha256 === undefined))
   ) {
     refuse("conflict", `runs.${draftId}`, "reported run is missing its Run, Matrix, Report, or Report envelope identity");
   }
+  const { reportSha256, reportEnvelopeSha256 } = resolveReportIdentity(runState, draftId, reportSelector);
 
   const benchmarkBytes = getSealedBytes(workspaceDir, benchmarkSha256);
   const runBytes = getSealedBytes(workspaceDir, runState.runSha256);
   const matrixBytes = getSealedBytes(workspaceDir, runState.matrixSha256);
-  const reportBytes = getSealedBytes(workspaceDir, runState.reportSha256);
-  const reportEnvelopeBytes = getSealedBytes(workspaceDir, runState.reportEnvelopeSha256);
+  const reportBytes = getSealedBytes(workspaceDir, reportSha256);
+  const reportEnvelopeBytes = getSealedBytes(workspaceDir, reportEnvelopeSha256);
   const benchmark = parseBenchmark(benchmarkBytes);
   const run = parseRun(runBytes);
   const matrix = parseMatrix(matrixBytes);
@@ -210,6 +290,9 @@ function recordClosure(input: MaterializeBundleInput): {
   const inspectSelectionSha256 = inspectRuntime
     ? draft.spec.evaluationRuntime?.selectionManifestSha256
     : undefined;
+  // Captured when this run is the binary-judge runtime, so the probe's digest (if any) is
+  // available where roles are assembled below without re-parsing the selection bytes.
+  let binaryInspectSelection: InspectBinaryJudgeSelectionManifest | undefined;
   if (inspectRuntime) {
     if (inspectSelectionSha256 === undefined) {
       refuse("record-integrity", "evidence-closure", "Inspect draft has no sealed runtime selection identity");
@@ -225,13 +308,20 @@ function recordClosure(input: MaterializeBundleInput): {
     }
     const selectionBytes = getSealedBytes(workspaceDir, inspectSelectionSha256);
     if (binaryInspectRuntime) {
-      exactJson(selectionBytes, InspectBinaryJudgeSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
+      binaryInspectSelection = exactJson(
+        selectionBytes,
+        InspectBinaryJudgeSelectionManifestSchema,
+        `records/${inspectSelectionSha256}.bin`,
+      );
     } else {
       exactJson(selectionBytes, InspectSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
     }
   }
 
-  const claimBytes = new Uint8Array(readFileSync(claimPackageArtifactPath(workspaceDir, draftId)));
+  const claimPath = reportSelector === undefined
+    ? claimPackageArtifactPath(workspaceDir, draftId)
+    : additionalClaimPackagePath(workspaceDir, draftId, reportSelector.method, reportSelector.version);
+  const claimBytes = new Uint8Array(readFileSync(claimPath));
   const claim = exactJson(claimBytes, ClaimPackageSchema, "claim-package.json");
   if (!Buffer.from(canonicalJsonBytes(claim)).equals(Buffer.from(claimBytes))) {
     refuse("record-integrity", "claim-package.json", "claim package is not in exact canonical JSON encoding");
@@ -249,8 +339,8 @@ function recordClosure(input: MaterializeBundleInput): {
       || claim.records.benchmarkSha256 !== benchmarkSha256
       || claim.records.runSha256 !== runState.runSha256
       || claim.records.matrixSha256 !== runState.matrixSha256
-      || claim.records.reportSha256 !== runState.reportSha256
-      || claim.records.reportEnvelopeSha256 !== runState.reportEnvelopeSha256
+      || claim.records.reportSha256 !== reportSha256
+      || claim.records.reportEnvelopeSha256 !== reportEnvelopeSha256
       || reportSubjects?.length !== 1
       || reportSubjects[0]?.subjectSha256 !== runState.matrixSha256
       || !Buffer.from(canonicalJsonBytes(reportSubjects[0]?.results as never)).equals(
@@ -313,7 +403,10 @@ function recordClosure(input: MaterializeBundleInput): {
   const admissionAuthorityBindings = new Map<"roster-attestor" | "truth-reveal-attestor" | "operator-truth-attestor", string>();
   let binaryAssetQualification: {
     publicationGrade: boolean;
-    truthAdmission: "two-human-unanimous" | "operator-only";
+    // Type-only widening (packet P6): matches the already-widened source type at
+    // `admission.manifest.truthAdmission`. The screened branch's own materialize.ts logic
+    // (evidence-role mapping, authority-binding discriminators) is out of this packet's scope.
+    truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
     sourceManifestSha256: string;
     admissionManifestSha256: string;
     exclusions: readonly unknown[];
@@ -363,16 +456,20 @@ function recordClosure(input: MaterializeBundleInput): {
         if (prior !== undefined && prior !== keyId) refuse("record-integrity", "qualification.trust", `reviewer ${view.evaluatorId} uses multiple keys`);
         admissionReviewerBindings.set(view.evaluatorId, keyId);
       } else {
-        const role = reachable.roles.find((candidate) => candidate === "reviewer-roster" || candidate === "review-reveal-receipt" || candidate === "operator-assertion");
+        // Widened spec §6.8a Group B-bis (packet P6): the discriminator the spec calls invisible
+        // to both the compiler and the grep sweep, because it switches on nothing and its line
+        // carries none of the family's search tokens. Both screened-branch roles are named here
+        // explicitly so they contribute an authority binding instead of being silently skipped by
+        // `if (role === undefined) continue;` below — which is exactly what made §6.8a's frozen
+        // third authority set unreachable before this fix.
+        const role = reachable.roles.find((candidate): candidate is Parameters<typeof binaryAdmissionEvidenceRoleToAuthorityRole>[0] =>
+          candidate === "reviewer-roster" || candidate === "review-reveal-receipt" || candidate === "operator-assertion"
+          || candidate === "screening-table" || candidate === "screening-reveal-receipt");
         if (role === undefined) continue;
         const envelope = parseDsseEnvelope(bytes);
         const keyId = envelope.signatures[0]?.keyid;
         if (typeof keyId !== "string") refuse("record-integrity", "qualification.trust", `${role} has no signer key id`);
-        const authorityRole = role === "reviewer-roster"
-          ? "roster-attestor" as const
-          : role === "review-reveal-receipt"
-            ? "truth-reveal-attestor" as const
-            : "operator-truth-attestor" as const;
+        const authorityRole = binaryAdmissionEvidenceRoleToAuthorityRole(role);
         const prior = admissionAuthorityBindings.get(authorityRole);
         if (prior !== undefined && prior !== keyId) refuse("record-integrity", "qualification.trust", `${authorityRole} uses multiple keys`);
         admissionAuthorityBindings.set(authorityRole, keyId);
@@ -462,10 +559,47 @@ function recordClosure(input: MaterializeBundleInput): {
     }
     const evaluationSpecSha256 = task.evaluation?.digest?.sha256;
     if (evaluationSpecSha256 !== undefined) addRole(evidenceRecords, evaluationSpecSha256, "evaluation-spec");
+    if (binaryInspectRuntime && evaluationSpecSha256 !== undefined) {
+      let spec: ReturnType<typeof parseEvaluationSpec>;
+      try {
+        spec = parseEvaluationSpec(getSealedBytes(workspaceDir, evaluationSpecSha256));
+      } catch {
+        refuse("record-integrity", "evidence-closure", `EvaluationSpec ${evaluationSpecSha256} bytes are invalid`);
+      }
+      const analysisHex = analysisContextDigestFromEvalSpec(spec);
+      if (analysisHex === undefined) {
+        refuse("record-integrity", "evidence-closure", `EvaluationSpec ${evaluationSpecSha256} has no analysis-context`);
+      }
+      addRole(evidenceRecords, analysisHex, "analysis-context");
+      const analysis = parseBinaryJudgmentAnalysisContext(getSealedBytes(workspaceDir, analysisHex));
+      addRole(evidenceRecords, analysis.labelResolutionSha256.slice("sha256:".length), "label-resolution");
+    }
     const receipt = receipts.get(taskSha256);
     if (receipt !== undefined) addRole(evidenceRecords, receipt.sha256, "admission-receipt");
   }
-  if (binaryInspectRuntime) addRole(evidenceRecords, inspectSelectionSha256!, "runtime-selection");
+  if (binaryInspectRuntime) {
+    addRole(evidenceRecords, inspectSelectionSha256!, "runtime-selection");
+    // Family-method additional-analysis bundles are /2 (no qualification.json) but still
+    // recompute pairwise-disagreement@1 / paired-majority-delta@1, which resolve arm
+    // instruments. The V4 qualification block also addRoles these; the Set is idempotent.
+    for (const arm of run.arms) {
+      const instrumentSha256 = arm.pinning[BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY];
+      if (typeof instrumentSha256 !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(instrumentSha256)) {
+        refuse("record-integrity", "evidence-closure", `Run arm ${arm.armId} has no exact judge-instrument pin`);
+      }
+      addRole(evidenceRecords, instrumentSha256.slice("sha256:".length), "judge-instrument");
+    }
+    // §1.5 rule 5: publish the pre-run snapshot-serving probe as a bundle asset alongside the
+    // selection manifest, so a cold verifier reads the same bytes. Present exactly when the
+    // sealed selection manifest carries `snapshotProbeSha256`.
+    if (binaryInspectSelection?.snapshotProbeSha256 !== undefined) {
+      addRole(
+        evidenceRecords,
+        binaryInspectSelection.snapshotProbeSha256.slice("sha256:".length),
+        "snapshot-probe",
+      );
+    }
+  }
 
   const journal = readRunJournalEntries(workspaceDir, draftId);
   const graph: BundleAssemblyHeader["graph"] = {
@@ -614,6 +748,12 @@ function recordClosure(input: MaterializeBundleInput): {
         ...(entry.evalDeliverySha256 !== undefined ? { evalDeliverySha256: entry.evalDeliverySha256 } : {}),
         ...(entry.verdictSha256 !== undefined ? { verdictSha256: entry.verdictSha256 } : {}),
         ...(entry.evaluationTerminal !== undefined ? { evaluationTerminal: entry.evaluationTerminal } : {}),
+        // Carry the terminal's operational category into the bundle. `evaluationRetries` already
+        // carries the category of every failure that was RETRIED; the failure that exhausted the
+        // budget and terminalized the leg has no retry row, so without this member the accounted
+        // ungradeable cell publishes as an uncategorized absence. Additive and optional: a run
+        // with no categorized could-not-grade terminal seals to identical assembly bytes.
+        ...(entry.failureCategory !== undefined ? { failureCategory: entry.failureCategory } : {}),
       });
       if (entry.verdictSha256 !== undefined) {
         evaluationEvidenceByVerdict.set(
@@ -791,8 +931,9 @@ function recordClosure(input: MaterializeBundleInput): {
       .sort(([left], [right]) => compareCodeUnitStrings(left, right))
       .map(([sha256, roles]) => ({
         sha256,
-        roles: ROLE_ORDER.slice(0, 12).filter((role) => roles.has(role)),
-      })),
+        roles: BUNDLE_EVIDENCE_ROLES.filter((role) => roles.has(role)),
+      }))
+      .filter((record) => record.roles.length > 0),
   });
   files.set("evidence.json", canonicalJsonBytes(evidenceCatalog));
   for (const record of evidenceCatalog.records) {
@@ -862,7 +1003,7 @@ function recordClosure(input: MaterializeBundleInput): {
     claim,
     matrix,
     report,
-    reportSha256: runState.reportSha256,
+    reportSha256,
     matrixSha256: runState.matrixSha256,
     recordSha256s: evidenceCatalog.records.map((record) => record.sha256),
     dissentCellKeys,

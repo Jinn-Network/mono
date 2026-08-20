@@ -163,6 +163,28 @@ describe("checkJudgeability", () => {
     });
   });
 
+  // Packet P5 (issue #2837) acceptance assertion, spec §7.2: `paired-majority-delta@1` clusters
+  // on `task-provenance-source`, which resolves through this exact gate. Every existing positive
+  // test above (`validTaskBytes`) uses the PLAINTEXT `source` variant; this is the first positive
+  // test of the `sourceCommitment` variant — the reshape §7.2's ratified option (A) put in place
+  // (`sourceCommitment: "sha256:<64 hex>"` plus a calendar-strict `timestamp`) — the exact shape
+  // the regenerated binary-judgment bank now carries. Asserted directly against the gate rather
+  // than trusted by inspection: this is the payload shape a real judge item bank ships.
+  test("accepts the regenerated bank's sourceCommitment+timestamp provenance shape (spec §7.2 option A), never a task-provenance-source-missing-shaped refusal", () => {
+    const commitment = `sha256:${DIGEST_A}` as const;
+    const bytes = sealTask({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1", profile: { digest: { sha256: DIGEST_B } },
+      instructions: "do it", outputs: [], evaluation: { digest: { sha256: DIGEST_C } },
+      payload: { provenance: { sourceCommitment: commitment, timestamp: "2026-07-29T00:00:00Z" } },
+    });
+    const digest = bareDigest(bytes);
+    expect(resolveBenchmarkTaskProvenance(digest, () => bytes)).toEqual({
+      ok: true,
+      provenance: { timestamp: "2026-07-29T00:00:00Z", cluster: { tag: "sourceCommitment", value: commitment } },
+    });
+    expect(checkJudgeability(benchmarkWith([digest]), () => bytes)).toEqual({ ok: true });
+  });
+
   test("refuses a valid source accompanied by a malformed present sourceCommitment", () => {
     const bytes = sealTask({
       protocol: "https://spec.jinn.network/profiles/task-execution/v1", profile: { digest: { sha256: DIGEST_B } },

@@ -105,6 +105,47 @@ function minReplicates(protocol: SuiteProtocolId): number {
 export const INSPECT_EVAL_SUBMIT_CLOSED_SENTENCE =
   "Colophon does not place an Inspect Hub row. An Inspect View bundle is a derived artifact, not the claim of record.";
 
+/**
+ * The two accounting definitions that meet in one export's instructions: framework eligibility
+ * counts an accounted-unscorable cell as done (`ACCOUNTED_OUTCOMES`, `run-complete.ts`), sealed
+ * completeness counts judged cells only. A run with one accounted-unscorable cell can therefore
+ * read "partial" on the certification and submit-ready two lines below, each true. Operator ruling
+ * of 2026-08-20 (option c): name the divergence where it appears rather than reconcile the two.
+ */
+export const CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE =
+  "The framework's eligibility rule counts accounted-unscorable cells as complete, which is why a submit-ready verdict can follow counts that are not complete; these sealed counts are the stricter record.";
+
+/**
+ * One certification line, prepended to every derived export's instructions, on all six shapes
+ * (§8.2 "Frozen: (2) the certification statement"). Renders the sealed Matrix's own
+ * `completeness` block (`CompletenessSchema`, `records/src/matrix/schema.ts:142-147`) and
+ * computes nothing: a certification that recomputed completeness would be a second commitment
+ * that can disagree with the artifact it describes.
+ */
+export function exportCompletenessCertification(input: {
+  readonly runSha256: string;
+  readonly completeness?: {
+    readonly expected: number;
+    readonly judged: number;
+    readonly runOutcome: "complete" | "partial" | "cancelled";
+  };
+  /**
+   * The framework-eligibility verdict the same instructions print, passed by the caller that
+   * already decided it. Read only to decide whether the divergence is explained; it feeds no
+   * predicate, and no eligibility rule reads anything on this input.
+   */
+  readonly frameworkSubmitReady?: boolean;
+}): string {
+  if (input.completeness === undefined) {
+    // No sealed Matrix quotes no runOutcome, so there is no divergence to explain.
+    return `no sealed Matrix: completeness of the selection sealed at lock ${input.runSha256} is not yet certified.`;
+  }
+  const { runOutcome, judged, expected } = input.completeness;
+  const certification = `${runOutcome} run of the selection sealed at lock ${input.runSha256}: ${judged} of ${expected} cells judged.`;
+  if (runOutcome === "complete" || input.frameworkSubmitReady !== true) return certification;
+  return `${certification} ${CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE}`;
+}
+
 export function methodLeaderboardEligible(input: DeriveSuiteComparabilityInput): boolean {
   const protocol = protocolOf(input);
   if (protocol === "apex-swe-dev") return false;

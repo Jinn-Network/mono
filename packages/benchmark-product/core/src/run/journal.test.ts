@@ -641,3 +641,49 @@ describe("evaluationGaps", () => {
     expect(evaluationGaps(fold, 1, 1)[0]?.nextEvaluationAttempts).toEqual({ 1: 2 });
   });
 });
+
+describe("evaluation-retryable-failure.category is a closed three-value domain (spec §5.2)", () => {
+  function retryableEntry(
+    category: "backend-unavailable" | "dependency-unavailable" | "transport-failure",
+  ): RunJournalEntry {
+    return {
+      kind: "evaluation-retryable-failure",
+      at: "2026-08-05T00:00:00Z",
+      cellKey: CELL_A,
+      dispatch: 1,
+      evalIndex: 1,
+      evaluationAttempt: 1,
+      evaluator: "urn:e:1",
+      category,
+      recoveryAdvice: "new-attempt-required",
+      detail: "outage",
+    };
+  }
+
+  // §5.2's mapping (journal category -> reporting class: backend-unavailable ->
+  // provider-unavailable, dependency-unavailable -> broker-error, transport-failure ->
+  // transport-timeout) is claimed total over this vocabulary. The three reporting names live in
+  // the report and the runbook, not in code, so there is no mapping table to test directly — what
+  // IS testable is that the domain it's total OVER is exactly these three.
+  test("accepts exactly the three retryable categories §5.2 maps to a reporting class", () => {
+    for (const category of ["backend-unavailable", "dependency-unavailable", "transport-failure"] as const) {
+      const draftId = `draft-${category}`;
+      const entry = retryableEntry(category);
+      appendRunJournalEntry(workspaceDir, draftId, entry);
+      expect(readRunJournalEntries(workspaceDir, draftId)).toEqual([entry]);
+    }
+  });
+
+  // Tripwire: if the evaluation-retryable-failure category enum (this schema) or
+  // RETRYABLE_EVALUATION_CATEGORY_VALUES (drive.ts, which the schema must stay in lockstep with)
+  // ever widens to admit a fourth TaskExecutionErrorCategory, §5.2's mapping stops being total —
+  // a retryable category would reach the journal with no reporting class to map to. This is what
+  // fires. `deadline-exceeded` and `operation-aborted` are real categories (and both generically
+  // "retryable" per task-execution/protocol's ERROR_RETRYABLE) that must still be rejected here.
+  test("rejects real TaskExecutionErrorCategory values outside the three", () => {
+    for (const category of ["deadline-exceeded", "operation-aborted"] as const) {
+      const malformed = { ...retryableEntry("backend-unavailable"), category } as unknown as RunJournalEntry;
+      expect(() => appendRunJournalEntry(workspaceDir, "draft-1", malformed)).toThrow();
+    }
+  });
+});

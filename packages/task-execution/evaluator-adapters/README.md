@@ -7,7 +7,8 @@ Concrete evaluator adapters for the Jinn evaluation harness
 
 - **binary judgment** — reconstructs the sealed Luna request, verifies every Task,
   specification, observation, response, instrument, truth, and analysis-context digest
-  join, then compares an exact `ACCEPT` / `REJECT` parse with admitted truth.
+  join, then compares the parsed judge decision with admitted truth. The instrument names
+  which of the registered response-parser contracts reads its bytes.
 
 - **swe-rebench** — parses the upstream SWE-rebench-V2 grader report into a
   `CompletedEvaluation`, classifying container/tooling failures as unscorable rather
@@ -19,10 +20,15 @@ Concrete evaluator adapters for the Jinn evaluation harness
 The binary-judgment layer is intentionally Inspect-neutral: it invokes no model, broker,
 repository, or launcher. Invalid delivered response bytes are completed scientific output
 (`REJECT`, `parseValid=false`); missing, malformed, drifted, or cancelled evaluator material
-is an operational no-verdict path. Its strict response parser uses fatal UTF-8 decoding,
-trims only ASCII space/tab/CR/LF at the edges, performs no normalization, and compares exact
-tokens. The allowlist identity and generated evaluation-method descriptor come from the
-profiles package's sealed umbrella semantics, so there is no second parser oracle here.
+is an operational no-verdict path. It implements the five registered response-parser
+contracts the profiles package seals, and an instrument selects exactly one of them by
+identity; there is no arm-supplied, task-supplied, or configuration-supplied parser code
+anywhere. All five decode UTF-8 fatally with the byte-order mark kept, perform no
+normalization, and are pure. They differ only in what they read: a whole-output token over
+`ACCEPT`/`REJECT`, `YES`/`NO`, or `CORRECT`/`WRONG`; a `verdict` member of a single strict
+RFC 8259 object; or a delimited scan of untrimmed prose. The allowlist identity and
+generated evaluation-method descriptor come from the profiles package's sealed umbrella
+semantics, so there is no second parser oracle here.
 `buildBinaryJudgmentEvaluationSpecification(analysisContextSha256)` is likewise the sole
 producer authority for the served `EvaluationSpec`; its matching
 `isBinaryJudgmentEvaluationSpecification` gate requires canonical equality with that builder,
@@ -147,16 +153,26 @@ package normalizes them to `fail` deliberately, and the prediction fixtures reco
 
 ## Parser identity and the semantics documents
 
-Each parser's `ParserIdentity.digest` is the SHA-256 of its own semantics document in
-`fixtures/parsers/`, pinned by `src/parser-identity.test.ts`. Editing what a parser
-promises without bumping its `version` therefore breaks the build rather than silently
-changing what an allowlist key means. This rests on `parserAllowlistKey` incorporating
-the digest — it does: `` `${id}@${version}#${digest}` `` — so a drifted digest is a
-different key and the deployment allowlist refuses it. Conformance case 5 proves that
-refusal end-to-end against the real runtime.
+Each parser's `ParserIdentity.digest` is the SHA-256 of its own code-free semantics
+document. The swe-rebench and prediction documents live in `fixtures/parsers/` here; the
+binary-judgment umbrella and the five response-parser contracts are owned and sealed by
+`@jinn-network/task-execution-profiles` and served from its
+`profiles/binary-judgment/parsers/` tree, so this package holds no second oracle for them.
+Both sets are pinned by `src/parser-identity.test.ts`. Editing what a parser promises
+without bumping its `version` therefore breaks the build rather than silently changing
+what an allowlist key means. This rests on `parserAllowlistKey` incorporating the digest —
+it does: `` `${id}@${version}#${digest}` `` — so a drifted digest is a different key and
+the deployment allowlist refuses it. Conformance case 5 proves that refusal end-to-end
+against the real runtime.
 
 The semantics documents are shipped in the published tarball (`files` includes
 `fixtures/`) because the digest is computed from their bytes at runtime.
+
+`fixtures/binary-judgment-parsers/` holds the behavioral corpus for the five response-parser
+contracts: one file per contract, each case naming its input bytes and the exact
+`{decision, parseValid, invalidReason}` the contract must produce. The corpus is the
+disclosure artifact, so it pins the contract's digest and an outside party can run it
+against their own implementation.
 
 ## Legacy behavior enters as fixtures, never as ported code
 
