@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Verify package inventory and dependency graph
@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Enable Yarn 4.13.0
@@ -115,7 +115,7 @@ jobs:
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Enable Yarn 4.13.0
