@@ -2025,7 +2025,7 @@
       "decisionRecords": 6,
       "discoveredFirstPartySurfaces": 4183,
       "generatedOutputSources": 1414,
-      "generatorSources": 676,
+      "generatorSources": 678,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 6
@@ -2435,6 +2435,26 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/generate-architecture.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/hermetic-selection.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/hermetic-selection.test.mjs"
       },
       {
         "categories": [
