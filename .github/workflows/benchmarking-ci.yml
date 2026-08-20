@@ -32,7 +32,7 @@ jobs:
   architecture:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -46,7 +46,7 @@ jobs:
   records:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -97,7 +97,7 @@ jobs:
     needs: [records]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -165,7 +165,7 @@ jobs:
     needs: [records]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -200,7 +200,7 @@ jobs:
     needs: [records, testing]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -251,7 +251,7 @@ jobs:
     needs: [records, testing]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -289,7 +289,7 @@ jobs:
     needs: [records, testing, run]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -333,7 +333,7 @@ jobs:
     needs: [records, testing, run]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -373,7 +373,7 @@ jobs:
     needs: [records, aggregate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -410,7 +410,7 @@ jobs:
     needs: [records]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -475,7 +475,7 @@ jobs:
             "$LOCAL_RESULT"; do
             test "$result" = "success"
           done
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4

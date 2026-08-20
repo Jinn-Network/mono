@@ -116,7 +116,7 @@ jobs:
   architecture:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -131,7 +131,7 @@ jobs:
     needs: [architecture]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -285,7 +285,7 @@ jobs:
       run:
         working-directory: packages/benchmark-product/web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -334,7 +334,7 @@ jobs:
     needs: [architecture, product]
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -370,7 +370,7 @@ jobs:
             "$MACOS_ARM64_RESULT"; do
             test "$result" = "success"
           done
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22

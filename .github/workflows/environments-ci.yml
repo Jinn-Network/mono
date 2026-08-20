@@ -44,7 +44,7 @@ jobs:
   architecture:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -65,7 +65,7 @@ jobs:
   record:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -99,7 +99,7 @@ jobs:
   chain-record:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -134,7 +134,7 @@ jobs:
   information-world:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -174,7 +174,7 @@ jobs:
   verification:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -208,7 +208,7 @@ jobs:
   chain-verification:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -242,7 +242,7 @@ jobs:
   chain-extraction:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -299,7 +299,7 @@ jobs:
             "$CHAIN_EXTRACTION_RESULT"; do
             test "$result" = "success"
           done
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4

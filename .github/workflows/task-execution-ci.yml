@@ -40,7 +40,7 @@ jobs:
   architecture:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -54,7 +54,7 @@ jobs:
   foundation:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -85,7 +85,7 @@ jobs:
     needs: foundation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -125,7 +125,7 @@ jobs:
     needs: foundation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -164,7 +164,7 @@ jobs:
     needs: [foundation, backend]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -208,7 +208,7 @@ jobs:
     needs: [foundation, profiles]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -252,7 +252,7 @@ jobs:
     needs: [foundation, backend, profiles, supervisor, workspace]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -316,7 +316,7 @@ jobs:
     needs: [foundation, backend, supervisor, workspace, launchers]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -400,7 +400,7 @@ jobs:
     needs: [foundation, backend, profiles, supervisor, workspace, launchers, testing]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -486,7 +486,7 @@ jobs:
     needs: [foundation, backend, profiles, supervisor, workspace, launchers, backend-local]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -562,7 +562,7 @@ jobs:
     needs: [foundation, backend, profiles, supervisor, workspace, launchers, backend-local, evaluation-harness]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -628,7 +628,7 @@ jobs:
     needs: [foundation, backend, profiles, supervisor, workspace, launchers, backend-local, evaluation-harness, evaluator-adapters]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -726,7 +726,7 @@ jobs:
             "$OCI_GRADER_RESULT"; do
             test "$result" = "success"
           done
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4

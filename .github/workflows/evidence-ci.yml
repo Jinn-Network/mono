@@ -46,7 +46,7 @@ jobs:
   architecture:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -62,7 +62,7 @@ jobs:
   foundation:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -142,7 +142,7 @@ jobs:
           - attestation-issuer
           - publication
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -261,7 +261,7 @@ jobs:
     needs: foundation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -307,7 +307,7 @@ jobs:
     needs: [foundation, components]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -372,7 +372,7 @@ jobs:
     needs: [foundation, components]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -431,7 +431,7 @@ jobs:
     needs: [foundation]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -484,7 +484,7 @@ jobs:
     needs: [foundation, trace]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -543,7 +543,7 @@ jobs:
     needs: [foundation, components, derivation]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -613,7 +613,7 @@ jobs:
     needs: [foundation, components]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -671,7 +671,7 @@ jobs:
     needs: [foundation, components, catalog-sqlite]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -782,7 +782,7 @@ jobs:
             "$TRACE_DECODE_RESULT"; do
             test "$result" = "success"
           done
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
