@@ -281,6 +281,25 @@ describe.sequential("server action layer against a real workspace", () => {
       .not.toContain("/private/path/key");
   });
 
+  test("method.bind refuses a catalog suite and an Inspect configuration together, and refuses neither", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "bp-method-bind-xor-"));
+    workspaces.push(workspace);
+    process.env[WORKSPACE_ENV] = workspace;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    expect(await invoke("workspace.init")).toMatchObject({ status: "success" });
+    expect(await invoke("draft.create", { draftId: "method-xor", name: "Method xor" })).toMatchObject({ status: "success" });
+
+    const both = await invoke("method.bind", {
+      draftId: "method-xor",
+      ref: "terminal-bench-2.1",
+      configuration: "{}",
+    });
+    expect(both).toMatchObject({ status: "error", error: { code: "invalid-invocation" } });
+
+    const neither = await invoke("method.bind", { draftId: "method-xor" });
+    expect(neither).toMatchObject({ status: "error", error: { code: "invalid-invocation" } });
+  });
+
   test("guided agent Arm setup projects local readiness safely and seals only credential-free pinning", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "bp-guided-agent-"));
     const privateSentinel = "PRIVATE_AGENT_PATH_SENTINEL";
