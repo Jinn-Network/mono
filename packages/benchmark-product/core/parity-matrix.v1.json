@@ -6,7 +6,7 @@
       "operation": "admitHumanTruth",
       "cliVerb": "human-review admit",
       "authorityGated": false,
-      "description": "Validates two-person unanimous truth or explicit operator-only truth and derives resolution and analysis records.",
+      "description": "Validates two-person unanimous truth, explicit operator-only truth, or screened-operator-sampled truth and derives resolution and analysis records.",
       "gui": {
         "status": "unavailable",
         "reason": "requires local signed-review, roster, and licensed truth evidence files"

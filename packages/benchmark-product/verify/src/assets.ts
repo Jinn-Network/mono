@@ -24,7 +24,7 @@ export interface PublicAssetInput {
   /** Producer-verified binary admission/instrument facts. Required for claim-package/2 only. */
   readonly binaryQualification?: {
     readonly publicationGrade: boolean;
-    readonly truthAdmission: "two-human-unanimous" | "operator-only";
+    readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
     readonly sourceManifestSha256: string;
     readonly admissionManifestSha256: string;
     readonly exclusions: readonly unknown[];
@@ -460,16 +460,46 @@ function comparisonSectionMarkdown(comparison: PublicComparisonView | undefined)
   return `## What happened, task by task\n\n${descriptive}${sample}\n\n${tasks}\n\n`;
 }
 
-function binaryAdmissionHtml(input: PublicAssetInput): string {
-  const admission = input.binaryQualification;
-  if (admission === undefined) return "";
-  return `<section id="qualification-admission" aria-labelledby="qualification-admission-heading"><h2 id="qualification-admission-heading">Authenticated truth admission and instruments</h2><dl class="facts"><div><dt>Publication grade</dt><dd>${admission.publicationGrade ? "Yes — two-human unanimous" : "No — operator-only"}</dd></div><div><dt>Truth admission</dt><dd>${escapeMarkup(admission.truthAdmission)}</dd></div><div><dt>Source manifest</dt><dd class="digest">${escapeMarkup(admission.sourceManifestSha256)}</dd></div><div><dt>Admission manifest</dt><dd class="digest">${escapeMarkup(admission.admissionManifestSha256)}</dd></div><div><dt>Pre-run exclusions</dt><dd>${admission.exclusions.length}</dd></div></dl><h3>Human disagreement and deterministic replacements</h3><pre>${escapeMarkup(canonicalText(admission.exclusions))}</pre><h3>Exact instrument and prompt-template commitments</h3><pre>${escapeMarkup(canonicalText(admission.instruments))}</pre></section>`;
+/**
+ * Publication-grade wording, keyed on `truthAdmission` (spec §6.8a Group A; ruling C-5) rather
+ * than the `publicationGrade` boolean alone. The boolean-keyed ternary this replaced printed the
+ * literal words "Yes — two-human unanimous" for ANY publication-grade admission, and the
+ * screened-operator-sampled branch is publication-grade under §6.8 -- so the old ternary would
+ * have published a false two-human-unanimous claim for a screened bundle. The two existing
+ * strings below keep their exact bytes (half of the byte-compatibility proof, spec §0.4); the
+ * screened wording is frozen by ruling C-5 and passes §6.1's overclaim test: no "human", no
+ * "unanimous", no "independent". It echoes the mode name so a reader can join it to the "Truth
+ * admission" field rendered immediately below, and stays terse because the full disclosure is the
+ * `screened-not-independently-labeled` limitation prose rendered in the limitations section.
+ */
+function publicationGradeWording(truthAdmission: NonNullable<PublicAssetInput["binaryQualification"]>["truthAdmission"]): {
+  readonly html: string;
+  readonly markdown: string;
+} {
+  switch (truthAdmission) {
+    case "two-human-unanimous":
+      return { html: "Yes — two-human unanimous", markdown: "yes — two-human unanimous" };
+    case "operator-only":
+      return { html: "No — operator-only", markdown: "no — operator-only" };
+    case "screened-operator-sampled":
+      return { html: "Yes — screened and operator-sampled", markdown: "yes — screened and operator-sampled" };
+    default: {
+      const exhaustive: never = truthAdmission;
+      throw new Error(`unsupported truthAdmission ${String(exhaustive)}`);
+    }
+  }
 }
 
-function binaryAdmissionMarkdown(input: PublicAssetInput): string {
+export function binaryAdmissionHtml(input: PublicAssetInput): string {
   const admission = input.binaryQualification;
   if (admission === undefined) return "";
-  return `## Authenticated truth admission and instruments\n\n- Publication grade: ${admission.publicationGrade ? "yes — two-human unanimous" : "no — operator-only"}\n- Truth admission: ${escapeMarkdown(admission.truthAdmission)}\n- Source manifest: ${escapeMarkdown(admission.sourceManifestSha256)}\n- Admission manifest: ${escapeMarkdown(admission.admissionManifestSha256)}\n- Pre-run exclusions: ${admission.exclusions.length}\n\n### Human disagreement and deterministic replacements\n\n    ${escapeMarkdownCode(canonicalText(admission.exclusions))}\n\n### Exact instrument and prompt-template commitments\n\n    ${escapeMarkdownCode(canonicalText(admission.instruments))}\n\n`;
+  return `<section id="qualification-admission" aria-labelledby="qualification-admission-heading"><h2 id="qualification-admission-heading">Authenticated truth admission and instruments</h2><dl class="facts"><div><dt>Publication grade</dt><dd>${publicationGradeWording(admission.truthAdmission).html}</dd></div><div><dt>Truth admission</dt><dd>${escapeMarkup(admission.truthAdmission)}</dd></div><div><dt>Source manifest</dt><dd class="digest">${escapeMarkup(admission.sourceManifestSha256)}</dd></div><div><dt>Admission manifest</dt><dd class="digest">${escapeMarkup(admission.admissionManifestSha256)}</dd></div><div><dt>Pre-run exclusions</dt><dd>${admission.exclusions.length}</dd></div></dl><h3>Human disagreement and deterministic replacements</h3><pre>${escapeMarkup(canonicalText(admission.exclusions))}</pre><h3>Exact instrument and prompt-template commitments</h3><pre>${escapeMarkup(canonicalText(admission.instruments))}</pre></section>`;
+}
+
+export function binaryAdmissionMarkdown(input: PublicAssetInput): string {
+  const admission = input.binaryQualification;
+  if (admission === undefined) return "";
+  return `## Authenticated truth admission and instruments\n\n- Publication grade: ${publicationGradeWording(admission.truthAdmission).markdown}\n- Truth admission: ${escapeMarkdown(admission.truthAdmission)}\n- Source manifest: ${escapeMarkdown(admission.sourceManifestSha256)}\n- Admission manifest: ${escapeMarkdown(admission.admissionManifestSha256)}\n- Pre-run exclusions: ${admission.exclusions.length}\n\n### Human disagreement and deterministic replacements\n\n    ${escapeMarkdownCode(canonicalText(admission.exclusions))}\n\n### Exact instrument and prompt-template commitments\n\n    ${escapeMarkdownCode(canonicalText(admission.instruments))}\n\n`;
 }
 
 function factsHeading(facts: MethodFacts, source: "report" | "claim"): string {

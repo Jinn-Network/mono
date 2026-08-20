@@ -326,7 +326,10 @@ export const BINARY_INSTRUMENT_PARAMETER_SCHEMA: Method["parameterSchema"] = {
       items: { type: "string", pattern: STRATUM_NAME.source },
     },
     parserInvalidPolicy: { enum: ["reject"] },
-    truthAdmission: { enum: ["two-human-unanimous", "operator-only"] },
+    // Widened spec §6.7 (packet P6): a third admission mode, screened by a pinned model and
+    // sampled/hand-checked by the operator. Compatible widening (§0.4): every parameter set valid
+    // today still validates and seals identically.
+    truthAdmission: { enum: ["two-human-unanimous", "operator-only", "screened-operator-sampled"] },
     intervalAlpha: { enum: ["0.05"] },
     // Optional, spec §1.4. Under the compatible-widening rule (§0.4), adding an OPTIONAL property
     // to a closed object still validates every parameter set valid today, seals identical bytes
@@ -349,7 +352,7 @@ export interface BinaryInstrumentParameters {
   readonly candidateClasses: readonly string[];
   readonly strata: readonly string[];
   readonly parserInvalidPolicy: "reject";
-  readonly truthAdmission: "two-human-unanimous" | "operator-only";
+  readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
   readonly intervalAlpha: "0.05";
   /** Optional (spec §1.4): derived at lock from the arms' shared model.requested. Absent means
    * "emit the alias limitation", which is today's behavior byte for byte. */
@@ -416,6 +419,7 @@ export function validateBinaryInstrumentParameters(
   if (
     parameters["truthAdmission"] !== "two-human-unanimous"
     && parameters["truthAdmission"] !== "operator-only"
+    && parameters["truthAdmission"] !== "screened-operator-sampled"
   ) {
     issues.push('parameter "truthAdmission" is outside its enum');
   }
@@ -685,11 +689,14 @@ function validateLabelResolution(
     readonly truthAdmission: BinaryInstrumentParameters["truthAdmission"];
   },
 ): void {
+  // §6.7's CommonShape refactor: `humanReviewEvaluationSpecSha256` is not common. It lives in the
+  // two-human and operator-only variants (below), where it already appears in every serialized
+  // record, but not on the screened variant — a row never hand-checked has no human-review
+  // evaluation, and a required field whose meaning does not apply is a fabricated reference.
   const common = [
     "protocol",
     "itemSha256",
     "itemId",
-    "humanReviewEvaluationSpecSha256",
     "truthLabel",
     "candidateClass",
     "stratum",
@@ -697,12 +704,18 @@ function validateLabelResolution(
     "truthAdmission",
   ];
   const truthAdmission = resolution["truthAdmission"];
-  if (truthAdmission !== "two-human-unanimous" && truthAdmission !== "operator-only") {
+  if (
+    truthAdmission !== "two-human-unanimous"
+    && truthAdmission !== "operator-only"
+    && truthAdmission !== "screened-operator-sampled"
+  ) {
     throw new MethodInputError("binary-record-malformed", digest, "label resolution truthAdmission is unsupported");
   }
   const variant = truthAdmission === "two-human-unanimous"
-    ? ["reviewVerdictSha256s", "reviewerRosterSha256", "visibilityReceiptSha256s", "revealReceiptSha256"]
-    : ["operatorAssertionSha256"];
+    ? ["humanReviewEvaluationSpecSha256", "reviewVerdictSha256s", "reviewerRosterSha256", "visibilityReceiptSha256s", "revealReceiptSha256"]
+    : truthAdmission === "operator-only"
+      ? ["humanReviewEvaluationSpecSha256", "operatorAssertionSha256"]
+      : ["screeningTableSha256", "screeningRevealReceiptSha256"];
   requireExactKeys(resolution, [...common, ...variant], digest, "label resolution");
   if (resolution["protocol"] !== LABEL_RESOLUTION_PROTOCOL) {
     throw new MethodInputError("binary-binding-mismatch", digest, "label resolution protocol is unsupported");
@@ -714,11 +727,6 @@ function validateLabelResolution(
   ) {
     throw new MethodInputError("binary-record-malformed", digest, "labelResolution.itemId is not an opaque UUID URN");
   }
-  wireSha256(
-    resolution["humanReviewEvaluationSpecSha256"],
-    digest,
-    "labelResolution.humanReviewEvaluationSpecSha256",
-  );
   if (!isCalendarStrictRfc3339(resolution["resolvedAt"])) {
     throw new MethodInputError("binary-record-malformed", digest, "labelResolution.resolvedAt must be an RFC 3339 date-time");
   }
@@ -731,13 +739,28 @@ function validateLabelResolution(
   if (typeof resolution["stratum"] !== "string" || !STRATUM_NAME.test(resolution["stratum"])) {
     throw new MethodInputError("binary-record-malformed", digest, "labelResolution.stratum is unsupported");
   }
-  if (truthAdmission === "two-human-unanimous") {
-    requireSortedUniqueDigestPair(resolution["reviewVerdictSha256s"], digest, "reviewVerdictSha256s");
-    wireSha256(resolution["reviewerRosterSha256"], digest, "reviewerRosterSha256");
-    requireSortedUniqueDigestPair(resolution["visibilityReceiptSha256s"], digest, "visibilityReceiptSha256s");
-    wireSha256(resolution["revealReceiptSha256"], digest, "revealReceiptSha256");
-  } else {
-    wireSha256(resolution["operatorAssertionSha256"], digest, "operatorAssertionSha256");
+  // §6.8a Group B shape: an exhaustive switch with a never-typed default, so a fourth admission
+  // mode is a compile error rather than a silent reroute.
+  switch (truthAdmission) {
+    case "two-human-unanimous":
+      wireSha256(resolution["humanReviewEvaluationSpecSha256"], digest, "labelResolution.humanReviewEvaluationSpecSha256");
+      requireSortedUniqueDigestPair(resolution["reviewVerdictSha256s"], digest, "reviewVerdictSha256s");
+      wireSha256(resolution["reviewerRosterSha256"], digest, "reviewerRosterSha256");
+      requireSortedUniqueDigestPair(resolution["visibilityReceiptSha256s"], digest, "visibilityReceiptSha256s");
+      wireSha256(resolution["revealReceiptSha256"], digest, "revealReceiptSha256");
+      break;
+    case "operator-only":
+      wireSha256(resolution["humanReviewEvaluationSpecSha256"], digest, "labelResolution.humanReviewEvaluationSpecSha256");
+      wireSha256(resolution["operatorAssertionSha256"], digest, "operatorAssertionSha256");
+      break;
+    case "screened-operator-sampled":
+      wireSha256(resolution["screeningTableSha256"], digest, "screeningTableSha256");
+      wireSha256(resolution["screeningRevealReceiptSha256"], digest, "screeningRevealReceiptSha256");
+      break;
+    default: {
+      const exhaustive: never = truthAdmission;
+      throw new MethodInputError("binary-record-malformed", digest, `label resolution truthAdmission ${String(exhaustive)} is unsupported`);
+    }
   }
   if (truthAdmission !== expected.truthAdmission) {
     throw new MethodInputError("binary-binding-mismatch", digest, "label resolution truthAdmission drifts from the registered method");

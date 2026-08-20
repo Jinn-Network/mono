@@ -202,6 +202,104 @@ describe("importBinaryItemBank", () => {
       .toEqual([expect.objectContaining({ actor: "sponsor-1", outcome: "ok" })]);
   });
 
+  // spec §6.8 (packet P6): the importer's closure check accepts the screened branch through the
+  // same verified-closure path as the other two admission modes, with no importer-side edit
+  // (core/src/intake/binary-item-bank.ts delegates to verifyBinaryJudgmentAdmissionClosureInWorkspace
+  // and joins on `accepted` by itemSha256 alone, mode-agnostically). This test is that claim's
+  // proof, not an assertion in prose.
+  test("composes a screened-operator-sampled admission into ordinary stored records, unmodified", () => {
+    const { context, draftId } = setup();
+    const provenanceSha256 = `sha256:${"d".repeat(64)}` as const;
+    const publishedAt = "2026-03-09T00:00:00Z";
+    const admittedItem = {
+      itemId: "urn:uuid:10000000-0000-4000-8000-000000000003",
+      question: "Synthetic question?",
+      referenceAnswer: "Synthetic reference.",
+      candidateAnswer: "Synthetic candidate.",
+      provenance: { sourceCommitment: provenanceSha256, timestamp: publishedAt },
+      sources: [{ digest: { sha256: provenanceSha256.slice("sha256:".length) } }],
+    };
+    const heldBackItem = {
+      ...admittedItem,
+      itemId: "urn:uuid:10000000-0000-4000-8000-000000000004",
+      candidateAnswer: "Held-back reserve.",
+    };
+    const admittedItemBytes = canonicalJsonBytes(admittedItem);
+    const admittedItemSha256 = recordDigest(admittedItemBytes);
+    putSealedBytes(context.workspaceDir, admittedItemBytes);
+
+    const admitted = admitHumanTruth(context, {
+      draftId,
+      truthAdmission: "screened-operator-sampled",
+      candidates: [{
+        itemSha256: admittedItemSha256,
+        itemId: admittedItem.itemId,
+        humanReviewEvaluationSpecSha256: BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest,
+        candidateClass: "synthetic",
+        stratum: "core",
+        poolPosition: 1,
+      }],
+      screening: {
+        screeningInstrumentSha256: `sha256:${"e".repeat(64)}`,
+        sampleSeed: "synthetic-import-seed",
+        sampleSize: 1,
+        samplingScriptSha256: `sha256:${"f".repeat(64)}`,
+        rawOutputsSha256: `sha256:${"1".repeat(64)}`,
+        rows: [{
+          itemSha256: admittedItemSha256,
+          intendedLabel: "CORRECT",
+          screeningVerdict: "CORRECT",
+          handChecked: true,
+          handVerdict: "confirm",
+        }],
+      },
+    });
+    expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
+    if (!admitted.ok) throw new Error("unreachable");
+
+    const items = renderCanonicalJsonl([
+      { protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL, item: admittedItem },
+      { protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL, item: heldBackItem },
+    ]);
+    const sources = renderCanonicalJsonl([{
+      protocol: BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
+      provenanceSha256,
+      source: {
+        uri: "https://fixtures.example.test/source.json",
+        digest: { sha256: provenanceSha256.slice("sha256:".length) },
+      },
+      license: {
+        uri: "https://www.apache.org/licenses/LICENSE-2.0.txt",
+        digest: { sha256: "b".repeat(64) },
+      },
+      attribution: {
+        uri: "https://fixtures.example.test/attribution.txt",
+        digest: { sha256: "c".repeat(64) },
+      },
+      publishedAt,
+    }]);
+    const admissions = renderCanonicalJsonl(admitted.result.resolutions.map((resolution) => ({
+      protocol: BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
+      admissionManifestSha256: admitted.result.admissionManifestSha256,
+      itemSha256: resolution.itemSha256,
+      labelResolutionSha256: resolution.labelResolutionSha256,
+      analysisContextSha256: resolution.analysisContextSha256,
+    })));
+
+    const imported = importBinaryItemBank(context, {
+      profile: "binary-judgment@2",
+      draftId,
+      itemBankJsonl: items,
+      sourceManifestJsonl: sources,
+      admissionIndexJsonl: admissions,
+    });
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    if (!imported.ok) throw new Error("unreachable");
+    expect(imported.result.taskSha256s).toHaveLength(1);
+    expect(imported.result.truthAdmission).toBe("screened-operator-sampled");
+    expect(imported.result.publicationGrade).toBe(true);
+  });
+
   test("refuses the superseded binary-judgment@1 profile", () => {
     // The profile check runs before any manifest is read, so this proves refusal on the profile
     // operand alone; it does not need admitted evidence or well-formed manifests behind it.

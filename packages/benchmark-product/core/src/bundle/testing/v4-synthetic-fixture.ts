@@ -39,6 +39,7 @@ import {
 } from "@jinn-network/task-execution-profiles";
 import {
   SubmissionRecordSchema,
+  compareCodeUnitStrings,
   sealDelivery,
 } from "@jinn-network/task-execution-protocol";
 import {
@@ -101,7 +102,7 @@ import {
 import type { LocalVenue } from "../../venue/venue.js";
 import { materializePublicBundle, type MaterializedBundle } from "../materialize.js";
 
-export type SyntheticV4TruthAdmission = "operator-only" | "two-human-unanimous";
+export type SyntheticV4TruthAdmission = "operator-only" | "two-human-unanimous" | "screened-operator-sampled";
 export type SyntheticV4Scenario = "minimal" | "qualification-144";
 
 export interface SyntheticV4BundleFixture {
@@ -674,6 +675,61 @@ async function admitItems(
       truthAdmission,
       candidates,
     }), "operator admission");
+  }
+
+  // Screened-operator-sampled (spec §6.3, §6.4; packet P6, S4 item 1). Sequenced AFTER the
+  // operator-only arm's early return and BEFORE the two-human code below, exactly like
+  // operator-only: this branch is unreachable for either existing truthAdmission value, so their
+  // code paths -- and therefore their `context.clock()` call sequence -- are byte-for-byte
+  // unchanged (H-1: a screened arm that seals extra records consumes extra clock ticks ONLY if it
+  // runs before an existing seal; it never runs at all for the other two modes). The screen is
+  // built to agree with every item's own intended label and hand-confirm every row -- a clean,
+  // always-admitted table with a full sample and a 1.0 agreement rate is all a shared bundle-
+  // materialization fixture needs; the refusal paths (disagreement, indeterminate, tie-break,
+  // partial sample, coverage) are exercised directly against `admitHumanTruth` and the standalone
+  // verifier elsewhere, not through this shared builder.
+  if (truthAdmission === "screened-operator-sampled") {
+    const rows = items.map((item) => {
+      const payload = buildItemPayload(item, withEvidence);
+      const itemSha256 = recordDigest(canonicalJsonBytes(payload));
+      putSealedBytes(context.workspaceDir, canonicalJsonBytes(payload));
+      return {
+        itemSha256,
+        intendedLabel: item.truthLabel,
+        screeningVerdict: item.truthLabel,
+        handChecked: true,
+        handVerdict: "confirm" as const,
+      };
+    });
+    // Spec §6.3 requires the table's `rows` to be sorted strictly ascending by `itemSha256`, and
+    // `ScreeningTableSchema` enforces it. Item order is NOT digest order: the default items happen
+    // to digest ascending, but `withEvidence: true` changes every payload and the pair comes out
+    // descending, so emitting them in item order makes `admitHumanTruth` refuse with a schema error
+    // pointing at the table instead of at this builder. Sort a COPY: `rows` stays item-aligned
+    // because `candidates` below indexes into it by position, and desynchronising those two would
+    // pair each candidate's itemId and stratum with another item's digest.
+    const screeningRows = [...rows].sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256));
+    const candidates = items.map((item, index) => ({
+      itemSha256: rows[index]!.itemSha256,
+      itemId: item.itemId,
+      humanReviewEvaluationSpecSha256: BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest,
+      candidateClass: "synthetic",
+      stratum: item.stratum,
+      poolPosition: index + 1,
+    }));
+    return requireOk(admitHumanTruth(context, {
+      draftId: DRAFT_ID,
+      truthAdmission,
+      candidates,
+      screening: {
+        screeningInstrumentSha256: prefixed(sha256Hex(encoder.encode("synthetic-v4-fixture-screening-instrument"))),
+        sampleSeed: "synthetic-v4-fixture-screening-seed",
+        sampleSize: rows.length,
+        samplingScriptSha256: prefixed(sha256Hex(encoder.encode("synthetic-v4-fixture-sampling-script"))),
+        rawOutputsSha256: prefixed(sha256Hex(encoder.encode("synthetic-v4-fixture-raw-screening-outputs"))),
+        rows: screeningRows,
+      },
+    }), "screened admission");
   }
 
   const reviewers = ["urn:jinn:reviewer:a", "urn:jinn:reviewer:b"] as const;
