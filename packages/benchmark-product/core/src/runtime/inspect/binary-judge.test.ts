@@ -9,6 +9,7 @@ import {
   BINARY_JUDGMENT_PROFILE_DIGEST,
   BINARY_JUDGMENT_PROFILE_URI,
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+  binaryJudgmentPromptTemplateDigest,
   buildBinaryJudgmentProfile,
   sealBinaryJudgmentInstrument,
   type BinaryJudgmentInstrument,
@@ -39,8 +40,11 @@ import {
 import { inspectOciRunnerPath } from "./oci.js";
 import { inspectOciRunnerSha256 } from "./oci.js";
 
+// binary-judgment task profile 2.0: the 1.0 oracle is superseded (see
+// task-execution/profiles/fixtures/manifest.sha256.json errata) because its payload carries the
+// 1.0 array-shaped `provenance` and no longer validates against `BinaryJudgmentPayloadSchema`.
 const fixture = JSON.parse(readFileSync(new URL(
-  "../../../../../task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings.json",
+  "../../../../../task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings-profile-2.json",
   import.meta.url,
 ), "utf8")) as {
   input: { payload: BinaryJudgmentPayload; instrument: BinaryJudgmentInstrument };
@@ -281,6 +285,74 @@ describe("Inspect binary-judge selection", () => {
     expect(serialized).toContain("--network=none");
     expect(serialized).not.toMatch(/dataset-cache|\/jinn\/project|scorer|retry|fallback/u);
   });
+
+  // P2 acceptance 1, asserted at the launcher seam rather than only at the pure renderer: the
+  // evidence-declaring arm's constructed messages carry exactly that item's evidence bytes, and
+  // the same launcher refuses rather than interpolating the literal string "undefined" when a
+  // declaring instrument meets an evidence-free item.
+  test("an evidence-declaring arm receives exactly that item's evidence bytes in its constructed messages", () => {
+    const evidence = "Synthetic supporting passage authored for this fixture.";
+    const declaringMessages = [
+      ...alphaInstrument.messages,
+      {
+        role: "user" as const,
+        segments: [{ literal: "\nEvidence:\n" }, { field: "evidence" as const }],
+      },
+    ];
+    const declaringInstrument: BinaryJudgmentInstrument = {
+      ...alphaInstrument,
+      messages: declaringMessages,
+      promptTemplateSha256: binaryJudgmentPromptTemplateDigest(declaringMessages),
+    };
+    const sealedDeclaring = sealBinaryJudgmentInstrument(declaringInstrument);
+    const declaringManifest: InspectBinaryJudgeSelectionManifest = {
+      ...manifest,
+      arms: [
+        { ...manifest.arms[0]!, instrumentSha256: sealedDeclaring.digest },
+        manifest.arms[1]!,
+      ],
+    };
+    const selectionManifestSha256 = recordDigest(canonicalJsonBytes(declaringManifest))
+      .slice("sha256:".length);
+
+    const buildFor = (payload: BinaryJudgmentPayload) => {
+      const bytes = sealTask({
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+        profile: {
+          uri: BINARY_JUDGMENT_PROFILE_URI,
+          digest: { sha256: BINARY_JUDGMENT_PROFILE_DIGEST.slice("sha256:".length) },
+        },
+        instructions: "Return one binary judgment.",
+        payload,
+        outputs: [
+          { name: "judge-response", mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE, required: true },
+          { name: "judge-observation", mediaType: BINARY_JUDGMENT_OBSERVATION_MEDIA_TYPE, required: true },
+          { name: "inspect-log", mediaType: BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE, required: false },
+        ],
+      });
+      const parsed = TaskSpecificationSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
+      return buildInspectBinaryJudgeWorkerInput({
+        view: {
+          ...taskView({ [BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY]: sealedDeclaring.digest }),
+          task: parsed,
+        },
+        sealedTaskBytes: bytes,
+        manifest: declaringManifest,
+        selectionManifestSha256,
+        instrumentBytes: sealedDeclaring.bytes,
+        cellKey: `${recordDigest(bytes).slice("sha256:".length)}/alpha/1`,
+        armId: "alpha",
+        replicate: 1,
+        outputDir: INSPECT_BINARY_JUDGE_OCI_OUTPUT_DIR,
+      });
+    };
+
+    const workerInput = buildFor({ ...fixture.input.payload, evidence });
+    expect(workerInput.semanticRequest.messages.at(-1)!.text).toBe(`\nEvidence:\n${evidence}`);
+
+    expect(() => buildFor(fixture.input.payload))
+      .toThrow(/interpolates evidence but the payload does not carry it/u);
+  });
 });
 
 describe("Inspect binary-judge Python worker contract", () => {
@@ -310,7 +382,7 @@ except ValueError: pass
 print(json.dumps(observation,sort_keys=True,separators=(",",":")))
 `;
     const fixturePath = new URL(
-      "../../../../../task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings.json",
+      "../../../../../task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings-profile-2.json",
       import.meta.url,
     );
     const result = spawnSync("python3", [

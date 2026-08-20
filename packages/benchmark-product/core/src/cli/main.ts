@@ -107,7 +107,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    [--name <name>] [--description <text>] [--version <ver>]
                    [--provenance-timestamp <rfc3339>]
                    (homemade instance rows, not official SWE-bench Verified)
-  import item-bank --workspace <dir> --principal <id> --profile binary-judgment@1
+  import item-bank --workspace <dir> --principal <id> --profile binary-judgment@2
                    --draft <draftId> --items <items.jsonl> --sources <sources.jsonl>
                    --admissions <admissions.jsonl>
                    [--name <name>] [--description <text>] [--version <ver>]
@@ -497,8 +497,8 @@ function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: b
   assertKnownFlags(args, IMPORT_ITEM_BANK_FLAGS);
   const opContext = buildOperationContext(args, context);
   const profile = required(args, "profile");
-  if (profile !== "binary-judgment@1") {
-    refuse("invalid-invocation", "--profile", "--profile must be binary-judgment@1");
+  if (profile !== "binary-judgment@2") {
+    refuse("invalid-invocation", "--profile", "--profile must be binary-judgment@2");
   }
   const name = optional(args, "name");
   const description = optional(args, "description");

@@ -128,7 +128,8 @@
                   "evalAttempt": { "type": "string" },
                   "evalDeliverySha256": { "$ref": "#/$defs/sha256" },
                   "verdictSha256": { "$ref": "#/$defs/sha256" },
-                  "evaluationTerminal": { "const": "could-not-grade" }
+                  "evaluationTerminal": { "const": "could-not-grade" },
+                  "failureCategory": { "type": "string", "minLength": 1 }
                 },
                 "required": ["cellKey", "evalIndex"]
               }

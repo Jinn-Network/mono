@@ -26,6 +26,7 @@ import {
   HUMAN_REVIEW_PACKET_PROTOCOL,
   HUMAN_REVIEW_VISIBILITY_RECEIPT_PROTOCOL,
   HUMAN_REVIEW_OMITTED_FIELDS,
+  parseCanonicalHumanReviewBytes,
   sealHumanReviewDocument,
 } from "../human-review/contracts.js";
 import {
@@ -74,12 +75,14 @@ function setup() {
 }
 
 function item(index: number) {
+  const digestHex = String(index + 1).repeat(64);
   return {
     itemId: `urn:uuid:123e4567-e89b-12d3-a456-42661417400${index}`,
     question: `Question ${index}?`,
     referenceAnswer: `Reference ${index}`,
     candidateAnswer: `Candidate ${index}`,
-    provenance: [{ digest: { sha256: String(index + 1).repeat(64) } }],
+    provenance: { sourceCommitment: `sha256:${digestHex}` as const, timestamp: "2026-01-01T00:00:00Z" },
+    sources: [{ digest: { sha256: digestHex } }],
   };
 }
 
@@ -278,6 +281,31 @@ function rewriteAuthorityPayload(
     }],
   });
 }
+
+describe("createHumanReviewPackets — evidence round-trip (P2 acceptance)", () => {
+  it("carries an evidence-carrying item through packet creation and back out unchanged", () => {
+    const context = setup();
+    const evidenceCarryingItem = { ...item(0), evidence: "Direct synthetic verification of item 0." };
+    const created = createHumanReviewPackets(context, {
+      draftId: "review-run",
+      item: evidenceCarryingItem,
+      evaluatorIds: ["urn:jinn:reviewer:a", "urn:jinn:reviewer:b"],
+    });
+    expect(created.ok, JSON.stringify(created)).toBe(true);
+    if (!created.ok) throw new Error("unreachable");
+    expect(created.result.packets).toHaveLength(2);
+
+    for (const packet of created.result.packets) {
+      const sealedPacket = parseCanonicalHumanReviewBytes(
+        HumanReviewPacketSchema,
+        getSealedBytes(context.workspaceDir, packet.packetSha256.slice("sha256:".length)),
+        "human review packet",
+      );
+      expect(sealedPacket.item.evidence).toBe(evidenceCarryingItem.evidence);
+      expect(sealedPacket.itemSha256).toBe(created.result.itemSha256);
+    }
+  });
+});
 
 describe("binary human truth admission", () => {
   it("derives publication-grade resolution and the exact F0 analysis-context join", async () => {

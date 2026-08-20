@@ -10,10 +10,13 @@ import {
 } from "../identifiers.js";
 import { sealTaskProfile } from "../task-profile/seal.js";
 import type { TaskProfileDocument } from "../task-profile/schema.js";
+import { BINARY_JUDGMENT_TIMESTAMP_PATTERN } from "../binary-judgment/contracts.js";
 
 /**
- * Backend-neutral judge work over one closed question/reference/candidate payload. Analysis truth,
- * class, stratum, reviewer evidence, and other arms are deliberately absent from this profile.
+ * Backend-neutral judge work over one closed question/reference/candidate payload, plus an
+ * optional evidence passage and a records-admitted `provenance` commitment (source-manifest
+ * digest + publication timestamp). Analysis truth, class, stratum, reviewer evidence, and other
+ * arms are deliberately absent from this profile.
  */
 export function buildBinaryJudgmentProfile(): TaskProfileDocument {
   return {
@@ -33,7 +36,17 @@ export function buildBinaryJudgmentProfile(): TaskProfileDocument {
         question: { type: "string" },
         referenceAnswer: { type: "string" },
         candidateAnswer: { type: "string" },
+        evidence: { type: "string" },
         provenance: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            sourceCommitment: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
+            timestamp: { type: "string", pattern: BINARY_JUDGMENT_TIMESTAMP_PATTERN },
+          },
+          required: ["sourceCommitment", "timestamp"],
+        },
+        sources: {
           type: "array",
           minItems: 1,
           items: {
@@ -51,7 +64,7 @@ export function buildBinaryJudgmentProfile(): TaskProfileDocument {
           },
         },
       },
-      required: ["itemId", "question", "referenceAnswer", "candidateAnswer", "provenance"],
+      required: ["itemId", "question", "referenceAnswer", "candidateAnswer", "provenance", "sources"],
     },
     inputConventions: { slots: [] },
     outputConventions: {

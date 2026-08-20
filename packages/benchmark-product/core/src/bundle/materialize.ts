@@ -614,6 +614,12 @@ function recordClosure(input: MaterializeBundleInput): {
         ...(entry.evalDeliverySha256 !== undefined ? { evalDeliverySha256: entry.evalDeliverySha256 } : {}),
         ...(entry.verdictSha256 !== undefined ? { verdictSha256: entry.verdictSha256 } : {}),
         ...(entry.evaluationTerminal !== undefined ? { evaluationTerminal: entry.evaluationTerminal } : {}),
+        // Carry the terminal's operational category into the bundle. `evaluationRetries` already
+        // carries the category of every failure that was RETRIED; the failure that exhausted the
+        // budget and terminalized the leg has no retry row, so without this member the accounted
+        // ungradeable cell publishes as an uncategorized absence. Additive and optional: a run
+        // with no categorized could-not-grade terminal seals to identical assembly bytes.
+        ...(entry.failureCategory !== undefined ? { failureCategory: entry.failureCategory } : {}),
       });
       if (entry.verdictSha256 !== undefined) {
         evaluationEvidenceByVerdict.set(

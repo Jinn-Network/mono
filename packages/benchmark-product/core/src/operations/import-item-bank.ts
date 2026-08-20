@@ -22,7 +22,7 @@ import { readDraftDocument } from "./drafts.js";
 import { operate } from "./operate.js";
 import type { OperationResult } from "./result.js";
 
-export const BINARY_ITEM_BANK_PROFILE = "binary-judgment@1" as const;
+export const BINARY_ITEM_BANK_PROFILE = "binary-judgment@2" as const;
 
 export interface ImportBinaryItemBankInput {
   readonly profile: typeof BINARY_ITEM_BANK_PROFILE;
