@@ -196,7 +196,7 @@ describe("packet P8 judge rehearsal (#2847)", () => {
 
     const verified = await verifyPublicBundle(copied);
     expect(verified.format).toBe(BUNDLE_V4_FORMAT);
-    if (verified.format !== BUNDLE_V4_FORMAT) throw new Error("expected V4 qualification bundle");
+    if (verified.format !== BUNDLE_V4_FORMAT || verified.qualification === undefined) throw new Error("expected V4 qualification bundle");
     expect(verified.qualification.armCount).toBe(4);
     expect(verified.qualification.strata).toEqual(["core", "stress"]);
 
@@ -241,7 +241,7 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     expect(exported.result.mode).toBe("inspection-upload");
     expect(exported.result.instructions.split("\n")[0]).toContain(fixture.matrix.completeness.runOutcome);
     expect(exported.result.instructions.split("\n")[0]).toContain(`${fixture.matrix.completeness.judged} of ${fixture.matrix.completeness.expected} cells judged`);
-    expect(exported.result.instructions).toContain(CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE);
+    expect(exported.result.instructions).not.toContain(CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE);
     expect(exported.result.instructions).toContain("Do not treat this package as an Inspect Hub row or as the Colophon claim of record.");
 
     const refused = await runPublish(context, { draftId: fixture.draftId });
@@ -254,6 +254,11 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     expect(runState).toBeDefined();
     if (runState === undefined) return;
 
+    // Workspace claim-consistency still does not fold `binaryInstrumentReportLimitations`.
+    // `oci-container` isolation inventory length 2 opens the exact-disclosure gate. Portable
+    // copy (P5) does fold it. This is the pre-existing hole P5 named in `report.test.ts`.
+    // Fail closed: use publish dirs on success; materialize only when the first issue path is
+    // that named hole; any other publish failure fails this test.
     const published = await runPublish(context, { draftId: fixture.draftId, includeNativeArtifacts: true });
     const publishedBundles: Array<{ readonly method: string; readonly version: string; readonly dir: string }> = [];
     if (published.ok) {
@@ -270,6 +275,7 @@ describe("packet P8 judge rehearsal (#2847)", () => {
         });
       }
     } else {
+      expect(published.error.issues?.[0]?.path, JSON.stringify(published.error)).toBe("claim-consistency");
       const canonical = materializePublicBundle({
         workspaceDir,
         draftId: fixture.draftId,
@@ -315,7 +321,7 @@ describe("packet P8 judge rehearsal (#2847)", () => {
       expect(verified.checks).toContain("claim-consistency");
       if (bundle.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
         expect(verified.format).toBe(BUNDLE_V4_FORMAT);
-        if (verified.format !== BUNDLE_V4_FORMAT) throw new Error("primary rehearsal bundle must stay on the V4 qualification path");
+        if (verified.format !== BUNDLE_V4_FORMAT || verified.qualification === undefined) throw new Error("primary rehearsal bundle must stay on the V4 qualification path");
         expect(verified.qualification.armCount).toBe(6);
         expect(verified.qualification.truthAdmission).toBe("screened-operator-sampled");
         expect(verified.qualification.exclusionCount).toBe(1);
@@ -342,15 +348,12 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     expect(records[0]!.runSha256).toBe(fixture.runSha256);
     expect(records[0]!.matrixSha256).toBe(fixture.matrixSha256);
 
-    const readoutNames = claims.map((claim) => readoutName(String(claim.method.id), String(claim.method.version))).toSorted();
+    const readoutNames = [...claims.map((claim) => readoutName(String(claim.method.id), String(claim.method.version)))].sort();
     expect(readoutNames).toEqual([
       "binary-instrument@1",
       "paired-majority-delta@1",
       "pairwise-disagreement@1",
     ]);
-    for (const claim of claims) {
-      expect(claim.method.provenance ?? "registry-verified").toBe("registry-verified");
-    }
     const publishedText = copied.flatMap((bundle) => walkTextFiles(bundle.dir).map((path) => readFileSync(path, "utf8"))).join("\n");
     expect(publishedText).not.toMatch(/jinn\.benchmarking\.method\/paired-delta(?!-majority)/u);
     expect(publishedText).not.toContain("paired-delta@1");
@@ -361,23 +364,22 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     const pairwiseClaim = claims.find((claim) => claim.method.id === BENCHMARKING_METHOD_IDS.pairwiseDisagreement)!;
     const deltaClaim = claims.find((claim) => claim.method.id === BENCHMARKING_METHOD_IDS.pairedMajorityDelta)!;
     const qualification = primaryClaim.qualification as Record<string, any>;
+    // Registry-verified vs sealed-companion is the rehearsal's classification of those analogs (corrupt-key and twelve-probe are §7.3 companions; the rest are registered-method outputs); R1 (#2849) is the column renderer. The sealed claim package does not carry that column.
     const marked = [
-      { name: "per-arm false-accept", provenance: "registry-verified", value: qualification.arms.alpha.falseAccept },
-      { name: "per-arm false-reject", provenance: "registry-verified", value: qualification.arms.alpha.falseReject },
-      { name: "per-class factual", provenance: "registry-verified", value: qualification.arms.alpha.byCandidateClass.factual },
-      { name: "per-stratum category-1", provenance: "registry-verified", value: qualification.arms.alpha.byStratum["category-1"] },
-      { name: "instability", provenance: "registry-verified", value: qualification.arms.delta.instability },
-      { name: "parser-invalid", provenance: "registry-verified", value: qualification.arms.gamma.parserInvalid },
-      { name: "cross-arm disagreement", provenance: "registry-verified", value: pairwiseClaim.pairwiseDisagreement },
-      { name: "evidence contrast", provenance: "registry-verified", value: deltaClaim.pairedMajorityDelta },
-      { name: "corrupt-key pair", provenance: "sealed-companion", value: qualification.arms.alpha.byCandidateClass.corruptKey },
-      { name: "twelve-probe gate", provenance: "sealed-companion", value: qualification.arms.alpha.byCandidateClass.gateProbe },
+      { name: "per-arm false-accept", value: qualification.arms.alpha.falseAccept },
+      { name: "per-arm false-reject", value: qualification.arms.alpha.falseReject },
+      { name: "per-class factual", value: qualification.arms.alpha.byCandidateClass.factual },
+      { name: "per-stratum category-1", value: qualification.arms.alpha.byStratum["category-1"] },
+      { name: "instability", value: qualification.arms.delta.instability },
+      { name: "parser-invalid", value: qualification.arms.gamma.parserInvalid },
+      { name: "cross-arm disagreement", value: pairwiseClaim.pairwiseDisagreement },
+      { name: "evidence contrast", value: deltaClaim.pairedMajorityDelta },
+      { name: "corrupt-key pair", value: qualification.arms.alpha.byCandidateClass.corruptKey },
+      { name: "twelve-probe gate", value: qualification.arms.alpha.byCandidateClass.gateProbe },
     ] as const;
     for (const analog of marked) {
       expect(analog.value, analog.name).toBeDefined();
-      expect(["registry-verified", "sealed-companion"]).toContain(analog.provenance);
     }
-    expect(new Set(marked.map((analog) => analog.provenance))).toEqual(new Set(["registry-verified", "sealed-companion"]));
     expect(deltaClaim.pairedMajorityDelta.candidate).toBe(JUDGE_REHEARSAL_EVIDENCE_PAIR.declaring);
     expect(deltaClaim.pairedMajorityDelta.baseline).toBe(JUDGE_REHEARSAL_EVIDENCE_PAIR.twin);
 

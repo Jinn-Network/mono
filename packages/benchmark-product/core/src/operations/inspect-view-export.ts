@@ -217,7 +217,7 @@ export function executeExportInspectViewBundle(
       const certification = exportCompletenessCertification({
         runSha256,
         completeness: matrix?.completeness,
-        frameworkSubmitReady: mode === "suite-named" || lane === "inspect-binary-judge",
+        frameworkSubmitReady: mode === "suite-named",
       });
       const instructions = inspectViewExportInstructions(certification, mode, exportDir, lane);
       writeFileSync(join(exportDir, "INSTRUCTIONS.txt"), `${instructions}\n`, { mode: 0o600 });

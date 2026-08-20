@@ -391,6 +391,41 @@ describe("buildClaimPackage", () => {
     expect(ClaimPackageSchema.safeParse({ ...claim, assurance: undefined }).success).toBe(false);
   });
 
+  it("copies only the four binary claim assurance primitives when resolveAssurance also carries maxInfrastructureRetries", async () => {
+    const { matrix, run, produced } = await buildFixture();
+    const matrixRecord = parseMatrix(matrix.bytes);
+    const runRecord = parseRun(run.bytes);
+
+    const claim = buildClaimPackage({
+      draftId: "draft-1",
+      benchmarkSha256: "b".repeat(64),
+      runRecord,
+      runSha256: run.digest.slice("sha256:".length),
+      matrixRecord,
+      matrixSha256: matrix.digest.slice("sha256:".length),
+      reportRecord: produced.record,
+      reportSha256: sha256Hex(produced.bytes),
+      reportEnvelopeSha256: sha256Hex(produced.envelope),
+      venueHonesty: venueHonestyFor(matrixRecord),
+      verificationCommandVerb: "verify",
+      assurance: {
+        ...FIXTURE_ASSURANCE,
+        resolved: {
+          ...FIXTURE_ASSURANCE.resolved,
+          maxInfrastructureRetries: 1,
+        } as typeof FIXTURE_ASSURANCE.resolved,
+      },
+    });
+
+    expect(Object.keys(claim.assurance.resolved)).toEqual([
+      "independence",
+      "minVerdicts",
+      "distinctEvaluator",
+      "verdictRule",
+    ]);
+    expect(claim.assurance.resolved).toEqual(FIXTURE_ASSURANCE.resolved);
+  });
+
   it("throws when the stated assurance primitives disagree with what the sealed Run carries", async () => {
     const { matrix, run, produced } = await buildFixture();
     const matrixRecord = parseMatrix(matrix.bytes);

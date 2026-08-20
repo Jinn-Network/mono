@@ -141,8 +141,8 @@ const samplingGeneration = {
   background: false,
   stream: false,
   serviceTier: "default",
-  tools: [],
-  fallbackModels: [],
+  tools: [] as [],
+  fallbackModels: [] as [],
   retries: 0,
   persistedConversation: false,
   metadata: null,
@@ -837,7 +837,7 @@ export async function runJudgeRehearsalLifecycle(input: {
     screeningVerdict: row.screeningVerdict,
     handChecked: row.handChecked,
     handVerdict: row.handVerdict,
-  })).toSorted((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256));
+  })).sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256));
   const candidates = rows.map((row, index) => ({
     itemSha256: row.itemSha256,
     itemId: row.item.itemId,
