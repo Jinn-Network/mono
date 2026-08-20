@@ -329,7 +329,16 @@ export function runReport(
             );
           }
         }
+        // paired-majority-delta@1 carries the same PAIRED_ESTIMATE_LIMITATION as paired-delta@1
+        // (coordinator ruling, packet #2837): the line describes the method's SHAPE -- an
+        // estimator rather than a gate -- not its unit, and both methods are estimators. The
+        // withheld-interval case (fewer than 5 paired tasks, or fewer than two source clusters)
+        // gets NO extra limitation line here: §7.2's frozen reporting rule makes the withholding a
+        // registry-verified OUTPUT already printed from the method's own `reasons`, explicitly
+        // "not a gap" -- a disclosure line here would publish that same fact at a second
+        // disclosure level.
         const limitations = entry.method === BENCHMARKING_METHOD_IDS.pairedDelta
+          || entry.method === BENCHMARKING_METHOD_IDS.pairedMajorityDelta
           ? [
               ...venueLimits,
               ...inspectLimits,

@@ -8,7 +8,14 @@ import {
   BENCHMARKING_PROTOCOL,
   sealBenchmark,
 } from "@jinn-network/benchmarking-records";
-import { BINARY_INSTRUMENT_MEASUREMENT_PROFILE } from "@jinn-network/benchmarking-aggregate";
+import {
+  BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
+  PAIRED_MAJORITY_DELTA_ALPHA,
+  PAIRED_MAJORITY_DELTA_RESAMPLES,
+  PAIRED_MAJORITY_DELTA_SEED,
+  validatePairedMajorityDeltaParameters,
+  validatePairwiseDisagreementParameters,
+} from "@jinn-network/benchmarking-aggregate";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
@@ -62,6 +69,8 @@ import {
   INSPECT_BINARY_JUDGE_SELECTION_SCHEMA,
   binaryInstrumentReportLimitations,
   compileBinaryInstrumentProfile,
+  compilePairedMajorityDeltaProfile,
+  compilePairwiseDisagreementProfile,
 } from "./binary-instrument-profile.js";
 import { compileDraft, compilePreviewRun } from "./compile.js";
 
@@ -778,6 +787,186 @@ describe("binary-instrument@1 lock-time composition", () => {
       });
       expect(parameters.strata).toStrictEqual(["core", "stress"]);
     });
+  });
+});
+
+const OWNER = "urn:uuid:00000000-0000-5000-8000-000000000001";
+const CLOSE_AT = "2026-08-16T09:00:00.000Z";
+
+// packet #2837: `pairwise-disagreement@1` and `paired-majority-delta@1` share their whole front
+// half (spec §7.5) with each other -- NOT with `compileBinaryInstrumentProfile` above, which is
+// left untouched -- and are typically `additionalAnalyses` entries alongside a binary-instrument
+// primary (the "real judge shape").
+describe("pairwise-disagreement@1 and paired-majority-delta@1 shared derivation (packet #2837)", () => {
+  function withAdditionalAnalyses(draft: DraftDocument, additionalAnalyses: DraftDocument["spec"]["additionalAnalyses"]): DraftDocument {
+    return { ...draft, spec: { ...draft.spec, additionalAnalyses } };
+  }
+
+  test("compiles pairwise-disagreement@1 as an additionalAnalyses entry alongside a binary-instrument primary, sealing the shared eight-parameter closure plus intervalAlpha", () => {
+    const fixture = setUpFixture();
+    const draft = withAdditionalAnalyses(fixture.draft, [
+      { method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: BENCHMARKING_METHOD_VERSION },
+    ]);
+    const compiled = compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT });
+    const plan = compiled.plannedRun.record.analysisPlan!;
+    expect(plan.map((entry) => entry.method)).toEqual([
+      BENCHMARKING_METHOD_IDS.wilson,
+      BENCHMARKING_METHOD_IDS.binaryInstrument,
+      BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+    ]);
+    const expectedParameters = {
+      verdictRule: "sole",
+      k: 3,
+      reduction: "strict-majority",
+      measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
+      candidateClasses: ["alpha", "zeta"],
+      strata: ["core", "stress"],
+      parserInvalidPolicy: "reject",
+      truthAdmission: "operator-only",
+      intervalAlpha: "0.05",
+    };
+    expect(plan[2]!.parameters).toEqual(expectedParameters);
+    expect(validatePairwiseDisagreementParameters(plan[2]!.parameters as Readonly<Record<string, unknown>>).ok).toBe(true);
+
+    // Same derivation, called directly rather than through the compile seam.
+    const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+    const direct = compilePairwiseDisagreementProfile({
+      workspaceDir, draft: fixture.draft, benchmark,
+      analysis: { method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: BENCHMARKING_METHOD_VERSION },
+    });
+    expect(direct).toEqual(expectedParameters);
+  });
+
+  test("derives baseline (evidence-free twin) and candidate (evidence-declaring arm) for paired-majority-delta@1, sealing the three frozen constants FROM the aggregate package's own exports", () => {
+    const fixture = setUpFixture({
+      arms: [
+        { armId: "alpha", model: "gpt-5.6-luna", generation },
+        { armId: "beta", model: "gpt-5.6-luna", generation },
+      ],
+      withItemEvidence: true,
+      declaringArmIds: ["beta"],
+    });
+    const draft = withAdditionalAnalyses(fixture.draft, [
+      { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION },
+    ]);
+    const compiled = compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT });
+    const plan = compiled.plannedRun.record.analysisPlan!;
+    const entry = plan.find((planEntry) => planEntry.method === BENCHMARKING_METHOD_IDS.pairedMajorityDelta)!;
+    expect(entry.parameters).toEqual({
+      verdictRule: "sole",
+      k: 3,
+      reduction: "strict-majority",
+      measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
+      candidateClasses: ["alpha", "zeta"],
+      strata: ["core", "stress"],
+      parserInvalidPolicy: "reject",
+      truthAdmission: "operator-only",
+      // candidate = the evidence-declaring arm ("beta"); baseline = its evidence-free twin
+      // ("alpha") -- the coordinator ruling this derivation implements.
+      baseline: "alpha",
+      candidate: "beta",
+      seed: PAIRED_MAJORITY_DELTA_SEED,
+      resamples: PAIRED_MAJORITY_DELTA_RESAMPLES,
+      alpha: PAIRED_MAJORITY_DELTA_ALPHA,
+    });
+    expect(validatePairedMajorityDeltaParameters(entry.parameters as Readonly<Record<string, unknown>>).ok).toBe(true);
+  });
+
+  test("refuses when more than two arms make the evidence-declaring arm's twin ambiguous", () => {
+    // Default fixture: four arms, "beta" declares evidence.
+    const fixture = setUpFixture({ withItemEvidence: true, declaringArmIds: ["beta"] });
+    const draft = withAdditionalAnalyses(fixture.draft, [
+      { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION },
+    ]);
+    expect(() => compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT }))
+      .toThrow(/requires exactly two Run arms/u);
+  });
+
+  test("refuses when zero arms declare evidence (the twin has no pair to name)", () => {
+    const fixture = setUpFixture({
+      arms: [
+        { armId: "alpha", model: "gpt-5.6-luna", generation },
+        { armId: "beta", model: "gpt-5.6-luna", generation },
+      ],
+    });
+    const draft = withAdditionalAnalyses(fixture.draft, [
+      { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION },
+    ]);
+    expect(() => compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT }))
+      .toThrow(/exactly one arm whose instrument declares evidence.*found 0/u);
+  });
+
+  test("refuses when both arms declare evidence (the pair is not well formed)", () => {
+    const fixture = setUpFixture({
+      arms: [
+        { armId: "alpha", model: "gpt-5.6-luna", generation },
+        { armId: "beta", model: "gpt-5.6-luna", generation },
+      ],
+      withItemEvidence: true,
+      declaringArmIds: ["alpha", "beta"],
+    });
+    const draft = withAdditionalAnalyses(fixture.draft, [
+      { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION },
+    ]);
+    expect(() => compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT }))
+      .toThrow(/exactly one arm whose instrument declares evidence.*found 2/u);
+  });
+
+  test("both derivations refuse caller-supplied analysis.parameters with the identical shared-front-half message (the front half is one function, two callers)", () => {
+    const fixture = setUpFixture();
+    for (const method of [BENCHMARKING_METHOD_IDS.pairwiseDisagreement, BENCHMARKING_METHOD_IDS.pairedMajorityDelta]) {
+      // A non-`k` key exercises the shared front half's GENERIC "callers must not supply them"
+      // refusal; `k` specifically has its own more-specific message, checked first (both shared,
+      // both identical between the two callers — proven by the loop over both methods here).
+      const draft = withAdditionalAnalyses(fixture.draft, [
+        { method, version: BENCHMARKING_METHOD_VERSION, parameters: { candidateClasses: ["alpha"] } },
+      ]);
+      expect(() => compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT }))
+        .toThrow(/parameters are derived from the draft and sealed evidence; callers must not supply them/u);
+    }
+  });
+
+  test("both derivations refuse a caller-supplied baseline/candidate — pairwise-disagreement because it is non-comparative, paired-majority-delta because it derives its own pair", () => {
+    const fixture = setUpFixture();
+    const pairwiseDraft = withAdditionalAnalyses(fixture.draft, [
+      { method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: BENCHMARKING_METHOD_VERSION, baseline: "alpha", candidate: "beta" },
+    ]);
+    expect(() => compileDraft({ workspaceDir, draft: pairwiseDraft, owner: OWNER, closeAt: CLOSE_AT }))
+      .toThrow(/pairwise-disagreement computes all unordered arm pairs/u);
+
+    const pairedDraft = withAdditionalAnalyses(fixture.draft, [
+      { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION, baseline: "alpha", candidate: "beta" },
+    ]);
+    expect(() => compileDraft({ workspaceDir, draft: pairedDraft, owner: OWNER, closeAt: CLOSE_AT }))
+      .toThrow(/paired-majority-delta derives its own baseline\/candidate/u);
+  });
+
+  test("both derivations refuse a version other than the registered shared version, with the identical shared-front-half message", () => {
+    const fixture = setUpFixture();
+    for (const method of [BENCHMARKING_METHOD_IDS.pairwiseDisagreement, BENCHMARKING_METHOD_IDS.pairedMajorityDelta]) {
+      const draft = withAdditionalAnalyses(fixture.draft, [{ method, version: "2" }]);
+      expect(() => compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT }))
+        .toThrow(/requires version 1/u);
+    }
+  });
+
+  test("preview compilation carries the binary-judgment-intake extension for a pairwise-disagreement-only draft (no binary-instrument primary)", () => {
+    // The primary is wilson, not binary-instrument -- `binaryParameters` alone would be undefined,
+    // and without the widened extension gate the subset Benchmark would silently drop the
+    // admission-manifest reference the shared derivation needs.
+    const fixture = setUpFixture();
+    const draft = withAdditionalAnalyses(
+      { ...fixture.draft, spec: { ...fixture.draft.spec, analysis: undefined } },
+      [{ method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: BENCHMARKING_METHOD_VERSION }],
+    );
+    const preview = compilePreviewRun({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT, itemLimit: 1 });
+    expect(preview.previewBenchmarkRecord.items).toHaveLength(1);
+    expect((preview.previewBenchmarkRecord as unknown as Record<string, unknown>)[BINARY_ITEM_BANK_INTAKE_EXTENSION])
+      .toEqual((JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256))) as Record<string, unknown>)[BINARY_ITEM_BANK_INTAKE_EXTENSION]);
+    expect(preview.plannedRun.record.analysisPlan!.map((entry) => entry.method)).toEqual([
+      BENCHMARKING_METHOD_IDS.wilson,
+      BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+    ]);
   });
 });
 

@@ -55,12 +55,29 @@ import { runtimeSubmissionBaseline } from "../runtime/adapter.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
   compileBinaryInstrumentProfile,
+  compilePairedMajorityDeltaProfile,
+  compilePairwiseDisagreementProfile,
   isBinaryInstrumentSpec,
 } from "./binary-instrument-profile.js";
 
 /** The sealed Run record's own analysisPlan entry shape — reused rather than invented so this
  * module can never drift from what `planRun`/`sealRun` actually accept. */
 type RunAnalysisPlanEntry = NonNullable<RunRecord["analysisPlan"]>[number];
+
+/**
+ * The sealed Benchmark/draft closure `pairwise-disagreement@1`'s and `paired-majority-delta@1`'s
+ * derivations need (packet #2837) — the same three values `compileBinaryInstrumentProfile` itself
+ * takes, bundled so `resolveNonWilsonAnalysisEntry` can pass them through unchanged regardless of
+ * whether the entry it is resolving is the primary or an `additionalAnalyses` member. Unlike
+ * `binaryParameters` (computed once, keyed to the single primary `spec.analysis`), this bundle
+ * carries the RAW closure rather than a pre-derived result, because either new method can appear
+ * as the primary entry, an additional entry, or (not yet, but not precluded) more than one
+ * additional entry — the derivation has to run per plan entry, not once per draft. */
+interface JudgeFamilyContext {
+  readonly workspaceDir: string;
+  readonly draft: DraftDocument;
+  readonly benchmark: BenchmarkRecord;
+}
 
 /** `analysis.parameters` keys `buildAnalysisPlan` always derives itself — from the draft's
  * resolved `verdictRule` and the validated `analysis.baseline`/`analysis.candidate` — never from
@@ -71,12 +88,15 @@ const RESERVED_ANALYSIS_PARAMETER_KEYS = ["verdictRule", "baseline", "candidate"
 /**
  * Registered method ids whose ADDITIONAL-entry parameters are DERIVED from the sealed
  * Benchmark/draft closure (the same way `binary-instrument@1`'s own bespoke branch below derives
- * its parameters) rather than taken from caller-supplied `analysis.parameters`. Empty at
- * ratification (packet P5, spec §8.3 option 5, builds only the packaging mechanics) — a later
- * agent registers the two D2 comparison methods here alongside their own derivation branches in
- * `resolveNonWilsonAnalysisEntry`, mirroring the binary-instrument branch immediately below.
+ * its parameters) rather than taken from caller-supplied `analysis.parameters`. Populated (packet
+ * #2837, spec §7.1/§7.2a) with the two D2 comparison methods — `pairwise-disagreement@1` and
+ * `paired-majority-delta@1` — whose own derivation branches live in `resolveNonWilsonAnalysisEntry`
+ * below, mirroring the binary-instrument branch immediately above it.
  */
-const DERIVED_PARAMETER_METHOD_IDS: ReadonlySet<string> = new Set();
+const DERIVED_PARAMETER_METHOD_IDS: ReadonlySet<string> = new Set([
+  BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+  BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+]);
 
 /** Composite `(method, version)` key used to detect duplicate plan entries — mirrors the
  * ``-joined `pairKey` convention `run/state.ts` already uses for its own uniqueness check. */
@@ -108,7 +128,8 @@ function resolveNonWilsonAnalysisEntry(
   verdictRule: ResolvedAssurance["verdictRule"],
   analysis: Analysis,
   pathPrefix: string,
-  binaryParameters?: BinaryInstrumentParameters,
+  binaryParameters: BinaryInstrumentParameters | undefined,
+  judgeFamilyContext: JudgeFamilyContext,
 ): RunAnalysisPlanEntry {
   if (analysis.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
     if (binaryParameters === undefined) {
@@ -122,10 +143,29 @@ function resolveNonWilsonAnalysisEntry(
   }
 
   if (DERIVED_PARAMETER_METHOD_IDS.has(analysis.method)) {
-    // Extension seam (spec §8.3): a later agent adds one derivation branch per registered id here,
-    // mirroring the binary-instrument branch above — deriving `parameters` from the sealed
-    // Benchmark/draft closure rather than accepting caller-supplied `analysis.parameters`. The set
-    // is empty today, so this branch never fires yet.
+    // Derivation branches (packet #2837, spec §7.1/§7.2a), mirroring the binary-instrument branch
+    // above: `parameters` is derived from the sealed Benchmark/draft closure, never taken from
+    // caller-supplied `analysis.parameters`. Each derivation function refuses on its own if the
+    // closure or the arm roster does not satisfy its method's own requirements.
+    if (analysis.method === BENCHMARKING_METHOD_IDS.pairwiseDisagreement) {
+      const parameters = compilePairwiseDisagreementProfile({ ...judgeFamilyContext, analysis });
+      return {
+        method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+        version: BENCHMARKING_METHOD_VERSION,
+        parameters: parameters as unknown as Record<string, unknown>,
+      };
+    }
+    if (analysis.method === BENCHMARKING_METHOD_IDS.pairedMajorityDelta) {
+      const parameters = compilePairedMajorityDeltaProfile({ ...judgeFamilyContext, analysis });
+      return {
+        method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+        version: BENCHMARKING_METHOD_VERSION,
+        parameters: parameters as unknown as Record<string, unknown>,
+      };
+    }
+    // Unreachable while DERIVED_PARAMETER_METHOD_IDS names only the two ids handled above — kept
+    // as a loud refusal rather than a silent fall-through in case the set is ever widened without
+    // a matching branch.
     refuse(
       "validation",
       pathPrefix,
@@ -192,7 +232,8 @@ function resolveNonWilsonAnalysisEntry(
 function buildPrimaryAnalysisPlan(
   spec: DraftSpec,
   verdictRule: ResolvedAssurance["verdictRule"],
-  binaryParameters?: BinaryInstrumentParameters,
+  binaryParameters: BinaryInstrumentParameters | undefined,
+  judgeFamilyContext: JudgeFamilyContext,
 ): RunAnalysisPlanEntry[] {
   const wilson: RunAnalysisPlanEntry = {
     method: BENCHMARKING_METHOD_IDS.wilson,
@@ -222,7 +263,7 @@ function buildPrimaryAnalysisPlan(
     return [wilson];
   }
 
-  return [wilson, resolveNonWilsonAnalysisEntry(spec, verdictRule, analysis, "spec.analysis", binaryParameters)];
+  return [wilson, resolveNonWilsonAnalysisEntry(spec, verdictRule, analysis, "spec.analysis", binaryParameters, judgeFamilyContext)];
 }
 
 /**
@@ -252,9 +293,10 @@ export function primaryAnalysisPlanLength(spec: DraftSpec): 1 | 2 {
 function buildAnalysisPlan(
   spec: DraftSpec,
   verdictRule: ResolvedAssurance["verdictRule"],
-  binaryParameters?: BinaryInstrumentParameters,
+  binaryParameters: BinaryInstrumentParameters | undefined,
+  judgeFamilyContext: JudgeFamilyContext,
 ): RunAnalysisPlanEntry[] {
-  const primaryPlan = buildPrimaryAnalysisPlan(spec, verdictRule, binaryParameters);
+  const primaryPlan = buildPrimaryAnalysisPlan(spec, verdictRule, binaryParameters, judgeFamilyContext);
   const additionalAnalyses = spec.additionalAnalyses;
   if (additionalAnalyses === undefined || additionalAnalyses.length === 0) return primaryPlan;
 
@@ -278,7 +320,7 @@ function buildAnalysisPlan(
       );
     }
     seenKeys.add(key);
-    additionalEntries.push(resolveNonWilsonAnalysisEntry(spec, verdictRule, analysis, pathPrefix, binaryParameters));
+    additionalEntries.push(resolveNonWilsonAnalysisEntry(spec, verdictRule, analysis, pathPrefix, binaryParameters, judgeFamilyContext));
   });
 
   return [...primaryPlan, ...additionalEntries];
@@ -318,7 +360,8 @@ function planFromSpec(
   benchmarkDigestHex: string,
   owner: string,
   closeAt: string,
-  binaryParameters?: BinaryInstrumentParameters,
+  binaryParameters: BinaryInstrumentParameters | undefined,
+  judgeFamilyContext: JudgeFamilyContext,
 ): PlannedRun {
   const arms: RunArm[] = spec.arms.map((arm) => ({
     armId: arm.armId,
@@ -349,7 +392,7 @@ function planFromSpec(
         },
         submissionBaseline: runtimeSubmissionBaseline(spec.evaluationRuntime),
       },
-      analysisPlan: buildAnalysisPlan(spec, resolvedAssurance.verdictRule, binaryParameters),
+      analysisPlan: buildAnalysisPlan(spec, resolvedAssurance.verdictRule, binaryParameters, judgeFamilyContext),
       ...(spec.budget !== undefined ? { budget: spec.budget } : {}),
       venue: { kind: "self-run" },
       closeAt,
@@ -388,9 +431,26 @@ export function compileDraft(input: CompileDraftInput): CompiledRun {
     ? compileBinaryInstrumentProfile({ workspaceDir, draft, benchmark: benchmarkRecord })
     : undefined;
 
-  const plannedRun = planFromSpec(spec, benchmarkSha256, owner, closeAt, binaryParameters);
+  const plannedRun = planFromSpec(
+    spec,
+    benchmarkSha256,
+    owner,
+    closeAt,
+    binaryParameters,
+    { workspaceDir, draft, benchmark: benchmarkRecord },
+  );
 
   return { plannedRun, benchmarkRecord, benchmarkSha256 };
+}
+
+/** True when `analysis` names one of the three binary-instrument-family methods (packet #2837):
+ * `binary-instrument@1` itself, `pairwise-disagreement@1`, or `paired-majority-delta@1`. Used only
+ * by `compilePreviewRun` to decide whether the subset Benchmark must carry the
+ * binary-judgment-intake extension every family derivation reads — see the call site. */
+function isBinaryInstrumentFamilyAnalysis(analysis: Analysis | undefined): boolean {
+  return analysis?.method === BENCHMARKING_METHOD_IDS.binaryInstrument
+    || analysis?.method === BENCHMARKING_METHOD_IDS.pairwiseDisagreement
+    || analysis?.method === BENCHMARKING_METHOD_IDS.pairedMajorityDelta;
 }
 
 export interface CompilePreviewRunInput {
@@ -449,6 +509,18 @@ export function compilePreviewRun(input: CompilePreviewRunInput): CompiledPrevie
   const itemCount = itemLimit === undefined ? fullRecord.items.length : Math.min(itemLimit, fullRecord.items.length);
   const subsetItems = fullRecord.items.slice(0, itemCount);
 
+  // The binary-judgment-intake extension carries the admission manifest reference every
+  // binary-instrument-family derivation reads (`deriveAdmissionProfile`), so it must survive onto
+  // the subset document whenever ANY plan entry -- primary or additional -- names one of the three
+  // family methods, not only when binary-instrument itself is the primary (`binaryParameters`'s own
+  // gate). `pairwise-disagreement@1` and `paired-majority-delta@1` are typically
+  // `additionalAnalyses` entries (packet #2837), so `binaryParameters === undefined` alone would
+  // silently drop the extension the moment neither of them is also the primary.
+  const needsBinaryJudgmentIntakeExtension =
+    binaryParameters !== undefined
+    || isBinaryInstrumentFamilyAnalysis(spec.analysis)
+    || (spec.additionalAnalyses ?? []).some(isBinaryInstrumentFamilyAnalysis);
+
   const subsetDocument: Record<string, unknown> = {
     protocol: fullRecord.protocol,
     name: fullRecord.name,
@@ -460,12 +532,12 @@ export function compilePreviewRun(input: CompilePreviewRunInput): CompiledPrevie
     ...(fullRecord.license !== undefined ? { license: fullRecord.license } : {}),
     ...(fullRecord.citation !== undefined ? { citation: fullRecord.citation } : {}),
     ...(fullRecord.supersedes !== undefined ? { supersedes: fullRecord.supersedes } : {}),
-    ...(binaryParameters === undefined
-      ? {}
-      : {
+    ...(needsBinaryJudgmentIntakeExtension
+      ? {
           ["https://product.jinn.network/extensions/binary-judgment-intake/v1"]:
             (fullRecord as unknown as Record<string, unknown>)["https://product.jinn.network/extensions/binary-judgment-intake/v1"],
-        }),
+        }
+      : {}),
   };
 
   let previewBenchmarkBytes: Uint8Array;
@@ -478,7 +550,14 @@ export function compilePreviewRun(input: CompilePreviewRunInput): CompiledPrevie
   const previewBenchmarkSha256 = sha256Hex(previewBenchmarkBytes);
   const previewBenchmarkRecord = parseBenchmark(previewBenchmarkBytes);
 
-  const plannedRun = planFromSpec(spec, previewBenchmarkSha256, owner, closeAt, binaryParameters);
+  const plannedRun = planFromSpec(
+    spec,
+    previewBenchmarkSha256,
+    owner,
+    closeAt,
+    binaryParameters,
+    { workspaceDir, draft, benchmark: fullRecord },
+  );
 
   return { plannedRun, previewBenchmarkRecord, previewBenchmarkSha256, itemCount: subsetItems.length };
 }
