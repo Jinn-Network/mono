@@ -27,6 +27,8 @@ export const LIVE_CAMPAIGN_AUTHORING_FORMAT_TOKEN =
 export interface LiveCampaignCompileInput {
   readonly snapshotBytes: Uint8Array;
   readonly splitManifestBytes: Uint8Array;
+  /** Complete operator-declared route set affected by adopting this loadout. */
+  readonly affectedRoutes: readonly NextRunRoute[];
   readonly objectivePreset: PolicyOptimizationObjectivePreset;
   readonly baselineArm: string;
   readonly candidateArm: string;
@@ -37,6 +39,12 @@ export interface LiveCampaignCompileInput {
 export interface LiveCampaignInputs {
   readonly formatToken: typeof LIVE_CAMPAIGN_INPUTS_FORMAT_TOKEN;
   readonly route: NextRunRoute;
+  /** Declared by the operator; the standalone optimizer cannot discover deployment reuse. */
+  readonly affectedRoutes: readonly NextRunRoute[];
+  readonly affectedRouteDeclaration: {
+    readonly source: "operator-declared";
+    readonly completeness: "not-independently-proven";
+  };
   readonly configRevision: string;
   readonly snapshotDigest: string;
   readonly splitManifestDigest: string;
@@ -82,6 +90,35 @@ function sortedUnique(values: readonly string[]): string[] {
   return [...new Set(values)].sort(compareCodeUnitStrings);
 }
 
+function routeKey(route: NextRunRoute): string {
+  return `${route.taskProfile}\0${route.route ?? ""}`;
+}
+
+/** Canonical route-set validation shared by every campaign authoring mode. */
+export function normalizeAffectedRoutes(
+  selected: NextRunRoute,
+  values: readonly NextRunRoute[],
+): readonly NextRunRoute[] {
+  if (values.length === 0) refuse("invalid-document", "affectedRoutes", "at least one affected route must be declared");
+  const routes = new Map<string, NextRunRoute>();
+  for (const [index, value] of values.entries()) {
+    if (typeof value.taskProfile !== "string" || value.taskProfile.length === 0
+      || value.taskProfile !== selected.taskProfile
+      || (value.route !== undefined && (value.route.length === 0 || value.route.includes("\0")))) {
+      refuse("invalid-document", `affectedRoutes.${index}`, "affected route identity is invalid or crosses task profiles");
+    }
+    const route = {
+      taskProfile: value.taskProfile,
+      ...(value.route === undefined ? {} : { route: value.route }),
+    };
+    routes.set(routeKey(route), route);
+  }
+  if (!routes.has(routeKey(selected))) {
+    refuse("invalid-document", "affectedRoutes", "the selected campaign route must be included in the affected route declaration");
+  }
+  return [...routes.values()].sort((left, right) => compareCodeUnitStrings(routeKey(left), routeKey(right)));
+}
+
 export function compileLiveCampaignInputs(input: LiveCampaignCompileInput): SealedLiveCampaignInputs {
   if (!Number.isSafeInteger(input.replicates) || input.replicates < 1) {
     refuse("invalid-document", "replicates", "replicates must be a positive safe integer");
@@ -90,6 +127,7 @@ export function compileLiveCampaignInputs(input: LiveCampaignCompileInput): Seal
   const split = parseExactPolicyOptimizationSplitManifest(input.splitManifestBytes);
   const snapshotDigest = prefixedDigest(input.snapshotBytes);
   const splitManifestDigest = prefixedDigest(input.splitManifestBytes);
+  const affectedRoutes = normalizeAffectedRoutes(snapshot.route, input.affectedRoutes);
   if (split.seed.snapshotDigest !== snapshotDigest || split.seed.tupleDigest !== snapshot.seed.digest) {
     refuse("invalid-document", "splitManifest.seed", "split manifest does not bind the exact next-run snapshot and tuple seed");
   }
@@ -107,6 +145,11 @@ export function compileLiveCampaignInputs(input: LiveCampaignCompileInput): Seal
   const campaign: LiveCampaignInputs = {
     formatToken: LIVE_CAMPAIGN_INPUTS_FORMAT_TOKEN,
     route: snapshot.route,
+    affectedRoutes,
+    affectedRouteDeclaration: {
+      source: "operator-declared",
+      completeness: "not-independently-proven",
+    },
     configRevision: snapshot.configRevision,
     snapshotDigest,
     splitManifestDigest,
@@ -151,6 +194,7 @@ export interface LiveCampaignAuthoringDocument {
   readonly formatToken: typeof LIVE_CAMPAIGN_AUTHORING_FORMAT_TOKEN;
   readonly snapshotBase64: string;
   readonly splitManifestBase64: string;
+  readonly affectedRoutes: readonly NextRunRoute[];
   readonly objectivePreset: PolicyOptimizationObjectivePreset;
   readonly baselineArm: string;
   readonly candidateArm: string;
@@ -177,7 +221,7 @@ export function compileLiveCampaignAuthoringDocument(bytes: Uint8Array): SealedL
   const document = value as Record<string, unknown>;
   const expectedKeys = [
     "formatToken", "snapshotBase64", "splitManifestBase64", "objectivePreset",
-    "baselineArm", "candidateArm", "replicates", "candidatePayloadRisks",
+    "baselineArm", "candidateArm", "replicates", "candidatePayloadRisks", "affectedRoutes",
   ].sort();
   const actualKeys = Object.keys(document).sort();
   if (actualKeys.length !== expectedKeys.length || actualKeys.some((key, index) => key !== expectedKeys[index])) {
@@ -192,6 +236,7 @@ export function compileLiveCampaignAuthoringDocument(bytes: Uint8Array): SealedL
     || typeof document["baselineArm"] !== "string"
     || typeof document["candidateArm"] !== "string"
     || typeof document["replicates"] !== "number"
+    || !Array.isArray(document["affectedRoutes"])
     || !Array.isArray(document["candidatePayloadRisks"])
     || document["candidatePayloadRisks"].some((risk) => typeof risk !== "string" || risk.length === 0)) {
     refuse("invalid-document", "document", "authoring document fields are invalid");
@@ -199,6 +244,7 @@ export function compileLiveCampaignAuthoringDocument(bytes: Uint8Array): SealedL
   return compileLiveCampaignInputs({
     snapshotBytes: decodeExactBase64(document["snapshotBase64"], "snapshotBase64"),
     splitManifestBytes: decodeExactBase64(document["splitManifestBase64"], "splitManifestBase64"),
+    affectedRoutes: document["affectedRoutes"] as NextRunRoute[],
     objectivePreset: document["objectivePreset"] as PolicyOptimizationObjectivePreset,
     baselineArm: document["baselineArm"] as string,
     candidateArm: document["candidateArm"] as string,

@@ -79,7 +79,7 @@ The catalog contains **97** entries: **13** `sealed-platform-v1` packages, **60*
 | @jinn-network/marketplace-testing | packages/marketplace/testing | marketplace | — | platform-support | marketplace conformance kit | candidate | implementations-v1 | canary-and-stable | @jinn-network/evidence-protocol<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-projector<br>@jinn-network/marketplace-venue-base<br>@jinn-network/record-discovery-testing<br>@jinn-network/task-execution-testing<br>@jinn-network/trust-testing<br>viem | — | vitest |
 | @jinn-network/marketplace-venue-base | packages/marketplace/venue-base | marketplace | 3 | platform | Base venue adapter | candidate | implementations-v1 | canary-and-stable | @jinn-network/marketplace-binding<br>@jinn-network/marketplace-projector<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-protocol<br>@types/better-sqlite3<br>better-sqlite3<br>viem | — | — |
 | @jinn-network/plugin | packages/plugin | legacy-plugin-stack | — | legacy | legacy extension contract | transitional | legacy-product-lines | independent | zod | — | vitest |
-| @jinn-network/policy-optimization | packages/policy-optimization | policy | 4 | product | policy optimization product | experimental | transitional-or-private | never | @jinn-network/attestation-issuer<br>@jinn-network/benchmarking-aggregate<br>@jinn-network/benchmarking-local<br>@jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run<br>@jinn-network/evidence-protocol<br>@jinn-network/policy-identity<br>@jinn-network/policy-outcomes<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-core<br>zod | — | — |
+| @jinn-network/policy-optimization | packages/policy-optimization | policy | 4 | product | policy optimization product | experimental | transitional-or-private | never | @jinn-network/attestation-issuer<br>@jinn-network/benchmarking-aggregate<br>@jinn-network/benchmarking-local<br>@jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run<br>@jinn-network/evidence-protocol<br>@jinn-network/policy-identity<br>@jinn-network/policy-outcomes<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-oci-grader<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-core<br>zod | — | — |
 | @jinn-network/policy-identity | packages/policy/identity | policy | 3 | platform | execution-policy identity and candidate manifest sealing | experimental | experimental-policy | disabled | @noble/curves<br>@noble/hashes | — | — |
 | @jinn-network/policy-outcomes | packages/policy/outcomes | policy | 3 | platform | policy-keyed outcomes projection | experimental | experimental-policy | disabled | @jinn-network/policy-identity<br>@noble/hashes<br>zod | — | — |
 | @jinn-network/read-plane | packages/read-plane | read-plane | 3 | platform | health/ready, freshness, SSE resume, constructor token gate, payload classes, OpenAPI generation | experimental | experimental-read-plane | disabled | zod | — | — |
@@ -333,6 +333,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/policy-optimization | runtime | @jinn-network/task-execution-evaluation-harness |
 | @jinn-network/policy-optimization | runtime | @jinn-network/task-execution-evaluator-adapters |
 | @jinn-network/policy-optimization | runtime | @jinn-network/task-execution-launchers |
+| @jinn-network/policy-optimization | runtime | @jinn-network/task-execution-oci-grader |
 | @jinn-network/policy-optimization | runtime | @jinn-network/task-execution-profiles |
 | @jinn-network/policy-optimization | runtime | @jinn-network/task-execution-protocol |
 | @jinn-network/policy-optimization | runtime | @jinn-network/task-execution-supervisor |
@@ -1707,12 +1708,12 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 
 ## Architecture-control ownership
 
-Task 6's validator reports 5031 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 5032 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
 | --- | ---: |
-| authorityDocuments | 32 |
+| authorityDocuments | 33 |
 | boundaryPolicies | 26 |
 | catalogManifests | 97 |
 | catalogPublicSurfaces | 1352 |

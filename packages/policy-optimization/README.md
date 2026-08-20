@@ -7,6 +7,8 @@ to decide with.
 
 **Authority:**
 [`docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md`](../../docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md).
+Live host and journey:
+[`docs/superpowers/specs/2026-08-05-policy-optimization-live-host-and-guided-journey-design.md`](../../docs/superpowers/specs/2026-08-05-policy-optimization-live-host-and-guided-journey-design.md).
 Program:
 [`docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md`](../../docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md).
 
@@ -28,6 +30,12 @@ the exact `.05` proof threshold. Smaller campaigns are valid; they return `promi
 `inconclusive` evidence and keep the current policy by default. Confirmation evidence is consumed
 when first revealed or dispatched and cannot be recycled into a later cycle.
 
+The optimizer and operator are sibling tier-4 products. `jinn-optimize` takes an explicit declared
+baseline—route, profile, public loadout, harness, model, isolation, and every operator-declared
+route sharing that loadout. It does not call operator endpoints, read operator tokens, or inspect
+operator-private state. Consequently it can prove what was evaluated against the declared
+baseline, but not what a live destination currently runs.
+
 ## What is here now
 
 The whole product: **C7a** (the core state layer), **C7b** (the wave engine), **C7c** (admission and
@@ -48,9 +56,9 @@ proposers), **C7d** (the archive and the CLI), and **C8** (the two observation a
 | The reference proposer | §7.2 | Deterministic skill ablation and recombination over the parent loadout. No model, no clock, no randomness. The replaceability falsifier, not a baseline. |
 | Admission | §7.3, §7.4 | Eleven individually-reported checks, injected ports, a payload-class consent gate, and a `tupleDigest`-keyed population with first-admitted attribution. |
 | The archive | §8.3 | A pure, re-derivable projection: `lineageGraph`, `evaluatedHistory`, `frontier` (a **set**, never a ranking), plus a host-directory layout that puts the derivable half under `derived/`. |
-| Adoption | §9 | `adopt` / `rollback` over an append-only, explicitly **non-derivable** log, gated per §7.4 payload class. Emits an operator-config fragment; changes no daemon. |
+| Adoption | §9 | `adopt` / `rollback` over an append-only, explicitly **non-derivable** log, gated per §7.4 payload class. The local host additionally emits immutable, recommendation-bound `LocalAdoptionPlan/1.0` change and rollback fragments; it changes no deployment. |
 | The `optimize` CLI | program §1 C7d | Six verbs as this package's own bin (`policy-optimization optimize …`), argv-shaped so `jinn optimize …` is a later dispatch entry, not a re-design. |
-| The private local host | live-host design §5 | Role-separated backend composition, prepared-Submission recovery, exact solver/evaluator dispatch bindings, cancellation, the relational host journal, pinned-OCI grading, and the zero-document real-task journey. |
+| The private local host | live-host design §5 | Role-separated backend composition, prepared-Submission recovery, exact solver/evaluator dispatch bindings, cancellation, the relational host journal, shared pinned-OCI grading, and the zero-document real-task journey. |
 
 The neutral engine implements **no replacement execution, assembly, or aggregation machinery** —
 re-implementing any of it is forbidden duplication (§6.1), and statistics reach this product only
@@ -69,7 +77,8 @@ node dist/cli/bin.js
 ```
 
 Choose **Test a change**. The guide asks for the current and changed learner-loadout directories,
-the selected route's harness and model, and private state location. It then:
+the selected route, every route declared to share that loadout, the harness and model, and private
+state location. It then:
 
 1. captures each loadout under `learner-public.v1`, refusing unknown roots, links, binary files,
    and secret-bearing public bytes;
@@ -78,8 +87,8 @@ the selected route's harness and model, and private state location. It then:
 4. resolves every mutable image tag to an immutable registry manifest digest;
 5. derives exact Tasks with the upstream row timestamp, EvaluationSpecs, and locally signed
    admission receipts;
-6. seals a confirmation-only split, current-policy snapshot, campaign inputs, and a local run plan
-   binding both exact loadout archives;
+6. seals a confirmation-only split, optimizer-owned declared-baseline snapshot, campaign inputs,
+   and a local run plan binding both exact loadout archives and the affected-route set;
 7. shows the route, group count, proof limitation, payload class, and same-operator limitation;
 8. writes campaign artifacts only after the operator types `yes`; and
 9. prints the exact `campaign run` command, which separately asks for spend confirmation.
@@ -93,12 +102,13 @@ node dist/cli/bin.js campaign run --prepared <prepared-campaign-dir> --confirm
 It revalidates every prepared byte and pin, freezes the operator-supplied challenger, seals the
 single promotion Run, persists each solver Submission before submitting it, and executes one
 current-policy and one changed-policy cell per task. Solver Deliveries are graded by the separate
-evaluator role in each task's pinned OCI image with a read-only root. Network is disabled by
+evaluator role through the shared OCI-grader capability in each task's pinned image with a
+read-only root. Network is disabled by
 default; when the sealed EvaluationSpec explicitly requires public network access, the host creates
 a one-use isolated bridge for that grader and removes it afterwards. The
 host verifies the unsigned evaluator statement, signs it with the evaluator-verdict key, assembles
 the Matrix, produces the preregistered registry Reports, and writes a recomputable recommendation.
-The run never applies that recommendation or changes the daemon. Candidate loadouts carrying
+The run never applies that recommendation or changes a deployment. Candidate loadouts carrying
 `hooks/` or `tools/` additionally require `--approve-executable-change`. An operator interrupt
 is recorded before cancellation side effects; restart resumes the drain, admits no new dispatch,
 and closes without a Matrix or recommendation.
@@ -112,6 +122,24 @@ JINN_POLICY_OPTIMIZATION_REAL_SOURCE=1 yarn test src/host-local/swe-rebench-jour
 This source check uses the public dataset and registry, but performs no model call and starts no
 grader container. Only the separately confirmed `campaign run` step performs real solver calls and
 container grading.
+
+Recommendation-bound adoption is a third, still non-mutating step:
+
+```bash
+node dist/cli/bin.js campaign adopt \
+  --prepared <prepared-campaign-dir> \
+  --current-loadout <declared-baseline-dir> \
+  --approve-route <route> \
+  --approve-tuple <sha256:digest> \
+  --approve-payload-class <class> \
+  --confirm
+```
+
+Repeat `--approve-route` for the complete shared-loadout route set. The command recomputes the
+recommendation from exact Run/Matrix/Report bytes, re-seals the baseline source, and writes one
+canonical `LocalAdoptionPlan/1.0` plus atomically linked local decisions. The plan contains exact
+changes and rollbacks for every route and requires a future applier to verify the destination's
+current tuple. The optimizer neither performs nor claims that destination check.
 
 ## Running your first campaign
 
@@ -564,6 +592,8 @@ interface AdoptionRecord {
   scope: { taskProfile: string; route?: string };
   priorTuple: string | null;        // what this displaced; null on a scope's first adoption
   payloadClassesApproved: PayloadClass[];   // sorted along §7.4's gradient
+  recommendationBasis?: RecommendationDecision["basis"];
+  sharedDecisionId?: string;        // links one atomic affected-route decision
 }
 ```
 
@@ -581,10 +611,11 @@ A prompt is an injection surface and a hook is arbitrary code execution; consent
 consenting to the other, so an unapproved class is refused rather than warned about. `unclassified`
 is the fail-closed member and is approvable only by that name.
 
-Adoption **records** a decision. Pinning the tuple into a daemon's task routes is the operator
-config's business, so `adopt` *prints* the config fragment (`expressAsRunPinning(tuple)`, byte-
-identical to a wave arm's) and changes nothing. The freeze-fence and L1 revert remain the safety net
-under any adopted policy; this verb does not replace them and does not claim to.
+Adoption **records** a decision. Applying the tuple to a destination is a separate deployer's
+business, so `adopt` *prints* the config fragment (`expressAsRunPinning(tuple)`, byte-identical to a
+wave arm's) and changes nothing. The live-host plan additionally carries the expected-current-tuple
+precondition and rollback. This product neither applies that plan nor claims destination drift was
+checked.
 
 ## The CLI
 

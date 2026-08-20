@@ -1,0 +1,3 @@
+# The predecessor blob contains a legacy literal NUL in a TypeScript string. Keep its removal and
+# the compatible adoption extensions reviewable as text instead of presenting this file as binary.
+packages/policy-optimization/src/archive/adoption.ts text diff

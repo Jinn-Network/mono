@@ -157,6 +157,7 @@ __metadata:
     "@jinn-network/task-execution-evaluation-harness": "npm:0.1.0"
     "@jinn-network/task-execution-evaluator-adapters": "npm:0.1.0"
     "@jinn-network/task-execution-launchers": "npm:0.1.0"
+    "@jinn-network/task-execution-oci-grader": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
     "@jinn-network/task-execution-supervisor": "npm:0.1.0"
@@ -240,6 +241,16 @@ __metadata:
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
     "@jinn-network/task-execution-supervisor": "npm:0.1.0"
     "@jinn-network/task-execution-workspace": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-oci-grader@portal:../task-execution/oci-grader::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-oci-grader@portal:../task-execution/oci-grader::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-evaluation-harness": "npm:0.1.0"
+    "@jinn-network/task-execution-evaluator-adapters": "npm:0.1.0"
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
   languageName: node
   linkType: soft
 

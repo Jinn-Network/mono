@@ -3462,6 +3462,10 @@
             "status": "draft"
           },
           {
+            "path": "docs/superpowers/specs/2026-08-05-policy-optimization-live-host-and-guided-journey-design.md",
+            "status": "approved"
+          },
+          {
             "path": "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md",
             "status": "approved"
           }

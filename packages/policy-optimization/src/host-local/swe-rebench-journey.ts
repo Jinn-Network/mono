@@ -50,6 +50,10 @@ import { readVerifiedSupplyPool, type LiveSupplyPoolEntry } from "./supply-pool.
 import { ensurePrivateDirectory, secureAtomicWrite, secureRead } from "./state.js";
 import { liveSolverWrapperDigest } from "./solver-launcher.js";
 import {
+  declaredBaselineRevision,
+  normalizeAffectedRoutes,
+} from "./declared-baseline.js";
+import {
   LOCAL_SWE_REBENCH_EVALUATION_METHOD,
   SWE_REBENCH_PUBLIC_NETWORK_EXTENSION,
 } from "./swe-rebench-grader-source.js";
@@ -115,6 +119,8 @@ export interface PrepareSweRebenchJourneyInput {
   readonly currentLoadout: SealedLocalLoadoutArchive;
   readonly candidateLoadout: SealedLocalLoadoutArchive;
   readonly routeName: string;
+  /** Every named route the operator declares shares this baseline loadout. */
+  readonly affectedRoutes: readonly string[];
   readonly harness: string;
   readonly model: string;
   readonly isolationPolicy: string;
@@ -581,6 +587,11 @@ export async function prepareSweRebenchJourney(
   }
   const profile = buildRepositoryWorkProfile();
   const sealedProfile = sealTaskProfile(profile);
+  const route = { taskProfile: REPOSITORY_WORK_PROFILE_URI, route: input.routeName };
+  const affectedRoutes = normalizeAffectedRoutes(
+    route,
+    input.affectedRoutes.map((name) => ({ taskProfile: REPOSITORY_WORK_PROFILE_URI, route: name })),
+  );
   const authority = localAdmissionAuthority(input.stateRoot);
   const entries: LiveSupplyPoolEntry[] = [];
   const receipts = new Map<string, Uint8Array>();
@@ -749,15 +760,25 @@ export async function prepareSweRebenchJourney(
   if (representative === undefined) {
     refuse("invalid-document", "sweRebench.groups", "no fresh representative task remains after exclusions");
   }
-  const configRevision = prefixedDigest(canonicalJsonBytes({
-    currentLoadout: input.currentLoadout.treeDigest,
-    harness,
-    isolationPolicy: input.isolationPolicy,
-    model: input.model,
-    route: input.routeName,
-    source: { config, dataset: SWE_REBENCH_DATASET, split: splitName },
-  }));
   const requirements = routeRequirements(input, harness, input.currentLoadout.treeDigest);
+  const configRevision = declaredBaselineRevision({
+    route,
+    affectedRoutes,
+    profileDigest: sealedProfile.digest,
+    harness: {
+      id: harness.id,
+      executable: harness.executable,
+      digest: harness.digest,
+      version: harness.version,
+    },
+    model: input.model,
+    isolationPolicy: input.isolationPolicy,
+    loadout: {
+      archiveDigest: input.currentLoadout.archiveDigest,
+      treeDigest: input.currentLoadout.treeDigest,
+    },
+    requirements,
+  });
   const submissionIdentity = prefixedDigest(canonicalJsonBytes({
     configRevision,
     taskDigest: representative.taskDigest,
@@ -776,7 +797,7 @@ export async function prepareSweRebenchJourney(
     configRevisionBefore: configRevision,
     configRevisionAfter: configRevision,
     resolutions: [{
-      route: { taskProfile: REPOSITORY_WORK_PROFILE_URI, route: input.routeName },
+      route,
       task: { bytes: representative.taskBytes, digest: representative.taskDigest },
       submission: { bytes: submissionBytes, digest: documentDigest(submissionBytes) },
       profile: {
@@ -805,6 +826,7 @@ export async function prepareSweRebenchJourney(
   const campaign = compileLiveCampaignInputs({
     snapshotBytes: snapshot.bytes,
     splitManifestBytes: split.bytes,
+    affectedRoutes,
     objectivePreset: "more-tasks-succeed@1",
     baselineArm: `current-${input.currentLoadout.treeDigest.slice("sha256:".length, "sha256:".length + 12)}`,
     candidateArm: `candidate-${input.candidateLoadout.treeDigest.slice("sha256:".length, "sha256:".length + 12)}`,
@@ -856,6 +878,7 @@ export async function prepareSweRebenchJourney(
     },
     promotionBenchmarkDigest: promotionBenchmark.digest,
     route: {
+      affectedRoutes,
       harness,
       isolationPolicy: input.isolationPolicy,
       model: input.model,

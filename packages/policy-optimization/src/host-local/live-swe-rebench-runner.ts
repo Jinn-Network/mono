@@ -26,7 +26,6 @@ import { planRun, type AttemptWaitPort } from "@jinn-network/benchmarking-run";
 import {
   canonicalJsonBytes,
   expressAsRunPinning,
-  hashTreeLearnerPublicV1,
   prefixedDigest,
   tupleDigest,
   type ExecutionPolicyTuple,
@@ -65,7 +64,10 @@ import {
   type ProvisionerContract,
 } from "@jinn-network/task-execution-workspace";
 import { assembleWaveMatrix } from "../execute.js";
-import { parseExactNextRunPolicySnapshot } from "../next-run-policy-snapshot.js";
+import {
+  parseExactNextRunPolicySnapshot,
+  type NextRunRoute,
+} from "../next-run-policy-snapshot.js";
 import { projectRecommendation, SAME_OPERATOR_EVALUATION_LIMITATION } from "../recommendation.js";
 import { parseExactPolicyOptimizationSplitManifest } from "../split-manifest.js";
 import type { WaveCellEvidence, WaveExecution, WavePlan } from "../wave-types.js";
@@ -83,10 +85,7 @@ import {
 } from "./evaluator-deployment-entry.js";
 import { ensurePinnedOciImage, validateAndSignEvaluatorStatement } from "./grader-oci.js";
 import { LiveHostJournal, type LiveHostJournalTransaction } from "./journal.js";
-import {
-  LOCAL_LOADOUT_ARCHIVE_FORMAT_TOKEN,
-  type SealedLocalLoadoutArchive,
-} from "./loadout-archive.js";
+import { parseLocalLoadoutArchive, type SealedLocalLoadoutArchive } from "./loadout-archive.js";
 import { liveHostPurposeKey } from "./purpose-keys.js";
 import { createRoleScopedLocalBackends, type RoleScopedBackends } from "./role-backends.js";
 import {
@@ -113,7 +112,7 @@ import { retrieveExactDeliveries, submitPreparedDispatch } from "./dispatch.js";
 const REQUESTER = "urn:jinn:policy-optimization:local-operator";
 const EVALUATOR_HARNESS_VERSION = "0.1.0";
 const AUTH_DESCRIPTOR = Object.freeze({ kind: "local-codex-session-v1" });
-interface LocalRunPlan {
+export interface LocalRunPlan {
   readonly campaignDigest: string;
   readonly snapshotDigest: string;
   readonly splitManifestDigest: string;
@@ -122,6 +121,7 @@ interface LocalRunPlan {
   readonly candidate: { readonly archiveDigest: string; readonly treeDigest: string };
   readonly policyTuples: { readonly current: string; readonly candidate: string };
   readonly route: {
+    readonly affectedRoutes: readonly NextRunRoute[];
     readonly harness: PinnedHarness;
     readonly isolationPolicy: string;
     readonly model: string;
@@ -215,7 +215,37 @@ function string(value: unknown, label: string): string {
   return value;
 }
 
-function parseRunPlan(path: string): { readonly bytes: Uint8Array; readonly digest: string; readonly plan: LocalRunPlan } {
+function exactObjectKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+  label: string,
+): void {
+  if (Object.keys(value).sort().join("\0") !== [...expected].sort().join("\0")) {
+    throw new HostStateError("state-io", `${label} has missing or unknown fields`);
+  }
+}
+
+function affectedRoutes(value: unknown): readonly NextRunRoute[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new HostStateError("state-io", "run plan affected routes are missing");
+  }
+  return value.map((entry, index) => {
+    const route = object(entry, `run plan affected route ${index}`);
+    if (Object.keys(route).sort().join("\0") !== "route\0taskProfile") {
+      throw new HostStateError("state-io", "run plan affected route has missing or unknown fields");
+    }
+    return {
+      taskProfile: string(route["taskProfile"], "affected route task profile"),
+      route: string(route["route"], "affected route name"),
+    };
+  });
+}
+
+export function parseLocalRunPlan(path: string): {
+  readonly bytes: Uint8Array;
+  readonly digest: string;
+  readonly plan: LocalRunPlan;
+} {
   const exact = exactCanonical(path);
   const root = object(exact.value, "run plan");
   const expected = [
@@ -232,6 +262,17 @@ function parseRunPlan(path: string): { readonly bytes: Uint8Array; readonly dige
   const candidate = object(root["candidate"], "run plan candidate loadout");
   const tuples = object(root["policyTuples"], "run plan policy tuples");
   const implementations = object(root["hostImplementations"], "run plan host implementations");
+  const source = object(root["source"], "run plan source");
+  exactObjectKeys(route, ["affectedRoutes", "harness", "isolationPolicy", "model", "name"], "run plan route");
+  exactObjectKeys(harness, ["digest", "executable", "id", "version"], "run plan harness");
+  exactObjectKeys(current, ["archiveDigest", "treeDigest"], "run plan current loadout");
+  exactObjectKeys(candidate, ["archiveDigest", "treeDigest"], "run plan candidate loadout");
+  exactObjectKeys(tuples, ["candidate", "current"], "run plan policy tuples");
+  exactObjectKeys(implementations, ["evaluatorMethodDigest", "solverWrapperDigest"], "run plan host implementations");
+  exactObjectKeys(source, ["config", "dataset", "split"], "run plan source");
+  string(source["config"], "run plan source config");
+  string(source["dataset"], "run plan source dataset");
+  string(source["split"], "run plan source split");
   if (!Array.isArray(root["pool"])) throw new HostStateError("state-io", "run plan pool is missing");
   const plan: LocalRunPlan = {
     campaignDigest: digest(root["campaignDigest"], "campaign digest"),
@@ -251,6 +292,7 @@ function parseRunPlan(path: string): { readonly bytes: Uint8Array; readonly dige
       candidate: digest(tuples["candidate"], "candidate tuple digest"),
     },
     route: {
+      affectedRoutes: affectedRoutes(route["affectedRoutes"]),
       harness: {
         id: string(harness["id"], "harness id"),
         executable: string(harness["executable"], "harness executable"),
@@ -267,6 +309,11 @@ function parseRunPlan(path: string): { readonly bytes: Uint8Array; readonly dige
     },
     pool: root["pool"].map((value, index) => {
       const entry = object(value, `run plan pool ${index}`);
+      exactObjectKeys(
+        entry,
+        ["evaluationSpecDigest", "receiptDigest", "taskDigest"],
+        `run plan pool ${index}`,
+      );
       return {
         taskDigest: digest(entry["taskDigest"], "pool Task digest"),
         evaluationSpecDigest: digest(entry["evaluationSpecDigest"], "pool EvaluationSpec digest"),
@@ -279,21 +326,13 @@ function parseRunPlan(path: string): { readonly bytes: Uint8Array; readonly dige
 
 function loadout(path: string, expected: { readonly archiveDigest: string; readonly treeDigest: string }): SealedLocalLoadoutArchive {
   const exact = exactCanonical(path);
-  const value = object(exact.value, "loadout archive");
-  if (value["formatToken"] !== LOCAL_LOADOUT_ARCHIVE_FORMAT_TOKEN
-    || value["hashProfile"] !== "learner-public.v1" || !Array.isArray(value["entries"])) {
-    throw new HostStateError("state-io", "loadout archive format moved");
-  }
-  const entries = value["entries"] as TreeEntry[];
-  const treeDigest = `sha256:${hashTreeLearnerPublicV1(entries)}`;
-  if (prefixedDigest(exact.bytes) !== expected.archiveDigest
-    || value["treeDigest"] !== expected.treeDigest || treeDigest !== expected.treeDigest) {
+  let parsed: SealedLocalLoadoutArchive;
+  try { parsed = parseLocalLoadoutArchive(exact.bytes, dirname(path)); }
+  catch { throw new HostStateError("state-io", "loadout archive format moved"); }
+  if (parsed.archiveDigest !== expected.archiveDigest || parsed.treeDigest !== expected.treeDigest) {
     throw new HostStateError("state-io", "loadout archive or materialized-tree binding moved");
   }
-  return {
-    root: dirname(path), entries, bytes: exact.bytes,
-    archiveDigest: expected.archiveDigest, treeDigest: expected.treeDigest,
-  };
+  return parsed;
 }
 
 async function processExit(command: string, args: readonly string[], cwd?: string): Promise<void> {
@@ -888,7 +927,7 @@ export async function runLiveSweRebenchCampaign(input: LiveSweRebenchRunInput): 
   const stateRoot = ensurePrivateDirectory(input.stateRoot);
   const now = input.now ?? (() => new Date());
   const progress = input.onProgress ?? (() => undefined);
-  const runPlan = parseRunPlan(join(preparedRoot, "run-plan.json"));
+  const runPlan = parseLocalRunPlan(join(preparedRoot, "run-plan.json"));
   const campaignExact = exactCanonical(join(preparedRoot, "campaign-inputs.json"));
   const campaign = parseExactLiveCampaignInputs(campaignExact.bytes);
   const snapshotBytes = secureRead(join(preparedRoot, "next-run-policy-snapshot.json"));
@@ -899,6 +938,7 @@ export async function runLiveSweRebenchCampaign(input: LiveSweRebenchRunInput): 
     || prefixedDigest(snapshotBytes) !== runPlan.plan.snapshotDigest
     || prefixedDigest(splitBytes) !== runPlan.plan.splitManifestDigest
     || campaign.configRevision !== snapshot.configRevision
+    || JSON.stringify(campaign.affectedRoutes) !== JSON.stringify(runPlan.plan.route.affectedRoutes)
     || campaign.evidenceAccess.challengerSource !== "operator-supplied"
     || campaign.evidenceAccess.confirmationGroups.join("\0") !== split.assignments.promotion.join("\0")) {
     throw new HostStateError("state-io", "prepared campaign, snapshot, split, or configuration revision moved");
