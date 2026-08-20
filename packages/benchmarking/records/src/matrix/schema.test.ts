@@ -440,6 +440,29 @@ describe("MatrixRecordSchema / parseMatrix / sealMatrix", () => {
     expect(() => sealMatrix(value)).not.toThrow();
   });
 
+  test("at completeness floor \"1\" forces partial when one cell is ungradeable, and refuses complete over the same cells", () => {
+    // spec §5.4: the run pins policy.completenessFloor to "1"; one ungradeable cell then makes
+    // judged < expected, which the schema must force to runOutcome "partial" — it is not
+    // optional disclosure.
+    const value = validMatrix();
+    const first = value.cells[0]!;
+    const second = structuredClone(first);
+    second.cellKey = `${first.taskDigest}/armA/2`;
+    second.replicate = 2;
+    second.outcome = "unscorable";
+    second.verdicts = [];
+    second.validVerdicts = [];
+    value.cells.push(second);
+    value.completeness.floor = "1";
+    rederiveConvenienceViews(value);
+
+    value.completeness.runOutcome = "complete";
+    expect(() => sealMatrix(value)).toThrow(InvalidDocumentError);
+
+    value.completeness.runOutcome = "partial";
+    expect(() => sealMatrix(value)).not.toThrow();
+  });
+
   test.each([
     ["duplicate flags", ["same", "same"]],
     ["unsorted flags", ["z-flag", "a-flag"]],
