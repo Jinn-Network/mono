@@ -34,6 +34,7 @@ import { DSSE_PAYLOAD_TYPE, recordDigest } from "@jinn-network/evidence-protocol
 import { dssePreAuthEncoding } from "@jinn-network/trust-core";
 import { admitDeclaredCells } from "../dist/method/skillsbench-demo1-declaration.js";
 import {
+  informativeSubset,
   manipulationCheck,
   pairedDeltaEstimate,
   varianceDecomposition,
@@ -67,7 +68,7 @@ check(recordDigest(json(bundle.declaration)) === summary.digests.declaration, "d
 
 // 2. Recompute every statistic over the declared slate and compare to the committed report.
 const slateCells = admission.cells.filter((cell) => cell.section === "slate");
-const estimate = pairedDeltaEstimate(slateCells);
+const estimate = pairedDeltaEstimate(informativeSubset(slateCells));
 const decomposition = varianceDecomposition(estimate);
 const manipulation = manipulationCheck(slateCells);
 const closeTo = (a, b) => Math.abs(a - b) < 1e-9;

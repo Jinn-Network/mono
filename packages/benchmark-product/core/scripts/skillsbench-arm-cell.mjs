@@ -51,6 +51,21 @@ const ARMS = {
 };
 
 const sh = (c, o = {}) => execSync(c, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], ...o });
+
+/**
+ * Removes a directory that grading may have littered with container-root-owned files. On Docker
+ * Desktop the container's root writes are uid-mapped to the invoking user, but on native Linux
+ * they land as real root and rmSync dies with EACCES — so fall back to sudo, which the droplet
+ * runner user holds passwordless.
+ */
+function destroyDir(path) {
+  try {
+    rmSync(path, { recursive: true, force: true });
+  } catch {
+    sh(`sudo rm -rf '${path}'`);
+  }
+}
+
 const gitBlobId = (b) => createHash("sha1").update(`blob ${b.length}\0`, "utf8").update(b).digest("hex");
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 
@@ -134,6 +149,39 @@ writeFileSync(join(pkg, "environment", "Dockerfile.pinned"), dockerText.replace(
 const tag = `jinn-demo1/${taskId}:cell`;
 sh(`docker build -q -f ${join(pkg, "environment", "Dockerfile.pinned")} -t ${tag} ${join(pkg, "environment")}`, { timeout: 3_600_000 });
 
+// Instrument controls: the upstream oracle must reach full success and a blank submission must
+// not, on THIS host and architecture — a zero from an unvalidated instrument means nothing.
+// No model executes. Results append to a separate controls document.
+if (argv.includes("--oracle")) {
+  const controlsOut = process.env.DEMO1_CONTROLS_OUT ?? join(dirname(OUT), "controls.json");
+  const controls = existsSync(controlsOut)
+    ? JSON.parse(readFileSync(controlsOut, "utf8"))
+    : { schema: "jinn.demo1.host-control-evidence.v1", host: process.env.HOSTNAME ?? "unknown", cells: {} };
+  if (controls.cells[taskId] === undefined) {
+    const oracleOut = sh(
+      `docker run --rm --network bridge -v "${join(pkg, "oracle")}:/oracle:ro" -v "${join(pkg, "verifier")}:/verifier:ro" ${tag} `
+      + `bash -c 'cd /root; mkdir -p /logs/verifier; bash /oracle/solve.sh >/tmp/o.log 2>&1 || true; bash /verifier/test.sh >/tmp/v.log 2>&1 || true; echo REWARD=$(cat /logs/verifier/reward.txt 2>/dev/null || echo MISSING)'`,
+      { timeout: 1_800_000 },
+    );
+    const noOpOut = sh(
+      `docker run --rm --network bridge -v "${join(pkg, "verifier")}:/verifier:ro" ${tag} `
+      + `bash -c 'cd /root; mkdir -p /logs/verifier; bash /verifier/test.sh >/tmp/v.log 2>&1 || true; echo REWARD=$(cat /logs/verifier/reward.txt 2>/dev/null || echo MISSING)'`,
+      { timeout: 1_800_000 },
+    );
+    const oracleReward = /REWARD=(\S+)/u.exec(oracleOut)?.[1] ?? null;
+    const noOpReward = /REWARD=(\S+)/u.exec(noOpOut)?.[1] ?? null;
+    controls.cells[taskId] = { oracleReward, noOpReward, baseImage: baseDigest };
+    writeFileSync(controlsOut, `${JSON.stringify(controls, null, 2)}
+`);
+    console.log(`ORACLE ${taskId}: oracle=${oracleReward} noop=${noOpReward}`);
+  } else {
+    console.log(`ORACLE ${taskId}: already recorded`);
+  }
+  try { sh(`docker rmi -f ${tag}`); } catch { /* fine */ }
+  destroyDir(pkg);
+  process.exit(0);
+}
+
 // Population probe: prove the environment builds on this host, record nothing, run no agent.
 if (argv.includes("--probe-build")) {
   console.log(`BUILD OK ${taskId} base=${baseDigest}`);
@@ -164,7 +212,7 @@ for (const [armId, replicate] of plan) {
   if (results.cells[cellId] !== undefined) { console.log(`${cellId}: already recorded`); continue; }
 
   const ws = join(pkg, `ws-${arm}`);
-  rmSync(ws, { recursive: true, force: true });
+  destroyDir(ws);
   mkdirSync(ws, { recursive: true });
 
   // Non-instruction environment content: identical in all three arms.
@@ -195,9 +243,26 @@ for (const [armId, replicate] of plan) {
   if (arm === "B-flat-claude-md") writeFileSync(join(ws, "CLAUDE.md"), claudeMd);
 
   process.stdout.write(`${cellId}: solving... `);
-  const started = Date.now();
-  const agent = spawnSync("claude", args, { cwd: ws, encoding: "utf8", timeout: 900_000, maxBuffer: 32 * 1024 * 1024 });
+  // A nonzero agent exit is an infrastructure error (auth, usage limit, crash), never a task
+  // verdict — claude -p exits 0 on any completed conversation. Recording such an attempt as a
+  // zero would manufacture a fail from a non-attempt, so back off and retry; if the window never
+  // reopens, record NOTHING and let fail-closed admission demand the cell later.
+  let agent;
+  let started = Date.now();
+  for (let attempt = 1; ; attempt += 1) {
+    started = Date.now();
+    agent = spawnSync("claude", args, { cwd: ws, encoding: "utf8", timeout: 900_000, maxBuffer: 32 * 1024 * 1024 });
+    if (agent.status === 0) break;
+    if (attempt >= 12) break;
+    const wait = Math.min(900, 90 * attempt);
+    console.log(`agent exit ${agent.status} (attempt ${attempt}) — backing off ${wait}s`);
+    execSync(`sleep ${wait}`);
+  }
   const elapsed = Math.round((Date.now() - started) / 1000);
+  if (agent.status !== 0) {
+    console.log(`${cellId}: NOT RECORDED (agent exit ${agent.status} after retries)`);
+    continue;
+  }
   if (process.env.DEMO1_TRACE === "1") {
     console.log(`\n--- agent stdout (${arm}) ---\n${(agent.stdout ?? "").slice(0, 1200)}`);
     console.log(`--- agent stderr ---\n${(agent.stderr ?? "").slice(0, 600)}`);
@@ -228,6 +293,6 @@ for (const [armId, replicate] of plan) {
 }
 
 try { sh(`docker rmi -f ${tag}`); } catch { /* fine */ }
-if (process.env.DEMO1_KEEP !== "1") rmSync(pkg, { recursive: true, force: true }); else console.log(`kept ${pkg}`);
+if (process.env.DEMO1_KEEP !== "1") destroyDir(pkg); else console.log(`kept ${pkg}`);
 console.log(`\ncells recorded: ${Object.keys(results.cells).length}`);
 console.log(`sealed ${OUT}`);

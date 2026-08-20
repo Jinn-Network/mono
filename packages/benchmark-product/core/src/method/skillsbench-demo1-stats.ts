@@ -57,6 +57,34 @@ export interface SkillsBenchDemo1PairedEstimate {
   readonly ci95: { readonly lower: number; readonly upper: number };
 }
 
+/**
+ * Pre-declared informative-subset rule, sealed in the analysis manifest:
+ * a task enters the paired A−B estimate iff C = 0 in every replicate AND
+ * max(mean A, mean B) > 0. The ±15 pp (150000 ppm) equivalence margin is a
+ * separate declared parameter; it is not a post-hoc filter.
+ */
+export function informativeSubset(
+  cells: readonly SkillsBenchDemo1AdmittedCell[],
+): SkillsBenchDemo1AdmittedCell[] {
+  const byTask = new Map<string, SkillsBenchDemo1AdmittedCell[]>();
+  for (const cell of cells) {
+    const entry = byTask.get(cell.taskId) ?? [];
+    entry.push(cell);
+    byTask.set(cell.taskId, entry);
+  }
+  const keep = new Set<string>();
+  for (const [taskId, group] of byTask) {
+    const c = group.filter((cell) => cell.arm === "C-no-instructions");
+    const a = group.filter((cell) => cell.arm === "A-native-skill").map((cell) => cell.rewardValue);
+    const b = group.filter((cell) => cell.arm === "B-flat-claude-md").map((cell) => cell.rewardValue);
+    if (c.length === 0 || a.length === 0 || b.length === 0) continue;
+    if (c.some((cell) => cell.rewardValue !== 0)) continue;
+    if (Math.max(mean(a), mean(b)) <= 0) continue;
+    keep.add(taskId);
+  }
+  return cells.filter((cell) => keep.has(cell.taskId));
+}
+
 export function pairedDeltaEstimate(
   cells: readonly SkillsBenchDemo1AdmittedCell[],
 ): SkillsBenchDemo1PairedEstimate {

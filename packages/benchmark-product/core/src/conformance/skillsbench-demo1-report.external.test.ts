@@ -46,6 +46,7 @@ import {
   type SkillsBenchDemo1CellRecord,
 } from "../method/skillsbench-demo1-declaration.js";
 import {
+  informativeSubset,
   manipulationCheck,
   pairedDeltaEstimate,
   varianceDecomposition,
@@ -231,7 +232,7 @@ describe.skipIf(!ENABLED)("Demo-1 evidence-native report", () => {
     // declared slate enters the paired analysis.
     const admission = admitDeclaredCells(declaration, document);
     const slateCells = admission.cells.filter((cell) => cell.section === "slate");
-    const estimate = pairedDeltaEstimate(slateCells);
+    const estimate = pairedDeltaEstimate(informativeSubset(slateCells));
     const decomposition = varianceDecomposition(estimate);
     const check = manipulationCheck(slateCells);
 
@@ -384,7 +385,13 @@ describe.skipIf(!ENABLED)("Demo-1 evidence-native report", () => {
         conflictsPreserved: 0,
         commissioningRequired: false,
       },
-      limitations: [
+      limitations: stage === "final" ? [
+        `FLAT POPULATION: ${declaration.slate.length} statically-admitted tasks, uniform A×5 / B×5 / C×2. No task was selected or dropped on any outcome. The paired estimate is the pre-declared informative subset (${estimate.n} of ${declaration.slate.length}): C = 0 in every replicate and max(mean A, mean B) > 0. Equivalence margin ±15 pp (150000 ppm).`,
+        `SCALE: ${estimate.n} informative tasks against the official Demo-1 floor of 21 units in 13 independence clusters.`,
+        "HOST-AGENT DEVIATION: the agent ran on the host (Claude Code authenticates itself there), not inside the task image; grading always ran inside the pinned container. Agent-side environment is therefore the host interpreter, not the task's.",
+        `SUBJECT MODEL: every cell ran ${declaration.model}. Nothing here generalizes to other models; upstream rescue data shows the skill effect is strongly model-dependent.`,
+        "SELF-RUN VENUE: the same operator produced and sealed every cell. The checkable artifact chain, not the operator, is what a reader should rely on.",
+      ] : [
         `PILOT SCALE: ${declaration.slate.length} informative tasks against the official Demo-1 floor of 21 units in 13 independence clusters. That floor is unreachable for this model on this corpus; this is the strongest claim the data can honestly carry.`,
         "SLATE SELECTION: tasks were selected for demonstrated instruction-content uplift — first from the upstream coverage data, then symmetrically via Jinn's own arm-A and arm-B screens. The A-vs-B contrast is therefore conditional on content mattering, which is what the manipulation check certifies per task.",
         "HOST-AGENT DEVIATION: the agent ran on the host (Claude Code authenticates itself there), not inside the task image; grading always ran inside the pinned container. Agent-side environment is therefore the host interpreter, not the task's.",
@@ -421,8 +428,12 @@ describe.skipIf(!ENABLED)("Demo-1 evidence-native report", () => {
       schema: "jinn.demo1.report.v1",
       title: "Demo-1: Skill delivery A/B on SkillsBench v1.1",
       stage,
-      pilotScale: `PILOT SCALE — ${declaration.slate.length} informative tasks against the official floor of 21 units / 13 clusters, which is unreachable for this model on this corpus.`,
-      slateSelection: "Uplift-selected from upstream coverage data, then symmetrically screened with Jinn's own arm-A and arm-B rescue screens.",
+      pilotScale: stage === "final"
+        ? `${estimate.n} informative tasks of ${declaration.slate.length} against the official floor of 21 units / 13 clusters.`
+        : `PILOT SCALE — ${declaration.slate.length} informative tasks against the official floor of 21 units / 13 clusters, which is unreachable for this model on this corpus.`,
+      slateSelection: stage === "final"
+        ? "Flat: every statically-admitted task. No outcome-based selection. Paired estimate restricted to the pre-declared informative subset."
+        : "Uplift-selected from upstream coverage data, then symmetrically screened with Jinn's own arm-A and arm-B rescue screens.",
       hostAgentDeviation: "Agent on host; grading in the pinned container.",
       model: declaration.model,
       source: { benchmark: "skillsbench", release: "v1.1", commit: SOURCE_COMMIT },

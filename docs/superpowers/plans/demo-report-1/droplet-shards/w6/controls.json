@@ -1,0 +1,41 @@
+{
+  "schema": "jinn.demo1.host-control-evidence.v1",
+  "host": "unknown",
+  "cells": {
+    "dapt-intrusion-detection": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-unit-commitment": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "jax-computing-basics": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "mario-coin-counting": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "pddl-tpp-planning": {
+      "oracleReward": "0",
+      "noOpReward": "0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "syzkaller-ppdev-syzlang": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "threejs-to-obj": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    }
+  }
+}

@@ -1,9 +1,9 @@
 {
   "schema": "jinn.demo1.report.v1",
   "title": "Demo-1: Skill delivery A/B on SkillsBench v1.1",
-  "stage": "pilot",
-  "pilotScale": "PILOT SCALE — 7 informative tasks against the official floor of 21 units / 13 clusters, which is unreachable for this model on this corpus.",
-  "slateSelection": "Uplift-selected from upstream coverage data, then symmetrically screened with Jinn's own arm-A and arm-B rescue screens.",
+  "stage": "final",
+  "pilotScale": "14 informative tasks of 41 against the official floor of 21 units / 13 clusters.",
+  "slateSelection": "Flat: every statically-admitted task. No outcome-based selection. Paired estimate restricted to the pre-declared informative subset.",
   "hostAgentDeviation": "Agent on host; grading in the pinned container.",
   "model": "claude-haiku-4-5-20251001",
   "source": {
@@ -11,201 +11,327 @@
     "release": "v1.1",
     "commit": "b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af"
   },
-  "cells": 63,
-  "slateCells": 63,
+  "cells": 492,
+  "slateCells": 492,
   "screeningCells": 0,
-  "undeclaredCellsInFile": 149,
+  "undeclaredCellsInFile": 0,
   "results": {
     "pairedDelta": {
-      "n": 7,
-      "mean": -0.09523809523809525,
-      "sd": 0.25197631533948484,
-      "se": 0.09523809523809525,
-      "tCritical": 2.447,
+      "n": 14,
+      "mean": -0.04714284285714286,
+      "sd": 0.305398316093148,
+      "se": 0.08162113323701788,
+      "tCritical": 2.16,
       "ci95": {
-        "lower": -0.32828571428571435,
-        "upper": 0.13780952380952383
+        "lower": -0.2234444906491015,
+        "upper": 0.12915880493481574
       },
       "perTask": [
         {
-          "taskId": "dapt-intrusion-detection",
+          "taskId": "drone-planning-control",
+          "meanA": 0.053333399999999996,
+          "meanB": 0.11333319999999998,
+          "delta": -0.059999799999999985,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.013911106888899998
+        },
+        {
+          "taskId": "edit-pdf",
+          "meanA": 0.2,
+          "meanB": 0,
+          "delta": 0.2,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.04000000000000001
+        },
+        {
+          "taskId": "energy-market-pricing",
+          "meanA": 0,
+          "meanB": 0.2,
+          "delta": -0.2,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.04000000000000001
+        },
+        {
+          "taskId": "glm-lake-mendota",
           "meanA": 1,
-          "meanB": 1,
-          "delta": 0,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariance": 0
+          "meanB": 0.8,
+          "delta": 0.19999999999999996,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.04
         },
         {
           "taskId": "grid-dispatch-operator",
-          "meanA": 0.3333333333333333,
-          "meanB": 0.3333333333333333,
+          "meanA": 0.2,
+          "meanB": 0.2,
           "delta": 0,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariance": 0.22222222222222224
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.08000000000000002
+        },
+        {
+          "taskId": "hvac-control",
+          "meanA": 1,
+          "meanB": 0.4,
+          "delta": 0.6,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.06000000000000001
         },
         {
           "taskId": "lake-warming-attribution",
           "meanA": 0,
-          "meanB": 0.3333333333333333,
-          "delta": -0.3333333333333333,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariance": 0.11111111111111112
+          "meanB": 0.6,
+          "delta": -0.6,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.06000000000000001
         },
         {
           "taskId": "llm-prefix-cache-replay",
-          "meanA": 0.6666666666666666,
-          "meanB": 1,
-          "delta": -0.33333333333333337,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariance": 0.11111111111111112
+          "meanA": 0.2,
+          "meanB": 0.6,
+          "delta": -0.39999999999999997,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.10000000000000002
         },
         {
           "taskId": "mario-coin-counting",
-          "meanA": 0.3333333333333333,
-          "meanB": 0,
-          "delta": 0.3333333333333333,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariance": 0.11111111111111112
+          "meanA": 0,
+          "meanB": 0.4,
+          "delta": -0.4,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.06000000000000001
+        },
+        {
+          "taskId": "pddl-airport-planning",
+          "meanA": 0.6,
+          "meanB": 0.4,
+          "delta": 0.19999999999999996,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.12000000000000002
         },
         {
           "taskId": "radar-vital-signs",
-          "meanA": 0.3333333333333333,
-          "meanB": 0.6666666666666666,
-          "delta": -0.3333333333333333,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariance": 0.22222222222222224
+          "meanA": 0.8,
+          "meanB": 0.8,
+          "delta": 0,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.08
         },
         {
           "taskId": "threejs-structure-parser",
-          "meanA": 0.3333333333333333,
-          "meanB": 0.3333333333333333,
+          "meanA": 0.4,
+          "meanB": 0.4,
           "delta": 0,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariance": 0.22222222222222224
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.12000000000000002
+        },
+        {
+          "taskId": "threejs-to-obj",
+          "meanA": 0.2,
+          "meanB": 0.4,
+          "delta": -0.2,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.10000000000000003
+        },
+        {
+          "taskId": "video-silence-remover",
+          "meanA": 0.2,
+          "meanB": 0.2,
+          "delta": 0,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariance": 0.08000000000000003
         }
       ]
     },
     "varianceDecomposition": {
-      "betweenTaskVariance": 0.0634920634920635,
-      "meanSamplingVariance": 0.14285714285714285,
-      "taskHeterogeneity": 0,
-      "heterogeneityShare": 0
+      "betweenTaskVariance": 0.09326813147253034,
+      "meanSamplingVariance": 0.0709936504920643,
+      "taskHeterogeneity": 0.02227448098046604,
+      "heterogeneityShare": 0.23882199234393797
     },
     "manipulationCheck": {
-      "cCells": 21,
-      "cFullPass": 0,
-      "cMean": 0,
-      "abMean": 0.47619047619047616,
-      "uplift": 0.47619047619047616
+      "cCells": 82,
+      "cFullPass": 7,
+      "cMean": 0.08536585365853659,
+      "abMean": 0.1776422756097561,
+      "uplift": 0.0922764219512195
     }
   },
   "resultsSealedPpm": {
-    "stage": "skillsbench-v1.1-demo1-pilot",
+    "stage": "skillsbench-v1.1-demo1-final",
     "unit": "ppm-of-reward",
     "pairedDelta": {
-      "n": 7,
-      "meanPpm": -95238,
-      "sdPpm": 251976,
-      "sePpm": 95238,
-      "tCriticalPpm": 2447000,
+      "n": 14,
+      "meanPpm": -47143,
+      "sdPpm": 305398,
+      "sePpm": 81621,
+      "tCriticalPpm": 2160000,
       "ci95Ppm": {
-        "lower": -328286,
-        "upper": 137810
+        "lower": -223444,
+        "upper": 129159
       },
       "perTask": [
         {
-          "taskId": "dapt-intrusion-detection",
+          "taskId": "drone-planning-control",
+          "meanAPpm": 53333,
+          "meanBPpm": 113333,
+          "deltaPpm": -60000,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 13911
+        },
+        {
+          "taskId": "edit-pdf",
+          "meanAPpm": 200000,
+          "meanBPpm": 0,
+          "deltaPpm": 200000,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 40000
+        },
+        {
+          "taskId": "energy-market-pricing",
+          "meanAPpm": 0,
+          "meanBPpm": 200000,
+          "deltaPpm": -200000,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 40000
+        },
+        {
+          "taskId": "glm-lake-mendota",
           "meanAPpm": 1000000,
-          "meanBPpm": 1000000,
-          "deltaPpm": 0,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariancePpm": 0
+          "meanBPpm": 800000,
+          "deltaPpm": 200000,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 40000
         },
         {
           "taskId": "grid-dispatch-operator",
-          "meanAPpm": 333333,
-          "meanBPpm": 333333,
+          "meanAPpm": 200000,
+          "meanBPpm": 200000,
           "deltaPpm": 0,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariancePpm": 222222
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 80000
+        },
+        {
+          "taskId": "hvac-control",
+          "meanAPpm": 1000000,
+          "meanBPpm": 400000,
+          "deltaPpm": 600000,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 60000
         },
         {
           "taskId": "lake-warming-attribution",
           "meanAPpm": 0,
-          "meanBPpm": 333333,
-          "deltaPpm": -333333,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariancePpm": 111111
+          "meanBPpm": 600000,
+          "deltaPpm": -600000,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 60000
         },
         {
           "taskId": "llm-prefix-cache-replay",
-          "meanAPpm": 666667,
-          "meanBPpm": 1000000,
-          "deltaPpm": -333333,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariancePpm": 111111
+          "meanAPpm": 200000,
+          "meanBPpm": 600000,
+          "deltaPpm": -400000,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 100000
         },
         {
           "taskId": "mario-coin-counting",
-          "meanAPpm": 333333,
-          "meanBPpm": 0,
-          "deltaPpm": 333333,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariancePpm": 111111
+          "meanAPpm": 0,
+          "meanBPpm": 400000,
+          "deltaPpm": -400000,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 60000
+        },
+        {
+          "taskId": "pddl-airport-planning",
+          "meanAPpm": 600000,
+          "meanBPpm": 400000,
+          "deltaPpm": 200000,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 120000
         },
         {
           "taskId": "radar-vital-signs",
-          "meanAPpm": 333333,
-          "meanBPpm": 666667,
-          "deltaPpm": -333333,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariancePpm": 222222
+          "meanAPpm": 800000,
+          "meanBPpm": 800000,
+          "deltaPpm": 0,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 80000
         },
         {
           "taskId": "threejs-structure-parser",
-          "meanAPpm": 333333,
-          "meanBPpm": 333333,
+          "meanAPpm": 400000,
+          "meanBPpm": 400000,
           "deltaPpm": 0,
-          "replicatesA": 3,
-          "replicatesB": 3,
-          "samplingVariancePpm": 222222
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 120000
+        },
+        {
+          "taskId": "threejs-to-obj",
+          "meanAPpm": 200000,
+          "meanBPpm": 400000,
+          "deltaPpm": -200000,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 100000
+        },
+        {
+          "taskId": "video-silence-remover",
+          "meanAPpm": 200000,
+          "meanBPpm": 200000,
+          "deltaPpm": 0,
+          "replicatesA": 5,
+          "replicatesB": 5,
+          "samplingVariancePpm": 80000
         }
       ]
     },
     "varianceDecomposition": {
-      "betweenTaskVariancePpm": 63492,
-      "meanSamplingVariancePpm": 142857,
-      "taskHeterogeneityPpm": 0,
-      "heterogeneitySharePpm": 0
+      "betweenTaskVariancePpm": 93268,
+      "meanSamplingVariancePpm": 70994,
+      "taskHeterogeneityPpm": 22274,
+      "heterogeneitySharePpm": 238822
     },
     "manipulationCheck": {
-      "cCells": 21,
-      "cFullPass": 0,
-      "cMeanPpm": 0,
-      "abMeanPpm": 476190,
-      "upliftPpm": 476190
+      "cCells": 82,
+      "cFullPass": 7,
+      "cMeanPpm": 85366,
+      "abMeanPpm": 177642,
+      "upliftPpm": 92276
     }
   },
   "digests": {
-    "declaration": "sha256:56bb1521f762a13e126fee63868717e7496fa569634924d3589b9e4b16d666b2",
-    "benchmark": "sha256:e9694d24e9f269a58bcd5c0b09f79416304993173d408ee274e7675817130e2b",
-    "analysisManifest": "sha256:66fb4ae8d71e4203f3bdc82beee2883d171dd22f037f1d4364d55066853cf8d3",
-    "cohort": "sha256:6e5b1f00f9571a2116467d2ee8a1b6348fe6edc394a6aed9a708c781e8383ca9",
-    "matrix": "sha256:d0948f7fcf9b12136b91040d2eb06eff285e3f1779413acc2bb93f5ba8bb3492",
-    "report": "sha256:e1596ccb36c921115a7855f4846c0a34d0f0fa0db3f986faa670e90408a1a397"
+    "declaration": "sha256:a31405a150a66753273e7b645e5b1391265564c9f0d33df814e4af93bdeb7a7e",
+    "benchmark": "sha256:b88a7d07c3d28a4e61145535145f06d0fd1b6e7323b43c0ea86cf018d229b370",
+    "analysisManifest": "sha256:822b2f7469dc2e58a3e72eee32688614d296ba20fc381d9a074e3935a68622b3",
+    "cohort": "sha256:f279e3fe7de1308f8177bea06d316b0f6c5d546900f75033396fe55a6cf0d001",
+    "matrix": "sha256:1bd2dc6cd59df4784e78fca37907000b2f102ec69448a9a233acc9ca7c834470",
+    "report": "sha256:c66199af9e86dd9701f40c0a9d1fd8648dde4e50821f99335ce4052cfbb93583"
   },
   "verify": "cd packages/benchmark-product/core && yarn demo1:verify",
   "verified": {

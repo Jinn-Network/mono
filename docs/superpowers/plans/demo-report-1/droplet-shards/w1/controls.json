@@ -1,0 +1,51 @@
+{
+  "schema": "jinn.demo1.host-control-evidence.v1",
+  "host": "unknown",
+  "cells": {
+    "3d-scan-calc": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "data-to-d3": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "enterprise-information-search": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "lake-warming-attribution": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "mars-clouds-clustering": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "r2r-mpc-control": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "threejs-structure-parser": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "exam-block-sequencing": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "radar-vital-signs": {
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "baseImage": "python@sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7"
+    }
+  }
+}

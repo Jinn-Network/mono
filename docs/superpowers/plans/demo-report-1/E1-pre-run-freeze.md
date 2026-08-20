@@ -13,6 +13,10 @@
 | `E1-task-evidence.v1.json` | `jinn.demo1.task-evidence.v1` | `b136f80342e5d6e7179267590c72d6bcde9c6922ecd61841faf18905daada8e1` | Complete static scan of the authorized task universe |
 | `E1-pre-run-freeze.stop.v3.json` | `jinn.demo1.pre-run-freeze.v3` | `d439e6729144a74c84f124c058a3c1e01e557091085b9e2c26740884e24b2f3c` | Historical STOP on the superseded `anthropics/skills` source |
 | `E1-pre-run-freeze.v4.json` | `jinn.demo1.pre-run-freeze.v4` | `404b3c8ad00330a9ff09a7dbb415a44498173979ad965fe13bcf9ca659dc0ca0` | **Current freeze**, on SkillsBench v1.1; supersedes v3 by digest. Static admission **passes**; authorizes the no-model controls only |
+| `E1-demo1-confirmatory-cells.v1.json` | `jinn.demo1.arm-cells.v1` | `b394d197174f136dc7c10a9564c5e6e5a730935370c141fc7c70ea5efc6da575` | Confirmatory 492-cell flat A/B/C run; separate from exploration `E1-arm-cells.v1.json` |
+| `E1-demo1-host-control-evidence.v1.json` | `jinn.demo1.host-control-evidence.v1` | `7164cb1f435f3d851a661b17a5727a4a3fb4e4402d8eb4d162a9161ad87a65c8` | Union of six-host oracle / no-op controls (41 units) |
+| `E1-demo1-evidence-bundle.v1.json` | `jinn.demo1.evidence-bundle.v1` | `11a8c189eb06405f8bd97dd2dc31ae5b20a4fb300a2d9b57feabcadc399bdadd` | Sealed final evidence-native bundle |
+| `demo1-report.v1.json` | `jinn.demo1.report.v1` | `df1f8bb2ded82b82f2454306d6fd33da59f47811b7a45e26c609278ed72f9173` | Machine-readable confirmatory report (`stage: final`) |
 
 The v3 artifact names and authenticates v2 rather than replacing its bytes. It embeds the exact
 task-evidence artifact, rebuilds every candidate disposition, derives the selection basis

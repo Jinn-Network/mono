@@ -1,0 +1,2366 @@
+{
+  "schema": "jinn.demo1.arm-cells.v1",
+  "status": "REAL DEMO-1 ARM CELLS — pilot scale, not a locked official run",
+  "source": {
+    "benchmark": "skillsbench",
+    "release": "v1.1",
+    "commit": "b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af"
+  },
+  "model": "claude-haiku-4-5-20251001",
+  "agentLocation": "host",
+  "deviation": "The agent runs on the host, not inside the task image. Claude Code authenticates itself there, so no credential is handled or forwarded. The agent therefore works against the host interpreter rather than the task environment; grading always happens inside the pinned image.",
+  "cells": {
+    "azure-bgp-oscillation-route-leak/A-native-skill/r0": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 113,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/C-no-instructions/r0": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 174,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "energy-ac-optimal-power-flow/A-native-skill/r0": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 266,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "azure-bgp-oscillation-route-leak/A-native-skill/r1": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 85,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/A-native-skill/r2": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 96,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/A-native-skill/r3": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 100,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/A-native-skill/r4": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 93,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/B-flat-claude-md/r0": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 83,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": "435f34be0dec47f353003b4bc61b2386328a68abaf4e14c1ba17fcff4492c84f",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/B-flat-claude-md/r1": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 118,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": "435f34be0dec47f353003b4bc61b2386328a68abaf4e14c1ba17fcff4492c84f",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/B-flat-claude-md/r2": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 134,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": "435f34be0dec47f353003b4bc61b2386328a68abaf4e14c1ba17fcff4492c84f",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/B-flat-claude-md/r3": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 101,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": "435f34be0dec47f353003b4bc61b2386328a68abaf4e14c1ba17fcff4492c84f",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/B-flat-claude-md/r4": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 106,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": "435f34be0dec47f353003b4bc61b2386328a68abaf4e14c1ba17fcff4492c84f",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/C-no-instructions/r1": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 219,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "energy-ac-optimal-power-flow/A-native-skill/r1": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 341,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-ac-optimal-power-flow/A-native-skill/r2": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 316,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-ac-optimal-power-flow/A-native-skill/r3": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 380,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-ac-optimal-power-flow/A-native-skill/r4": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 327,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-ac-optimal-power-flow/B-flat-claude-md/r0": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 10,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "6e88beec982e5212325a55c0e2f6b51299d5df80b2d38b3eba682b08de20b236",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-ac-optimal-power-flow/B-flat-claude-md/r1": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 441,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "6e88beec982e5212325a55c0e2f6b51299d5df80b2d38b3eba682b08de20b236",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-ac-optimal-power-flow/B-flat-claude-md/r2": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 776,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "6e88beec982e5212325a55c0e2f6b51299d5df80b2d38b3eba682b08de20b236",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-ac-optimal-power-flow/B-flat-claude-md/r3": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 571,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "6e88beec982e5212325a55c0e2f6b51299d5df80b2d38b3eba682b08de20b236",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-ac-optimal-power-flow/B-flat-claude-md/r4": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 331,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "6e88beec982e5212325a55c0e2f6b51299d5df80b2d38b3eba682b08de20b236",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-ac-optimal-power-flow/C-no-instructions/r0": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 300,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "energy-ac-optimal-power-flow/C-no-instructions/r1": {
+      "taskId": "energy-ac-optimal-power-flow",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 626,
+      "skills": [
+        {
+          "folder": "ac-branch-pi-model",
+          "bodySha256": "aa7cf96bd031652330a7f8aeda9fba209dadf0219f5f9bab23e3d34a4d43af0d"
+        },
+        {
+          "folder": "casadi-ipopt-nlp",
+          "bodySha256": "4aa0a241e35067df315e67a17ae22c0eee3d92dc0fc4def0aabfd672112e110a"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "grid-dispatch-operator/A-native-skill/r0": {
+      "taskId": "grid-dispatch-operator",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 515,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "grid-dispatch-operator/A-native-skill/r1": {
+      "taskId": "grid-dispatch-operator",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 205,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "grid-dispatch-operator/A-native-skill/r2": {
+      "taskId": "grid-dispatch-operator",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 235,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "grid-dispatch-operator/A-native-skill/r3": {
+      "taskId": "grid-dispatch-operator",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 737,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "grid-dispatch-operator/A-native-skill/r4": {
+      "taskId": "grid-dispatch-operator",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 188,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "grid-dispatch-operator/B-flat-claude-md/r0": {
+      "taskId": "grid-dispatch-operator",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 279,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "3d7ec2681bfc5ade93f91d59c7de24bddd5a029f39fcc070253f6bb99c937fa2",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "grid-dispatch-operator/B-flat-claude-md/r2": {
+      "taskId": "grid-dispatch-operator",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 216,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "3d7ec2681bfc5ade93f91d59c7de24bddd5a029f39fcc070253f6bb99c937fa2",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "grid-dispatch-operator/B-flat-claude-md/r3": {
+      "taskId": "grid-dispatch-operator",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 267,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "3d7ec2681bfc5ade93f91d59c7de24bddd5a029f39fcc070253f6bb99c937fa2",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "grid-dispatch-operator/B-flat-claude-md/r4": {
+      "taskId": "grid-dispatch-operator",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 211,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "3d7ec2681bfc5ade93f91d59c7de24bddd5a029f39fcc070253f6bb99c937fa2",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "grid-dispatch-operator/C-no-instructions/r0": {
+      "taskId": "grid-dispatch-operator",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 166,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "grid-dispatch-operator/C-no-instructions/r1": {
+      "taskId": "grid-dispatch-operator",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 146,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "manufacturing-equipment-maintenance/A-native-skill/r0": {
+      "taskId": "manufacturing-equipment-maintenance",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 397,
+      "skills": [
+        {
+          "folder": "reflow-machine-maintenance-guidance",
+          "bodySha256": "3e1a73c1e08fbf3236a3232cc444c8b0d0cf73abc6c17a8cd27d754f840b4baa"
+        },
+        {
+          "folder": "reflow-profile-compliance-toolkit",
+          "bodySha256": "aa3973cc723e6a3a6003e9d43ef82d9a6240f89a9f78758bd5eb8dab3395897f"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-equipment-maintenance/A-native-skill/r1": {
+      "taskId": "manufacturing-equipment-maintenance",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 370,
+      "skills": [
+        {
+          "folder": "reflow-machine-maintenance-guidance",
+          "bodySha256": "3e1a73c1e08fbf3236a3232cc444c8b0d0cf73abc6c17a8cd27d754f840b4baa"
+        },
+        {
+          "folder": "reflow-profile-compliance-toolkit",
+          "bodySha256": "aa3973cc723e6a3a6003e9d43ef82d9a6240f89a9f78758bd5eb8dab3395897f"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-equipment-maintenance/A-native-skill/r2": {
+      "taskId": "manufacturing-equipment-maintenance",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 143,
+      "skills": [
+        {
+          "folder": "reflow-machine-maintenance-guidance",
+          "bodySha256": "3e1a73c1e08fbf3236a3232cc444c8b0d0cf73abc6c17a8cd27d754f840b4baa"
+        },
+        {
+          "folder": "reflow-profile-compliance-toolkit",
+          "bodySha256": "aa3973cc723e6a3a6003e9d43ef82d9a6240f89a9f78758bd5eb8dab3395897f"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-equipment-maintenance/A-native-skill/r3": {
+      "taskId": "manufacturing-equipment-maintenance",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 248,
+      "skills": [
+        {
+          "folder": "reflow-machine-maintenance-guidance",
+          "bodySha256": "3e1a73c1e08fbf3236a3232cc444c8b0d0cf73abc6c17a8cd27d754f840b4baa"
+        },
+        {
+          "folder": "reflow-profile-compliance-toolkit",
+          "bodySha256": "aa3973cc723e6a3a6003e9d43ef82d9a6240f89a9f78758bd5eb8dab3395897f"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-equipment-maintenance/A-native-skill/r4": {
+      "taskId": "manufacturing-equipment-maintenance",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 157,
+      "skills": [
+        {
+          "folder": "reflow-machine-maintenance-guidance",
+          "bodySha256": "3e1a73c1e08fbf3236a3232cc444c8b0d0cf73abc6c17a8cd27d754f840b4baa"
+        },
+        {
+          "folder": "reflow-profile-compliance-toolkit",
+          "bodySha256": "aa3973cc723e6a3a6003e9d43ef82d9a6240f89a9f78758bd5eb8dab3395897f"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-equipment-maintenance/B-flat-claude-md/r0": {
+      "taskId": "manufacturing-equipment-maintenance",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 195,
+      "skills": [
+        {
+          "folder": "reflow-machine-maintenance-guidance",
+          "bodySha256": "3e1a73c1e08fbf3236a3232cc444c8b0d0cf73abc6c17a8cd27d754f840b4baa"
+        },
+        {
+          "folder": "reflow-profile-compliance-toolkit",
+          "bodySha256": "aa3973cc723e6a3a6003e9d43ef82d9a6240f89a9f78758bd5eb8dab3395897f"
+        }
+      ],
+      "claudeMdSha256": "40bba99715a710c342b225cf3e6ecd5ddc54fafd66537c4c1137e96f1af6e050",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-equipment-maintenance/B-flat-claude-md/r1": {
+      "taskId": "manufacturing-equipment-maintenance",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 181,
+      "skills": [
+        {
+          "folder": "reflow-machine-maintenance-guidance",
+          "bodySha256": "3e1a73c1e08fbf3236a3232cc444c8b0d0cf73abc6c17a8cd27d754f840b4baa"
+        },
+        {
+          "folder": "reflow-profile-compliance-toolkit",
+          "bodySha256": "aa3973cc723e6a3a6003e9d43ef82d9a6240f89a9f78758bd5eb8dab3395897f"
+        }
+      ],
+      "claudeMdSha256": "40bba99715a710c342b225cf3e6ecd5ddc54fafd66537c4c1137e96f1af6e050",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-equipment-maintenance/B-flat-claude-md/r2": {
+      "taskId": "manufacturing-equipment-maintenance",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 274,
+      "skills": [
+        {
+          "folder": "reflow-machine-maintenance-guidance",
+          "bodySha256": "3e1a73c1e08fbf3236a3232cc444c8b0d0cf73abc6c17a8cd27d754f840b4baa"
+        },
+        {
+          "folder": "reflow-profile-compliance-toolkit",
+          "bodySha256": "aa3973cc723e6a3a6003e9d43ef82d9a6240f89a9f78758bd5eb8dab3395897f"
+        }
+      ],
+      "claudeMdSha256": "40bba99715a710c342b225cf3e6ecd5ddc54fafd66537c4c1137e96f1af6e050",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-equipment-maintenance/B-flat-claude-md/r3": {
+      "taskId": "manufacturing-equipment-maintenance",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 275,
+      "skills": [
+        {
+          "folder": "reflow-machine-maintenance-guidance",
+          "bodySha256": "3e1a73c1e08fbf3236a3232cc444c8b0d0cf73abc6c17a8cd27d754f840b4baa"
+        },
+        {
+          "folder": "reflow-profile-compliance-toolkit",
+          "bodySha256": "aa3973cc723e6a3a6003e9d43ef82d9a6240f89a9f78758bd5eb8dab3395897f"
+        }
+      ],
+      "claudeMdSha256": "40bba99715a710c342b225cf3e6ecd5ddc54fafd66537c4c1137e96f1af6e050",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-equipment-maintenance/B-flat-claude-md/r4": {
+      "taskId": "manufacturing-equipment-maintenance",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 190,
+      "skills": [
+        {
+          "folder": "reflow-machine-maintenance-guidance",
+          "bodySha256": "3e1a73c1e08fbf3236a3232cc444c8b0d0cf73abc6c17a8cd27d754f840b4baa"
+        },
+        {
+          "folder": "reflow-profile-compliance-toolkit",
+          "bodySha256": "aa3973cc723e6a3a6003e9d43ef82d9a6240f89a9f78758bd5eb8dab3395897f"
+        }
+      ],
+      "claudeMdSha256": "40bba99715a710c342b225cf3e6ecd5ddc54fafd66537c4c1137e96f1af6e050",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-equipment-maintenance/C-no-instructions/r0": {
+      "taskId": "manufacturing-equipment-maintenance",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 112,
+      "skills": [
+        {
+          "folder": "reflow-machine-maintenance-guidance",
+          "bodySha256": "3e1a73c1e08fbf3236a3232cc444c8b0d0cf73abc6c17a8cd27d754f840b4baa"
+        },
+        {
+          "folder": "reflow-profile-compliance-toolkit",
+          "bodySha256": "aa3973cc723e6a3a6003e9d43ef82d9a6240f89a9f78758bd5eb8dab3395897f"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "manufacturing-equipment-maintenance/C-no-instructions/r1": {
+      "taskId": "manufacturing-equipment-maintenance",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 187,
+      "skills": [
+        {
+          "folder": "reflow-machine-maintenance-guidance",
+          "bodySha256": "3e1a73c1e08fbf3236a3232cc444c8b0d0cf73abc6c17a8cd27d754f840b4baa"
+        },
+        {
+          "folder": "reflow-profile-compliance-toolkit",
+          "bodySha256": "aa3973cc723e6a3a6003e9d43ef82d9a6240f89a9f78758bd5eb8dab3395897f"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "paratransit-routing/A-native-skill/r0": {
+      "taskId": "paratransit-routing",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 471,
+      "skills": [
+        {
+          "folder": "ortools-pickup-delivery-routing",
+          "bodySha256": "05e7646faa949df2d23748998af0db9a606cd16df60b7df2a6a11880c723d8ed"
+        },
+        {
+          "folder": "ortools-routing-modeling",
+          "bodySha256": "29b73b173748092eaf4ebc864517cb853503f2282796391d8bdd7e37d151adbe"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "paratransit-routing/A-native-skill/r1": {
+      "taskId": "paratransit-routing",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 278,
+      "skills": [
+        {
+          "folder": "ortools-pickup-delivery-routing",
+          "bodySha256": "05e7646faa949df2d23748998af0db9a606cd16df60b7df2a6a11880c723d8ed"
+        },
+        {
+          "folder": "ortools-routing-modeling",
+          "bodySha256": "29b73b173748092eaf4ebc864517cb853503f2282796391d8bdd7e37d151adbe"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "paratransit-routing/A-native-skill/r2": {
+      "taskId": "paratransit-routing",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 2179,
+      "skills": [
+        {
+          "folder": "ortools-pickup-delivery-routing",
+          "bodySha256": "05e7646faa949df2d23748998af0db9a606cd16df60b7df2a6a11880c723d8ed"
+        },
+        {
+          "folder": "ortools-routing-modeling",
+          "bodySha256": "29b73b173748092eaf4ebc864517cb853503f2282796391d8bdd7e37d151adbe"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "paratransit-routing/A-native-skill/r3": {
+      "taskId": "paratransit-routing",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 400,
+      "skills": [
+        {
+          "folder": "ortools-pickup-delivery-routing",
+          "bodySha256": "05e7646faa949df2d23748998af0db9a606cd16df60b7df2a6a11880c723d8ed"
+        },
+        {
+          "folder": "ortools-routing-modeling",
+          "bodySha256": "29b73b173748092eaf4ebc864517cb853503f2282796391d8bdd7e37d151adbe"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "paratransit-routing/A-native-skill/r4": {
+      "taskId": "paratransit-routing",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 425,
+      "skills": [
+        {
+          "folder": "ortools-pickup-delivery-routing",
+          "bodySha256": "05e7646faa949df2d23748998af0db9a606cd16df60b7df2a6a11880c723d8ed"
+        },
+        {
+          "folder": "ortools-routing-modeling",
+          "bodySha256": "29b73b173748092eaf4ebc864517cb853503f2282796391d8bdd7e37d151adbe"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "paratransit-routing/B-flat-claude-md/r0": {
+      "taskId": "paratransit-routing",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 500,
+      "skills": [
+        {
+          "folder": "ortools-pickup-delivery-routing",
+          "bodySha256": "05e7646faa949df2d23748998af0db9a606cd16df60b7df2a6a11880c723d8ed"
+        },
+        {
+          "folder": "ortools-routing-modeling",
+          "bodySha256": "29b73b173748092eaf4ebc864517cb853503f2282796391d8bdd7e37d151adbe"
+        }
+      ],
+      "claudeMdSha256": "278857b485c4400a9f9e7691ae410fb55ad663f80fa5a5e713231d14d3a0d684",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "paratransit-routing/B-flat-claude-md/r1": {
+      "taskId": "paratransit-routing",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 509,
+      "skills": [
+        {
+          "folder": "ortools-pickup-delivery-routing",
+          "bodySha256": "05e7646faa949df2d23748998af0db9a606cd16df60b7df2a6a11880c723d8ed"
+        },
+        {
+          "folder": "ortools-routing-modeling",
+          "bodySha256": "29b73b173748092eaf4ebc864517cb853503f2282796391d8bdd7e37d151adbe"
+        }
+      ],
+      "claudeMdSha256": "278857b485c4400a9f9e7691ae410fb55ad663f80fa5a5e713231d14d3a0d684",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "paratransit-routing/B-flat-claude-md/r2": {
+      "taskId": "paratransit-routing",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 503,
+      "skills": [
+        {
+          "folder": "ortools-pickup-delivery-routing",
+          "bodySha256": "05e7646faa949df2d23748998af0db9a606cd16df60b7df2a6a11880c723d8ed"
+        },
+        {
+          "folder": "ortools-routing-modeling",
+          "bodySha256": "29b73b173748092eaf4ebc864517cb853503f2282796391d8bdd7e37d151adbe"
+        }
+      ],
+      "claudeMdSha256": "278857b485c4400a9f9e7691ae410fb55ad663f80fa5a5e713231d14d3a0d684",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "paratransit-routing/B-flat-claude-md/r3": {
+      "taskId": "paratransit-routing",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 513,
+      "skills": [
+        {
+          "folder": "ortools-pickup-delivery-routing",
+          "bodySha256": "05e7646faa949df2d23748998af0db9a606cd16df60b7df2a6a11880c723d8ed"
+        },
+        {
+          "folder": "ortools-routing-modeling",
+          "bodySha256": "29b73b173748092eaf4ebc864517cb853503f2282796391d8bdd7e37d151adbe"
+        }
+      ],
+      "claudeMdSha256": "278857b485c4400a9f9e7691ae410fb55ad663f80fa5a5e713231d14d3a0d684",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "paratransit-routing/B-flat-claude-md/r4": {
+      "taskId": "paratransit-routing",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 411,
+      "skills": [
+        {
+          "folder": "ortools-pickup-delivery-routing",
+          "bodySha256": "05e7646faa949df2d23748998af0db9a606cd16df60b7df2a6a11880c723d8ed"
+        },
+        {
+          "folder": "ortools-routing-modeling",
+          "bodySha256": "29b73b173748092eaf4ebc864517cb853503f2282796391d8bdd7e37d151adbe"
+        }
+      ],
+      "claudeMdSha256": "278857b485c4400a9f9e7691ae410fb55ad663f80fa5a5e713231d14d3a0d684",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "paratransit-routing/C-no-instructions/r0": {
+      "taskId": "paratransit-routing",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 364,
+      "skills": [
+        {
+          "folder": "ortools-pickup-delivery-routing",
+          "bodySha256": "05e7646faa949df2d23748998af0db9a606cd16df60b7df2a6a11880c723d8ed"
+        },
+        {
+          "folder": "ortools-routing-modeling",
+          "bodySha256": "29b73b173748092eaf4ebc864517cb853503f2282796391d8bdd7e37d151adbe"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "paratransit-routing/C-no-instructions/r1": {
+      "taskId": "paratransit-routing",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 413,
+      "skills": [
+        {
+          "folder": "ortools-pickup-delivery-routing",
+          "bodySha256": "05e7646faa949df2d23748998af0db9a606cd16df60b7df2a6a11880c723d8ed"
+        },
+        {
+          "folder": "ortools-routing-modeling",
+          "bodySha256": "29b73b173748092eaf4ebc864517cb853503f2282796391d8bdd7e37d151adbe"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "sec-financial-report/A-native-skill/r0": {
+      "taskId": "sec-financial-report",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 344,
+      "skills": [
+        {
+          "folder": "13f-analyzer",
+          "bodySha256": "2ae8b1accbfd19a2ebca8837d95e3960166aad4cdecd636dfc1cfe49a810abae"
+        },
+        {
+          "folder": "fuzzy-name-search",
+          "bodySha256": "806e252613b762fc36e1df37073a0cc87cc463e2f977253814e69b75b9effd13"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "sec-financial-report/A-native-skill/r1": {
+      "taskId": "sec-financial-report",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 403,
+      "skills": [
+        {
+          "folder": "13f-analyzer",
+          "bodySha256": "2ae8b1accbfd19a2ebca8837d95e3960166aad4cdecd636dfc1cfe49a810abae"
+        },
+        {
+          "folder": "fuzzy-name-search",
+          "bodySha256": "806e252613b762fc36e1df37073a0cc87cc463e2f977253814e69b75b9effd13"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "sec-financial-report/A-native-skill/r2": {
+      "taskId": "sec-financial-report",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 378,
+      "skills": [
+        {
+          "folder": "13f-analyzer",
+          "bodySha256": "2ae8b1accbfd19a2ebca8837d95e3960166aad4cdecd636dfc1cfe49a810abae"
+        },
+        {
+          "folder": "fuzzy-name-search",
+          "bodySha256": "806e252613b762fc36e1df37073a0cc87cc463e2f977253814e69b75b9effd13"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "sec-financial-report/A-native-skill/r3": {
+      "taskId": "sec-financial-report",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 266,
+      "skills": [
+        {
+          "folder": "13f-analyzer",
+          "bodySha256": "2ae8b1accbfd19a2ebca8837d95e3960166aad4cdecd636dfc1cfe49a810abae"
+        },
+        {
+          "folder": "fuzzy-name-search",
+          "bodySha256": "806e252613b762fc36e1df37073a0cc87cc463e2f977253814e69b75b9effd13"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "sec-financial-report/A-native-skill/r4": {
+      "taskId": "sec-financial-report",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 421,
+      "skills": [
+        {
+          "folder": "13f-analyzer",
+          "bodySha256": "2ae8b1accbfd19a2ebca8837d95e3960166aad4cdecd636dfc1cfe49a810abae"
+        },
+        {
+          "folder": "fuzzy-name-search",
+          "bodySha256": "806e252613b762fc36e1df37073a0cc87cc463e2f977253814e69b75b9effd13"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "sec-financial-report/B-flat-claude-md/r0": {
+      "taskId": "sec-financial-report",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 210,
+      "skills": [
+        {
+          "folder": "13f-analyzer",
+          "bodySha256": "2ae8b1accbfd19a2ebca8837d95e3960166aad4cdecd636dfc1cfe49a810abae"
+        },
+        {
+          "folder": "fuzzy-name-search",
+          "bodySha256": "806e252613b762fc36e1df37073a0cc87cc463e2f977253814e69b75b9effd13"
+        }
+      ],
+      "claudeMdSha256": "afe56bf3bb920502a6df62ddfb2864ee19840ae767b41a41e4adfcfe06df195f",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "sec-financial-report/B-flat-claude-md/r1": {
+      "taskId": "sec-financial-report",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 171,
+      "skills": [
+        {
+          "folder": "13f-analyzer",
+          "bodySha256": "2ae8b1accbfd19a2ebca8837d95e3960166aad4cdecd636dfc1cfe49a810abae"
+        },
+        {
+          "folder": "fuzzy-name-search",
+          "bodySha256": "806e252613b762fc36e1df37073a0cc87cc463e2f977253814e69b75b9effd13"
+        }
+      ],
+      "claudeMdSha256": "afe56bf3bb920502a6df62ddfb2864ee19840ae767b41a41e4adfcfe06df195f",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "sec-financial-report/B-flat-claude-md/r2": {
+      "taskId": "sec-financial-report",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 502,
+      "skills": [
+        {
+          "folder": "13f-analyzer",
+          "bodySha256": "2ae8b1accbfd19a2ebca8837d95e3960166aad4cdecd636dfc1cfe49a810abae"
+        },
+        {
+          "folder": "fuzzy-name-search",
+          "bodySha256": "806e252613b762fc36e1df37073a0cc87cc463e2f977253814e69b75b9effd13"
+        }
+      ],
+      "claudeMdSha256": "afe56bf3bb920502a6df62ddfb2864ee19840ae767b41a41e4adfcfe06df195f",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "sec-financial-report/B-flat-claude-md/r3": {
+      "taskId": "sec-financial-report",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 257,
+      "skills": [
+        {
+          "folder": "13f-analyzer",
+          "bodySha256": "2ae8b1accbfd19a2ebca8837d95e3960166aad4cdecd636dfc1cfe49a810abae"
+        },
+        {
+          "folder": "fuzzy-name-search",
+          "bodySha256": "806e252613b762fc36e1df37073a0cc87cc463e2f977253814e69b75b9effd13"
+        }
+      ],
+      "claudeMdSha256": "afe56bf3bb920502a6df62ddfb2864ee19840ae767b41a41e4adfcfe06df195f",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "sec-financial-report/B-flat-claude-md/r4": {
+      "taskId": "sec-financial-report",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 365,
+      "skills": [
+        {
+          "folder": "13f-analyzer",
+          "bodySha256": "2ae8b1accbfd19a2ebca8837d95e3960166aad4cdecd636dfc1cfe49a810abae"
+        },
+        {
+          "folder": "fuzzy-name-search",
+          "bodySha256": "806e252613b762fc36e1df37073a0cc87cc463e2f977253814e69b75b9effd13"
+        }
+      ],
+      "claudeMdSha256": "afe56bf3bb920502a6df62ddfb2864ee19840ae767b41a41e4adfcfe06df195f",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "sec-financial-report/C-no-instructions/r0": {
+      "taskId": "sec-financial-report",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 90,
+      "skills": [
+        {
+          "folder": "13f-analyzer",
+          "bodySha256": "2ae8b1accbfd19a2ebca8837d95e3960166aad4cdecd636dfc1cfe49a810abae"
+        },
+        {
+          "folder": "fuzzy-name-search",
+          "bodySha256": "806e252613b762fc36e1df37073a0cc87cc463e2f977253814e69b75b9effd13"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "sec-financial-report/C-no-instructions/r1": {
+      "taskId": "sec-financial-report",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 375,
+      "skills": [
+        {
+          "folder": "13f-analyzer",
+          "bodySha256": "2ae8b1accbfd19a2ebca8837d95e3960166aad4cdecd636dfc1cfe49a810abae"
+        },
+        {
+          "folder": "fuzzy-name-search",
+          "bodySha256": "806e252613b762fc36e1df37073a0cc87cc463e2f977253814e69b75b9effd13"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "travel-planning/A-native-skill/r0": {
+      "taskId": "travel-planning",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 124,
+      "skills": [
+        {
+          "folder": "search-accommodations",
+          "bodySha256": "b8a7d7ce393859848d98040f0a6cb4b555236008e7ba866102592f6dbe13bc60"
+        },
+        {
+          "folder": "search-attractions",
+          "bodySha256": "2909e618aa1946a059274dce4b4ba0f839c7fbfe7301dafb2cf4f7ea04a2929f"
+        },
+        {
+          "folder": "search-cities",
+          "bodySha256": "89b956d2a96d0198a3091de0a885c9cf4428222415582285d318b90484dda357"
+        },
+        {
+          "folder": "search-driving-distance",
+          "bodySha256": "985d553ae5b33cbd593e965181dca806bd97d46711a252229ebad5d12d765ec1"
+        },
+        {
+          "folder": "search-flights",
+          "bodySha256": "0574a19eb92db0e962b7503dccf465e27ab41b9258ef6e14af6791a6880cafe2"
+        },
+        {
+          "folder": "search-restaurants",
+          "bodySha256": "7c1112f5e49fe80cff91ec4e41c23c7052a7009f72dd696bbce56a95dd538a59"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "travel-planning/A-native-skill/r1": {
+      "taskId": "travel-planning",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 115,
+      "skills": [
+        {
+          "folder": "search-accommodations",
+          "bodySha256": "b8a7d7ce393859848d98040f0a6cb4b555236008e7ba866102592f6dbe13bc60"
+        },
+        {
+          "folder": "search-attractions",
+          "bodySha256": "2909e618aa1946a059274dce4b4ba0f839c7fbfe7301dafb2cf4f7ea04a2929f"
+        },
+        {
+          "folder": "search-cities",
+          "bodySha256": "89b956d2a96d0198a3091de0a885c9cf4428222415582285d318b90484dda357"
+        },
+        {
+          "folder": "search-driving-distance",
+          "bodySha256": "985d553ae5b33cbd593e965181dca806bd97d46711a252229ebad5d12d765ec1"
+        },
+        {
+          "folder": "search-flights",
+          "bodySha256": "0574a19eb92db0e962b7503dccf465e27ab41b9258ef6e14af6791a6880cafe2"
+        },
+        {
+          "folder": "search-restaurants",
+          "bodySha256": "7c1112f5e49fe80cff91ec4e41c23c7052a7009f72dd696bbce56a95dd538a59"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "travel-planning/A-native-skill/r2": {
+      "taskId": "travel-planning",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 116,
+      "skills": [
+        {
+          "folder": "search-accommodations",
+          "bodySha256": "b8a7d7ce393859848d98040f0a6cb4b555236008e7ba866102592f6dbe13bc60"
+        },
+        {
+          "folder": "search-attractions",
+          "bodySha256": "2909e618aa1946a059274dce4b4ba0f839c7fbfe7301dafb2cf4f7ea04a2929f"
+        },
+        {
+          "folder": "search-cities",
+          "bodySha256": "89b956d2a96d0198a3091de0a885c9cf4428222415582285d318b90484dda357"
+        },
+        {
+          "folder": "search-driving-distance",
+          "bodySha256": "985d553ae5b33cbd593e965181dca806bd97d46711a252229ebad5d12d765ec1"
+        },
+        {
+          "folder": "search-flights",
+          "bodySha256": "0574a19eb92db0e962b7503dccf465e27ab41b9258ef6e14af6791a6880cafe2"
+        },
+        {
+          "folder": "search-restaurants",
+          "bodySha256": "7c1112f5e49fe80cff91ec4e41c23c7052a7009f72dd696bbce56a95dd538a59"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "travel-planning/A-native-skill/r3": {
+      "taskId": "travel-planning",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 124,
+      "skills": [
+        {
+          "folder": "search-accommodations",
+          "bodySha256": "b8a7d7ce393859848d98040f0a6cb4b555236008e7ba866102592f6dbe13bc60"
+        },
+        {
+          "folder": "search-attractions",
+          "bodySha256": "2909e618aa1946a059274dce4b4ba0f839c7fbfe7301dafb2cf4f7ea04a2929f"
+        },
+        {
+          "folder": "search-cities",
+          "bodySha256": "89b956d2a96d0198a3091de0a885c9cf4428222415582285d318b90484dda357"
+        },
+        {
+          "folder": "search-driving-distance",
+          "bodySha256": "985d553ae5b33cbd593e965181dca806bd97d46711a252229ebad5d12d765ec1"
+        },
+        {
+          "folder": "search-flights",
+          "bodySha256": "0574a19eb92db0e962b7503dccf465e27ab41b9258ef6e14af6791a6880cafe2"
+        },
+        {
+          "folder": "search-restaurants",
+          "bodySha256": "7c1112f5e49fe80cff91ec4e41c23c7052a7009f72dd696bbce56a95dd538a59"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "travel-planning/A-native-skill/r4": {
+      "taskId": "travel-planning",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 141,
+      "skills": [
+        {
+          "folder": "search-accommodations",
+          "bodySha256": "b8a7d7ce393859848d98040f0a6cb4b555236008e7ba866102592f6dbe13bc60"
+        },
+        {
+          "folder": "search-attractions",
+          "bodySha256": "2909e618aa1946a059274dce4b4ba0f839c7fbfe7301dafb2cf4f7ea04a2929f"
+        },
+        {
+          "folder": "search-cities",
+          "bodySha256": "89b956d2a96d0198a3091de0a885c9cf4428222415582285d318b90484dda357"
+        },
+        {
+          "folder": "search-driving-distance",
+          "bodySha256": "985d553ae5b33cbd593e965181dca806bd97d46711a252229ebad5d12d765ec1"
+        },
+        {
+          "folder": "search-flights",
+          "bodySha256": "0574a19eb92db0e962b7503dccf465e27ab41b9258ef6e14af6791a6880cafe2"
+        },
+        {
+          "folder": "search-restaurants",
+          "bodySha256": "7c1112f5e49fe80cff91ec4e41c23c7052a7009f72dd696bbce56a95dd538a59"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "travel-planning/B-flat-claude-md/r0": {
+      "taskId": "travel-planning",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 235,
+      "skills": [
+        {
+          "folder": "search-accommodations",
+          "bodySha256": "b8a7d7ce393859848d98040f0a6cb4b555236008e7ba866102592f6dbe13bc60"
+        },
+        {
+          "folder": "search-attractions",
+          "bodySha256": "2909e618aa1946a059274dce4b4ba0f839c7fbfe7301dafb2cf4f7ea04a2929f"
+        },
+        {
+          "folder": "search-cities",
+          "bodySha256": "89b956d2a96d0198a3091de0a885c9cf4428222415582285d318b90484dda357"
+        },
+        {
+          "folder": "search-driving-distance",
+          "bodySha256": "985d553ae5b33cbd593e965181dca806bd97d46711a252229ebad5d12d765ec1"
+        },
+        {
+          "folder": "search-flights",
+          "bodySha256": "0574a19eb92db0e962b7503dccf465e27ab41b9258ef6e14af6791a6880cafe2"
+        },
+        {
+          "folder": "search-restaurants",
+          "bodySha256": "7c1112f5e49fe80cff91ec4e41c23c7052a7009f72dd696bbce56a95dd538a59"
+        }
+      ],
+      "claudeMdSha256": "b4529a7f4ff56c3fe810c009cf6aaee05afd33e6daaca4b3854df3b01a04a0ea",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "travel-planning/B-flat-claude-md/r1": {
+      "taskId": "travel-planning",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 107,
+      "skills": [
+        {
+          "folder": "search-accommodations",
+          "bodySha256": "b8a7d7ce393859848d98040f0a6cb4b555236008e7ba866102592f6dbe13bc60"
+        },
+        {
+          "folder": "search-attractions",
+          "bodySha256": "2909e618aa1946a059274dce4b4ba0f839c7fbfe7301dafb2cf4f7ea04a2929f"
+        },
+        {
+          "folder": "search-cities",
+          "bodySha256": "89b956d2a96d0198a3091de0a885c9cf4428222415582285d318b90484dda357"
+        },
+        {
+          "folder": "search-driving-distance",
+          "bodySha256": "985d553ae5b33cbd593e965181dca806bd97d46711a252229ebad5d12d765ec1"
+        },
+        {
+          "folder": "search-flights",
+          "bodySha256": "0574a19eb92db0e962b7503dccf465e27ab41b9258ef6e14af6791a6880cafe2"
+        },
+        {
+          "folder": "search-restaurants",
+          "bodySha256": "7c1112f5e49fe80cff91ec4e41c23c7052a7009f72dd696bbce56a95dd538a59"
+        }
+      ],
+      "claudeMdSha256": "b4529a7f4ff56c3fe810c009cf6aaee05afd33e6daaca4b3854df3b01a04a0ea",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "travel-planning/B-flat-claude-md/r2": {
+      "taskId": "travel-planning",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 118,
+      "skills": [
+        {
+          "folder": "search-accommodations",
+          "bodySha256": "b8a7d7ce393859848d98040f0a6cb4b555236008e7ba866102592f6dbe13bc60"
+        },
+        {
+          "folder": "search-attractions",
+          "bodySha256": "2909e618aa1946a059274dce4b4ba0f839c7fbfe7301dafb2cf4f7ea04a2929f"
+        },
+        {
+          "folder": "search-cities",
+          "bodySha256": "89b956d2a96d0198a3091de0a885c9cf4428222415582285d318b90484dda357"
+        },
+        {
+          "folder": "search-driving-distance",
+          "bodySha256": "985d553ae5b33cbd593e965181dca806bd97d46711a252229ebad5d12d765ec1"
+        },
+        {
+          "folder": "search-flights",
+          "bodySha256": "0574a19eb92db0e962b7503dccf465e27ab41b9258ef6e14af6791a6880cafe2"
+        },
+        {
+          "folder": "search-restaurants",
+          "bodySha256": "7c1112f5e49fe80cff91ec4e41c23c7052a7009f72dd696bbce56a95dd538a59"
+        }
+      ],
+      "claudeMdSha256": "b4529a7f4ff56c3fe810c009cf6aaee05afd33e6daaca4b3854df3b01a04a0ea",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "travel-planning/B-flat-claude-md/r3": {
+      "taskId": "travel-planning",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 123,
+      "skills": [
+        {
+          "folder": "search-accommodations",
+          "bodySha256": "b8a7d7ce393859848d98040f0a6cb4b555236008e7ba866102592f6dbe13bc60"
+        },
+        {
+          "folder": "search-attractions",
+          "bodySha256": "2909e618aa1946a059274dce4b4ba0f839c7fbfe7301dafb2cf4f7ea04a2929f"
+        },
+        {
+          "folder": "search-cities",
+          "bodySha256": "89b956d2a96d0198a3091de0a885c9cf4428222415582285d318b90484dda357"
+        },
+        {
+          "folder": "search-driving-distance",
+          "bodySha256": "985d553ae5b33cbd593e965181dca806bd97d46711a252229ebad5d12d765ec1"
+        },
+        {
+          "folder": "search-flights",
+          "bodySha256": "0574a19eb92db0e962b7503dccf465e27ab41b9258ef6e14af6791a6880cafe2"
+        },
+        {
+          "folder": "search-restaurants",
+          "bodySha256": "7c1112f5e49fe80cff91ec4e41c23c7052a7009f72dd696bbce56a95dd538a59"
+        }
+      ],
+      "claudeMdSha256": "b4529a7f4ff56c3fe810c009cf6aaee05afd33e6daaca4b3854df3b01a04a0ea",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "travel-planning/B-flat-claude-md/r4": {
+      "taskId": "travel-planning",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 108,
+      "skills": [
+        {
+          "folder": "search-accommodations",
+          "bodySha256": "b8a7d7ce393859848d98040f0a6cb4b555236008e7ba866102592f6dbe13bc60"
+        },
+        {
+          "folder": "search-attractions",
+          "bodySha256": "2909e618aa1946a059274dce4b4ba0f839c7fbfe7301dafb2cf4f7ea04a2929f"
+        },
+        {
+          "folder": "search-cities",
+          "bodySha256": "89b956d2a96d0198a3091de0a885c9cf4428222415582285d318b90484dda357"
+        },
+        {
+          "folder": "search-driving-distance",
+          "bodySha256": "985d553ae5b33cbd593e965181dca806bd97d46711a252229ebad5d12d765ec1"
+        },
+        {
+          "folder": "search-flights",
+          "bodySha256": "0574a19eb92db0e962b7503dccf465e27ab41b9258ef6e14af6791a6880cafe2"
+        },
+        {
+          "folder": "search-restaurants",
+          "bodySha256": "7c1112f5e49fe80cff91ec4e41c23c7052a7009f72dd696bbce56a95dd538a59"
+        }
+      ],
+      "claudeMdSha256": "b4529a7f4ff56c3fe810c009cf6aaee05afd33e6daaca4b3854df3b01a04a0ea",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "travel-planning/C-no-instructions/r0": {
+      "taskId": "travel-planning",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 82,
+      "skills": [
+        {
+          "folder": "search-accommodations",
+          "bodySha256": "b8a7d7ce393859848d98040f0a6cb4b555236008e7ba866102592f6dbe13bc60"
+        },
+        {
+          "folder": "search-attractions",
+          "bodySha256": "2909e618aa1946a059274dce4b4ba0f839c7fbfe7301dafb2cf4f7ea04a2929f"
+        },
+        {
+          "folder": "search-cities",
+          "bodySha256": "89b956d2a96d0198a3091de0a885c9cf4428222415582285d318b90484dda357"
+        },
+        {
+          "folder": "search-driving-distance",
+          "bodySha256": "985d553ae5b33cbd593e965181dca806bd97d46711a252229ebad5d12d765ec1"
+        },
+        {
+          "folder": "search-flights",
+          "bodySha256": "0574a19eb92db0e962b7503dccf465e27ab41b9258ef6e14af6791a6880cafe2"
+        },
+        {
+          "folder": "search-restaurants",
+          "bodySha256": "7c1112f5e49fe80cff91ec4e41c23c7052a7009f72dd696bbce56a95dd538a59"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "travel-planning/C-no-instructions/r1": {
+      "taskId": "travel-planning",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 92,
+      "skills": [
+        {
+          "folder": "search-accommodations",
+          "bodySha256": "b8a7d7ce393859848d98040f0a6cb4b555236008e7ba866102592f6dbe13bc60"
+        },
+        {
+          "folder": "search-attractions",
+          "bodySha256": "2909e618aa1946a059274dce4b4ba0f839c7fbfe7301dafb2cf4f7ea04a2929f"
+        },
+        {
+          "folder": "search-cities",
+          "bodySha256": "89b956d2a96d0198a3091de0a885c9cf4428222415582285d318b90484dda357"
+        },
+        {
+          "folder": "search-driving-distance",
+          "bodySha256": "985d553ae5b33cbd593e965181dca806bd97d46711a252229ebad5d12d765ec1"
+        },
+        {
+          "folder": "search-flights",
+          "bodySha256": "0574a19eb92db0e962b7503dccf465e27ab41b9258ef6e14af6791a6880cafe2"
+        },
+        {
+          "folder": "search-restaurants",
+          "bodySha256": "7c1112f5e49fe80cff91ec4e41c23c7052a7009f72dd696bbce56a95dd538a59"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "grid-dispatch-operator/B-flat-claude-md/r1": {
+      "taskId": "grid-dispatch-operator",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 110,
+      "skills": [
+        {
+          "folder": "dc-power-flow",
+          "bodySha256": "6fe8b906c314cd5db8988e7a38c0eec54fbbde023d330ec9f3a4d51ad8ce1a2a"
+        },
+        {
+          "folder": "economic-dispatch",
+          "bodySha256": "b638698b3cd084a46967ddab8ab8358b85816f0779dd7b02c1575326d6a6e6ac"
+        },
+        {
+          "folder": "power-flow-data",
+          "bodySha256": "82e5d20d7cb7536d624c249b383c0ad857cd59e1150d411d3ee7f7050a2aa02c"
+        }
+      ],
+      "claudeMdSha256": "3d7ec2681bfc5ade93f91d59c7de24bddd5a029f39fcc070253f6bb99c937fa2",
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "llm-prefix-cache-replay/A-native-skill/r0": {
+      "taskId": "llm-prefix-cache-replay",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 106,
+      "skills": [
+        {
+          "folder": "cache-policy-comparison",
+          "bodySha256": "6c58b9a43bc32aafea4a171677d40fc76ec458b5350ed42f667130f827dffe97"
+        },
+        {
+          "folder": "prefix-cache-replay",
+          "bodySha256": "f5b7f6e3312ed1255035dc99f940ef21e3250baa80069889b4ae9fa88c064d8c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "llm-prefix-cache-replay/A-native-skill/r1": {
+      "taskId": "llm-prefix-cache-replay",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 62,
+      "skills": [
+        {
+          "folder": "cache-policy-comparison",
+          "bodySha256": "6c58b9a43bc32aafea4a171677d40fc76ec458b5350ed42f667130f827dffe97"
+        },
+        {
+          "folder": "prefix-cache-replay",
+          "bodySha256": "f5b7f6e3312ed1255035dc99f940ef21e3250baa80069889b4ae9fa88c064d8c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "llm-prefix-cache-replay/A-native-skill/r2": {
+      "taskId": "llm-prefix-cache-replay",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 93,
+      "skills": [
+        {
+          "folder": "cache-policy-comparison",
+          "bodySha256": "6c58b9a43bc32aafea4a171677d40fc76ec458b5350ed42f667130f827dffe97"
+        },
+        {
+          "folder": "prefix-cache-replay",
+          "bodySha256": "f5b7f6e3312ed1255035dc99f940ef21e3250baa80069889b4ae9fa88c064d8c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "llm-prefix-cache-replay/A-native-skill/r3": {
+      "taskId": "llm-prefix-cache-replay",
+      "arm": "A-native-skill",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 62,
+      "skills": [
+        {
+          "folder": "cache-policy-comparison",
+          "bodySha256": "6c58b9a43bc32aafea4a171677d40fc76ec458b5350ed42f667130f827dffe97"
+        },
+        {
+          "folder": "prefix-cache-replay",
+          "bodySha256": "f5b7f6e3312ed1255035dc99f940ef21e3250baa80069889b4ae9fa88c064d8c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "llm-prefix-cache-replay/A-native-skill/r4": {
+      "taskId": "llm-prefix-cache-replay",
+      "arm": "A-native-skill",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 91,
+      "skills": [
+        {
+          "folder": "cache-policy-comparison",
+          "bodySha256": "6c58b9a43bc32aafea4a171677d40fc76ec458b5350ed42f667130f827dffe97"
+        },
+        {
+          "folder": "prefix-cache-replay",
+          "bodySha256": "f5b7f6e3312ed1255035dc99f940ef21e3250baa80069889b4ae9fa88c064d8c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "llm-prefix-cache-replay/B-flat-claude-md/r0": {
+      "taskId": "llm-prefix-cache-replay",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 100,
+      "skills": [
+        {
+          "folder": "cache-policy-comparison",
+          "bodySha256": "6c58b9a43bc32aafea4a171677d40fc76ec458b5350ed42f667130f827dffe97"
+        },
+        {
+          "folder": "prefix-cache-replay",
+          "bodySha256": "f5b7f6e3312ed1255035dc99f940ef21e3250baa80069889b4ae9fa88c064d8c"
+        }
+      ],
+      "claudeMdSha256": "70a6490efd45e530e63d5d3b1b41cebc00fdc0f512b2dd1de02eef53d647ee24",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "llm-prefix-cache-replay/B-flat-claude-md/r1": {
+      "taskId": "llm-prefix-cache-replay",
+      "arm": "B-flat-claude-md",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 62,
+      "skills": [
+        {
+          "folder": "cache-policy-comparison",
+          "bodySha256": "6c58b9a43bc32aafea4a171677d40fc76ec458b5350ed42f667130f827dffe97"
+        },
+        {
+          "folder": "prefix-cache-replay",
+          "bodySha256": "f5b7f6e3312ed1255035dc99f940ef21e3250baa80069889b4ae9fa88c064d8c"
+        }
+      ],
+      "claudeMdSha256": "70a6490efd45e530e63d5d3b1b41cebc00fdc0f512b2dd1de02eef53d647ee24",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "llm-prefix-cache-replay/B-flat-claude-md/r2": {
+      "taskId": "llm-prefix-cache-replay",
+      "arm": "B-flat-claude-md",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 72,
+      "skills": [
+        {
+          "folder": "cache-policy-comparison",
+          "bodySha256": "6c58b9a43bc32aafea4a171677d40fc76ec458b5350ed42f667130f827dffe97"
+        },
+        {
+          "folder": "prefix-cache-replay",
+          "bodySha256": "f5b7f6e3312ed1255035dc99f940ef21e3250baa80069889b4ae9fa88c064d8c"
+        }
+      ],
+      "claudeMdSha256": "70a6490efd45e530e63d5d3b1b41cebc00fdc0f512b2dd1de02eef53d647ee24",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "llm-prefix-cache-replay/B-flat-claude-md/r3": {
+      "taskId": "llm-prefix-cache-replay",
+      "arm": "B-flat-claude-md",
+      "replicate": 3,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 109,
+      "skills": [
+        {
+          "folder": "cache-policy-comparison",
+          "bodySha256": "6c58b9a43bc32aafea4a171677d40fc76ec458b5350ed42f667130f827dffe97"
+        },
+        {
+          "folder": "prefix-cache-replay",
+          "bodySha256": "f5b7f6e3312ed1255035dc99f940ef21e3250baa80069889b4ae9fa88c064d8c"
+        }
+      ],
+      "claudeMdSha256": "70a6490efd45e530e63d5d3b1b41cebc00fdc0f512b2dd1de02eef53d647ee24",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "llm-prefix-cache-replay/B-flat-claude-md/r4": {
+      "taskId": "llm-prefix-cache-replay",
+      "arm": "B-flat-claude-md",
+      "replicate": 4,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 70,
+      "skills": [
+        {
+          "folder": "cache-policy-comparison",
+          "bodySha256": "6c58b9a43bc32aafea4a171677d40fc76ec458b5350ed42f667130f827dffe97"
+        },
+        {
+          "folder": "prefix-cache-replay",
+          "bodySha256": "f5b7f6e3312ed1255035dc99f940ef21e3250baa80069889b4ae9fa88c064d8c"
+        }
+      ],
+      "claudeMdSha256": "70a6490efd45e530e63d5d3b1b41cebc00fdc0f512b2dd1de02eef53d647ee24",
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "llm-prefix-cache-replay/C-no-instructions/r0": {
+      "taskId": "llm-prefix-cache-replay",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 185,
+      "skills": [
+        {
+          "folder": "cache-policy-comparison",
+          "bodySha256": "6c58b9a43bc32aafea4a171677d40fc76ec458b5350ed42f667130f827dffe97"
+        },
+        {
+          "folder": "prefix-cache-replay",
+          "bodySha256": "f5b7f6e3312ed1255035dc99f940ef21e3250baa80069889b4ae9fa88c064d8c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "llm-prefix-cache-replay/C-no-instructions/r1": {
+      "taskId": "llm-prefix-cache-replay",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 54,
+      "skills": [
+        {
+          "folder": "cache-policy-comparison",
+          "bodySha256": "6c58b9a43bc32aafea4a171677d40fc76ec458b5350ed42f667130f827dffe97"
+        },
+        {
+          "folder": "prefix-cache-replay",
+          "bodySha256": "f5b7f6e3312ed1255035dc99f940ef21e3250baa80069889b4ae9fa88c064d8c"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    }
+  }
+}
