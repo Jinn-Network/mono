@@ -1161,6 +1161,30 @@ function exactGeneration(value: unknown, digest: string, profile: JudgeModelProf
   }
 }
 
+// Mirrored from BINARY_JUDGMENT_OPTIONAL_TEMPLATE_FIELDS in
+// packages/task-execution/profiles/src/binary-judgment/contracts.ts, which is the source of
+// truth. `packages/benchmarking/aggregate` deliberately does not depend on
+// `@jinn-network/task-execution-profiles` (see its package.json — only benchmarking-records and
+// trust-core are runtime dependencies here), so `evidence` is hardcoded below as a second copy
+// rather than imported, matching this file's existing mirror-and-widen-together pattern (see
+// JUDGE_MODEL_PROFILE_IDS above).
+//
+// This completes the P2 evidence-channel seam on the aggregate side; it is not a P5 contract
+// change. P2 declared `evidence` OPTIONAL on the profiles side and shipped
+// `binaryJudgmentInstrumentDeclaresEvidence` to identify an evidence-declaring arm by exactly this
+// segment, but this aggregate-side allowlist was never widened to match. An arm whose instrument
+// interpolated `evidence` therefore passed lock and then threw
+// `binary-record-malformed: instrument field segment is unsupported` at report time, in the
+// PRIMARY readout (binary-instrument@1), blocking the whole flagship judge run before either
+// cross-arm readout was reached.
+//
+// Compatible widening under spec §0.4: `evidence` is added only to this ACCEPTED set, never to
+// the REQUIRED set enforced a few lines below in this function (`usedFields` must still cover
+// exactly question/referenceAnswer/candidateAnswer — evidence stays optional). Every instrument
+// that validates today still validates, seals to identical bytes, and computes identically;
+// binary-instrument@1 does not bump for this change.
+const ACCEPTED_INSTRUMENT_FIELD_SEGMENTS = new Set(["question", "referenceAnswer", "candidateAnswer", "evidence"]);
+
 function validateInstrument(
   instrument: Record<string, unknown>,
   digest: `sha256:${string}`,
@@ -1208,7 +1232,7 @@ function validateInstrument(
       }
       if (keys[0] === "field") {
         const field = segment["field"];
-        if (field !== "question" && field !== "referenceAnswer" && field !== "candidateAnswer") {
+        if (typeof field !== "string" || !ACCEPTED_INSTRUMENT_FIELD_SEGMENTS.has(field)) {
           throw new MethodInputError("binary-record-malformed", digest, "instrument field segment is unsupported");
         }
         usedFields.add(field);
