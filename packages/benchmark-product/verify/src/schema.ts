@@ -153,24 +153,34 @@ export const BundleV4TrustSchema = z.strictObject({
 });
 export type BundleV4Trust = z.infer<typeof BundleV4TrustSchema>;
 
+// The /2 catalog's original twelve roles, plus the three binary-family records
+// pairwise-disagreement@1 / paired-majority-delta@1 recompute from (packet P5).
+// Existing /2 bundles do not declare the three; adding them is a compatible
+// widening. Snapshot-probe and the admission-only V4 roles stay V4-only.
+export const BUNDLE_EVIDENCE_ROLES = [
+  "task",
+  "runtime-selection",
+  "evaluation-spec",
+  "admission-receipt",
+  "solve-submission",
+  "run-pinning-evidence",
+  "evaluation-submission",
+  "solve-delivery",
+  "solve-output",
+  "evaluation-task",
+  "evaluation-delivery",
+  "verdict",
+  "judge-instrument",
+  "analysis-context",
+  "label-resolution",
+] as const;
+export type BundleEvidenceRole = (typeof BUNDLE_EVIDENCE_ROLES)[number];
+
 export const BundleEvidenceCatalogSchema = z.object({
   format: z.literal(BUNDLE_EVIDENCE_FORMAT),
   records: z.array(z.object({
     sha256: Sha256HexSchema,
-    roles: z.array(z.enum([
-      "task",
-      "runtime-selection",
-      "evaluation-spec",
-      "admission-receipt",
-      "solve-submission",
-      "run-pinning-evidence",
-      "evaluation-submission",
-      "solve-delivery",
-      "solve-output",
-      "evaluation-task",
-      "evaluation-delivery",
-      "verdict",
-    ])).min(1),
+    roles: z.array(z.enum(BUNDLE_EVIDENCE_ROLES)).min(1),
   })),
 });
 export type BundleEvidenceCatalog = z.infer<typeof BundleEvidenceCatalogSchema>;

@@ -20,8 +20,10 @@ import { verifyMatrix, type InScopeCell, type InScopeVerdict } from "@jinn-netwo
 import {
   type AcceptedJudgeModelId,
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
+  BINARY_JUDGMENT_PROFILE_URI,
   BinaryJudgmentSnapshotProbeSchema,
   deriveEvaluationTask,
+  parseBinaryJudgmentAnalysisContext,
   parseBinaryJudgmentInstrument,
   parseEvaluationSpec,
 } from "@jinn-network/task-execution-profiles";
@@ -217,6 +219,19 @@ function parseRecord<T>(bytes: Uint8Array, schema: { safeParse(value: unknown): 
 
 function requireCanonical<T>(bytes: Uint8Array, value: T, path: string): void {
   if (!equalBytes(bytes, canonicalJsonBytes(value))) refuse("record-integrity", path, `${path} is not the exact canonical encoding`);
+}
+
+function analysisContextDigestFromEvalSpec(spec: ReturnType<typeof parseEvaluationSpec>): string | undefined {
+  const block = spec.familyBlock;
+  if (typeof block !== "object" || block === null || Array.isArray(block)) return undefined;
+  const testMaterial = (block as { readonly testMaterial?: unknown }).testMaterial;
+  if (!Array.isArray(testMaterial) || testMaterial.length !== 1) return undefined;
+  const entry = testMaterial[0];
+  if (typeof entry !== "object" || entry === null) return undefined;
+  const record = entry as { readonly name?: unknown; readonly digest?: { readonly sha256?: unknown } };
+  if (record.name !== "analysis-context.json" || typeof record.digest?.sha256 !== "string") return undefined;
+  if (!/^[a-f0-9]{64}$/u.test(record.digest.sha256)) return undefined;
+  return record.digest.sha256;
 }
 
 function unique(values: readonly string[], path: string): void {
@@ -891,6 +906,97 @@ export async function verifyPublicBundleSnapshot(
     }
   }
 
+  // Binary-judgment Tasks (the family that includes binary-instrument@1 and the two judge
+  // readouts) catalog a runtime-selection, arm instruments, analysis-context, and
+  // label-resolution even when the Report is not binary-instrument@1 and there is therefore no
+  // qualification.json. The V4 qualification block above already expects those roles; this is
+  // the same producer-side `binaryInspectRuntime` catalog for the non-V4 additional-analysis
+  // bundles. Snapshot-probe is V4-only (stripped from the /2 catalog).
+  if (
+    qualification === undefined
+    && [...taskSpecs.values()].some((task) => task.profile.uri === BINARY_JUDGMENT_PROFILE_URI)
+  ) {
+    const registeredSelections = readRunPublicationExtension(run as unknown as Record<string, unknown>)
+      ?.registrationArtifacts.filter((artifact) => artifact.role === INSPECT_SELECTION_CORRELATION_ROLE) ?? [];
+    if (
+      registeredSelections.length !== 1
+      || registeredSelections[0]!.artifact.mediaType !== "application/json"
+    ) {
+      refuse("record-integrity", "evidence-closure", "binary Run must register exactly one JSON Inspect runtime selection");
+    }
+    const registeredSelectionSha256 = registeredSelections[0]!.artifact.digest.sha256;
+    const selectionBytes = records.get(registeredSelectionSha256);
+    if (selectionBytes === undefined) {
+      refuse("record-integrity", "evidence-closure", "binary runtime-selection bytes are missing");
+    }
+    const binarySelection = parseRecord(
+      selectionBytes,
+      InspectBinaryJudgeSelectionManifestSchema,
+      `records/${registeredSelectionSha256}.bin`,
+    );
+    requireCanonical(selectionBytes, binarySelection, `records/${registeredSelectionSha256}.bin`);
+    addRole(expectedRoles, registeredSelectionSha256, "runtime-selection");
+    for (const arm of run.arms) {
+      const instrumentSha256 = arm.pinning[BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY];
+      if (typeof instrumentSha256 !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(instrumentSha256)) {
+        refuse("record-integrity", "evidence-closure", `Run arm ${arm.armId} has no exact judge-instrument pin`);
+      }
+      const instrumentHex = instrumentSha256.slice("sha256:".length);
+      const instrumentBytes = records.get(instrumentHex);
+      if (instrumentBytes === undefined) {
+        refuse("record-integrity", "evidence-closure", `instrument ${instrumentSha256} is missing`);
+      }
+      let instrument: ReturnType<typeof parseBinaryJudgmentInstrument>;
+      try {
+        instrument = parseBinaryJudgmentInstrument(instrumentBytes);
+      } catch (cause) {
+        refuse(
+          "record-integrity",
+          "evidence-closure",
+          `instrument ${instrumentSha256} is invalid: ${cause instanceof Error ? cause.message : String(cause)}`,
+        );
+      }
+      requireCanonical(instrumentBytes, instrument as never, `records/${instrumentHex}.bin`);
+      addRole(expectedRoles, instrumentHex, "judge-instrument");
+    }
+    for (const task of taskSpecs.values()) {
+      if (task.profile.uri !== BINARY_JUDGMENT_PROFILE_URI) continue;
+      const specSha256 = task.evaluation?.digest?.sha256;
+      if (typeof specSha256 !== "string") {
+        refuse("record-integrity", "evidence-closure", "binary Task has no EvaluationSpec digest");
+      }
+      const spec = evaluationSpecs.get(specSha256);
+      if (spec === undefined) {
+        refuse("record-integrity", "evidence-closure", `EvaluationSpec ${specSha256} is not in the catalog`);
+      }
+      const analysisHex = analysisContextDigestFromEvalSpec(spec);
+      if (analysisHex === undefined) {
+        refuse("record-integrity", "evidence-closure", `EvaluationSpec ${specSha256} has no analysis-context`);
+      }
+      const analysisBytes = records.get(analysisHex);
+      if (analysisBytes === undefined) {
+        refuse("record-integrity", "evidence-closure", `analysis context ${analysisHex} is missing`);
+      }
+      let analysis: ReturnType<typeof parseBinaryJudgmentAnalysisContext>;
+      try {
+        analysis = parseBinaryJudgmentAnalysisContext(analysisBytes);
+      } catch (cause) {
+        refuse(
+          "record-integrity",
+          "evidence-closure",
+          `analysis context ${analysisHex} is invalid: ${cause instanceof Error ? cause.message : String(cause)}`,
+        );
+      }
+      requireCanonical(analysisBytes, analysis, `records/${analysisHex}.bin`);
+      addRole(expectedRoles, analysisHex, "analysis-context");
+      const labelHex = analysis.labelResolutionSha256.slice("sha256:".length);
+      if (records.get(labelHex) === undefined) {
+        refuse("record-integrity", "evidence-closure", `label resolution ${analysis.labelResolutionSha256} is missing`);
+      }
+      addRole(expectedRoles, labelHex, "label-resolution");
+    }
+  }
+
   unique(assembly.header.graph.admissions.map((entry) => entry.taskSha256), "verification.graph.admissions.taskSha256");
   const admissionByTask = new Map<string, { receiptSha256: string; fact: LocalAdmissionReceiptFact }>();
   for (const edge of assembly.header.graph.admissions) {
@@ -1141,8 +1247,14 @@ export async function verifyPublicBundleSnapshot(
           || edge.evalAttempt !== undefined || edge.evalDeliverySha256 !== undefined
           || edge.evaluationTerminal !== undefined
         ) refuse("record-integrity", "evidence-closure", "same-execution Inspect score carries false separate-evaluator lineage");
-        if (qualification !== undefined) {
-          // Binary Tasks are deliberately runtime-neutral and carry no generic Inspect summary.
+        // Binary Tasks (binary-instrument@1 and the two judge-family readouts that share its
+        // execution) are runtime-neutral and carry no generic Inspect summary. `qualification.json`
+        // is present only for binary-instrument@1's V4 bundle; pairwise-disagreement@1 and
+        // paired-majority-delta@1 ride the same Binary Tasks without that file, so the
+        // discriminator is the Task profile URI (with qualification.json as the V4 alias).
+        const binaryJudgmentCell = qualification !== undefined
+          || taskSpecs.get(cell.taskDigest)?.profile.uri === BINARY_JUDGMENT_PROFILE_URI;
+        if (binaryJudgmentCell) {
           // The solve Delivery plus signed verdict are joined here; verifyReport is the sole
           // authority that replays its exact response/observation/instrument semantics below.
           if (solveDeliveryByCell.get(cell.cellKey) === undefined) {
@@ -1414,7 +1526,9 @@ export async function verifyPublicBundleSnapshot(
       const verdictBytes = records.get(declared.sha256);
       if (verdictBytes === undefined) refuse("record-integrity", "evidence-closure", `verdict ${declared.sha256} bytes are missing`);
       const view = readVerdictEnvelope(verdictBytes);
-      if (qualification === undefined && declared.relationship === "same-execution-scorer" && (
+      const binaryJudgmentCell = qualification !== undefined
+        || taskSpecs.get(cell.taskDigest)?.profile.uri === BINARY_JUDGMENT_PROFILE_URI;
+      if (!binaryJudgmentCell && declared.relationship === "same-execution-scorer" && (
         view.evaluatorExtensions?.["jinn.network/relationship"] !== "same-execution-scorer"
         || !view.limitations?.includes("same-execution-scorer")
       )) {

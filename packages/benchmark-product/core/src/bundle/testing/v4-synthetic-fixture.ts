@@ -324,9 +324,27 @@ function syntheticCellOutcome(
   return token;
 }
 
-function instrument(armId: string, judgeModel: AcceptedJudgeModelId) {
+/**
+ * `templateArmId` and `declaresEvidence` are OPTIONS-ONLY and default to the pre-existing
+ * behaviour (packet P5): omitted, every byte this builder emits is unchanged, so every existing
+ * caller's fixture digests are untouched.
+ *
+ * They exist to build an EVIDENCE TWIN PAIR, which `paired-majority-delta@1` requires and this
+ * fixture could not previously express. Each arm normally gets its own rubric preamble and its own
+ * promptSource/attribution URIs, so no two arms are ever identical once evidence is stripped and
+ * the twin derivation would find no pair. Passing the same `templateArmId` to two arms gives them
+ * one shared template identity, and passing `declaresEvidence` to one of the two adds the evidence
+ * interpolation to that one. `instrumentId` stays the arm's own id either way, which the sealed
+ * selection requires and which the twin test deliberately excludes from comparison.
+ */
+function instrument(
+  armId: string,
+  judgeModel: AcceptedJudgeModelId,
+  options: { readonly templateArmId?: string; readonly declaresEvidence?: boolean } = {},
+) {
+  const templateArmId = options.templateArmId ?? armId;
   const messages = [
-    { role: "developer", segments: [{ literal: `Synthetic ${armId} rubric. Judge only the supplied item. ` }] },
+    { role: "developer", segments: [{ literal: `Synthetic ${templateArmId} rubric. Judge only the supplied item. ` }] },
     {
       role: "user",
       segments: [
@@ -336,12 +354,13 @@ function instrument(armId: string, judgeModel: AcceptedJudgeModelId) {
         { field: "referenceAnswer" },
         { literal: "\nCandidate: " },
         { field: "candidateAnswer" },
+        ...(options.declaresEvidence ? [{ literal: "\nEvidence: " }, { field: "evidence" }] : []),
       ],
     },
   ] as const;
   const descriptor = {
-    uri: `https://fixtures.example.test/${armId}/prompt`,
-    digest: { sha256: sha256Hex(encoder.encode(`synthetic-${armId}-prompt`)) },
+    uri: `https://fixtures.example.test/${templateArmId}/prompt`,
+    digest: { sha256: sha256Hex(encoder.encode(`synthetic-${templateArmId}-prompt`)) },
   };
   return sealBinaryJudgmentInstrument({
     protocol: BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
@@ -354,8 +373,8 @@ function instrument(armId: string, judgeModel: AcceptedJudgeModelId) {
       digest: { sha256: sha256Hex(encoder.encode("Apache-2.0 fixture metadata only")) },
     },
     attribution: {
-      uri: `https://fixtures.example.test/${armId}/attribution`,
-      digest: { sha256: sha256Hex(encoder.encode(`synthetic-${armId}-attribution`)) },
+      uri: `https://fixtures.example.test/${templateArmId}/attribution`,
+      digest: { sha256: sha256Hex(encoder.encode(`synthetic-${templateArmId}-attribution`)) },
     },
     model: { adapter: "jinn-openai", requested: judgeModel, generation: generationForJudgeModel(judgeModel) },
     response: {
@@ -801,6 +820,21 @@ export async function createSyntheticV4BundleFixture(input: {
   readonly armIds?: readonly string[];
   /** Defaults to "gpt-5.6-luna" (the reasoning-2026-08 profile). */
   readonly judgeModel?: "gpt-5.6-luna" | "gpt-4o-mini-2024-07-18";
+  /**
+   * Builds an EVIDENCE TWIN PAIR (packet P5): `declaring`'s instrument interpolates `evidence`,
+   * `twin`'s is identical to it once that interpolation is stripped. OPTIONS-ONLY and defaults
+   * off, so every existing caller's bytes are unchanged. Required by `paired-majority-delta@1`,
+   * which derives its `candidate`/`baseline` pair structurally and refuses a roster where the
+   * declaring arm has no unique twin. Pass `withEvidence: true` alongside it: an instrument that
+   * interpolates evidence requires every bound item to carry evidence (the §2.3 lock-time leak
+   * refusal).
+   */
+  readonly evidencePair?: { readonly declaring: string; readonly twin: string };
+  /**
+   * Extra pre-registered analyses sealed into the Run's analysis plan beside the canonical
+   * `binary-instrument@1` entry (packet P5, spec §8.3 option 5). OPTIONS-ONLY, defaults to none.
+   */
+  readonly additionalAnalyses?: readonly { readonly method: string; readonly version: string }[];
 }): Promise<SyntheticV4BundleFixture> {
   const scenario = input.scenario ?? "minimal";
   const withEvidence = input.withEvidence ?? false;
@@ -877,7 +911,19 @@ export async function createSyntheticV4BundleFixture(input: {
   }), "binary item-bank import");
 
   const arms = armIds;
-  const instruments = arms.map((armId) => instrument(armId, judgeModel));
+  const evidencePair = input.evidencePair;
+  const instruments = arms.map((armId) => {
+    if (evidencePair === undefined) return instrument(armId, judgeModel);
+    // Both halves of the pair share ONE template identity; only the declaring half interpolates
+    // evidence. Every other arm keeps its own rubric, so it is not a twin candidate.
+    if (armId === evidencePair.declaring) {
+      return instrument(armId, judgeModel, { templateArmId: evidencePair.twin, declaresEvidence: true });
+    }
+    if (armId === evidencePair.twin) {
+      return instrument(armId, judgeModel, { templateArmId: evidencePair.twin });
+    }
+    return instrument(armId, judgeModel);
+  });
   for (const sealed of instruments) putSealedBytes(input.workspaceDir, sealed.bytes);
 
   // §1.5 rule 2: required when any bound arm's model is a dated snapshot, forbidden otherwise.
@@ -960,6 +1006,12 @@ export async function createSyntheticV4BundleFixture(input: {
         method: BENCHMARKING_METHOD_IDS.binaryInstrument,
         version: BENCHMARKING_METHOD_VERSION,
       },
+      // `additionalAnalyses` is a SIBLING of `analysis` on the spec (domain/draft.ts), not a member
+      // of it. Omitted entirely when the caller passes none, so the stored draft's specSha256 is
+      // unchanged for every existing caller.
+      ...(input.additionalAnalyses === undefined
+        ? {}
+        : { additionalAnalyses: input.additionalAnalyses.map((entry) => ({ ...entry })) }),
     },
   }), "draft binary profile");
 

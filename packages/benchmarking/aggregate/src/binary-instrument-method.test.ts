@@ -221,24 +221,43 @@ function encodeParserResponse(
   }
 }
 
+// Instrument message-segment overrides used only by the evidence-template-field regression
+// coverage (packet P5). `omitField` drops one of the three required segments (proving the
+// required-fields assertion still refuses); `includeEvidence` adds the optional evidence segment
+// (proving the widened allowlist accepts it); `unknownField` adds a segment naming a field outside
+// the allowlist entirely (proving the allowlist widened by exactly one member, not into a
+// free-for-all). Every default call site passes none of these and gets byte-identical segments to
+// before this change.
+interface InstrumentFieldOverrides {
+  readonly omitField?: "question" | "referenceAnswer" | "candidateAnswer";
+  readonly includeEvidence?: boolean;
+  readonly unknownField?: string;
+}
+
 function makeInstrument(
   armId: string,
   parserDigest: `sha256:${string}`,
   modelId: string = "gpt-5.6-luna",
   parserId: string = "network.jinn.parser.binary-accept-reject",
   parserVersion: string = "1.0.0",
+  fieldOverrides: InstrumentFieldOverrides = {},
 ) {
+  const developerSegments: ({ readonly literal: string } | { readonly field: string })[] = [
+    { literal: "Question: " },
+    ...(fieldOverrides.omitField === "question" ? [] : [{ field: "question" }]),
+    { literal: "\nReference: " },
+    ...(fieldOverrides.omitField === "referenceAnswer" ? [] : [{ field: "referenceAnswer" }]),
+    { literal: "\nCandidate: " },
+    ...(fieldOverrides.omitField === "candidateAnswer" ? [] : [{ field: "candidateAnswer" }]),
+    ...(fieldOverrides.includeEvidence === true ? [{ literal: "\nEvidence: " }, { field: "evidence" }] : []),
+    ...(fieldOverrides.unknownField !== undefined
+      ? [{ literal: "\nUnknown: " }, { field: fieldOverrides.unknownField }]
+      : []),
+  ];
   const messages = [
     {
       role: "developer",
-      segments: [
-        { literal: "Question: " },
-        { field: "question" },
-        { literal: "\nReference: " },
-        { field: "referenceAnswer" },
-        { literal: "\nCandidate: " },
-        { field: "candidateAnswer" },
-      ],
+      segments: developerSegments,
     },
     { role: "user", segments: [{ literal: "Return exactly ACCEPT or REJECT." }] },
   ];
@@ -402,6 +421,15 @@ function makeFixture(options: {
   readonly invalidPayloadEvidence?: boolean;
   readonly arrayProvenance?: boolean;
   readonly extraPayloadField?: boolean;
+  // Evidence template-field regression coverage (packet P5, aggregate-side mirror of P2's
+  // BINARY_JUDGMENT_OPTIONAL_TEMPLATE_FIELDS). Setting `evidenceArmId` makes that one arm's
+  // instrument interpolate `evidence` (and, unless overridden, gives the Task payload an evidence
+  // string so the interpolation is representative). `missingFieldArm` and `unknownFieldArm` corrupt
+  // one arm's instrument to prove the required-fields assertion and the malformed-segment refusal
+  // both still fire.
+  readonly evidenceArmId?: string;
+  readonly missingFieldArm?: { readonly armId: string; readonly field: "question" | "referenceAnswer" | "candidateAnswer" };
+  readonly unknownFieldArm?: { readonly armId: string; readonly field: string };
 } = {}): {
   readonly input: MethodComputeInput;
   readonly matrix: MatrixRecord;
@@ -429,6 +457,11 @@ function makeFixture(options: {
       options.judgeModel,
       options.responseParserId,
       options.responseParserVersion,
+      {
+        includeEvidence: options.evidenceArmId === armId,
+        omitField: options.missingFieldArm?.armId === armId ? options.missingFieldArm.field : undefined,
+        unknownField: options.unknownFieldArm?.armId === armId ? options.unknownFieldArm.field : undefined,
+      },
     );
     if (options.undeclaredModelArm === armId) {
       document = { ...document, model: { ...document.model, requested: "gpt-9-undeclared" } };
@@ -456,7 +489,10 @@ function makeFixture(options: {
       question: `What is the synthetic answer for ${seed.id}?`,
       referenceAnswer: "reference",
       candidateAnswer: seed.truthLabel === "CORRECT" ? "reference" : "different",
-      ...(options.payloadEvidence !== undefined ? { evidence: options.payloadEvidence } : {}),
+      ...(options.payloadEvidence !== undefined ? { evidence: options.payloadEvidence }
+        : options.evidenceArmId !== undefined
+          ? { evidence: "Synthetic supporting evidence text for the fixture item." }
+          : {}),
       ...(options.invalidPayloadEvidence === true ? { evidence: 123 } : {}),
       provenance: options.arrayProvenance === true
         ? [{ digest: { sha256: sha(`source:${seed.id}`) } }]
@@ -1094,6 +1130,44 @@ describe("binary-instrument@1 tamper refusals", () => {
   test("rejects a Task payload whose provenance is the superseded array form", () => {
     const fixture = makeFixture({ arrayProvenance: true });
     const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    expect(() => method.compute!(fixture.input)).toThrow(expect.objectContaining({
+      code: "binary-record-malformed",
+    }));
+  });
+});
+
+// Regression coverage for the aggregate-side mirror of P2's BINARY_JUDGMENT_OPTIONAL_TEMPLATE_FIELDS
+// (packet P5, issue #2837): an evidence-declaring arm's instrument used to pass lock and then throw
+// `binary-record-malformed: instrument field segment is unsupported` at report time, in the PRIMARY
+// readout, blocking the whole flagship judge run. Every test in this block drives that primary
+// readout through `method.compute!`, which for this method IS `computeBinaryInstrumentQualification`
+// (registry.ts wires `compute: computeBinaryInstrumentQualification` for binaryInstrumentMethod, and
+// `subjectScopedMethod` calls that field directly per subject) — not one of the two newer P5
+// cross-arm methods, which only run after this one succeeds.
+describe("binary-instrument@1 evidence template field (packet P5, aggregate-side mirror of P2)", () => {
+  test("computes for an evidence-declaring arm via computeBinaryInstrumentQualification (the primary readout)", () => {
+    const fixture = makeFixture({ evidenceArmId: "armA" });
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+
+    const result = method.compute!(fixture.input).perSubject[0]!.results as any;
+    expect(Object.keys(result.arms)).toEqual(["armA", "armB", "armC", "armD"]);
+    expect(result.itemDecisions).toHaveLength(8);
+  });
+
+  test("still refuses an instrument missing a required solver-visible field (the trap the widening must not spring)", () => {
+    const fixture = makeFixture({ missingFieldArm: { armId: "armA", field: "candidateAnswer" } });
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+
+    expect(() => method.compute!(fixture.input)).toThrow(expect.objectContaining({
+      code: "binary-binding-mismatch",
+      message: expect.stringContaining("instrument prompt must interpolate every solver-visible field"),
+    }));
+  });
+
+  test("still rejects an instrument field segment outside the widened allowlist", () => {
+    const fixture = makeFixture({ unknownFieldArm: { armId: "armA", field: "notAnAcceptedField" } });
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+
     expect(() => method.compute!(fixture.input)).toThrow(expect.objectContaining({
       code: "binary-record-malformed",
     }));

@@ -11,6 +11,9 @@
  */
 
 import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { BINARY_INSTRUMENT_MEASUREMENT_PROFILE } from "@jinn-network/benchmarking-aggregate";
 import {
   BENCHMARKING_METHOD_IDS,
@@ -368,5 +371,175 @@ describe("assertClaimConsistency: binary-instrument report limitations (spec §1
     expect(caught?.message).toBe(
       "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history",
     );
+  });
+});
+
+/**
+ * Wiring coverage for packet #2837 / the portable half of C1: `assertClaimConsistency` folds
+ * `PAIRED_ESTIMATE_LIMITATION` for paired-delta@1 AND paired-majority-delta@1 (the same
+ * method-conditional core uses) while leaving the binary-instrument arm in place. The
+ * exact-disclosure gate is NOT widened to `pairedEstimateLimitation.length > 0`; a non-empty
+ * `additionalLimitations` opens it here, matching core's claim.test.ts forcing pattern.
+ */
+describe("assertClaimConsistency: paired-estimate limitation (packet #2837, portable copy)", () => {
+  const FORCING_ADDITIONAL_LIMITATIONS = ["forcing fact so the limitations gate opens"];
+  const PAIRED_ESTIMATE_LIMITATION =
+    "This method estimates an effect; it does not gate one — no verdict, threshold, or selection was registered.";
+
+  test("PAIRED_ESTIMATE_LIMITATION is byte-identical to core's established copy", () => {
+    const extract = (src: string) => src.match(/const PAIRED_ESTIMATE_LIMITATION =\s*"([^"]+)";/)?.[1];
+    const here = fileURLToPath(new URL(".", import.meta.url));
+    const verifySrc = readFileSync(join(here, "claim-consistency.ts"), "utf8");
+    const coreSrc = readFileSync(join(here, "../../../core/src/verification/claim-consistency.ts"), "utf8");
+    expect(extract(verifySrc)).toBe(PAIRED_ESTIMATE_LIMITATION);
+    expect(extract(coreSrc)).toBe(PAIRED_ESTIMATE_LIMITATION);
+  });
+
+  const pairedMajorityResults = {
+    baseline: "armA",
+    candidate: "armB",
+    n: 2,
+    delta: "0.5000",
+    interval: null,
+    reasons: ["fewer than minN=5 paired tasks (got 2)"],
+    clusters: { count: 1 },
+    byCandidateClass: [],
+    byStratum: [],
+    exclusions: [],
+    conflicted: { count: 0, cellKeys: [] },
+  } as const;
+
+  const pairwiseResults = {
+    pairs: [{
+      armA: "armA",
+      armB: "armB",
+      n: 2,
+      disagreements: 1,
+      rate: "0.5000",
+      interval: { lower: "0.0655", upper: "0.9345", alpha: "0.05" },
+      byCandidateClass: [],
+      byStratum: [],
+      exclusions: [],
+    }],
+    conflicted: { count: 0, cellKeys: [] },
+  } as const;
+
+  function judgeRunRecord(method: string, parameters: Readonly<Record<string, unknown>>): RunRecord {
+    return {
+      arms: [{ armId: "armA", pinning: {} }, { armId: "armB", pinning: {} }],
+      replicates: 1,
+      policy: {
+        independence: RESOLVED_ASSURANCE.independence,
+        evaluation: { minVerdicts: RESOLVED_ASSURANCE.minVerdicts, distinctEvaluator: RESOLVED_ASSURANCE.distinctEvaluator },
+        submissionBaseline: {},
+      },
+      analysisPlan: [{
+        method,
+        version: BENCHMARKING_METHOD_VERSION,
+        parameters: { ...parameters, verdictRule: RESOLVED_ASSURANCE.verdictRule },
+      }],
+    } as unknown as RunRecord;
+  }
+
+  function judgeReport(method: string, results: unknown, limitations: readonly string[]): ReportRecord {
+    return {
+      method: { id: method, version: BENCHMARKING_METHOD_VERSION, parameters: {} },
+      preregistered: false,
+      results: { perSubject: [{ results }] },
+      disclosures: { perSubject: [] },
+      limitations,
+    } as unknown as ReportRecord;
+  }
+
+  function checkJudge(runRecord: RunRecord, reportRecord: ReportRecord): void {
+    assertClaimConsistency({
+      claim: buildClaimPackage({
+        draftId: DRAFT_ID,
+        benchmarkSha256: identities.benchmarkSha256,
+        runRecord,
+        runSha256: identities.runSha256,
+        matrixRecord,
+        matrixSha256: identities.matrixSha256,
+        reportRecord,
+        reportSha256: identities.reportSha256!,
+        reportEnvelopeSha256: identities.reportEnvelopeSha256,
+        venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord),
+        verificationCommandVerb: "bundle verify",
+        assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+      }),
+      identities,
+      benchmarkRecord: {} as unknown as BenchmarkRecord,
+      runRecord,
+      matrixRecord,
+      reportRecord,
+      draftId: DRAFT_ID,
+      assurancePreset: ASSURANCE_PRESET,
+      additionalLimitations: FORCING_ADDITIONAL_LIMITATIONS,
+    });
+  }
+
+  test("accepts a paired-majority-delta@1 Report whose limitations carry venue + additional + PAIRED_ESTIMATE_LIMITATION", () => {
+    const runRecord = judgeRunRecord(BENCHMARKING_METHOD_IDS.pairedMajorityDelta, {});
+    const limitations = [
+      ...localVenueLimitsForRun(runRecord),
+      ...FORCING_ADDITIONAL_LIMITATIONS,
+      PAIRED_ESTIMATE_LIMITATION,
+    ];
+    expect(() => checkJudge(
+      runRecord,
+      judgeReport(BENCHMARKING_METHOD_IDS.pairedMajorityDelta, pairedMajorityResults, limitations),
+    )).not.toThrow();
+  });
+
+  test("refuses a paired-majority-delta@1 Report that omits PAIRED_ESTIMATE_LIMITATION", () => {
+    const runRecord = judgeRunRecord(BENCHMARKING_METHOD_IDS.pairedMajorityDelta, {});
+    const limitations = [...localVenueLimitsForRun(runRecord), ...FORCING_ADDITIONAL_LIMITATIONS];
+    let caught: BenchmarkProductError | undefined;
+    try {
+      checkJudge(
+        runRecord,
+        judgeReport(BENCHMARKING_METHOD_IDS.pairedMajorityDelta, pairedMajorityResults, limitations),
+      );
+    } catch (cause) {
+      if (cause instanceof BenchmarkProductError) caught = cause;
+      else throw cause;
+    }
+    expect(caught).toBeDefined();
+    expect(caught?.message).toBe(
+      "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history",
+    );
+  });
+
+  test("accepts a paired-delta@1 Report whose limitations carry PAIRED_ESTIMATE_LIMITATION (same method-conditional arm)", () => {
+    const pairedDeltaResults = {
+      pairs: 1,
+      delta: "0.5000",
+      interval: { alpha: "0.05", low: "0.0000", high: "1.0000" },
+      reasons: [],
+      pairing: { taskDigests: [digest("1")] },
+      clustering: { basis: "source", clusters: 1 },
+      excluded: { count: 0, cellKeys: [] },
+      conflicted: { count: 0, cellKeys: [] },
+      bootstrap: { seed: 1, resamples: 1 },
+    };
+    const runRecord = judgeRunRecord(BENCHMARKING_METHOD_IDS.pairedDelta, {});
+    const limitations = [
+      ...localVenueLimitsForRun(runRecord),
+      ...FORCING_ADDITIONAL_LIMITATIONS,
+      PAIRED_ESTIMATE_LIMITATION,
+    ];
+    expect(() => checkJudge(
+      runRecord,
+      judgeReport(BENCHMARKING_METHOD_IDS.pairedDelta, pairedDeltaResults, limitations),
+    )).not.toThrow();
+  });
+
+  test("does NOT require an extra limitation line for pairwise-disagreement@1", () => {
+    const runRecord = judgeRunRecord(BENCHMARKING_METHOD_IDS.pairwiseDisagreement, {});
+    const limitations = [...localVenueLimitsForRun(runRecord), ...FORCING_ADDITIONAL_LIMITATIONS];
+    expect(() => checkJudge(
+      runRecord,
+      judgeReport(BENCHMARKING_METHOD_IDS.pairwiseDisagreement, pairwiseResults, limitations),
+    )).not.toThrow();
   });
 });

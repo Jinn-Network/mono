@@ -1,4 +1,4 @@
-import type { BenchmarkRecord, MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, type BenchmarkRecord, type MatrixRecord, type ReportRecord, type RunRecord } from "@jinn-network/benchmarking-records";
 import type { ClaimAnchor } from "@colophon-claims/verify";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
@@ -6,6 +6,13 @@ import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/ru
 import { buildClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { previewDisclosureSummaryLine } from "../run/preview-log.js";
 import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
+
+/** Mirrors `operations/report.ts`'s own (unexported) copy of this exact string -- see the comment
+ * at its use below. Not shared via export: `operations/publication-report.ts` already carries its
+ * own independent copy too, and this module follows that established precedent rather than
+ * introducing a new shared export for one string. */
+const PAIRED_ESTIMATE_LIMITATION =
+  "This method estimates an effect; it does not gate one — no verdict, threshold, or selection was registered.";
 
 export interface ClaimRecordIdentities {
   readonly benchmarkSha256: string;
@@ -128,14 +135,36 @@ export function assertClaimConsistency(input: {
 
   const rehearsalLine = input.rehearsal === undefined ? undefined : previewDisclosureSummaryLine(input.rehearsal);
   const reportLimitations = reportRecord.limitations ?? [];
+  // paired-majority-delta@1 carries the same PAIRED_ESTIMATE_LIMITATION as paired-delta@1
+  // (coordinator ruling, packet #2837) -- mirrors `operations/report.ts`'s own method-conditional
+  // exactly, so the cold rebuild here agrees with what `report` actually sealed. Computed from
+  // `reportRecord.method.id` directly (like the portable verifier's own `binaryLimitations`,
+  // `verify/src/profile/claim-consistency.ts`) rather than threaded through
+  // `input.additionalLimitations`, since it depends on WHICH method produced this Report, not on
+  // venue/suite facts shared across every Report a run carries.
+  const pairedEstimateLimitation =
+    reportRecord.method.id === BENCHMARKING_METHOD_IDS.pairedDelta
+    || reportRecord.method.id === BENCHMARKING_METHOD_IDS.pairedMajorityDelta
+      ? [PAIRED_ESTIMATE_LIMITATION]
+      : [];
   const expectedLimitations = [
     ...localVenueLimitsForRun(runRecord),
     ...(input.additionalLimitations ?? []),
+    ...pairedEstimateLimitation,
     ...(rehearsalLine === undefined ? [] : [rehearsalLine]),
   ];
   const isolationPosture = venueIsolationPostureForPolicy(
     runRecord.policy.submissionBaseline?.["isolationPolicy"],
   );
+  // The gate itself is UNCHANGED by this addition (still isolation posture or caller-supplied
+  // additionalLimitations only) -- deliberately not widened to `|| pairedEstimateLimitation.length
+  // > 0`: this check is dormant for every single-isolation-policy, no-suite-facts fixture on the
+  // tree today (including the pre-existing paired-delta@1 fixture in `report/claim.test.ts`, whose
+  // hand-typed Report `limitations` predates this exact-disclosure rebuild and does not itself
+  // satisfy it), and widening the gate would make this addition responsible for surfacing that
+  // unrelated, pre-existing gap rather than the new method-agnostic composition fix below. The
+  // composition fix (`pairedEstimateLimitation` folded into `expectedLimitations`) is still
+  // correct and load-bearing for the cases the gate DOES already cover.
   if (
     (isolationPosture.inventory.length > 1 || (input.additionalLimitations?.length ?? 0) > 0)
     && !bytesEqual(canonicalJsonBytes(reportLimitations), canonicalJsonBytes(expectedLimitations))
