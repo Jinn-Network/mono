@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { validateArchitectureControl } from './architecture-control.mjs';
+import { ARCHITECTURE_OWNERS_PATH, validateArchitectureControl } from './architecture-control.mjs';
 import { canonicalJsonBytes } from './build-prepublication-bundle.mjs';
 import {
   PLATFORM_CATALOG_PATH,
@@ -152,7 +152,7 @@ export function buildArchitectureReport(repoRoot) {
     schemaVersion: 1,
     sources: {
       catalog: PLATFORM_CATALOG_PATH,
-      codeowners: '.github/CODEOWNERS',
+      architectureOwners: ARCHITECTURE_OWNERS_PATH,
       manifests: 'catalog package paths/package.json',
     },
     counts: {

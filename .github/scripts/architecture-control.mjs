@@ -15,6 +15,7 @@ export { resolveConformanceSources } from './public-surface-assets.mjs';
 export { repositoryCandidateFiles } from './repository-candidates.mjs';
 
 export const REQUIRED_ARCHITECTURE_OWNERS = ['@oaksprout', '@ritsukai'];
+export const ARCHITECTURE_OWNERS_PATH = '.github/architecture-owners';
 const USERNAME = /^@[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/u;
 const SURFACE_DIRECTORIES = new Set([
   'schema', 'schemas', 'profile', 'profiles', 'fixture', 'fixtures',
@@ -32,6 +33,7 @@ const STATIC_CONTROL = [
   ['.github/scripts', 'staticControl'],
   ['.github/workflows', 'staticControl'],
   ['.github/CODEOWNERS', 'staticControl'],
+  ['.github/architecture-owners', 'staticControl'],
   ['packages/marketplace/binding', 'marketplaceControl'],
   ['packages/marketplace/testing', 'marketplaceControl'],
 ];
@@ -265,11 +267,11 @@ export function enumerateArchitectureControlPaths(repoRoot, catalog, { candidate
   return paths;
 }
 
-export function validateArchitectureControl({ repoRoot, codeownersText } = {}) {
+export function validateArchitectureControl({ repoRoot, codeownersText, ownersText } = {}) {
   const root = resolve(repoRoot ?? process.cwd());
   const catalog = loadPlatformCatalog(root);
   assertUsernameGroups(catalog);
-  const source = codeownersText ?? readFileSync(resolve(root, '.github/CODEOWNERS'), 'utf8');
+  const source = ownersText ?? codeownersText ?? readFileSync(resolve(root, ARCHITECTURE_OWNERS_PATH), 'utf8');
   const rules = parseCodeowners(source);
   const paths = enumerateArchitectureControlPaths(root, catalog);
   const entries = [...paths.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([path, categories]) => {
