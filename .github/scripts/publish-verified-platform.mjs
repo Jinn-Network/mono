@@ -51,6 +51,11 @@ const DEFAULT_REGISTRY_RETRY_DELAY_MS = Number.parseInt(
   process.env.JINN_NPM_REGISTRY_RETRY_DELAY_MS ?? '5000',
   10,
 );
+const DEFAULT_TLOG_CONFLICT_RETRY_ATTEMPTS = Number.parseInt(
+  process.env.JINN_NPM_TLOG_CONFLICT_RETRY_ATTEMPTS ?? '3',
+  10,
+);
+const TLOG_CONFLICT = /\bTLOG_CREATE_ENTRY_ERROR\b[\s\S]*\bequivalent entry already exists in the transparency log\b/u;
 
 function readJson(path, label) {
   try {
@@ -379,6 +384,7 @@ function publishMissingTarballs(receipt, missing, {
   packRoot,
   registryRetryAttempts,
   registryRetryDelayMs,
+  tlogConflictRetryAttempts,
   sleep,
 }) {
   const tarballs = new Map(receipt.tarballs.map((tarball) => [tarball.name, tarball]));
@@ -387,8 +393,8 @@ function publishMissingTarballs(receipt, missing, {
     for (const name of wave) {
       if (!missing.has(name)) continue;
       const tarball = tarballs.get(name);
-      requireSuccess(
-        exec('npm', [
+      for (let attempt = 1; attempt <= tlogConflictRetryAttempts; attempt += 1) {
+        const result = exec('npm', [
           'publish',
           tarballPath(packRoot, tarball.filename),
           '--access',
@@ -398,9 +404,19 @@ function publishMissingTarballs(receipt, missing, {
           receipt.distTag,
           '--registry',
           registry,
-        ], repoRoot),
-        `npm publication failed for ${name}@${receipt.packageVersion}`,
-      );
+        ], repoRoot);
+        if (result.status === 0) break;
+
+        const output = `${result.stdout}\n${result.stderr}`;
+        if (!TLOG_CONFLICT.test(output) || attempt === tlogConflictRetryAttempts) {
+          requireSuccess(result, `npm publication failed for ${name}@${receipt.packageVersion}`);
+        }
+
+        // npm creates the transparency-log entry before it uploads the package. A lost response
+        // can make the same npm process retry the identical signed envelope and receive a 409.
+        // Start a fresh process so it signs a fresh envelope; never retry any other publish error.
+        sleep(registryRetryDelayMs);
+      }
       verifyPublishedTarball(tarball, receipt, registryContext, {
         registryRetryAttempts,
         registryRetryDelayMs,
@@ -419,6 +435,7 @@ function validateArguments({
   outputPath,
   registryRetryAttempts,
   registryRetryDelayMs,
+  tlogConflictRetryAttempts,
 }) {
   if (!COMMIT_SHA.test(String(sourceSha))) {
     throw new Error('publication source SHA must be a 40-character lowercase commit SHA');
@@ -435,6 +452,9 @@ function validateArguments({
   }
   if (!Number.isSafeInteger(registryRetryDelayMs) || registryRetryDelayMs < 0) {
     throw new Error('registry retry delay must be a non-negative integer');
+  }
+  if (!Number.isSafeInteger(tlogConflictRetryAttempts) || tlogConflictRetryAttempts < 1) {
+    throw new Error('tlog conflict retry attempts must be a positive integer');
   }
   if (existsSync(outputPath)) {
     throw new Error(`refusing to overwrite existing publication receipt ${outputPath}`);
@@ -455,6 +475,7 @@ export async function publishVerifiedPlatform(options) {
     exec = defaultExec,
     registryRetryAttempts = DEFAULT_REGISTRY_RETRY_ATTEMPTS,
     registryRetryDelayMs = DEFAULT_REGISTRY_RETRY_DELAY_MS,
+    tlogConflictRetryAttempts = DEFAULT_TLOG_CONFLICT_RETRY_ATTEMPTS,
     sleep = defaultSleep,
   } = options;
   const root = resolve(repoRoot);
@@ -471,6 +492,7 @@ export async function publishVerifiedPlatform(options) {
     outputPath: publicationReceiptPath,
     registryRetryAttempts,
     registryRetryDelayMs,
+    tlogConflictRetryAttempts,
   });
 
   const validated = reconstructVerificationReceipt({
@@ -517,6 +539,7 @@ export async function publishVerifiedPlatform(options) {
     packRoot: validated.packRoot,
     registryRetryAttempts,
     registryRetryDelayMs,
+    tlogConflictRetryAttempts,
     sleep,
   });
 
