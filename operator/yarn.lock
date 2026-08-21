@@ -1055,7 +1055,7 @@ __metadata:
     "@jinn-network/read-plane": "npm:0.1.0"
     "@jinn-network/record-discovery-client": "npm:0.1.0"
     "@jinn-network/record-discovery-facts-task-execution": "npm:0.1.0"
-    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.0.0"
     "@jinn-network/record-discovery-serve": "npm:0.1.0"
     "@jinn-network/record-discovery-testing": "portal:../packages/discovery/testing"
     "@jinn-network/record-discovery-transport-http": "npm:0.1.0"

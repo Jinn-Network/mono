@@ -256,7 +256,7 @@
     "@jinn-network/read-plane": "0.1.0",
     "@jinn-network/record-discovery-client": "0.1.0",
     "@jinn-network/record-discovery-facts-task-execution": "0.1.0",
-    "@jinn-network/record-discovery-protocol": "0.1.0",
+    "@jinn-network/record-discovery-protocol": "0.0.0",
     "@jinn-network/record-discovery-serve": "0.1.0",
     "@jinn-network/record-discovery-transport-http": "0.1.0",
     "@jinn-network/sdk": "0.2.0",
