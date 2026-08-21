@@ -262,7 +262,7 @@
     "@jinn-network/sdk": "0.2.0",
     "@jinn-network/task-admission": "0.1.0",
     "@jinn-network/task-execution-backend": "0.1.0",
-    "@jinn-network/task-execution-backend-local": "0.1.0",
+    "@jinn-network/task-execution-backend-local": "0.0.0",
     "@jinn-network/task-execution-evaluation-harness": "0.1.0",
     "@jinn-network/task-execution-evaluator-adapters": "0.1.0",
     "@jinn-network/task-execution-launchers": "0.1.0",

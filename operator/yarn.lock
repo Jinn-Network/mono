@@ -1062,7 +1062,7 @@ __metadata:
     "@jinn-network/sdk": "npm:0.2.0"
     "@jinn-network/task-admission": "npm:0.1.0"
     "@jinn-network/task-execution-backend": "npm:0.1.0"
-    "@jinn-network/task-execution-backend-local": "npm:0.1.0"
+    "@jinn-network/task-execution-backend-local": "npm:0.0.0"
     "@jinn-network/task-execution-evaluation-harness": "npm:0.1.0"
     "@jinn-network/task-execution-evaluator-adapters": "npm:0.1.0"
     "@jinn-network/task-execution-launchers": "npm:0.1.0"
