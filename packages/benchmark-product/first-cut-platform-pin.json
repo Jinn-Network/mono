@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "decision": "DR-2026-08-17-c",
-  "sourceSha": "05ab5a98a8b30392ca448de12748b19b0c947684",
-  "packageVersion": "0.1.0-canary.sha.05ab5a98a8b30392ca448de12748b19b0c947684",
+  "sourceSha": "1ed36166faf16ea4b96b021ceff0397f83a0a80c",
+  "packageVersion": "0.1.0-canary.sha.1ed36166faf16ea4b96b021ceff0397f83a0a80c",
   "distTag": "canary",
   "latestRemains": "0.0.0",
-  "stackPublishRunUrl": "https://github.com/Jinn-Network/mono/actions/runs/32128150291"
+  "stackPublishRunUrl": "https://github.com/Jinn-Network/mono/actions/runs/32488931325"
 }

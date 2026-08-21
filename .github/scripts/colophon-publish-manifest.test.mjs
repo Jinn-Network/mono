@@ -13,7 +13,7 @@ import { loadPlatformCatalog } from './platform-catalog.mjs';
 import { buildRegistrationList } from './stack-trusted-publishers.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
-const PIN_SHA = '05ab5a98a8b30392ca448de12748b19b0c947684';
+const PIN_SHA = '1ed36166faf16ea4b96b021ceff0397f83a0a80c';
 const PIN_VERSION = `0.1.0-canary.sha.${PIN_SHA}`;
 
 function verifyManifest() {
