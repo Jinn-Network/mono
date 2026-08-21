@@ -53,11 +53,11 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/broadcast-bot@workspace:."
   dependencies:
-    "@types/node": "npm:^26.1.1"
-    smol-toml: "npm:^1.7.0"
-    twitter-api-v2: "npm:^1.18.0"
+    "@types/node": "npm:^26.2.0"
+    smol-toml: "npm:^1.8.0"
+    twitter-api-v2: "npm:^1.29.1"
     typescript: "npm:^5.4.0"
-    viem: "npm:^2.55.8"
+    viem: "npm:^2.55.18"
     vitest: "npm:^4.1.10"
     zod: "npm:^3.23.0"
   bin:
@@ -307,12 +307,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^26.1.1":
-  version: 26.1.1
-  resolution: "@types/node@npm:26.1.1"
+"@types/node@npm:^26.2.0":
+  version: 26.2.0
+  resolution: "@types/node@npm:26.2.0"
   dependencies:
     undici-types: "npm:~8.3.0"
-  checksum: 10c0/25ac5093195736dd074d5027adbba85617bc951d5a41506ebd3b9073048acb7233613f3822d5f9b9447f9c0841c91f6387c46283916767e3ef79f23917452c46
+  checksum: 10c0/f8566d88162241eb55a46f7e4ea097188eab0aaafefea7a58e63adab8c4144eb98c08b7911452c846104c339a0f82282f5e1ed4b26b578d60709614fe2843f4d
   languageName: node
   linkType: hard
 
@@ -760,9 +760,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ox@npm:0.14.32":
-  version: 0.14.32
-  resolution: "ox@npm:0.14.32"
+"ox@npm:0.14.33":
+  version: 0.14.33
+  resolution: "ox@npm:0.14.33"
   dependencies:
     "@adraffy/ens-normalize": "npm:^1.11.0"
     "@noble/ciphers": "npm:^1.3.0"
@@ -777,7 +777,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/e07c0b18f967f93bf9b52dd5f00cd72db38be435f06cb16e7852c08cc6f05730c031a3ae5dbe058682160ec25b8a8664df334e28fe0677f7848abd0b9a9b59f0
+  checksum: 10c0/3fae8d41cc9e8d56112d7f6e5cc2e90ba8dc4d3764b01ead34798b8d2436a8009c1ccbe2731ae587e69cd31dba8e7fe9f08c586abc1eadb588a42a174e46d766
   languageName: node
   linkType: hard
 
@@ -894,10 +894,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"smol-toml@npm:^1.7.0":
-  version: 1.7.0
-  resolution: "smol-toml@npm:1.7.0"
-  checksum: 10c0/8eef246b9b96f278a181f6dd2a90c754304cb4cf92ccdfe1d2f714fb980fb3f539ba00283609e8fd2fbcf7c0d48a4ae76b36bc0de556ed286b2c865827a778e8
+"smol-toml@npm:^1.8.0":
+  version: 1.8.0
+  resolution: "smol-toml@npm:1.8.0"
+  checksum: 10c0/4e01dbfb7c7af142176b037ebedaccccafb8229cc873feaa47c184ee31073d86e30b4b1b0fe9a5a6d083ed3ce21615eda9e81d1f5d779ad8b2e2e9459b900aea
   languageName: node
   linkType: hard
 
@@ -983,10 +983,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"twitter-api-v2@npm:^1.18.0":
-  version: 1.29.0
-  resolution: "twitter-api-v2@npm:1.29.0"
-  checksum: 10c0/355e71fb74cbed567f2528e0c824ceff2dfea72c653d37e047fdcc05a1bcdd4297c1c0fa146f6d82550c7b87238d8ebcf4afb3120082aa4bed258c56534295ca
+"twitter-api-v2@npm:^1.29.1":
+  version: 1.29.1
+  resolution: "twitter-api-v2@npm:1.29.1"
+  checksum: 10c0/91081257e47c957fe00dd4c8b2ad4df284c587998673810e08b7500ada0a2aec81bcf8470f90f3ef8e60df91aeea1da24b384cf36c0261647d785ca14720843f
   languageName: node
   linkType: hard
 
@@ -1024,9 +1024,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.55.8":
-  version: 2.55.8
-  resolution: "viem@npm:2.55.8"
+"viem@npm:^2.55.18":
+  version: 2.55.18
+  resolution: "viem@npm:2.55.18"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -1034,14 +1034,14 @@ __metadata:
     "@scure/bip39": "npm:1.6.0"
     abitype: "npm:1.2.3"
     isows: "npm:1.0.7"
-    ox: "npm:0.14.32"
+    ox: "npm:0.14.33"
     ws: "npm:8.21.0"
   peerDependencies:
     typescript: ">=5.0.4"
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/30457ab22c174e02680831f841cd27ba806346ea2099e6b091a53bb46f0bcd6406d93704ef1d91be0d21fd367e38fe81573a9a89a84906e469bdb9c12be7a0bb
+  checksum: 10c0/57b033c67d0d9e70cd5a56a3e1cc6771f55ff9b4ae8273b57e0f90eba37dc15fc76537ccf06bf9278a61a54c1627be9457e84f7593d2632ba992cd04658c5563
   languageName: node
   linkType: hard
 
