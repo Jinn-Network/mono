@@ -251,6 +251,14 @@ function registryExec(fixture, options = {}) {
     if (args[0] === 'publish') {
       const tarball = tarballByPath.get(args[1]);
       assert.ok(tarball, `publisher used a receipt-bound tarball: ${args[1]}`);
+      const override = options.publishOverride?.({
+        args,
+        calls,
+        publishedNames,
+        states,
+        tarball,
+      });
+      if (override) return override;
       states.set(tarball.name, {
         version: fixture.packageVersion,
         integrity: tarball.integrity,
@@ -712,6 +720,84 @@ test('post-publish version and tag propagation use bounded injected retries', as
     } finally {
       cleanup(fixture);
     }
+  }
+});
+
+test('an equivalent transparency-log conflict retries in a fresh npm process and no other publish error does', async () => {
+  const fixture = publicationFixture();
+  let conflicts = 0;
+  const sleeps = [];
+  const fake = registryExec(fixture, {
+    publishOverride: () => {
+      if (conflicts > 0) return undefined;
+      conflicts += 1;
+      return {
+        status: 1,
+        stdout: '',
+        stderr: 'npm error code TLOG_CREATE_ENTRY_ERROR\nnpm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log',
+      };
+    },
+  });
+  try {
+    const receipt = await publishVerifiedPlatform(publisherArgs(fixture, {
+      exec: fake.exec,
+      registryRetryDelayMs: 1,
+      sleep: (ms) => sleeps.push(ms),
+      tlogConflictRetryAttempts: 2,
+    }));
+    assert.equal(receipt.observedRegistry.length, fixture.receipt.packageOrder.length);
+    assert.equal(conflicts, 1);
+    assert.equal(publishCalls(fake.calls).length, fixture.receipt.packageOrder.length + 1);
+    assert.deepEqual(sleeps, [1]);
+  } finally {
+    cleanup(fixture);
+  }
+
+  const exhaustedFixture = publicationFixture();
+  const exhaustedSleeps = [];
+  const exhausted = registryExec(exhaustedFixture, {
+    publishOverride: () => ({
+      status: 1,
+      stdout: '',
+      stderr: 'npm error code TLOG_CREATE_ENTRY_ERROR\nnpm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log',
+    }),
+  });
+  try {
+    await assert.rejects(
+      publishVerifiedPlatform(publisherArgs(exhaustedFixture, {
+        exec: exhausted.exec,
+        registryRetryDelayMs: 1,
+        sleep: (ms) => exhaustedSleeps.push(ms),
+        tlogConflictRetryAttempts: 2,
+      })),
+      /npm publication failed.*TLOG_CREATE_ENTRY_ERROR/us,
+    );
+    assert.equal(publishCalls(exhausted.calls).length, 2);
+    assert.deepEqual(exhaustedSleeps, [1]);
+    assert.equal(existsSync(exhaustedFixture.outputPath), false);
+  } finally {
+    cleanup(exhaustedFixture);
+  }
+
+  const refusedFixture = publicationFixture();
+  const refusedSleeps = [];
+  const refused = registryExec(refusedFixture, {
+    publishOverride: () => ({ status: 1, stdout: '', stderr: 'npm error code E403' }),
+  });
+  try {
+    await assert.rejects(
+      publishVerifiedPlatform(publisherArgs(refusedFixture, {
+        exec: refused.exec,
+        registryRetryDelayMs: 1,
+        sleep: (ms) => refusedSleeps.push(ms),
+        tlogConflictRetryAttempts: 2,
+      })),
+      /npm publication failed.*E403/u,
+    );
+    assert.equal(publishCalls(refused.calls).length, 1);
+    assert.deepEqual(refusedSleeps, []);
+  } finally {
+    cleanup(refusedFixture);
   }
 });
 
