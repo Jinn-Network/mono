@@ -239,7 +239,7 @@
     "@jinn-network/attestation-issuer": "0.1.0",
     "@jinn-network/core": "0.1.2",
     "@jinn-network/environment-record": "0.1.0",
-    "@jinn-network/evidence-catalog-sqlite": "0.1.0",
+    "@jinn-network/evidence-catalog-sqlite": "0.0.0",
     "@jinn-network/evidence-discovery": "0.1.0",
     "@jinn-network/evidence-local-runtime": "0.1.0",
     "@jinn-network/evidence-protocol": "0.1.0",

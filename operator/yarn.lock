@@ -1037,7 +1037,7 @@ __metadata:
     "@jinn-network/attestation-issuer": "npm:0.1.0"
     "@jinn-network/core": "npm:0.1.2"
     "@jinn-network/environment-record": "npm:0.1.0"
-    "@jinn-network/evidence-catalog-sqlite": "npm:0.1.0"
+    "@jinn-network/evidence-catalog-sqlite": "npm:0.0.0"
     "@jinn-network/evidence-discovery": "npm:0.1.0"
     "@jinn-network/evidence-local-runtime": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
