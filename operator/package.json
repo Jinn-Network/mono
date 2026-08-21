@@ -247,7 +247,7 @@
     "@jinn-network/execution-evidence-builder": "0.1.0",
     "@jinn-network/execution-recorder": "0.1.0",
     "@jinn-network/lifecycle-notifications": "0.1.0",
-    "@jinn-network/marketplace-binding": "0.1.0",
+    "@jinn-network/marketplace-binding": "0.0.0",
     "@jinn-network/marketplace-pipeline": "0.1.0",
     "@jinn-network/marketplace-projector": "0.1.0",
     "@jinn-network/marketplace-venue-base": "0.1.0",
