@@ -1048,7 +1048,7 @@ __metadata:
     "@jinn-network/lifecycle-notifications": "npm:0.1.0"
     "@jinn-network/marketplace-binding": "npm:0.1.0"
     "@jinn-network/marketplace-pipeline": "npm:0.1.0"
-    "@jinn-network/marketplace-projector": "npm:0.1.0"
+    "@jinn-network/marketplace-projector": "npm:0.0.0"
     "@jinn-network/marketplace-venue-base": "npm:0.1.0"
     "@jinn-network/plugin": "npm:0.1.2"
     "@jinn-network/policy-identity": "npm:0.1.0"

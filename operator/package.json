@@ -249,7 +249,7 @@
     "@jinn-network/lifecycle-notifications": "0.1.0",
     "@jinn-network/marketplace-binding": "0.1.0",
     "@jinn-network/marketplace-pipeline": "0.1.0",
-    "@jinn-network/marketplace-projector": "0.1.0",
+    "@jinn-network/marketplace-projector": "0.0.0",
     "@jinn-network/marketplace-venue-base": "0.1.0",
     "@jinn-network/plugin": "0.1.2",
     "@jinn-network/policy-identity": "0.1.0",
