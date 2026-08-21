@@ -15,6 +15,7 @@ import { buildRegistrationList } from './stack-trusted-publishers.mjs';
 const repoRoot = resolve(import.meta.dirname, '../..');
 const PIN_SHA = '1ed36166faf16ea4b96b021ceff0397f83a0a80c';
 const PIN_VERSION = `0.1.0-canary.sha.${PIN_SHA}`;
+const PRODUCT_SHA = '2f249073718111afd810127ff7bbbc19b206dc93';
 
 function verifyManifest() {
   return JSON.parse(readFileSync(join(repoRoot, 'packages/benchmark-product/verify/package.json'), 'utf8'));
@@ -22,13 +23,22 @@ function verifyManifest() {
 
 test('the first-cut pin names one exact stack-canary receipt, not a dist-tag', () => {
   const pin = loadFirstCutPlatformPin(repoRoot);
-  assert.equal(pin.schemaVersion, 1);
+  assert.equal(pin.schemaVersion, 2);
   assert.equal(pin.decision, 'DR-2026-08-17-c');
-  assert.equal(pin.sourceSha, PIN_SHA);
-  assert.equal(pin.packageVersion, PIN_VERSION);
-  assert.equal(pin.distTag, 'canary');
-  assert.equal(pin.latestRemains, '0.0.0');
-  assert.doesNotMatch(pin.packageVersion, /@canary|^canary$/u);
+  assert.equal(pin.platformSourceSha, PIN_SHA);
+  assert.equal(pin.platformVersion, PIN_VERSION);
+  assert.equal(pin.platformDistTag, 'canary');
+  assert.equal(pin.platformLatestVersion, '0.0.0');
+  assert.doesNotMatch(pin.platformVersion, /@canary|^canary$/u);
+  assert.deepEqual(pin.productRelease, {
+    packageName: '@colophon-claims/verify',
+    version: '0.1.0',
+    distTag: 'latest',
+    sourceSha: PRODUCT_SHA,
+    publishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/32504027116',
+    registryIntegrity: 'sha512-Wtp6q40AYKTYk0Yqy5mJzpUcooZe9uab3GEF7vbF6delhEBmImAZqX8WjoYBHIcHGbg7FxKzCVldIyn796wORA==',
+    provenanceUrl: 'https://registry.npmjs.org/-/npm/v1/attestations/@colophon-claims%2fverify@0.1.0',
+  });
   assert.equal(FIRST_CUT_PLATFORM_PIN_PATH, 'packages/benchmark-product/first-cut-platform-pin.json');
 });
 
@@ -60,7 +70,7 @@ test('publish transform strips portal and workspace resolutions and rewrites pre
 test('publish transform refuses a floating canary dist-tag in the pin or source deps', () => {
   const pin = loadFirstCutPlatformPin(repoRoot);
   assert.throws(
-    () => transformColophonManifestForPublish(verifyManifest(), { ...pin, packageVersion: 'canary' }),
+    () => transformColophonManifestForPublish(verifyManifest(), { ...pin, platformVersion: 'canary' }),
     /floating canary dist-tag/u,
   );
   const tagged = verifyManifest();

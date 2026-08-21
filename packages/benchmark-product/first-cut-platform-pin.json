@@ -1,9 +1,18 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "decision": "DR-2026-08-17-c",
-  "sourceSha": "1ed36166faf16ea4b96b021ceff0397f83a0a80c",
-  "packageVersion": "0.1.0-canary.sha.1ed36166faf16ea4b96b021ceff0397f83a0a80c",
-  "distTag": "canary",
-  "latestRemains": "0.0.0",
-  "stackPublishRunUrl": "https://github.com/Jinn-Network/mono/actions/runs/32488931325"
+  "platformSourceSha": "1ed36166faf16ea4b96b021ceff0397f83a0a80c",
+  "platformVersion": "0.1.0-canary.sha.1ed36166faf16ea4b96b021ceff0397f83a0a80c",
+  "platformDistTag": "canary",
+  "platformLatestVersion": "0.0.0",
+  "stackPublishRunUrl": "https://github.com/Jinn-Network/mono/actions/runs/32488931325",
+  "productRelease": {
+    "packageName": "@colophon-claims/verify",
+    "version": "0.1.0",
+    "distTag": "latest",
+    "sourceSha": "2f249073718111afd810127ff7bbbc19b206dc93",
+    "publishRunUrl": "https://github.com/Jinn-Network/mono/actions/runs/32504027116",
+    "registryIntegrity": "sha512-Wtp6q40AYKTYk0Yqy5mJzpUcooZe9uab3GEF7vbF6delhEBmImAZqX8WjoYBHIcHGbg7FxKzCVldIyn796wORA==",
+    "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/@colophon-claims%2fverify@0.1.0"
+  }
 }
