@@ -2,12 +2,13 @@
 
 | | |
 |---|---|
-| **Version** | 1.10 |
+| **Version** | 1.11 |
 | **Date** | 2026-08-21 |
 | **Author** | P0 design session (operator + Claude Fable 5); every seam cited path:line against `next` @ `4f4ad46f2` |
 | **Revision** | v1.1 folded in an independent review of v1.0. Every paragraph marked "Correction to v1.0" is a v1.0 claim that was checked against code and found wrong: §7.2 (`paired-delta@1` cannot compute over a binary-judgment Matrix today), §1.6 and §3.1 (constants pinned in eight and eleven places, not three and four), §5 (a declaration v1.0 specified is inert), §8.3 (the singular-Report blast radius). **v1.2 folds in the mechanical constant sweep**, which classified 214 sites across four families and again found the counts short: stratum 11 to 23, arm count 8 to 9, admission **5 to 60** (§6.8a is new and P6 is now the largest packet), singular Report 7 to 35. The sweep also changed one recommendation (§8.3 now prefers N bundles over one bundle carrying N Reports) and produced §10.2, the coverage proof. **v1.3 folds in a delta re-review of v1.2**, which verified all 16 earlier findings closed and raised six more. Three were load-bearing: §1.4's v1.2 conditional was **not implementable** (the limitations function cannot see the model, so the profile is now sealed into the analysis parameters as an optional key whose absent case preserves the golden fixtures byte for byte); §6.8a's role mapping does **not** close in either direction, and `materialize.ts:366` is a site invisible to both the grep and the compiler; §8.3's option-5 residual cost omitted the producer side, and `report` turns out to be single-shot exactly as `publish` is. Two proposed citation corrections were checked and declined with evidence, and final review upheld both. **v1.4 fixes the one defect final review found:** v1.3's seed binding digested the full `rows` array, which is circular, because a row carries `handChecked` and which rows carry it depends on the sample the digest determines. The digest is now over the row **identity** set, and v1.3's claim that the binding survives §6.4's replacements is withdrawn as false. **v1.5 folds in the operator's G1 rulings of 2026-08-20 and is the ratified freeze.** Two picks overturn this document's own recommendations. **G1-D-A goes to (a):** the judge becomes a method-operand file citizen and `runtime inspect bind-judge` is **retired in the same change** — one way, not two; §8.1 freezes the mechanics and a dated amendment to DR-2026-08-18-f records both. **G1-D-B goes to a generalized (b):** the orphaned Inspect View export is wired for the judge adapter, and more consequentially every conforming export's certification is generalized — each certifies completeness against its **own** sealed selection, named by the lock digest, with a catalog suite name as an *additional* badge rather than the only lane that says anything at all. Both land in a new packet, **P10**, not in P1. **R-1 is overturned:** the evidence contrast does not ship on `paired-delta@1`'s per-item mean-rate unit; §7.2a registers **`paired-majority-delta@1`**, a new general-purpose paired contrast over **item-majority** decisions, which is the unit D2 specified and the unit the rest of the report uses. G1-D-C, G1-D-D, G1-D-E, R-2, R-3, and R-4 are ratified as recommended. §11 is rewritten from a checklist into the ratified record. **v1.6 folds in a targeted review of v1.5, which passed seven of its nine checks and returned two defects.** Both were in the two overturned rulings, and both are the same shape: a claim that was true of `next` before the ruling and stops being true once the ruling lands. **N1: the P10 retirement inventory was not full.** `bindInspectBinaryJudge` also leaves the **package-root** facade (`core/src/index.ts`) which a hard-coded public-surface test asserts, and deleting its `OPERATION_TO_GUI` row breaks a **cross-package** byte assertion in `benchmark-product/web`, because `core/src/index.ts:15` re-exports that map as `GUI_CAPABILITY_CATALOG`. The inventory goes from ten sites to **fourteen**, and §10.1's claim that P10 touches only `core` is corrected: **P10 reaches into `web`**. **N2: §8.2's own wiring makes one shipped sentence false**, which §8.2's audit conclusion did not survive. `inspect-view-export.ts:55` asserts a match to Inspect eval execution settings for a named slice; a judge run matches neither. One sentence is forked for the judge lane and the audit conclusion is restated over the correct surface. Five further items are folded: `truthAdmission` is sealed into §7.2a's derived parameters and `intervalAlpha` is superseded by `alpha` with the reason stated; `isInspectRuntimeAdapterId` must gain an export; #2862 to #2864 merged so §10.1's collision table and §9's grammar note are rewritten against `origin/next` @ `a4c9a2d95`; five citations are corrected; and one British spelling is fixed. **v1.7 is the merge revision and changes no ruling.** `origin/next` moved under this branch: the discover train (#2862 to #2864) merged and amended **the same DR** this document's G1 amendment touches. The two amendment sets are disjoint by decision number — theirs at 3 and 9, ours at 6 and 8 — and compose in one file without either clobbering the other; the composition is recorded in the DR itself. The merge also moved `method-catalog.ts` by roughly seven lines, so four citations are refreshed against `origin/next` @ `a4c9a2d95`, and one paragraph is added: the discover train made `--n` catalog-id-only as well, so the file-operand branch now refuses four flags rather than three, which **strengthens** §8.1's consonance argument rather than straining it. **The rulings are frozen at v1.7. v1.8 is the G3 erratum patch and changes no ruling.** The eight execution packets (P1 #2877, P2 #2876, P3 #2879, P4 #2880, P5 #2884, P6 #2881, P7 #2875, P10 #2878) each recorded their corrections against this document at their own source, and v1.8 folds all of them into the sections that own them, under §0.6's dated erratum marker. **P5 [#2884](https://github.com/Jinn-Network/mono/pull/2884) is still OPEN at the time this revision is written**; its current PR body is absorbed here, and a follow-up commit is expected after it lands if that body moves. **Three of the findings are class fixes rather than point corrections**, because the same cause produced several instances. **C-1: §7 gains a registry envelope clause (§7.0a).** Four separate errata (E-1's sealed parameter set, E-2's baseline and candidate role assignment, E-6's conflicted accounting, and the claim-projection mirror seam that reaches into `verify` as well as `core`) are one cause: §7 specified each method's science precisely and left the envelope every registered method carries to be rediscovered. Independent review of #2884 @ `0142eb08f` (PR comment 5358725423) found the next file in that same seam: the portable `claim-consistency` rebuild `verifyPublicBundle` actually runs, which this revision names as a remaining hole and does not wait on P5 code to name. **C-2: §10.2 gains a fifth sweep family, F5, for field vocabularies (§10.2).** The four v1.2 families all enumerate *value* vocabularies; E-7 was a mirrored allowlist of payload *field names*, which no value sweep can surface, and it blocked the flagship run outright. The same subsection now records that the F1 command is structurally blind to `.md` and `.mjs`, and that the family list is a floor rather than a closed set. **C-3: §10.1's shared-file inventory is corrected and re-scoped.** Its claim that no P10 file is touched by P1 to P7 is false in three directions, and the inventory is now marked as computed at a point in time, with the recomputation each lane runs at rebase stated as the procedure that replaces trusting it. Thirty-seven point errata land beside them, plus two CHIPs that are not contract changes; §0.6 lists the convention, the index, and every erratum's source PR. Certification accounting divergence is issue [#2885](https://github.com/Jinn-Network/mono/issues/2885) (operator option c, still open): one explanatory sentence when the export certification's `runOutcome` disagrees with framework eligibility, not a reconciliation of the two definitions, and not taken here. |
 | **v1.9 erratum** | Portable `claim-consistency` closure only: P5 landed at `cf9d477cd039118c2c13eb324ef350720f21d2fe`; row 37 is closed, while the separate `runPublish` binary-judgment gap and G3 remain open. |
 | **v1.10 erratum** | Workspace `runPublish` closure only: [#2905](https://github.com/Jinn-Network/mono/pull/2905) landed at `80dd02c099ad4a32d02f41357a75be03e6c54988`; row 35 is closed. This records rehearsal evidence, not a real freeze or G3 closure. |
+| **v1.11 additive erratum** | Prompt-driven Codex screening adds a second, sealed screening-table methodology without changing the v1 table, `BinaryJudgmentInstrument`, admission manifest, qualification format, or public bundle format. §6.11 is the normative additive contract and seal-only capability boundary. Core production and report projection are explicitly deferred to the dependent delivery lane. |
 | **Shape** | `design` (packet P0 of the judge-report implementation program) |
 | **Closes** | [#2842](https://github.com/Jinn-Network/mono/issues/2842) |
 | **Program** | [`2026-08-18-judge-report-implementation-program.md`](../plans/2026-08-18-judge-report-implementation-program.md) |
@@ -1747,6 +1748,107 @@ future reviewer reading the two-human branch does not "restore symmetry".
 fixtures, and the verifier's recomputations. Asserted by fixture (P6 acceptance 2). The screening
 model can never be confused with a human verdict: distinct evidence class, distinct measurement
 names, distinct record protocol URIs, asserted by fixture (P6 acceptance 3).
+
+### 6.11 Additive prompt-driven Codex screening (v1.11 erratum)
+
+The original v1 method above remains valid and byte-identical. It models a direct
+`BinaryJudgmentInstrument` screen. The prompt-driven Codex method is a second method under the same
+`screened-operator-sampled` admission mode because the admission claim is unchanged: Luna screens,
+Ritsu checks the flagged and publicly sampled rows, and only Ritsu confirms or excludes. It uses a
+new signed table protocol and media type so an old verifier refuses instead of interpreting the new
+method as v1:
+
+```
+protocol: "https://spec.jinn.network/binary-judgment/screening-table/v2"
+payloadType: "application/vnd.jinn.binary-judgment.screening-table.v2+json"
+```
+
+No existing protocol, media type, top-level bundle format, or admission-manifest field moves.
+
+#### 6.11.1 Prompted procedure
+
+`PromptedScreeningProcedureV1` is exact canonical JSON. It binds the exact opaque coordinator
+prompt digest and opaque transcript digest. Its closed structured metadata declares:
+
+- Sol (`gpt-5.6-sol`) as coordinator at reasoning effort `high`, with permission to orchestrate;
+- Luna (`gpt-5.6-luna`), Terra (`gpt-5.6-terra`), and Sol (`gpt-5.6-sol`) judgment agents in that
+  order, with exact reasoning efforts `medium`, `high`, and `high` and exact maximum batch sizes 32,
+  16, and 8;
+- coordinator tool policy `orchestration-only`; judgment-agent web, shell, repository, and search
+  access all false;
+- output alphabet exactly `CORRECT`, `WRONG`, `UNSURE`, with any invalid output becoming
+  `UNSURE`;
+- at most one retry, using the identical prompt, and only for an infrastructure failure that
+  produced no model output.
+
+Reasoning effort is fixed by this contract: coordinator Sol `high`, Luna `medium`, Terra `high`, and
+judgment-agent Sol `high`. It is not a claim that a mutable provider alias always resolves to
+invariant weights. A different reasoning effort is non-conforming rather than a new digest-compatible
+procedure declaration.
+
+#### 6.11.2 Candidate pool and public sample commitment
+
+`ScreeningPoolV1` contains exactly 664 rows in deterministic `poolPosition` order: 240 mains and
+424 reserves. Every row binds an exact source-item digest, intended label, one of the three classes
+`correct`, `specific-wrong`, `vague-topical-wrong`, one of strata `category-1` through
+`category-4`, and a `slot-NNN` lineage. There are exactly 20 main rows per class/stratum cell.
+Every reserve preserves its main slot's class, stratum, and label, follows the main in pool order,
+and has a contiguous one-based `reserveOrder`. Item digests, positions, slot mains, and reserve
+orders are unique or otherwise closed as their field implies. `identityCommitmentSha256` is
+`computeScreeningPoolDigest` over the 664 item identities, which independently sorts and
+deduplicates before hashing.
+
+`ScreeningSampleCommitmentV1` names the exact pool record and identity commitment, declares
+`screening-sample/1`, and carries exactly 72 sorted unique sample identities. The verifier reruns
+`screening-sample/1` with its public seed and refuses any membership difference. The pool is sealed
+no later than the commitment; the commitment is sealed no later than the signed table. A Ritsu
+decision must fall within the commitment-to-table interval.
+
+#### 6.11.3 Signed v2 table and admission
+
+The v2 table references the exact procedure, coordinator prompt, pool, sample commitment, sampling
+script, and transcript digests. It carries exactly 664 rows sorted by item digest. Each row's
+`screeningVerdict` is Luna's load-bearing `CORRECT | WRONG | UNSURE` decision. Optional Terra and
+Sol verdicts are review evidence only. They never replace Luna's verdict and can never confirm or
+exclude an item. The only confirm/exclude field is `ritsuDecision`, whose checked arm also binds its
+decision timestamp. The table's operator is literally `Ritsu`.
+
+The verifier resolves and hashes every referenced artifact and all 664 source-item records. Prompt,
+sampling-script, and transcript bytes remain opaque. It checks exact canonical procedure, pool,
+commitment, and table bytes; the table's one authority signature; draft and time joins; pool/table
+coverage and intended-label joins; the exact 72-item sample; every Luna-flagged or sampled row's
+Ritsu decision; and the sample agreement rate. `UNSURE` is always flagged.
+
+The final bank contains exactly 240 items, exactly 80 per candidate class and 20 per
+class/stratum cell. Each main slot chooses its main when admissible, otherwise the first admissible
+reserve in sealed `reserveOrder`. The replacement ledger must exactly name every displaced main and
+that winner with the pool's exact positions; skipped admissible reserves, cross-slot replacements,
+and missing or additional ledger entries refuse.
+
+The prompted-v2 evidence-role set appends `screening-prompt`, `screening-procedure`,
+`screening-pool`, `screening-sample-commitment`, and `screening-transcript`. It retains the common
+`screening-table`, `screening-reveal-receipt`, and `screening-sampling-script` roles, and carries
+neither v1's `screening-instrument` nor v1's `screening-raw-outputs`. The schema accepts exactly one
+complete v1 or v2 set and refuses hybrids. Because there is no prompted screening instrument, run
+arm separation is structural for v2; v1 retains the explicit screening-instrument versus run-arm
+digest check.
+
+#### 6.11.4 Seal-only capability boundary and delivery split
+
+Portable verification reports `status: "not-machine-verified"` for four limitations:
+`prompt-compliance-not-machine-verified`, `provider-execution-not-machine-verified`,
+`transcript-provenance-not-machine-verified`, and
+`mutable-model-alias-weights-not-machine-verified`. It may report sealed pool, sample, signed table,
+operator decisions, and artifact integrity as machine verified. It must never report routing or
+prompt compliance as green. A public verifier can authenticate and replay the sealed decision graph
+without access to Codex, but it cannot rerun the provider execution or prove what generated opaque
+transcript bytes.
+
+This lane owns the contracts and portable replay only. The dependent core lane must add producer
+inputs and storage, run lock and materialization reachability, CLI handling, report projection of
+`prompted-codex-screening/v1` and the four limitations into primary analysis parameters, rehearsal,
+and external lifecycle coverage. Until that lane lands, this additive verifier contract is
+constructible in synthetic portable tests but is not a supported core-managed production path.
 
 ---
 

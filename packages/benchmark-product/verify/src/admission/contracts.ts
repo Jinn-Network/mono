@@ -16,6 +16,10 @@ export const HUMAN_REVIEW_OPERATOR_ASSERTION_PROTOCOL = "https://spec.jinn.netwo
 export const BINARY_JUDGMENT_ADMISSION_MANIFEST_PROTOCOL = "https://spec.jinn.network/binary-judgment/admission-manifest/v1" as const;
 // screened-operator-sampled admission branch (spec §6.1, §6.3, §6.6; packet P6).
 export const SCREENING_TABLE_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-table/v1" as const;
+export const PROMPTED_SCREENING_PROCEDURE_PROTOCOL = "https://spec.jinn.network/binary-judgment/prompted-screening-procedure/v1" as const;
+export const SCREENING_POOL_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-pool/v1" as const;
+export const SCREENING_SAMPLE_COMMITMENT_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-sample-commitment/v1" as const;
+export const SCREENING_TABLE_V2_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-table/v2" as const;
 export const SCREENING_REVEAL_RECEIPT_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-reveal-receipt/v1" as const;
 
 export const HUMAN_REVIEW_PACKET_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.human-review-packet.v1+json" as const;
@@ -26,6 +30,7 @@ export const HUMAN_REVIEW_REVEAL_RECEIPT_MEDIA_TYPE = "application/vnd.jinn.bina
 export const HUMAN_REVIEW_OPERATOR_ASSERTION_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.operator-truth-assertion.v1+json" as const;
 // screened-operator-sampled admission branch (spec §6.3, §6.6; packet P6).
 export const SCREENING_TABLE_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.screening-table.v1+json" as const;
+export const SCREENING_TABLE_V2_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.screening-table.v2+json" as const;
 export const SCREENING_REVEAL_RECEIPT_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.screening-reveal-receipt.v1+json" as const;
 
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
@@ -228,6 +233,175 @@ export const ScreeningTableSchema = z.strictObject({
   }
 });
 export type ScreeningTable = z.infer<typeof ScreeningTableSchema>;
+
+export const PROMPTED_SCREENING_PROFILE = "prompted-codex-screening/v1" as const;
+export const PROMPTED_SCREENING_LIMITATIONS = [
+  "prompt-compliance-not-machine-verified",
+  "provider-execution-not-machine-verified",
+  "transcript-provenance-not-machine-verified",
+  "mutable-model-alias-weights-not-machine-verified",
+] as const;
+
+const PromptedAgentSchema = <Alias extends "Luna" | "Terra" | "Sol", Model extends string, Batch extends number>(
+  alias: Alias,
+  model: Model,
+  reasoningEffort: "medium" | "high",
+  maxBatchSize: Batch,
+) => z.strictObject({
+  alias: z.literal(alias),
+  model: z.literal(model),
+  reasoningEffort: z.literal(reasoningEffort),
+  maxBatchSize: z.literal(maxBatchSize),
+});
+
+/** Closed, machine-checkable orchestration metadata. Prompt and transcript bytes stay opaque. */
+export const PromptedScreeningProcedureV1Schema = z.strictObject({
+  protocol: z.literal(PROMPTED_SCREENING_PROCEDURE_PROTOCOL),
+  procedureId: z.literal(PROMPTED_SCREENING_PROFILE),
+  coordinatorPromptSha256: DigestSchema,
+  coordinator: z.strictObject({
+    alias: z.literal("Sol"),
+    model: z.literal("gpt-5.6-sol"),
+    reasoningEffort: z.literal("high"),
+    mayOrchestrate: z.literal(true),
+  }),
+  judgmentAgents: z.tuple([
+    PromptedAgentSchema("Luna", "gpt-5.6-luna", "medium", 32),
+    PromptedAgentSchema("Terra", "gpt-5.6-terra", "high", 16),
+    PromptedAgentSchema("Sol", "gpt-5.6-sol", "high", 8),
+  ]),
+  toolPolicy: z.strictObject({
+    coordinator: z.literal("orchestration-only"),
+    judgmentAgents: z.strictObject({
+      web: z.literal(false),
+      shell: z.literal(false),
+      repository: z.literal(false),
+      search: z.literal(false),
+    }),
+  }),
+  output: z.strictObject({
+    alphabet: z.tuple([z.literal("CORRECT"), z.literal("WRONG"), z.literal("UNSURE")]),
+    invalidOutputDecision: z.literal("UNSURE"),
+  }),
+  retry: z.strictObject({
+    maxRetries: z.literal(1),
+    onlyWhen: z.literal("infrastructure-failure-with-no-model-output"),
+    prompt: z.literal("identical"),
+  }),
+  transcriptSha256: DigestSchema,
+  sealedAt: TimestampSchema,
+});
+export type PromptedScreeningProcedureV1 = z.infer<typeof PromptedScreeningProcedureV1Schema>;
+
+export const SCREENING_POOL_CANDIDATE_CLASSES = ["correct", "specific-wrong", "vague-topical-wrong"] as const;
+export const SCREENING_POOL_STRATA = ["category-1", "category-2", "category-3", "category-4"] as const;
+const ScreeningPoolCommonItemSchema = z.strictObject({
+  itemSha256: DigestSchema,
+  intendedLabel: BinaryJudgmentTruthLabelSchema,
+  candidateClass: z.enum(SCREENING_POOL_CANDIDATE_CLASSES),
+  stratum: z.enum(SCREENING_POOL_STRATA),
+  poolPosition: z.number().int().positive(),
+  slotId: z.string().regex(/^slot-[0-9]{3}$/u),
+});
+export const ScreeningPoolItemSchema = z.discriminatedUnion("poolKind", [
+  ScreeningPoolCommonItemSchema.extend({ poolKind: z.literal("main") }),
+  ScreeningPoolCommonItemSchema.extend({ poolKind: z.literal("reserve"), reserveOrder: z.number().int().positive() }),
+]);
+export type ScreeningPoolItem = z.infer<typeof ScreeningPoolItemSchema>;
+
+/** The complete, ordered 240-main plus 424-reserve candidate universe. */
+export const ScreeningPoolV1Schema = z.strictObject({
+  protocol: z.literal(SCREENING_POOL_PROTOCOL),
+  draftId: IdentitySchema,
+  identityCommitmentSha256: DigestSchema,
+  items: z.array(ScreeningPoolItemSchema).length(664),
+  sealedAt: TimestampSchema,
+}).superRefine((pool, ctx) => {
+  const slots = new Map<string, ScreeningPoolItem[]>();
+  const identities = new Set<string>();
+  for (const [index, item] of pool.items.entries()) {
+    if (item.poolPosition !== index + 1) ctx.addIssue({ code: "custom", path: ["items", index, "poolPosition"], message: "poolPosition must be contiguous and match array order" });
+    if (identities.has(item.itemSha256)) ctx.addIssue({ code: "custom", path: ["items", index, "itemSha256"], message: "itemSha256 must be unique" });
+    identities.add(item.itemSha256);
+    const expectedLabel = item.candidateClass === "correct" ? "CORRECT" : "WRONG";
+    if (item.intendedLabel !== expectedLabel) ctx.addIssue({ code: "custom", path: ["items", index, "intendedLabel"], message: "intendedLabel does not derive from candidateClass" });
+    slots.set(item.slotId, [...(slots.get(item.slotId) ?? []), item]);
+  }
+  const mains = pool.items.filter((item) => item.poolKind === "main");
+  if (mains.length !== 240 || slots.size !== 240) ctx.addIssue({ code: "custom", path: ["items"], message: "pool must contain exactly 240 main slots" });
+  const expectedSlotIds = Array.from({ length: 240 }, (_, index) => `slot-${(index + 1).toString().padStart(3, "0")}`);
+  const actualSlotIds = [...slots.keys()].sort(compareCodeUnitStrings);
+  if (actualSlotIds.length !== expectedSlotIds.length || actualSlotIds.some((value, index) => value !== expectedSlotIds[index])) ctx.addIssue({ code: "custom", path: ["items"], message: "slot lineage must be exactly slot-001 through slot-240" });
+  for (const [slotId, items] of slots) {
+    const main = items.filter((item) => item.poolKind === "main");
+    if (main.length !== 1) { ctx.addIssue({ code: "custom", path: ["items"], message: `${slotId} must contain exactly one main item` }); continue; }
+    const reserves = items.filter((item): item is Extract<ScreeningPoolItem, { poolKind: "reserve" }> => item.poolKind === "reserve").sort((a, b) => a.reserveOrder - b.reserveOrder);
+    for (const [index, reserve] of reserves.entries()) {
+      if (reserve.reserveOrder !== index + 1) ctx.addIssue({ code: "custom", path: ["items"], message: `${slotId} reserveOrder must be contiguous` });
+      if (reserve.poolPosition <= main[0]!.poolPosition) ctx.addIssue({ code: "custom", path: ["items"], message: `${slotId} reserves must follow their main item in pool order` });
+      if (reserve.candidateClass !== main[0]!.candidateClass || reserve.stratum !== main[0]!.stratum || reserve.intendedLabel !== main[0]!.intendedLabel) ctx.addIssue({ code: "custom", path: ["items"], message: `${slotId} reserves must preserve class, stratum, and intended label` });
+    }
+  }
+  for (const candidateClass of SCREENING_POOL_CANDIDATE_CLASSES) for (const stratum of SCREENING_POOL_STRATA) {
+    if (mains.filter((item) => item.candidateClass === candidateClass && item.stratum === stratum).length !== 20) ctx.addIssue({ code: "custom", path: ["items"], message: `main pool must contain 20 ${candidateClass}/${stratum} items` });
+  }
+});
+export type ScreeningPoolV1 = z.infer<typeof ScreeningPoolV1Schema>;
+
+export const ScreeningSampleCommitmentV1Schema = z.strictObject({
+  protocol: z.literal(SCREENING_SAMPLE_COMMITMENT_PROTOCOL),
+  draftId: IdentitySchema,
+  poolSha256: DigestSchema,
+  poolIdentityCommitmentSha256: DigestSchema,
+  samplingProcedure: z.literal("screening-sample/1"),
+  sampleSeed: z.string().min(1),
+  sampleSize: z.literal(72),
+  sampleItemSha256s: z.array(DigestSchema).length(72).superRefine((values, ctx) => {
+    for (let index = 1; index < values.length; index += 1) {
+      if (compareCodeUnitStrings(values[index - 1]!, values[index]!) >= 0) ctx.addIssue({ code: "custom", message: "sample identities must be sorted and unique" });
+    }
+  }),
+  committedAt: TimestampSchema,
+});
+export type ScreeningSampleCommitmentV1 = z.infer<typeof ScreeningSampleCommitmentV1Schema>;
+
+const ScreeningDecisionSchema = z.enum(["CORRECT", "WRONG", "UNSURE"]);
+const RitsuScreeningDecisionSchema = z.discriminatedUnion("checked", [
+  z.strictObject({ checked: z.literal(false) }),
+  z.strictObject({ checked: z.literal(true), verdict: z.enum(["confirm", "exclude"]), decidedAt: TimestampSchema }),
+]);
+export const PromptedScreeningRowV2Schema = z.strictObject({
+  itemSha256: DigestSchema,
+  intendedLabel: BinaryJudgmentTruthLabelSchema,
+  screeningVerdict: ScreeningDecisionSchema,
+  terraReviewVerdict: ScreeningDecisionSchema.optional(),
+  solReviewVerdict: ScreeningDecisionSchema.optional(),
+  ritsuDecision: RitsuScreeningDecisionSchema,
+});
+export type PromptedScreeningRowV2 = z.infer<typeof PromptedScreeningRowV2Schema>;
+
+/** Signed authority decision table for the prompted Codex procedure. */
+export const ScreeningTableV2Schema = z.strictObject({
+  protocol: z.literal(SCREENING_TABLE_V2_PROTOCOL),
+  draftId: IdentitySchema,
+  procedureSha256: DigestSchema,
+  coordinatorPromptSha256: DigestSchema,
+  poolSha256: DigestSchema,
+  sampleCommitmentSha256: DigestSchema,
+  samplingScriptSha256: DigestSchema,
+  transcriptSha256: DigestSchema,
+  operator: z.literal("Ritsu"),
+  rows: z.array(PromptedScreeningRowV2Schema).length(664),
+  sealedAt: TimestampSchema,
+}).superRefine((table, ctx) => {
+  for (let index = 1; index < table.rows.length; index += 1) {
+    if (compareCodeUnitStrings(table.rows[index - 1]!.itemSha256, table.rows[index]!.itemSha256) >= 0) {
+      ctx.addIssue({ code: "custom", path: ["rows"], message: "rows must be sorted by itemSha256 and unique" });
+      return;
+    }
+  }
+});
+export type ScreeningTableV2 = z.infer<typeof ScreeningTableV2Schema>;
 
 // The two-human-review reasons (unchanged) and the screened-branch reasons this packet adds
 // (spec §6.4; packet P6). This is one of four widened copies of the closed reason vocabulary

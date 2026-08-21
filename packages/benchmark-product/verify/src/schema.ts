@@ -55,6 +55,11 @@ export const BUNDLE_V4_EVIDENCE_ROLES = [
   "screening-instrument",
   "screening-sampling-script",
   "screening-raw-outputs",
+  "screening-prompt",
+  "screening-procedure",
+  "screening-pool",
+  "screening-sample-commitment",
+  "screening-transcript",
 ] as const;
 export type BundleV4EvidenceRole = (typeof BUNDLE_V4_EVIDENCE_ROLES)[number];
 export const BUNDLE_V4_ADMISSION_EVIDENCE_ROLES = [
@@ -72,6 +77,11 @@ export const BUNDLE_V4_ADMISSION_EVIDENCE_ROLES = [
   "screening-instrument",
   "screening-sampling-script",
   "screening-raw-outputs",
+  "screening-prompt",
+  "screening-procedure",
+  "screening-pool",
+  "screening-sample-commitment",
+  "screening-transcript",
 ] as const;
 
 const PublicKeySchema = z.object({
@@ -320,12 +330,11 @@ export const BundleQualificationSchema = z.strictObject({
     "human-review-packet", "human-review-response", "human-review-verdict", "reviewer-roster",
     "review-visibility-receipt", "review-reveal-receipt",
   ] as const;
-  const screeningEvidenceRoles = [
-    "screening-table",
-    "screening-reveal-receipt",
-    "screening-instrument",
-    "screening-sampling-script",
-    "screening-raw-outputs",
+  const commonScreeningEvidenceRoles = ["screening-table", "screening-reveal-receipt", "screening-sampling-script"] as const;
+  const legacyScreeningEvidenceRoles = ["screening-instrument", "screening-raw-outputs"] as const;
+  const promptedScreeningEvidenceRoles = [
+    "screening-prompt", "screening-procedure", "screening-pool",
+    "screening-sample-commitment", "screening-transcript",
   ] as const;
   if (qualification.truthAdmission === "two-human-unanimous") {
     if (humanEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) === 0)
@@ -341,12 +350,17 @@ export const BundleQualificationSchema = z.strictObject({
     // branch names the mode it handles, so a fourth admission mode lands in no arm instead of
     // silently inheriting the screened one's evidence rules.
   } else if (qualification.truthAdmission === "screened-operator-sampled") {
+    const legacyRoleSet = legacyScreeningEvidenceRoles.every((role) => roleCounts.get(role) === 1)
+      && promptedScreeningEvidenceRoles.every((role) => roleCounts.get(role) === 0);
+    const promptedRoleSet = promptedScreeningEvidenceRoles.every((role) => roleCounts.get(role) === 1)
+      && legacyScreeningEvidenceRoles.every((role) => roleCounts.get(role) === 0);
     if (
-      screeningEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) !== 1)
+      commonScreeningEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) !== 1)
+      || (!legacyRoleSet && !promptedRoleSet)
       || humanEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) !== 0)
       || (roleCounts.get("operator-assertion") ?? 0) !== 0
     ) {
-      ctx.addIssue({ code: "custom", path: ["admissionRecords"], message: "screened admission must carry exactly one of every screening record and no human-review evidence or operator assertion" });
+      ctx.addIssue({ code: "custom", path: ["admissionRecords"], message: "screened admission must carry exactly one complete legacy-v1 or prompted-v2 screening record set and no human-review evidence or operator assertion" });
     }
     const screeningInstrument = qualification.admissionRecords.find((entry) => (
       entry.roles.includes("screening-instrument")
