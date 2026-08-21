@@ -2030,7 +2030,7 @@
       "decisionRecords": 6,
       "discoveredFirstPartySurfaces": 4189,
       "generatedOutputSources": 1414,
-      "generatorSources": 683,
+      "generatorSources": 685,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 7
@@ -19518,6 +19518,26 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/scripts/deepswe-v1.1-one-task-qualify.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/demo1-export-public-bundle.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/demo1-export-public-bundle.test.mjs"
       },
       {
         "categories": [
