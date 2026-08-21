@@ -23,7 +23,6 @@ import {
   verifyPublicBundle,
 } from "@colophon-claims/verify";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
-import { materializePublicBundle } from "../bundle/materialize.js";
 import { BUNDLE_V4_FORMAT as CORE_BUNDLE_V4_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
 import { createSyntheticV4BundleFixture } from "../bundle/testing/v4-synthetic-fixture.js";
 import {
@@ -38,6 +37,7 @@ import { CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE } from "../runtime/suite-p
 import { readRunState } from "../run/state.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
+import { readDraftDocument } from "./drafts.js";
 import { exportDerivedBundle } from "./method.js";
 import { runPublish } from "./publish.js";
 
@@ -251,58 +251,63 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     expect(refused.error.code).toBe("validation");
     expect(refused.error.issues?.[0]?.path).toBe("includeNativeArtifacts");
 
+    const published = await runPublish(context, { draftId: fixture.draftId, includeNativeArtifacts: true });
+    expect(published.ok, JSON.stringify(published)).toBe(true);
+    if (!published.ok) return;
+    expect(published.result.draft.state).toBe("published-bundle");
+    expect(published.result.additionalBundles).toHaveLength(2);
+
+    const publishedBundles = [
+      {
+        method: BENCHMARKING_METHOD_IDS.binaryInstrument,
+        version: BENCHMARKING_METHOD_VERSION,
+        identity: published.result.bundleIdentity,
+        relativePath: published.result.bundleRelativePath,
+        checks: published.result.checks,
+      },
+      ...(published.result.additionalBundles ?? []).map((entry) => ({
+        method: entry.method,
+        version: entry.version,
+        identity: entry.bundleIdentity,
+        relativePath: entry.bundleRelativePath,
+        checks: entry.checks,
+      })),
+    ].map((bundle) => ({ ...bundle, dir: join(workspaceDir, bundle.relativePath) }));
+    expect(publishedBundles).toHaveLength(3);
+    expect(publishedBundles.map((bundle) => `${bundle.method}@${bundle.version}`).sort()).toEqual([
+      "jinn.benchmarking.method/binary-instrument@1",
+      "jinn.benchmarking.method/paired-majority-delta@1",
+      "jinn.benchmarking.method/pairwise-disagreement@1",
+    ]);
+    expect(new Set(publishedBundles.map((bundle) => bundle.identity)).size).toBe(3);
+    for (const bundle of publishedBundles) {
+      expect(bundle.identity).toMatch(/^[a-f0-9]{64}$/u);
+      expect(bundle.relativePath).toBe(`artifacts/${fixture.draftId}/public-bundles/${bundle.identity}`);
+      expect(bundle.checks).toEqual(expect.arrayContaining([
+        "manifest",
+        "evidence-closure",
+        "trust",
+        "matrix-rederivation",
+        "report-verification",
+        "claim-consistency",
+      ]));
+    }
+
+    expect(readDraftDocument(workspaceDir, fixture.draftId).state).toBe("published-bundle");
     const runState = readRunState(workspaceDir, fixture.draftId);
     expect(runState).toBeDefined();
     if (runState === undefined) return;
-
-    // Workspace claim-consistency still does not fold `binaryInstrumentReportLimitations`.
-    // `oci-container` isolation inventory length 2 opens the exact-disclosure gate. Portable
-    // copy (P5) does fold it. This is the pre-existing hole P5 named in `report.test.ts`.
-    // Fail closed: use publish dirs on success; materialize only when the first issue path is
-    // that named hole; any other publish failure fails this test.
-    const published = await runPublish(context, { draftId: fixture.draftId, includeNativeArtifacts: true });
-    const publishedBundles: Array<{ readonly method: string; readonly version: string; readonly dir: string }> = [];
-    if (published.ok) {
-      publishedBundles.push({
-        method: BENCHMARKING_METHOD_IDS.binaryInstrument,
-        version: BENCHMARKING_METHOD_VERSION,
-        dir: join(workspaceDir, published.result.bundleRelativePath),
-      });
-      for (const extra of published.result.additionalBundles ?? []) {
-        publishedBundles.push({
-          method: extra.method,
-          version: extra.version,
-          dir: join(workspaceDir, extra.bundleRelativePath),
-        });
-      }
-    } else {
-      expect(published.error.issues?.[0]?.path, JSON.stringify(published.error)).toBe("claim-consistency");
-      const canonical = materializePublicBundle({
-        workspaceDir,
-        draftId: fixture.draftId,
-        benchmarkSha256: fixture.benchmarkSha256,
-        runState,
-      });
-      publishedBundles.push({
-        method: BENCHMARKING_METHOD_IDS.binaryInstrument,
-        version: BENCHMARKING_METHOD_VERSION,
-        dir: canonical.bundleDir,
-      });
-      for (const extra of [
-        { method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: BENCHMARKING_METHOD_VERSION },
-        { method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta, version: BENCHMARKING_METHOD_VERSION },
-      ]) {
-        const materialized = materializePublicBundle({
-          workspaceDir,
-          draftId: fixture.draftId,
-          benchmarkSha256: fixture.benchmarkSha256,
-          runState,
-          reportSelector: extra,
-        });
-        publishedBundles.push({ ...extra, dir: materialized.bundleDir });
-      }
-    }
-    expect(publishedBundles).toHaveLength(3);
+    expect(runState.bundleIdentity).toBe(published.result.bundleIdentity);
+    expect(runState.bundleRelativePath).toBe(published.result.bundleRelativePath);
+    expect(runState.bundleChecks).toEqual(published.result.checks);
+    expect(runState.additionalBundles).toEqual((published.result.additionalBundles ?? []).map((entry) => ({
+      method: entry.method,
+      version: entry.version,
+      bundleIdentity: entry.bundleIdentity,
+      bundleRelativePath: entry.bundleRelativePath,
+      bundleChecks: [...entry.checks],
+    })));
+    expect(runState.publishedAt).toBeDefined();
 
     const copied = publishedBundles.map((bundle) => {
       const dir = mkdtempSync(join(tmpdir(), "judge-p8-cold-"));
