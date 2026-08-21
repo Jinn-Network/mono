@@ -210,7 +210,8 @@ export const ScreeningTableSchema = z.strictObject({
   // (spec §6.5 check (0)) owned elsewhere; this schema owns only the positivity.
   sampleSize: z.number().int().positive(),
   samplingScriptSha256: DigestSchema,
-  // Digest-bound sidecar; the verifier never walks its bytes, only checks the digest (spec §6.5).
+  // Digest-bound opaque sidecar; the verifier resolves and hashes its exact bytes but never parses
+  // or interprets their content (spec §6.5).
   rawOutputsSha256: DigestSchema,
   rows: z.array(ScreeningRowSchema),
   sealedAt: TimestampSchema,

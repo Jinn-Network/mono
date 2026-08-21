@@ -4,12 +4,63 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
+  BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+  binaryJudgmentPromptTemplateDigest,
+  recordDigest,
+  sealBinaryJudgmentInstrument,
+} from "@jinn-network/task-execution-profiles";
 import { runCli } from "./main.js";
 
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+
+function screeningMaterials() {
+  const messages = [
+    { role: "developer", segments: [{ literal: "Synthetic screening rubric. " }] },
+    { role: "user", segments: [
+      { field: "question" }, { field: "referenceAnswer" }, { field: "candidateAnswer" },
+      { field: "evidence" },
+    ] },
+  ] as const;
+  const descriptor = { uri: "https://fixtures.example.test/screening", digest: { sha256: "a".repeat(64) } };
+  const instrument = sealBinaryJudgmentInstrument({
+    protocol: BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
+    instrumentId: "screening-only",
+    messages: messages as never,
+    promptTemplateSha256: binaryJudgmentPromptTemplateDigest(messages as never),
+    promptSource: descriptor,
+    license: descriptor,
+    attribution: descriptor,
+    model: {
+      adapter: "jinn-openai", requested: "gpt-5.6-luna",
+      generation: {
+        reasoningEffort: "low", maxOutputTokens: 128, store: false, background: false,
+        stream: false, serviceTier: "default", tools: [], fallbackModels: [], retries: 0,
+        persistedConversation: false, metadata: null, promptCacheIdentifier: null,
+      },
+    },
+    response: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      invalidOutputDecision: "REJECT",
+    },
+  });
+  const script = new Uint8Array([0, 255, 1]);
+  const raw = new Uint8Array([255, 0, 2]);
+  return {
+    screeningInstrumentSha256: instrument.digest,
+    screeningInstrumentBase64: Buffer.from(instrument.bytes).toString("base64"),
+    samplingScriptSha256: recordDigest(script),
+    samplingScriptBase64: Buffer.from(script).toString("base64"),
+    rawOutputsSha256: recordDigest(raw),
+    rawOutputsBase64: Buffer.from(raw).toString("base64"),
+  };
+}
 
 describe("human-review CLI", () => {
   it("uses file-backed packet, configured-signer, and admission operations without raw key flags", async () => {
@@ -135,11 +186,9 @@ describe("human-review CLI", () => {
         poolPosition: 1,
       }],
       screening: {
-        screeningInstrumentSha256: `sha256:${"3".repeat(64)}`,
+        ...screeningMaterials(),
         sampleSeed: "synthetic-cli-seed",
         sampleSize: 1,
-        samplingScriptSha256: `sha256:${"4".repeat(64)}`,
-        rawOutputsSha256: `sha256:${"5".repeat(64)}`,
         rows: [{
           itemSha256: packetResult.itemSha256,
           intendedLabel: "CORRECT",

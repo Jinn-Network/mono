@@ -23,13 +23,18 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import {
+  BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
+  BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
   BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
+  BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
   BinaryJudgmentAnalysisContextSchema,
   BinaryJudgmentLabelResolutionSchema,
   BinaryJudgmentPayloadSchema,
+  binaryJudgmentPromptTemplateDigest,
   canonicalJsonBytes,
   recordDigest,
+  sealBinaryJudgmentInstrument,
   sealDocument,
   type BinaryJudgmentAnalysisContext,
   type BinaryJudgmentLabelResolution,
@@ -102,6 +107,14 @@ class Store {
     const bytes = this.records.get(digest);
     if (bytes === undefined) throw new Error(`test store: no record for ${digest}`);
     return bytes;
+  }
+
+  remove(digest: `sha256:${string}`): void {
+    this.records.delete(digest);
+  }
+
+  replace(digest: `sha256:${string}`, bytes: Uint8Array): void {
+    this.records.set(digest, bytes);
   }
 
   ports(): BinaryJudgmentAdmissionClosurePorts {
@@ -232,6 +245,57 @@ function sealFrozenHumanReviewSpec(store: Store): void {
   store.put(HUMAN_REVIEW_FORM_SEALED.bytes);
 }
 
+function screeningInstrumentBytes(): Uint8Array {
+  const messages = [
+    { role: "developer", segments: [{ literal: "Synthetic screening rubric. Judge only the supplied item. " }] },
+    {
+      role: "user",
+      segments: [
+        { literal: "Question: " }, { field: "question" },
+        { literal: "\nReference: " }, { field: "referenceAnswer" },
+        { literal: "\nCandidate: " }, { field: "candidateAnswer" },
+        { literal: "\nEvidence: " }, { field: "evidence" },
+      ],
+    },
+  ] as const;
+  const descriptor = {
+    uri: "https://fixtures.example.test/screening/prompt",
+    digest: { sha256: "a".repeat(64) },
+  };
+  return sealBinaryJudgmentInstrument({
+    protocol: BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
+    instrumentId: "screening-only",
+    messages: messages as never,
+    promptTemplateSha256: binaryJudgmentPromptTemplateDigest(messages as never),
+    promptSource: descriptor,
+    license: { ...descriptor, uri: "https://fixtures.example.test/licenses/synthetic" },
+    attribution: { ...descriptor, uri: "https://fixtures.example.test/screening/attribution" },
+    model: {
+      adapter: "jinn-openai",
+      requested: "gpt-5.6-luna",
+      generation: {
+        reasoningEffort: "low",
+        maxOutputTokens: 128,
+        store: false,
+        background: false,
+        stream: false,
+        serviceTier: "default",
+        tools: [],
+        fallbackModels: [],
+        retries: 0,
+        persistedConversation: false,
+        metadata: null,
+        promptCacheIdentifier: null,
+      },
+    },
+    response: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      invalidOutputDecision: "REJECT",
+    },
+  }).bytes;
+}
+
 interface ScreenedFixtureOptions {
   /** One row per pool item; index-aligned with `items`. */
   readonly rows: readonly Pick<ScreeningRow, "screeningVerdict" | "handChecked" | "handVerdict">[];
@@ -245,6 +309,11 @@ interface ScreenedFixtureOptions {
    * nor a replacement-ledger entry -- a table naming an item outside the accepted+excluded
    * closure (spec §6.5 check (0)). */
   readonly extraUncoveredRow?: boolean;
+  readonly screeningInstrumentBytes?: Uint8Array;
+  readonly samplingScriptBytes?: Uint8Array;
+  readonly rawOutputsBytes?: Uint8Array;
+  readonly tableDraftId?: string;
+  readonly tableSealedAt?: string;
 }
 
 /** Builds the smallest screened-operator-sampled closure that exercises all five §6.5 checks: two
@@ -256,6 +325,11 @@ function buildScreenedClosure(options: ScreenedFixtureOptions): {
   /** The bare, parsed table -- exposed so a test can re-seal it under a different (e.g.
    * non-DSSE) mechanism without reconstructing the object from scratch. */
   readonly tableValue: z.infer<typeof ScreeningTableSchema>;
+  readonly nestedDigests: {
+    readonly instrument: `sha256:${string}`;
+    readonly samplingScript: `sha256:${string}`;
+    readonly rawOutputs: `sha256:${string}`;
+  };
 } {
   const store = new Store();
   sealFrozenHumanReviewSpec(store);
@@ -280,18 +354,19 @@ function buildScreenedClosure(options: ScreenedFixtureOptions): {
   }
   rows.sort((left, right) => (left.itemSha256 < right.itemSha256 ? -1 : left.itemSha256 > right.itemSha256 ? 1 : 0));
 
-  const samplingScriptSha256 = store.put(new TextEncoder().encode("synthetic sampling script"));
-  const rawOutputsSha256 = store.put(new TextEncoder().encode("synthetic raw screening outputs"));
+  const screeningInstrumentSha256 = store.put(options.screeningInstrumentBytes ?? screeningInstrumentBytes());
+  const samplingScriptSha256 = store.put(options.samplingScriptBytes ?? new TextEncoder().encode("synthetic sampling script"));
+  const rawOutputsSha256 = store.put(options.rawOutputsBytes ?? new TextEncoder().encode("synthetic raw screening outputs"));
   const tableValue = ScreeningTableSchema.parse({
     protocol: SCREENING_TABLE_PROTOCOL,
-    draftId: DRAFT_ID,
-    screeningInstrumentSha256: store.put(new TextEncoder().encode("synthetic screening instrument")),
+    draftId: options.tableDraftId ?? DRAFT_ID,
+    screeningInstrumentSha256,
     sampleSeed: options.sampleSeed ?? "synthetic-seed-alpha",
     sampleSize: options.sampleSize ?? rows.length,
     samplingScriptSha256,
     rawOutputsSha256,
     rows,
-    sealedAt: ADMITTED_AT,
+    sealedAt: options.tableSealedAt ?? ADMITTED_AT,
   });
   // Signed once, DSSE-wrapped on the same sealing path as the other admission records (spec
   // §6.3, final sentence, verbatim; the table schema itself gains no attestorRole field --
@@ -359,7 +434,16 @@ function buildScreenedClosure(options: ScreenedFixtureOptions): {
     admittedAt: ADMITTED_AT,
   });
 
-  return { store, manifestSha256: manifest.digest, tableValue };
+  return {
+    store,
+    manifestSha256: manifest.digest,
+    tableValue,
+    nestedDigests: {
+      instrument: screeningInstrumentSha256,
+      samplingScript: samplingScriptSha256,
+      rawOutputs: rawOutputsSha256,
+    },
+  };
 }
 
 function refusal(fn: () => void): BinaryJudgmentAdmissionClosureError {
@@ -433,6 +517,114 @@ describe("verifyBinaryJudgmentAdmissionClosure: screened-operator-sampled (§6.4
     expect(result.excluded[0]!.reason).toBe("screening-hand-excluded"); // R-3 tie-break
     expect(result.reachableRecords.some((record) => record.roles.includes("screening-table"))).toBe(true);
     expect(result.reachableRecords.some((record) => record.roles.includes("screening-reveal-receipt"))).toBe(true);
+    expect(result.reachableRecords.some((record) => record.roles.includes("screening-instrument"))).toBe(true);
+    expect(result.reachableRecords.some((record) => record.roles.includes("screening-sampling-script"))).toBe(true);
+    expect(result.reachableRecords.some((record) => record.roles.includes("screening-raw-outputs"))).toBe(true);
+    expect(result.screening?.instrumentSha256).toBeDefined();
+  });
+
+  test.each([
+    ["instrument", "screeningInstrumentSha256"],
+    ["samplingScript", "samplingScriptSha256"],
+    ["rawOutputs", "rawOutputsSha256"],
+  ] as const)("missing nested %s record refuses closed", (record, expectedPath) => {
+    const { store, manifestSha256, nestedDigests } = buildScreenedClosure({
+      rows: [
+        { screeningVerdict: "CORRECT", handChecked: true, handVerdict: "confirm" },
+        { screeningVerdict: "WRONG", handChecked: true, handVerdict: "exclude" },
+      ],
+      admittedIndices: [0],
+    });
+    store.remove(nestedDigests[record]);
+    const error = refusal(() => verifyBinaryJudgmentAdmissionClosure(
+      { admissionManifestSha256: manifestSha256, expectedDraftId: DRAFT_ID },
+      store.ports(),
+    ));
+    expect(error.path).toContain(expectedPath);
+    expect(error.message).toMatch(/cannot resolve/);
+  });
+
+  test.each([
+    ["instrument", "screeningInstrumentSha256"],
+    ["samplingScript", "samplingScriptSha256"],
+    ["rawOutputs", "rawOutputsSha256"],
+  ] as const)("substituted nested %s bytes refuse their table digest", (record, expectedPath) => {
+    const { store, manifestSha256, nestedDigests } = buildScreenedClosure({
+      rows: [
+        { screeningVerdict: "CORRECT", handChecked: true, handVerdict: "confirm" },
+        { screeningVerdict: "WRONG", handChecked: true, handVerdict: "exclude" },
+      ],
+      admittedIndices: [0],
+    });
+    store.replace(nestedDigests[record], new Uint8Array([0, 255, 1]));
+    const error = refusal(() => verifyBinaryJudgmentAdmissionClosure(
+      { admissionManifestSha256: manifestSha256, expectedDraftId: DRAFT_ID },
+      store.ports(),
+    ));
+    expect(error.path).toContain(expectedPath);
+    expect(error.message).toMatch(/do not hash/);
+  });
+
+  test("sampling script and raw outputs remain opaque exact bytes", () => {
+    const { store, manifestSha256 } = buildScreenedClosure({
+      rows: [
+        { screeningVerdict: "CORRECT", handChecked: true, handVerdict: "confirm" },
+        { screeningVerdict: "WRONG", handChecked: true, handVerdict: "exclude" },
+      ],
+      admittedIndices: [0],
+      samplingScriptBytes: new Uint8Array([0, 255, 1, 254]),
+      rawOutputsBytes: new Uint8Array([255, 0, 253, 2]),
+    });
+    expect(() => verifyBinaryJudgmentAdmissionClosure(
+      { admissionManifestSha256: manifestSha256, expectedDraftId: DRAFT_ID },
+      store.ports(),
+    )).not.toThrow();
+  });
+
+  test.each([
+    ["invalid schema", new TextEncoder().encode("synthetic screening instrument")],
+    ["noncanonical JSON", new TextEncoder().encode(JSON.stringify(JSON.parse(new TextDecoder().decode(screeningInstrumentBytes())), null, 2))],
+    ["model/profile mismatch", canonicalJsonBytes({
+      ...(JSON.parse(new TextDecoder().decode(screeningInstrumentBytes())) as Record<string, unknown>),
+      model: {
+        ...((JSON.parse(new TextDecoder().decode(screeningInstrumentBytes())) as { model: Record<string, unknown> }).model),
+        requested: "gpt-4o-mini-2024-07-18",
+      },
+    })],
+  ] as const)("screening instrument %s refuses under its own valid digest", (_caseName, bytes) => {
+    const { store, manifestSha256 } = buildScreenedClosure({
+      rows: [
+        { screeningVerdict: "CORRECT", handChecked: true, handVerdict: "confirm" },
+        { screeningVerdict: "WRONG", handChecked: true, handVerdict: "exclude" },
+      ],
+      admittedIndices: [0],
+      screeningInstrumentBytes: bytes,
+    });
+    const error = refusal(() => verifyBinaryJudgmentAdmissionClosure(
+      { admissionManifestSha256: manifestSha256, expectedDraftId: DRAFT_ID },
+      store.ports(),
+    ));
+    expect(error.path).toBe("screeningTable.screeningInstrumentSha256");
+  });
+
+  test.each([
+    ["draftId", { tableDraftId: "urn:uuid:22222222-2222-4222-8222-222222222222" }],
+    ["sealedAt", { tableSealedAt: "2026-08-20T09:00:01.000Z" }],
+  ] as const)("screening table %s must join the admission manifest", (_field, tableOverride) => {
+    const { store, manifestSha256 } = buildScreenedClosure({
+      rows: [
+        { screeningVerdict: "CORRECT", handChecked: true, handVerdict: "confirm" },
+        { screeningVerdict: "WRONG", handChecked: true, handVerdict: "exclude" },
+      ],
+      admittedIndices: [0],
+      ...tableOverride,
+    });
+    const error = refusal(() => verifyBinaryJudgmentAdmissionClosure(
+      { admissionManifestSha256: manifestSha256, expectedDraftId: DRAFT_ID },
+      store.ports(),
+    ));
+    expect(error.path).toBe("screeningTable");
+    expect(error.message).toMatch(/draft\/time/);
   });
 
   test("the table is DSSE-sealed (spec §6.3, final sentence): bare canonical table bytes at screeningTableSha256 refuse", () => {
@@ -535,7 +727,7 @@ describe("verifyBinaryJudgmentAdmissionClosure: screened-operator-sampled (§6.4
     const tableValue = ScreeningTableSchema.parse({
       protocol: SCREENING_TABLE_PROTOCOL,
       draftId: DRAFT_ID,
-      screeningInstrumentSha256: store.put(new TextEncoder().encode("synthetic screening instrument")),
+      screeningInstrumentSha256: store.put(screeningInstrumentBytes()),
       sampleSeed,
       sampleSize,
       samplingScriptSha256: store.put(new TextEncoder().encode("synthetic sampling script")),

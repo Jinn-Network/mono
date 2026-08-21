@@ -6,6 +6,7 @@ import {
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
   BENCHMARKING_PROTOCOL,
+  compareCodeUnitStrings,
   sealBenchmark,
 } from "@jinn-network/benchmarking-records";
 import {
@@ -30,6 +31,7 @@ import {
   EVALUATION_SPEC_FORMAT_URI,
   EVAL_SEMANTICS_VERSION,
   binaryJudgmentPromptTemplateDigest,
+  recordDigest,
   sealBinaryJudgmentInstrument,
   sealEvaluationSpec,
   type AcceptedJudgeModelId,
@@ -314,6 +316,8 @@ function setUpFixture(options: {
   /** Arm ids whose instrument should interpolate `evidence`. Default: none declare. */
   readonly declaringArmIds?: readonly string[];
   readonly items?: readonly AdmissionItemConfig[];
+  /** Test-only screened admission whose instrument deliberately reuses this run arm. */
+  readonly screeningInstrumentArmId?: string;
 } = {}): Fixture {
   const withItemEvidence = options.withItemEvidence ?? false;
   const declaringArmIds = new Set(options.declaringArmIds ?? []);
@@ -324,6 +328,18 @@ function setUpFixture(options: {
   });
   expect(initial.ok).toBe(true);
   if (!initial.ok) throw new Error(initial.error.detail);
+
+  const armConfigs = options.arms ?? DEFAULT_ARM_CONFIGS;
+  const instruments = armConfigs.map((armConfig) => {
+    const sealed = instrument(armConfig.armId, {
+      model: armConfig.model,
+      generation: armConfig.generation,
+      declaresEvidence: declaringArmIds.has(armConfig.armId),
+      preamble: armConfig.preamble,
+    });
+    store(sealed.bytes);
+    return sealed;
+  });
 
   const candidates = (options.items ?? DEFAULT_ADMISSION_ITEMS).map((entry, index) => {
     const { truthLabel, candidateClass, stratum, evidenceText, ...rest } = entry;
@@ -342,10 +358,39 @@ function setUpFixture(options: {
       operatorTruthLabel: truthLabel,
     };
   });
-  const admittedOutcome = admitHumanTruth(context(), {
+  const screeningInstrument = options.screeningInstrumentArmId === undefined
+    ? undefined
+    : instruments[armConfigs.findIndex((arm) => arm.armId === options.screeningInstrumentArmId)];
+  if (options.screeningInstrumentArmId !== undefined && screeningInstrument === undefined) {
+    throw new Error(`unknown screening instrument arm ${options.screeningInstrumentArmId}`);
+  }
+  const scriptBytes = new Uint8Array([0, 255, 1]);
+  const rawBytes = new Uint8Array([255, 0, 2]);
+  const admittedOutcome = admitHumanTruth(context(), screeningInstrument === undefined ? {
     draftId: "draft-1",
     truthAdmission: "operator-only",
     candidates: candidates.map(({ payload: _payload, ...candidate }) => candidate),
+  } : {
+    draftId: "draft-1",
+    truthAdmission: "screened-operator-sampled",
+    candidates: candidates.map(({ payload: _payload, operatorTruthLabel: _truth, ...candidate }) => candidate),
+    screening: {
+      screeningInstrumentSha256: screeningInstrument.digest,
+      screeningInstrumentBase64: Buffer.from(screeningInstrument.bytes).toString("base64"),
+      sampleSeed: "synthetic-run-lock-screening",
+      sampleSize: candidates.length,
+      samplingScriptSha256: recordDigest(scriptBytes),
+      samplingScriptBase64: Buffer.from(scriptBytes).toString("base64"),
+      rawOutputsSha256: recordDigest(rawBytes),
+      rawOutputsBase64: Buffer.from(rawBytes).toString("base64"),
+      rows: candidates.map((candidate) => ({
+        itemSha256: candidate.itemSha256,
+        intendedLabel: candidate.operatorTruthLabel,
+        screeningVerdict: candidate.operatorTruthLabel,
+        handChecked: true,
+        handVerdict: "confirm" as const,
+      })).sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256)),
+    },
   });
   if (!admittedOutcome.ok) throw new Error(admittedOutcome.error.detail);
   expect(admittedOutcome.ok).toBe(true);
@@ -398,17 +443,6 @@ function setUpFixture(options: {
   });
   const benchmarkSha256 = bare(store(benchmark.bytes));
 
-  const armConfigs = options.arms ?? DEFAULT_ARM_CONFIGS;
-  const instruments = armConfigs.map((armConfig) => {
-    const sealed = instrument(armConfig.armId, {
-      model: armConfig.model,
-      generation: armConfig.generation,
-      declaresEvidence: declaringArmIds.has(armConfig.armId),
-      preamble: armConfig.preamble,
-    });
-    store(sealed.bytes);
-    return sealed;
-  });
   const selection = {
     schema: INSPECT_BINARY_JUDGE_SELECTION_SCHEMA,
     runtime: {
@@ -606,6 +640,23 @@ describe("binary-instrument@1 lock-time composition", () => {
       draft: fixture.draft,
       benchmark,
     })).toThrow(/admission closure is not authenticated/u);
+  });
+
+  test("refuses when the authenticated screening instrument is also selected as a run judge arm", () => {
+    const fixture = setUpFixture({ screeningInstrumentArmId: "alpha" });
+    const benchmark = JSON.parse(new TextDecoder().decode(
+      getSealedBytes(workspaceDir, fixture.benchmarkSha256),
+    ));
+    const error = expectProductError(() => compileBinaryInstrumentProfile({
+      workspaceDir,
+      draft: fixture.draft,
+      benchmark,
+    }));
+    expect(error).toMatchObject({
+      code: "conflict",
+      issues: [{ path: "spec.arms.0.instrument" }],
+    });
+    expect(error.message).toMatch(/screening instrument cannot also be a run judge arm/u);
   });
 
   test("rejects every caller-supplied derived parameter, even when its value happens to match", () => {

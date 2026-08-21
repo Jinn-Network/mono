@@ -708,6 +708,16 @@ async function admitItems(
   // partial sample, coverage) are exercised directly against `admitHumanTruth` and the standalone
   // verifier elsewhere, not through this shared builder.
   if (truthAdmission === "screened-operator-sampled") {
+    const toBase64 = (bytes: Uint8Array): string => btoa(
+      Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""),
+    );
+    const sealedScreeningInstrument = instrument(
+      "screening-only",
+      "gpt-4o-mini-2024-07-18",
+      { declaresEvidence: true },
+    );
+    const samplingScriptBytes = encoder.encode("synthetic-v4-fixture-sampling-script/v1");
+    const rawOutputsBytes = new Uint8Array([0, 255, 1, 254, 2, 253]);
     const rows = items.map((item) => {
       const payload = buildItemPayload(item, withEvidence);
       const itemSha256 = recordDigest(canonicalJsonBytes(payload));
@@ -741,11 +751,14 @@ async function admitItems(
       truthAdmission,
       candidates,
       screening: {
-        screeningInstrumentSha256: prefixed(sha256Hex(encoder.encode("synthetic-v4-fixture-screening-instrument"))),
+        screeningInstrumentSha256: sealedScreeningInstrument.digest,
+        screeningInstrumentBase64: toBase64(sealedScreeningInstrument.bytes),
         sampleSeed: "synthetic-v4-fixture-screening-seed",
         sampleSize: rows.length,
-        samplingScriptSha256: prefixed(sha256Hex(encoder.encode("synthetic-v4-fixture-sampling-script"))),
-        rawOutputsSha256: prefixed(sha256Hex(encoder.encode("synthetic-v4-fixture-raw-screening-outputs"))),
+        samplingScriptSha256: recordDigest(samplingScriptBytes),
+        samplingScriptBase64: toBase64(samplingScriptBytes),
+        rawOutputsSha256: recordDigest(rawOutputsBytes),
+        rawOutputsBase64: toBase64(rawOutputsBytes),
         rows: screeningRows,
       },
     }), "screened admission");

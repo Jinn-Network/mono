@@ -30,14 +30,20 @@ import {
 } from "./admission/contracts.js";
 
 describe("evidence role vocabularies (§6.8a Group C)", () => {
-  test("BUNDLE_V4_EVIDENCE_ROLES carries both new roles, appended after snapshot-probe", () => {
-    const tail = BUNDLE_V4_EVIDENCE_ROLES.slice(-3);
-    expect(tail).toEqual(["snapshot-probe", "screening-table", "screening-reveal-receipt"]);
+  test("BUNDLE_V4_EVIDENCE_ROLES carries the nested screening roles as an appended tail", () => {
+    const tail = BUNDLE_V4_EVIDENCE_ROLES.slice(-6);
+    expect(tail).toEqual([
+      "snapshot-probe", "screening-table", "screening-reveal-receipt",
+      "screening-instrument", "screening-sampling-script", "screening-raw-outputs",
+    ]);
   });
 
-  test("BUNDLE_V4_ADMISSION_EVIDENCE_ROLES carries both new roles, appended after operator-assertion", () => {
-    const tail = BUNDLE_V4_ADMISSION_EVIDENCE_ROLES.slice(-3);
-    expect(tail).toEqual(["operator-assertion", "screening-table", "screening-reveal-receipt"]);
+  test("BUNDLE_V4_ADMISSION_EVIDENCE_ROLES carries the nested screening roles as an appended tail", () => {
+    const tail = BUNDLE_V4_ADMISSION_EVIDENCE_ROLES.slice(-6);
+    expect(tail).toEqual([
+      "operator-assertion", "screening-table", "screening-reveal-receipt",
+      "screening-instrument", "screening-sampling-script", "screening-raw-outputs",
+    ]);
   });
 
   test("every existing role is unmoved: the two new roles are strictly appended, nothing reordered", () => {
@@ -67,9 +73,10 @@ describe("evidence role vocabularies (§6.8a Group C)", () => {
     expect(BINARY_JUDGMENT_ADMISSION_RECORD_ROLES).toEqual(BUNDLE_V4_ADMISSION_EVIDENCE_ROLES);
   });
 
-  test("the admission-only subset has no judge-instrument entry, unlike the full list (deliberate, not to be normalized)", () => {
+  test("the admission screening instrument stays distinct from a run judge instrument role", () => {
     expect(BUNDLE_V4_EVIDENCE_ROLES).toContain("judge-instrument");
     expect(BUNDLE_V4_ADMISSION_EVIDENCE_ROLES).not.toContain("judge-instrument");
+    expect(BUNDLE_V4_ADMISSION_EVIDENCE_ROLES).toContain("screening-instrument");
   });
 });
 

@@ -288,7 +288,9 @@ function deriveAdmissionProfile(input: {
   readonly workspaceDir: string;
   readonly draft: DraftDocument;
   readonly benchmark: BenchmarkRecord;
-}): Pick<BinaryInstrumentParameters, "candidateClasses" | "strata" | "truthAdmission"> {
+}): Pick<BinaryInstrumentParameters, "candidateClasses" | "strata" | "truthAdmission"> & {
+  readonly screeningInstrumentSha256?: `sha256:${string}`;
+} {
   const extension = parseBinaryItemBankIntakeExtension(input.benchmark);
   let verified: ReturnType<typeof verifyBinaryJudgmentAdmissionClosureInWorkspace>;
   try {
@@ -328,7 +330,27 @@ function deriveAdmissionProfile(input: {
     candidateClasses: verified.classes,
     strata: verified.strata,
     truthAdmission: verified.manifest.truthAdmission,
+    ...(verified.screening === undefined ? {} : {
+      screeningInstrumentSha256: verified.screening.instrumentSha256,
+    }),
   };
+}
+
+function refuseScreeningInstrumentRunReuse(
+  screeningInstrumentSha256: string | undefined,
+  spec: DraftSpec,
+): void {
+  if (screeningInstrumentSha256 === undefined) return;
+  const reusedAt = spec.arms.findIndex((arm) => (
+    arm.pinning[BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY] === screeningInstrumentSha256
+  ));
+  if (reusedAt !== -1) {
+    refuse(
+      "conflict",
+      `spec.arms.${reusedAt}.instrument`,
+      "the screening instrument cannot also be a run judge arm",
+    );
+  }
 }
 
 // A Task this function cannot read is not an evidence-free Task, it is a malformed one, and
@@ -523,6 +545,7 @@ export function compileBinaryInstrumentProfile(input: {
     benchmark: input.benchmark,
   });
   const admission = deriveAdmissionProfile(input);
+  refuseScreeningInstrumentRunReuse(admission.screeningInstrumentSha256, spec);
   const parameters: BinaryInstrumentParameters = {
     verdictRule: "sole",
     k: spec.replicates,
@@ -626,6 +649,7 @@ function deriveBinaryInstrumentFamilyClosure(input: {
     draft: input.draft,
     benchmark: input.benchmark,
   });
+  refuseScreeningInstrumentRunReuse(admission.screeningInstrumentSha256, spec);
 
   return {
     k: spec.replicates,

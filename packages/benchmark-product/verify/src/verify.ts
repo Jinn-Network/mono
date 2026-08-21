@@ -770,6 +770,12 @@ export async function verifyPublicBundleSnapshot(
         generation: instrument.model.generation,
       });
     }
+    if (
+      verifiedAdmission.screening !== undefined
+      && instruments.some((entry) => entry.instrumentSha256 === verifiedAdmission!.screening!.instrumentSha256)
+    ) {
+      refuse("record-integrity", "qualification.arms", "the screening instrument is reused as a run judge arm");
+    }
     const registeredSelections = readRunPublicationExtension(run as unknown as Record<string, unknown>)
       ?.registrationArtifacts.filter((artifact) => artifact.role === INSPECT_SELECTION_CORRELATION_ROLE) ?? [];
     if (

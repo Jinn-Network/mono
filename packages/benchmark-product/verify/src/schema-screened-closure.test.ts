@@ -28,7 +28,7 @@ function shaDigest(seed: number): string {
   return `sha256:${seed.toString(16).padStart(64, "0")}`;
 }
 
-/** Minimal valid screened-operator-sampled document: two screening records, the two frozen
+/** Minimal valid screened-operator-sampled document: five screening records, the two frozen
  * human-review records G-5 requires unconditionally for every mode, and no human-review evidence
  * or operator assertion (spec §6.8a Group C). */
 function screenedBundleQualification(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
@@ -44,6 +44,9 @@ function screenedBundleQualification(overrides: Partial<Record<string, unknown>>
     { sha256: shaDigest(4), roles: ["human-review-form"] as const },
     { sha256: shaDigest(7), roles: ["screening-table"] as const },
     { sha256: shaDigest(8), roles: ["screening-reveal-receipt"] as const },
+    { sha256: shaDigest(9), roles: ["screening-instrument"] as const },
+    { sha256: shaDigest(10), roles: ["screening-sampling-script"] as const },
+    { sha256: shaDigest(11), roles: ["screening-raw-outputs"] as const },
   ];
   return {
     format: BUNDLE_QUALIFICATION_FORMAT,
@@ -103,6 +106,27 @@ describe("BundleQualificationSchema screened-operator-sampled closure (§6.8, §
       .filter((entry) => !entry.roles.includes("screening-reveal-receipt"));
     document["reachableSha256s"] = (document["admissionRecords"] as { sha256: string }[]).map((entry) => entry.sha256);
     expect(BundleQualificationSchema.safeParse(document).success).toBe(false);
+  });
+
+  test.each(["screening-instrument", "screening-sampling-script", "screening-raw-outputs"])(
+    "§6.8a Group C: a screened document missing the %s role refuses",
+    (role) => {
+      const document = screenedBundleQualification();
+      document["admissionRecords"] = (document["admissionRecords"] as { sha256: string; roles: string[] }[])
+        .filter((entry) => !entry.roles.includes(role));
+      document["reachableSha256s"] = (document["admissionRecords"] as { sha256: string }[]).map((entry) => entry.sha256);
+      expect(BundleQualificationSchema.safeParse(document).success).toBe(false);
+    },
+  );
+
+  test("a screening instrument reused as a run judge arm refuses portably", () => {
+    const document = screenedBundleQualification();
+    const screeningInstrument = (document["admissionRecords"] as { sha256: string; roles: string[] }[])
+      .find((entry) => entry.roles.includes("screening-instrument"))!;
+    (document["arms"] as { armId: string; instrumentSha256: string }[])[0]!.instrumentSha256 = screeningInstrument.sha256;
+    const result = BundleQualificationSchema.safeParse(document);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues).toContainEqual(expect.objectContaining({ path: ["arms"] }));
   });
 
   test("byte-compat: the existing two-human and operator-only publicationGrade rules are unmoved", () => {

@@ -9,6 +9,7 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { Buffer } from "node:buffer";
 import { join } from "node:path";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import {
@@ -149,6 +150,21 @@ const samplingGeneration = {
   promptCacheIdentifier: null,
 } as const;
 
+const screeningGeneration = {
+  reasoningEffort: "low",
+  maxOutputTokens: 128,
+  store: false,
+  background: false,
+  stream: false,
+  serviceTier: "default",
+  tools: [] as [],
+  fallbackModels: [] as [],
+  retries: 0,
+  persistedConversation: false,
+  metadata: null,
+  promptCacheIdentifier: null,
+} as const;
+
 const SYNTHETIC_SOURCE_DIGESTS = ["a".repeat(64), "e".repeat(64), "f".repeat(64)] as const;
 const SYNTHETIC_SOURCE_PUBLISHED_AT = [
   "2026-03-09T00:00:00Z",
@@ -185,6 +201,11 @@ export interface JudgeRehearsalFixture {
   readonly corruptKeyItemIds: readonly [string, string];
   readonly taskSha256s: readonly string[];
   readonly instrumentSha256s: readonly string[];
+  readonly screeningRecords: {
+    readonly instrumentSha256: `sha256:${string}`;
+    readonly samplingScriptSha256: `sha256:${string}`;
+    readonly rawOutputsSha256: `sha256:${string}`;
+  };
   readonly reportSha256: string;
   readonly additionalReports: readonly { readonly method: string; readonly version: string; readonly reportSha256: string }[];
   readonly runSha256: string;
@@ -403,6 +424,48 @@ function instrument(
     response: {
       mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
       parser: { id: parser.id, version: parser.version, digest: parser.digest },
+      invalidOutputDecision: "REJECT",
+    },
+  } as never);
+}
+
+function screeningInstrument() {
+  const messages = [
+    { role: "developer", segments: [{ literal: "Synthetic admission screening rubric. " }] },
+    {
+      role: "user",
+      segments: [
+        { literal: "Question: " }, { field: "question" },
+        { literal: "\nReference: " }, { field: "referenceAnswer" },
+        { literal: "\nCandidate: " }, { field: "candidateAnswer" },
+        { literal: "\nEvidence: " }, { field: "evidence" },
+      ],
+    },
+  ] as const;
+  const descriptor = {
+    uri: "https://fixtures.example.test/screening/prompt",
+    digest: { sha256: sha256Hex(encoder.encode("judge-rehearsal-screening-prompt")) },
+  };
+  return sealBinaryJudgmentInstrument({
+    protocol: BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
+    instrumentId: "screening-only",
+    messages: messages as never,
+    promptTemplateSha256: binaryJudgmentPromptTemplateDigest(messages as never),
+    promptSource: descriptor,
+    license: {
+      uri: "https://fixtures.example.test/licenses/synthetic",
+      digest: { sha256: sha256Hex(encoder.encode("synthetic fixture metadata only")) },
+    },
+    attribution: {
+      uri: "https://fixtures.example.test/screening/attribution",
+      digest: { sha256: sha256Hex(encoder.encode("synthetic screening attribution")) },
+    },
+    // The six run arms use the dated snapshot profile. The screening model deliberately uses the
+    // other accepted profile, and its unique instrumentId keeps the exact bytes disjoint too.
+    model: { adapter: "jinn-openai", requested: "gpt-5.6-luna", generation: screeningGeneration },
+    response: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
       invalidOutputDecision: "REJECT",
     },
   } as never);
@@ -849,16 +912,27 @@ export async function runJudgeRehearsalLifecycle(input: {
       ? {}
       : { replacesItemSha256: itemSha256ById.get(row.item.replacesItemId)! }),
   }));
+  const sealedScreeningInstrument = screeningInstrument();
+  const samplingScriptBytes = encoder.encode("judge-rehearsal-sampling-script/v1");
+  const rawOutputsBytes = new Uint8Array([0, 255, 1, 254, 2, 253]);
+  const screeningRecords = {
+    instrumentSha256: sealedScreeningInstrument.digest,
+    samplingScriptSha256: recordDigest(samplingScriptBytes),
+    rawOutputsSha256: recordDigest(rawOutputsBytes),
+  };
   const admission = requireOk(admitHumanTruth(context, {
     draftId: JUDGE_REHEARSAL_DRAFT_ID,
     truthAdmission: "screened-operator-sampled",
     candidates,
     screening: {
-      screeningInstrumentSha256: prefixed(sha256Hex(encoder.encode("judge-rehearsal-screening-instrument"))),
+      screeningInstrumentSha256: screeningRecords.instrumentSha256,
+      screeningInstrumentBase64: Buffer.from(sealedScreeningInstrument.bytes).toString("base64"),
       sampleSeed: "judge-rehearsal-screening-seed",
       sampleSize: rows.length,
-      samplingScriptSha256: prefixed(sha256Hex(encoder.encode("judge-rehearsal-sampling-script"))),
-      rawOutputsSha256: prefixed(sha256Hex(encoder.encode("judge-rehearsal-raw-screening-outputs"))),
+      samplingScriptSha256: screeningRecords.samplingScriptSha256,
+      samplingScriptBase64: Buffer.from(samplingScriptBytes).toString("base64"),
+      rawOutputsSha256: screeningRecords.rawOutputsSha256,
+      rawOutputsBase64: Buffer.from(rawOutputsBytes).toString("base64"),
       rows: screeningRows,
     },
   }), "screened admission");
@@ -979,6 +1053,7 @@ export async function runJudgeRehearsalLifecycle(input: {
     corruptKeyItemIds: [corruptItems[0]!.itemId, corruptItems[1]!.itemId],
     taskSha256s: imported.taskSha256s,
     instrumentSha256s,
+    screeningRecords,
     reportSha256: reported.reportSha256,
     additionalReports: (reported.additionalReports ?? []).map((entry) => ({
       method: entry.method,
