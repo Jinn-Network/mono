@@ -68,5 +68,14 @@ export const MECH_MARKETPLACE: Address = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C
 /** Jinn staking contract / JinnRouter activity checker proxy (Base mainnet). */
 export const STAKING_CONTRACT: Address = '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54';
 
-/** stOLAS ExternalStakingDistributor (LemonTree, Base mainnet). */
+/**
+ * stOLAS ExternalStakingDistributor (LemonTree, Base mainnet).
+ *
+ * KNOWN LIMITATION (since Base block 48626242 / 2026-07-14): fresh `stake()`
+ * onboarding (serviceId = 0) reverts UnauthorizedMultisig because the
+ * distributor's immutable same-address implementation (0xFbBE…E2aB) is no
+ * longer whitelisted by ServiceRegistryL2. Existing service redeploy and
+ * `reStake()` paths use the still-whitelisted RecoveryModule (0x359d…E74c)
+ * and remain available. Base Sepolia is unaffected.
+ */
 export const STOLAS_DISTRIBUTOR: Address = '0x40abf47B926181148000DbCC7c8DE76A3a61a66f';

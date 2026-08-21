@@ -205,6 +205,14 @@ const BASE_CONFIG: ChainConfig = {
   serviceRegistry: '0x3C1fF68f5aa342D296d4DEe4Bb1cACCA912D95fE',
   serviceRegistryTokenUtility: '0x34C895f302D0b5cf52ec0Edd3945321EB0f83dd5',
   serviceManager: '0x1262136cac6a06A782DC94eb3a3dF0b4d09FF6A6',
+  // DE-WHITELISTED by OLAS governance at Base block 48626242 (2026-07-14):
+  // ServiceRegistryL2.mapMultisigs(this) is false, so fresh Base onboarding
+  // that deploys with this implementation reverts UnauthorizedMultisig.
+  // The whitelisted GnosisSafeMultisig (0x22bE…6B83) and
+  // SafeMultisigWithRecoveryModule (0x8c53…7453) create a new Safe rather than
+  // reusing the pre-deployed operator Safe, so neither is a same-address
+  // replacement for this flow. Existing reStake/redeploy paths use the
+  // whitelisted RecoveryModule (0x359d…E74c). Base Sepolia is unaffected.
   gnosisSafeSameAddressMultisig: '0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB',
 
   // Tokens
