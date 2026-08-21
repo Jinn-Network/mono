@@ -13,6 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { daemonFetch, daemonJson } from '@/lib/daemon';
+import { mergeEventsById } from '@/lib/events-merge';
 import { classifySurface, SurfaceStatus } from '@/lib/use-daemon';
 
 type CloudEvent = {
@@ -43,7 +44,7 @@ export default function EventsPage() {
       try {
         const payload = await daemonJson<RecentPayload>('/v1/events/recent');
         if (!cancelled) {
-          setEvents(rowsFrom(payload));
+          setEvents((curr) => mergeEventsById(curr, rowsFrom(payload)));
           setError(null);
         }
       } catch (err) {
@@ -82,7 +83,7 @@ export default function EventsPage() {
             try {
               const parsed = JSON.parse(dataLine.slice(5).trim()) as CloudEvent;
               if (!cancelled) {
-                setEvents((curr) => [parsed, ...curr].slice(0, 200));
+                setEvents((curr) => mergeEventsById(curr, [parsed]));
                 setLoading(false);
               }
             } catch {

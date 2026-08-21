@@ -4,15 +4,22 @@ export const STATUS_WITH_CONTRACT = {
   schemaVersion: 1,
   contractVersion: { major: 1, minor: 0 },
   fleet: {
+    masterAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
     services: [
       {
         index: 1,
         step: 'complete',
+        serviceId: 76,
         safeAddress: '0x0e767E28C6889CcD0DfB88E631a3702D56Ce24FC',
-        agentId: 5474,
+        agentId: '5474',
         safeBoundToAgent: true,
       },
     ],
+  },
+  balances: {
+    eth: {
+      agent: { address: '0xFf26BFE3e987556a207D77ae2ff0c6EA030CC3E9' },
+    },
   },
   postingEntries: 0,
 };
@@ -54,7 +61,16 @@ export async function mockOperatorApi(page: Page): Promise<void> {
     (route) =>
       route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ pendingOlas: '0' }),
+        body: JSON.stringify({
+          schemaVersion: 1,
+          readState: 'ready',
+          totalPending: '0',
+          totalClaimed: '0',
+          lastClaimAt: null,
+          lastClaimTickAt: null,
+          nextCheckpointAt: null,
+          services: [],
+        }),
       }),
   );
   await page.route(

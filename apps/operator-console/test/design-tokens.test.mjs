@@ -31,6 +31,11 @@ for (const { copy, source } of COPIES) {
   });
 }
 
+test('design-system source of truth does not @import Google Fonts', () => {
+  const css = readBuffer('docs/design/jinn-design-system/project/colors_and_type.css').toString('utf8');
+  assert.equal(css.includes('fonts.googleapis.com'), false);
+});
+
 test('apps/operator-console/styles/theme.css exists and is not a design-system copy', () => {
   const themePath = 'apps/operator-console/styles/theme.css';
   const stat = statSync(resolve(root, themePath), { throwIfNoEntry: false });

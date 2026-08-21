@@ -473,4 +473,84 @@ describe('daemon-api-auth (bearer middleware)', () => {
     });
     expect(uiTokenAuthed.status).toBe(200);
   });
+
+  it('GET /v1/operator/claim-policy is 404 when ui is set but claimPolicy routes are not wired', async () => {
+    await server.close();
+    store.close();
+
+    store = new Store(':memory:');
+    server = await startApiServer({
+      port: 0,
+      store,
+      apiToken: TEST_TOKEN,
+      ui: { token: 'ui-token', handshakeKey: 'handshake-key' },
+    });
+    baseUrl = `http://127.0.0.1:${server.port}`;
+
+    const missing = await fetch(`${baseUrl}/v1/operator/claim-policy`, {
+      headers: { 'x-jinn-ui-token': 'ui-token' },
+    });
+    expect(missing.status).toBe(404);
+  });
+
+  it('GET /v1/operator/claim-policy is 200 when claimPolicy is wired', async () => {
+    await server.close();
+    store.close();
+
+    store = new Store(':memory:');
+    server = await startApiServer({
+      port: 0,
+      store,
+      apiToken: TEST_TOKEN,
+      ui: { token: 'ui-token', handshakeKey: 'handshake-key' },
+      claimPolicy: {
+        configPath: '/tmp/jinn-claim-policy-test.json',
+        readConfig: () =>
+          ({
+            claimPolicy: { mode: 'claim-nothing' },
+            executionWiring: [],
+          }) as never,
+        writeConfig: () => undefined,
+      },
+    });
+    baseUrl = `http://127.0.0.1:${server.port}`;
+
+    const ok = await fetch(`${baseUrl}/v1/operator/claim-policy`, {
+      headers: { 'x-jinn-ui-token': 'ui-token' },
+    });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({
+      claimPolicy: { mode: 'claim-nothing' },
+      executionWiring: [],
+      restartRequired: false,
+    });
+  });
+
+  it('GET /v1/operator/claim-policy is 200 when claimPolicy is unset on the config', async () => {
+    await server.close();
+    store.close();
+
+    store = new Store(':memory:');
+    server = await startApiServer({
+      port: 0,
+      store,
+      apiToken: TEST_TOKEN,
+      ui: { token: 'ui-token', handshakeKey: 'handshake-key' },
+      claimPolicy: {
+        configPath: '/tmp/jinn-claim-policy-unset.json',
+        readConfig: () => ({}) as never,
+        writeConfig: () => undefined,
+      },
+    });
+    baseUrl = `http://127.0.0.1:${server.port}`;
+
+    const ok = await fetch(`${baseUrl}/v1/operator/claim-policy`, {
+      headers: { 'x-jinn-ui-token': 'ui-token' },
+    });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({
+      executionWiring: [],
+      restartRequired: false,
+    });
+  });
 });
