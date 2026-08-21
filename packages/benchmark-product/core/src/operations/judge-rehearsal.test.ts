@@ -15,6 +15,7 @@ import {
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
 } from "@jinn-network/benchmarking-records";
+import { parseBinaryJudgmentInstrument } from "@jinn-network/task-execution-profiles";
 import {
   BUNDLE_QUALIFICATION_FORMAT,
   BUNDLE_V4_FORMAT,
@@ -386,6 +387,22 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     const evidence = json(join(primary.dir, "evidence.json"));
     const probe = evidenceRecord(evidence, "snapshot-probe");
     expect(existsSync(join(primary.dir, "records", `${probe.sha256}.bin`))).toBe(true);
+    const screeningInstrumentRecord = evidenceRecord(evidence, "screening-instrument");
+    const samplingScriptRecord = evidenceRecord(evidence, "screening-sampling-script");
+    const rawOutputsRecord = evidenceRecord(evidence, "screening-raw-outputs");
+    expect(screeningInstrumentRecord.sha256).toBe(fixture.screeningRecords.instrumentSha256.slice("sha256:".length));
+    expect(samplingScriptRecord.sha256).toBe(fixture.screeningRecords.samplingScriptSha256.slice("sha256:".length));
+    expect(rawOutputsRecord.sha256).toBe(fixture.screeningRecords.rawOutputsSha256.slice("sha256:".length));
+    expect(fixture.instrumentSha256s).not.toContain(fixture.screeningRecords.instrumentSha256);
+    const screeningInstrumentBytes = readFileSync(
+      join(primary.dir, "records", `${screeningInstrumentRecord.sha256}.bin`),
+    );
+    expect(sha256Hex(screeningInstrumentBytes)).toBe(screeningInstrumentRecord.sha256);
+    expect(parseBinaryJudgmentInstrument(screeningInstrumentBytes).model.requested).toBe("gpt-5.6-luna");
+    expect(readFileSync(join(primary.dir, "records", `${samplingScriptRecord.sha256}.bin`)))
+      .toEqual(Buffer.from("judge-rehearsal-sampling-script/v1"));
+    expect(readFileSync(join(primary.dir, "records", `${rawOutputsRecord.sha256}.bin`)))
+      .toEqual(Buffer.from([0, 255, 1, 254, 2, 253]));
     const nativeDir = join(primary.dir, "native", "inspect");
     expect(existsSync(nativeDir)).toBe(true);
     expect(readdirSync(nativeDir).some((name) => name.endsWith(".eval"))).toBe(true);
@@ -409,6 +426,24 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     writeCanonical(join(truthTamper, "evidence.json"), truthEvidence);
     rewriteManifest(truthTamper);
     await expectRejectedAt(truthTamper, "evidence-closure");
+
+    for (const role of [
+      "screening-instrument", "screening-sampling-script", "screening-raw-outputs",
+    ]) {
+      const nestedTamper = copyBundle(primary.dir, role);
+      const nestedEvidence = json(join(nestedTamper, "evidence.json"));
+      const nestedRecord = evidenceRecord(nestedEvidence, role);
+      const original = readFileSync(join(nestedTamper, "records", `${nestedRecord.sha256}.bin`));
+      replaceEvidenceRecord(
+        nestedTamper,
+        nestedEvidence,
+        nestedRecord.sha256,
+        new Uint8Array([...original, 0]),
+      );
+      writeCanonical(join(nestedTamper, "evidence.json"), nestedEvidence);
+      rewriteManifest(nestedTamper);
+      await expectRejectedAt(nestedTamper, "evidence-closure");
+    }
 
     const metricTamper = copyBundle(primary.dir, "metric");
     const report = json(join(metricTamper, "report.json"));

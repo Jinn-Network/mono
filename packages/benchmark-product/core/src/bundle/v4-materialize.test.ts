@@ -352,7 +352,7 @@ describe("binary public-bundle/4 producer closure", () => {
     // §6.8a Group C's frozen third authority set is exactly ["truth-reveal-attestor"] alone (S4
     // item 2, the round-trip proof: this bundle materializes a NON-EMPTY `authorities`, parses
     // under this third authority set, and -- via the assertions below -- satisfies the third
-    // evidence-role branch: exactly the two screening roles, no human-review evidence, no
+    // evidence-role branch: all five screening roles, no human-review evidence, no
     // operator assertion).
     expect(trust.admission.authorities).toEqual(
       truthAdmission === "operator-only"
@@ -384,6 +384,9 @@ describe("binary public-bundle/4 producer closure", () => {
       const screenedRoles = new Set(evidence.records.flatMap((record: { roles: string[] }) => record.roles));
       expect(screenedRoles.has("screening-table")).toBe(true);
       expect(screenedRoles.has("screening-reveal-receipt")).toBe(true);
+      expect(screenedRoles.has("screening-instrument")).toBe(true);
+      expect(screenedRoles.has("screening-sampling-script")).toBe(true);
+      expect(screenedRoles.has("screening-raw-outputs")).toBe(true);
       for (const humanRole of [
         "human-review-packet", "human-review-response", "human-review-verdict",
         "reviewer-roster", "review-visibility-receipt", "review-reveal-receipt", "operator-assertion",
