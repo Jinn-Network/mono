@@ -58,6 +58,8 @@ const LABEL_RESOLUTION_NAME = "label-resolution.json";
 // widening is how a downstream site refuses what an upstream site accepted.
 const JUDGE_MODEL_PROFILE_IDS = ["dated-snapshot-sampling", "reasoning-2026-08"] as const;
 type JudgeModelProfileId = (typeof JUDGE_MODEL_PROFILE_IDS)[number];
+const PROMPTED_SCREENING_PROFILE_IDS = ["prompted-codex-screening/v1"] as const;
+type PromptedScreeningProfileId = (typeof PROMPTED_SCREENING_PROFILE_IDS)[number];
 const JUDGE_MODEL_PROFILES: Readonly<Record<string, JudgeModelProfileId>> = {
   "gpt-4o-mini-2024-07-18": "dated-snapshot-sampling",
   "gpt-5.6-luna": "reasoning-2026-08",
@@ -341,11 +343,14 @@ export const BINARY_INSTRUMENT_PARAMETER_SCHEMA: Method["parameterSchema"] = {
     // 144-cell golden fixtures' bytes and destroy the compatibility proof this program depends on.
     // Absent means "emit the alias limitation", which is today's behavior byte for byte.
     judgeModelProfile: { enum: [...JUDGE_MODEL_PROFILE_IDS] },
+    // Optional, spec §6.11.4. Present only when admission replay authenticated screening-table/v2.
+    // Absence preserves every legacy analysis-plan and Report byte.
+    promptedScreeningProfile: { enum: [...PROMPTED_SCREENING_PROFILE_IDS] },
   },
   additionalProperties: false,
 };
 
-const OPTIONAL_BINARY_INSTRUMENT_PARAMETERS = new Set(["judgeModelProfile"]);
+const OPTIONAL_BINARY_INSTRUMENT_PARAMETERS = new Set(["judgeModelProfile", "promptedScreeningProfile"]);
 
 export interface BinaryInstrumentParameters {
   readonly verdictRule: "sole";
@@ -360,6 +365,8 @@ export interface BinaryInstrumentParameters {
   /** Optional (spec §1.4): derived at lock from the arms' shared model.requested. Absent means
    * "emit the alias limitation", which is today's behavior byte for byte. */
   readonly judgeModelProfile?: JudgeModelProfileId;
+  /** Optional (spec §6.11.4): derived only from an authenticated prompted screening closure. */
+  readonly promptedScreeningProfile?: PromptedScreeningProfileId;
 }
 
 export function validateBinaryInstrumentParameters(
@@ -434,6 +441,12 @@ export function validateBinaryInstrumentParameters(
     && !(JUDGE_MODEL_PROFILE_IDS as readonly string[]).includes(parameters["judgeModelProfile"] as string)
   ) {
     issues.push('parameter "judgeModelProfile" must be a declared judge-model profile id');
+  }
+  if (
+    Object.hasOwn(parameters, "promptedScreeningProfile")
+    && !(PROMPTED_SCREENING_PROFILE_IDS as readonly string[]).includes(parameters["promptedScreeningProfile"] as string)
+  ) {
+    issues.push('parameter "promptedScreeningProfile" must be a declared prompted-screening profile id');
   }
   return issues.length === 0 ? { ok: true } : { ok: false, issues };
 }

@@ -1,4 +1,8 @@
 import { validateBinaryInstrumentParameters } from "@jinn-network/benchmarking-aggregate";
+import {
+  PROMPTED_SCREENING_LIMITATIONS,
+  PROMPTED_SCREENING_PROFILE,
+} from "../admission/contracts.js";
 
 export const BINARY_INSTRUMENT_REPORT_LIMITATIONS = {
   mutableModelAlias:
@@ -56,6 +60,11 @@ export function binaryInstrumentReportLimitations(
     // two frozen 144-cell goldens depend on the existing entries keeping their indices.
     ...(parameters["truthAdmission"] === "screened-operator-sampled"
       ? [BINARY_INSTRUMENT_REPORT_LIMITATIONS.screenedNotIndependentlyLabeled]
+      : []),
+    // Appended only for an authenticated screening-table/v2 closure. Legacy parameter sets omit
+    // the profile and therefore retain their exact limitation arrays and sealed Report bytes.
+    ...(parameters["promptedScreeningProfile"] === PROMPTED_SCREENING_PROFILE
+      ? PROMPTED_SCREENING_LIMITATIONS
       : []),
   ];
 }

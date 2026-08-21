@@ -28,6 +28,7 @@ import { buildClaimPackage, type ClaimPackage } from "./claim.js";
 import { BenchmarkProductError } from "./errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 import { binaryInstrumentReportLimitations, BINARY_INSTRUMENT_REPORT_LIMITATIONS } from "./binary-qualification.js";
+import { PROMPTED_SCREENING_LIMITATIONS, PROMPTED_SCREENING_PROFILE } from "../admission/contracts.js";
 
 const digest = (fill: string) => fill.repeat(64);
 const DRAFT_ID = "draft-1";
@@ -369,6 +370,68 @@ describe("assertClaimConsistency: binary-instrument report limitations (spec §1
     }
     expect(caught).toBeDefined();
     expect(caught?.message).toBe(
+      "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history",
+    );
+  });
+
+  const promptedParameters = {
+    ...screenedParameters,
+    promptedScreeningProfile: PROMPTED_SCREENING_PROFILE,
+  } as const;
+  const promptedRunRecord = {
+    ...binaryRunRecord,
+    analysisPlan: [{
+      method: BENCHMARKING_METHOD_IDS.binaryInstrument,
+      version: BENCHMARKING_METHOD_VERSION,
+      parameters: promptedParameters,
+    }],
+  } as unknown as RunRecord;
+
+  function checkPrompted(reportRecord: ReportRecord): void {
+    assertClaimConsistency({
+      claim: buildClaimPackage({
+        draftId: DRAFT_ID,
+        benchmarkSha256: identities.benchmarkSha256,
+        runRecord: promptedRunRecord,
+        runSha256: identities.runSha256,
+        matrixRecord,
+        matrixSha256: identities.matrixSha256,
+        reportRecord,
+        reportSha256: identities.reportSha256!,
+        reportEnvelopeSha256: identities.reportEnvelopeSha256,
+        venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, promptedRunRecord),
+        verificationCommandVerb: "bundle verify",
+        assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+      }),
+      identities,
+      benchmarkRecord: {} as unknown as BenchmarkRecord,
+      runRecord: promptedRunRecord,
+      matrixRecord,
+      reportRecord,
+      draftId: DRAFT_ID,
+      assurancePreset: ASSURANCE_PRESET,
+    });
+  }
+
+  test("accepts a prompted-screening Report with all four exact capability limitations", () => {
+    const limitations = [
+      ...localVenueLimitsForRun(promptedRunRecord),
+      ...binaryInstrumentReportLimitations(promptedParameters),
+    ];
+    expect(limitations).toEqual(expect.arrayContaining([...PROMPTED_SCREENING_LIMITATIONS]));
+    expect(() => checkPrompted(binaryReport(limitations))).not.toThrow();
+  });
+
+  test.each([
+    ["omitted", PROMPTED_SCREENING_LIMITATIONS.slice(1)],
+    ["extra", [...PROMPTED_SCREENING_LIMITATIONS, "routing-compliance-machine-verified"]],
+  ])("refuses prompted-screening limitations when one is %s", (_case, promptedLimitations) => {
+    const limitations = [
+      ...localVenueLimitsForRun(promptedRunRecord),
+      ...binaryInstrumentReportLimitations(screenedParameters),
+      ...promptedLimitations,
+    ];
+    expect(() => checkPrompted(binaryReport(limitations))).toThrow(
       "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history",
     );
   });

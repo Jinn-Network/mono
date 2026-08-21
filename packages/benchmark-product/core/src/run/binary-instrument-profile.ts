@@ -74,6 +74,7 @@ import {
 } from "../runtime/inspect/binary-judge-manifest.js";
 import {
   BINARY_INSTRUMENT_REPORT_LIMITATIONS,
+  PROMPTED_SCREENING_PROFILE,
   binaryInstrumentReportLimitations,
 } from "@colophon-claims/verify";
 import { getSealedBytes } from "../workspace/sealed-store.js";
@@ -288,7 +289,7 @@ function deriveAdmissionProfile(input: {
   readonly workspaceDir: string;
   readonly draft: DraftDocument;
   readonly benchmark: BenchmarkRecord;
-}): Pick<BinaryInstrumentParameters, "candidateClasses" | "strata" | "truthAdmission"> & {
+}): Pick<BinaryInstrumentParameters, "candidateClasses" | "strata" | "truthAdmission" | "promptedScreeningProfile"> & {
   readonly screeningInstrumentSha256?: `sha256:${string}`;
 } {
   const extension = parseBinaryItemBankIntakeExtension(input.benchmark);
@@ -332,6 +333,9 @@ function deriveAdmissionProfile(input: {
     truthAdmission: verified.manifest.truthAdmission,
     ...(verified.screening === undefined ? {} : {
       screeningInstrumentSha256: verified.screening.instrumentSha256,
+    }),
+    ...(verified.promptedScreening === undefined ? {} : {
+      promptedScreeningProfile: PROMPTED_SCREENING_PROFILE,
     }),
   };
 }
@@ -562,6 +566,9 @@ export function compileBinaryInstrumentProfile(input: {
     // digest (spec §1.2). Optional on the parameter schema, so its presence here is a compatible
     // widening (§0.4/§10 row 11).
     judgeModelProfile: JUDGE_MODEL_PROFILES[judgeModel],
+    ...(admission.promptedScreeningProfile === undefined ? {} : {
+      promptedScreeningProfile: admission.promptedScreeningProfile,
+    }),
   };
   const validation = validateBinaryInstrumentParameters(
     parameters as unknown as Readonly<Record<string, unknown>>,

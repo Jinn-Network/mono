@@ -47,6 +47,8 @@ import {
   HUMAN_REVIEW_OPERATOR_ASSERTION_MEDIA_TYPE,
   SCREENING_TABLE_PROTOCOL,
   SCREENING_TABLE_MEDIA_TYPE,
+  SCREENING_TABLE_V2_PROTOCOL,
+  SCREENING_TABLE_V2_MEDIA_TYPE,
   SCREENING_REVEAL_RECEIPT_PROTOCOL,
   SCREENING_REVEAL_RECEIPT_MEDIA_TYPE,
   HumanReviewOperatorAssertionSchema,
@@ -58,9 +60,18 @@ import {
   HumanReviewVisibilityReceiptSchema,
   ScreeningRowSchema,
   ScreeningTableSchema,
+  ScreeningTableV2Schema,
+  PromptedScreeningProcedureV1Schema,
+  ScreeningPoolV1Schema,
+  ScreeningSampleCommitmentV1Schema,
+  PromptedScreeningRowV2Schema,
   ScreeningRevealReceiptSchema,
+  computeScreeningPoolDigest,
+  computeScreeningSample,
   parseCanonicalHumanReviewBytes,
   sealHumanReviewDocument,
+  type PromptedScreeningRowV2,
+  type ScreeningPoolV1,
   type ScreeningRow,
 } from "../human-review/contracts.js";
 import {
@@ -178,6 +189,25 @@ export interface AdmitHumanTruthScreeningInput {
   readonly rows: readonly AdmitHumanTruthScreeningRowInput[];
 }
 
+/** Prompted screening-table/v2 input. Structured records are supplied as exact canonical bytes;
+ * the prompt, sampling script, and transcript stay opaque. The operation verifies every digest,
+ * joins the nested records, signs the authority table, and stores the complete closure. */
+export interface AdmitHumanTruthPromptedScreeningInput {
+  readonly coordinatorPromptSha256: string;
+  readonly coordinatorPromptBase64: string;
+  readonly procedureSha256: string;
+  readonly procedureBase64: string;
+  readonly poolSha256: string;
+  readonly poolBase64: string;
+  readonly sampleCommitmentSha256: string;
+  readonly sampleCommitmentBase64: string;
+  readonly samplingScriptSha256: string;
+  readonly samplingScriptBase64: string;
+  readonly transcriptSha256: string;
+  readonly transcriptBase64: string;
+  readonly rows: readonly PromptedScreeningRowV2[];
+}
+
 export interface AdmitHumanTruthInput {
   readonly draftId: string;
   readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
@@ -187,7 +217,7 @@ export interface AdmitHumanTruthInput {
   /** Bank-scoped, not per-candidate (spec §6.3, §6.9): the caller supplies the table's rows and
    * parameters, and this operation validates, canonicalizes, DSSE-signs under the existing single
    * authoritySigner, and stores (RULING C-4) — mirroring how the reviewer roster is sealed today. */
-  readonly screening?: AdmitHumanTruthScreeningInput;
+  readonly screening?: AdmitHumanTruthScreeningInput | AdmitHumanTruthPromptedScreeningInput;
 }
 
 export interface HumanAdmissionResolutionSummary {
@@ -232,7 +262,7 @@ const CandidateSchema = z.strictObject({
 // Bank-scoped screening-table input (spec §6.3; packet P6). `rows` reuses S1's frozen
 // `ScreeningRowSchema` directly rather than duplicating its shape or refinement (handVerdict
 // present iff handChecked) — the wire row and the input row are the identical shape.
-const ScreeningInputSchema = z.strictObject({
+const LegacyScreeningInputSchema = z.strictObject({
   screeningInstrumentSha256: DigestSchema,
   screeningInstrumentBase64: z.string(),
   sampleSeed: z.string().min(1),
@@ -243,6 +273,24 @@ const ScreeningInputSchema = z.strictObject({
   rawOutputsBase64: z.string(),
   rows: z.array(ScreeningRowSchema),
 });
+
+const PromptedScreeningInputSchema = z.strictObject({
+  coordinatorPromptSha256: DigestSchema,
+  coordinatorPromptBase64: z.string(),
+  procedureSha256: DigestSchema,
+  procedureBase64: z.string(),
+  poolSha256: DigestSchema,
+  poolBase64: z.string(),
+  sampleCommitmentSha256: DigestSchema,
+  sampleCommitmentBase64: z.string(),
+  samplingScriptSha256: DigestSchema,
+  samplingScriptBase64: z.string(),
+  transcriptSha256: DigestSchema,
+  transcriptBase64: z.string(),
+  rows: z.array(PromptedScreeningRowV2Schema).length(664),
+});
+
+const ScreeningInputSchema = z.union([LegacyScreeningInputSchema, PromptedScreeningInputSchema]);
 
 // Widened spec §6.7 (packet P6): a third admission mode. `screening` present-iff is enforced at
 // runtime inside `admitHumanTruth` (spec §6.9's cross-field rule), matching how the existing two
@@ -560,67 +608,159 @@ export function admitHumanTruth(
       }
       let screeningTableSha256: `sha256:${string}` | undefined;
       let screeningRevealReceiptSha256: `sha256:${string}` | undefined;
-      let screeningRowsByItem = new Map<string, ScreeningRow>();
+      let screeningRowsByItem = new Map<string, ScreeningRow | PromptedScreeningRowV2>();
+      let promptedPool: ScreeningPoolV1 | undefined;
+      let promptedParticipatingItems: ReadonlySet<string> | undefined;
+      let promptedReplacementByMain = new Map<string, string>();
       if (parsed.truthAdmission === "screened-operator-sampled" && parsed.screening !== undefined) {
-        const screeningInstrumentBytes = decodeCanonicalBase64(
-          parsed.screening.screeningInstrumentBase64,
-          "screening.screeningInstrumentBase64",
-        );
-        const samplingScriptBytes = decodeCanonicalBase64(
-          parsed.screening.samplingScriptBase64,
-          "screening.samplingScriptBase64",
-        );
-        const rawOutputsBytes = decodeCanonicalBase64(
-          parsed.screening.rawOutputsBase64,
-          "screening.rawOutputsBase64",
-        );
-        for (const [path, expectedDigest, bytes] of [
-          ["screening.screeningInstrumentSha256", parsed.screening.screeningInstrumentSha256, screeningInstrumentBytes],
-          ["screening.samplingScriptSha256", parsed.screening.samplingScriptSha256, samplingScriptBytes],
-          ["screening.rawOutputsSha256", parsed.screening.rawOutputsSha256, rawOutputsBytes],
-        ] as const) {
-          if (recordDigest(bytes) !== expectedDigest) {
-            refuse("validation", path, "declared digest does not match the supplied exact bytes");
+        if ("screeningInstrumentSha256" in parsed.screening) {
+          const screeningInstrumentBytes = decodeCanonicalBase64(
+            parsed.screening.screeningInstrumentBase64,
+            "screening.screeningInstrumentBase64",
+          );
+          const samplingScriptBytes = decodeCanonicalBase64(
+            parsed.screening.samplingScriptBase64,
+            "screening.samplingScriptBase64",
+          );
+          const rawOutputsBytes = decodeCanonicalBase64(
+            parsed.screening.rawOutputsBase64,
+            "screening.rawOutputsBase64",
+          );
+          for (const [path, expectedDigest, bytes] of [
+            ["screening.screeningInstrumentSha256", parsed.screening.screeningInstrumentSha256, screeningInstrumentBytes],
+            ["screening.samplingScriptSha256", parsed.screening.samplingScriptSha256, samplingScriptBytes],
+            ["screening.rawOutputsSha256", parsed.screening.rawOutputsSha256, rawOutputsBytes],
+          ] as const) {
+            if (recordDigest(bytes) !== expectedDigest) {
+              refuse("validation", path, "declared digest does not match the supplied exact bytes");
+            }
           }
+          let screeningInstrument: ReturnType<typeof parseBinaryJudgmentInstrument>;
+          try {
+            screeningInstrument = parseBinaryJudgmentInstrument(screeningInstrumentBytes);
+          } catch (cause) {
+            refuse(
+              "validation",
+              "screening.screeningInstrumentBase64",
+              `screening instrument is outside the sealed BinaryJudgmentInstrument contract: ${cause instanceof Error ? cause.message : String(cause)}`,
+            );
+          }
+          const resealedScreeningInstrument = sealBinaryJudgmentInstrument(screeningInstrument);
+          if (
+            resealedScreeningInstrument.digest !== parsed.screening.screeningInstrumentSha256
+            || !bytesEqual(resealedScreeningInstrument.bytes, screeningInstrumentBytes)
+          ) {
+            refuse(
+              "validation",
+              "screening.screeningInstrumentBase64",
+              "screening instrument must be exact canonical bytes that reseal to its declared digest",
+            );
+          }
+          // Store only after every nested record and the instrument contract have validated, so a
+          // refused admission does not leave a partially imported screening closure.
+          putSealedBytes(clocked.workspaceDir, screeningInstrumentBytes);
+          putSealedBytes(clocked.workspaceDir, samplingScriptBytes);
+          putSealedBytes(clocked.workspaceDir, rawOutputsBytes);
+          const table = sealHumanReviewDocument(ScreeningTableSchema, {
+            protocol: SCREENING_TABLE_PROTOCOL,
+            draftId: parsed.draftId,
+            screeningInstrumentSha256: parsed.screening.screeningInstrumentSha256,
+            sampleSeed: parsed.screening.sampleSeed,
+            sampleSize: parsed.screening.sampleSize,
+            samplingScriptSha256: parsed.screening.samplingScriptSha256,
+            rawOutputsSha256: parsed.screening.rawOutputsSha256,
+            rows: parsed.screening.rows,
+            sealedAt: at,
+          }, "screening table");
+          screeningTableSha256 = sealRoleEvidence(clocked.workspaceDir, table, SCREENING_TABLE_MEDIA_TYPE, authoritySigner);
+          screeningRowsByItem = new Map(table.value.rows.map((row) => [row.itemSha256, row] as const));
+        } else {
+          const supplied = [
+            ["coordinatorPrompt", parsed.screening.coordinatorPromptSha256, parsed.screening.coordinatorPromptBase64],
+            ["procedure", parsed.screening.procedureSha256, parsed.screening.procedureBase64],
+            ["pool", parsed.screening.poolSha256, parsed.screening.poolBase64],
+            ["sampleCommitment", parsed.screening.sampleCommitmentSha256, parsed.screening.sampleCommitmentBase64],
+            ["samplingScript", parsed.screening.samplingScriptSha256, parsed.screening.samplingScriptBase64],
+            ["transcript", parsed.screening.transcriptSha256, parsed.screening.transcriptBase64],
+          ] as const;
+          const suppliedBytes = new Map<string, Uint8Array>();
+          for (const [name, digest, base64] of supplied) {
+            const bytes = decodeCanonicalBase64(base64, `screening.${name}Base64`);
+            if (recordDigest(bytes) !== digest) refuse("validation", `screening.${name}Sha256`, "declared digest does not match the supplied exact bytes");
+            suppliedBytes.set(name, bytes);
+          }
+          const procedure = parseCanonicalHumanReviewBytes(PromptedScreeningProcedureV1Schema, suppliedBytes.get("procedure")!, "prompted screening procedure");
+          const pool = parseCanonicalHumanReviewBytes(ScreeningPoolV1Schema, suppliedBytes.get("pool")!, "screening pool");
+          const commitment = parseCanonicalHumanReviewBytes(ScreeningSampleCommitmentV1Schema, suppliedBytes.get("sampleCommitment")!, "screening sample commitment");
+          if (
+            procedure.coordinatorPromptSha256 !== parsed.screening.coordinatorPromptSha256
+            || procedure.transcriptSha256 !== parsed.screening.transcriptSha256
+            || pool.draftId !== parsed.draftId
+            || commitment.draftId !== parsed.draftId
+            || commitment.poolSha256 !== parsed.screening.poolSha256
+            || commitment.poolIdentityCommitmentSha256 !== pool.identityCommitmentSha256
+            || Date.parse(procedure.sealedAt) > Date.parse(at)
+            || Date.parse(pool.sealedAt) > Date.parse(commitment.committedAt)
+            || Date.parse(commitment.committedAt) > Date.parse(at)
+          ) refuse("validation", "screening", "prompted procedure, prompt, transcript, pool, commitment, draft, or timestamps do not join");
+          const poolIdentities = pool.items.map((item) => item.itemSha256);
+          if (computeScreeningPoolDigest(poolIdentities) !== pool.identityCommitmentSha256) refuse("validation", "screening.poolSha256", "pool identity commitment does not match its exact identities");
+          const sample = [...computeScreeningSample({ itemSha256s: poolIdentities, sampleSeed: commitment.sampleSeed, sampleSize: commitment.sampleSize }).sample]
+            .sort(compareCodeUnitStrings);
+          if (sample.length !== commitment.sampleItemSha256s.length || sample.some((digest, index) => digest !== commitment.sampleItemSha256s[index])) refuse("validation", "screening.sampleCommitmentSha256", "committed sample differs from screening-sample/1 recomputation");
+          const sortedPoolIdentities = [...poolIdentities].sort(compareCodeUnitStrings);
+          if (parsed.screening.rows.some((row, index) => row.itemSha256 !== sortedPoolIdentities[index])) refuse("validation", "screening.rows", "v2 rows must cover all pool identities in sorted order");
+          const rows = new Map(parsed.screening.rows.map((row) => [row.itemSha256, row] as const));
+          const poolByItem = new Map(pool.items.map((item) => [item.itemSha256, item] as const));
+          for (const row of parsed.screening.rows) {
+            const poolItem = poolByItem.get(row.itemSha256)!;
+            if (row.intendedLabel !== poolItem.intendedLabel) refuse("validation", "screening.rows", "row intended label differs from the sealed pool");
+            const agreed = row.screeningVerdict !== "UNSURE" && row.screeningVerdict === row.intendedLabel;
+            if ((!agreed || commitment.sampleItemSha256s.includes(row.itemSha256)) && !row.ritsuDecision.checked) refuse("validation", "screening.rows", "every Luna flag and public sample row requires a Ritsu decision");
+            if (row.ritsuDecision.checked && (Date.parse(row.ritsuDecision.decidedAt) < Date.parse(commitment.committedAt) || Date.parse(row.ritsuDecision.decidedAt) > Date.parse(at))) refuse("validation", "screening.rows", "Ritsu decision falls outside the committed-sample-to-admission interval");
+          }
+          const candidatesByItem = new Map(parsed.candidates.map((candidate) => [candidate.itemSha256, candidate] as const));
+          if (candidatesByItem.size !== pool.items.length) refuse("validation", "candidates", "v2 admission requires exactly the complete sealed 664-item pool");
+          for (const poolItem of pool.items) {
+            const candidate = candidatesByItem.get(poolItem.itemSha256);
+            if (candidate === undefined || candidate.itemSha256 !== poolItem.itemSha256 || candidate.poolPosition !== poolItem.poolPosition || candidate.candidateClass !== poolItem.candidateClass || candidate.stratum !== poolItem.stratum || candidate.replacesItemSha256 !== undefined) refuse("validation", "candidates", "v2 candidates must exactly project the sealed pool and cannot author replacement links");
+          }
+          const participating = new Set<string>();
+          for (const slotId of [...new Set(pool.items.map((item) => item.slotId))].sort(compareCodeUnitStrings)) {
+            const slot = pool.items.filter((item) => item.slotId === slotId);
+            const main = slot.find((item) => item.poolKind === "main")!;
+            const ordered = [main, ...slot.filter((item): item is Extract<(typeof slot)[number], { poolKind: "reserve" }> => item.poolKind === "reserve").sort((left, right) => left.reserveOrder - right.reserveOrder)];
+            const winner = ordered.find((item) => {
+              const row = rows.get(item.itemSha256)!;
+              const agreed = row.screeningVerdict !== "UNSURE" && row.screeningVerdict === row.intendedLabel;
+              return row.ritsuDecision.checked ? row.ritsuDecision.verdict === "confirm" : agreed;
+            });
+            if (winner === undefined) refuse("validation", "screening.poolSha256", `${slotId} has no admissible candidate`);
+            participating.add(winner.itemSha256);
+            if (winner.itemSha256 !== main.itemSha256) {
+              participating.add(main.itemSha256);
+              promptedReplacementByMain.set(main.itemSha256, winner.itemSha256);
+            }
+          }
+          for (const bytes of suppliedBytes.values()) putSealedBytes(clocked.workspaceDir, bytes);
+          const table = sealHumanReviewDocument(ScreeningTableV2Schema, {
+            protocol: SCREENING_TABLE_V2_PROTOCOL,
+            draftId: parsed.draftId,
+            procedureSha256: parsed.screening.procedureSha256,
+            coordinatorPromptSha256: parsed.screening.coordinatorPromptSha256,
+            poolSha256: parsed.screening.poolSha256,
+            sampleCommitmentSha256: parsed.screening.sampleCommitmentSha256,
+            samplingScriptSha256: parsed.screening.samplingScriptSha256,
+            transcriptSha256: parsed.screening.transcriptSha256,
+            operator: "Ritsu",
+            rows: parsed.screening.rows,
+            sealedAt: at,
+          }, "screening table v2");
+          screeningTableSha256 = sealRoleEvidence(clocked.workspaceDir, table, SCREENING_TABLE_V2_MEDIA_TYPE, authoritySigner);
+          screeningRowsByItem = rows;
+          promptedPool = pool;
+          promptedParticipatingItems = participating;
         }
-        let screeningInstrument: ReturnType<typeof parseBinaryJudgmentInstrument>;
-        try {
-          screeningInstrument = parseBinaryJudgmentInstrument(screeningInstrumentBytes);
-        } catch (cause) {
-          refuse(
-            "validation",
-            "screening.screeningInstrumentBase64",
-            `screening instrument is outside the sealed BinaryJudgmentInstrument contract: ${cause instanceof Error ? cause.message : String(cause)}`,
-          );
-        }
-        const resealedScreeningInstrument = sealBinaryJudgmentInstrument(screeningInstrument);
-        if (
-          resealedScreeningInstrument.digest !== parsed.screening.screeningInstrumentSha256
-          || !bytesEqual(resealedScreeningInstrument.bytes, screeningInstrumentBytes)
-        ) {
-          refuse(
-            "validation",
-            "screening.screeningInstrumentBase64",
-            "screening instrument must be exact canonical bytes that reseal to its declared digest",
-          );
-        }
-        // Store only after every nested record and the instrument contract have validated, so a
-        // refused admission does not leave a partially imported screening closure.
-        putSealedBytes(clocked.workspaceDir, screeningInstrumentBytes);
-        putSealedBytes(clocked.workspaceDir, samplingScriptBytes);
-        putSealedBytes(clocked.workspaceDir, rawOutputsBytes);
-        const table = sealHumanReviewDocument(ScreeningTableSchema, {
-          protocol: SCREENING_TABLE_PROTOCOL,
-          draftId: parsed.draftId,
-          screeningInstrumentSha256: parsed.screening.screeningInstrumentSha256,
-          sampleSeed: parsed.screening.sampleSeed,
-          sampleSize: parsed.screening.sampleSize,
-          samplingScriptSha256: parsed.screening.samplingScriptSha256,
-          rawOutputsSha256: parsed.screening.rawOutputsSha256,
-          rows: parsed.screening.rows,
-          sealedAt: at,
-        }, "screening table");
-        screeningTableSha256 = sealRoleEvidence(clocked.workspaceDir, table, SCREENING_TABLE_MEDIA_TYPE, authoritySigner);
         const reveal = sealHumanReviewDocument(ScreeningRevealReceiptSchema, {
           protocol: SCREENING_REVEAL_RECEIPT_PROTOCOL,
           draftId: parsed.draftId,
@@ -632,10 +772,10 @@ export function admitHumanTruth(
           attestorRole: "truth-reveal-attestor",
         }, "screening reveal receipt");
         screeningRevealReceiptSha256 = sealRoleEvidence(clocked.workspaceDir, reveal, SCREENING_REVEAL_RECEIPT_MEDIA_TYPE, authoritySigner);
-        screeningRowsByItem = new Map(table.value.rows.map((row) => [row.itemSha256, row] as const));
       }
 
       const evaluated = [...parsed.candidates]
+        .filter((candidate) => promptedParticipatingItems === undefined || promptedParticipatingItems.has(candidate.itemSha256))
         .sort((left, right) => left.poolPosition - right.poolPosition)
         .map((candidate) => {
           const itemBytes = getSealedBytes(clocked.workspaceDir, bare(candidate.itemSha256));
@@ -673,14 +813,16 @@ export function admitHumanTruth(
               // Per-row admission rule (spec §6.4): the hand check, when it happened, decides;
               // otherwise agreement decides. No label correction: an admitted item's truth is
               // always the row's own intendedLabel, never the screen's verdict.
-              const agreed = row.screeningVerdict === row.intendedLabel;
-              const admitted = row.handChecked ? row.handVerdict === "confirm" : agreed;
+              const agreed = row.screeningVerdict !== "UNSURE" && row.screeningVerdict !== "indeterminate" && row.screeningVerdict === row.intendedLabel;
+              const admitted = "ritsuDecision" in row
+                ? row.ritsuDecision.checked ? row.ritsuDecision.verdict === "confirm" : agreed
+                : row.handChecked ? row.handVerdict === "confirm" : agreed;
               if (admitted) return { candidate, truth: row.intendedLabel } as const;
               // R-3's tie-break (spec §6.4): a screen-agreed row the hand check overrode is
               // `screening-hand-excluded`, distinct from a flagged row's own disagreement or
               // indeterminate finding.
               const exclusionReason = !agreed
-                ? (row.screeningVerdict === "indeterminate" ? "screening-indeterminate" as const : "screening-disagreement" as const)
+                ? (row.screeningVerdict === "indeterminate" || row.screeningVerdict === "UNSURE" ? "screening-indeterminate" as const : "screening-disagreement" as const)
                 : "screening-hand-excluded" as const;
               return { candidate, exclusionReason } as const;
             }
@@ -799,7 +941,10 @@ export function admitHumanTruth(
       } => "exclusionReason" in entry);
       const accepted = evaluated.filter((entry): entry is typeof entry & { truth: "CORRECT" | "WRONG" } => "truth" in entry);
       const ledgerEntries = excluded.map((entry) => {
-        const replacements = accepted.filter((candidate) => candidate.candidate.replacesItemSha256 === entry.candidate.itemSha256);
+        const promptedReplacement = promptedReplacementByMain.get(entry.candidate.itemSha256);
+        const replacements = promptedPool === undefined
+          ? accepted.filter((candidate) => candidate.candidate.replacesItemSha256 === entry.candidate.itemSha256)
+          : accepted.filter((candidate) => candidate.candidate.itemSha256 === promptedReplacement);
         if (replacements.length !== 1) {
           refuse("validation", "candidates.replacesItemSha256", "every excluded review requires exactly one admitted reserve replacement before run lock");
         }
@@ -834,7 +979,7 @@ export function admitHumanTruth(
             }
           : { ...common };
       });
-      for (const replacement of accepted.filter((entry) => entry.candidate.replacesItemSha256 !== undefined)) {
+      for (const replacement of promptedPool === undefined ? accepted.filter((entry) => entry.candidate.replacesItemSha256 !== undefined) : []) {
         if (!excluded.some((entry) => entry.candidate.itemSha256 === replacement.candidate.replacesItemSha256)) {
           refuse("validation", "candidates.replacesItemSha256", "replacement points to an item that was not excluded by this admission");
         }
