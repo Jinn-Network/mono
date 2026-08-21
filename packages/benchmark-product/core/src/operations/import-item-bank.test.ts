@@ -5,9 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import {
+  BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
+  BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+  binaryJudgmentPromptTemplateDigest,
   canonicalJsonBytes,
   compareCodeUnitStrings,
   recordDigest,
+  sealBinaryJudgmentInstrument,
 } from "@jinn-network/task-execution-profiles";
 import { TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
 import { readAuditEntries } from "../audit/journal.js";
@@ -33,6 +38,49 @@ const workspaces: string[] = [];
 afterEach(() => {
   for (const workspace of workspaces.splice(0)) rmSync(workspace, { recursive: true, force: true });
 });
+
+function screeningMaterials() {
+  const messages = [
+    { role: "developer", segments: [{ literal: "Synthetic screening rubric. " }] },
+    { role: "user", segments: [
+      { field: "question" }, { field: "referenceAnswer" }, { field: "candidateAnswer" },
+      { field: "evidence" },
+    ] },
+  ] as const;
+  const descriptor = { uri: "https://fixtures.example.test/screening", digest: { sha256: "a".repeat(64) } };
+  const instrument = sealBinaryJudgmentInstrument({
+    protocol: BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
+    instrumentId: "screening-only",
+    messages: messages as never,
+    promptTemplateSha256: binaryJudgmentPromptTemplateDigest(messages as never),
+    promptSource: descriptor,
+    license: descriptor,
+    attribution: descriptor,
+    model: {
+      adapter: "jinn-openai", requested: "gpt-5.6-luna",
+      generation: {
+        reasoningEffort: "low", maxOutputTokens: 128, store: false, background: false,
+        stream: false, serviceTier: "default", tools: [], fallbackModels: [], retries: 0,
+        persistedConversation: false, metadata: null, promptCacheIdentifier: null,
+      },
+    },
+    response: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      invalidOutputDecision: "REJECT",
+    },
+  });
+  const script = new TextEncoder().encode("synthetic sampling script");
+  const raw = new Uint8Array([255, 0, 2]);
+  return {
+    screeningInstrumentSha256: instrument.digest,
+    screeningInstrumentBase64: Buffer.from(instrument.bytes).toString("base64"),
+    samplingScriptSha256: recordDigest(script),
+    samplingScriptBase64: Buffer.from(script).toString("base64"),
+    rawOutputsSha256: recordDigest(raw),
+    rawOutputsBase64: Buffer.from(raw).toString("base64"),
+  };
+}
 
 function setup(): { context: OperationContext; draftId: string; setClock: (value: string) => void } {
   const workspaceDir = mkdtempSync(join(tmpdir(), "colophon-binary-import-"));
@@ -240,11 +288,9 @@ describe("importBinaryItemBank", () => {
         poolPosition: 1,
       }],
       screening: {
-        screeningInstrumentSha256: `sha256:${"e".repeat(64)}`,
+        ...screeningMaterials(),
         sampleSeed: "synthetic-import-seed",
         sampleSize: 1,
-        samplingScriptSha256: `sha256:${"f".repeat(64)}`,
-        rawOutputsSha256: `sha256:${"1".repeat(64)}`,
         rows: [{
           itemSha256: admittedItemSha256,
           intendedLabel: "CORRECT",

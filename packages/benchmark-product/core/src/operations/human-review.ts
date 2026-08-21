@@ -11,9 +11,11 @@ import {
   BinaryJudgmentTruthLabelSchema,
   canonicalJsonBytes,
   compareCodeUnitStrings,
+  parseBinaryJudgmentInstrument,
   parseBinaryJudgmentPayload,
   recordDigest,
   sealBinaryJudgmentAnalysisContext,
+  sealBinaryJudgmentInstrument,
   sealBinaryJudgmentLabelResolution,
   type BinaryJudgmentLabelResolution,
 } from "@jinn-network/task-execution-profiles";
@@ -166,10 +168,13 @@ export interface AdmitHumanTruthScreeningRowInput {
  * `"screened-operator-sampled"`. One table, not one per candidate: RULING C-4. */
 export interface AdmitHumanTruthScreeningInput {
   readonly screeningInstrumentSha256: string;
+  readonly screeningInstrumentBase64: string;
   readonly sampleSeed: string;
   readonly sampleSize: number;
   readonly samplingScriptSha256: string;
+  readonly samplingScriptBase64: string;
   readonly rawOutputsSha256: string;
+  readonly rawOutputsBase64: string;
   readonly rows: readonly AdmitHumanTruthScreeningRowInput[];
 }
 
@@ -229,10 +234,13 @@ const CandidateSchema = z.strictObject({
 // present iff handChecked) — the wire row and the input row are the identical shape.
 const ScreeningInputSchema = z.strictObject({
   screeningInstrumentSha256: DigestSchema,
+  screeningInstrumentBase64: z.string(),
   sampleSeed: z.string().min(1),
   sampleSize: z.number().int().positive(),
   samplingScriptSha256: DigestSchema,
+  samplingScriptBase64: z.string(),
   rawOutputsSha256: DigestSchema,
+  rawOutputsBase64: z.string(),
   rows: z.array(ScreeningRowSchema),
 });
 
@@ -264,6 +272,14 @@ function sortedPair(values: readonly [string, string]): [`sha256:${string}`, `sh
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+}
+
+function decodeCanonicalBase64(value: string, path: string): Uint8Array {
+  const decoded = Buffer.from(value, "base64");
+  if (decoded.toString("base64") !== value) {
+    refuse("validation", path, "record bytes must use canonical RFC 4648 base64");
+  }
+  return new Uint8Array(decoded);
 }
 
 function sealRoleEvidence(
@@ -546,6 +562,53 @@ export function admitHumanTruth(
       let screeningRevealReceiptSha256: `sha256:${string}` | undefined;
       let screeningRowsByItem = new Map<string, ScreeningRow>();
       if (parsed.truthAdmission === "screened-operator-sampled" && parsed.screening !== undefined) {
+        const screeningInstrumentBytes = decodeCanonicalBase64(
+          parsed.screening.screeningInstrumentBase64,
+          "screening.screeningInstrumentBase64",
+        );
+        const samplingScriptBytes = decodeCanonicalBase64(
+          parsed.screening.samplingScriptBase64,
+          "screening.samplingScriptBase64",
+        );
+        const rawOutputsBytes = decodeCanonicalBase64(
+          parsed.screening.rawOutputsBase64,
+          "screening.rawOutputsBase64",
+        );
+        for (const [path, expectedDigest, bytes] of [
+          ["screening.screeningInstrumentSha256", parsed.screening.screeningInstrumentSha256, screeningInstrumentBytes],
+          ["screening.samplingScriptSha256", parsed.screening.samplingScriptSha256, samplingScriptBytes],
+          ["screening.rawOutputsSha256", parsed.screening.rawOutputsSha256, rawOutputsBytes],
+        ] as const) {
+          if (recordDigest(bytes) !== expectedDigest) {
+            refuse("validation", path, "declared digest does not match the supplied exact bytes");
+          }
+        }
+        let screeningInstrument: ReturnType<typeof parseBinaryJudgmentInstrument>;
+        try {
+          screeningInstrument = parseBinaryJudgmentInstrument(screeningInstrumentBytes);
+        } catch (cause) {
+          refuse(
+            "validation",
+            "screening.screeningInstrumentBase64",
+            `screening instrument is outside the sealed BinaryJudgmentInstrument contract: ${cause instanceof Error ? cause.message : String(cause)}`,
+          );
+        }
+        const resealedScreeningInstrument = sealBinaryJudgmentInstrument(screeningInstrument);
+        if (
+          resealedScreeningInstrument.digest !== parsed.screening.screeningInstrumentSha256
+          || !bytesEqual(resealedScreeningInstrument.bytes, screeningInstrumentBytes)
+        ) {
+          refuse(
+            "validation",
+            "screening.screeningInstrumentBase64",
+            "screening instrument must be exact canonical bytes that reseal to its declared digest",
+          );
+        }
+        // Store only after every nested record and the instrument contract have validated, so a
+        // refused admission does not leave a partially imported screening closure.
+        putSealedBytes(clocked.workspaceDir, screeningInstrumentBytes);
+        putSealedBytes(clocked.workspaceDir, samplingScriptBytes);
+        putSealedBytes(clocked.workspaceDir, rawOutputsBytes);
         const table = sealHumanReviewDocument(ScreeningTableSchema, {
           protocol: SCREENING_TABLE_PROTOCOL,
           draftId: parsed.draftId,

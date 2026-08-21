@@ -6,11 +6,16 @@ import { join } from "node:path";
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
+  BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+  binaryJudgmentPromptTemplateDigest,
   parseBinaryJudgmentAnalysisContext,
   parseBinaryJudgmentLabelResolution,
   canonicalJsonBytes,
   compareCodeUnitStrings,
   recordDigest,
+  sealBinaryJudgmentInstrument,
 } from "@jinn-network/task-execution-profiles";
 import { dssePreAuthEncoding, parseExactDsseEnvelope, sealDsseEnvelope } from "@jinn-network/trust-core";
 import {
@@ -89,6 +94,58 @@ function item(index: number) {
     candidateAnswer: `Candidate ${index}`,
     provenance: { sourceCommitment: `sha256:${digestHex}` as const, timestamp: "2026-01-01T00:00:00Z" },
     sources: [{ digest: { sha256: digestHex } }],
+  };
+}
+
+function screeningMaterials() {
+  const messages = [
+    { role: "developer", segments: [{ literal: "Synthetic screening rubric. " }] },
+    {
+      role: "user",
+      segments: [
+        { literal: "Question: " }, { field: "question" },
+        { literal: "\nReference: " }, { field: "referenceAnswer" },
+        { literal: "\nCandidate: " }, { field: "candidateAnswer" },
+        { literal: "\nEvidence: " }, { field: "evidence" },
+      ],
+    },
+  ] as const;
+  const descriptor = {
+    uri: "https://fixtures.example.test/screening/prompt",
+    digest: { sha256: "a".repeat(64) },
+  };
+  const instrument = sealBinaryJudgmentInstrument({
+    protocol: BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
+    instrumentId: "screening-only",
+    messages: messages as never,
+    promptTemplateSha256: binaryJudgmentPromptTemplateDigest(messages as never),
+    promptSource: descriptor,
+    license: { ...descriptor, uri: "https://fixtures.example.test/licenses/synthetic" },
+    attribution: { ...descriptor, uri: "https://fixtures.example.test/screening/attribution" },
+    model: {
+      adapter: "jinn-openai",
+      requested: "gpt-5.6-luna",
+      generation: {
+        reasoningEffort: "low", maxOutputTokens: 128, store: false, background: false,
+        stream: false, serviceTier: "default", tools: [], fallbackModels: [], retries: 0,
+        persistedConversation: false, metadata: null, promptCacheIdentifier: null,
+      },
+    },
+    response: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      invalidOutputDecision: "REJECT",
+    },
+  });
+  const samplingScriptBytes = new Uint8Array([0, 255, 1, 254]);
+  const rawOutputsBytes = new Uint8Array([255, 0, 253, 2]);
+  return {
+    screeningInstrumentSha256: instrument.digest,
+    screeningInstrumentBase64: Buffer.from(instrument.bytes).toString("base64"),
+    samplingScriptSha256: recordDigest(samplingScriptBytes),
+    samplingScriptBase64: Buffer.from(samplingScriptBytes).toString("base64"),
+    rawOutputsSha256: recordDigest(rawOutputsBytes),
+    rawOutputsBase64: Buffer.from(rawOutputsBytes).toString("base64"),
   };
 }
 
@@ -817,11 +874,9 @@ describe("binary human truth admission", () => {
         },
       ],
       screening: {
-        screeningInstrumentSha256: `sha256:${"a".repeat(64)}`,
+        ...screeningMaterials(),
         sampleSeed: "synthetic-byte-identity-seed",
         sampleSize: 2,
-        samplingScriptSha256: `sha256:${"b".repeat(64)}`,
-        rawOutputsSha256: `sha256:${"c".repeat(64)}`,
         rows: [screenedDisputed, screenedReserve]
           .map((packets, index) => ({
             itemSha256: packets.itemSha256,
@@ -1120,11 +1175,9 @@ describe("binary screened-operator-sampled admission", () => {
 
   function screeningInput(rows: ReturnType<typeof screeningRow>[]) {
     return {
-      screeningInstrumentSha256: syntheticDigest("a"),
+      ...screeningMaterials(),
       sampleSeed: "synthetic-screening-seed",
       sampleSize: 1,
-      samplingScriptSha256: syntheticDigest("b"),
-      rawOutputsSha256: syntheticDigest("c"),
       rows: sortedRows(rows),
     };
   }
@@ -1194,6 +1247,66 @@ describe("binary screened-operator-sampled admission", () => {
       excluded: [],
       screening: { sampleAgreementRate: 1 },
     });
+    const materials = screeningMaterials();
+    expect(getSealedBytes(context.workspaceDir, materials.screeningInstrumentSha256.slice("sha256:".length)))
+      .toEqual(new Uint8Array(Buffer.from(materials.screeningInstrumentBase64, "base64")));
+    expect(getSealedBytes(context.workspaceDir, materials.samplingScriptSha256.slice("sha256:".length)))
+      .toEqual(new Uint8Array(Buffer.from(materials.samplingScriptBase64, "base64")));
+    expect(getSealedBytes(context.workspaceDir, materials.rawOutputsSha256.slice("sha256:".length)))
+      .toEqual(new Uint8Array(Buffer.from(materials.rawOutputsBase64, "base64")));
+    expect(closure.reachableRecords.flatMap((entry) => entry.roles)).toEqual(expect.arrayContaining([
+      "screening-instrument", "screening-sampling-script", "screening-raw-outputs",
+    ]));
+  });
+
+  it.each([
+    "screeningInstrumentSha256",
+    "samplingScriptSha256",
+    "rawOutputsSha256",
+  ] as const)("refuses when %s does not match the supplied exact bytes", (field) => {
+    const context = setup();
+    const packets = screenableItem(context, 0);
+    const screening = screeningInput([
+      screeningRow(packets.itemSha256, "CORRECT", "CORRECT", true, "confirm"),
+    ]);
+    const result = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "screened-operator-sampled",
+      candidates: [screenedCandidate(packets, 0, 1)],
+      screening: { ...screening, [field]: syntheticDigest("d") },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "validation", issues: [{ path: `screening.${field}` }] },
+    });
+  });
+
+  it("refuses a digest-valid marker or noncanonical bytes as the screening instrument", () => {
+    for (const instrumentBytes of [
+      new TextEncoder().encode("synthetic screening instrument"),
+      new TextEncoder().encode(JSON.stringify(
+        JSON.parse(Buffer.from(screeningMaterials().screeningInstrumentBase64, "base64").toString("utf8")),
+        null,
+        2,
+      )),
+    ]) {
+      const context = setup();
+      const packets = screenableItem(context, 0);
+      const result = admitHumanTruth(context, {
+        draftId: "review-run",
+        truthAdmission: "screened-operator-sampled",
+        candidates: [screenedCandidate(packets, 0, 1)],
+        screening: {
+          ...screeningInput([screeningRow(packets.itemSha256, "CORRECT", "CORRECT", true, "confirm")]),
+          screeningInstrumentSha256: recordDigest(instrumentBytes),
+          screeningInstrumentBase64: Buffer.from(instrumentBytes).toString("base64"),
+        },
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: "validation", issues: [{ path: "screening.screeningInstrumentBase64" }] },
+      });
+    }
   });
 
   it("excludes a screen-disagreement row and seals a same-slice reserve replacement", async () => {

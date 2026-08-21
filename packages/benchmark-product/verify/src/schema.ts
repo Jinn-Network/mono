@@ -348,6 +348,15 @@ export const BundleQualificationSchema = z.strictObject({
     ) {
       ctx.addIssue({ code: "custom", path: ["admissionRecords"], message: "screened admission must carry exactly one of every screening record and no human-review evidence or operator assertion" });
     }
+    const screeningInstrument = qualification.admissionRecords.find((entry) => (
+      entry.roles.includes("screening-instrument")
+    ));
+    if (
+      screeningInstrument !== undefined
+      && qualification.arms.some((arm) => arm.instrumentSha256 === screeningInstrument.sha256)
+    ) {
+      ctx.addIssue({ code: "custom", path: ["arms"], message: "the screening instrument cannot also be a run judge arm" });
+    }
   }
   if (
     qualification.admissionRecords.length !== qualification.reachableSha256s.length

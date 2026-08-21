@@ -119,6 +119,16 @@ describe("BundleQualificationSchema screened-operator-sampled closure (§6.8, §
     },
   );
 
+  test("a screening instrument reused as a run judge arm refuses portably", () => {
+    const document = screenedBundleQualification();
+    const screeningInstrument = (document["admissionRecords"] as { sha256: string; roles: string[] }[])
+      .find((entry) => entry.roles.includes("screening-instrument"))!;
+    (document["arms"] as { armId: string; instrumentSha256: string }[])[0]!.instrumentSha256 = screeningInstrument.sha256;
+    const result = BundleQualificationSchema.safeParse(document);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues).toContainEqual(expect.objectContaining({ path: ["arms"] }));
+  });
+
   test("byte-compat: the existing two-human and operator-only publicationGrade rules are unmoved", () => {
     // Mirrors `binary-qualification.test.ts`'s bundleQualification() shape at armCount 2.
     const twoHuman = {
