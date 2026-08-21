@@ -6,9 +6,11 @@ import {
   canonicalJsonBytes,
   compareCodeUnitStrings,
   parseBinaryJudgmentAnalysisContext,
+  parseBinaryJudgmentInstrument,
   parseBinaryJudgmentLabelResolution,
   parseBinaryJudgmentPayload,
   recordDigest,
+  sealBinaryJudgmentInstrument,
 } from "@jinn-network/task-execution-profiles";
 import { parseExactDsseEnvelope } from "@jinn-network/trust-core";
 import {
@@ -117,6 +119,10 @@ export const BINARY_JUDGMENT_ADMISSION_RECORD_ROLES = [
   // Appended after operator-assertion (spec §6.8a Group C, first bullet; packet P6).
   "screening-table",
   "screening-reveal-receipt",
+  // Appended only: these exact nested records are authenticated by the signed screening table.
+  "screening-instrument",
+  "screening-sampling-script",
+  "screening-raw-outputs",
 ] as const;
 export type BinaryJudgmentAdmissionRecordRole = (typeof BINARY_JUDGMENT_ADMISSION_RECORD_ROLES)[number];
 export type AdmissionAuthorityRole =
@@ -187,6 +193,7 @@ export interface VerifiedBinaryJudgmentAdmissionClosure {
   /** Present iff `manifest.truthAdmission === "screened-operator-sampled"` (spec §6.5 check (3)). */
   readonly screening?: {
     readonly sampleAgreementRate: number;
+    readonly instrumentSha256: AdmissionSha256;
   };
 }
 
@@ -630,6 +637,7 @@ export function verifyBinaryJudgmentAdmissionClosure(
   let screeningRowsByItem = new Map<string, ScreeningRow>();
   let screeningSample = new Set<string>();
   let screeningSampleAgreementRate: number | undefined;
+  let screeningInstrumentSha256: AdmissionSha256 | undefined;
   if (manifest.truthAdmission === "screened-operator-sampled") {
     if (manifest.screeningTableSha256 === undefined) {
       fail("admissionManifest.screeningTableSha256", "screened admission manifest carries no screening table reference");
@@ -653,6 +661,38 @@ export function verifyBinaryJudgmentAdmissionClosure(
       schema: ScreeningTableSchema,
       path: "admissionManifest.screeningTableSha256",
     }).value;
+    if (screeningTable.draftId !== input.expectedDraftId || screeningTable.sealedAt !== manifest.admittedAt) {
+      fail("screeningTable", "table draft/time does not bind the manifest");
+    }
+    const screeningInstrument = parseProfileRecord(
+      state,
+      screeningTable.screeningInstrumentSha256,
+      "screeningTable.screeningInstrumentSha256",
+      parseBinaryJudgmentInstrument,
+      "screening-instrument",
+    );
+    const resealedScreeningInstrument = sealBinaryJudgmentInstrument(screeningInstrument.value);
+    if (
+      resealedScreeningInstrument.digest !== screeningTable.screeningInstrumentSha256
+      || !bytesEqual(resealedScreeningInstrument.bytes, screeningInstrument.bytes)
+    ) {
+      fail("screeningTable.screeningInstrumentSha256", "instrument does not reseal to its table commitment");
+    }
+    screeningInstrumentSha256 = screeningTable.screeningInstrumentSha256 as AdmissionSha256;
+    // These two sidecars are intentionally opaque. Resolving them is sufficient to prove exact
+    // digest-bound reachability; screening-sample/1 remains the independent sampling authority.
+    resolve(
+      state,
+      screeningTable.samplingScriptSha256,
+      "screeningTable.samplingScriptSha256",
+      "screening-sampling-script",
+    );
+    resolve(
+      state,
+      screeningTable.rawOutputsSha256,
+      "screeningTable.rawOutputsSha256",
+      "screening-raw-outputs",
+    );
     screeningRowsByItem = new Map(screeningTable.rows.map((row) => [row.itemSha256, row]));
 
     // (1) Sample membership: recomputed by screening-sample/1, never by executing the sealed
@@ -959,8 +999,11 @@ export function verifyBinaryJudgmentAdmissionClosure(
       })),
     // Present iff screened (spec §6.5 check (3)): the one definition of the screen-versus-hand
     // agreement rate on the random sample, so no caller recomputes it independently.
-    ...(screeningSampleAgreementRate === undefined ? {} : {
-      screening: { sampleAgreementRate: screeningSampleAgreementRate },
+    ...(screeningSampleAgreementRate === undefined || screeningInstrumentSha256 === undefined ? {} : {
+      screening: {
+        sampleAgreementRate: screeningSampleAgreementRate,
+        instrumentSha256: screeningInstrumentSha256,
+      },
     }),
   };
 }

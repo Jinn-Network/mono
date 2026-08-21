@@ -52,6 +52,9 @@ export const BUNDLE_V4_EVIDENCE_ROLES = [
   // screened-operator-sampled admission branch's two new sealed records.
   "screening-table",
   "screening-reveal-receipt",
+  "screening-instrument",
+  "screening-sampling-script",
+  "screening-raw-outputs",
 ] as const;
 export type BundleV4EvidenceRole = (typeof BUNDLE_V4_EVIDENCE_ROLES)[number];
 export const BUNDLE_V4_ADMISSION_EVIDENCE_ROLES = [
@@ -66,6 +69,9 @@ export const BUNDLE_V4_ADMISSION_EVIDENCE_ROLES = [
   // and is not to be normalized.
   "screening-table",
   "screening-reveal-receipt",
+  "screening-instrument",
+  "screening-sampling-script",
+  "screening-raw-outputs",
 ] as const;
 
 const PublicKeySchema = z.object({
@@ -314,8 +320,13 @@ export const BundleQualificationSchema = z.strictObject({
     "human-review-packet", "human-review-response", "human-review-verdict", "reviewer-roster",
     "review-visibility-receipt", "review-reveal-receipt",
   ] as const;
-  // The screened branch's two roles (spec §6.8a Group C, second bullet; packet P6).
-  const screeningEvidenceRoles = ["screening-table", "screening-reveal-receipt"] as const;
+  const screeningEvidenceRoles = [
+    "screening-table",
+    "screening-reveal-receipt",
+    "screening-instrument",
+    "screening-sampling-script",
+    "screening-raw-outputs",
+  ] as const;
   if (qualification.truthAdmission === "two-human-unanimous") {
     if (humanEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) === 0)
       || roleCounts.get("operator-assertion") !== 0) {
@@ -331,11 +342,11 @@ export const BundleQualificationSchema = z.strictObject({
     // silently inheriting the screened one's evidence rules.
   } else if (qualification.truthAdmission === "screened-operator-sampled") {
     if (
-      screeningEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) === 0)
+      screeningEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) !== 1)
       || humanEvidenceRoles.some((role) => (roleCounts.get(role) ?? 0) !== 0)
       || (roleCounts.get("operator-assertion") ?? 0) !== 0
     ) {
-      ctx.addIssue({ code: "custom", path: ["admissionRecords"], message: "screened admission must carry both screening records and no human-review evidence or operator assertion" });
+      ctx.addIssue({ code: "custom", path: ["admissionRecords"], message: "screened admission must carry exactly one of every screening record and no human-review evidence or operator assertion" });
     }
   }
   if (

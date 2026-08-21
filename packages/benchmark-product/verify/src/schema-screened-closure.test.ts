@@ -28,7 +28,7 @@ function shaDigest(seed: number): string {
   return `sha256:${seed.toString(16).padStart(64, "0")}`;
 }
 
-/** Minimal valid screened-operator-sampled document: two screening records, the two frozen
+/** Minimal valid screened-operator-sampled document: five screening records, the two frozen
  * human-review records G-5 requires unconditionally for every mode, and no human-review evidence
  * or operator assertion (spec §6.8a Group C). */
 function screenedBundleQualification(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
@@ -44,6 +44,9 @@ function screenedBundleQualification(overrides: Partial<Record<string, unknown>>
     { sha256: shaDigest(4), roles: ["human-review-form"] as const },
     { sha256: shaDigest(7), roles: ["screening-table"] as const },
     { sha256: shaDigest(8), roles: ["screening-reveal-receipt"] as const },
+    { sha256: shaDigest(9), roles: ["screening-instrument"] as const },
+    { sha256: shaDigest(10), roles: ["screening-sampling-script"] as const },
+    { sha256: shaDigest(11), roles: ["screening-raw-outputs"] as const },
   ];
   return {
     format: BUNDLE_QUALIFICATION_FORMAT,
@@ -104,6 +107,17 @@ describe("BundleQualificationSchema screened-operator-sampled closure (§6.8, §
     document["reachableSha256s"] = (document["admissionRecords"] as { sha256: string }[]).map((entry) => entry.sha256);
     expect(BundleQualificationSchema.safeParse(document).success).toBe(false);
   });
+
+  test.each(["screening-instrument", "screening-sampling-script", "screening-raw-outputs"])(
+    "§6.8a Group C: a screened document missing the %s role refuses",
+    (role) => {
+      const document = screenedBundleQualification();
+      document["admissionRecords"] = (document["admissionRecords"] as { sha256: string; roles: string[] }[])
+        .filter((entry) => !entry.roles.includes(role));
+      document["reachableSha256s"] = (document["admissionRecords"] as { sha256: string }[]).map((entry) => entry.sha256);
+      expect(BundleQualificationSchema.safeParse(document).success).toBe(false);
+    },
+  );
 
   test("byte-compat: the existing two-human and operator-only publicationGrade rules are unmoved", () => {
     // Mirrors `binary-qualification.test.ts`'s bundleQualification() shape at armCount 2.
