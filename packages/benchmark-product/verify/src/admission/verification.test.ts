@@ -33,6 +33,7 @@ import {
   BinaryJudgmentPayloadSchema,
   binaryJudgmentPromptTemplateDigest,
   canonicalJsonBytes,
+  compareCodeUnitStrings,
   recordDigest,
   sealBinaryJudgmentInstrument,
   sealDocument,
@@ -50,21 +51,34 @@ import {
   SCREENING_REVEAL_RECEIPT_MEDIA_TYPE,
   SCREENING_REVEAL_RECEIPT_PROTOCOL,
   SCREENING_TABLE_MEDIA_TYPE,
+  SCREENING_TABLE_V2_MEDIA_TYPE,
   SCREENING_TABLE_PROTOCOL,
+  SCREENING_TABLE_V2_PROTOCOL,
+  PROMPTED_SCREENING_PROCEDURE_PROTOCOL,
+  PROMPTED_SCREENING_PROFILE,
+  SCREENING_POOL_PROTOCOL,
+  SCREENING_POOL_CANDIDATE_CLASSES,
+  SCREENING_POOL_STRATA,
+  SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
   BinaryJudgmentAdmissionManifestSchema,
   HumanReviewOperatorAssertionSchema,
   HumanReviewReplacementLedgerSchema,
   ScreeningRevealReceiptSchema,
   ScreeningTableSchema,
+  ScreeningTableV2Schema,
+  PromptedScreeningProcedureV1Schema,
+  ScreeningPoolV1Schema,
+  ScreeningSampleCommitmentV1Schema,
   type HumanReviewReplacementLedgerEntrySchema,
   type ScreeningRow,
+  type PromptedScreeningRowV2,
 } from "./contracts.js";
 import {
   BinaryJudgmentAdmissionClosureError,
   verifyBinaryJudgmentAdmissionClosure,
   type BinaryJudgmentAdmissionClosurePorts,
 } from "./verification.js";
-import { computeScreeningSample } from "./screening-sample.js";
+import { computeScreeningPoolDigest, computeScreeningSample } from "./screening-sample.js";
 
 // --- fixture kit -------------------------------------------------------------------------------
 
@@ -456,6 +470,173 @@ function refusal(fn: () => void): BinaryJudgmentAdmissionClosureError {
   throw new Error("expected verifyBinaryJudgmentAdmissionClosure to refuse");
 }
 
+interface PromptedFixture {
+  readonly store: Store;
+  readonly manifestSha256: `sha256:${string}`;
+  readonly nestedDigests: readonly `sha256:${string}`[];
+}
+
+function buildPromptedClosure(options: {
+  readonly omitRequiredRitsuCheck?: boolean;
+  readonly ritsuDecisionAfterSeal?: boolean;
+  readonly driftPoolIdentityCommitment?: boolean;
+  readonly driftSampleCommitment?: boolean;
+  readonly nondeterministicReplacement?: boolean;
+} = {}): PromptedFixture {
+  const store = new Store();
+  sealFrozenHumanReviewSpec(store);
+  type PromptedPoolItem = Omit<PoolItem, "candidateClass" | "stratum"> & {
+    candidateClass: (typeof SCREENING_POOL_CANDIDATE_CLASSES)[number];
+    stratum: (typeof SCREENING_POOL_STRATA)[number];
+    slotId: string;
+    poolPosition: number;
+  };
+  const mains: Array<PromptedPoolItem & { poolKind: "main" }> = [];
+  let seed = 1000;
+  let position = 1;
+  let slot = 1;
+  for (const candidateClass of SCREENING_POOL_CANDIDATE_CLASSES) for (const stratum of SCREENING_POOL_STRATA) for (let cellIndex = 0; cellIndex < 20; cellIndex += 1) {
+    const truthLabel = candidateClass === "correct" ? "CORRECT" as const : "WRONG" as const;
+    const base = sealItem(store, seed, truthLabel);
+    mains.push({ ...base, candidateClass, stratum, slotId: `slot-${slot.toString().padStart(3, "0")}`, poolPosition: position, poolKind: "main" });
+    seed += 1; position += 1; slot += 1;
+  }
+  const reserves: Array<PromptedPoolItem & { poolKind: "reserve"; reserveOrder: number }> = [];
+  for (let reserveIndex = 0; reserveIndex < 424; reserveIndex += 1) {
+    const main = mains[reserveIndex % mains.length]!;
+    const base = sealItem(store, seed, main.truthLabel);
+    reserves.push({ ...base, candidateClass: main.candidateClass, stratum: main.stratum, slotId: main.slotId, poolPosition: position, poolKind: "reserve", reserveOrder: reserveIndex < mains.length ? 1 : 2 });
+    seed += 1; position += 1;
+  }
+  const poolItems = [
+    ...mains.map((item) => ({
+      itemSha256: item.itemSha256, intendedLabel: item.truthLabel, candidateClass: item.candidateClass,
+      stratum: item.stratum, poolPosition: item.poolPosition, slotId: item.slotId, poolKind: "main" as const,
+    })),
+    ...reserves.map((item) => ({
+      itemSha256: item.itemSha256, intendedLabel: item.truthLabel, candidateClass: item.candidateClass,
+      stratum: item.stratum, poolPosition: item.poolPosition, slotId: item.slotId, poolKind: "reserve" as const,
+      reserveOrder: item.reserveOrder,
+    })),
+  ];
+  const pool = store.seal(ScreeningPoolV1Schema, {
+    protocol: SCREENING_POOL_PROTOCOL,
+    draftId: DRAFT_ID,
+    identityCommitmentSha256: options.driftPoolIdentityCommitment === true
+      ? `sha256:${"f".repeat(64)}`
+      : computeScreeningPoolDigest(poolItems.map((item) => item.itemSha256)),
+    items: poolItems,
+    sealedAt: ADMITTED_AT,
+  });
+  const promptSha256 = store.put(new TextEncoder().encode("Synthetic opaque coordinator prompt.\n"));
+  const transcriptSha256 = store.put(new TextEncoder().encode("Synthetic opaque transcript.\n"));
+  const scriptSha256 = store.put(new TextEncoder().encode("Synthetic opaque public sampler.\n"));
+  const procedure = store.seal(PromptedScreeningProcedureV1Schema, {
+    protocol: PROMPTED_SCREENING_PROCEDURE_PROTOCOL,
+    procedureId: PROMPTED_SCREENING_PROFILE,
+    coordinatorPromptSha256: promptSha256,
+    coordinator: { alias: "Sol", model: "gpt-5.6-sol", reasoningEffort: "high", mayOrchestrate: true },
+    judgmentAgents: [
+      { alias: "Luna", model: "gpt-5.6-luna", reasoningEffort: "high", maxBatchSize: 32 },
+      { alias: "Terra", model: "gpt-5.6-terra", reasoningEffort: "high", maxBatchSize: 16 },
+      { alias: "Sol", model: "gpt-5.6-sol", reasoningEffort: "high", maxBatchSize: 8 },
+    ],
+    toolPolicy: { coordinator: "orchestration-only", judgmentAgents: { web: false, shell: false, repository: false, search: false } },
+    output: { alphabet: ["CORRECT", "WRONG", "UNSURE"], invalidOutputDecision: "UNSURE" },
+    retry: { maxRetries: 1, onlyWhen: "infrastructure-failure-with-no-model-output", prompt: "identical" },
+    transcriptSha256,
+    sealedAt: ADMITTED_AT,
+  });
+  const sample = computeScreeningSample({ itemSha256s: poolItems.map((item) => item.itemSha256), sampleSeed: "synthetic-public-seed", sampleSize: 72 });
+  const committedSample = [...sample.sample];
+  if (options.driftSampleCommitment === true) {
+    const replacement = poolItems.find((item) => !committedSample.includes(item.itemSha256))!;
+    committedSample[0] = replacement.itemSha256;
+  }
+  const commitment = store.seal(ScreeningSampleCommitmentV1Schema, {
+    protocol: SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
+    draftId: DRAFT_ID,
+    poolSha256: pool.digest,
+    poolIdentityCommitmentSha256: pool.value.identityCommitmentSha256,
+    samplingProcedure: "screening-sample/1",
+    sampleSeed: "synthetic-public-seed",
+    sampleSize: 72,
+    sampleItemSha256s: committedSample.sort(compareCodeUnitStrings),
+    committedAt: ADMITTED_AT,
+  });
+  const sampled = new Set(sample.sample);
+  const rows: PromptedScreeningRowV2[] = poolItems.map((item) => ({
+    itemSha256: item.itemSha256,
+    intendedLabel: item.intendedLabel,
+    screeningVerdict: item.intendedLabel,
+    ritsuDecision: sampled.has(item.itemSha256)
+      ? { checked: true as const, verdict: "confirm" as const, decidedAt: ADMITTED_AT }
+      : { checked: false as const },
+  })).sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256));
+  if (options.omitRequiredRitsuCheck === true) {
+    const requiredIndex = rows.findIndex((row) => sampled.has(row.itemSha256));
+    rows[requiredIndex] = { ...rows[requiredIndex]!, ritsuDecision: { checked: false } };
+  }
+  if (options.ritsuDecisionAfterSeal === true) {
+    const requiredIndex = rows.findIndex((row) => sampled.has(row.itemSha256));
+    rows[requiredIndex] = { ...rows[requiredIndex]!, ritsuDecision: { checked: true, verdict: "confirm", decidedAt: "2026-08-20T09:00:01.000Z" } };
+  }
+  if (options.nondeterministicReplacement === true) {
+    const mainIndex = rows.findIndex((row) => row.itemSha256 === mains[0]!.itemSha256);
+    rows[mainIndex] = { ...rows[mainIndex]!, ritsuDecision: { checked: true, verdict: "exclude", decidedAt: ADMITTED_AT } };
+  }
+  const table = ScreeningTableV2Schema.parse({
+    protocol: SCREENING_TABLE_V2_PROTOCOL,
+    draftId: DRAFT_ID,
+    procedureSha256: procedure.digest,
+    coordinatorPromptSha256: promptSha256,
+    poolSha256: pool.digest,
+    sampleCommitmentSha256: commitment.digest,
+    samplingScriptSha256: scriptSha256,
+    transcriptSha256,
+    operator: "Ritsu",
+    rows,
+    sealedAt: ADMITTED_AT,
+  });
+  const tableSha256 = store.sealDsse(canonicalJsonBytes(table), SCREENING_TABLE_V2_MEDIA_TYPE, SCREENING_ATTESTOR_KEY);
+  const revealReceiptSha256 = screeningReveal(store, tableSha256);
+  const admittedItems = options.nondeterministicReplacement === true
+    ? [...mains.slice(1), reserves[240]!]
+    : mains;
+  const resolutions = admittedItems.map((item) => sealScreenedResolution(store, item, tableSha256, revealReceiptSha256));
+  const ledgerEntries = options.nondeterministicReplacement === true ? [{
+    excludedItemSha256: mains[0]!.itemSha256,
+    replacementItemSha256: reserves[240]!.itemSha256,
+    candidateClass: mains[0]!.candidateClass,
+    stratum: mains[0]!.stratum,
+    excludedPoolPosition: mains[0]!.poolPosition,
+    replacementPoolPosition: reserves[240]!.poolPosition,
+    reason: "screening-hand-excluded" as const,
+  }] : [];
+  const ledger = store.seal(HumanReviewReplacementLedgerSchema, {
+    protocol: HUMAN_REVIEW_REPLACEMENT_LEDGER_PROTOCOL,
+    draftId: DRAFT_ID,
+    entries: ledgerEntries,
+    sealedAt: ADMITTED_AT,
+  });
+  const manifest = store.seal(BinaryJudgmentAdmissionManifestSchema, {
+    protocol: BINARY_JUDGMENT_ADMISSION_MANIFEST_PROTOCOL,
+    draftId: DRAFT_ID,
+    truthAdmission: "screened-operator-sampled",
+    labelResolutionSha256s: resolutions.map((entry) => entry.digest).sort(compareCodeUnitStrings),
+    analysisContextSha256s: resolutions.map((entry) => entry.analysisContextSha256).sort(compareCodeUnitStrings),
+    excludedItemSha256s: ledgerEntries.map((entry) => entry.excludedItemSha256),
+    replacementLedgerSha256: ledger.digest,
+    screeningTableSha256: tableSha256,
+    admittedAt: ADMITTED_AT,
+  });
+  return {
+    store,
+    manifestSha256: manifest.digest,
+    nestedDigests: [promptSha256, procedure.digest, pool.digest, commitment.digest, scriptSha256, transcriptSha256, tableSha256],
+  };
+}
+
 // --- operator-only regression: proves the switch/authorityPayload refactor left this path intact
 
 describe("verifyBinaryJudgmentAdmissionClosure: operator-only (regression for items C/E)", () => {
@@ -489,6 +670,69 @@ describe("verifyBinaryJudgmentAdmissionClosure: operator-only (regression for it
     expect(result.accepted).toHaveLength(1);
     expect(result.accepted[0]!.truthAdmission).toBe("operator-only");
     expect(result.excluded).toHaveLength(0);
+  });
+});
+
+describe("verifyBinaryJudgmentAdmissionClosure: prompted screening v2", () => {
+  test("verifies the sealed 664-candidate pool, 72-item sample, and balanced 240-item final bank", () => {
+    const fixture = buildPromptedClosure();
+    const result = verifyBinaryJudgmentAdmissionClosure(
+      { admissionManifestSha256: fixture.manifestSha256, expectedDraftId: DRAFT_ID },
+      fixture.store.ports(),
+    );
+    expect(result.accepted).toHaveLength(240);
+    expect(result.excluded).toHaveLength(0);
+    expect(result.screening).toBeUndefined();
+    expect(result.promptedScreening?.profile).toBe(PROMPTED_SCREENING_PROFILE);
+    expect(result.promptedScreening?.capabilityBoundary).toEqual({
+      status: "not-machine-verified",
+      machineVerified: ["sealed-pool", "sealed-sample", "signed-table", "operator-decisions", "artifact-integrity"],
+      notMachineVerified: [
+        "prompt-compliance-not-machine-verified",
+        "provider-execution-not-machine-verified",
+        "transcript-provenance-not-machine-verified",
+        "mutable-model-alias-weights-not-machine-verified",
+      ],
+    });
+    for (const role of ["screening-prompt", "screening-procedure", "screening-pool", "screening-sample-commitment", "screening-transcript"] as const) {
+      expect(result.reachableRecords.some((record) => record.roles.includes(role))).toBe(true);
+    }
+    expect(result.reachableRecords.filter((record) => record.roles.includes("source-item"))).toHaveLength(664);
+  });
+
+  test("fails closed when any exact prompted artifact bytes are tampered", () => {
+    const fixture = buildPromptedClosure();
+    for (const digest of fixture.nestedDigests) {
+      const original = fixture.store.resolve(digest);
+      fixture.store.replace(digest, new Uint8Array([...original, 0]));
+      const error = refusal(() => verifyBinaryJudgmentAdmissionClosure(
+        { admissionManifestSha256: fixture.manifestSha256, expectedDraftId: DRAFT_ID },
+        fixture.store.ports(),
+      ));
+      expect(error.message).toContain("resolved bytes do not hash");
+      fixture.store.replace(digest, original);
+    }
+  });
+
+  test("fails closed when a sampled item lacks Ritsu's decision", () => {
+    const fixture = buildPromptedClosure({ omitRequiredRitsuCheck: true });
+    expect(() => verifyBinaryJudgmentAdmissionClosure(
+      { admissionManifestSha256: fixture.manifestSha256, expectedDraftId: DRAFT_ID },
+      fixture.store.ports(),
+    )).toThrow(/flagged or sampled but was never hand-checked/u);
+  });
+
+  test.each([
+    ["pool identity commitment", { driftPoolIdentityCommitment: true }, /identity commitment does not match/u],
+    ["public sample membership", { driftSampleCommitment: true }, /public sample membership differs/u],
+    ["Ritsu decision timestamp", { ritsuDecisionAfterSeal: true }, /outside the committed-sample-to-table interval/u],
+    ["first-admissible reserve", { nondeterministicReplacement: true }, /first admissible candidate/u],
+  ] as const)("fails closed on semantic %s drift after canonical resealing", (_name, options, expected) => {
+    const fixture = buildPromptedClosure(options);
+    expect(() => verifyBinaryJudgmentAdmissionClosure(
+      { admissionManifestSha256: fixture.manifestSha256, expectedDraftId: DRAFT_ID },
+      fixture.store.ports(),
+    )).toThrow(expected);
   });
 });
 

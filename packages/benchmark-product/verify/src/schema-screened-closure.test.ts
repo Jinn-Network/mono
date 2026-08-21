@@ -66,10 +66,49 @@ function screenedBundleQualification(overrides: Partial<Record<string, unknown>>
   };
 }
 
+function promptedScreenedBundleQualification(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+  const document = screenedBundleQualification();
+  const legacyRecords = document["admissionRecords"] as { sha256: string; roles: readonly string[] }[];
+  const admissionRecords = [
+    ...legacyRecords.filter((entry) => !entry.roles.includes("screening-instrument") && !entry.roles.includes("screening-raw-outputs")),
+    { sha256: shaDigest(12), roles: ["screening-prompt"] as const },
+    { sha256: shaDigest(13), roles: ["screening-procedure"] as const },
+    { sha256: shaDigest(14), roles: ["screening-pool"] as const },
+    { sha256: shaDigest(15), roles: ["screening-sample-commitment"] as const },
+    { sha256: shaDigest(16), roles: ["screening-transcript"] as const },
+  ].sort((left, right) => left.sha256.localeCompare(right.sha256));
+  return { ...document, admissionRecords, reachableSha256s: admissionRecords.map((entry) => entry.sha256), ...overrides };
+}
+
 describe("BundleQualificationSchema screened-operator-sampled closure (§6.8, §6.8a Group A/C)", () => {
   test("a minimal, fully-formed screened document validates end to end", () => {
     const result = BundleQualificationSchema.safeParse(screenedBundleQualification());
     expect(result.success, result.success ? "" : JSON.stringify(result.error.issues)).toBe(true);
+  });
+
+  test("the prompted v2 role set validates without a legacy screening instrument or raw-output role", () => {
+    const result = BundleQualificationSchema.safeParse(promptedScreenedBundleQualification());
+    expect(result.success, result.success ? "" : JSON.stringify(result.error.issues)).toBe(true);
+  });
+
+  test("a hybrid legacy/prompted role set refuses", () => {
+    const document = promptedScreenedBundleQualification();
+    (document["admissionRecords"] as { sha256: string; roles: readonly string[] }[]).push({ sha256: shaDigest(20), roles: ["screening-instrument"] });
+    (document["admissionRecords"] as { sha256: string; roles: readonly string[] }[]).sort((left, right) => left.sha256.localeCompare(right.sha256));
+    document["reachableSha256s"] = (document["admissionRecords"] as { sha256: string }[]).map((entry) => entry.sha256);
+    expect(BundleQualificationSchema.safeParse(document).success).toBe(false);
+  });
+
+  test.each([
+    "screening-table", "screening-reveal-receipt", "screening-sampling-script",
+    "screening-prompt", "screening-procedure", "screening-pool",
+    "screening-sample-commitment", "screening-transcript",
+  ])("the prompted v2 role set refuses when %s is missing", (role) => {
+    const document = promptedScreenedBundleQualification();
+    document["admissionRecords"] = (document["admissionRecords"] as { sha256: string; roles: string[] }[])
+      .filter((entry) => !entry.roles.includes(role));
+    document["reachableSha256s"] = (document["admissionRecords"] as { sha256: string }[]).map((entry) => entry.sha256);
+    expect(BundleQualificationSchema.safeParse(document).success).toBe(false);
   });
 
   test("§6.8: screened-operator-sampled with publicationGrade false refuses", () => {

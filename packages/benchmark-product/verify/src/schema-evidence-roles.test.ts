@@ -31,18 +31,22 @@ import {
 
 describe("evidence role vocabularies (§6.8a Group C)", () => {
   test("BUNDLE_V4_EVIDENCE_ROLES carries the nested screening roles as an appended tail", () => {
-    const tail = BUNDLE_V4_EVIDENCE_ROLES.slice(-6);
+    const tail = BUNDLE_V4_EVIDENCE_ROLES.slice(-11);
     expect(tail).toEqual([
       "snapshot-probe", "screening-table", "screening-reveal-receipt",
       "screening-instrument", "screening-sampling-script", "screening-raw-outputs",
+      "screening-prompt", "screening-procedure", "screening-pool",
+      "screening-sample-commitment", "screening-transcript",
     ]);
   });
 
   test("BUNDLE_V4_ADMISSION_EVIDENCE_ROLES carries the nested screening roles as an appended tail", () => {
-    const tail = BUNDLE_V4_ADMISSION_EVIDENCE_ROLES.slice(-6);
+    const tail = BUNDLE_V4_ADMISSION_EVIDENCE_ROLES.slice(-11);
     expect(tail).toEqual([
       "operator-assertion", "screening-table", "screening-reveal-receipt",
       "screening-instrument", "screening-sampling-script", "screening-raw-outputs",
+      "screening-prompt", "screening-procedure", "screening-pool",
+      "screening-sample-commitment", "screening-transcript",
     ]);
   });
 
