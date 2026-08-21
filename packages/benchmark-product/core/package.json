@@ -39,7 +39,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run && node --test scripts/demo1-task-evidence-runner.test.mjs",
+    "test": "vitest run && node --test scripts/demo1-task-evidence-runner.test.mjs scripts/demo1-export-public-bundle.test.mjs",
     "public-quickstart": "./quickstart/public-quickstart.mjs",
     "publication-release-rehearsal": "COLOPHON_PUBLICATION_RELEASE_REHEARSAL=1 vitest run src/conformance/publication-release-rehearsal.external.test.ts --reporter=verbose",
     "tb21-one-task-qualify": "node scripts/tb21-one-task-qualify.mjs",
@@ -64,7 +64,9 @@
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build",
     "demo1:report": "vitest run src/conformance/skillsbench-demo1-report.external.test.ts",
-    "demo1:verify": "yarn build && node scripts/demo1-verify.mjs"
+    "demo1:verify": "yarn build && node scripts/demo1-verify.mjs",
+    "demo1:public-bundle": "node scripts/demo1-export-public-bundle.mjs",
+    "demo1:public-bundle:test": "node --test scripts/demo1-export-public-bundle.test.mjs"
   },
   "dependencies": {
     "@colophon-claims/verify": "0.1.0",
