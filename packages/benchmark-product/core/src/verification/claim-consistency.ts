@@ -4,6 +4,7 @@ import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";
 import { buildClaimPackage, type ClaimPackage } from "../report/claim.js";
+import { binaryInstrumentReportLimitations } from "../run/binary-instrument-profile.js";
 import { previewDisclosureSummaryLine } from "../run/preview-log.js";
 import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
 
@@ -135,6 +136,9 @@ export function assertClaimConsistency(input: {
 
   const rehearsalLine = input.rehearsal === undefined ? undefined : previewDisclosureSummaryLine(input.rehearsal);
   const reportLimitations = reportRecord.limitations ?? [];
+  const binaryLimitations = reportRecord.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument
+    ? binaryInstrumentReportLimitations((matchingPlanEntry?.parameters ?? {}) as Readonly<Record<string, unknown>>)
+    : [];
   // paired-majority-delta@1 carries the same PAIRED_ESTIMATE_LIMITATION as paired-delta@1
   // (coordinator ruling, packet #2837) -- mirrors `operations/report.ts`'s own method-conditional
   // exactly, so the cold rebuild here agrees with what `report` actually sealed. Computed from
@@ -150,23 +154,24 @@ export function assertClaimConsistency(input: {
   const expectedLimitations = [
     ...localVenueLimitsForRun(runRecord),
     ...(input.additionalLimitations ?? []),
+    ...binaryLimitations,
     ...pairedEstimateLimitation,
     ...(rehearsalLine === undefined ? [] : [rehearsalLine]),
   ];
   const isolationPosture = venueIsolationPostureForPolicy(
     runRecord.policy.submissionBaseline?.["isolationPolicy"],
   );
-  // The gate itself is UNCHANGED by this addition (still isolation posture or caller-supplied
-  // additionalLimitations only) -- deliberately not widened to `|| pairedEstimateLimitation.length
-  // > 0`: this check is dormant for every single-isolation-policy, no-suite-facts fixture on the
-  // tree today (including the pre-existing paired-delta@1 fixture in `report/claim.test.ts`, whose
-  // hand-typed Report `limitations` predates this exact-disclosure rebuild and does not itself
-  // satisfy it), and widening the gate would make this addition responsible for surfacing that
-  // unrelated, pre-existing gap rather than the new method-agnostic composition fix below. The
-  // composition fix (`pairedEstimateLimitation` folded into `expectedLimitations`) is still
-  // correct and load-bearing for the cases the gate DOES already cover.
+  // The gate itself is unchanged by the paired-estimate addition (still isolation posture,
+  // caller-supplied additionalLimitations, or the binary-instrument arm). Deliberately not widened
+  // to `|| pairedEstimateLimitation.length > 0`: doing so would surface the unrelated historical
+  // single-isolation paired-delta fixture gap. Binary limitations are different: they are sealed
+  // method facts and must always be checked for binary-instrument Reports.
   if (
-    (isolationPosture.inventory.length > 1 || (input.additionalLimitations?.length ?? 0) > 0)
+    (
+      isolationPosture.inventory.length > 1
+      || (input.additionalLimitations?.length ?? 0) > 0
+      || binaryLimitations.length > 0
+    )
     && !bytesEqual(canonicalJsonBytes(reportLimitations), canonicalJsonBytes(expectedLimitations))
   ) {
     refuse(
