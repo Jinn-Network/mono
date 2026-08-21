@@ -11,5 +11,5 @@ const CONSOLE_JUMPS: Record<string, string> = {
 
 export function consoleJumpHref(jumpTo: unknown): string | null {
   if (typeof jumpTo !== 'string') return null;
-  return CONSOLE_JUMPS[jumpTo] ?? null;
+  return Object.hasOwn(CONSOLE_JUMPS, jumpTo) ? CONSOLE_JUMPS[jumpTo] : null;
 }

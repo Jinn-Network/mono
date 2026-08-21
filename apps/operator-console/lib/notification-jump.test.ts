@@ -18,3 +18,14 @@ test('drops missing, off-console, and open-redirect jumps', () => {
   assert.equal(consoleJumpHref('//evil.example'), null);
   assert.equal(consoleJumpHref('/operator/memberships'), null);
 });
+
+test('does not treat Object.prototype keys as console routes', () => {
+  assert.equal(consoleJumpHref('__proto__'), null);
+  assert.equal(consoleJumpHref('constructor'), null);
+  assert.equal(consoleJumpHref('toString'), null);
+  assert.equal(consoleJumpHref(''), null);
+});
+
+test('maps bootstrap jump / onto Overview', () => {
+  assert.equal(consoleJumpHref('/'), '/');
+});
