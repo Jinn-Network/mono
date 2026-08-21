@@ -28,7 +28,7 @@ function procedure() {
     coordinatorPromptSha256: digest(900),
     coordinator: { alias: "Sol", model: "gpt-5.6-sol", reasoningEffort: "high", mayOrchestrate: true },
     judgmentAgents: [
-      { alias: "Luna", model: "gpt-5.6-luna", reasoningEffort: "high", maxBatchSize: 32 },
+      { alias: "Luna", model: "gpt-5.6-luna", reasoningEffort: "medium", maxBatchSize: 32 },
       { alias: "Terra", model: "gpt-5.6-terra", reasoningEffort: "high", maxBatchSize: 16 },
       { alias: "Sol", model: "gpt-5.6-sol", reasoningEffort: "high", maxBatchSize: 8 },
     ],
@@ -97,8 +97,17 @@ describe("PromptedScreeningProcedureV1Schema", () => {
 
   test("canonical identity moves on any declared procedure field", () => {
     const original = recordDigest(canonicalJsonBytes(PromptedScreeningProcedureV1Schema.parse(procedure())));
-    const changed = recordDigest(canonicalJsonBytes(PromptedScreeningProcedureV1Schema.parse({ ...procedure(), coordinator: { ...procedure().coordinator, reasoningEffort: "xhigh" } })));
+    const changed = recordDigest(canonicalJsonBytes(PromptedScreeningProcedureV1Schema.parse({ ...procedure(), transcriptSha256: digest(902) })));
     expect(changed).not.toBe(original);
+  });
+
+  test.each([
+    ["coordinator Sol", (value: ReturnType<typeof procedure>) => ({ ...value, coordinator: { ...value.coordinator, reasoningEffort: "medium" } })],
+    ["Luna judgment agent", (value: ReturnType<typeof procedure>) => ({ ...value, judgmentAgents: value.judgmentAgents.map((agent, index) => index === 0 ? { ...agent, reasoningEffort: "high" } : agent) })],
+    ["Terra judgment agent", (value: ReturnType<typeof procedure>) => ({ ...value, judgmentAgents: value.judgmentAgents.map((agent, index) => index === 1 ? { ...agent, reasoningEffort: "medium" } : agent) })],
+    ["Sol judgment agent", (value: ReturnType<typeof procedure>) => ({ ...value, judgmentAgents: value.judgmentAgents.map((agent, index) => index === 2 ? { ...agent, reasoningEffort: "medium" } : agent) })],
+  ])("refuses the wrong reasoning effort for %s", (_name, mutate) => {
+    expect(PromptedScreeningProcedureV1Schema.safeParse(mutate(procedure())).success).toBe(false);
   });
 });
 

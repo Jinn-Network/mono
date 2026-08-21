@@ -242,15 +242,15 @@ export const PROMPTED_SCREENING_LIMITATIONS = [
   "mutable-model-alias-weights-not-machine-verified",
 ] as const;
 
-const ReasoningEffortSchema = z.enum(["low", "medium", "high", "xhigh", "max", "ultra"]);
 const PromptedAgentSchema = <Alias extends "Luna" | "Terra" | "Sol", Model extends string, Batch extends number>(
   alias: Alias,
   model: Model,
+  reasoningEffort: "medium" | "high",
   maxBatchSize: Batch,
 ) => z.strictObject({
   alias: z.literal(alias),
   model: z.literal(model),
-  reasoningEffort: ReasoningEffortSchema,
+  reasoningEffort: z.literal(reasoningEffort),
   maxBatchSize: z.literal(maxBatchSize),
 });
 
@@ -262,13 +262,13 @@ export const PromptedScreeningProcedureV1Schema = z.strictObject({
   coordinator: z.strictObject({
     alias: z.literal("Sol"),
     model: z.literal("gpt-5.6-sol"),
-    reasoningEffort: ReasoningEffortSchema,
+    reasoningEffort: z.literal("high"),
     mayOrchestrate: z.literal(true),
   }),
   judgmentAgents: z.tuple([
-    PromptedAgentSchema("Luna", "gpt-5.6-luna", 32),
-    PromptedAgentSchema("Terra", "gpt-5.6-terra", 16),
-    PromptedAgentSchema("Sol", "gpt-5.6-sol", 8),
+    PromptedAgentSchema("Luna", "gpt-5.6-luna", "medium", 32),
+    PromptedAgentSchema("Terra", "gpt-5.6-terra", "high", 16),
+    PromptedAgentSchema("Sol", "gpt-5.6-sol", "high", 8),
   ]),
   toolPolicy: z.strictObject({
     coordinator: z.literal("orchestration-only"),

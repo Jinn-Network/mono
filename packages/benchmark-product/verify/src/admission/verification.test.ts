@@ -537,7 +537,7 @@ function buildPromptedClosure(options: {
     coordinatorPromptSha256: promptSha256,
     coordinator: { alias: "Sol", model: "gpt-5.6-sol", reasoningEffort: "high", mayOrchestrate: true },
     judgmentAgents: [
-      { alias: "Luna", model: "gpt-5.6-luna", reasoningEffort: "high", maxBatchSize: 32 },
+      { alias: "Luna", model: "gpt-5.6-luna", reasoningEffort: "medium", maxBatchSize: 32 },
       { alias: "Terra", model: "gpt-5.6-terra", reasoningEffort: "high", maxBatchSize: 16 },
       { alias: "Sol", model: "gpt-5.6-sol", reasoningEffort: "high", maxBatchSize: 8 },
     ],
