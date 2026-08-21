@@ -429,7 +429,8 @@ Reporting vocabulary for those cells (journal category → report class):
 
 Integrity failures (`invalid-evaluator-output`, `subject-digest-mismatch`,
 `subject-not-found`) map to no class, terminalize `could-not-grade` with
-`failureCategory`, and are never retried.
+no `failureCategory`, and are never retried or scored. Only an exhausted
+retryable-infrastructure terminal carries `failureCategory`.
 
 `cancel` aborts remaining dispatch and seals `runOutcome: "cancelled"`
 instead of `partial`. Use it only when remaining cells must not dispatch.

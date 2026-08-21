@@ -2240,15 +2240,10 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
         ],
       });
 
-      // Materialized through P5's own `reportSelector` seam rather than `runPublish`. `runPublish`
-      // is NOT usable here: on a binary-judgment run it refuses at claim-consistency because the
-      // publish path does not thread the Inspect and binary-instrument limitation lines into its
-      // exact-disclosure rebuild. That gap is PRE-EXISTING and unrelated to this packet — it
-      // reproduces identically on this same fixture with no additional analyses registered at all,
-      // i.e. with none of this packet's code reachable — so it is reported separately rather than
-      // fixed here. `materializePublicBundle` is the seam this packet actually adds, it writes the
-      // same bundle directory to the same `publicBundlePath`, and the fixture already produces its
-      // own canonical bundle through it.
+      // This direct `materializePublicBundle` call isolates P5's `reportSelector` portable-mirror
+      // proof; it is not an official-publication fallback. P8's native-consent rehearsal now
+      // exercises real `runPublish` and cold-verifies all three bundles after workspace deletion.
+      // This remains a lower-level selector-seam test writing the same canonical public bundle path.
       const runState = readRunState(workspaceDir, fixture.draftId);
       expect(runState).toBeDefined();
       if (runState === undefined) return;
