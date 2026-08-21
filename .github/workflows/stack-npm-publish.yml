@@ -86,6 +86,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ github.sha }}
+          # npm's public metadata has taken just over 60 seconds to expose a
+          # successfully published package. Keep the retry bounded but allow
+          # enough time for that observed propagation window.
+          JINN_NPM_REGISTRY_RETRY_ATTEMPTS: 24
         run: |
           node .github/scripts/publish-verified-platform.mjs \
             --verification-root .platform-verification \
