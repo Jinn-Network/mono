@@ -25,33 +25,42 @@ function refuseFloatingCanary(value, label) {
 export function loadFirstCutPlatformPin(repoRoot) {
   const pinPath = resolve(repoRoot, ...FIRST_CUT_PLATFORM_PIN_PATH.split('/'));
   const pin = JSON.parse(readFileSync(pinPath, 'utf8'));
-  if (pin.schemaVersion !== 1) {
-    throw new Error(`first-cut pin schemaVersion must be 1, got ${pin.schemaVersion ?? '<missing>'}`);
+  if (pin.schemaVersion !== 2) {
+    throw new Error(`first-cut pin schemaVersion must be 2, got ${pin.schemaVersion ?? '<missing>'}`);
   }
   if (pin.decision !== 'DR-2026-08-17-c') {
     throw new Error(`first-cut pin must name DR-2026-08-17-c, got ${pin.decision ?? '<missing>'}`);
   }
-  refuseFloatingCanary(pin.packageVersion, 'first-cut pin packageVersion');
-  if (!COMMIT_SHA.test(String(pin.sourceSha))) {
-    throw new Error(`first-cut pin sourceSha must be a 40-character commit sha, got ${pin.sourceSha ?? '<missing>'}`);
+  refuseFloatingCanary(pin.platformVersion, 'first-cut pin platformVersion');
+  if (!COMMIT_SHA.test(String(pin.platformSourceSha))) {
+    throw new Error(`first-cut pin platformSourceSha must be a 40-character commit sha, got ${pin.platformSourceSha ?? '<missing>'}`);
   }
-  const expectedVersion = `0.1.0-canary.sha.${pin.sourceSha}`;
-  if (pin.packageVersion !== expectedVersion || !EXACT_CANARY_PIN.test(pin.packageVersion)) {
-    throw new Error(`first-cut pin packageVersion must be ${expectedVersion}, got ${pin.packageVersion ?? '<missing>'}`);
+  const expectedVersion = `0.1.0-canary.sha.${pin.platformSourceSha}`;
+  if (pin.platformVersion !== expectedVersion || !EXACT_CANARY_PIN.test(pin.platformVersion)) {
+    throw new Error(`first-cut pin platformVersion must be ${expectedVersion}, got ${pin.platformVersion ?? '<missing>'}`);
   }
-  if (pin.distTag !== 'canary') {
-    throw new Error(`first-cut pin distTag must remain canary, got ${pin.distTag ?? '<missing>'}`);
+  if (pin.platformDistTag !== 'canary') {
+    throw new Error(`first-cut pin platformDistTag must remain canary, got ${pin.platformDistTag ?? '<missing>'}`);
   }
-  if (pin.latestRemains !== '0.0.0') {
-    throw new Error(`first-cut pin latestRemains must be 0.0.0, got ${pin.latestRemains ?? '<missing>'}`);
+  if (pin.platformLatestVersion !== '0.0.0') {
+    throw new Error(`first-cut pin platformLatestVersion must be 0.0.0, got ${pin.platformLatestVersion ?? '<missing>'}`);
+  }
+  const product = pin.productRelease;
+  if (
+    product?.packageName !== '@colophon-claims/verify'
+    || product.version !== '0.1.0'
+    || product.distTag !== 'latest'
+    || !COMMIT_SHA.test(String(product.sourceSha))
+  ) {
+    throw new Error('first-cut pin must record @colophon-claims/verify@0.1.0 on latest with an exact source sha');
   }
   return pin;
 }
 
 export function transformColophonManifestForPublish(manifest, pin, { gitHead } = {}) {
-  refuseFloatingCanary(pin?.packageVersion, 'pin packageVersion');
-  if (!EXACT_CANARY_PIN.test(String(pin?.packageVersion ?? ''))) {
-    throw new Error(`Colophon publish pin must be an exact canary sha version, got ${pin?.packageVersion ?? '<missing>'}`);
+  refuseFloatingCanary(pin?.platformVersion, 'pin platformVersion');
+  if (!EXACT_CANARY_PIN.test(String(pin?.platformVersion ?? ''))) {
+    throw new Error(`Colophon publish pin must be an exact canary sha version, got ${pin?.platformVersion ?? '<missing>'}`);
   }
   const patched = structuredClone(manifest);
   delete patched.packageManager;
@@ -61,7 +70,7 @@ export function transformColophonManifestForPublish(manifest, pin, { gitHead } =
     if (!entries) continue;
     for (const [dependency, specifier] of Object.entries(entries)) {
       refuseFloatingCanary(specifier, `${section}.${dependency}`);
-      if (dependency.startsWith('@jinn-network/')) entries[dependency] = pin.packageVersion;
+      if (dependency.startsWith('@jinn-network/')) entries[dependency] = pin.platformVersion;
     }
   }
   if (patched.resolutions) {
