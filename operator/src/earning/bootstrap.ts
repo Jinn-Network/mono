@@ -2157,6 +2157,13 @@ export class FleetBootstrapper {
     return this.store.updateService(index, { step: 'service_deployed' });
   }
 
+  // KNOWN LIMITATION (Base mainnet, since block 48626242 / 2026-07-14): the
+  // same-address multisig implementation passed to ServiceManager.deploy was
+  // de-whitelisted by OLAS governance. Fresh self-bond onboarding therefore
+  // reverts UnauthorizedMultisig on chainId 8453. The whitelisted alternatives
+  // create a new Safe and cannot preserve this flow's pre-deployed operator
+  // Safe. Existing redeploy/reStake paths remain available through the
+  // RecoveryModule; Base Sepolia's same-address implementation is unaffected.
   private async stepSelfBondDeployService(
     state: FleetState,
     mnemonic: string,
