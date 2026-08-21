@@ -47,7 +47,7 @@ test('the publisher downloads only the current run verification artifacts and re
   const publishAt = workflow.indexOf('canary-publish:');
   const stableAt = workflow.indexOf('resolve-stable-source:');
   const block = workflow.slice(publishAt, stableAt);
-  assert.equal((block.match(/uses: actions\/download-artifact@v4/gu) ?? []).length, 2);
+  assert.equal((block.match(/uses: actions\/download-artifact@v8/gu) ?? []).length, 2);
   assert.deepEqual(
     [...block.matchAll(/^\s+name: (platform-verification-(?:artifacts|receipt))$/gmu)].map((match) => match[1]).sort(),
     ['platform-verification-artifacts', 'platform-verification-receipt'],
@@ -139,7 +139,7 @@ test('live-host verification needs the resolved source and the same-run verifica
   assert.match(block, /--expect-public-key-sha256 "\$\{PUBLIC_KEY_SHA256\}"/u);
   assert.match(block, /--root "\.platform-verification\/\$\{group\}\/profile-root"/u);
   assert.match(block, /--receipt "\.platform-verification-receipt\/\$\{group\}\/verification-receipt\.json"/u);
-  assert.equal((block.match(/uses: actions\/download-artifact@v4/gu) ?? []).length, 2);
+  assert.equal((block.match(/uses: actions\/download-artifact@v8/gu) ?? []).length, 2);
   assert.match(block, /name: platform-live-host-receipt/u);
   assert.match(block, /if-no-files-found: error/u);
 

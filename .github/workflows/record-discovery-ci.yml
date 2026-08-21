@@ -92,7 +92,7 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore Record Discovery Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
@@ -136,12 +136,12 @@ jobs:
         run: |
           (cd packages/trust/core && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
       - name: Restore Record Discovery Testing distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-testing-dist
           path: packages/discovery/testing/dist
@@ -185,12 +185,12 @@ jobs:
         run: |
           (cd packages/trust/core && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
       - name: Restore Record Discovery Serve distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-serve-dist
           path: packages/discovery/serve/dist
@@ -234,12 +234,12 @@ jobs:
         run: |
           (cd packages/trust/core && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
       - name: Restore Record Discovery Testing distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-testing-dist
           path: packages/discovery/testing/dist
@@ -283,22 +283,22 @@ jobs:
         run: |
           (cd packages/trust/core && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
       - name: Restore Record Discovery Testing distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-testing-dist
           path: packages/discovery/testing/dist
       - name: Restore Record Discovery Serve distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-serve-dist
           path: packages/discovery/serve/dist
       - name: Restore Record Discovery Client distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-client-dist
           path: packages/discovery/client/dist
@@ -351,7 +351,7 @@ jobs:
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
@@ -392,7 +392,7 @@ jobs:
         run: |
           (cd packages/trust/core && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
@@ -435,7 +435,7 @@ jobs:
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
@@ -478,12 +478,12 @@ jobs:
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
       - name: Restore Record Discovery Testing distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-testing-dist
           path: packages/discovery/testing/dist
@@ -528,12 +528,12 @@ jobs:
           (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/environments/record && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
       - name: Restore Record Discovery Testing distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-testing-dist
           path: packages/discovery/testing/dist
@@ -579,12 +579,12 @@ jobs:
           (cd packages/environments/chain-record && yarn install --immutable && yarn build)
           (cd packages/environments/information-world && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
       - name: Restore Record Discovery Testing distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-testing-dist
           path: packages/discovery/testing/dist
@@ -631,17 +631,17 @@ jobs:
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
       - name: Restore Record Discovery Serve distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-serve-dist
           path: packages/discovery/serve/dist
       - name: Restore Record Discovery Testing distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: record-discovery-testing-dist
           path: packages/discovery/testing/dist
@@ -720,7 +720,7 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       - name: Restore all package distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: record-discovery-*-dist
           path: .record-discovery-dist
