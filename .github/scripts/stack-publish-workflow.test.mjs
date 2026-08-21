@@ -64,6 +64,7 @@ test('the publisher verifies strict GitHub provenance policy before its receipt-
   assert.match(block, /GITHUB_REPOSITORY/u);
   assert.match(block, /GH_TOKEN: \$\{\{ github\.token \}\}/u);
   assert.match(block, /SOURCE_SHA: \$\{\{ github\.sha \}\}/u);
+  assert.match(block, /JINN_NPM_REGISTRY_RETRY_ATTEMPTS: 24/u);
   assert.match(block, /--source-sha "\$\{SOURCE_SHA\}"/u);
   assert.match(block, /--registry https:\/\/registry\.npmjs\.org\//u);
   assert.ok(block.includes('--release-group ${{ matrix.release_group }}'));
