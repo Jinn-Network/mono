@@ -13,10 +13,20 @@ import {
   sealRun,
   type BenchmarkRecord,
 } from "@jinn-network/benchmarking-records";
-import { createMethodRegistry, produceReport, type DsseSigner, type MethodPorts } from "@jinn-network/benchmarking-aggregate";
+import {
+  BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
+  createMethodRegistry,
+  produceReport,
+  type DsseSigner,
+  type MethodPorts,
+} from "@jinn-network/benchmarking-aggregate";
 import { canonicalJsonBytes, recordDigest, sealDsseEnvelope } from "@jinn-network/trust-core";
 import type { VenueHonesty } from "../operations/run-results.js";
 import { LOCAL_VENUE_LIMITS, unverifiableAxisCounts } from "../operations/run-results.js";
+import {
+  BINARY_INSTRUMENT_REPORT_LIMITATIONS,
+  binaryInstrumentReportLimitations,
+} from "../run/binary-instrument-profile.js";
 import { assertClaimConsistency } from "../verification/claim-consistency.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import {
@@ -1126,6 +1136,90 @@ function buildJudgeFamilyClaim(fixture: JudgeFamilyFixture, extra: Partial<Build
     ...extra,
   });
 }
+
+describe("assertClaimConsistency: binary-instrument report limitations", () => {
+  const baseParameters = {
+    verdictRule: "sole",
+    k: 1,
+    reduction: "strict-majority",
+    measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
+    candidateClasses: ["factuality"],
+    strata: ["core", "stress"],
+    parserInvalidPolicy: "reject",
+    intervalAlpha: "0.05",
+  } as const;
+
+  const cases = [
+    {
+      name: "reasoning two-human",
+      parameters: { ...baseParameters, truthAdmission: "two-human-unanimous", judgeModelProfile: "reasoning-2026-08" },
+      extra: BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly,
+    },
+    {
+      name: "dated-snapshot operator-only",
+      parameters: { ...baseParameters, truthAdmission: "operator-only", judgeModelProfile: "dated-snapshot-sampling" },
+      extra: BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
+    },
+    {
+      name: "reasoning screened-operator-sampled",
+      parameters: { ...baseParameters, truthAdmission: "screened-operator-sampled", judgeModelProfile: "reasoning-2026-08" },
+      extra: BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly,
+    },
+  ] as const;
+
+  function assertBinaryLimitations(
+    parameters: Readonly<Record<string, unknown>>,
+    limitations: readonly string[],
+  ): void {
+    const qualification = binaryQualificationFixture();
+    const fixture = buildJudgeFamilyFixture({
+      method: BENCHMARKING_METHOD_IDS.binaryInstrument,
+      parameters: { ...parameters },
+      results: {
+        ...qualification,
+        configuration: {
+          ...qualification.configuration,
+          truthAdmission: parameters["truthAdmission"],
+        },
+      },
+      limitations,
+    });
+    const claim = buildJudgeFamilyClaim(fixture);
+    assertClaimConsistency({
+      claim,
+      identities: {
+        benchmarkSha256: "c".repeat(64),
+        runSha256: fixture.runSha256,
+        matrixSha256: fixture.matrixSha256,
+        reportSha256: fixture.reportSha256,
+        reportEnvelopeSha256: fixture.reportEnvelopeSha256,
+      },
+      benchmarkRecord: {} as unknown as BenchmarkRecord,
+      runRecord: fixture.runRecord,
+      matrixRecord: fixture.matrixRecord,
+      reportRecord: fixture.reportRecord,
+      draftId: "judge-1",
+      assurancePreset: JUDGE_FAMILY_ASSURANCE.preset,
+    });
+  }
+
+  it.each(cases)("accepts the exact required limitations for $name", ({ parameters }) => {
+    const expected = [...LOCAL_VENUE_LIMITS, ...binaryInstrumentReportLimitations(parameters)];
+    expect(() => assertBinaryLimitations(parameters, expected)).not.toThrow();
+  });
+
+  it.each(cases)("refuses an omitted binary limitation for $name", ({ parameters }) => {
+    const expected = [...LOCAL_VENUE_LIMITS, ...binaryInstrumentReportLimitations(parameters)];
+    expect(() => assertBinaryLimitations(parameters, expected.slice(0, -1)))
+      .toThrow(/Report limitations are not the exact disclosure/);
+  });
+
+  it.each(cases)("refuses an extra binary limitation for $name", ({ parameters, extra }) => {
+    const expected = [...LOCAL_VENUE_LIMITS, ...binaryInstrumentReportLimitations(parameters), extra];
+    expect(() => assertBinaryLimitations(parameters, expected))
+      .toThrow(/Report limitations are not the exact disclosure/);
+  });
+});
 
 const PAIRWISE_DISAGREEMENT_PARAMETERS = {
   verdictRule: "sole",
