@@ -1072,7 +1072,7 @@ __metadata:
     "@jinn-network/task-execution-workspace": "npm:0.1.0"
     "@jinn-network/trust-authoring": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
-    "@jinn-network/trust-observation": "npm:0.1.0"
+    "@jinn-network/trust-observation": "npm:0.0.0"
     "@jinn-network/trust-resolve": "npm:0.1.0"
     "@lmoe/gliner-onnx": "npm:0.1.0"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"

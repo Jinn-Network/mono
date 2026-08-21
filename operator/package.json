@@ -272,7 +272,7 @@
     "@jinn-network/task-execution-workspace": "0.1.0",
     "@jinn-network/trust-authoring": "0.1.0",
     "@jinn-network/trust-core": "0.1.0",
-    "@jinn-network/trust-observation": "0.1.0",
+    "@jinn-network/trust-observation": "0.0.0",
     "@jinn-network/trust-resolve": "0.1.0",
     "@lmoe/gliner-onnx": "0.1.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
