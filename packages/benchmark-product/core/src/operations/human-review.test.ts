@@ -24,6 +24,7 @@ import {
   HUMAN_REVIEW_OPERATOR_ASSERTION_MEDIA_TYPE,
   HUMAN_REVIEW_ROSTER_MEDIA_TYPE,
   SCREENING_TABLE_MEDIA_TYPE,
+  SCREENING_TABLE_V2_MEDIA_TYPE,
   SCREENING_REVEAL_RECEIPT_MEDIA_TYPE,
   HumanReviewOperatorAssertionSchema,
   HumanReviewRevealReceiptSchema,
@@ -33,13 +34,26 @@ import {
   HumanReviewPacketSchema,
   HumanReviewVisibilityReceiptSchema,
   ScreeningTableSchema,
+  ScreeningTableV2Schema,
   ScreeningRevealReceiptSchema,
+  PROMPTED_SCREENING_PROCEDURE_PROTOCOL,
+  SCREENING_POOL_PROTOCOL,
+  SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
+  PromptedScreeningProcedureV1Schema,
+  ScreeningPoolV1Schema,
+  ScreeningSampleCommitmentV1Schema,
+  computeScreeningPoolDigest,
+  computeScreeningSample,
   HUMAN_REVIEW_PACKET_PROTOCOL,
   HUMAN_REVIEW_VISIBILITY_RECEIPT_PROTOCOL,
   HUMAN_REVIEW_OMITTED_FIELDS,
   parseCanonicalHumanReviewBytes,
   sealHumanReviewDocument,
 } from "../human-review/contracts.js";
+import {
+  BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED,
+  binaryJudgmentItemBytes,
+} from "../human-review/application.js";
 import {
   buildBinaryJudgmentAdmissionClosureWorkspacePorts,
   verifyBinaryJudgmentAdmissionClosureInWorkspace,
@@ -1181,6 +1195,162 @@ describe("binary screened-operator-sampled admission", () => {
       rows: sortedRows(rows),
     };
   }
+
+  function promptedScreeningInput(context: ReturnType<typeof setup>) {
+    const candidateClasses = ["correct", "specific-wrong", "vague-topical-wrong"] as const;
+    const strata = ["category-1", "category-2", "category-3", "category-4"] as const;
+    const source = Array.from({ length: 664 }, (_, index) => {
+      const mainIndex = index < 240 ? index : index < 480 ? index - 240 : index - 480;
+      const candidateClass = candidateClasses[Math.floor(mainIndex / 80)]!;
+      const stratum = strata[Math.floor((mainIndex % 80) / 20)]!;
+      const payload = {
+        itemId: `urn:uuid:00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        question: `Synthetic prompted question ${index + 1}?`,
+        referenceAnswer: `Synthetic reference ${index + 1}`,
+        candidateAnswer: `Synthetic candidate ${index + 1}`,
+        provenance: {
+          sourceCommitment: recordDigest(new TextEncoder().encode(`source-${index + 1}`)),
+          timestamp: "2026-08-15T07:00:00Z",
+        },
+        sources: [{ digest: { sha256: recordDigest(new TextEncoder().encode(`record-${index + 1}`)).slice("sha256:".length) } }],
+      };
+      const bytes = binaryJudgmentItemBytes(payload);
+      const itemSha256 = recordDigest(bytes);
+      putSealedBytes(context.workspaceDir, bytes);
+      const slotNumber = mainIndex + 1;
+      return {
+        payload,
+        candidate: {
+          itemSha256,
+          itemId: payload.itemId,
+          humanReviewEvaluationSpecSha256: BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest,
+          candidateClass,
+          stratum,
+          poolPosition: index + 1,
+        },
+        poolItem: index < 240
+          ? { itemSha256, intendedLabel: candidateClass === "correct" ? "CORRECT" as const : "WRONG" as const, candidateClass, stratum, poolPosition: index + 1, slotId: `slot-${String(slotNumber).padStart(3, "0")}`, poolKind: "main" as const }
+          : { itemSha256, intendedLabel: candidateClass === "correct" ? "CORRECT" as const : "WRONG" as const, candidateClass, stratum, poolPosition: index + 1, slotId: `slot-${String(slotNumber).padStart(3, "0")}`, poolKind: "reserve" as const, reserveOrder: index < 480 ? 1 : 2 },
+      };
+    });
+    const promptBytes = new TextEncoder().encode("Synthetic opaque coordinator prompt\n");
+    const transcriptBytes = new Uint8Array([0, 255, 2, 253]);
+    const scriptBytes = new Uint8Array([255, 1, 254, 3]);
+    const promptSha256 = recordDigest(promptBytes);
+    const transcriptSha256 = recordDigest(transcriptBytes);
+    const procedure = sealHumanReviewDocument(PromptedScreeningProcedureV1Schema, {
+      protocol: PROMPTED_SCREENING_PROCEDURE_PROTOCOL,
+      procedureId: "prompted-codex-screening/v1",
+      coordinatorPromptSha256: promptSha256,
+      coordinator: { alias: "Sol", model: "gpt-5.6-sol", reasoningEffort: "high", mayOrchestrate: true },
+      judgmentAgents: [
+        { alias: "Luna", model: "gpt-5.6-luna", reasoningEffort: "medium", maxBatchSize: 32 },
+        { alias: "Terra", model: "gpt-5.6-terra", reasoningEffort: "high", maxBatchSize: 16 },
+        { alias: "Sol", model: "gpt-5.6-sol", reasoningEffort: "high", maxBatchSize: 8 },
+      ],
+      toolPolicy: { coordinator: "orchestration-only", judgmentAgents: { web: false, shell: false, repository: false, search: false } },
+      output: { alphabet: ["CORRECT", "WRONG", "UNSURE"], invalidOutputDecision: "UNSURE" },
+      retry: { maxRetries: 1, onlyWhen: "infrastructure-failure-with-no-model-output", prompt: "identical" },
+      transcriptSha256,
+      sealedAt: "2026-08-15T08:00:00.000Z",
+    }, "prompted screening procedure");
+    const poolIdentities = source.map((entry) => entry.poolItem.itemSha256);
+    const pool = sealHumanReviewDocument(ScreeningPoolV1Schema, {
+      protocol: SCREENING_POOL_PROTOCOL,
+      draftId: "review-run",
+      identityCommitmentSha256: computeScreeningPoolDigest(poolIdentities),
+      items: source.map((entry) => entry.poolItem),
+      sealedAt: "2026-08-15T08:10:00.000Z",
+    }, "screening pool");
+    const sampleItemSha256s = [...computeScreeningSample({ itemSha256s: poolIdentities, sampleSeed: "synthetic-prompted-seed", sampleSize: 72 }).sample]
+      .sort(compareCodeUnitStrings);
+    const commitment = sealHumanReviewDocument(ScreeningSampleCommitmentV1Schema, {
+      protocol: SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
+      draftId: "review-run",
+      poolSha256: pool.digest,
+      poolIdentityCommitmentSha256: pool.value.identityCommitmentSha256,
+      samplingProcedure: "screening-sample/1",
+      sampleSeed: "synthetic-prompted-seed",
+      sampleSize: 72,
+      sampleItemSha256s,
+      committedAt: "2026-08-15T08:20:00.000Z",
+    }, "screening sample commitment");
+    const rows = source.map((entry, index) => ({
+      itemSha256: entry.poolItem.itemSha256,
+      intendedLabel: entry.poolItem.intendedLabel,
+      screeningVerdict: entry.poolItem.intendedLabel,
+      ritsuDecision: index === 0
+        ? { checked: true as const, verdict: "exclude" as const, decidedAt: "2026-08-15T08:30:00.000Z" }
+        : { checked: true as const, verdict: "confirm" as const, decidedAt: "2026-08-15T08:30:00.000Z" },
+    })).sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256));
+    return {
+      candidates: source.map((entry) => entry.candidate),
+      screening: {
+        coordinatorPromptSha256: promptSha256,
+        coordinatorPromptBase64: Buffer.from(promptBytes).toString("base64"),
+        procedureSha256: procedure.digest,
+        procedureBase64: Buffer.from(procedure.bytes).toString("base64"),
+        poolSha256: pool.digest,
+        poolBase64: Buffer.from(pool.bytes).toString("base64"),
+        sampleCommitmentSha256: commitment.digest,
+        sampleCommitmentBase64: Buffer.from(commitment.bytes).toString("base64"),
+        samplingScriptSha256: recordDigest(scriptBytes),
+        samplingScriptBase64: Buffer.from(scriptBytes).toString("base64"),
+        transcriptSha256,
+        transcriptBase64: Buffer.from(transcriptBytes).toString("base64"),
+        rows,
+      },
+    };
+  }
+
+  it("admits a complete prompted-v2 pool, selects first admissible reserves, and publishes every nested role", () => {
+    const context = setup();
+    const fixture = promptedScreeningInput(context);
+    const result = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "screened-operator-sampled",
+      ...fixture,
+    });
+    expect(result.ok, result.ok ? "" : JSON.stringify(result.error)).toBe(true);
+    if (!result.ok) return;
+    expect(result.result.resolutions).toHaveLength(240);
+    expect(result.result.exclusions).toHaveLength(1);
+    expect(result.result.exclusions[0]).toMatchObject({
+      itemSha256: fixture.candidates[0]!.itemSha256,
+      replacementItemSha256: fixture.candidates[240]!.itemSha256,
+      reason: "screening-hand-excluded",
+    });
+    const closure = verifyBinaryJudgmentAdmissionClosureInWorkspace({
+      workspaceDir: context.workspaceDir,
+      admissionManifestSha256: result.result.admissionManifestSha256 as AdmissionSha256,
+      expectedDraftId: "review-run",
+    });
+    expect(closure.promptedScreening).toMatchObject({ profile: "prompted-codex-screening/v1", sampleAgreementRate: 1 });
+    expect(closure.reachableRecords.flatMap((entry) => entry.roles)).toEqual(expect.arrayContaining([
+      "screening-prompt", "screening-procedure", "screening-pool", "screening-sample-commitment",
+      "screening-sampling-script", "screening-transcript", "screening-table", "source-item",
+    ]));
+    const resolution = parseBinaryJudgmentLabelResolution(getSealedBytes(
+      context.workspaceDir,
+      result.result.resolutions[0]!.labelResolutionSha256.slice("sha256:".length),
+    ));
+    if (resolution.truthAdmission !== "screened-operator-sampled") throw new Error("wrong admission kind");
+    const envelope = parseExactDsseEnvelope(getSealedBytes(context.workspaceDir, resolution.screeningTableSha256.slice("sha256:".length)));
+    expect(envelope.payloadType).toBe(SCREENING_TABLE_V2_MEDIA_TYPE);
+    expect(ScreeningTableV2Schema.parse(JSON.parse(new TextDecoder().decode(envelope.payloadBytes)))).toMatchObject({ operator: "Ritsu", draftId: "review-run" });
+  }, 60_000);
+
+  it("refuses prompted-v2 nested-byte tampering before storing a partial closure", () => {
+    const context = setup();
+    const fixture = promptedScreeningInput(context);
+    const result = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "screened-operator-sampled",
+      candidates: fixture.candidates,
+      screening: { ...fixture.screening, transcriptBase64: Buffer.from("tampered").toString("base64") },
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "validation", issues: [{ path: "screening.transcriptSha256" }] } });
+  }, 60_000);
 
   it("admits screened truth from a bank-scoped table when the screen agrees, DSSE-signed once", async () => {
     const context = setup();

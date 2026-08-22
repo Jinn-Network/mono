@@ -837,6 +837,20 @@ describe("binary-instrument@1 judge-model profile parameter (spec §1.4)", () =>
   });
 });
 
+describe("binary-instrument@1 prompted-screening profile parameter (spec §6.11.4)", () => {
+  test("keeps legacy parameters valid when the optional profile is absent", () => {
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    expect(Object.hasOwn(PARAMETERS, "promptedScreeningProfile")).toBe(false);
+    expect(method.validateParameters(PARAMETERS)).toEqual({ ok: true });
+  });
+
+  test("accepts only the authenticated prompted-v2 profile id", () => {
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    expect(method.validateParameters({ ...PARAMETERS, promptedScreeningProfile: "prompted-codex-screening/v1" })).toEqual({ ok: true });
+    expect(method.validateParameters({ ...PARAMETERS, promptedScreeningProfile: "prompted-codex-screening/v2" }).ok).toBe(false);
+  });
+});
+
 describe("binary-instrument@1 qualification oracle", () => {
   test("derives item-majority confusion, Wilson rates, parser failures, instability, and slices", () => {
     const fixture = makeFixture();

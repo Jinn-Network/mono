@@ -91,6 +91,17 @@ import {
   renderCanonicalJsonl,
 } from "../../intake/binary-item-bank.js";
 import { BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED } from "../../human-review/application.js";
+import {
+  PROMPTED_SCREENING_PROCEDURE_PROTOCOL,
+  SCREENING_POOL_PROTOCOL,
+  SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
+  PromptedScreeningProcedureV1Schema,
+  ScreeningPoolV1Schema,
+  ScreeningSampleCommitmentV1Schema,
+  computeScreeningPoolDigest,
+  computeScreeningSample,
+  sealHumanReviewDocument,
+} from "../../human-review/contracts.js";
 import { readRunJournalEntries, type RunJournalEntry } from "../../run/journal.js";
 import { readRunState } from "../../run/state.js";
 import type { ProxiedBackend } from "../../run/drive.js";
@@ -118,7 +129,7 @@ export const JUDGE_REHEARSAL_DRAFT_ID = "judge-rehearsal";
 export const JUDGE_REHEARSAL_ARM_IDS = ["alpha", "beta", "delta", "epsilon", "gamma", "zeta"] as const;
 export const JUDGE_REHEARSAL_JUDGE_MODEL = "gpt-4o-mini-2024-07-18" as const;
 export const JUDGE_REHEARSAL_EVIDENCE_PAIR = { declaring: "beta", twin: "alpha" } as const;
-export const JUDGE_REHEARSAL_CANDIDATE_CLASSES = ["factual", "format", "reasoning"] as const;
+export const JUDGE_REHEARSAL_CANDIDATE_CLASSES = ["correct", "specific-wrong", "vague-topical-wrong"] as const;
 export const JUDGE_REHEARSAL_STRATA = ["category-1", "category-2", "category-3", "category-4"] as const;
 
 export const JUDGE_REHEARSAL_PARSER_BY_ARM = {
@@ -150,21 +161,6 @@ const samplingGeneration = {
   promptCacheIdentifier: null,
 } as const;
 
-const screeningGeneration = {
-  reasoningEffort: "low",
-  maxOutputTokens: 128,
-  store: false,
-  background: false,
-  stream: false,
-  serviceTier: "default",
-  tools: [] as [],
-  fallbackModels: [] as [],
-  retries: 0,
-  persistedConversation: false,
-  metadata: null,
-  promptCacheIdentifier: null,
-} as const;
-
 const SYNTHETIC_SOURCE_DIGESTS = ["a".repeat(64), "e".repeat(64), "f".repeat(64)] as const;
 const SYNTHETIC_SOURCE_PUBLISHED_AT = [
   "2026-03-09T00:00:00Z",
@@ -173,7 +169,7 @@ const SYNTHETIC_SOURCE_PUBLISHED_AT = [
 ] as const;
 
 type CellToken = "A" | "R" | "I";
-type ItemKind = "main" | "gate" | "corrupt" | "excluded";
+type ItemKind = "main" | "gate" | "corrupt" | "excluded" | "reserve";
 
 interface RehearsalItem {
   readonly itemId: string;
@@ -185,7 +181,10 @@ interface RehearsalItem {
   readonly candidateClass: string;
   readonly stratum: string;
   readonly kind: ItemKind;
-  readonly replacesItemId?: string;
+  readonly slotId: string;
+  readonly poolKind: "main" | "reserve";
+  readonly reserveOrder?: number;
+  readonly selected: boolean;
 }
 
 export interface JudgeRehearsalFixture {
@@ -202,9 +201,12 @@ export interface JudgeRehearsalFixture {
   readonly taskSha256s: readonly string[];
   readonly instrumentSha256s: readonly string[];
   readonly screeningRecords: {
-    readonly instrumentSha256: `sha256:${string}`;
+    readonly promptSha256: `sha256:${string}`;
+    readonly procedureSha256: `sha256:${string}`;
+    readonly poolSha256: `sha256:${string}`;
+    readonly sampleCommitmentSha256: `sha256:${string}`;
     readonly samplingScriptSha256: `sha256:${string}`;
-    readonly rawOutputsSha256: `sha256:${string}`;
+    readonly transcriptSha256: `sha256:${string}`;
   };
   readonly reportSha256: string;
   readonly additionalReports: readonly { readonly method: string; readonly version: string; readonly reportSha256: string }[];
@@ -246,83 +248,66 @@ function itemIdAt(index: number): string {
 }
 
 function buildRehearsalItems(): readonly RehearsalItem[] {
-  const excluded: RehearsalItem = {
-    itemId: itemIdAt(0),
-    question: "Does the seeded synthetic factual category-1 statement match its reference?",
-    referenceAnswer: "The seeded synthetic factual category-1 statement is correct.",
-    candidateAnswer: "The seeded synthetic factual category-1 statement is correct.",
-    sourceDigestHex: sourceDigestForPosition(0),
-    truthLabel: "CORRECT",
-    candidateClass: "factual",
-    stratum: "category-1",
-    kind: "excluded",
-  };
-  const main: RehearsalItem[] = [];
-  let index = 1;
+  const mains: RehearsalItem[] = [];
+  let index = 0;
   for (const candidateClass of JUDGE_REHEARSAL_CANDIDATE_CLASSES) {
     for (const stratum of JUDGE_REHEARSAL_STRATA) {
-      const truthLabel: "CORRECT" | "WRONG" = index % 2 === 1 ? "CORRECT" : "WRONG";
-      const isReplacement = candidateClass === "factual" && stratum === "category-1";
-      main.push({
+      for (let withinCell = 0; withinCell < 20; withinCell += 1) {
+        const truthLabel: "CORRECT" | "WRONG" = candidateClass === "correct" ? "CORRECT" : "WRONG";
+        const kind: ItemKind = index === 0
+          ? "excluded"
+          : index <= 12
+            ? "gate"
+            : index === 13 || index === 93
+              ? "corrupt"
+              : "main";
+        const corruptVariant = index === 13 ? "A" : "B";
+        const question = kind === "gate"
+          ? `Does synthetic gate probe G${index - 1} match its reference?`
+          : kind === "corrupt"
+            ? "Does the synthetic corrupt-key statement match its reference?"
+            : `Does synthetic ${candidateClass} ${stratum} item ${withinCell + 1} match its reference?`;
+        const referenceAnswer = kind === "corrupt"
+          ? `Synthetic corrupt-key reference variant ${corruptVariant}.`
+          : `Synthetic ${candidateClass} ${stratum} reference ${withinCell + 1}.`;
+        mains.push({
+          itemId: itemIdAt(index), question, referenceAnswer,
+          candidateAnswer: kind === "corrupt"
+            ? "Synthetic corrupt-key reference variant A."
+            : truthLabel === "CORRECT" ? referenceAnswer : `Deliberately different synthetic answer ${index + 1}.`,
+          sourceDigestHex: sourceDigestForPosition(index), truthLabel, candidateClass, stratum, kind,
+          slotId: `slot-${String(index + 1).padStart(3, "0")}`,
+          poolKind: "main", selected: index !== 0,
+        });
+        index += 1;
+      }
+    }
+  }
+  const reserves: RehearsalItem[] = [];
+  for (let reserveOrder = 1; reserveOrder <= 2; reserveOrder += 1) {
+    const slotLimit = reserveOrder === 1 ? 240 : 184;
+    for (let slotIndex = 0; slotIndex < slotLimit; slotIndex += 1) {
+      const main = mains[slotIndex]!;
+      const selected = slotIndex === 0 && reserveOrder === 1;
+      reserves.push({
         itemId: itemIdAt(index),
-        question: `Does synthetic ${candidateClass} ${stratum} item match its reference?`,
-        referenceAnswer: `Synthetic ${candidateClass} ${stratum} reference.`,
-        candidateAnswer: truthLabel === "CORRECT"
-          ? `Synthetic ${candidateClass} ${stratum} reference.`
-          : `Deliberately different synthetic ${candidateClass} ${stratum} answer.`,
+        question: `Reserve ${reserveOrder} for ${main.question}`,
+        referenceAnswer: main.referenceAnswer,
+        candidateAnswer: main.candidateAnswer,
         sourceDigestHex: sourceDigestForPosition(index),
-        truthLabel,
-        candidateClass,
-        stratum,
-        kind: "main",
-        ...(isReplacement ? { replacesItemId: excluded.itemId } : {}),
+        truthLabel: main.truthLabel,
+        candidateClass: main.candidateClass,
+        stratum: main.stratum,
+        kind: "reserve",
+        slotId: main.slotId,
+        poolKind: "reserve",
+        reserveOrder,
+        selected,
       });
       index += 1;
     }
   }
-  const probes: RehearsalItem[] = [];
-  for (let probe = 0; probe < 12; probe += 1) {
-    const truthLabel: "CORRECT" | "WRONG" = probe % 2 === 0 ? "CORRECT" : "WRONG";
-    probes.push({
-      itemId: itemIdAt(index),
-      question: `Does synthetic gate probe G${probe} match its reference?`,
-      referenceAnswer: `Synthetic gate probe reference G${probe}.`,
-      candidateAnswer: truthLabel === "CORRECT"
-        ? `Synthetic gate probe reference G${probe}.`
-        : `Deliberately different synthetic gate probe G${probe}.`,
-      sourceDigestHex: sourceDigestForPosition(index),
-      truthLabel,
-      candidateClass: "gateProbe",
-      stratum: "gate",
-      kind: "gate",
-    });
-    index += 1;
-  }
-  const corruptQuestion = "Does the synthetic corrupt-key statement match its reference?";
-  const corruptA: RehearsalItem = {
-    itemId: itemIdAt(index),
-    question: corruptQuestion,
-    referenceAnswer: "Synthetic corrupt-key reference variant A.",
-    candidateAnswer: "Synthetic corrupt-key reference variant A.",
-    sourceDigestHex: sourceDigestForPosition(index),
-    truthLabel: "CORRECT",
-    candidateClass: "corruptKey",
-    stratum: "corrupt",
-    kind: "corrupt",
-  };
-  index += 1;
-  const corruptB: RehearsalItem = {
-    itemId: itemIdAt(index),
-    question: corruptQuestion,
-    referenceAnswer: "Synthetic corrupt-key reference variant B, deliberately different bytes.",
-    candidateAnswer: "Synthetic corrupt-key reference variant A.",
-    sourceDigestHex: sourceDigestForPosition(index),
-    truthLabel: "WRONG",
-    candidateClass: "corruptKey",
-    stratum: "corrupt",
-    kind: "corrupt",
-  };
-  return [excluded, ...main, ...probes, corruptA, corruptB];
+  return [...mains, ...reserves];
 }
 
 function buildItemPayload(item: RehearsalItem) {
@@ -371,11 +356,11 @@ function responseBytesFor(
 function cellToken(item: RehearsalItem, armId: string, replicate: number): CellToken {
   const agrees: CellToken = item.truthLabel === "CORRECT" ? "A" : "R";
   const disagrees: CellToken = item.truthLabel === "CORRECT" ? "R" : "A";
-  if (item.kind === "main" && item.candidateClass === "factual" && armId === "beta") return disagrees;
-  if (item.kind === "main" && item.candidateClass === "factual" && item.stratum === "category-2" && armId === "delta") {
+  if (item.kind === "main" && item.candidateClass === "correct" && armId === "beta") return disagrees;
+  if (item.kind === "main" && item.candidateClass === "correct" && item.stratum === "category-2" && armId === "delta") {
     return replicate === 3 ? disagrees : agrees;
   }
-  if (item.kind === "main" && item.candidateClass === "format" && item.stratum === "category-1" && armId === "gamma" && replicate === 1) {
+  if (item.kind === "main" && item.candidateClass === "specific-wrong" && item.stratum === "category-1" && armId === "gamma" && replicate === 1) {
     return "I";
   }
   return agrees;
@@ -424,48 +409,6 @@ function instrument(
     response: {
       mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
       parser: { id: parser.id, version: parser.version, digest: parser.digest },
-      invalidOutputDecision: "REJECT",
-    },
-  } as never);
-}
-
-function screeningInstrument() {
-  const messages = [
-    { role: "developer", segments: [{ literal: "Synthetic admission screening rubric. " }] },
-    {
-      role: "user",
-      segments: [
-        { literal: "Question: " }, { field: "question" },
-        { literal: "\nReference: " }, { field: "referenceAnswer" },
-        { literal: "\nCandidate: " }, { field: "candidateAnswer" },
-        { literal: "\nEvidence: " }, { field: "evidence" },
-      ],
-    },
-  ] as const;
-  const descriptor = {
-    uri: "https://fixtures.example.test/screening/prompt",
-    digest: { sha256: sha256Hex(encoder.encode("judge-rehearsal-screening-prompt")) },
-  };
-  return sealBinaryJudgmentInstrument({
-    protocol: BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
-    instrumentId: "screening-only",
-    messages: messages as never,
-    promptTemplateSha256: binaryJudgmentPromptTemplateDigest(messages as never),
-    promptSource: descriptor,
-    license: {
-      uri: "https://fixtures.example.test/licenses/synthetic",
-      digest: { sha256: sha256Hex(encoder.encode("synthetic fixture metadata only")) },
-    },
-    attribution: {
-      uri: "https://fixtures.example.test/screening/attribution",
-      digest: { sha256: sha256Hex(encoder.encode("synthetic screening attribution")) },
-    },
-    // The six run arms use the dated snapshot profile. The screening model deliberately uses the
-    // other accepted profile, and its unique instrumentId keeps the exact bytes disjoint too.
-    model: { adapter: "jinn-openai", requested: "gpt-5.6-luna", generation: screeningGeneration },
-    response: {
-      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
-      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
       invalidOutputDecision: "REJECT",
     },
   } as never);
@@ -868,8 +811,8 @@ export async function runJudgeRehearsalLifecycle(input: {
   const items = buildRehearsalItems();
   const itemsById = new Map(items.map((item) => [item.itemId, item]));
   const excluded = items.find((item) => item.kind === "excluded")!;
-  const admittedItems = items.filter((item) => item.kind !== "excluded");
-  const replacement = admittedItems.find((item) => item.replacesItemId === excluded.itemId)!;
+  const admittedItems = items.filter((item) => item.selected);
+  const replacement = admittedItems.find((item) => item.slotId === excluded.slotId)!;
   const gateProbeItemIds = admittedItems.filter((item) => item.kind === "gate").map((item) => item.itemId);
   const corruptItems = admittedItems.filter((item) => item.kind === "corrupt");
 
@@ -888,19 +831,21 @@ export async function runJudgeRehearsalLifecycle(input: {
       payload,
       itemSha256,
       intendedLabel: item.truthLabel,
-      screeningVerdict: item.kind === "excluded" ? "WRONG" as const : item.truthLabel,
-      handChecked: true,
-      handVerdict: item.kind === "excluded" ? "exclude" as const : "confirm" as const,
+      screeningVerdict: item.truthLabel,
+      ritsuDecision: item.kind === "excluded"
+        ? { checked: true as const, verdict: "exclude" as const, decidedAt: "2026-08-15T10:30:00.000Z" }
+        : { checked: true as const, verdict: "confirm" as const, decidedAt: "2026-08-15T10:30:00.000Z" },
     };
   });
-  const itemSha256ById = new Map(rows.map((row) => [row.item.itemId, row.itemSha256]));
   const screeningRows = rows.map((row) => ({
     itemSha256: row.itemSha256,
     intendedLabel: row.intendedLabel,
     screeningVerdict: row.screeningVerdict,
-    handChecked: row.handChecked,
-    handVerdict: row.handVerdict,
+    terraReviewVerdict: row.screeningVerdict,
+    solReviewVerdict: row.screeningVerdict,
+    ritsuDecision: row.ritsuDecision,
   })).sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256));
+  const itemSha256ById = new Map(rows.map((row) => [row.item.itemId, row.itemSha256]));
   const candidates = rows.map((row, index) => ({
     itemSha256: row.itemSha256,
     itemId: row.item.itemId,
@@ -908,31 +853,86 @@ export async function runJudgeRehearsalLifecycle(input: {
     candidateClass: row.item.candidateClass,
     stratum: row.item.stratum,
     poolPosition: index + 1,
-    ...(row.item.replacesItemId === undefined
-      ? {}
-      : { replacesItemSha256: itemSha256ById.get(row.item.replacesItemId)! }),
   }));
-  const sealedScreeningInstrument = screeningInstrument();
+  const promptBytes = encoder.encode("Synthetic prompted Codex screening coordinator prompt.\n");
+  const transcriptBytes = new Uint8Array([0, 255, 1, 254, 2, 253]);
   const samplingScriptBytes = encoder.encode("judge-rehearsal-sampling-script/v1");
-  const rawOutputsBytes = new Uint8Array([0, 255, 1, 254, 2, 253]);
+  const promptSha256 = recordDigest(promptBytes);
+  const transcriptSha256 = recordDigest(transcriptBytes);
+  const procedure = sealHumanReviewDocument(PromptedScreeningProcedureV1Schema, {
+    protocol: PROMPTED_SCREENING_PROCEDURE_PROTOCOL,
+    procedureId: "prompted-codex-screening/v1",
+    coordinatorPromptSha256: promptSha256,
+    coordinator: { alias: "Sol", model: "gpt-5.6-sol", reasoningEffort: "high", mayOrchestrate: true },
+    judgmentAgents: [
+      { alias: "Luna", model: "gpt-5.6-luna", reasoningEffort: "medium", maxBatchSize: 32 },
+      { alias: "Terra", model: "gpt-5.6-terra", reasoningEffort: "high", maxBatchSize: 16 },
+      { alias: "Sol", model: "gpt-5.6-sol", reasoningEffort: "high", maxBatchSize: 8 },
+    ],
+    toolPolicy: { coordinator: "orchestration-only", judgmentAgents: { web: false, shell: false, repository: false, search: false } },
+    output: { alphabet: ["CORRECT", "WRONG", "UNSURE"], invalidOutputDecision: "UNSURE" },
+    retry: { maxRetries: 1, onlyWhen: "infrastructure-failure-with-no-model-output", prompt: "identical" },
+    transcriptSha256,
+    sealedAt: "2026-08-15T10:00:00.000Z",
+  }, "judge rehearsal prompted procedure");
+  const poolItems = rows.map((row, index) => ({
+    itemSha256: row.itemSha256,
+    intendedLabel: row.intendedLabel,
+    candidateClass: row.item.candidateClass,
+    stratum: row.item.stratum,
+    poolPosition: index + 1,
+    slotId: row.item.slotId,
+    poolKind: row.item.poolKind,
+    ...(row.item.reserveOrder === undefined ? {} : { reserveOrder: row.item.reserveOrder }),
+  }));
+  const pool = sealHumanReviewDocument(ScreeningPoolV1Schema, {
+    protocol: SCREENING_POOL_PROTOCOL,
+    draftId: JUDGE_REHEARSAL_DRAFT_ID,
+    identityCommitmentSha256: computeScreeningPoolDigest(poolItems.map((item) => item.itemSha256)),
+    items: poolItems,
+    sealedAt: "2026-08-15T10:10:00.000Z",
+  }, "judge rehearsal screening pool");
+  const sampleItemSha256s = [...computeScreeningSample({
+    itemSha256s: poolItems.map((item) => item.itemSha256),
+    sampleSeed: "judge-rehearsal-screening-seed",
+    sampleSize: 72,
+  }).sample].sort(compareCodeUnitStrings);
+  const commitment = sealHumanReviewDocument(ScreeningSampleCommitmentV1Schema, {
+    protocol: SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
+    draftId: JUDGE_REHEARSAL_DRAFT_ID,
+    poolSha256: pool.digest,
+    poolIdentityCommitmentSha256: pool.value.identityCommitmentSha256,
+    samplingProcedure: "screening-sample/1",
+    sampleSeed: "judge-rehearsal-screening-seed",
+    sampleSize: 72,
+    sampleItemSha256s,
+    committedAt: "2026-08-15T10:20:00.000Z",
+  }, "judge rehearsal sample commitment");
   const screeningRecords = {
-    instrumentSha256: sealedScreeningInstrument.digest,
+    promptSha256,
+    procedureSha256: procedure.digest,
+    poolSha256: pool.digest,
+    sampleCommitmentSha256: commitment.digest,
     samplingScriptSha256: recordDigest(samplingScriptBytes),
-    rawOutputsSha256: recordDigest(rawOutputsBytes),
+    transcriptSha256,
   };
   const admission = requireOk(admitHumanTruth(context, {
     draftId: JUDGE_REHEARSAL_DRAFT_ID,
     truthAdmission: "screened-operator-sampled",
     candidates,
     screening: {
-      screeningInstrumentSha256: screeningRecords.instrumentSha256,
-      screeningInstrumentBase64: Buffer.from(sealedScreeningInstrument.bytes).toString("base64"),
-      sampleSeed: "judge-rehearsal-screening-seed",
-      sampleSize: rows.length,
+      coordinatorPromptSha256: screeningRecords.promptSha256,
+      coordinatorPromptBase64: Buffer.from(promptBytes).toString("base64"),
+      procedureSha256: screeningRecords.procedureSha256,
+      procedureBase64: Buffer.from(procedure.bytes).toString("base64"),
+      poolSha256: screeningRecords.poolSha256,
+      poolBase64: Buffer.from(pool.bytes).toString("base64"),
+      sampleCommitmentSha256: screeningRecords.sampleCommitmentSha256,
+      sampleCommitmentBase64: Buffer.from(commitment.bytes).toString("base64"),
       samplingScriptSha256: screeningRecords.samplingScriptSha256,
       samplingScriptBase64: Buffer.from(samplingScriptBytes).toString("base64"),
-      rawOutputsSha256: screeningRecords.rawOutputsSha256,
-      rawOutputsBase64: Buffer.from(rawOutputsBytes).toString("base64"),
+      transcriptSha256: screeningRecords.transcriptSha256,
+      transcriptBase64: Buffer.from(transcriptBytes).toString("base64"),
       rows: screeningRows,
     },
   }), "screened admission");

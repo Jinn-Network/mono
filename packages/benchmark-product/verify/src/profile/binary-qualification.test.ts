@@ -30,6 +30,7 @@ import {
   BINARY_INSTRUMENT_REPORT_LIMITATIONS,
   binaryInstrumentReportLimitations,
 } from "./binary-qualification.js";
+import { PROMPTED_SCREENING_LIMITATIONS } from "../admission/contracts.js";
 import {
   INSPECT_BINARY_JUDGE_INSPECT_EVALS_VERSION,
   INSPECT_BINARY_JUDGE_INSPECT_VERSION,
@@ -278,6 +279,23 @@ describe("binaryInstrumentReportLimitations", () => {
       BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
       BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly,
     ]);
+  });
+
+  test("10: an authenticated prompted-v2 profile appends the exact seal-only capability boundary", () => {
+    expect(binaryInstrumentReportLimitations({
+      ...base,
+      truthAdmission: "screened-operator-sampled",
+      promptedScreeningProfile: "prompted-codex-screening/v1",
+    })).toEqual([
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
+      BINARY_INSTRUMENT_REPORT_LIMITATIONS.screenedNotIndependentlyLabeled,
+      ...PROMPTED_SCREENING_LIMITATIONS,
+    ]);
+  });
+
+  test("11: legacy screened parameters omit every prompted capability-boundary string", () => {
+    const legacy = binaryInstrumentReportLimitations({ ...base, truthAdmission: "screened-operator-sampled" });
+    expect(legacy).not.toEqual(expect.arrayContaining([...PROMPTED_SCREENING_LIMITATIONS]));
   });
 });
 
