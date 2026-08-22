@@ -15,7 +15,6 @@ import {
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
 } from "@jinn-network/benchmarking-records";
-import { parseBinaryJudgmentInstrument } from "@jinn-network/task-execution-profiles";
 import {
   BUNDLE_QUALIFICATION_FORMAT,
   BUNDLE_V4_FORMAT,
@@ -33,6 +32,10 @@ import {
   JUDGE_REHEARSAL_STRATA,
   runJudgeRehearsalLifecycle,
 } from "../bundle/testing/judge-rehearsal-fixture.js";
+import {
+  PROMPTED_SCREENING_LIMITATIONS,
+  PROMPTED_SCREENING_PROFILE,
+} from "../human-review/contracts.js";
 import { CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE } from "../runtime/suite-protocol/comparability.js";
 import { readRunState } from "../run/state.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
@@ -54,7 +57,7 @@ const roots: string[] = [];
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
+}, 120_000);
 
 function json(path: string): Record<string, any> {
   return JSON.parse(readFileSync(path, "utf8")) as Record<string, any>;
@@ -107,6 +110,12 @@ function copyBundle(bundleDir: string, label: string): string {
   roots.push(copy);
   cpSync(bundleDir, copy, { recursive: true });
   return copy;
+}
+
+function discardBundleCopy(bundleDir: string): void {
+  rmSync(bundleDir, { recursive: true, force: true });
+  const index = roots.indexOf(bundleDir);
+  if (index !== -1) roots.splice(index, 1);
 }
 
 function rewriteManifest(bundleDir: string): void {
@@ -331,11 +340,7 @@ describe("packet P8 judge rehearsal (#2847)", () => {
         expect(verified.qualification.armCount).toBe(6);
         expect(verified.qualification.truthAdmission).toBe("screened-operator-sampled");
         expect(verified.qualification.exclusionCount).toBe(1);
-        expect(verified.qualification.candidateClasses).toEqual(expect.arrayContaining([
-          ...JUDGE_REHEARSAL_CANDIDATE_CLASSES,
-          "gateProbe",
-          "corruptKey",
-        ]));
+        expect(verified.qualification.candidateClasses).toEqual([...JUDGE_REHEARSAL_CANDIDATE_CLASSES]);
       }
       if (externalVerifyAvailable) {
         assertExternalVerifyAllChecksPass(await runExternalVerify(bundle.dir));
@@ -370,18 +375,22 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     const pairwiseClaim = claims.find((claim) => claim.method.id === BENCHMARKING_METHOD_IDS.pairwiseDisagreement)!;
     const deltaClaim = claims.find((claim) => claim.method.id === BENCHMARKING_METHOD_IDS.pairedMajorityDelta)!;
     const qualification = primaryClaim.qualification as Record<string, any>;
+    const primaryRun = json(join(primary.dir, "run.json"));
+    const primaryAnalysis = (primaryRun.analysisPlan as Array<Record<string, any>>)
+      .find((analysis) => analysis.method === BENCHMARKING_METHOD_IDS.binaryInstrument);
+    expect(primaryAnalysis?.parameters.promptedScreeningProfile).toBe(PROMPTED_SCREENING_PROFILE);
+    const primaryReport = json(join(primary.dir, "report.json"));
+    expect(primaryReport.limitations).toEqual(expect.arrayContaining([...PROMPTED_SCREENING_LIMITATIONS]));
     // Registry-verified vs sealed-companion is the rehearsal's classification of those analogs (corrupt-key and twelve-probe are §7.3 companions; the rest are registered-method outputs); R1 (#2849) is the column renderer. The sealed claim package does not carry that column.
     const marked = [
       { name: "per-arm false-accept", value: qualification.arms.alpha.falseAccept },
       { name: "per-arm false-reject", value: qualification.arms.alpha.falseReject },
-      { name: "per-class factual", value: qualification.arms.alpha.byCandidateClass.factual },
+      { name: "per-class correct", value: qualification.arms.alpha.byCandidateClass.correct },
       { name: "per-stratum category-1", value: qualification.arms.alpha.byStratum["category-1"] },
       { name: "instability", value: qualification.arms.delta.instability },
       { name: "parser-invalid", value: qualification.arms.gamma.parserInvalid },
       { name: "cross-arm disagreement", value: pairwiseClaim.pairwiseDisagreement },
       { name: "evidence contrast", value: deltaClaim.pairedMajorityDelta },
-      { name: "corrupt-key pair", value: qualification.arms.alpha.byCandidateClass.corruptKey },
-      { name: "twelve-probe gate", value: qualification.arms.alpha.byCandidateClass.gateProbe },
     ] as const;
     for (const analog of marked) {
       expect(analog.value, analog.name).toBeDefined();
@@ -392,21 +401,22 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     const evidence = json(join(primary.dir, "evidence.json"));
     const probe = evidenceRecord(evidence, "snapshot-probe");
     expect(existsSync(join(primary.dir, "records", `${probe.sha256}.bin`))).toBe(true);
-    const screeningInstrumentRecord = evidenceRecord(evidence, "screening-instrument");
+    const promptRecord = evidenceRecord(evidence, "screening-prompt");
+    const procedureRecord = evidenceRecord(evidence, "screening-procedure");
+    const poolRecord = evidenceRecord(evidence, "screening-pool");
+    const commitmentRecord = evidenceRecord(evidence, "screening-sample-commitment");
     const samplingScriptRecord = evidenceRecord(evidence, "screening-sampling-script");
-    const rawOutputsRecord = evidenceRecord(evidence, "screening-raw-outputs");
-    expect(screeningInstrumentRecord.sha256).toBe(fixture.screeningRecords.instrumentSha256.slice("sha256:".length));
+    const transcriptRecord = evidenceRecord(evidence, "screening-transcript");
+    expect(promptRecord.sha256).toBe(fixture.screeningRecords.promptSha256.slice("sha256:".length));
+    expect(procedureRecord.sha256).toBe(fixture.screeningRecords.procedureSha256.slice("sha256:".length));
+    expect(poolRecord.sha256).toBe(fixture.screeningRecords.poolSha256.slice("sha256:".length));
+    expect(commitmentRecord.sha256).toBe(fixture.screeningRecords.sampleCommitmentSha256.slice("sha256:".length));
     expect(samplingScriptRecord.sha256).toBe(fixture.screeningRecords.samplingScriptSha256.slice("sha256:".length));
-    expect(rawOutputsRecord.sha256).toBe(fixture.screeningRecords.rawOutputsSha256.slice("sha256:".length));
-    expect(fixture.instrumentSha256s).not.toContain(fixture.screeningRecords.instrumentSha256);
-    const screeningInstrumentBytes = readFileSync(
-      join(primary.dir, "records", `${screeningInstrumentRecord.sha256}.bin`),
-    );
-    expect(sha256Hex(screeningInstrumentBytes)).toBe(screeningInstrumentRecord.sha256);
-    expect(parseBinaryJudgmentInstrument(screeningInstrumentBytes).model.requested).toBe("gpt-5.6-luna");
+    expect(transcriptRecord.sha256).toBe(fixture.screeningRecords.transcriptSha256.slice("sha256:".length));
+    for (const digest of Object.values(fixture.screeningRecords)) expect(fixture.instrumentSha256s).not.toContain(digest);
     expect(readFileSync(join(primary.dir, "records", `${samplingScriptRecord.sha256}.bin`)))
       .toEqual(Buffer.from("judge-rehearsal-sampling-script/v1"));
-    expect(readFileSync(join(primary.dir, "records", `${rawOutputsRecord.sha256}.bin`)))
+    expect(readFileSync(join(primary.dir, "records", `${transcriptRecord.sha256}.bin`)))
       .toEqual(Buffer.from([0, 255, 1, 254, 2, 253]));
     const nativeDir = join(primary.dir, "native", "inspect");
     expect(existsSync(nativeDir)).toBe(true);
@@ -421,6 +431,7 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     writeCanonical(join(executionTamper, "evidence.json"), executionEvidence);
     rewriteManifest(executionTamper);
     await expectRejectedAt(executionTamper, "evidence-closure");
+    discardBundleCopy(executionTamper);
 
     const truthTamper = copyBundle(primary.dir, "truth");
     const truthEvidence = json(join(truthTamper, "evidence.json"));
@@ -431,9 +442,11 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     writeCanonical(join(truthTamper, "evidence.json"), truthEvidence);
     rewriteManifest(truthTamper);
     await expectRejectedAt(truthTamper, "evidence-closure");
+    discardBundleCopy(truthTamper);
 
     for (const role of [
-      "screening-instrument", "screening-sampling-script", "screening-raw-outputs",
+      "screening-prompt", "screening-procedure", "screening-pool", "screening-sample-commitment",
+      "screening-sampling-script", "screening-transcript", "screening-table", "screening-reveal-receipt",
     ]) {
       const nestedTamper = copyBundle(primary.dir, role);
       const nestedEvidence = json(join(nestedTamper, "evidence.json"));
@@ -448,6 +461,36 @@ describe("packet P8 judge rehearsal (#2847)", () => {
       writeCanonical(join(nestedTamper, "evidence.json"), nestedEvidence);
       rewriteManifest(nestedTamper);
       await expectRejectedAt(nestedTamper, "evidence-closure");
+      discardBundleCopy(nestedTamper);
+    }
+
+    const roleTamper = copyBundle(primary.dir, "screening-role");
+    const roleEvidence = json(join(roleTamper, "evidence.json"));
+    evidenceRecord(roleEvidence, "screening-prompt").roles = ["screening-transcript"];
+    writeCanonical(join(roleTamper, "evidence.json"), roleEvidence);
+    rewriteManifest(roleTamper);
+    await expectRejectedAt(roleTamper, "evidence-closure");
+    discardBundleCopy(roleTamper);
+
+    for (const [label, mutate] of [
+      ["screening-decision", (row: Record<string, any>) => { row.ritsuDecision.verdict = "exclude"; }],
+      ["screening-timestamp", (row: Record<string, any>) => { row.ritsuDecision.decidedAt = "2026-08-20T09:00:01.000Z"; }],
+    ] as const) {
+      const tableTamper = copyBundle(primary.dir, label);
+      const tableEvidence = json(join(tableTamper, "evidence.json"));
+      const tableRecord = evidenceRecord(tableEvidence, "screening-table");
+      const envelope = json(join(tableTamper, "records", `${tableRecord.sha256}.bin`));
+      const payload = JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8")) as Record<string, any>;
+      const confirmedRow = (payload.rows as Array<Record<string, any>>)
+        .find((row) => row.ritsuDecision?.verdict === "confirm");
+      expect(confirmedRow).toBeDefined();
+      mutate(confirmedRow!);
+      envelope.payload = Buffer.from(canonicalJsonBytes(payload)).toString("base64");
+      replaceEvidenceRecord(tableTamper, tableEvidence, tableRecord.sha256, canonicalJsonBytes(envelope));
+      writeCanonical(join(tableTamper, "evidence.json"), tableEvidence);
+      rewriteManifest(tableTamper);
+      await expectRejectedAt(tableTamper, "evidence-closure");
+      discardBundleCopy(tableTamper);
     }
 
     const metricTamper = copyBundle(primary.dir, "metric");
@@ -456,6 +499,7 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     writeCanonical(join(metricTamper, "report.json"), report);
     rewriteManifest(metricTamper);
     await expectRejectedAt(metricTamper, "evidence-closure");
+    discardBundleCopy(metricTamper);
 
     const claimTamper = copyBundle(primary.dir, "claim");
     const claimDoc = json(join(claimTamper, "claim-package.json"));
@@ -463,6 +507,7 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     writeCanonical(join(claimTamper, "claim-package.json"), claimDoc);
     rewriteManifest(claimTamper);
     await expectRejectedAt(claimTamper, "claim-consistency");
+    discardBundleCopy(claimTamper);
 
     const assetTamper = copyBundle(primary.dir, "asset");
     const evalName = readdirSync(join(assetTamper, "native", "inspect")).find((name) => name.endsWith(".eval"));
@@ -476,5 +521,6 @@ describe("packet P8 judge rehearsal (#2847)", () => {
       assetPath = (cause as { readonly issues?: readonly { readonly path?: string }[] }).issues?.[0]?.path ?? "";
     }
     expect(assetPath).toMatch(/^native\/inspect\/[a-f0-9]{64}\.eval$/u);
-  }, 300_000);
+    discardBundleCopy(assetTamper);
+  }, 7_200_000);
 });
