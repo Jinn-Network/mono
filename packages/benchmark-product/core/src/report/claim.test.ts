@@ -33,6 +33,8 @@ import {
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
   BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
   buildClaimPackage,
   type BuildClaimPackageInput,
   CLAIM_PACKAGE_SCHEMA_ID,
@@ -763,6 +765,7 @@ describe("buildClaimPackage — paired-delta@1 comparison shape (P4b Task 5)", (
 
     // The claim must still satisfy its own schema (comparison present is sufficient).
     expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+
   });
 
   it("throws when the stated verdictRule matches wilson's plan entry rather than the produced paired-delta entry (proves entry SELECTION, not analysisPlan[0])", () => {
@@ -812,6 +815,7 @@ describe("buildClaimPackage — schema requires headline or comparison", () => {
     const { headline: _headline, ...withoutHeadline } = claim;
     expect(ClaimPackageSchema.safeParse(withoutHeadline).success).toBe(false);
     expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+
   });
 });
 
@@ -945,6 +949,19 @@ describe("claim-package/2 exact binary qualification gate", () => {
     delete claim.headline;
     delete claim.comparison;
     expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+
+    const prompted = structuredClone(claim) as any;
+    prompted.method.parameters = { promptedScreeningProfile: "prompted-codex-screening/v1" };
+    prompted.verification.command = PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND;
+    prompted.verification.compatibleCommand = PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND;
+    expect(ClaimPackageSchema.safeParse(prompted).success).toBe(true);
+
+    const promptedWrong = structuredClone(prompted) as any;
+    promptedWrong.verification.command = BINARY_QUALIFICATION_VERIFICATION_COMMAND;
+    expect(ClaimPackageSchema.safeParse(promptedWrong).success).toBe(false);
+    const promptedMixed = structuredClone(prompted) as any;
+    promptedMixed.verification.compatibleCommand = BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND;
+    expect(ClaimPackageSchema.safeParse(promptedMixed).success).toBe(false);
 
     const topLevelConclusion = structuredClone(claim) as any;
     topLevelConclusion.ranking = ["arm-a"];
@@ -1330,6 +1347,33 @@ const EXPECTED_PAIRED_MAJORITY_DELTA = {
 
 function task1(): string { return "1".repeat(64); }
 function task2(): string { return "2".repeat(64); }
+
+it("uses verifier 0.2 for every prompted binary, pairwise, and paired-majority claim", () => {
+  const prompted = { promptedScreeningProfile: "prompted-codex-screening/v1" } as const;
+  const qualification = binaryQualificationFixture();
+  const cases = [
+    {
+      method: BENCHMARKING_METHOD_IDS.binaryInstrument,
+      parameters: { ...qualification.configuration, ...prompted },
+      results: qualification,
+    },
+    {
+      method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
+      parameters: { ...PAIRWISE_DISAGREEMENT_PARAMETERS, ...prompted },
+      results: EXPECTED_PAIRWISE_DISAGREEMENT,
+    },
+    {
+      method: BENCHMARKING_METHOD_IDS.pairedMajorityDelta,
+      parameters: { ...PAIRED_MAJORITY_DELTA_PARAMETERS, ...prompted },
+      results: EXPECTED_PAIRED_MAJORITY_DELTA,
+    },
+  ] as const;
+  for (const input of cases) {
+    const claim = buildJudgeFamilyClaim(buildJudgeFamilyFixture(input));
+    expect(claim.verification.command).toBe(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND);
+    expect(claim.verification.compatibleCommand).toBe(PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND);
+  }
+});
 
 describe("buildClaimPackage — paired-majority-delta@1 evidence-contrast shape (packet #2837)", () => {
   it("builds a claim carrying `pairedMajorityDelta`, not `headline`/`comparison`/`qualification`, extracted verbatim from the Report", () => {

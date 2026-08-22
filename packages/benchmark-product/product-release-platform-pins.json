@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "receipts": [
+    {
+      "decision": "DR-2026-08-22-a",
+      "product": {
+        "packageName": "@colophon-claims/verify",
+        "version": "0.2.0"
+      },
+      "platformSourceSha": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+      "platformVersion": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+      "platformDistTag": "canary",
+      "platformLatestVersion": "0.0.0",
+      "stackPublishRunUrl": "https://github.com/Jinn-Network/mono/actions/runs/32544891098/attempts/2",
+      "platformPackages": [
+        {
+          "name": "@jinn-network/benchmarking-aggregate",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-xTj+ZhL073NXxkDsfbBxnHgewAiSE9fJdS/MdMOLTMr7gY3xUabSFzy/pYRzs2aU9rxZOEf26Lcy4fb7tBFoaQ==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Fbenchmarking-aggregate@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/benchmarking-evidence",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-LoKYClSKRNE6t2D9hQvcATgSQoj4H6oYq7BYO1WmepWL1q3/780sf41+RsWgvZo7qojuH7flvSEaKdmWsA1ubQ==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Fbenchmarking-evidence@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/benchmarking-interop",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-zWF9Jhbzhp14HSjBS+y1mP9WmxFlV9YmXJnrejmSijX6eu0slUxb0c/gqXARAVfFdz9WMlkg2fVG0t7oqBFRuA==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Fbenchmarking-interop@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/benchmarking-local",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-dbW6N5ld8NmJY4yZbGt/Yh1Xlj7jWOMbF+1c8eV2xv+ZnXizObqPJYNyQ85gMZNYBO/E/ucObd3y8SB1fudh3w==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Fbenchmarking-local@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/benchmarking-protocol",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-BcrVkvvwDuOR3yFNi+4fnbFA7TqUSsnkmk8jRU0/uixFEgHy3DuFAQJnQggVcLO7TyOZeT8t69gOCTQNaPRxFw==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Fbenchmarking-protocol@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/benchmarking-records",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-K1cvFsL0AdupqFBUgDL5/g5HR5wDwerJx5RUceVvr2FW89qmOQHnfXkoCnZiEsF8J/QunlCYA1a/aFh+ad4owg==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Fbenchmarking-records@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/benchmarking-run",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-YHUhG9z9pp4MmDgukwPohwhR4/earwCxBT0JUZWpXnF90HWXY2iogNuv38qROzyrK4pULnHicAzytCoCi18rgQ==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Fbenchmarking-run@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/environment-record",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-1eZ7eiVJO9zPnOu5iQpiq7xwaxDKde5fL2tYxheF5v17rT1GVLLCCRcBANa/AwoVexawEklDK8aYJ99QW2wQIQ==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Fenvironment-record@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/evidence-protocol",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-JGztPz07bPWr0B4jxRsY8XIpS0HvHQ0cdK7xEwFJRqMshClO2CVHCcb6uxHK2eF5slUkd3gXCUXv5mrsrYQcHA==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Fevidence-protocol@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/task-admission",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-o1u6UNbH+0DZSHVsoBShIq1RouAIehAhbRF3fVs4w7NEa1yKD6lGf9F0dreJHpEZKClABmrDK1vXKrdZ9Lpa7A==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Ftask-admission@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/task-execution-profiles",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-95sNOM/pNdjDJ7JQQjkjbjqJSLUfW65xu1cxOOQq9KgYv0TZiHHrqWA5AdzrychCvEN6tgupN4UncBn8JbFXxA==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Ftask-execution-profiles@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/task-execution-protocol",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-IGyz/vlqN/yETKXShJRyxuMMQL0dJzXbe0jYnCFNwhSRdxwMxc0iaJrJxp1AsfYjn8rhCKFiuXUUzdRonsdG2w==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Ftask-execution-protocol@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/trust-core",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-XyIdLJvMBTGuYA+rljSYplUdxVW7MkZGJW7/R70kTJcvDfWbWxjJ/pcqWGTGoN2QBcJvgsFUzazj47yeWF9ZOw==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Ftrust-core@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/trust-resolve",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-09YaaUt9jpSeGHvIE/duIWJOVNs9gImJSB2C6RHaCnZZPapWySxqbrNPYaQcTaDPOfuNp/tsFbXpRkuehJYAIQ==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Ftrust-resolve@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        },
+        {
+          "name": "@jinn-network/trust-testing",
+          "version": "0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "gitHead": "e00b2fc47fc5635b007eb349fb1e41aa81bb3c50",
+          "integrity": "sha512-uD3Y2WTYPbaIoLrcLFdLFa2FKimApRjpWERTzuhIGsHH8kmolbY/aaxADsLr5/2VPzH8+u1mvUnbRyHy19jRZA==",
+          "provenanceUrl": "https://registry.npmjs.org/-/npm/v1/attestations/%40jinn-network%2Ftrust-testing@0.1.0-canary.sha.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50"
+        }
+      ]
+    }
+  ]
+}

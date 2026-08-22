@@ -6,8 +6,12 @@ import { test } from 'node:test';
 import {
   COLOPHON_PUBLISH_WORKFLOW,
   FIRST_CUT_PLATFORM_PIN_PATH,
+  PRODUCT_RELEASE_PLATFORM_PINS_PATH,
   loadFirstCutPlatformPin,
+  loadProductReleasePlatformPin,
   transformColophonManifestForPublish,
+  validateProductReleasePlatformPin,
+  validateProductReleasePlatformPins,
 } from './colophon-publish-manifest.mjs';
 import { loadPlatformCatalog } from './platform-catalog.mjs';
 import { buildRegistrationList } from './stack-trusted-publishers.mjs';
@@ -16,6 +20,8 @@ const repoRoot = resolve(import.meta.dirname, '../..');
 const PIN_SHA = '1ed36166faf16ea4b96b021ceff0397f83a0a80c';
 const PIN_VERSION = `0.1.0-canary.sha.${PIN_SHA}`;
 const PRODUCT_SHA = '2f249073718111afd810127ff7bbbc19b206dc93';
+const V2_PIN_SHA = 'e00b2fc47fc5635b007eb349fb1e41aa81bb3c50';
+const V2_PIN_VERSION = `0.1.0-canary.sha.${V2_PIN_SHA}`;
 
 function verifyManifest() {
   return JSON.parse(readFileSync(join(repoRoot, 'packages/benchmark-product/verify/package.json'), 'utf8'));
@@ -42,22 +48,113 @@ test('the first-cut pin names one exact stack-canary receipt, not a dist-tag', (
   assert.equal(FIRST_CUT_PLATFORM_PIN_PATH, 'packages/benchmark-product/first-cut-platform-pin.json');
 });
 
-test('publish transform keeps the Colophon product version and pins every Jinn runtime dep', () => {
-  const pin = loadFirstCutPlatformPin(repoRoot);
+test('the verifier 0.2 exception records one attested e00 closure without changing the historical receipt', () => {
+  const manifest = verifyManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  assert.equal(pin.decision, 'DR-2026-08-22-a');
+  assert.equal(pin.product.packageName, '@colophon-claims/verify');
+  assert.equal(pin.product.version, '0.2.0');
+  assert.equal(pin.platformSourceSha, V2_PIN_SHA);
+  assert.equal(pin.platformVersion, V2_PIN_VERSION);
+  assert.equal(pin.stackPublishRunUrl, 'https://github.com/Jinn-Network/mono/actions/runs/32544891098/attempts/2');
+  assert.equal(PRODUCT_RELEASE_PLATFORM_PINS_PATH, 'packages/benchmark-product/product-release-platform-pins.json');
+  assert.equal(pin.platformPackages.length, 15);
+  for (const pkg of pin.platformPackages) {
+    assert.equal(pkg.version, V2_PIN_VERSION, pkg.name);
+    assert.equal(pkg.gitHead, V2_PIN_SHA, pkg.name);
+    assert.match(pkg.integrity, /^sha512-/u, pkg.name);
+    assert.match(pkg.provenanceUrl, /^https:\/\/registry\.npmjs\.org\/-\/npm\/v1\/attestations\/%40jinn-network%2F/u, pkg.name);
+  }
+  assert.equal(loadFirstCutPlatformPin(repoRoot).platformVersion, PIN_VERSION);
+});
+
+test('the verifier 0.2 exception cannot become an implicit product or version exception', () => {
+  const manifest = verifyManifest();
+  assert.throws(
+    () => loadProductReleasePlatformPin(repoRoot, { ...manifest, version: '0.2.1' }),
+    /only @colophon-claims\/verify@0\.2\.0/u,
+  );
+  assert.throws(
+    () => loadProductReleasePlatformPin(repoRoot, { ...manifest, name: '@colophon-claims/core' }),
+    /only @colophon-claims\/verify@0\.2\.0/u,
+  );
+});
+
+test('the one-time receipt rejects hostile coherent rewrites and malformed registry facts', () => {
+  const manifest = verifyManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  const mutate = (apply) => {
+    const copy = structuredClone(pin);
+    apply(copy);
+    return copy;
+  };
+  assert.throws(
+    () => validateProductReleasePlatformPin(mutate((copy) => {
+      copy.platformSourceSha = 'a'.repeat(40);
+      copy.platformVersion = `0.1.0-canary.sha.${copy.platformSourceSha}`;
+      for (const row of copy.platformPackages) {
+        row.gitHead = copy.platformSourceSha;
+        row.version = copy.platformVersion;
+        row.provenanceUrl = `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(row.name)}@${copy.platformVersion}`;
+      }
+    }), manifest),
+    /only @colophon-claims\/verify@0\.2\.0|immutable DR-2026-08-22-a/u,
+  );
+  assert.throws(
+    () => validateProductReleasePlatformPin(mutate((copy) => {
+      copy.platformPackages[0].integrity = 'sha512-not-a-registry-integrity';
+    }), manifest),
+    /immutable DR-2026-08-22-a/u,
+  );
+  assert.throws(
+    () => validateProductReleasePlatformPin(mutate((copy) => {
+      copy.platformPackages.reverse();
+    }), manifest),
+    /sorted verifier 0\.2 closure/u,
+  );
+  assert.throws(
+    () => validateProductReleasePlatformPin(mutate((copy) => {
+      copy.platformPackages[0].extra = 'drift';
+    }), manifest),
+    /package row shape drift/u,
+  );
+});
+
+test('the receipt collection refuses added or duplicate rows and root-key drift', () => {
+  const manifest = verifyManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  assert.throws(
+    () => validateProductReleasePlatformPins({ schemaVersion: 1, receipts: [pin, structuredClone(pin)] }, manifest),
+    /exactly one immutable verifier 0\.2 receipt/u,
+  );
+  assert.throws(
+    () => validateProductReleasePlatformPins({ receipts: [pin], schemaVersion: 1 }, manifest),
+    /exactly one immutable verifier 0\.2 receipt/u,
+  );
+  const duplicate = structuredClone(pin);
+  duplicate.platformPackages[1] = structuredClone(duplicate.platformPackages[0]);
+  assert.throws(
+    () => validateProductReleasePlatformPin(duplicate, manifest),
+    /sorted verifier 0\.2 closure/u,
+  );
+});
+
+test('publish transform keeps the Colophon product version and pins every Jinn runtime dep to the 0.2 receipt', () => {
+  const pin = loadProductReleasePlatformPin(repoRoot, verifyManifest());
   const patched = transformColophonManifestForPublish(verifyManifest(), pin);
   assert.equal(patched.name, '@colophon-claims/verify');
-  assert.equal(patched.version, '0.1.0');
+  assert.equal(patched.version, '0.2.0');
   const jinnDeps = Object.entries(patched.dependencies).filter(([name]) => name.startsWith('@jinn-network/'));
   assert.ok(jinnDeps.length >= 8);
   for (const [name, version] of jinnDeps) {
-    assert.equal(version, PIN_VERSION, name);
+    assert.equal(version, V2_PIN_VERSION, name);
   }
   assert.equal(patched.dependencies.zod, '4.4.3');
   assert.equal(patched.dependencies['@fontsource-variable/newsreader'], '5.3.0');
 });
 
 test('publish transform strips portal and workspace resolutions and rewrites prepack for npm', () => {
-  const pin = loadFirstCutPlatformPin(repoRoot);
+  const pin = loadProductReleasePlatformPin(repoRoot, verifyManifest());
   const patched = transformColophonManifestForPublish(verifyManifest(), pin);
   const serialized = JSON.stringify(patched);
   assert.doesNotMatch(serialized, /portal:/u);
@@ -68,7 +165,7 @@ test('publish transform strips portal and workspace resolutions and rewrites pre
 });
 
 test('publish transform refuses a floating canary dist-tag in the pin or source deps', () => {
-  const pin = loadFirstCutPlatformPin(repoRoot);
+  const pin = loadProductReleasePlatformPin(repoRoot, verifyManifest());
   assert.throws(
     () => transformColophonManifestForPublish(verifyManifest(), { ...pin, platformVersion: 'canary' }),
     /floating canary dist-tag/u,

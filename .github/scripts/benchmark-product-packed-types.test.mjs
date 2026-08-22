@@ -388,13 +388,13 @@ try {
           throw new Error(`focused T1 cold install did not fetch ${name} metadata and tarball through loopback: ${JSON.stringify([...registry.requests].sort())}`);
         }
       }
-      console.log('Materialized the 144-cell qualification, deleted its builder workspace, and replayed it with a cold-installed @colophon-claims/verify@0.1 binary.');
+      console.log('Materialized the 144-cell qualification, deleted its builder workspace, and replayed it with a cold-installed @colophon-claims/verify@0.2 binary.');
     } else {
     // Prove the reader's *installed closure*, not just its direct manifest, stays
     // independent of the Colophon runner and task-execution runtime packages.
     await mkdir(readerRoot);
     await writeFile(join(readerRoot, 'package.json'), JSON.stringify({ private: true, dependencies: {
-      '@colophon-claims/verify': '0.1',
+      '@colophon-claims/verify': '0.2',
     } }, null, 2));
     await writeFile(join(readerRoot, '.npmrc'), `@colophon-claims:registry=${registry.baseUrl}\n@jinn-network:registry=${registry.baseUrl}\n`);
     await run('npm', [
@@ -429,7 +429,7 @@ try {
 
     await mkdir(consumerRoot);
     await writeFile(join(consumerRoot, 'package.json'), JSON.stringify({ private: true, type: 'module', dependencies: {
-      '@colophon-claims/core': '0.1', '@colophon-claims/cli': '0.1', '@colophon-claims/verify': '0.1',
+      '@colophon-claims/core': '0.1', '@colophon-claims/cli': '0.1', '@colophon-claims/verify': '0.2',
       '@types/node': '^22.0.0', typescript: '^5.9.3',
     } }, null, 2));
     await writeFile(join(consumerRoot, '.npmrc'), `@colophon-claims:registry=${registry.baseUrl}\n@jinn-network:registry=${registry.baseUrl}\n`);
@@ -515,7 +515,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     }
     const reader = JSON.parse(await run(
       npx,
-      ['--yes', '@colophon-claims/verify@0.1', demo.result.output.bundle, '--json'],
+      ['--yes', '@colophon-claims/verify@0.2', demo.result.output.bundle, '--json'],
       { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: join(temporaryRoot, 'reader-one-shot-npm-cache') } },
     ));
     if (reader.ok !== true || reader.checks?.length !== 6 || reader.identity !== demo.result.digests.bundleIdentity) {
@@ -524,7 +524,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     await appendFile(join(demo.result.output.bundle, 'README.md'), '\ntampered after publication\n');
     const tamperedReader = await runExpectingExit(
       npx,
-      ['--yes', '@colophon-claims/verify@0.1', demo.result.output.bundle, '--json'],
+      ['--yes', '@colophon-claims/verify@0.2', demo.result.output.bundle, '--json'],
       1,
       { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: join(temporaryRoot, 'reader-one-shot-npm-cache') } },
     );
@@ -535,7 +535,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     }
     console.log(isQualifiedRuntime
       ? `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages, ran the retained sample, served its verified loopback viewer, and reverified it with the reader package.`
-      : `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages and proved the public @0.1 selectors; darwin/arm64 and linux/x64 CI complete sample execution, viewer, and reader reverification.`);
+      : `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages and proved the public Core/CLI @0.1 and Verify @0.2 selectors; darwin/arm64 and linux/x64 CI complete sample execution, viewer, and reader reverification.`);
     }
   } finally { await registry.close(); }
 } finally {
