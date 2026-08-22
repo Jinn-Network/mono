@@ -43,6 +43,7 @@ import {
   PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
 } from "../reader-instructions.js";
+import { PROMPTED_SCREENING_PROFILE } from "../admission/contracts.js";
 import { ClaimAnchorSchema, SELF_RUN_TRUST_ROOT, anchoredTrustRoot } from "./anchor-claims.js";
 import type { ClaimAnchor } from "./anchor-claims.js";
 type VenueHonesty = unknown;
@@ -60,6 +61,11 @@ export const BINARY_QUALIFICATION_VERIFICATION_COMMAND =
   "npx @colophon-claims/verify@0.1.0 <bundle-dir>" as const;
 export const BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
   "npx @colophon-claims/verify@0.1 <bundle-dir>" as const;
+/** Prompted-screening v2 claims require the verifier release that carries that admission surface. */
+export const PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND =
+  "npx @colophon-claims/verify@0.2.0 <bundle-dir>" as const;
+export const PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
+  "npx @colophon-claims/verify@0.2 <bundle-dir>" as const;
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/, "must be a lowercase sha256 hex digest");
 
@@ -410,11 +416,15 @@ const ClaimPackageWireSchema = z.object({
   if (!exactResult) {
     ctx.addIssue({ code: "custom", message: "qualification must exactly equal the Report's one F6 per-subject result", path: ["qualification"] });
   }
-  if (
-    claim.verification.command !== BINARY_QUALIFICATION_VERIFICATION_COMMAND
-    || claim.verification.compatibleCommand !== BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
-  ) {
-    ctx.addIssue({ code: "custom", message: "binary claim package must pin verifier 0.1.0/@0.1", path: ["verification"] });
+  const prompted = (claim.method.parameters as Record<string, unknown>)["promptedScreeningProfile"] === PROMPTED_SCREENING_PROFILE;
+  const command = prompted
+    ? PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND
+    : BINARY_QUALIFICATION_VERIFICATION_COMMAND;
+  const compatibleCommand = prompted
+    ? PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
+    : BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND;
+  if (claim.verification.command !== command || claim.verification.compatibleCommand !== compatibleCommand) {
+    ctx.addIssue({ code: "custom", message: `binary claim package must pin verifier ${prompted ? "0.2.0/@0.2" : "0.1.0/@0.1"}`, path: ["verification"] });
   }
   if (
     claim.verification.checks.length !== READER_VERIFICATION_CHECKS.length
@@ -798,7 +808,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     (entry) => entry.method === reportRecord.method.id && entry.version === reportRecord.method.version,
   );
   const analysisParameters = matchingPlanEntry?.parameters as
-    | { readonly verdictRule?: unknown }
+    | { readonly verdictRule?: unknown; readonly promptedScreeningProfile?: unknown }
     | undefined;
   if (
     policy.independence !== resolved.independence
@@ -813,6 +823,12 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
   }
 
   const projection = methodProjection(reportRecord);
+  // Prompted screening is an authenticated Run-level admission fact. Every report/claim emitted
+  // from that Run uses the v2 reader, including its companion method claims; the binary claim's
+  // own schema separately binds the same exact profile in its method parameters.
+  const promptedScreening = input.runRecord.analysisPlan?.some(
+    (entry) => (entry.parameters as Record<string, unknown>)["promptedScreeningProfile"] === PROMPTED_SCREENING_PROFILE,
+  ) === true;
   const disclosuresPerSubject = (reportRecord.disclosures?.perSubject ?? []) as readonly DisclosurePerSubjectShape[];
   const taskCount = new Set(input.matrixRecord.cells.map((cell) => cell.taskDigest)).size;
   // anchor-evidence §7.4: the anchored closure is entered by the CALLER, by supplying the section
@@ -876,14 +892,18 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     verification: {
       command: anchored
         ? PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
-        : projection.qualification === undefined
-          ? PUBLIC_BUNDLE_VERIFICATION_COMMAND
-          : BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+        : promptedScreening
+          ? PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND
+          : projection.qualification === undefined
+            ? PUBLIC_BUNDLE_VERIFICATION_COMMAND
+            : BINARY_QUALIFICATION_VERIFICATION_COMMAND,
       compatibleCommand: anchored
         ? PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
-        : projection.qualification === undefined
-          ? PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND
-          : BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+        : promptedScreening
+          ? PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
+          : projection.qualification === undefined
+            ? PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND
+            : BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
       checks: anchored ? [...ANCHORED_CLAIM_VERIFICATION_CHECKS] : [...CLAIM_VERIFICATION_CHECKS],
       // §9.2: the trust-root sentence is replaced only by a governing lock anchor. A bundle whose
       // only anchors are pending, or cover the Matrix alone, keeps the unconditional sentence.

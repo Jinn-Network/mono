@@ -57,6 +57,17 @@ function validBinaryClaim() {
 test("claim-package/2 rejects top-level and nested ranking conclusions", () => {
   const claim = validBinaryClaim();
   assert.equal(ClaimPackageSchema.safeParse(claim).success, true);
+  const prompted = structuredClone(claim);
+  prompted.method.parameters = { promptedScreeningProfile: "prompted-codex-screening/v1" };
+  prompted.verification.command = "npx @colophon-claims/verify@0.2.0 <bundle-dir>";
+  prompted.verification.compatibleCommand = "npx @colophon-claims/verify@0.2 <bundle-dir>";
+  assert.equal(ClaimPackageSchema.safeParse(prompted).success, true);
+  const promptedWrong = structuredClone(prompted);
+  promptedWrong.verification.command = "npx @colophon-claims/verify@0.1.0 <bundle-dir>";
+  assert.equal(ClaimPackageSchema.safeParse(promptedWrong).success, false);
+  const promptedMixed = structuredClone(prompted);
+  promptedMixed.verification.compatibleCommand = "npx @colophon-claims/verify@0.1 <bundle-dir>";
+  assert.equal(ClaimPackageSchema.safeParse(promptedMixed).success, false);
   assert.equal(ClaimPackageSchema.safeParse({ ...claim, ranking: ["arm-a"] }).success, false);
   const nested = structuredClone(claim);
   nested.scope.arms = [{ armId: "arm-a", pinning: {}, winner: true }];

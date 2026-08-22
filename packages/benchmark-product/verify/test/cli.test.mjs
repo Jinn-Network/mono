@@ -32,7 +32,7 @@ test("a missing bundle exits 1 with machine-readable invalid-bundle output", asy
   assert.equal(result.code, 1);
   assert.deepEqual(JSON.parse(result.stdout), {
     ok: false,
-    verifierVersion: "0.1.0",
+    verifierVersion: "0.2.0",
     supportedFormats: [
       "benchmark-product-public-bundle/2",
       "benchmark-product-public-bundle/4",

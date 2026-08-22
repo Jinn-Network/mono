@@ -24,7 +24,7 @@ const PRODUCT_PACKAGES = [
 const PACKAGE_VERSIONS = new Map([
   ['@colophon-claims/core', '0.1.0'],
   ['@colophon-claims/cli', '0.1.0'],
-  ['@colophon-claims/verify', '0.1.0'],
+  ['@colophon-claims/verify', '0.2.0'],
   ['@colophon-claims/web', '0.1.0'],
 ]);
 
@@ -195,7 +195,10 @@ test('the Colophon claims inventory is explicit and derives its membership from 
     assert.equal(manifest.version, PACKAGE_VERSIONS.get(name));
     assert.equal(manifest.private === true, visibility === 'private', `${name} visibility drifted`);
     for (const dependency of dependencyNames(manifest, COLOPHON_SCOPE)) {
-      assert.equal(manifest.dependencies?.[dependency], PACKAGE_VERSIONS.get(dependency), `${name} must pin public sibling ${dependency} exactly`);
+      // Core and CLI remain at product version 0.1, while their current-artifact dependency
+      // closure uses verifier 0.2 for the prompted-screening admission surface.
+      const expectedVersion = PACKAGE_VERSIONS.get(dependency);
+      assert.equal(manifest.dependencies?.[dependency], expectedVersion, `${name} must pin public sibling ${dependency} exactly`);
     }
   }
 });
