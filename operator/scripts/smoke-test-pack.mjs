@@ -295,6 +295,31 @@ try {
     const npxLegacy = runOrExit('npx', ['-p', tarball, 'jinn', 'version', '--json'], 'npx -p');
     assertVersionPayload(parseJsonOrExit(npxLegacy.stdout, 'npx -p'), 'npx -p');
 
+    const publicNpx = spawnSync('npx', ['--no-install', '@jinn-network/operator', 'doctor'], {
+      cwd: smokeDir,
+      encoding: 'utf8',
+      env: smokeEnv,
+      timeout: 60_000,
+    });
+    const publicOutput = `${publicNpx.stdout}\n${publicNpx.stderr}`;
+    if (publicNpx.error || publicOutput.includes('could not determine executable')) {
+      console.error('smoke-test-pack: public npx @jinn-network/operator doctor is ambiguous or failed');
+      console.error(publicNpx.error ?? publicOutput);
+      process.exit(publicNpx.status ?? 1);
+    }
+    if (publicNpx.status === 50) {
+      console.error('smoke-test-pack: public npx doctor crashed');
+      console.error(publicNpx.stderr || publicNpx.stdout);
+      process.exit(publicNpx.status);
+    }
+    parseJsonOrExit(publicNpx.stdout, 'public npx doctor');
+
+    runOrExit(
+      'npx',
+      ['--no-install', '-p', '@jinn-network/operator', 'jinn-stop-hook', '--help'],
+      'packed jinn-stop-hook remains named',
+    );
+
     console.log('smoke-test-pack: ok', payload.client.version);
   }
 
