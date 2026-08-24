@@ -349,9 +349,9 @@ updates:
   # omitted from the allowlist above — so they accrued Dependabot security
   # alerts with no version-update PRs to clear them. Added so routine
   # minor+patch bumps (and security updates) are auto-managed like the rest.
-  # NOTE: apps/jinn-agent is deliberately NOT listed — it is a subtree of the
-  # standalone Jinn-Network/jinn-agent repo, which carries its own
-  # .github/dependabot.yml; its updates flow in via subtree sync.
+  # NOTE: the vendored Hermes host (apps/jinn-agent) is gone. Do not add a
+  # Dependabot ecosystem for a deleted tree. Frozen adapter lives in
+  # plugin/frozen; clean-slate adapter lives in plugin/adapter-hermes.
   - package-ecosystem: npm
     directory: "/packages/indexer-enrichment"
     schedule:
