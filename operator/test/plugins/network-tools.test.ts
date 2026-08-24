@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
@@ -168,7 +168,7 @@ describe('Network Tools plugin manifest', () => {
     }
   });
 
-  it('can be resolved through the bundled plugin resolver path', async () => {
+  it('resolves bundled network-tools in place and finds the MCP server without JINN_NETWORK_TOOLS_CLIENT_ROOT', async () => {
     const vendorRoot = mkdtempSync(join(tmpdir(), 'network-tools-'));
     try {
       const plugin = await resolveSolverPlugin('bundled:network-tools', { vendorRoot });
@@ -176,9 +176,19 @@ describe('Network Tools plugin manifest', () => {
       expect(plugin.name).toBe('@jinn-network/network-tools');
       expect(plugin.sourceKind).toBe('bundled');
       expect(plugin.source).toBe('bundled:network-tools');
-      expect(plugin.root.startsWith(vendorRoot)).toBe(true);
+      expect(resolve(plugin.root)).toBe(resolve(pluginRoot));
+      expect(plugin.root.startsWith(vendorRoot)).toBe(false);
       expect(plugin.supports).toEqual(['jinn.runtime']);
       expect(existsSync(join(plugin.root, 'mcp/jinn-client-server.mjs'))).toBe(true);
+
+      const wrapper = await import(pathToFileURL(join(plugin.root, 'mcp/jinn-client-server.mjs')).href) as {
+        resolveJinnClientMcpLauncher: (
+          env?: Record<string, string | undefined>,
+          root?: string,
+        ) => { command: string; args: string[]; cwd: string };
+      };
+      const launcher = wrapper.resolveJinnClientMcpLauncher({}, plugin.root);
+      expect(existsSync(launcher.args.at(-1)!)).toBe(true);
     } finally {
       rmSync(vendorRoot, { recursive: true, force: true });
     }

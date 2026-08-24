@@ -1,7 +1,6 @@
 // operator/src/harnesses/impls/hermes-agent/config-builder.ts
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isAbsolute, join, resolve } from 'node:path';
 
 export interface McpStdioServer {
   command: string;
@@ -54,38 +53,10 @@ export interface ConfigBuilderEnv {
   };
 }
 
-/**
- * Resolves the client install root (`<client>/`, containing `dist/` and
- * `plugins/`) by walking up from this module's compiled location.
- *
- * This file lives at:
- *   - `<client>/dist/harnesses/impls/hermes-agent/config-builder.js` (built)
- *   - `<client>/src/harnesses/impls/hermes-agent/config-builder.ts` (source)
- *
- * Either way, four directory hops up from the file's directory lands at
- * `<client>/`, which the `network-tools` plugin's MCP launcher
- * (`operator/plugins/network-tools/mcp/jinn-client-server.mjs`) expects when
- * reading `JINN_NETWORK_TOOLS_CLIENT_ROOT`.
- *
- * v0.1.6 patch — gh #294. The proper fix (audit *why* SolverPlugins are
- * copied per-task into `$HOME/.jinn-client/solver-plugins/`, which is why
- * the launcher's own `<pluginRoot>/../..` walk fails) is tracked in #296.
- */
-function resolveClientRoot(): string {
-  const here = fileURLToPath(import.meta.url);
-  return resolve(dirname(here), '..', '..', '..', '..');
-}
-
 function buildJinnRuntimeEnv(env: ConfigBuilderEnv): Record<string, string> {
   const out: Record<string, string> = {
     DAEMON_API_URL: env.daemonApiUrl,
     DAEMON_API_TOKEN: env.daemonApiToken,
-    // gh #294: tell the network-tools MCP launcher where to find the
-    // daemon's `dist/mcp/server.js`. The launcher's own resolution walks
-    // `<pluginRoot>/../..`, which lands at `$HOME/.jinn-client/` (no
-    // `dist/`) when the plugin tree has been copied per-task — see #296
-    // for the layout-audit investigation.
-    JINN_NETWORK_TOOLS_CLIENT_ROOT: resolveClientRoot(),
   };
   if (env.storePath) out.STORE_PATH = env.storePath;
   if (env.corpusEnv.discoveryUrl) {
