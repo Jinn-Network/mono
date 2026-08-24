@@ -9,6 +9,7 @@ on:
   pull_request:
     paths:
       - "packages/marketplace/**"
+      - "packages/contract-abis/**"
       - "contracts/**"
       - ".github/scripts/marketplace-*.test.mjs"
       - ".github/scripts/custody-boundaries.test.mjs"
@@ -18,6 +19,7 @@ on:
     branches: [next]
     paths:
       - "packages/marketplace/**"
+      - "packages/contract-abis/**"
       - "contracts/**"
       - ".github/scripts/marketplace-*.test.mjs"
       - ".github/scripts/custody-boundaries.test.mjs"
@@ -69,6 +71,7 @@ jobs:
           (cd contracts && yarn install --immutable && yarn compile)
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
+          (cd packages/contract-abis && yarn install --immutable && yarn build:dist)
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)

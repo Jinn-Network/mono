@@ -215,6 +215,7 @@ jobs:
       # `yarn test:hermetic`) can spawn a real indexer against the snapshot chain.
       - name: Build indexer local package dependencies
         run: |
+          (cd packages/contract-abis && yarn install --immutable && yarn build:dist)
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)

@@ -7,6 +7,7 @@ on:
       - '.github/workflows/indexer-ci.yml'
       - '.github/scripts/indexer-boundaries.test.mjs'
       - 'packages/indexer/**'
+      - 'packages/contract-abis/**'
       - 'packages/benchmarking/records/**'
       - 'packages/task-execution/protocol/**'
   push:
@@ -15,6 +16,7 @@ on:
       - '.github/workflows/indexer-ci.yml'
       - '.github/scripts/indexer-boundaries.test.mjs'
       - 'packages/indexer/**'
+      - 'packages/contract-abis/**'
       - 'packages/benchmarking/records/**'
       - 'packages/task-execution/protocol/**'
 
@@ -63,6 +65,12 @@ jobs:
         run: |
           yarn install --immutable
           yarn build
+
+      - name: Build @jinn-network/contract-abis
+        working-directory: packages/contract-abis
+        run: |
+          yarn install --immutable
+          yarn build:dist
 
       - run: yarn install --immutable
       - run: yarn codegen

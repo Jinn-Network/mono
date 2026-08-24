@@ -2,10 +2,14 @@ name: Contracts CI
 
 on:
   pull_request:
-    paths: ['contracts/**']
+    paths:
+      - 'contracts/**'
+      - 'packages/contract-abis/**'
   push:
     branches: [next, main]
-    paths: ['contracts/**']
+    paths:
+      - 'contracts/**'
+      - 'packages/contract-abis/**'
 
 concurrency:
   group: contracts-ci-${{ github.ref }}
@@ -38,6 +42,12 @@ jobs:
         with:
           version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
       - run: yarn compile
+      - name: Verify contract-abis drift gate (#1577)
+        working-directory: ${{ github.workspace }}/packages/contract-abis
+        run: |
+          yarn install --immutable
+          yarn check-drift
+          yarn test
       - name: Build marketplace-testing adapter dependency from source (§7.8)
         working-directory: ${{ github.workspace }}
         run: |
@@ -62,6 +72,7 @@ jobs:
           (cd packages/discovery/serve && yarn install --immutable && yarn build)
           (cd packages/discovery/testing && yarn install --immutable && yarn build)
           (cd packages/trust/testing && yarn install --immutable && yarn build)
+          (cd packages/contract-abis && yarn install --immutable && yarn build:dist)
           (cd packages/marketplace/binding && yarn install --immutable && yarn build)
           (cd packages/marketplace/projector && yarn install --immutable && yarn build)
           (cd packages/marketplace/venue-base && yarn install --immutable && yarn build)
