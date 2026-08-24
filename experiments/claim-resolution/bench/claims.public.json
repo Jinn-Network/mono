@@ -1,0 +1,707 @@
+{
+  "note": "Solver-visible fields ONLY. Ground truth lives in bench/truth.json and is never read on the solver path.",
+  "generated_at": "2026-08-19T09:53:18.593Z",
+  "n": 100,
+  "claims": [
+    {
+      "id": "cr-ca082a3077",
+      "claim": "Hamas agreed, through the US-led Gaza Board of Peace, to a formal roadmap for the phased disarmament of Hamas and other armed factions in Gaza before August 1, 2026.",
+      "criteria": "Resolves YES if, before August 1, 2026, Hamas signaled agreement (even if qualified) to a Board of Peace-negotiated roadmap providing for handover of weapons and transfer of governance to a new administrative body. Resolves NO if no such agreement was reached by that date.",
+      "deadline": "2026-08-01",
+      "split": "eval"
+    },
+    {
+      "id": "cr-67763d0400",
+      "claim": "The Phase 3 EPCORE DLBCL-1 trial of epcoritamab in relapsed/refractory diffuse large B-cell lymphoma, clarified by Genmab and AbbVie in a statement issued around July 23, 2026, met its sole U.S. primary endpoint of overall survival with statistical significance.",
+      "criteria": "Resolves YES if the companies' July 2026 clarification confirmed the overall survival primary endpoint reached statistical significance. Resolves NO if the companies confirmed the overall survival primary endpoint was not met, regardless of secondary endpoint results such as progression-free survival.",
+      "deadline": "2026-07-23",
+      "split": "eval"
+    },
+    {
+      "id": "cr-36a407a10e",
+      "claim": "Between the start of its pause on publishing new complete response letters (CRLs) in April 2026 and July 31, 2026, the FDA published zero new complete response letters on its public CRL disclosure portal.",
+      "criteria": "Resolves YES if no new CRLs were added to FDA's public repository during this period. Resolves NO if the FDA published at least one new CRL on the portal during this period despite the announced pause.",
+      "deadline": "2026-07-31",
+      "split": "dev"
+    },
+    {
+      "id": "cr-0969ef36ea",
+      "claim": "Bureau of Labor Statistics CPI data released in mid-August 2026 and highlighted by the White House showed that US prescription drug prices posted their steepest annual percentage decline since 1963.",
+      "criteria": "Resolves YES if BLS CPI data covering the 12 months ending July 2026, as reported in mid-August 2026, showed the largest annual percentage drop in prescription drug prices since 1963. Resolves NO if the decline was not the largest since 1963 or if no such record was reported by BLS/White House at that time.",
+      "deadline": "2026-08-13",
+      "split": "dev"
+    },
+    {
+      "id": "cr-1c84e55bf7",
+      "claim": "Keiko Fujimori was officially declared the winner of Peru's June 2026 presidential runoff election.",
+      "criteria": "Resolves YES if Peru's National Elections Jury (Jurado Nacional de Elecciones) formally proclaimed Keiko Fujimori president-elect following the 7 June 2026 runoff against Roberto Sánchez. Resolves NO if Sánchez was proclaimed the winner.",
+      "deadline": "2026-07-03",
+      "split": "dev"
+    },
+    {
+      "id": "cr-6e68ee6992",
+      "claim": "Oracle Corporation's fiscal year 2026 annual report (Form 10-K), filed in June 2026, disclosed a global workforce reduction of at least 15,000 employees explicitly linked to AI-driven restructuring.",
+      "criteria": "Resolves YES if Oracle's FY2026 annual report, filed around June 22, 2026, disclosed a workforce reduction of 15,000 or more employees tied to AI infrastructure spending or restructuring. Resolves NO if the disclosed reduction was below 15,000 or not linked to AI restructuring.",
+      "deadline": "2026-06-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-75942e100f",
+      "claim": "Strategy (formerly known as MicroStrategy) sold Bitcoin from its corporate treasury holdings at some point between May 26 and May 31, 2026.",
+      "criteria": "Considered true if Strategy's own SEC filings (such as a Form 8-K) or on-chain transaction records confirm that any amount of Bitcoin was sold from the company's treasury during the calendar window of May 26-31, 2026 inclusive, regardless of when that sale was later disclosed to the public; considered false if no such sale occurred within that window.",
+      "deadline": "2026-05-31",
+      "split": "eval"
+    },
+    {
+      "id": "cr-5ded66698d",
+      "claim": "By April 22, 2026, US President Donald Trump had publicly announced that the ceasefire between the United States and Iran (which began April 8, 2026) would continue on an open-ended basis pending an Iranian peace proposal, rather than simply lapsing on its original two-week timeline.",
+      "criteria": "Considered true if, by April 22, 2026, credible wire-service reporting documents a public announcement by Trump extending the ceasefire without a fixed new end date, conditioned on Iran submitting a unified peace proposal; considered false if no such open-ended extension announcement had been made by that date, or if the ceasefire had simply lapsed or been replaced only by a fixed-duration extension.",
+      "deadline": "2026-04-22",
+      "split": "eval"
+    },
+    {
+      "id": "cr-143bac2c24",
+      "claim": "The January 2026 US special-forces operation that captured Venezuelan leader Nicolás Maduro from his compound in Caracas amounted to a sustained military offensive intended to establish US control over Venezuelan territory, rather than a short, targeted extraction raid.",
+      "criteria": "Considered true if credible reporting and official US characterizations describe the operation as a broad, sustained military campaign aimed at seizing and holding Venezuelan territory; considered false if it is characterized as a brief, targeted special-operations raid focused on capturing a specific individual, without an accompanying campaign to occupy or control territory.",
+      "deadline": "2026-01-10",
+      "split": "dev"
+    },
+    {
+      "id": "cr-8ddfad58ca",
+      "claim": "TikTok became inaccessible for use or download to the majority of users in the United States at some point before May 1, 2025, as a direct result of the federal ban law taking effect.",
+      "criteria": "Considered true if, before May 1, 2025, the app became unavailable for use or new downloads to the majority of US users at any point as documented by credible contemporaneous reporting, even if service was subsequently restored through a later non-enforcement action; considered false if the app remained continuously accessible to US users throughout the period up to May 1, 2025.",
+      "deadline": "2025-05-01",
+      "split": "eval"
+    },
+    {
+      "id": "cr-70ab31c981",
+      "claim": "Russia and Ukraine signed a comprehensive written agreement ending the war, as required by the U.S.-set deadline, before June 30, 2026.",
+      "criteria": "Resolves YES if, before June 30, 2026 (11:59pm ET), Ukraine and Russia both signed any written instrument establishing a ceasefire ending the war or a defined binding process toward ending the war. Localized, temporary, or issue-specific arrangements (prisoner exchanges, humanitarian pauses, sector-limited truces) do not count. Resolves NO otherwise.",
+      "deadline": "2026-06-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-79ea59256d",
+      "claim": "Armenia and Azerbaijan formally signed their final bilateral peace treaty before August 15, 2026.",
+      "criteria": "Resolves YES if the governments of Armenia and Azerbaijan executed a formal, ratifiable signature of the comprehensive peace treaty (as distinct from initialing the text or signing a preliminary framework/declaration) before August 15, 2026. Resolves NO otherwise.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-f90c8a6ca8",
+      "claim": "Rwanda completed the withdrawal of its troops from eastern Democratic Republic of Congo as required under the 2025 Washington Accords before August 15, 2026.",
+      "criteria": "Resolves YES if independent verification (e.g., US State Department, UN, or AU monitoring bodies) confirmed complete Rwandan troop withdrawal from North Kivu and Ituri provinces of the DRC before August 15, 2026. Resolves NO if withdrawal remained incomplete or unverified by that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-cc9595043e",
+      "claim": "Peru's National Jury of Elections officially proclaimed the winner of the 7 June 2026 presidential runoff by a margin of more than five percentage points between Keiko Fujimori and Roberto Sánchez.",
+      "criteria": "Resolves YES if the official proclamation issued by Peru's Jurado Nacional de Elecciones (JNE) records a winning margin greater than 5 percentage points between the two candidates. Resolves NO if the certified margin was 5 percentage points or smaller.",
+      "deadline": "2026-07-03",
+      "split": "eval"
+    },
+    {
+      "id": "cr-6a977503dd",
+      "claim": "The Federal Reserve's Summary of Economic Projections released at its June 2026 FOMC meeting showed a higher median federal funds rate projection for year-end 2026 than the Summary of Economic Projections released in March 2026.",
+      "criteria": "Resolves YES if the median FOMC participant 'dot' for the federal funds rate at year-end 2026, as published in the June 2026 SEP, is numerically higher than the median dot for year-end 2026 published in the March 2026 SEP. Resolves NO if the June median dot is equal to or lower than the March figure.",
+      "deadline": "2026-06-17",
+      "split": "eval"
+    },
+    {
+      "id": "cr-65ddbe5945",
+      "claim": "The U.S. House of Representatives passed the National Defense Authorization Act for Fiscal Year 2027, including non-defense provisions such as a federal voter identification requirement, in a near party-line vote in late July 2026.",
+      "criteria": "Resolves YES if House records confirm the FY2027 NDAA passed the House in the window July 20–31, 2026, by a narrow vote (roughly along party lines, decided by fewer than 15 votes) and the bill as passed included a voter-ID related provision. Resolves NO if the bill failed to pass the House in that period, or passed with broad bipartisan support, or did not include such a provision.",
+      "deadline": "2026-07-23",
+      "split": "eval"
+    },
+    {
+      "id": "cr-f5501fc333",
+      "claim": "US federal regulators finalized implementing regulations for the GENIUS Act's stablecoin framework by the one-year statutory deadline.",
+      "criteria": "Resolves YES if the Federal Reserve, OCC, FDIC, NCUA, and/or Treasury had issued final (not merely proposed) implementing regulations under the GENIUS Act by July 18, 2026, one year after the law's enactment. Resolves NO if only proposed rules or open comment periods existed as of that date.",
+      "deadline": "2026-07-18",
+      "split": "eval"
+    },
+    {
+      "id": "cr-e7519897ff",
+      "claim": "A firmware-level random number generator flaw in a popular hardware wallet brand led to over $100 million in stolen Bitcoin in a single month in 2026.",
+      "criteria": "Resolves YES if security researchers and blockchain analytics firms documented cumulative Bitcoin theft exceeding $100 million within a calendar month, attributed to exploitation of a hardware wallet firmware vulnerability (weak pseudorandom seed generation), by August 15, 2026. Resolves NO otherwise.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-66ba76c933",
+      "claim": "The Trump family-backed crypto venture World Liberty Financial received final, unconditional approval from the OCC to operate a national trust bank.",
+      "criteria": "Resolves YES if, by August 15, 2026, the OCC had granted World Liberty Trust Company final approval to open and operate as a national trust bank (i.e., completed all conditions and examinations). Resolves NO if only preliminary/conditional approval, subject to further conditions and a final examination, had been granted by that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-542de6f0f0",
+      "claim": "The U.S. Securities and Exchange Commission finalized a settlement fully resolving its wash-trading fraud lawsuit against Tron founder Justin Sun with no admission of wrongdoing.",
+      "criteria": "Resolves YES if, by August 15, 2026, a federal court entered a final judgment dismissing all claims against Justin Sun personally (with the case fully resolved as a global settlement, neither admitting nor denying wrongdoing), while a Tron-affiliated corporate entity separately paid a civil monetary penalty. Resolves NO if the case against Sun remained unresolved, litigated to a verdict, or resulted in Sun personally admitting liability.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-954ffde0dc",
+      "claim": "OpenAI made its GPT-5.6 model family available to the general public (not just a restricted partner preview) on or before July 15, 2026.",
+      "criteria": "Resolves YES if OpenAI opened GPT-5.6 access to the general public (e.g., ChatGPT users broadly and/or open API access) by July 15, 2026, regardless of any earlier limited-preview period; resolves NO if only a restricted partner/government-vetted preview existed by that date with no general public rollout.",
+      "deadline": "2026-07-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-4a661d633a",
+      "claim": "The EU General Court ruled against Apple's legal challenge to its 'gatekeeper' designation for the App Store, iOS, and iMessage under the Digital Markets Act.",
+      "criteria": "Resolves YES if the EU General Court dismissed Apple's challenges and upheld the European Commission's gatekeeper designation of Apple's core platform services; resolves NO if the court sided with Apple and struck down or narrowed the designation.",
+      "deadline": "2026-07-08",
+      "split": "eval"
+    },
+    {
+      "id": "cr-6c4b1aecf8",
+      "claim": "Google's Gemini 3.5 Pro model reached general availability for the public on or before August 15, 2026.",
+      "criteria": "Resolves YES if Google removed Gemini 3.5 Pro from preview/limited-access status and made it generally available in the Gemini app and standard API/Vertex AI tiers by August 15, 2026; resolves NO if it remained in preview or unreleased through that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-dde63730e5",
+      "claim": "Anthropic's private-market valuation reached $1 trillion or more in a funding round completed on or before August 15, 2026.",
+      "criteria": "Resolves YES if a completed Anthropic private funding round valued the company at $1 trillion or higher by August 15, 2026; resolves NO if the highest completed private valuation by that date remained below $1 trillion.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-9d23980d7a",
+      "claim": "By August 15, 2026, academic publisher Sage had retracted more than 40 papers from the Journal of Intelligent and Fuzzy Systems (JIFS) over evidence of manipulated peer review tied to a 2020 Istanbul conference.",
+      "criteria": "Resolves YES if Retraction Watch or Sage's own retraction notices confirm that a batch of more than 40 JIFS papers connected to peer-review manipulation associated with the 2020 International Conference on Intelligent and Fuzzy Systems (Istanbul) was retracted on or before August 15, 2026. Resolves NO if fewer than 40 papers were retracted, or no such batch retraction occurred by that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-da699288ff",
+      "claim": "United Launch Alliance's Vulcan Centaur rocket resumed flying U.S. Space Force national security missions before August 15, 2026, following the anomaly-driven pause that began in February 2026.",
+      "criteria": "Resolves YES if a Vulcan Centaur National Security Space Launch (NSSL) mission launched on or before August 15, 2026 after the Space Force's pause following the February 12, 2026 USSF-87 booster anomaly. Resolves NO if the pause remained in effect and no such mission had launched by that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-59e6581e22",
+      "claim": "Ukraine met all IMF quantitative performance criteria, including its end-June 2026 net international reserves target, when the IMF Executive Board completed the first review of Ukraine's Extended Fund Facility arrangement in July 2026.",
+      "criteria": "Resolves YES if the IMF's first EFF review documentation states that Ukraine met the end-June 2026 net international reserves performance criterion. Resolves NO if Ukraine missed that target (regardless of whether the review was still completed via a waiver).",
+      "deadline": "2026-07-20",
+      "split": "eval"
+    },
+    {
+      "id": "cr-e9d96614ba",
+      "claim": "The Paris Court of Appeal's July 2026 ruling in the National Rally EU parliamentary assistants case immediately barred Marine Le Pen from running in France's 2027 presidential election.",
+      "criteria": "Resolves YES if the appellate court's July 2026 judgment imposed an ineligibility sanction that, as of the ruling, prevents Le Pen from being a candidate in the 2027 presidential race. Resolves NO if the ruling left her eligible to run (e.g., by crediting time already served, suspending part of the ban, or otherwise not imposing an immediate bar).",
+      "deadline": "2026-07-07",
+      "split": "eval"
+    },
+    {
+      "id": "cr-5ef13eea95",
+      "claim": "In its June 2026 ruling on Harvey Weinstein's appeal of his Los Angeles rape conviction, the California Court of Appeal completely overturned the conviction and ordered it dismissed.",
+      "criteria": "Resolves YES if the appellate panel vacated or reversed the underlying conviction itself. Resolves NO if the panel upheld/affirmed the conviction and only ordered further proceedings such as resentencing.",
+      "deadline": "2026-06-26",
+      "split": "eval"
+    },
+    {
+      "id": "cr-6291b4a39d",
+      "claim": "Exelixis's final analysis of the Phase 3 STELLAR-303 trial, evaluating zanzalintinib plus atezolizumab in metastatic colorectal cancer, announced in June 2026, showed that both of the trial's dual primary overall-survival endpoints (in the intention-to-treat population and in the non-liver-metastases subgroup) achieved statistical significance.",
+      "criteria": "Resolves YES if the June 2026 final analysis reported statistically significant overall survival benefit in both the intention-to-treat population and the non-liver-metastases subgroup. Resolves NO if only one (or neither) of the two dual primary endpoints reached statistical significance.",
+      "deadline": "2026-06-22",
+      "split": "eval"
+    },
+    {
+      "id": "cr-b2ea002aac",
+      "claim": "NOAA's global climate analysis found that July 2026 was outright the single hottest month ever recorded for the globe, surpassing all previous months including July 2024.",
+      "criteria": "Resolves YES if NOAA/NCEI's July 2026 global climate report ranks July 2026 as the sole warmest month on record globally (strictly exceeding July 2024). Resolves NO if NOAA reported July 2026 as tied with July 2024 for warmest month on record, rather than exceeding it outright.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-069b2f9a4b",
+      "claim": "In June 2026, the Museum of Modern Art (MoMA) in New York appointed an entirely new museum Director to lead the institution.",
+      "criteria": "Resolves YES if MoMA's announced June 2026 appointment was for the position of Museum Director (the institution's top executive leadership role). Resolves NO if the June 2026 appointment was for a different senior curatorial position (e.g., a department chief curator) rather than the overall Director role.",
+      "deadline": "2026-06-17",
+      "split": "dev"
+    },
+    {
+      "id": "cr-452941cc05",
+      "claim": "SpaceX's Starship Flight 13 test on July 24, 2026 achieved both a successful deployment of its Starlink satellite payload and a successful landing/splashdown of the Super Heavy booster.",
+      "criteria": "Resolves YES only if both (a) the Starlink V3 satellites were successfully deployed during the flight, and (b) the Super Heavy booster completed its landing burn and splashed down/landed intact without breaking apart. Resolves NO if the booster's landing burn failed or it was destroyed on impact, even if satellite deployment succeeded.",
+      "deadline": "2026-07-31",
+      "split": "eval"
+    },
+    {
+      "id": "cr-13e56f2aa1",
+      "claim": "By July 31, 2026, at least 30 countries had recorded their hottest July on record and a wildfire in France's Gironde department had burned over 40,000 hectares that summer.",
+      "criteria": "Resolves YES only if (a) Copernicus/AFP data analysis confirmed at least 30 countries recorded their hottest July since records began, and (b) a wildfire in France's Gironde department during summer 2026 burned more than 40,000 hectares. Resolves NO if either figure was not reached.",
+      "deadline": "2026-07-31",
+      "split": "dev"
+    },
+    {
+      "id": "cr-277ef62c9c",
+      "claim": "The US House of Representatives and the US Senate passed continuing resolutions specifying the identical government-funding expiration date before August 15, 2026.",
+      "criteria": "Resolves YES only if the funding-extension date in the House-passed continuing resolution and the date in the Senate-passed continuing resolution, both enacted before August 15, 2026, were the same calendar date. Resolves NO if the two chambers passed CRs with different expiration dates as of that deadline.",
+      "deadline": "2026-08-15",
+      "split": "dev"
+    },
+    {
+      "id": "cr-b07e22ba93",
+      "claim": "Iraq's parliament finished filling all remaining vacant ministerial posts in Prime Minister Ali al-Zaidi's cabinet at the special session scheduled for 5 July 2026.",
+      "criteria": "Resolves YES if, by 5 July 2026, the Iraqi Council of Representatives had voted to fill all nine (later reported as ten) vacant ministries (including Defense and Interior) left open since the 14 May 2026 confidence vote. Resolves NO if any ministries remained unfilled after that date.",
+      "deadline": "2026-07-05",
+      "split": "eval"
+    },
+    {
+      "id": "cr-6d516e248d",
+      "claim": "In its June 2026 ruling in Mullin v. Doe, the U.S. Supreme Court held that federal courts retain authority to review non-constitutional challenges to the Department of Homeland Security's termination of Temporary Protected Status, and it blocked the administration from ending TPS designations for Haiti and Syria while litigation proceeded.",
+      "criteria": "Resolves YES if the Court held that judicial review of non-constitutional TPS-termination claims was permitted and blocked termination pending further proceedings. Resolves NO if the Court held such judicial review was statutorily barred and allowed DHS to proceed with terminating TPS for Haiti and Syria.",
+      "deadline": "2026-06-25",
+      "split": "eval"
+    },
+    {
+      "id": "cr-f3650d4fd3",
+      "claim": "The temporary 10% tariff that President Trump imposed on most U.S. imports under Section 122 of the Trade Act of 1974 remained the primary global tariff rate in effect after July 24, 2026, without being replaced by any new tariff regime.",
+      "criteria": "Resolves YES if the Section 122 10% tariff continued unchanged past its July 24, 2026 expiration date with no successor tariff scheme taking effect. Resolves NO if it expired as scheduled and was immediately replaced by a new set of tariffs imposed under different legal authority on dozens of trading partners.",
+      "deadline": "2026-07-24",
+      "split": "eval"
+    },
+    {
+      "id": "cr-bc42dc1143",
+      "claim": "As of August 15, 2026, both the Formula One Drivers' World Championship and Constructors' World Championship for the 2026 season had been mathematically clinched.",
+      "criteria": "Resolves YES only if, by August 15, 2026, the points leader in each of the Drivers' and Constructors' standings held an unassailable lead such that no rival could mathematically catch them with the remaining races. Resolves NO if either title (or both) remained mathematically open at that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-2e1241c2bc",
+      "claim": "The United States and Iran signed a written memorandum of understanding aimed at ending their 2026 military conflict before June 20, 2026.",
+      "criteria": "Resolves YES if, before June 20, 2026, authorized representatives of both the U.S. and Iranian governments signed (including via remote/electronic signature) a memorandum of understanding addressing termination of hostilities between the two countries. Resolves NO otherwise.",
+      "deadline": "2026-06-20",
+      "split": "dev"
+    },
+    {
+      "id": "cr-c0cc528602",
+      "claim": "Israel and Lebanon, together with the United States, signed a trilateral framework agreement addressing a ceasefire and Hezbollah's disarmament before June 30, 2026.",
+      "criteria": "Resolves YES if the governments of Israel and Lebanon, brokered by the United States, formally signed a trilateral framework document linking a sequenced ceasefire/troop process to disarmament of non-state armed groups before June 30, 2026. Resolves NO otherwise.",
+      "deadline": "2026-06-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-34cf53e95c",
+      "claim": "Hezbollah's leadership publicly endorsed the June 2026 Israel-Lebanon trilateral framework agreement before July 15, 2026.",
+      "criteria": "Resolves YES if Hezbollah's Secretary-General or another top Hezbollah leadership figure issued a public statement endorsing or accepting the framework agreement before July 15, 2026. Resolves NO if Hezbollah's leadership instead rejected, denounced, or declared the agreement void in that period.",
+      "deadline": "2026-07-15",
+      "split": "dev"
+    },
+    {
+      "id": "cr-e3e310398f",
+      "claim": "Venezuela held a presidential election to formalize a new government before August 15, 2026.",
+      "criteria": "Resolves YES if Venezuela conducted a national presidential election between January 2026 and August 15, 2026, following Nicolás Maduro's removal from power. Resolves NO if no such election was held or scheduled with a confirmed date by that time.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-c3ba418b2e",
+      "claim": "Under the June 2026 Israel-Lebanon framework agreement, Israeli forces withdrew from at least one southern Lebanese town, ceding control to the Lebanese Armed Forces, before August 15, 2026.",
+      "criteria": "Resolves YES if, as part of the 'pilot zone' program under the framework agreement, Israeli troops withdrew from at least one specific southern Lebanese town/position and the Lebanese Armed Forces deployed there before August 15, 2026. Resolves NO otherwise.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-011a5bfabb",
+      "claim": "Belarusian President Alexander Lukashenko pardoned more than 50 political prisoners in a single amnesty announced on July 1, 2026.",
+      "criteria": "Resolves YES if the number of political prisoners pardoned/released in the amnesty announced around July 1, 2026 exceeded 50. Resolves NO if the number was 50 or fewer.",
+      "deadline": "2026-07-01",
+      "split": "dev"
+    },
+    {
+      "id": "cr-9bd3a4f55b",
+      "claim": "Nikol Pashinyan's Civil Contract party won an outright majority of seats in Armenia's National Assembly in the parliamentary election held on 7 June 2026.",
+      "criteria": "Resolves YES if official results from Armenia's Central Election Commission (or verified international media reporting on those official results) show that Civil Contract secured more than half of the 105 seats in the National Assembly following the 7 June 2026 election. Resolves NO if Civil Contract fell short of a majority (53 or fewer seats).",
+      "deadline": "2026-06-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-ceac06d02d",
+      "claim": "Swiss voters approved the 'Sustainability Initiative' popular initiative to cap Switzerland's permanent resident population at 10 million by 2050, in the nationwide referendum held on 14 June 2026.",
+      "criteria": "Resolves YES if the Swiss Federal Chancellery's official referendum results for 14 June 2026 show a majority of voters (and, if legally required for this measure, a majority of cantons) in favor of the population-cap initiative. Resolves NO if the initiative was rejected by voters.",
+      "deadline": "2026-06-14",
+      "split": "eval"
+    },
+    {
+      "id": "cr-13a593d4f9",
+      "claim": "The July 2026 presidential election in São Tomé and Príncipe required a second-round runoff between the two leading candidates because no candidate won more than 50% of the vote in the first round.",
+      "criteria": "Resolves YES if São Tomé's National Electoral Commission scheduled and held a second round of the presidential election because the leading first-round candidate's vote share was 50% or below. Resolves NO if a candidate won an outright majority in the first round held on 19 July 2026, making a runoff unnecessary.",
+      "deadline": "2026-07-31",
+      "split": "dev"
+    },
+    {
+      "id": "cr-f8f5481a48",
+      "claim": "The July 2026 Labour Party leadership contest to select Keir Starmer's successor as UK Prime Minister was contested by two or more candidates who appeared on the final ballot presented to party members.",
+      "criteria": "Resolves YES if Labour Party records or contemporaneous reporting confirm that more than one candidate met the nomination threshold and stood in a ballot of members/affiliates. Resolves NO if only one candidate secured sufficient nominations and was declared leader without a contested member ballot.",
+      "deadline": "2026-07-20",
+      "split": "eval"
+    },
+    {
+      "id": "cr-c84b5c6258",
+      "claim": "Bangladesh's President Mohammed Shahabuddin resigned from office in 2026 before completing his full constitutionally mandated five-year term.",
+      "criteria": "Resolves YES if Shahabuddin submitted a resignation letter and left the presidency prior to the scheduled end of his five-year term. Resolves NO if he remained in office through the end of his term or was removed via a different constitutional mechanism (e.g., impeachment) rather than resigning voluntarily.",
+      "deadline": "2026-07-31",
+      "split": "eval"
+    },
+    {
+      "id": "cr-88c180e5f6",
+      "claim": "Moldovan Prime Minister Alexandru Munteanu was removed from office in mid-2026 through a parliamentary vote of no confidence rather than resigning voluntarily.",
+      "criteria": "Resolves YES if Moldova's Parliament passed a formal motion of no confidence that forced Munteanu from office. Resolves NO if Munteanu's departure was a voluntary resignation that automatically triggered the government's resignation under Moldovan law, without a no-confidence vote having been held or being necessary.",
+      "deadline": "2026-07-21",
+      "split": "eval"
+    },
+    {
+      "id": "cr-8600211e63",
+      "claim": "At the Federal Open Market Committee's July 2026 meeting, three or more Committee members formally dissented from the policy decision.",
+      "criteria": "Resolves YES if the official FOMC statement for the July 28-29, 2026 meeting lists three or more members as voting against the majority decision. Resolves NO if fewer than three dissents are recorded.",
+      "deadline": "2026-07-29",
+      "split": "eval"
+    },
+    {
+      "id": "cr-9a90eb4b85",
+      "claim": "The European Central Bank's Governing Council left its three key interest rates unchanged at its July 2026 monetary policy meeting.",
+      "criteria": "Resolves YES if the ECB's official monetary policy decision published after its July 2026 Governing Council meeting shows no change to the deposit facility rate, the main refinancing operations rate, and the marginal lending facility rate versus the prior meeting. Resolves NO if any of the three rates was changed.",
+      "deadline": "2026-07-23",
+      "split": "eval"
+    },
+    {
+      "id": "cr-617c4ad898",
+      "claim": "The Bank of England's Monetary Policy Committee vote to set Bank Rate at its June 2026 meeting was unanimous.",
+      "criteria": "Resolves YES if the official MPC minutes for the meeting ending 17 June 2026 show all nine members voting for the same Bank Rate outcome. Resolves NO if the published vote split, with any member(s) voting for a different rate than the majority.",
+      "deadline": "2026-06-18",
+      "split": "eval"
+    },
+    {
+      "id": "cr-d32aeb880e",
+      "claim": "In Chatrie v. United States, the U.S. Supreme Court held that when law enforcement obtains an individual's cell phone geolocation data via a geofence warrant, this constitutes a 'search' under the Fourth Amendment.",
+      "criteria": "Resolves YES if the Supreme Court's opinion in Chatrie v. United States, issued by June 30, 2026, holds that geofence warrants (directing companies like Google to disclose location data for all devices in an area) constitute a Fourth Amendment search. Resolves NO if the Court held geofence warrants are not searches requiring Fourth Amendment protection.",
+      "deadline": "2026-06-29",
+      "split": "eval"
+    },
+    {
+      "id": "cr-12ddbbd50a",
+      "claim": "The U.S. Supreme Court ruled that President Trump's executive order seeking to end automatic birthright citizenship for children born in the United States to undocumented immigrants was constitutional and could take effect.",
+      "criteria": "Resolves YES if the Supreme Court's decision (issued by June 30, 2026) upheld the executive order ending birthright citizenship as constitutional. Resolves NO if the Court struck down the executive order and reaffirmed automatic birthright citizenship under the Fourteenth Amendment.",
+      "deadline": "2026-06-30",
+      "split": "dev"
+    },
+    {
+      "id": "cr-47c23b047b",
+      "claim": "The U.S. House of Representatives passed legislation making daylight saving time permanent nationwide by a wide, bipartisan vote margin in July 2026.",
+      "criteria": "Resolves YES if House roll-call records show the Sunshine Protection Act (or equivalent permanent-DST bill) passed the House by a vote in which the winning side exceeded the losing side by more than 100 votes, on a date in July 2026. Resolves NO if the bill failed to pass the House, or passed only by a narrow margin, in that period.",
+      "deadline": "2026-07-14",
+      "split": "eval"
+    },
+    {
+      "id": "cr-a6cee98043",
+      "claim": "A U.S. Court of Appeals ruled in favor of the Trump administration's policy of mandatory detention without bond hearings for immigrants apprehended within the interior of the United States, in a ruling issued in late July 2026.",
+      "criteria": "Resolves YES if the Ninth Circuit's ruling (issued around July 30, 2026) upheld the administration's mandatory-detention policy and denied migrants the right to bond hearings. Resolves NO if the court instead rejected the policy and required bond-hearing eligibility for interior arrestees.",
+      "deadline": "2026-07-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-f272cdc623",
+      "claim": "New Section 232 tariffs on patented pharmaceutical imports from a specified list of drug manufacturers took effect on July 31, 2026, as set out in a presidential proclamation issued earlier in 2026.",
+      "criteria": "Resolves YES if the tiered Section 232 pharmaceutical tariff rates for the companies listed in Annex III of the April 2, 2026 proclamation became legally effective on July 31, 2026 as scheduled. Resolves NO if that effective date was postponed, rescinded, or did not apply to those companies as planned.",
+      "deadline": "2026-07-31",
+      "split": "eval"
+    },
+    {
+      "id": "cr-13d0676559",
+      "claim": "The executive order President Trump signed in July 2026 on defense supply chains and critical materials loosened existing restrictions, making it easier for defense contractors to obtain waivers to source critical minerals from foreign adversary countries.",
+      "criteria": "Resolves YES if Executive Order 14415 (signed July 20, 2026) eased or expanded the availability of waivers under 10 U.S.C. 4872 for sourcing covered critical materials from prohibited foreign sources. Resolves NO if the order instead tightened restrictions and curtailed the issuance of such waivers.",
+      "deadline": "2026-07-20",
+      "split": "dev"
+    },
+    {
+      "id": "cr-16ec68ff68",
+      "claim": "SpaceX (Space Exploration Technologies Corp.) completed an initial public offering and its common stock began trading on a U.S. national securities exchange during June 2026.",
+      "criteria": "Resolves YES if SpaceX priced an IPO and its shares commenced public trading on a U.S. exchange (e.g., Nasdaq) at any point between June 1, 2026 and June 30, 2026, as confirmed by an SEC registration/pricing filing and exchange trading records. Resolves NO if no such trading commenced in that window.",
+      "deadline": "2026-06-30",
+      "split": "dev"
+    },
+    {
+      "id": "cr-731d21c1f9",
+      "claim": "Danaher Corporation completed its previously announced acquisition of Masimo Corporation before July 1, 2026.",
+      "criteria": "Resolves YES if the acquisition closed and Masimo common stock ceased trading as an independent public company on or before June 30, 2026, per a company press release or SEC 8-K filing. Resolves NO if the deal had not closed by that date.",
+      "deadline": "2026-06-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-638e4b8131",
+      "claim": "Perrigo Company plc's chief executive officer departed the company before July 1, 2026 following a board finding that his personal conduct violated the company's code of conduct.",
+      "criteria": "Resolves YES if Perrigo announced, via SEC filing or press release, that its sitting CEO left the company (resignation or removal) on or before June 30, 2026 specifically due to a board determination of a personal code-of-conduct violation unrelated to financial reporting or company strategy. Resolves NO otherwise.",
+      "deadline": "2026-06-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-056cb8c31e",
+      "claim": "The leveraged buyout of Electronic Arts Inc. by a consortium including Saudi Arabia's Public Investment Fund, Silver Lake, and Affinity Partners closed, with EA's common stock delisted from Nasdaq, on or before August 15, 2026.",
+      "criteria": "Resolves YES if EA's SEC filings or official press releases confirm the transaction closed and EA stock ceased trading as a public company on or before August 15, 2026. Resolves NO if the deal remained open or had not closed by that date.",
+      "deadline": "2026-08-15",
+      "split": "dev"
+    },
+    {
+      "id": "cr-3a2208f7e9",
+      "claim": "A U.S. federal judge approved a settlement between the SEC and Elon Musk over his delayed disclosure of Twitter share purchases before August 1, 2026.",
+      "criteria": "Resolves YES if a federal district court judge issued an order approving the SEC-Musk settlement (including entry of a final judgment or consent order) on or before July 31, 2026, as reported in court records or major news outlets. Resolves NO if no such approval had occurred by that date.",
+      "deadline": "2026-07-31",
+      "split": "eval"
+    },
+    {
+      "id": "cr-b1fa9a8008",
+      "claim": "Paramount Skydance Corporation completed its acquisition of Warner Bros. Discovery, Inc. on or before August 15, 2026.",
+      "criteria": "Resolves YES if the merger officially closed and WBD ceased to exist as an independent public company on or before August 15, 2026. Resolves NO if the deal remained pending or was not closed by that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-95278345d9",
+      "claim": "U.S. TelePacific Corp., doing business as TPx Communications, filed for Chapter 11 bankruptcy protection before July 1, 2026.",
+      "criteria": "Resolves YES if a Chapter 11 petition was filed in a U.S. bankruptcy court on behalf of U.S. TelePacific Corp./TPx Communications on or before June 30, 2026, per court records or press reporting. Resolves NO otherwise.",
+      "deadline": "2026-06-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-59656ae9d4",
+      "claim": "Inotiv, Inc. filed for Chapter 11 bankruptcy protection before June 15, 2026.",
+      "criteria": "Resolves YES if Inotiv filed a Chapter 11 petition (including as part of a prepackaged reorganization plan) in a U.S. bankruptcy court on or before June 14, 2026, per an SEC 8-K filing or court record. Resolves NO otherwise.",
+      "deadline": "2026-06-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-e9e244aa7d",
+      "claim": "Marvell Technology, Inc. was added to the S&P 500 index with an effective date on or before June 30, 2026.",
+      "criteria": "Resolves YES if S&P Dow Jones Indices' official announcement set Marvell Technology's effective addition date to the S&P 500 on or before June 30, 2026. Resolves NO if the effective date fell after June 30, 2026 or no such addition occurred.",
+      "deadline": "2026-06-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-65384c1391",
+      "claim": "Sam Bankman-Fried received a presidential pardon or commutation from President Trump.",
+      "criteria": "Resolves YES if, by August 15, 2026, President Trump issued a pardon, commutation, or any form of clemency for Sam Bankman-Fried's federal fraud conviction. Resolves NO if no such clemency had been granted by that date, regardless of any pending application.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-e9deaae2df",
+      "claim": "Crypto exchange Kraken (Payward) completed its initial public offering and began trading on a US stock exchange.",
+      "criteria": "Resolves YES if Kraken/Payward shares began public trading on a US exchange (e.g., Nasdaq or NYSE) on or before August 15, 2026. Resolves NO if the IPO had not occurred by that date, including if only confidential or draft S-1 filings existed.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-758765df78",
+      "claim": "Stablecoin issuer Circle received final regulatory approval from the Office of the Comptroller of the Currency to operate as a national trust bank.",
+      "criteria": "Resolves YES if the OCC granted Circle (or its holding company) final (not merely conditional/preliminary) approval to establish and operate a national trust bank by August 15, 2026. Resolves NO if only conditional approval, or no approval, existed by that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-8cfd5cd42d",
+      "claim": "Asset manager Grayscale completed its initial public offering and began trading shares on a US stock exchange.",
+      "criteria": "Resolves YES if Grayscale Investments, Inc. shares began public trading on NYSE (ticker GRAY) or another US exchange on or before August 15, 2026. Resolves NO if the IPO had been paused or not completed by that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-5eed1e928f",
+      "claim": "The FTX Recovery Trust completed a scheduled multi-hundred-million-dollar creditor distribution round in the second half of July 2026.",
+      "criteria": "Resolves YES if the FTX Recovery Trust actually disbursed funds to eligible creditors on or around July 31, 2026 as part of a numbered distribution round (the 'Fifth Distribution'), with the payout amount publicly confirmed in the hundreds of millions of dollars. Resolves NO if the distribution was postponed or did not occur by August 15, 2026.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-30cdb7a7bf",
+      "claim": "Anthropic released a next-generation flagship model called Claude Opus 5 to the public on or before August 15, 2026.",
+      "criteria": "Resolves YES if Anthropic publicly announced and made available (via API and/or Claude apps) a model officially named 'Claude Opus 5' on or before August 15, 2026; resolves NO if no such release occurred by that date.",
+      "deadline": "2026-08-15",
+      "split": "dev"
+    },
+    {
+      "id": "cr-e01f8395ce",
+      "claim": "DeepSeek moved its V4-Pro model from preview status to full general availability on or before August 15, 2026.",
+      "criteria": "Resolves YES if DeepSeek officially designated a V4-Pro checkpoint as generally available (GA), ending its preview period, across app/web/API by August 15, 2026; resolves NO if V4-Pro remained in preview-only status through that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-2d045e26a2",
+      "claim": "xAI publicly released a model officially branded 'Grok 4.5' on or before August 15, 2026.",
+      "criteria": "Resolves YES if xAI announced and shipped a publicly accessible model named 'Grok 4.5' (via API, Grok apps, or partner integrations like Cursor) by August 15, 2026; resolves NO otherwise.",
+      "deadline": "2026-08-15",
+      "split": "dev"
+    },
+    {
+      "id": "cr-15e70f539f",
+      "claim": "SpaceX's 13th Starship flight test, conducted in July 2026, achieved all of its planned flight objectives for the upper-stage Ship, including a successful in-space engine relight and a controlled splashdown.",
+      "criteria": "Resolves YES if post-flight reporting from SpaceX and independent space-industry press (e.g. CNN, Space.com, NASASpaceflight) confirms that Flight 13's Ship vehicle completed stage separation, ignited all planned upper-stage engines, performed an in-space engine relight demonstration, and executed a controlled splashdown as planned. Resolves NO if any of these milestones failed or the vehicle was lost before completing them.",
+      "deadline": "2026-07-31",
+      "split": "dev"
+    },
+    {
+      "id": "cr-c7bf9412d5",
+      "claim": "Industry-wide funding raised by private fusion energy companies over the twelve months ending mid-2026 exceeded $4 billion.",
+      "criteria": "Resolves YES if industry survey figures reported around July 2026 (covering the trailing twelve months) show private fusion companies collectively raised more than $4 billion in funding. Resolves NO if the reported total was at or below $4 billion.",
+      "deadline": "2026-07-31",
+      "split": "eval"
+    },
+    {
+      "id": "cr-a21af51440",
+      "claim": "China's Chang'e-7 lunar south pole probe lifted off from Earth before August 15, 2026.",
+      "criteria": "Resolves YES if the China National Space Administration/China Manned Space Agency confirmed liftoff of the Long March 5 rocket carrying the Chang'e-7 probe on or before August 15, 2026. Resolves NO if no such launch had occurred by that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-c92b4bbef4",
+      "claim": "Blue Origin's New Glenn rocket returned to flight and completed a launch after its May 2026 Launch Complex 36 explosion, before August 15, 2026.",
+      "criteria": "Resolves YES if Blue Origin conducted a New Glenn orbital launch attempt after the May 28, 2026 hotfire test explosion and on or before August 15, 2026. Resolves NO if no such launch occurred within that window.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-46e5fac360",
+      "claim": "OPEC+'s group of participating producers agreed at their early-August 2026 meeting to raise combined crude oil production by more than 200,000 barrels per day for September 2026.",
+      "criteria": "Resolves YES if the OPEC+ producers participating in the voluntary output adjustments announced, at their meeting held in the first week of August 2026, a combined September 2026 production increase exceeding 200,000 barrels per day. Resolves NO if the announced increase was 200,000 bpd or less.",
+      "deadline": "2026-08-03",
+      "split": "eval"
+    },
+    {
+      "id": "cr-a6646cd557",
+      "claim": "NATO's summit declaration adopted in Ankara in July 2026 committed member states to provide Ukraine at least €70 billion in military and other support for calendar year 2026.",
+      "criteria": "Resolves YES if the official Ankara Summit Declaration (issued 7-8 July 2026) explicitly commits NATO members to a Ukraine support figure of €70 billion or more for 2026. Resolves NO if the declaration commits to a lower figure or sets no numerical Ukraine funding target.",
+      "deadline": "2026-07-08",
+      "split": "eval"
+    },
+    {
+      "id": "cr-2bc7e8dac2",
+      "claim": "A WTO dispute settlement panel that issued its report in late July 2026 found that Turkey's tariffs and import measures targeting Chinese-made electric vehicles were consistent with Turkey's WTO obligations.",
+      "criteria": "Resolves YES if the WTO panel report in the Türkiye — Measures Concerning Electric Vehicles case (DS629), circulated in July 2026, concluded that Turkey's EV tariff and import measures complied with WTO rules. Resolves NO if the panel found the measures violated Turkey's WTO commitments.",
+      "deadline": "2026-07-28",
+      "split": "dev"
+    },
+    {
+      "id": "cr-47589c260e",
+      "claim": "In June 2026, the WTO's Dispute Settlement Body rejected China's renewed request to establish a dispute panel examining India's import duties and incentive measures affecting solar cells, solar modules and information technology goods.",
+      "criteria": "Resolves YES if the WTO DSB meeting of 23 June 2026 declined/rejected China's second request for a panel on this matter. Resolves NO if the DSB agreed to establish the panel at that meeting.",
+      "deadline": "2026-06-23",
+      "split": "eval"
+    },
+    {
+      "id": "cr-2700dd4551",
+      "claim": "In a ruling issued on 2 July 2026, the Court of Justice of the European Union reduced the European Commission's approximately €4.1 billion antitrust fine against Google over its Android-related practices.",
+      "criteria": "Resolves YES if the CJEU's 2 July 2026 final-appeal judgment lowered the fine amount below the €4.1 billion (also cited as €4.125 billion) figure set by the General Court in 2022. Resolves NO if the CJEU upheld the fine at its existing level (i.e., dismissed Google's appeal in full).",
+      "deadline": "2026-07-02",
+      "split": "dev"
+    },
+    {
+      "id": "cr-8e4c5c8a4b",
+      "claim": "At the WTO Dispute Settlement Body meeting on 24 July 2026, the European Union allowed Russia's first request for establishment of a dispute panel reviewing the EU's Carbon Border Adjustment Mechanism to proceed unopposed, resulting in automatic panel establishment.",
+      "criteria": "Resolves YES if the EU did not block Russia's first panel-establishment request at the 24 July 2026 DSB meeting, so that a panel was formed at that meeting. Resolves NO if the EU exercised its right to block the first request, meaning no panel was established at that meeting.",
+      "deadline": "2026-07-24",
+      "split": "eval"
+    },
+    {
+      "id": "cr-aebcba825a",
+      "claim": "The IMF's completion of Egypt's seventh review under its Extended Fund Facility and second review under its Resilience and Sustainability Facility, announced in July 2026, unlocked total disbursements of more than $1.5 billion for Egypt.",
+      "criteria": "Resolves YES if the combined EFF and RSF disbursement approved alongside the July 2026 review completion exceeded $1.5 billion. Resolves NO if it was $1.5 billion or less.",
+      "deadline": "2026-07-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-e927111de4",
+      "claim": "The IMF's completion of Ethiopia's fifth review under its Extended Credit Facility arrangement, announced on 1 July 2026, unlocked a disbursement of more than $500 million for Ethiopia.",
+      "criteria": "Resolves YES if the disbursement approved alongside the fifth ECF review completion (announced 1 July 2026) exceeded $500 million. Resolves NO if it was $500 million or less.",
+      "deadline": "2026-07-01",
+      "split": "eval"
+    },
+    {
+      "id": "cr-764770dc14",
+      "claim": "In its June 2026 ruling, the U.S. Court of Appeals for the Second Circuit upheld Sam Bankman-Fried's 2023 fraud conviction and 25-year prison sentence.",
+      "criteria": "Resolves YES if the Second Circuit panel affirmed both the conviction and the sentence in its ruling on Bankman-Fried's appeal. Resolves NO if the panel vacated, reversed, or remanded either the conviction or the sentence.",
+      "deadline": "2026-06-12",
+      "split": "eval"
+    },
+    {
+      "id": "cr-80b7b07d6c",
+      "claim": "Manhattan prosecutors decided not to pursue a fourth trial against Harvey Weinstein on the remaining third-degree rape charge stemming from his New York retrial.",
+      "criteria": "Resolves YES if the Manhattan District Attorney's office formally declined to retry Weinstein on the outstanding rape count and moved to dismiss it. Resolves NO if a fourth trial on that charge was pursued or scheduled.",
+      "deadline": "2026-06-25",
+      "split": "eval"
+    },
+    {
+      "id": "cr-372b3597cb",
+      "claim": "In July 2026, the Caribbean Court of Justice sided with Guyanese opposition leader Azruddin Mohamed, blocking further U.S. extradition proceedings against him.",
+      "criteria": "Resolves YES if the CCJ's ruling halted or ended the U.S. extradition process against Mohamed. Resolves NO if the CCJ rejected his legal challenge and allowed the extradition process to resume.",
+      "deadline": "2026-07-29",
+      "split": "eval"
+    },
+    {
+      "id": "cr-da7a3c6f8c",
+      "claim": "A Minnesota judge's June 2026 order left standing a jury's $65.5 million verdict against Johnson & Johnson in a talc-asbestos mesothelioma case by denying the company's motion for a new trial.",
+      "criteria": "Resolves YES if the judge denied J&J's motion for a new trial, leaving the $65.5 million jury verdict in effect. Resolves NO if the judge granted a new trial or otherwise overturned the verdict.",
+      "deadline": "2026-06-29",
+      "split": "eval"
+    },
+    {
+      "id": "cr-9ad4f41aa4",
+      "claim": "At its July 29, 2026 meeting, the FDA's Cellular, Tissue, and Gene Therapies Advisory Committee (CTGTAC) voted in favor of the effectiveness of Capricor Therapeutics' cell therapy deramiocel for treating cardiomyopathy in Duchenne muscular dystrophy patients.",
+      "criteria": "Resolves YES if a majority of CTGTAC members voted that available evidence supports deramiocel's effectiveness for the DMD cardiomyopathy indication at the July 29, 2026 meeting, as reported in the official FDA meeting outcome and Capricor Therapeutics' press release. Resolves NO if a majority voted against.",
+      "deadline": "2026-07-29",
+      "split": "eval"
+    },
+    {
+      "id": "cr-a3a36cba14",
+      "claim": "In June 2026, the European Medicines Agency's CHMP recommended lowering the minimum authorized age for the mpox/smallpox vaccine Imvanex from 12 years old to 2 years old.",
+      "criteria": "Resolves YES if the CHMP adopted a positive opinion at its June 2026 meeting recommending extension of Imvanex's authorized age range down to 2 years old. Resolves NO if no such age-lowering recommendation was made in June 2026.",
+      "deadline": "2026-06-25",
+      "split": "eval"
+    },
+    {
+      "id": "cr-ed8bef44a2",
+      "claim": "On June 30, 2026, the FDA approved Orca Bio's Tregzi (Orca-T) as the first allogeneic regulatory T cell-based precision-engineered cell therapy for use in matched-donor hematopoietic stem cell transplantation in adults with hematological malignancies.",
+      "criteria": "Resolves YES if the FDA issued this approval on or about June 30, 2026, and it was described by the FDA/company as the first therapy of this specific type approved in the US. Resolves NO if no such approval occurred by that date or if it was not the first of its kind.",
+      "deadline": "2026-06-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-7356ebde74",
+      "claim": "On July 7, 2026, the FDA granted accelerated approval to atacicept (Trutakna) as the first therapy in the US to target both BAFF and APRIL for treatment of adults with primary IgA nephropathy.",
+      "criteria": "Resolves YES if FDA accelerated approval was granted on or about July 7, 2026, and Trutakna was confirmed as the first dual BAFF/APRIL inhibitor approved for this indication. Resolves NO if the approval did not occur on this date or it was not the first dual BAFF/APRIL inhibitor.",
+      "deadline": "2026-07-07",
+      "split": "eval"
+    },
+    {
+      "id": "cr-dd08b10473",
+      "claim": "Golden Pass LNG (the QatarEnergy/ExxonMobil joint venture terminal in Sabine Pass, Texas) had loaded and departed its first commercial LNG export cargo before June 1, 2026.",
+      "criteria": "Resolves YES if a vessel carrying LNG produced at the Golden Pass LNG facility departed the terminal as an export cargo prior to June 1, 2026, as confirmed by the operator's press releases, EIA reporting, or major trade press (S&P Global, LNG industry press). Resolves NO if the first export cargo departed on or after June 1, 2026, or had not departed at all.",
+      "deadline": "2026-06-01",
+      "split": "eval"
+    },
+    {
+      "id": "cr-3ca3da7bec",
+      "claim": "Sempra Infrastructure's ECA LNG Phase 1 facility on Mexico's Pacific coast shipped its first LNG export cargo on or before July 15, 2026.",
+      "criteria": "Resolves YES if ECA LNG Phase 1 (Ensenada, Mexico) loaded and dispatched its first commercial LNG export cargo on or before July 15, 2026, per Sempra/TotalEnergies press releases or LNG trade press. Resolves NO if the first cargo shipped after July 15, 2026, or had not shipped by that date.",
+      "deadline": "2026-07-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-fe2c04f361",
+      "claim": "NOAA declared that the contiguous United States experienced its hottest calendar month on record (across all months, not just July) during July 2026.",
+      "criteria": "Resolves YES if NOAA/NCEI's climate report determined the July 2026 contiguous-U.S. average monthly temperature exceeded every previously recorded month (including the prior record month, July 1936), making it the all-time hottest month on record for the Lower 48. Resolves NO if July 2026 did not set this all-time monthly record for the contiguous U.S.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    }
+  ]
+}

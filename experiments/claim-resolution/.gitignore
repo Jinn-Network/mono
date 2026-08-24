@@ -1,0 +1,19 @@
+# Intermediate curation artifacts — large, regenerable from bench/*.mjs.
+# The benchmark itself (claims.public.json, truth.json, rejected.json) IS tracked.
+bench/candidates.json
+bench/sanitized.json
+bench/verified.json
+bench/closed-book.json
+logs/
+bench/candidates-hard.json
+bench/sanitized-hard.json
+bench/verified-hard.json
+bench/closed-book-hard.json
+
+# Round 2b — chain acquisition. Raw per-deployment log dumps are large and
+# reproducible via bench/fetch-reality-disputes.mjs scan; the dispute export +
+# manifest (provenance) ARE tracked.
+node_modules/
+package-lock.json
+bench/raw/*.logs.jsonl
+bench/raw/*.checkpoint.json

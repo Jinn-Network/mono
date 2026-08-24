@@ -1,0 +1,26 @@
+{
+  "n": 3,
+  "rejected": [
+    {
+      "claim": "U.S. federal law enforcement officials ultimately concluded that the man who rushed a security checkpoint at the White House Correspondents' Association Dinner in Washington, D.C. in April 2026 had personally discharged his own firearm during the encounter with a Secret Service officer, notwithstanding his defense team's public argument that video evidence showed no muzzle flash from his weapon.",
+      "bucket": "hard-contested",
+      "reasons": [
+        "criteria judged ambiguous"
+      ]
+    },
+    {
+      "claim": "In the runoff round of Colombia's 2026 presidential election, the winning candidate received more than half of all valid votes cast.",
+      "bucket": "hard-threshold",
+      "reasons": [
+        "near-duplicate of \"In the first round of Costa Rica's February 2026 presidential election...\""
+      ]
+    },
+    {
+      "claim": "The economist who served as President of the Central Bank of the Argentine Republic in 2018 is the same individual who was later appointed Argentina's Minister of Economy under President Javier Milei.",
+      "bucket": "hard-multihop",
+      "reasons": [
+        "criteria judged ambiguous"
+      ]
+    }
+  ]
+}

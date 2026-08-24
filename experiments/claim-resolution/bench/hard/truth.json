@@ -1,0 +1,1577 @@
+{
+  "note": "GROUND TRUTH — read only by bench/ tooling and src/score.mjs.",
+  "generated_at": "2026-08-19T10:30:48.387Z",
+  "n": 45,
+  "truth": [
+    {
+      "id": "cr-3647f0ef2a",
+      "ground_truth": "YES",
+      "resolution_source": "Peru's National Office of Electoral Processes (ONPE) full count, reported by MercoPress and CNN",
+      "settlement_record": "JNE (Jurado Nacional de Elecciones) proclamation of results for the Segunda Elección Presidencial 2026 (session of July 3, 2026; Resolution No. 1625-2026-JNE / acta de proclamación), based on ONPE's 100%-processed tally of June 29, 2026: Keiko Fujimori (Fuerza Popular) 9,223,396 valid votes (50.135%) vs. Roberto Sánchez (Juntos por el Perú) 9,173,755 (49.865%) — margin 49,641 votes.",
+      "source_urls": [
+        "https://en.mercopress.com/2026/06/30/keiko-fujimori-wins-peru-s-presidency-as-the-full-count-confirms-her-by-49-641-votes",
+        "https://www.cnn.com/2026/07/03/americas/fujimori-wins-peruvian-election-latam-intl"
+      ],
+      "verifier_sources": [
+        "https://elperuano.pe/noticia/299452-jne-proclama-a-keiko-fujimori-presidenta-electa",
+        "https://elperuano.pe/noticia/299509-elecciones-2026-jne-oficializa-proclamacion-de-keiko-fujimori-como-presidenta-electa",
+        "https://www.infobae.com/peru/2026/07/04/este-es-el-acta-del-jne-que-proclama-a-keiko-fujimori-como-presidenta-de-la-republica/",
+        "https://www.infobae.com/peru/2026/07/03/jne-proclama-a-keiko-fujimori-presidenta-electa-y-se-convierte-en-la-primera-mujer-elegida-para-gobernar-el-peru/",
+        "https://elcomercio.pe/politica/elecciones/resultados-segunda-vuelta-elecciones-peru-2026-en-vivo-conteo-onpe-flash-electoral-y-quien-gana-entre-keiko-fujimori-y-roberto-sanchez-hoy-7-de-junio-noticia/",
+        "https://alertas-v3.directoriolegislativo.org/52657250-1b80-4fd7-9fed-e992babd82e6@[ENG]%20PER%C3%9A%20Runoff%20Post%20Election%20Report%202026.pdf"
+      ],
+      "verifier_confidence": 0.9,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-threshold",
+      "difficulty": "hard",
+      "disputed": true,
+      "why_nontrivial": "The margin swung during counting (from a narrow lead for one candidate to the other, with 94-95% counts showing the race flip), and only the 100%-counted figure released three weeks after election day (a 49,641-vote gap) is authoritative, so a researcher must find that final release rather than early or mid-count snapshots, amid an ongoing dispute where the loser refused to concede.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.01432
+      },
+      "verifier_notes": "Winner: Keiko Fujimori. Certified margin 49,641 votes (9,223,396 vs 9,173,755), i.e., 641 votes above the 49,000 threshold — an extremely tight call relative to the bar, which makes this a genuinely discriminating item but also sensitive to which tally is used. ONPE's 100%-processed count (June 29, 2026) reported by media gives 9,223,866 vs 9,174,192 = 49,674, also above 49,000; both authoritative figures resolve YES. Minor wrinkle: the resolution deadline (July 1) precedes the formal JNE proclamation (July 3), though ONPE's 100% tally was complete June 29. No prediction-market settlement page was located; resolution rests on the electoral authority's own published results."
+    },
+    {
+      "id": "cr-a5147a3db1",
+      "ground_truth": "YES",
+      "resolution_source": "Wikipedia 'International recognition of Somaliland' tracking page, corroborated by regional press (Sudans Post, MadaMasr)",
+      "settlement_record": "Wikipedia \"International recognition of Somaliland\" / \"2026 in Somaliland\" (maintained status: recognized by one UN member state, Israel, since 26 Dec 2025), corroborated by Mada Masr's 10 Aug 2026 investigation \"How Guinea-Bissau's planned recognition of Somaliland fell apart\" and Guinea-Bissau's Foreign Ministry statement of 26–27 July 2026 denying any recognition decision.",
+      "source_urls": [
+        "https://www.sudanspost.com/south-sudan-rejects-somaliland-recognition-in-diplomatic-phone-call/",
+        "https://www.madamasr.com/en/2026/08/10/feature/politics/how-guinea-bissaus-planned-recognition-of-somaliland-fell-apart/",
+        "https://en.wikipedia.org/wiki/International_recognition_of_Somaliland"
+      ],
+      "verifier_sources": [
+        "https://en.wikipedia.org/wiki/International_recognition_of_Somaliland",
+        "https://en.wikipedia.org/wiki/2026_in_Somaliland",
+        "https://www.madamasr.com/en/2026/08/10/feature/politics/how-guinea-bissaus-planned-recognition-of-somaliland-fell-apart/",
+        "http://radiodalsan.com/2026/07/27/guinea-bissau-quashes-somaliland-recognition-buzz/",
+        "https://www.sudanspost.com/south-sudan-rejects-somaliland-recognition-in-diplomatic-phone-call/",
+        "https://www.somaliguardian.com/news/somalia-news/uae-somaliland-recognition-eswatini-argentina-zambia-somalia/",
+        "https://www.atlanticcouncil.org/blogs/menasource/after-israels-recognition-of-somaliland-what-comes-next/"
+      ],
+      "verifier_confidence": 0.93,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-negative",
+      "difficulty": "hard",
+      "disputed": true,
+      "why_nontrivial": "Multiple 'breaking news' reports in late December 2025/January 2026 claimed South Sudan was about to become the second country to recognize Somaliland, but later reporting shows South Sudan formally rejected recognition and a separate Guinea-Bissau recognition attempt also collapsed, requiring careful reconciliation of contradictory news cycles.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.015927
+      },
+      "verifier_notes": "Background: Israel recognized Somaliland on 26 Dec 2025 (before the window), so the question is purely whether a second UN member followed by 15 Aug 2026. Evidence across the window is consistent: reported near-recognitions (Guinea-Bissau in late July 2026, UAE lobbying of Eswatini, Argentina, Dominican Republic and Zambia in May 2026, US congressional bill H.R.3992 still in committee) all failed to produce formal recognition; Guinea-Bissau's MFA publicly denied it, and Somaliland's own officials described the effort as collapsed. Caveat for benchmark use: a viral Qaran News/social-media rumor claimed South Sudan became the \"second country to recognize\" Somaliland in late Dec 2025 — this is false (Sudans Post/Eye Radio report South Sudan explicitly reaffirmed Somalia's territorial integrity), but it pollutes search results and could mislead a naive resolver. Otherwise the item is close to a single-lookup settle and the criteria text (\"even if other states were reported to be considering or preparing recognition\") arguably telegraphs the YES outcome, which weakens it as a benchmark item."
+    },
+    {
+      "id": "cr-797052856d",
+      "ground_truth": "NO",
+      "resolution_source": "Insurance Journal and Gizmodo reporting on the DOJ's 2025 reversal of the guilty-plea demand and the March 31, 2026 appellate ruling upholding dismissal of the criminal case",
+      "settlement_record": "Docket in United States v. The Boeing Company, No. 4:21-cr-00005-O (N.D. Tex.) — Judge Reed O'Connor's order of Nov. 6, 2025 granting the DOJ's Rule 48(a) motion to dismiss the conspiracy-to-defraud-the-United-States charge pursuant to the May 2025 non-prosecution agreement; affirmed/CVRA petitions denied by the Fifth Circuit on Mar. 31, 2026. DOJ Criminal Division case page \"United States v. The Boeing Company.\"",
+      "source_urls": [
+        "https://www.insurancejournal.com/news/national/2026/03/31/864132.htm",
+        "https://gizmodo.com/boeing-strikes-deal-with-doj-to-avoid-criminal-charges-over-737-max-crashes-2000606810",
+        "https://www.justice.gov/criminal/criminal-fraud/case/united-states-v-boeing-company"
+      ],
+      "verifier_sources": [
+        "https://www.justice.gov/criminal/criminal-fraud/case/united-states-v-boeing-company",
+        "https://www.cnbc.com/2025/11/06/boeing-criminal-case-737-max-crashes-doj.html",
+        "https://www.nbcnews.com/news/us-news/criminal-case-boeing-deadly-737-max-plane-crashes-dismissed-us-judge-rcna242365",
+        "https://www.usnews.com/news/business/articles/2026-03-31/us-appeals-court-denies-bid-from-families-of-boeing-737-max-crash-victims-to-reopen-criminal-case",
+        "https://www.cliffordlaw.com/victims-of-boeing-crash-lose-appeal-in-federal-court-to-hold-aircraft-manufacturer-criminally-liable-for-crashes-of-two-max8-planes-their-reaction/",
+        "https://reason.com/volokh/2026/02/04/fifth-circuit-to-hear-oral-argument-on-the-victims-families-challenge-to-the-dismissal-of-the-boeing-criminal-case/"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-stage",
+      "difficulty": "hard",
+      "disputed": true,
+      "why_nontrivial": "Requires reconciling 2024 reporting that Boeing 'agreed to plead guilty' with a 2025 DOJ reversal dropping that plea demand in favor of a deal to avoid criminal charges altogether, then confirming an appeals court upheld the case's dismissal rather than a conviction.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "NO",
+        "confidence": 0.85,
+        "abstain": false,
+        "correct": true,
+        "cost_usd": 0.021
+      },
+      "verifier_notes": "Boeing agreed in July 2024 to plead guilty, but Judge O'Connor rejected that plea agreement in December 2024, so no plea was ever formally entered and no sentencing occurred. In May 2025 DOJ entered a non-prosecution agreement (~$1.1B in payments/investments, company-selected compliance consultant) and moved to dismiss; O'Connor granted dismissal on Nov. 6, 2025 while criticizing the deal. Victims' families' CVRA petitions were denied by the Fifth Circuit on Mar. 31, 2026, and rehearing was denied — so the outcome was final and stable well before the Apr. 15, 2026 deadline. The claim maps squarely onto the criteria's explicit \"dismissal or non-prosecution arrangement\" NO branch. Benchmark caveat: the resolution is highly salient and settleable with a single lookup, and the criteria essentially enumerate the actual outcome, which reduces its discriminative value; there is also mild risk a model confuses the abandoned 2024 plea agreement with an entered plea."
+    },
+    {
+      "id": "cr-61c7892c28",
+      "ground_truth": "YES",
+      "resolution_source": "BMJ Public Health retraction notice, published August 11, 2026; Retraction Watch coverage",
+      "settlement_record": "BMJ Public Health retraction notice for Mostert S, et al. \"Excess mortality across countries in the Western World since the COVID-19 pandemic: 'Our World in Data' estimates of January 2020 to December 2022\" (BMJ Public Health 2024;2:e000282), published 11 August 2026, accompanied by the official BMJ Group statement \"BMJ Group retracts research published in 2024 on excess deaths\" (bmjgroup.com); corroborated by Retraction Watch's 11 August 2026 report.",
+      "source_urls": [
+        "https://retractionwatch.com/2026/08/11/bmj-public-health-retraction-covid-19-vaccines-death-senate-hearing/",
+        "https://www.scientificamerican.com/article/major-covid-study-that-fueled-vaccine-skepticism-retracted-over-misinformation/"
+      ],
+      "verifier_sources": [
+        "https://bmjgroup.com/bmj-group-retracts-research-published-in-2024-on-excess-deaths/",
+        "https://retractionwatch.com/2026/08/11/bmj-public-health-retraction-covid-19-vaccines-death-senate-hearing/",
+        "https://www.the-scientist.com/journal-retracts-paper-linking-covid-19-vaccines-to-deaths-74883",
+        "https://www.scientificamerican.com/article/major-covid-study-that-fueled-vaccine-skepticism-retracted-over-misinformation/",
+        "https://www.discovermagazine.com/covid-19-excess-mortality-study-retracted-over-misinformation-in-its-discussion-49545",
+        "https://www.beckershospitalreview.com/quality/public-health/study-cited-to-link-covid-vaccines-to-deaths-retracted/"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-contested",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "Requires tracing a controversial 2024 paper through its rise to political prominence at a June 2026 Senate hearing to the journal's own retraction notice a few weeks later, and separating the fact of retraction from an ongoing, separate partisan argument about whether the retraction was justified.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.015307000000000001
+      },
+      "verifier_notes": "The paper (Mostert et al., 47 countries, 3+ million excess deaths 2020–2022, published in BMJ Public Health in 2024, subject of a June 2024 expression of concern) was formally retracted by BMJ Public Health on 11 August 2026 — four days before the 15 August 2026 deadline — citing an \"imbalanced\" discussion that \"lacks rigour, and includes misinformation,\" plus insufficient description of the limited original work. Mostert testified at the 3 June 2026 Senate Homeland Security & Governmental Affairs Permanent Subcommittee on Investigations hearing, matching the claim's framing. Weaknesses as a benchmark item: the outcome is settled by a single authoritative lookup (BMJ Group's own retraction page), and the resolution window is tight (retraction landed only 4 days before the deadline), so the item is somewhat close-run but not ambiguous. Minor descriptive noise: sources variously date original publication to March vs. June 2024, but this does not affect resolution."
+    },
+    {
+      "id": "cr-280d5fa64e",
+      "ground_truth": "NO",
+      "resolution_source": "Iranian state media (IRINN) confirmation of Khamenei's death, March 1, 2026; RFE/RL coverage",
+      "settlement_record": "Iranian state broadcaster IRIB/IRNA official confirmation (1 March 2026) that Ayatollah Ali Khamenei was killed in his office compound in the 28 February 2026 US–Israeli strikes, together with the Iranian government's declaration of 40 days of national mourning and the announced state funeral.",
+      "source_urls": [
+        "https://www.rferl.org/a/khamenei-killed-trump-iran-strikes-israel/33690684.html",
+        "https://www.aljazeera.com/news/2026/2/28/irans-supreme-leader-ali-khamenei-killed-in-us-israeli-attacks-reports"
+      ],
+      "verifier_sources": [
+        "https://www.aljazeera.com/news/2026/2/28/irans-supreme-leader-ali-khamenei-killed-in-us-israeli-attacks-reports",
+        "https://www.rferl.org/a/khamenei-killed-trump-iran-strikes-israel/33690684.html",
+        "https://www.aa.com.tr/en/middle-east/iranian-state-tv-confirms-supreme-leader-ali-khamenei-killed/3844529",
+        "https://www.aljazeera.com/news/2026/3/1/iran-begins-40-day-mourning-after-khamenei-killed-in-us-israeli-attack",
+        "https://en.wikipedia.org/wiki/Assassination_of_Ali_Khamenei",
+        "https://www.axios.com/2026/02/28/iran-khamenei-killed-israel",
+        "https://www.npr.org/2026/03/01/nx-s1-5731333/iran-us-israel-strikes"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-contested",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "Requires reconciling a same-day official Iranian denial that the strikes had killed Khamenei with a reversal from the same government roughly 24-36 hours later, and identifying which statement represents the lasting, confirmed record rather than the first one a researcher might find.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.018503000000000002
+      },
+      "verifier_notes": "The NO branch was satisfied exactly as written: Iran's own state media (IRIB/IRNA) confirmed on 1 March 2026 — before the 5 March deadline — that Khamenei had been killed in the 28 February strikes, with 40 days of official mourning declared and a state funeral scheduled. Baghaei's 28 February 'safe and firmly in command' denial was therefore not the final account. Weakness as a benchmark item: this is an extremely high-salience global event settled by a single lookup, so it offers little discriminating power. The criteria are also near-exhaustive (the two branches cover the plausible outcomes cleanly), and the phrasing 'turned out to be the accurate, final account' faintly signals the expected direction. Minor detail noise across outlets (e.g., which officials were killed, names given as Nasirzadeh/Mousavi/Pakpour) does not bear on the resolution."
+    },
+    {
+      "id": "cr-2d0fecc83e",
+      "ground_truth": "YES",
+      "resolution_source": "Autorité de la concurrence official decision text and press coverage of Décision 26-D-05",
+      "settlement_record": "Autorité de la concurrence Decision No. 26-D-05 of 16 April 2026 (practices in the distribution of organic farming food products) and the accompanying official press release, which set the individual fines at €1,850,000 for Greenweez (jointly with Carrefour SA) and €740,000 for ITM Entreprises (jointly with Les Mousquetaires), out of a €12.67 million total including €10 million for Synadis Bio and €80,000 for Les Comptoirs de la Bio.",
+      "source_urls": [
+        "https://www.autoritedelaconcurrence.fr/fr/decision/relative-des-pratiques-mises-en-oeuvre-dans-le-secteur-de-la-distribution-des-produits-7",
+        "https://www.lsa-conso.fr/synadis-bio-greenweez-carrefour-comptoirs-de-la-bio-et-itm-entreprises-intermarche-condamnes-12-67-millions-d-euros-d-amende-par-l-autorite-de-la-concurrence,465377"
+      ],
+      "verifier_sources": [
+        "https://www.autoritedelaconcurrence.fr/fr/decision/relative-des-pratiques-mises-en-oeuvre-dans-le-secteur-de-la-distribution-des-produits-7",
+        "https://www.autoritedelaconcurrence.fr/en/press-release/autorite-de-la-concurrence-fines-syndicat-national-des-distributeurs-specialises-de",
+        "https://www.lsa-conso.fr/synadis-bio-greenweez-carrefour-comptoirs-de-la-bio-et-itm-entreprises-intermarche-condamnes-12-67-millions-d-euros-d-amende-par-l-autorite-de-la-concurrence,465377",
+        "https://www.nomosparis.com/ententes-anticoncurrentielles-sanction-de-1267-millions-deuros-a-lencontre-dune-association-professionnelle-synadis-bio-et-de-ses-membres-pour-entente-de-repartition-de-marques/"
+      ],
+      "verifier_confidence": 0.95,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-obscure",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "Requires locating the French-language decision text and correctly matching four separately fined parties (Synadis Bio, Greenweez, ITM Entreprises, Les Comptoirs de la Bio) to their individual fine amounts.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.014757
+      },
+      "verifier_notes": "Greenweez's €1.85m fine clearly exceeds ITM Entreprises' €740k, so the claim resolves YES. Criteria are crisp (direct numeric comparison of two line items in one published decision). Weakness as a benchmark item: it is trivially settled by a single lookup of the Autorité's press release, which lists both figures side by side; there is no genuine forecasting/uncertainty component. Minor factual nit in the claim's framing: the press release headline groups 'Les Comptoirs de la Bio' with the Les Mousquetaires group, but ITM Entreprises is indeed the Mousquetaires/Intermarché central entity, so the identification does not affect resolution."
+    },
+    {
+      "id": "cr-d39b9848e7",
+      "ground_truth": "NO",
+      "resolution_source": "Korean business press reporting of the KFTC's February 2026 sugar cartel penalty breakdown",
+      "settlement_record": "KFTC decision/press release of 12 Feb 2026 sanctioning CJ CheilJedang, Samyang Corp. and TS Corporation (Daehan Jedang) for sugar price-fixing (Feb 2021–Apr 2025), total penalty KRW 408.3 bn: CJ CheilJedang ~KRW 150.6 bn, Samyang ~KRW 130.2 bn, Daehan Jedang ~KRW 127.3 bn (per-company figures reported by MLex, Seoul Economic Daily, Munhwa Ilbo and Korean trade press; later final-decision reporting in May 2026 gave CJ KRW 138.3 bn vs Samyang KRW 130.2 bn — CJ higher in both versions)",
+      "source_urls": [
+        "https://www.mt.co.kr/economy/2026/02/12/2026021208132646891",
+        "https://www.mdtoday.co.kr/news/view/1065598700157169"
+      ],
+      "verifier_sources": [
+        "https://www.mlex.com/mlex/articles/2441032/kftc-fines-big-three-sugar-cartel-seeks-stronger-enforcement-tools",
+        "https://en.sedaily.com/finance/2026/02/13/korea-slaps-28b-fine-on-sugar-makers-for-price-fixing",
+        "https://www.munhwa.com/article/11568164",
+        "https://www.seoul.co.kr/news/economy/industry/2026/02/13/20260213031007",
+        "https://www.asiae.co.kr/article/2026050609020946878",
+        "https://www.newspim.com/news/view/20260506000450"
+      ],
+      "verifier_confidence": 0.96,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-obscure",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "Requires reading Korean-language trade press to extract the precise per-company penalty figures (CJ 150.69bn won vs Samyang 130.25bn won vs Daehan 127.37bn won) from a KFTC decision covered only in Korean media.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.015473
+      },
+      "verifier_notes": "Samyang's fine (KRW ~130.2 bn) was lower than CJ CheilJedang's (KRW ~150.6 bn provisional / ~138.3 bn after the 20% cooperation reduction reported in May 2026), so the claim resolves NO under either figure set. Minor caveats: (1) the third company is named TS Corporation/Daehan Jedang, not a source of ambiguity here; (2) the Feb 2026 announcement figures were labelled provisional and CJ's amount was later restated, but the ordering (CJ > Samyang > Daehan) is stable, so ranking-based resolution is robust. Weakness as a benchmark item: it is settled by a single lookup of the widely reported per-company fine table, and the fines were unusually close in magnitude only between Samyang and Daehan, not between Samyang and CJ. Note also that the underlying KFTC full written decision was issued later (May 2026); the February 2026 announcement is the referenced decision."
+    },
+    {
+      "id": "cr-a224b8ca99",
+      "ground_truth": "NO",
+      "resolution_source": "TRF-2 5th Specialized Panel ruling as reported by Conjur and Edison Siqueira law firm bulletin",
+      "settlement_record": "Published vote/ruling of the 5ª Turma Especializada of TRF-2 (relator Des. Fed. Ricardo Perlingeiro) in CVM's appeal concerning the R$400,000 fine for manipulation of RJCP Equity shares (full text PDF hosted by ConJur), corroborated by the AGU's official news release \"AGU garante validade de multa aplicada por manipulação de mercado de ações\" (16 Apr 2026).",
+      "source_urls": [
+        "https://conjur.com.br/2026-abr-16/uso-de-informacoes-falsas-para-inflar-empresa-na-bolsa-gera-multa-da-cvm/",
+        "https://edisonsiqueira.com.br/uso-de-informacoes-falsas-para-inflar-empresa-na-bolsa-gera-multa-da-cvm/"
+      ],
+      "verifier_sources": [
+        "https://www.gov.br/agu/pt-br/comunicacao/noticias/agu-garante-validade-de-multa-aplicada-por-manipulacao-de-mercado-de-acoes",
+        "https://conjur.com.br/2026-abr-16/uso-de-informacoes-falsas-para-inflar-empresa-na-bolsa-gera-multa-da-cvm/",
+        "https://www.conjur.com.br/wp-content/uploads/2026/04/Voto_TRF2_Multa_CVM_Acoes.pdf",
+        "https://www.gov.br/agu/pt-br/comunicacao/radio/audios/mercado-de-acoes_ed.mp3/view"
+      ],
+      "verifier_confidence": 0.96,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-obscure",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "Requires tracking a two-stage Brazilian court process (trial-court annulment on procedural grounds, then appellate reversal) reported only in Portuguese legal press, where the final outcome is opposite to the first-instance ruling.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.0375893
+      },
+      "verifier_notes": "TRF-2's 5th Specialized Panel granted CVM's appeal (deu provimento), reforming the first-instance judgment that had annulled the fine, and reinstated the R$400,000 penalty against the investment-blog operator (RJCP Equity price manipulation). This maps cleanly to the NO branch. Caveats for benchmark use: (a) the item is settled by a single lookup of the 16 Apr 2026 ConJur/AGU stories, so it is fairly trivial; (b) the claim's date coincides exactly with the publication date, making it easy to find; (c) the case is unlikely to be final — further appeals (embargos/recursos to STJ) may follow, but the criteria ask only about the TRF-2 panel ruling, which is unambiguous. The parties' names are not published (defendant identified only as the blog owner), which slightly limits independent docket verification."
+    },
+    {
+      "id": "cr-3b879d996e",
+      "ground_truth": "NO",
+      "resolution_source": "JPX delisting notice for MCJ and Japanese M&A trade press coverage of the Bain Capital-backed MBO",
+      "settlement_record": "JPX/TSE official notice \"上場廃止等の決定：（株）ＭＣＪ\" dated 2026-05-27 (English: \"Decision on Delisting, etc.: MCJ Co.,Ltd.\"), which sets delisting for 2026-06-16 following the shareholder-approved 23,500,000-to-1 share consolidation executed as the squeeze-out step of the Bain Capital–backed MBO (tender offer by BCP Meta Cayman LP commenced 2026-02-06; TSE 監理銘柄 designation 2026-02-05).",
+      "source_urls": [
+        "https://www.jpx.co.jp/news/1023/20260527-11.html",
+        "https://www.nihon-ma.co.jp/news/20260408_6670-48/"
+      ],
+      "verifier_sources": [
+        "https://www.jpx.co.jp/news/1023/20260527-11.html",
+        "https://www.jpx.co.jp/english/news/1023/20260527-11.html",
+        "https://www.jpx.co.jp/news/1023/20260205-11.html",
+        "https://japanir.jp/en/company/company-6670/ir/6670-20260206-01_wp_tender_offer/",
+        "https://www.nippon.com/en/news/yjj2026020600771/",
+        "https://japanir.jp/en/company/company-6670/ir/6670-20260615-01_wp_disclosure_update/",
+        "https://www.nihon-ma.co.jp/news/20260408_6670-48/"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-obscure",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "2026 saw a well-publicized wave of TSE delistings tied to expiring listing-maintenance transitional measures, making it easy to wrongly assume MCJ's case fit that pattern rather than being a standard MBO going-private deal.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.015567
+      },
+      "verifier_notes": "The delisting date (2026-06-16) matches the resolution deadline exactly, and the cause is squarely the NO branch: an MBO/going-private squeeze-out via share consolidation, not any listing-maintenance financial standard (market cap, tradable share value, etc.). No JPX or MCJ disclosure references TSE's transitional relief measures. Weaknesses as a benchmark item: (a) the resolution criteria explicitly name \"management buyout (MBO)\" as the NO branch, which effectively telegraphs the answer to anyone who knows the MBO occurred; (b) it is settled by a single lookup of the JPX delisting notice. The claim is a clean, verifiable falsehood but low difficulty."
+    },
+    {
+      "id": "cr-1609101b26",
+      "ground_truth": "YES",
+      "resolution_source": "Associated Press final vote count reported by NPR and Sabato's Crystal Ball",
+      "settlement_record": "Virginia Department of Elections unofficial statewide results for the April 21, 2026 Redistricting Referendum Special Election (as reported through April 22–23, 2026), corroborated by Ballotpedia's measure page, Decision Desk HQ, and Virginia Mercury: 'Yes' ≈ 51.4–51.7% vs 'No' ≈ 48.3–48.6% of ~3.1 million votes.",
+      "source_urls": [
+        "https://www.npr.org/2026/04/21/nx-s1-5793878/virginia-redistricting-results-trump",
+        "https://centerforpolitics.org/crystalball/breaking-down-virginias-close-but-clear-redistricting-vote/",
+        "https://en.wikipedia.org/wiki/2026_Virginia_redistricting_referendum"
+      ],
+      "verifier_sources": [
+        "https://www.elections.virginia.gov/news-releases/supreme-court-of-virginia-voids-april-21-redistricting-referendum-1.html",
+        "https://ballotpedia.org/Virginia_Use_of_Legislative_Congressional_Redistricting_Map_Amendment_(April_2026)",
+        "https://decisiondeskhq.substack.com/p/virginia-redistricting-vote-result",
+        "https://virginiamercury.com/2026/04/21/virginia-voters-back-redistricting-amendment-after-months-of-legal-and-political-battles/",
+        "https://en.wikipedia.org/wiki/2026_Virginia_redistricting_referendum",
+        "https://centerforpolitics.org/crystalball/breaking-down-virginias-close-but-clear-redistricting-vote/",
+        "https://cardinalnews.org/2026/04/21/virginians-narrowly-approve-mid-decade-redistricting-effort/"
+      ],
+      "verifier_confidence": 0.88,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-threshold",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "Different outlets reported conflicting figures during counting (one unofficial source cited 50.7%-49.3%, while the AP's more complete count settled at 51.5%-48.6%), so determining the true final share required reconciling multiple, inconsistent reports rather than taking the first number found.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.015238999999999999
+      },
+      "verifier_notes": "Threshold is clearly stated (>51.0% of yes/no votes) and reported totals (~51.5%) clear it by ~0.5 pp — not a hair's-breadth call, but not comfortable either. Two complications worth flagging for benchmark use: (1) the results were never certified — the Supreme Court of Virginia voided the election on May 8, 2026 (after the April 23 deadline), so the Dept. of Elections' totals remain permanently 'unofficial'; the criteria say 'final vote totals reported,' which the unofficial complete count satisfies, but a pedantic reader could argue no 'final' totals exist. (2) Source figures vary slightly (51.45%, 51.5%, 51.69%), and an early election-night snapshot showed 50.7% — a resolver looking at partial returns could have gotten this wrong. The claim is not self-answering and requires more than one lookup to settle confidently."
+    },
+    {
+      "id": "cr-a20577e50f",
+      "ground_truth": "NO",
+      "resolution_source": "Votebeat and SCOTUSblog reporting on the League of Women Voters of Massachusetts v. Trump injunction and pending Supreme Court stay applications",
+      "settlement_record": "U.S. District Court for the District of Massachusetts (Judge Indira Talwani) preliminary injunctions in California v. Trump (June 25, 2026) and League of Women Voters of Massachusetts v. Trump (Aug. 11, 2026, expressly barring USPS implementation of Section 3 of EO 14399 for the Nov. 3, 2026 midterms and any earlier federal election), together with the Supreme Court emergency docket in Trump v. California, No. 26A124, where the government's stay application remained pending and undecided as of Aug. 14–15, 2026 (1st Circuit had denied a stay on July 25, 2026).",
+      "source_urls": [
+        "https://www.votebeat.org/national/2026/08/12/trump-executive-order-mail-in-voting-postal-service-injunction/",
+        "https://www.scotusblog.com/2026/08/states-challenging-executive-order-on-mail-in-voting-ask-justices-to-leave-in-place-limits-on-it/",
+        "https://www.aclu.org/press-releases/voting-rights-groups-applaud-ruling-declaring-2026-executive-order-interference-with-voter-rolls-and-mail-in-ballots-unconstitutional-and-unlawful"
+      ],
+      "verifier_sources": [
+        "https://www.votebeat.org/national/2026/08/12/trump-executive-order-mail-in-voting-postal-service-injunction/",
+        "https://www.npr.org/2026/08/11/nx-s1-5928383/trump-mail-in-voting-executive-order-usps",
+        "https://thehill.com/regulation/court-battles/6023907-judge-blocks-usps-trump-voter-order/",
+        "https://www.aclu.org/press-releases/federal-court-blocks-u-s-postal-service-from-implementing-executive-order-restricting-mail-voting",
+        "https://www.scotusblog.com/cases/trump-v-california/",
+        "https://www.scotusblog.com/2026/08/trump-administration-urges-supreme-court-to-issue-a-decision-in-mail-in-voting-dispute/",
+        "https://www.votebeat.org/national/2026/06/25/trump-election-overhaul-mail-voting-executive-order-blocked-talwani-usps-dhs/",
+        "https://www.whitehouse.gov/presidential-actions/2026/03/ensuring-citizenship-verification-and-integrity-in-federal-elections/"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-stage",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "Requires tracking a rapidly shifting sequence of conflicting district- and appellate-court rulings plus a pending, undecided Supreme Court stay application to determine that the order remained legally blocked rather than in force by the deadline.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0.05,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.020597000000000004
+      },
+      "verifier_notes": "EO 14399 (\"Ensuring Citizenship Verification and Integrity in Federal Elections\") was signed March 31, 2026. Judge Talwani enjoined the mail-ballot/list-submission provisions on June 25, 2026 for the 23 plaintiff states + D.C., and on Aug. 11–12, 2026 issued a second (nationwide) injunction in League of Women Voters of Massachusetts v. Trump specifically barring USPS from implementing Section 3 for the Nov. 3, 2026 election. The 1st Circuit denied a stay July 25; DOJ's emergency application (Trump v. California, 26A124) was still pending at the Supreme Court through Aug. 14, with the administration filing supplemental briefing urging prompt action. USPS itself stated it was abiding by the injunctions and was not implementing the order. Therefore no nationwide implementation had begun and an injunction was in effect on the Aug. 15 deadline → NO.\n\nBenchmark caveats: (1) this is close to a single-lookup item — heavily covered news; (2) the claim as phrased (\"was being fully implemented\") is strongly contradicted by the dominant news narrative, so it is near-trivially false; (3) the criteria are otherwise clean and the Aug. 11 order explicitly names Section 3, removing the main ambiguity risk."
+    },
+    {
+      "id": "cr-719adacc8d",
+      "ground_truth": "NO",
+      "resolution_source": "Al Jazeera reporting on the July 30-31, 2026 Board of Peace disarmament agreement and its multi-month implementation roadmap",
+      "settlement_record": "Contemporaneous authoritative reporting on the Board of Peace / ISF-announced Gaza disarmament roadmap (announced 30 July 2026) and its implementation status through 16 August 2026: Al Jazeera's explainer on the Board of Peace disarmament agreement and full roadmap text (Times of Israel), FDD analysis of 7 Aug 2026 (\"Disarming Hamas Is Easier Said Than Done\") stating no weapons had been surrendered, and Al-Manassa's report on the 16 Aug 2026 El Alamein meeting (Al-Hayya/Kushner) at which Hamas said it would not take substantive steps to hand over weapons until Israel explicitly accepted the Phase Two roadmap.",
+      "source_urls": [
+        "https://www.aljazeera.com/news/2026/7/30/trump-says-board-of-peace-reaches-agreement-on-disarmament-of-hamas-in-gaza",
+        "https://www.aljazeera.com/news/2026/7/31/gaza-board-of-peace-announces-hamas-disarmament-agreement-what-we-know",
+        "https://www.inss.org.il/publication/hamas-disarmament-agreement/"
+      ],
+      "verifier_sources": [
+        "https://www.aljazeera.com/news/2026/7/31/gaza-board-of-peace-announces-hamas-disarmament-agreement-what-we-know",
+        "https://www.aljazeera.com/news/2026/7/30/trump-says-board-of-peace-reaches-agreement-on-disarmament-of-hamas-in-gaza",
+        "https://www.timesofisrael.com/full-text-of-board-of-peace-deal-for-hamas-to-disarm-israel-to-withdraw-from-gaza/",
+        "https://www.fdd.org/analysis/2026/08/07/disarming-hamas-is-easier-said-than-done/",
+        "https://almanassa.com/en/news/33471",
+        "https://foreignpolicy.com/2026/08/06/hamas-disarmament-deal-netanyahu-israel-gaza/",
+        "https://thehill.com/policy/international/6002266-hamas-disarmament-roadmap-unveiled/",
+        "https://www.inss.org.il/publication/hamas-disarmament-agreement/"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-stage",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "Requires distinguishing the July 30, 2026 announcement of an 'agreement' on disarmament from actual implementation, since the disclosed roadmap explicitly projected a six-to-eight-month handover process starting only after prior ceasefire commitments were met.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.019392
+      },
+      "verifier_notes": "Resolution is clear-cut NO. A 15-point disarmament roadmap was announced 30 July 2026 by the Board of Peace, under which Hamas would hand weapons to the National Committee for the Administration of Gaza (NCAG) over roughly 8 months / 200–300 days, contingent on NCAG deployment, ISF arrival, and phased Israeli withdrawal. As of the 15 Aug 2026 deadline none of those preconditions had been met: Israel had publicly balked at the plan (early Aug), and at the 16 Aug El Alamein meeting Hamas explicitly said it would take no substantive weapons-handover steps until Israel accepted the Phase Two roadmap. So only a framework agreement existed — exactly the NO branch.\n\nBenchmark quality caveats: (1) This is close to self-answering. The NO branch of the criteria (\"only a framework agreement on disarmament had been reached\") describes the real-world state so precisely that a reader who knows a framework was signed can infer the answer without further research. (2) It is also near-trivially settled by base rates: a multi-month decommissioning process announced ~2 weeks before the deadline could not plausibly have completed, so the claim carries little epistemic signal. (3) Minor definitional slack: \"Gaza's new governing authority\" is not named in the criteria (it is the NCAG), and \"completed the handover\" is unambiguous only because zero handover occurred — had partial heavy-weapons transfers begun, the criteria would not cleanly adjudicate. Recommend deprioritizing this item."
+    },
+    {
+      "id": "cr-74d0ba608d",
+      "ground_truth": "YES",
+      "resolution_source": "NASA Commercial Crew Program updates and spaceflight trade press (SpaceNews, NASASpaceFlight.com, Space.com)",
+      "settlement_record": "NASA/Boeing Commercial Crew contract modification (announced Nov 2025) converting Starliner-1 to an uncrewed cargo mission, plus NASA ISS Program status statements (Bill Spetch, July 30, 2026) that the cargo-only Starliner-1 would not fly before Q4 2026; corroborated by NASASpaceFlight (Aug 2026) reporting no Starliner flight had occurred.",
+      "source_urls": [
+        "https://www.space.com/space-exploration/human-spaceflight/boeing-starliner-wont-carry-nasa-astronauts-next-flight",
+        "https://www.nasaspaceflight.com/2026/08/boeing-starliner-2026-iss/",
+        "https://spaceflightnow.com/2025/11/24/nasa-boeing-pivot-starliner-1-mission-from-4-person-astronaut-flight-to-cargo-only/"
+      ],
+      "verifier_sources": [
+        "https://spacenews.com/nasa-to-fly-only-cargo-on-next-starliner-mission-under-modified-contract/",
+        "https://spaceflightnow.com/2025/11/24/nasa-boeing-pivot-starliner-1-mission-from-4-person-astronaut-flight-to-cargo-only/",
+        "https://www.nasaspaceflight.com/2026/08/boeing-starliner-2026-iss/",
+        "https://spacepolicyonline.com/news/still-no-date-for-starliners-next-flight/",
+        "https://payloadspace.com/starliner-to-fly-uncrewed-cargo-mission-in-april-not-astronauts/"
+      ],
+      "verifier_confidence": 0.98,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-negative",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "Requires tracking multiple contract revisions and slipping schedules, including the pivot of the 'Starliner-1' mission from a 4-person crew flight to an uncrewed cargo-only mission that itself slipped from April to Q4 2026, to confirm no crewed flight occurred at all.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0.05,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.0513612
+      },
+      "verifier_notes": "Criteria are clean (launch + dock with NASA astronauts aboard in the window). However, this is a weak benchmark item: it was near-certain ex ante — NASA and Boeing publicly de-crewed Starliner-1 in November 2025, before the claim window even opened, and the resolution criteria's explicit carve-out for uncrewed cargo missions effectively telegraphs the answer. It is also trivially settled by a single lookup, since a crewed Starliner launch would have been an unmissable public event."
+    },
+    {
+      "id": "cr-0b532847d0",
+      "ground_truth": "NO",
+      "resolution_source": "Al Jazeera reporting on the 2024 Palestine recognitions and on the 2022 UN Human Rights Council vote breakdown",
+      "settlement_record": "Official UN General Assembly voting record for resolution A/RES/ES-11/3 (7 April 2022), as published in UN Meetings Coverage GA/12414 and the UN Digital Library voting record (record 3967778), cross-checked against the criteria-supplied list of nine 2024 first-time recognizers of the State of Palestine.",
+      "source_urls": [
+        "https://www.aljazeera.com/news/2024/5/22/mapping-which-countries-recognise-palestine-in-2024",
+        "https://www.aljazeera.com/news/2022/4/8/russia-suspended-from-un-human-rights-body-how-countries-voted",
+        "https://en.wikipedia.org/wiki/United_Nations_General_Assembly_Resolution_ES-11/3"
+      ],
+      "verifier_sources": [
+        "https://press.un.org/en/2022/ga12414.doc.htm",
+        "https://digitallibrary.un.org/record/3967778?ln=en",
+        "https://www.aljazeera.com/news/2022/4/8/russia-suspended-from-un-human-rights-body-how-countries-voted",
+        "https://www.civilnet.am/en/news/656990/armenia-refuses-to-take-part-in-un-vote-to-suspend-russia-from-human-rights-council/",
+        "https://newsday.co.tt/2022/04/08/tt-supports-2-un-resolutions-against-russia-but-abstains-from-suspension-vote/",
+        "https://en.wikipedia.org/wiki/United_Nations_General_Assembly_Resolution_ES-11/3"
+      ],
+      "verifier_confidence": 0.96,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-multihop",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "Requires independently compiling two separate country lists from different events two years apart (a 2024 diplomatic recognition wave and a 2022 UN vote) and checking for any overlap, since neither source discusses the other.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": null,
+        "confidence": null,
+        "abstain": null,
+        "correct": null,
+        "cost_usd": 0,
+        "error": true
+      },
+      "verifier_notes": "The 24 'no' votes on ES-11/3 were: Algeria, Belarus, Bolivia, Burundi, Central African Republic, China, Congo, Cuba, DPR Korea, Eritrea, Ethiopia, Gabon, Iran, Kazakhstan, Kyrgyzstan, Laos, Mali, Nicaragua, Russia, Syria, Tajikistan, Uzbekistan, Vietnam, Zimbabwe. None of the nine 2024 recognizers appear. The only near-candidate, Armenia, did not participate in the vote (one of 18 non-voting states) rather than voting 'no'; the four Caribbean recognizers abstained or voted yes; Ireland, Norway, Spain and Slovenia voted yes. Benchmark weaknesses: (1) the resolution criteria explicitly enumerate the nine-country list, removing the main research burden and making the item near-self-answering; (2) it is a static historical fact rather than a forward-looking prediction — the 'deadline' is irrelevant; (3) it is settled by two straightforward lookups. The list-membership definitions are precise, so the criteria themselves are not ambiguous, though 'formal diplomatic recognition for the first time in 2024' would be contestable if the list were not pre-specified (e.g., some tallies of 2024 recognitions differ on the Caribbean states' dates)."
+    },
+    {
+      "id": "cr-c4bcdc057c",
+      "ground_truth": "NO",
+      "resolution_source": "European Parliament Legislative Train Schedule and Council of the EU press materials on the EU-Mercosur agreement's ratification status",
+      "settlement_record": "European Council/Council of the EU official page \"EU-Mercosur agreements explained\" and European Commission trade policy page on the EU-Mercosur agreement, together with the European Parliament Legislative Train file: the EMPA and interim Trade Agreement (iTA) were signed on 17 January 2026; the iTA has been provisionally applied since 1 May 2026; the European Parliament suspended its consent procedure on 21 January 2026 by requesting a CJEU Opinion (Art. 218(11) TFEU), and EU member-state ratification of the EMPA remains incomplete. The EMPA had therefore not entered into force by 15 August 2026.",
+      "source_urls": [
+        "https://www.europarl.europa.eu/legislative-train/theme-a-global-europe-leveraging-our-power-and-partnerships/file-eu-mercosur-association-agreement",
+        "https://www.consilium.europa.eu/en/press/press-releases/2026/01/09/eu-mercosur-council-greenlights-signature-of-the-comprehensive-partnership-and-trade-agreement/",
+        "https://www.squirepattonboggs.com/insights/publications/eu-mercosur-trade-agreement-signed-starting-ratification-process/"
+      ],
+      "verifier_sources": [
+        "https://www.consilium.europa.eu/en/policies/eu-mercosur-agreements-explained/",
+        "https://www.consilium.europa.eu/en/press/press-releases/2026/01/09/eu-mercosur-council-greenlights-signature-of-the-comprehensive-partnership-and-trade-agreement/",
+        "https://policy.trade.ec.europa.eu/eu-trade-relationships-country-and-region/countries-and-regions/mercosur/eu-mercosur-agreement_en",
+        "https://www.europarl.europa.eu/legislative-train/theme-a-global-europe-leveraging-our-power-and-partnerships/file-eu-mercosur-association-agreement",
+        "https://www.whitecase.com/insight-alert/eu-provisionally-apply-eu-mercosur-interim-trade-agreement-pending-cjeu-opinion",
+        "https://asil.org/insights/volume-30-issue-5/",
+        "https://www.pbs.org/newshour/amp/world/eu-lawmakers-vote-to-hold-up-mercosur-trade-agreement-over-legal-concerns"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-stage",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "Requires distinguishing among signature (Jan 2026), full Mercosur-side ratification (completed by March 2026), provisional application of the trade pillar (from May 2026), and full legal entry into force, which was suspended for over a year by a European Parliament referral to the CJEU.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "NO",
+        "confidence": 0.85,
+        "abstain": false,
+        "correct": true,
+        "cost_usd": 0.049232
+      },
+      "verifier_notes": "Facts are solid: signature 17 Jan 2026; Mercosur side ratified (Brazil Feb, Paraguay Mar 2026); EU side blocked — EP consent suspended 21 Jan 2026 pending CJEU Opinion (16–18 month delay), and no EU member-state ratifications of the EMPA completed; only the exclusive-competence interim Trade Agreement is provisionally applying since 1 May 2026. Weakness as a benchmark item: the outcome was essentially a foregone conclusion (full ratification by 27 member states within seven months of signature is procedurally impossible), and the NO branch of the criteria explicitly describes the real-world status quo (\"only signed and/or provisionally applying its trade pillar\"), which comes close to giving the answer away. It is also settled by a single lookup on the Council's explainer page."
+    },
+    {
+      "id": "cr-0e8efcd5d9",
+      "ground_truth": "YES",
+      "resolution_source": "International Court of Justice case docket and contemporaneous legal reporting (Just Security, Middle East Eye)",
+      "settlement_record": "ICJ case docket for \"Application of the Convention on the Prevention and Punishment of the Crime of Genocide in the Gaza Strip (South Africa v. Israel)\" (Case No. 192) — Order of 21 May 2026 fixing time-limits for the Reply (22 November 2027) and Rejoinder (22 May 2029), confirming written proceedings on the merits were still ongoing and no merits judgment had been rendered as of 15 August 2026.",
+      "source_urls": [
+        "https://www.middleeasteye.net/explainers/israels-genocide-gaza-whatever-happened-south-africas-case-icj",
+        "https://www.justsecurity.org/91486/icj-judgment-israel-south-africa-genocide-convention/",
+        "https://www.aljazeera.com/news/2025/10/14/south-africa-says-icj-genocide-case-will-continue-despite-gaza-ceasefire"
+      ],
+      "verifier_sources": [
+        "https://www.icj-cij.org/sites/default/files/case-related/192/192-20260521-ord-01-00-en.pdf",
+        "https://www.un.org/unispal/document/icj-court-order-on-fixing-of-time-limits-reply-and-rejoinder-south-africa-v-israel/",
+        "https://www.thepresidency.gov.za/presidency-notes-icj-order-21-may-2026-matter-between-government-republic-south-africa-and-state",
+        "https://www.middleeasteye.net/news/icj-grants-israel-another-extension-submit-evidence-south-africas-genocide-case",
+        "https://en.wikipedia.org/wiki/South_Africa%27s_genocide_case_against_Israel"
+      ],
+      "verifier_confidence": 0.985,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-negative",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "A researcher must sift through years of ICJ procedural history and distinguish the widely-reported January 2024 provisional-measures order from an actual merits judgment, which multiple 2026 reports confirm is not expected until 2027-2028.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "YES",
+        "confidence": 0.93,
+        "abstain": false,
+        "correct": true,
+        "cost_usd": 0.044926
+      },
+      "verifier_notes": "Israel filed its Counter-Memorial on 12 March 2026; the ICJ's Order of 21 May 2026 set South Africa's Reply for 22 November 2027 and Israel's Rejoinder for 22 May 2029, so oral hearings and a merits judgment are years away — a merits judgment before 15 August 2026 was structurally impossible. This makes the item near-trivially settled by one lookup and low-information as a benchmark question (base rate of YES was ~100% ex ante to anyone tracking ICJ procedure). Criteria themselves are clear and correctly exclude provisional-measures orders."
+    },
+    {
+      "id": "cr-8b76120dda",
+      "ground_truth": "NO",
+      "resolution_source": "News coverage of the January 2024 BRICS expansion cross-checked against OPEC's official member country list",
+      "settlement_record": "OPEC's official \"Member Countries\" roster as of 1 January 2024 (12 members, following Angola's withdrawal effective 1 Jan 2024): Algeria, Republic of the Congo, Equatorial Guinea, Gabon, Iran, Iraq, Kuwait, Libya, Nigeria, Saudi Arabia, UAE, Venezuela — cross-referenced with the BRICS accession of Egypt, Ethiopia, Iran, Saudi Arabia and the UAE on 1 January 2024 (Argentina having declined).",
+      "source_urls": [
+        "https://www.fdd.org/analysis/op_eds/2024/01/03/iran-saudi-arabia-uae-egypt-and-ethiopia-join-brics-doubling-membership/",
+        "https://www.opec.org/member-countries.html"
+      ],
+      "verifier_sources": [
+        "https://www.opec.org/member-countries.html",
+        "https://www.cnbcafrica.com/2023/factbox-angola-to-quit-opec-reducing-membership-to-12-countries",
+        "https://www.africanews.com/2024/01/02/brics-expansion-five-countries-join-ranks/",
+        "https://www.fdd.org/analysis/op_eds/2024/01/03/iran-saudi-arabia-uae-egypt-and-ethiopia-join-brics-doubling-membership/",
+        "https://www.britannica.com/money/OPEC"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-multihop",
+      "difficulty": "hard",
+      "disputed": false,
+      "why_nontrivial": "Requires assembling one list from BRICS expansion coverage and a second, independent list from OPEC's own membership records, then correctly determining that only three (not four) of the five countries overlap since Egypt and Ethiopia are not oil-cartel members.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "NO",
+        "confidence": 0.97,
+        "abstain": false,
+        "correct": true,
+        "cost_usd": 0.030961499999999996
+      },
+      "verifier_notes": "Only three of the five (Iran, Saudi Arabia, UAE) were OPEC members on 1 Jan 2024. Egypt is an OAPEC member and a net-importer/modest producer but has never been in OPEC; Ethiopia is not an oil producer and is not in OPEC. Three < four, so the claim resolves NO. Caveats for benchmark use: (1) this is a static reference-lookup question, not a genuine forecast — it is trivially settled by one or two lookups and there is no prediction-market or oracle settlement page; (2) a minor factual wrinkle in the premise is that Saudi Arabia never formally confirmed its BRICS accession in January 2024 (it participated as an invitee and its status remained ambiguous through 2024), but this does not change the count, which is at most three either way. The 'at least four' threshold makes the answer robust to that ambiguity. Also worth noting Angola (an OPEC member until 31 Dec 2023) is not among the BRICS joiners, so its exit does not affect the count."
+    },
+    {
+      "id": "cr-a3a58e4cf7",
+      "ground_truth": "NO",
+      "resolution_source": "Statement by Kyiv Mayor Vitali Klitschko, April 20, 2026, raising the death toll to seven",
+      "settlement_record": "Kyiv Mayor Vitali Klitschko's / Prosecutor General Ruslan Kravchenko's 20 April 2026 statements (carried by Reuters and Ukrainska Pravda) that the death toll from the 18 April 2026 Holosiivskyi district shooting had risen to seven after a critically wounded man (identified as 72-year-old Oleksandr Hryhorovych) died in hospital — versus the initial wire-service figure of six victims reported 18–19 April.",
+      "source_urls": [
+        "https://www.npr.org/2026/04/18/nx-s1-5789903/mass-shooting-kyiv-ukraine",
+        "https://whbl.com/2026/04/20/kyiv-shooting-death-toll-rises-to-seven-mayor-says/"
+      ],
+      "verifier_sources": [
+        "https://en.wikipedia.org/wiki/2026_Kyiv_shooting",
+        "https://www.pravda.com.ua/eng/news/2026/04/20/8030891/",
+        "https://www.aljazeera.com/news/2026/4/18/ukraine-police-shoot-dead-gunman-who-killed-six-in-kyiv-took-hostages",
+        "https://www.npr.org/2026/04/18/nx-s1-5789903/mass-shooting-kyiv-ukraine",
+        "https://www.cbc.ca/news/world/ukraine-fatal-shooting-gunman-dead-9.7169317",
+        "https://www.thestar.com.my/news/world/2026/04/20/kyiv-shooting-death-toll-rises-to-seven-mayor-says",
+        "https://meduza.io/en/news/2026/04/20/kyiv-shooting-death-toll-rises-to-7-mayor-says",
+        "https://unn.ua/en/news/the-death-toll-from-the-shooting-attack-in-kyiv-has-risen-to-seven",
+        "https://ukranews.com/en/news/1147188-in-kyiv-wounded-in-shooting-man-died-death-toll-rises-to-seven"
+      ],
+      "verifier_confidence": 0.95,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-contested",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires comparing same-day wire coverage (which reported six civilian deaths) against a follow-up municipal announcement two days later confirming a hospitalized victim had died, raising the toll to seven -- an update many later summaries omit or conflate with the total that includes the gunman.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.014441999999999998
+      },
+      "verifier_notes": "Sequence of record: on 18–19 April 2026 wire services and major outlets (Reuters via AJ, AP via NPR/CBC) reported six people killed by the gunman, plus the perpetrator shot dead by KORD police. On 20 April, Mayor Klitschko and Prosecutor General Kravchenko announced a hospitalized victim had died, raising the civilian toll to seven (Wikipedia and Ukrainian outlets identify him as 72-year-old Oleksandr Hryhorovych, who shielded a wounded boy). This is exactly the NO condition in the criteria. Minor wrinkle worth flagging: CNN's article at a 2026/04/18 URL now carries the headline \"gunman killed 7,\" but that is a live-updated page reflecting the later revision, not the original 24-hour figure; a careless resolver relying solely on that URL's date could mistakenly resolve YES. Otherwise the item is clean, though it is close to trivially settled — a single search of \"Kyiv shooting death toll rises to seven\" answers it — and the criteria's NO clause (\"because a hospitalized victim later died\") telegraphs the actual mechanism, which weakens it as a benchmark item."
+    },
+    {
+      "id": "cr-439a0a2d2b",
+      "ground_truth": "NO",
+      "resolution_source": "Al Jazeera, 'Nigeria charges six people with terrorism, treason over 2025 coup plot,' April 21, 2026",
+      "settlement_record": "Federal High Court, Abuja — arraignment of Maj. Gen. (rtd) Mohammed Ibrahim Gana, Navy Capt. (rtd) Erasmus Ochegobia Victor, Police Inspector Ahmed Ibrahim and three others on a 13-count treason/terrorism charge (charge filed by the Federal Government under the Criminal Code Act and Terrorism (Prevention and Prohibition) Act 2022), 21 April 2026; plus Nigerian Defence Headquarters' 26 January 2026 statement indicting 16 detained officers for an attempted coup and the General Court-Martial convened in April 2026 to try them.",
+      "source_urls": [
+        "https://www.aljazeera.com/news/2026/4/21/nigeria-charges-six-people-with-terrorism-treason-over-2025-coup-plot",
+        "https://allafrica.com/stories/202601270076.html"
+      ],
+      "verifier_sources": [
+        "https://www.aljazeera.com/news/2026/4/21/nigeria-charges-six-people-with-terrorism-treason-over-2025-coup-plot",
+        "https://www.premiumtimesng.com/news/headlines/873880-breaking-retired-general-five-others-plead-not-guilty-to-coup-charges-court-adjourns-bail-hearing.html",
+        "https://courthousenews.com/nigeria-charges-6-with-treason-over-alleged-coup-plot/",
+        "https://www.westafricanpilotnews.com/2026/04/22/fg-slams-13-count-treason-charge-on-ex-generals-police-officer-over-alleged-coup-plot/",
+        "https://allafrica.com/stories/202601270085.html",
+        "https://allafrica.com/stories/202601270101.html",
+        "https://prnigeria.com/2026/04/24/military-begins-court-martial/",
+        "https://www.premiumtimesng.com/news/headlines/874463-defence-headquarters-speaks-on-court-martial-of-36-military-personnel-for-alleged-coup-plot.html",
+        "https://www.theafricareport.com/395609/nigerias-military-denies-failed-coup-plot-as-16-officers-are-detained-scepticism-persists/"
+      ],
+      "verifier_confidence": 0.96,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-contested",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires tracking the story from the military's initial 'indiscipline' framing and government denials of a coup plot through months later to formal treason charges against a retired general and others, connecting sources that don't cross-reference each other.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.049464400000000006
+      },
+      "verifier_notes": "The initial October 2025 DHQ line (\"acts of indiscipline and breaches of service regulations,\" no coup) was explicitly reversed on 26 January 2026, when Defence Headquarters confirmed the investigation found some of the 16 detained personnel culpable in an attempted coup against President Tinubu and announced they would face a special court-martial (convened April 2026, reportedly covering 36 personnel in total). Separately and squarely within the window, on 21 April 2026 the Federal Government arraigned six \"associated individuals\" — including retired Maj. Gen. Mohammed Ibrahim Gana and retired Navy Capt. Erasmus Ochegobia Victor — on 13 counts of treason/terrorism at the Federal High Court in Abuja for conspiring \"to levy war against the state\"; all pleaded not guilty. Both tracks fall before the 30 April 2026 deadline, so the claim resolves NO under either reading. Minor weaknesses as a benchmark item: \"associated individuals\" is not defined, and one could quibble over whether a military court-martial constitutes \"prosecutors filing charges\" — but the civilian Federal High Court arraignment removes that ambiguity. The item is also settled by a single well-covered news event (AP/Al Jazeera, 21 April 2026), so it is close to a one-lookup resolution."
+    },
+    {
+      "id": "cr-3dc0cb69ac",
+      "ground_truth": "YES",
+      "resolution_source": "Retraction notice published in Humanities and Social Sciences Communications, April 22, 2026",
+      "settlement_record": "Official retraction notice published by Humanities and Social Sciences Communications (Springer Nature): \"Retraction Note: The effect of ChatGPT on students' learning performance, learning perception, and higher-order thinking: insights from a meta-analysis,\" DOI 10.1057/s41599-026-07310-z (published 22 April 2026); the original article (DOI 10.1057/s41599-025-04787-y, Wang & Fan, published May 2025) now carries the \"RETRACTED ARTICLE\" designation on nature.com.",
+      "source_urls": [
+        "https://www.nature.com/articles/s41599-026-07310-z",
+        "https://www.edtechinnovationhub.com/news/highly-cited-meta-analysis-claiming-chatgpt-boosts-student-learning-retracted-over-data-concerns"
+      ],
+      "verifier_sources": [
+        "https://www.nature.com/articles/s41599-026-07310-z",
+        "https://www.nature.com/articles/s41599-025-04787-y",
+        "https://ideas.repec.org/a/pal/palcom/v13y2026i1d10.1057_s41599-026-07310-z.html",
+        "https://www.edtechinnovationhub.com/news/highly-cited-meta-analysis-claiming-chatgpt-boosts-student-learning-retracted-over-data-concerns",
+        "https://www.govtech.com/education/nature-retracts-oft-cited-paper-on-positive-impact-of-chatgpt",
+        "https://www.plagiarismtoday.com/2026/07/15/study-claiming-ai-helps-students-learn-retracted/"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-contested",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires locating the actual retraction notice rather than the original viral coverage of the study's positive findings, and confirming the specific grounds and date, since many later summaries kept citing the study's original conclusions unaware it had been withdrawn.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.018304000000000004
+      },
+      "verifier_notes": "The Wang & Fan meta-analysis (51 studies, ~486,000 views, ~266 citations) was published in Humanities and Social Sciences Communications in May 2025 and formally retracted by the journal on 22 April 2026, comfortably before the 15 August 2026 deadline. The retraction notice cites methodological discrepancies (pooling of heterogeneous studies) raised by outside researchers; the authors reportedly did not respond. Criteria name the specific paper and journal, so resolution is clean. Weakness as a benchmark item: it is settled by a single lookup of the article page, and the claim's descriptive details (\"dozens of studies,\" \"hundreds of thousands of readers\") effectively identify the paper, making it low-difficulty rather than ambiguous."
+    },
+    {
+      "id": "cr-4ab0b3e636",
+      "ground_truth": "NO",
+      "resolution_source": "Maldives Elections Commission official results as reported by Anadolu Agency and Wikipedia's 2026 Maldivian constitutional referendum summary",
+      "settlement_record": "Elections Commission of the Maldives official referendum results for the 4 April 2026 Public Referendum on the Eighth Amendment (published at elections.gov.mv), reported as ~148,153 'No' (68.7%) vs ~67,413 'Yes' (31.3%); corroborated by AFP/Manila Times, Maldives Independent, Edition.mv and Wikipedia.",
+      "source_urls": [
+        "https://en.wikipedia.org/wiki/2026_Maldivian_constitutional_referendum",
+        "https://www.aa.com.tr/en/asia-pacific/voting-ends-in-maldives-key-constitutional-referendum/3891430"
+      ],
+      "verifier_sources": [
+        "https://en.wikipedia.org/wiki/2026_Maldivian_constitutional_referendum",
+        "https://www.elections.gov.mv/en/elections/referendum/49",
+        "https://www.manilatimes.net/2026/04/06/world/asia-oceania/maldives-rejects-merging-key-elections-to-cut-costs/2314430",
+        "https://maldivesindependent.com/politics/referendum-record-turnout-and-a-fractured-opposition-key-takeaways-from-the-april-4-elections-271d",
+        "https://edition.mv/news/49690",
+        "https://www.aa.com.tr/en/asia-pacific/voting-ends-in-maldives-key-constitutional-referendum/3891430",
+        "https://english.sun.mv/104272"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-obscure",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires finding the actual vote tally (68.7% No vs 31.3% Yes) rather than assuming a government-initiated referendum on a low-profile constitutional question passed.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.015154
+      },
+      "verifier_notes": "Criteria are clean and binary (Yes vs No vote count) with a clear authoritative tally. Result was decisive (~69/31), so no margin risk. Minor caveat: the claim is a straightforward factual lookup of a widely reported election outcome, so it may be trivially settled by a single search — low difficulty as a benchmark item. Reported percentages vary slightly across sources (68.7% vs 68.77%) depending on whether all 588 ballot boxes were counted, but the direction is unambiguous. The claim as stated (majority approved) is false."
+    },
+    {
+      "id": "cr-dd84db3d84",
+      "ground_truth": "NO",
+      "resolution_source": "Bursa Malaysia disclosures and Malaysian business press (The Edge Malaysia, BusinessToday) covering Reneuco's suspension, appeal and delisting",
+      "settlement_record": "Bursa Malaysia Securities Bhd's notification to Reneuco Berhad (announced 7 May 2026 on Bursa's website) dismissing the company's appeal against the delisting notice and against the refusal of a further extension of time to submit its PN17 regularisation plan; Reneuco's securities were removed from the Official List of the Main Market on 12 May 2026.",
+      "source_urls": [
+        "https://theedgemalaysia.com/node/802756",
+        "https://www.businesstoday.com.my/2026/04/13/reneuco-appeals-delisting-decision-bursa-defers-suspension-pending-outcome/"
+      ],
+      "verifier_sources": [
+        "https://theedgemalaysia.com/node/802756",
+        "https://www.nst.com.my/business/corporate/2026/05/1435252/reneuco-be-delisted-bursa-malaysia-may-12",
+        "https://klse.i3investor.com/web/announcement/detail/2050532",
+        "https://www.thestar.com.my/business/business-news/2026/05/07/reneuco-to-be-delisted-from-bursa-malaysia",
+        "https://www.malaymail.com/news/money/2026/05/08/reneuco-to-be-delisted-from-bursa-malaysia-on-may-12-after-missing-regularisation-deadline/219248",
+        "https://www.businesstoday.com.my/2026/04/13/reneuco-appeals-delisting-decision-bursa-defers-suspension-pending-outcome/",
+        "https://www.freemalaysiatoday.com/category/business/2026/05/07/reneuco-to-be-delisted-on-may-12"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-obscure",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires following a multi-stage sequence (extension rejected, delisting set, appeal filed, suspension deferred, appeal finally dismissed) reported only in Malaysian trade press, where an initial deferral could be mistaken for the final outcome.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.014582000000000001
+      },
+      "verifier_notes": "Clean binary outcome matching the NO branch exactly: appeal dismissed, shares delisted 12 May 2026 (the resolution deadline date). Background: Reneuco entered PN17 in Feb 2024 after auditors could not obtain sufficient evidence on trade receivables/payables and revenue; it sought an extension to 7 Nov 2026 to submit a regularisation plan, which Bursa refused, then appealed on 13 April 2026 (suspension originally set for 16 April was deferred pending appeal). Weakness as a benchmark item: it is trivially settled by a single news lookup and is widely reported, so it tests retrieval rather than reasoning. Primary Bursa/company announcements are on bursamalaysia.com but were only accessible here via i3investor mirrors of the announcement."
+    },
+    {
+      "id": "cr-26c22e305d",
+      "ground_truth": "YES",
+      "resolution_source": "Bursa Malaysia disclosures and Malaysian business press (The Edge Malaysia, The Star, New Straits Times) on Sentoria's PN17 status and delisting",
+      "settlement_record": "Bursa Malaysia Securities Bhd's notice to Sentoria Group Bhd (announced via Bursa/company filing, early June 2026) stating that, due to failure to submit a regularisation plan to the SC or Bursa Securities by the extended deadline of 3 June 2026, trading in Sentoria's securities would be suspended from 12 June 2026 and its securities removed from the Official List of the Main Market on 16 June 2026 unless an appeal was lodged by 11 June 2026; Sentoria stated it had no plan and no capacity to appeal, and the delisting took effect 16 June 2026.",
+      "source_urls": [
+        "https://theedgemalaysia.com/node/806040",
+        "https://www.thestar.com.my/business/business-news/2026/06/04/sentoria-shares-to-be-suspended-from-june-12-faces-delisting"
+      ],
+      "verifier_sources": [
+        "https://theedgemalaysia.com/node/806040",
+        "https://theedgemalaysia.com/node/805863",
+        "https://www.thestar.com.my/business/business-news/2026/06/04/sentoria-shares-to-be-suspended-from-june-12-faces-delisting",
+        "https://www.nst.com.my/property/2026/06/1455732/sentoria-be-suspended-delisted-over-regularisation-failure-watch",
+        "https://www.thestar.com.my/business/business-news/2026/06/05/sentoria-to-be-delisted-soon",
+        "https://www.edgeprop.my/content/1916323/sentoria-delist-main-market-june-16",
+        "https://www.businesstoday.com.my/2026/06/05/sentoria-shares-to-be-suspended-from-june-12-faces-delisting/"
+      ],
+      "verifier_confidence": 0.95,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-obscure",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires piecing together Sentoria's PN17 timeline, its court-ordered winding up, and the specific extended regularisation-plan deadline from Malaysian trade press to confirm the final delisting outcome.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.015044999999999998
+      },
+      "verifier_notes": "Resolution is clear-cut: extended deadline was 3 June 2026; no plan was submitted; suspension 12 June, delisting 16 June 2026. One minor wrinkle: Sentoria's shares had already been suspended since 21 April 2026 following a High Court winding-up order (official receiver appointed liquidator 8 April), so the June suspension overlapped an existing one — this does not change the outcome. Weakness as a benchmark item: it is trivially settled by a single news lookup and the claim text itself essentially restates the outcome, so it is close to self-answering. I did not retrieve the primary Bursa announcement page directly (bursamalaysia.com announcement not surfaced in search), relying instead on multiple independent Malaysian financial outlets quoting the Bursa notice plus post-event confirmations describing the delisting in the past tense."
+    },
+    {
+      "id": "cr-5339402f59",
+      "ground_truth": "YES",
+      "resolution_source": "National Election Office of Hungary final results, reported by intellinews.com and CNN",
+      "settlement_record": "Hungarian National Election Office (Nemzeti Választási Iroda / valasztas.hu) final, fully-counted mandate allocation for the 12 April 2026 National Assembly election, announced 18 April 2026: Tisza Party 141 mandates (96 single-member districts + 45 list seats), Fidesz–KDNP 52, Mi Hazánk 6, out of 199.",
+      "source_urls": [
+        "https://www.intellinews.com/final-hungarian-election-results-confirm-supermajority-for-tisza-438174/",
+        "https://www.cnn.com/2026/04/12/world/live-news/hungary-election-orban-magyar",
+        "https://en.wikipedia.org/wiki/2026_Hungarian_parliamentary_election"
+      ],
+      "verifier_sources": [
+        "https://en.wikipedia.org/wiki/2026_Hungarian_parliamentary_election",
+        "https://hu.wikipedia.org/wiki/2026-os_magyarorsz%C3%A1gi_orsz%C3%A1ggy%C5%B1l%C3%A9si_v%C3%A1laszt%C3%A1s",
+        "https://www.portfolio.hu/gazdasag/20260418/valasztas-2026-mar-141-mandatumon-all-a-tisza-a-fidesz-kepviselok-szama-52-re-csokkent-831380",
+        "https://telex.hu/belfold/2026/04/18/valasztas-vegeredmeny-mandatumok-tisza-fidesz-mi-hazank",
+        "https://dailynewshungary.com/hungary-election-2026-all-votes-counted-tisza/",
+        "https://www.erstegroup.com/en/research/report/en/SR497691",
+        "https://www.penzcentrum.hu/gazdasag/20260419/valasztas-2026-itt-a-megvalasztott-parlamenti-kepviselok-listaja-ime-a-vegleges-tisza-part-fidesz-kdnp-es-mi-hazank-eredmenyek-1197200"
+      ],
+      "verifier_confidence": 0.96,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-threshold",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Preliminary election-night counts (98.94% counted) showed only 138 seats, and the final total of 141 only emerged after several days of counting mail-in and overseas ballots, so a researcher must find the certified final tally rather than the election-night figure and compute the exact two-thirds cutoff (133 of 199) rather than trusting a rounded 'won two-thirds' headline.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.01608
+      },
+      "verifier_notes": "The final count (including mail-in/foreign-mission ballots and compensation-list seats) was published by the NVI on 18 April 2026, before the 20 April deadline: Tisza 141 ≥ 133, so YES. Late-counted ballots added four seats to Tisza versus election-night totals (three flipped constituencies plus one compensation seat), so the pre-final count (137) also cleared the threshold — the outcome is robust to which count is used. Minor source discrepancy on Fidesz–KDNP (52 vs 53) does not affect Tisza's 141. Weaknesses as a benchmark item: (a) the wording \"the winning opposition party\" presupposes an opposition victory, leaking part of the state of the world; (b) it is settled by a single authoritative lookup, so it is a low-difficulty item; (c) resolution never hinged on a close margin, since 141 is comfortably above 133."
+    },
+    {
+      "id": "cr-b15ee58f80",
+      "ground_truth": "YES",
+      "resolution_source": "County clerk unofficial results compiled by Civic Media, Spectrum News 1, and Wisconsin Policy Forum",
+      "settlement_record": "Wisconsin Association of School Boards (WASB) post-election tally, \"Referenda results: statewide passage rate was 61% with 46 out of 75 approved\" (April 9, 2026), corroborated by the Wisconsin Policy Forum report \"K-12 Referenda Add to Revenue Gaps\" (46 of 75 = 61.3% approval) and Wisconsin DPI referenda reporting.",
+      "source_urls": [
+        "https://civicmedia.us/news/2026/04/08/voters-approve-majority-of-school-referendums-in-2026-spring-election",
+        "https://spectrumnews1.com/wi/milwaukee/news/2026/04/08/wisconsin-school-referendum-results-spring-election-2026",
+        "https://www.schoolinfosystem.org/2026/04/08/nearly-a-quarter-of-school-referendum-questions-statewide-were-decided-by-fewer-than-90-votes-and-roughly-half-had-a-yes-no-split-under-10/"
+      ],
+      "verifier_sources": [
+        "https://wasb.org/referenda-results-statewide-passage-rate-was-61-with-46-out-of-75-approved/",
+        "https://wispolicyforum.org/research/k-12-referenda-add-to-revenue-gaps/",
+        "https://spectrumnews1.com/wi/milwaukee/news/2026/04/08/wisconsin-school-referendum-results-spring-election-2026",
+        "https://spectrumnews1.com/wi/milwaukee/news/2026/05/18/support-for-school-referenda-weakens",
+        "https://wisconsinwatch.org/2026/04/wisconsin-voters-school-district-referendum-funding-support-property-tax-election-2026/",
+        "https://www.wpr.org/politics/referendums/wisconsin-vote-75-school-referendums",
+        "https://dpi.wi.gov/sfs/reporting/safr/referenda-info",
+        "https://sfs.dpi.wi.gov/Referenda/CustomReporting.aspx"
+      ],
+      "verifier_confidence": 0.94,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-threshold",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires locating the exact statewide tally (46 of 75 questions passed = 61.3%) buried in local-news roundups rather than relying on the vague 'majority passed' framing used in most headlines, and computing whether that rate clears a 60% cutoff.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.015132
+      },
+      "verifier_notes": "Outcome: 46 of 75 school district referendum questions approved on April 7, 2026 = 61.3% > 0.60, so YES. Sensitivity check performed because the margin over the threshold is only about one question (45/75 = exactly 0.600 would have resolved NO under the stated tie rule). Many questions were extremely close (Butternut +1, Shell Lake +2, Crandon +19, Gilman +30; 11 questions decided by <=83 votes), and election-night totals were unofficial pending district canvasses. However, the Butternut one-vote result went to recount and was CONFIRMED as passing, and reporting well after canvassing (Spectrum News, May 18, 2026) still cites 46 of 75. No question is reported to have flipped.\n\nMinor denominator wrinkle: WASB's pre-election notice counted 74 questions in 72 districts; the final tally was 75 questions. Either denominator (46/74 = 62.2%, 46/75 = 61.3%) exceeds 0.60, so this does not affect resolution.\n\nWeaknesses as a benchmark item: (1) It is trivially settled by a single lookup - the authoritative WASB page's TITLE literally states \"61% with 46 out of 75 approved.\" (2) The claim's phrasing (\"more than 60% approved\") closely mirrors contemporaneous headlines (e.g., Wisconsin Watch: \"Voters approved more than 60% of school district referendums\"), so it is close to self-answering. (3) Slight wording mismatch between the claim (\"school-funding ballot referenda\") and criteria (\"school-district referendum questions\"), though in practice essentially all April 2026 Wisconsin school district questions were operational or capital funding questions, so this does not create real ambiguity. Recommend either dropping this item or rephrasing the threshold away from the widely-quoted 60% framing."
+    },
+    {
+      "id": "cr-c93bb4a10b",
+      "ground_truth": "NO",
+      "resolution_source": "House floor vote tally reported by NBC News and Congress Vote Tracker",
+      "settlement_record": "House floor roll call on final passage of H.R. 7296 (SAVE America Act), February 11, 2026 — recorded vote 218 yea to 213 nay (Office of the Clerk roll call record, as reported by Congress.gov/Roll Call/NBC and member press releases). Margin = 5, i.e., not greater than 5.",
+      "source_urls": [
+        "https://www.nbcnews.com/politics/congress/house-passes-save-america-act-trump-backed-election-bill-rcna258614",
+        "https://congressvotetracker.org/articles/save-america-act-house-vote-breakdown-march-2026.html"
+      ],
+      "verifier_sources": [
+        "https://rollcall.com/2026/02/11/house-passes-revamped-citizenship-voter-id-bill/",
+        "https://www.nbcnews.com/politics/congress/house-passes-bill-requiring-proof-citizenship-vote-federal-elections-rcna200586",
+        "https://www.congress.gov/bill/119th-congress/house-bill/7296",
+        "https://wibc.com/876391/house-passes-save-america-act-in-218-213-vote/",
+        "https://houchin.house.gov/media/press-releases/rep-erin-houchin-statement-house-passage-save-america-act",
+        "https://www.foxnews.com/politics/only-one-house-dem-voted-in-favor-voter-id-proof-citizenship-us-elections",
+        "https://clerk.house.gov/Votes"
+      ],
+      "verifier_confidence": 0.93,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-threshold",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "The bill passed 218-213, an exact 5-vote margin, so correctly resolving a 'more than 5' threshold requires pinning down the precise recorded tally rather than a rounded description like 'narrowly passed,' and recognizing that a margin equal to the threshold does not satisfy a strict 'more than' test.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.014931000000000002
+      },
+      "verifier_notes": "The criteria are precise (yea minus nay on the Feb 11, 2026 final-passage vote; >5 = YES, <=5 = NO) and the outcome sits exactly on the boundary: 218-213 gives a margin of exactly 5, which the criteria explicitly assign to NO. Because it is a boundary case, an off-by-one error in the tally would flip the answer; however, the 218-213 figure is corroborated by Roll Call, NBC, PBS, Fox, and multiple members' own press releases. I was not able to load the Clerk's roll-call page text directly through search snippets, only its derivative reporting — a minor caveat on the 'authoritative record' claim. Benchmark quality note: the claim's premise (that the House passed the bill in Feb 2026) is true and the resolution turns on a single numeric lookup, so it is a fairly trivial one-lookup item, though the exact-boundary margin makes it non-obvious to a model reasoning from priors."
+    },
+    {
+      "id": "cr-7d33233fbd",
+      "ground_truth": "NO",
+      "resolution_source": "Costa Rica Supreme Electoral Tribunal (TSE) official results, reported by The Tico Times and CNN",
+      "settlement_record": "Tribunal Supremo de Elecciones (Costa Rica) official declaratoria de elección presidencial, 3 March 2026 (TSE communiqué), final scrutiny: Laura Fernández Delgado 48.30% (1,191,727 votes) — first-round win under the 40% constitutional threshold",
+      "source_urls": [
+        "https://ticotimes.net/2026/02/01/laura-fernandez-wins-costa-rica-presidency-in-the-first-round-vote",
+        "https://www.cnn.com/2026/02/01/americas/costa-rica-elections-latam-intl",
+        "https://en.wikipedia.org/wiki/2026_Costa_Rican_general_election"
+      ],
+      "verifier_sources": [
+        "https://www.tse.go.cr/comunicado1168.html",
+        "https://delfino.cr/2026/03/tse-declara-oficialmente-presidenta-electa-a-laura-fernandez-delgado",
+        "https://en.wikipedia.org/wiki/2026_Costa_Rican_general_election",
+        "https://www.nacion.com/politica/resultados-de-elecciones-en-costa-rica-2026-tse/7JJ6BJ6665D3RLJELAQOFGHZ7I/story/",
+        "https://www.infobae.com/costa-rica/2026/03/03/tribunal-supremo-de-elecciones-oficializa-la-victoria-de-laura-fernandez-como-presidenta-de-costa-rica/"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-threshold",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Headlines describe the result as a decisive first-round 'win,' which could be mistaken for a majority, but Costa Rica's rule requires only 40% (with a lead) to avoid a runoff; confirming the answer requires finding the precise 48.53% figure and recognizing it falls short of an outright majority despite the win.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.036350099999999996
+      },
+      "verifier_notes": "The claim's premise (an outright single-round win) did occur, since Costa Rica's threshold is 40%, not 50% — so the criteria are well-defined here. Preliminary TSE count reported 48.5%; final scrutiny 48.30%; both are clearly below 50.0%, so measurement-source choice does not change the answer. Mild concern for benchmark use: the criteria hint at the key fact (that the winner won in a single round despite the sub-50% share), and the item is settled by a single lookup of the official result. Small residual risk only from the possibility that a source uses a different denominator, but no plausible denominator pushes the share above 50%."
+    },
+    {
+      "id": "cr-145f38ae21",
+      "ground_truth": "NO",
+      "resolution_source": "Apple Inc. official Q1 FY2026 earnings release",
+      "settlement_record": "Apple Inc. official earnings release for fiscal 2026 first quarter (quarter ended December 27, 2025), issued January 29, 2026 — Apple Newsroom \"Apple reports first quarter results\" and SEC Form 8-K Exhibit 99.1 (accession 0000320193-26-000005): quarterly revenue $143.8 billion, up 16% YoY.",
+      "source_urls": [
+        "https://www.apple.com/newsroom/2026/01/apple-reports-first-quarter-results/",
+        "https://www.tweaktown.com/news/109957/apple-posts-its-best-quarter-ever-with-fiscal-q1-2026-earnings-revenue-of-dollars143-8-billion/index.html"
+      ],
+      "verifier_sources": [
+        "https://www.apple.com/newsroom/2026/01/apple-reports-first-quarter-results/",
+        "https://www.sec.gov/Archives/edgar/data/320193/000032019326000005/a8-kex991q1202612272025.htm",
+        "https://s2.q4cdn.com/470004039/files/doc_earnings/2026/q1/filing/10Q-Q1-2026-as-filed.pdf",
+        "https://www.cnbc.com/2026/01/29/apple-aapl-earnings-report-q1-2026.html",
+        "https://www.macrumors.com/2026/01/29/apple-1q-2026-earnings/",
+        "https://variety.com/2026/digital/news/apple-earnings-q1-2026-iphone-sales-services-1236644631/"
+      ],
+      "verifier_confidence": 0.96,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-threshold",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Some coverage rounded the record result up to 'nearly $144 billion,' which could mislead a reader into assuming the threshold was cleared, so confirming the answer requires checking the exact reported figure ($143.8 billion) against Apple's official release rather than a rounded press summary.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.0243784
+      },
+      "verifier_notes": "Reported revenue of $143.8B falls just $0.2B short of the $144.0B threshold — a genuinely close call, which makes it a reasonable (non-trivial) benchmark item, but it also means the exact rounded figure matters. Sources uniformly cite $143.8B (Apple's own release rounds to $143.8B); I did not read the exact line-item in millions from the 8-K text directly, though $143.8B is unambiguously below $144.0B under any rounding within that range. Earnings were announced January 29, 2026, before the January 30 deadline. Criteria are clear: single official figure, single threshold. One caveat: the claim was a plausible pre-earnings forecast (consensus was ~$138.5B), so it is not self-answering."
+    },
+    {
+      "id": "cr-e9fdd8df6b",
+      "ground_truth": "YES",
+      "resolution_source": "Law firm client alerts summarizing the Supreme Court's February 20, 2026 decision in the IEEPA tariffs case",
+      "settlement_record": "U.S. Supreme Court slip opinion in Learning Resources, Inc. v. Trump, No. 24-1287 (consolidated with Trump v. V.O.S. Selections, Inc., No. 25-250), issued February 20, 2026, published at supremecourt.gov/opinions/25pdf/24-1287_4gcj.pdf, and the Court's public docket for No. 24-1287.",
+      "source_urls": [
+        "https://www.wilmerhale.com/en/insights/client-alerts/20260220-supreme-court-strikes-down-ieepa-tariffs-what-now",
+        "https://www.whitecase.com/insight-alert/united-states-terminates-ieepa-based-tariffs-following-supreme-court-decision",
+        "https://www.congress.gov/crs-product/LSB11398"
+      ],
+      "verifier_sources": [
+        "https://www.supremecourt.gov/opinions/25pdf/24-1287_4gcj.pdf",
+        "https://www.supremecourt.gov/docket/docketfiles/html/public/24-1287.html",
+        "https://supreme.justia.com/cases/federal/us/607/24-1287/",
+        "https://www.scotusblog.com/2026/02/a-breakdown-of-the-courts-tariff-decision/",
+        "https://www.congress.gov/crs-product/LSB11398",
+        "https://www.whitecase.com/insight-alert/united-states-terminates-ieepa-based-tariffs-following-supreme-court-decision"
+      ],
+      "verifier_confidence": 0.98,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-stage",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires tracing the tariff dispute through its Court of International Trade injunction, Federal Circuit stay, and eventual Supreme Court merits ruling to pin down exactly which stage had been reached and confirm a final decision (not just a lower-court block) had issued.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.0430889
+      },
+      "verifier_notes": "The Court issued a merits decision on Feb. 20, 2026 (6-3, Roberts, C.J.), holding IEEPA does not authorize tariffs; vacated and remanded. This is 9 days before the March 1, 2026 deadline, so timing is not borderline. Criteria are clean (merits decision vs. still pending). Caveat as a benchmark item: it is trivially settled by a single lookup of the Supreme Court's opinions page, and the outcome was heavily covered — low difficulty. Also note the claim only asks whether a ruling issued, not its direction, so the substance of the holding is irrelevant to resolution."
+    },
+    {
+      "id": "cr-47cce54163",
+      "ground_truth": "YES",
+      "resolution_source": "CNN Business and Axios reporting on the closing of the TikTok U.S. divestiture deal",
+      "settlement_record": "TikTok Newsroom official announcement, \"Announcement from the new TikTok USDS Joint Venture LLC\" (January 22, 2026), confirming the closing of the divestiture and formation/operational control of TikTok USDS Joint Venture LLC; corroborated by Oracle's subsequent SEC filing disclosing its stake in the joint venture.",
+      "source_urls": [
+        "https://www.cnn.com/2026/01/22/tech/tiktok-us-deal-closes",
+        "https://www.axios.com/2026/01/23/tiktok-deal-trump-app-ban",
+        "https://www.cnn.com/2025/12/18/tech/tiktok-signs-us-sale-deal"
+      ],
+      "verifier_sources": [
+        "https://newsroom.tiktok.com/announcement-from-the-new-tiktok-usds-joint-venture-llc",
+        "https://www.cnn.com/2026/01/22/tech/tiktok-us-deal-closes",
+        "https://axios.com/2026/01/23/tiktok-deal-trump-app-ban",
+        "https://deadline.com/2026/01/tiktok-sets-deal-for-majority-us-owned-joint-venture-1236694090/",
+        "https://www.cnbc.com/2026/03/11/oracle-tiktok-us-stake-outages.html",
+        "https://techcrunch.com/2026/01/23/heres-whats-you-should-know-about-the-us-tiktok-deal/"
+      ],
+      "verifier_confidence": 0.96,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-stage",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires separating the December 2025 signing of the divestiture agreement from its actual closing roughly five weeks later, since multiple outlets used 'deal reached' language for both distinct events.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.0355401
+      },
+      "verifier_notes": "The criteria draw a clean, standard M&A distinction between signing (Dec 18, 2025 binding agreements) and closing (Jan 22, 2026). The close occurred 3 days before the Jan 25 deadline, so timing is not marginal but is close enough that a resolver must actually check the date rather than assume. Weaknesses as a benchmark item: it is settleable with a single search, and the claim was widely reported; there is also a mild risk that a model conflates the December signing with closing (which would produce NO), which is arguably the intended discriminator. Minor residual nuance: ByteDance retained 19.9% and the algorithm is licensed/retrained rather than sold outright, so \"operational control\" is legally structured rather than a clean asset sale — but the JV explicitly holds operational control of U.S. operations, so this does not change the resolution."
+    },
+    {
+      "id": "cr-310de2b893",
+      "ground_truth": "NO",
+      "resolution_source": "Reporting on the pending Second Circuit appeal following April 9, 2026 oral arguments in United States v. Combs",
+      "settlement_record": "Second Circuit docket in United States v. Combs, No. 25-2623 (2d Cir.) — oral argument held April 9, 2026 before a panel (incl. Judge William Nardini); decision reserved, with no opinion/judgment entered as of Aug 15, 2026, corroborated by contemporaneous coverage through mid-August 2026 (Washington Times 7/31/2026; Deadline/TMZ/The Source August 2026) that still describes the appeal as pending.",
+      "source_urls": [
+        "https://www.cnn.com/2026/04/09/entertainment/sean-diddy-combs-appeals-court",
+        "https://www.law.com/nationallawjournal/2026/04/09/difficult-case-2nd-circuit-weighs-question-of-1st-impression-in-sean-diddy-combs-appeal/",
+        "https://www.musictimes.com/articles/112173/20260622/judges-say-diddys-appeal-raises-question-no-federal-court-has-answered.htm"
+      ],
+      "verifier_sources": [
+        "https://www.courtlistener.com/docket/71724945/united-states-of-america-v-combs/",
+        "https://dockets.justia.com/docket/circuit-courts/ca2/25-2623",
+        "https://www.cnn.com/2026/04/09/entertainment/sean-diddy-combs-appeals-court",
+        "https://www.nbcnews.com/news/crime-courts/diddys-lawyers-press-appeals-court-toss-prostitution-conviction-senten-rcna267067",
+        "https://www.musictimes.com/articles/112173/20260622/judges-say-diddys-appeal-raises-question-no-federal-court-has-answered.htm",
+        "https://www.washingtontimes.com/news/2026/jul/31/diddys-prison-release-date-moved-amid-appeal-prison-fight/",
+        "https://deadline.com/2026/08/diddy-jail-fight-longer-sentence-1237018908/",
+        "https://thesource.com/2026/08/13/diddy-released-from-solitary-confinement-following-fort-dix-prison-fight/"
+      ],
+      "verifier_confidence": 0.92,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-stage",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires confirming that a panel which heard argument in April 2026 and was reported as still deliberating a 'question of first impression' as of late June 2026 had, or had not, actually issued a ruling by mid-August, rather than assuming a high-profile case resolves quickly.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.019135000000000003
+      },
+      "verifier_notes": "The Second Circuit panel (Nardini and colleagues) heard ~2 hours of argument on April 9, 2026 on the acquitted-conduct sentencing question, called it a \"question of first impression\" and an \"exceptionally difficult case,\" and reserved decision. No opinion had issued by the Aug 15, 2026 deadline: as late as Aug 13, 2026, coverage of Combs (Fort Dix fight, solitary confinement, BOP release-date shifts to Feb. 20, 2028) still described the appeal as pending, and no outlet reported a ruling. Weaknesses as a benchmark item: (1) resolution rests partly on absence of evidence — I could not load the live PACER/CourtListener docket entries past April 2026 directly, only search summaries; a ruling would, however, have been enormous news; (2) the criteria's NO branch essentially restates the known posture (argued but not decided), making the item close to a single-lookup/near-self-answering question; (3) the NO branch is technically incomplete — it does not cover a hypothetical world where argument had not yet occurred — but that contingency did not arise."
+    },
+    {
+      "id": "cr-07509f2be6",
+      "ground_truth": "YES",
+      "resolution_source": "NASA mission blog coverage of the April 1, 2026 launch and April 10, 2026 splashdown of Artemis II",
+      "settlement_record": "NASA official mission blog and gallery: \"Artemis II Flight Day 10: Live Re-Entry Updates\" (nasa.gov/blogs/missions, April 10, 2026) and NASA \"Artemis II Splashdown and Recovery\" — Artemis II launched April 1, 2026 (6:35 p.m. EDT) on SLS, flew a free-return lunar flyby, and the crew (Wiseman, Glover, Koch, Hansen) splashed down safely off San Diego at 8:07 p.m. EDT on April 10, 2026.",
+      "source_urls": [
+        "https://www.nasa.gov/blogs/missions/2026/04/10/artemis-ii-flight-day-10-re-entry-live-updates/",
+        "https://www.nasa.gov/blogs/missions/2026/03/30/nasas-artemis-ii-launch-mission-countdown-begins/",
+        "https://www.nbcnews.com/science/space/live-blog/nasa-artemis-ii-splashdown-time-astronauts-live-updates-rcna266591"
+      ],
+      "verifier_sources": [
+        "https://www.nasa.gov/blogs/missions/2026/04/10/artemis-ii-flight-day-10-re-entry-live-updates/",
+        "https://www.nasa.gov/gallery/artemis-ii-splashdown-and-recovery/",
+        "https://www.cbsnews.com/live-updates/artemis-ii-splashdown-return/",
+        "https://www.nbcnews.com/science/space/live-blog/nasa-artemis-ii-splashdown-time-astronauts-live-updates-rcna266591",
+        "https://www.space.com/space-exploration/artemis/nasa-artemis-2-moon-mission-landing-what-time"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-stage",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires cutting through years of shifting NASA target dates (originally proposed for 2024/2025) to confirm the mission had actually launched on April 1, 2026 and fully concluded with splashdown well before the deadline, rather than assuming further delay.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "NO",
+        "confidence": 0.7,
+        "abstain": false,
+        "correct": false,
+        "cost_usd": 0.037429
+      },
+      "verifier_notes": "Clean resolution: all three required events (launch, lunar flyby, safe splashdown) occurred before the 2026-04-15 deadline, with only ~5 days of margin — so it was a genuinely uncertain claim ex ante given repeated Artemis schedule slips. Weakness as a benchmark item: it is settled by a single authoritative lookup (NASA mission blog), and the outcome was widely covered, so it is a low-difficulty item. No ambiguity in criteria; \"safely splashed down\" is unambiguously satisfied (crew recovered healthy aboard USS Murtha)."
+    },
+    {
+      "id": "cr-fec10a6ed7",
+      "ground_truth": "YES",
+      "resolution_source": "Leeham News and The Stand reporting on the January 30, 2026 SPEEA ratification vote",
+      "settlement_record": "SPEEA (IFPTE Local 2001) official announcement, \"SPEEA Wichita Technical & Professional members approve new contract\" (Jan. 30, 2026), reporting ratification of the 4.8-year Boeing contract by a 671–111 (85.8% yes) membership vote of the Wichita Technical & Professional Unit, following the Jan. 15/16, 2026 tentative agreement.",
+      "source_urls": [
+        "https://leehamnews.com/2026/01/30/flash-speea-union-at-boeing-wichita-oks-new-contract-with-85-8-voting-yes/",
+        "https://www.thestand.org/2026/02/wichita-aerospace-workers-ratify-new-contract-with-boeing/",
+        "https://www.usnews.com/news/top-news/articles/2026-01-15/boeing-secures-tentative-labor-deal-with-former-spirit-aerosystems-workers"
+      ],
+      "verifier_sources": [
+        "https://speea.org/speea-wichita-technical-professional-members-approve-new-contract/",
+        "https://leehamnews.com/2026/01/30/flash-speea-union-at-boeing-wichita-oks-new-contract-with-85-8-voting-yes/",
+        "https://www.kwch.com/2026/01/31/wichita-aerospace-professionals-ratify-boeing-contract/",
+        "https://www.ksn.com/news/business/speeas-wichita-unit-approves-labor-contract-with-boeing/",
+        "https://www.ifpte.org/news/speea-reaches-tentative-agreement-with-boeing-in-wichita",
+        "https://www.cnbc.com/2026/01/16/boeing-secures-tentative-deal-with-former-spirit-aerosystems-workers.html",
+        "https://www.thestand.org/2026/02/wichita-aerospace-workers-ratify-new-contract-with-boeing/"
+      ],
+      "verifier_confidence": 0.96,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-stage",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires distinguishing the January 15, 2026 'tentative' deal announcement from the separate, later formal ratification vote reported on January 30, 2026 to confirm ratification had actually occurred before the deadline.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0.05,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.0506828
+      },
+      "verifier_notes": "Timeline: Boeing and SPEEA announced a tentative agreement Jan. 15–16, 2026 for ~1,600 workers at the former Spirit AeroSystems Wichita site (acquired by Boeing in Dec. 2025); members ratified it Jan. 30, 2026 (671–111), i.e., before the Feb. 5, 2026 deadline. Minor wording imprecision: the unit that voted is the Wichita Technical & Professional Unit (technical/professional non-engineering roles); the ~1,000 Wichita engineers (WEU) are a separate bargaining unit whose contract was ratified in 2024. This does not change the outcome, since the contract at issue (the only one pending as of the claim) was ratified. The item is a fairly straightforward single-lookup resolution, and its \"tentative vs. ratified\" framing makes it a mild timing test rather than a hard forecast; possible temptation is to answer NO based on mid-January \"tentative deal\" headlines."
+    },
+    {
+      "id": "cr-597b92db2c",
+      "ground_truth": "YES",
+      "resolution_source": "Congressional Research Service and specialist Korea-watching outlets (38 North, USNI News)",
+      "settlement_record": "No record of a DPRK nuclear detonation exists in the authoritative test registries for the window: CTBTO/USGS seismic detection records list North Korea's last (sixth) test as 3 September 2017; the CRS \"North Korea's Nuclear Weapons and Missile Programs\" (IF10472, 2026 update) and the 2026 Annual Threat Assessment describe Pyongyang as merely \"postured to conduct a seventh nuclear test,\" and Wikipedia's \"2026 in North Korea\" chronology records only missile/rocket and naval weapons tests (Jan 4 ballistic missile, March MLRS, April 8 Hwasongpho-11 Ka, July Kang Kon destroyer trials) with no nuclear detonation.",
+      "source_urls": [
+        "https://www.38north.org/2026/02/revisiting-north-koreas-nuclear-tests/",
+        "https://news.usni.org/2026/01/05/north-korea-conducts-first-missile-launch-of-2026-into-sea-of-japan",
+        "https://www.congress.gov/crs-product/IF10472"
+      ],
+      "verifier_sources": [
+        "https://en.wikipedia.org/wiki/2026_in_North_Korea",
+        "https://www.congress.gov/crs-product/IF10472",
+        "https://www.congress.gov/crs_external_products/IF/HTML/IF10472.html",
+        "https://www.dailynk.com/english/punggye-ri-tunnel-no-3-ready-use-no-signs-imminent-test/",
+        "https://beyondparallel.csis.org/punggye-ri-update-waiting-for-kim/",
+        "https://www.ctbto.org/our-work/detecting-nuclear-tests",
+        "https://www.koreatimes.co.kr/amp/foreignaffairs/northkorea/20260814/n-korea-warns-of-bolstering-nuclear-deterrent-over-us-new-nuclear-strategy"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-negative",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "News coverage of North Korea in 2026 is dominated by frequent missile and rocket-launcher tests that must be carefully distinguished from an actual nuclear detonation test, which requires cross-checking specialist nonproliferation sources rather than general headlines.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.017394
+      },
+      "verifier_notes": "Resolution is clear: no seventh DPRK nuclear test occurred between Jan 1 and Aug 15, 2026 — the last detonation remains 3 Sept 2017. Such an event is impossible to conceal (IMS seismic/radionuclide detection has caught every declared DPRK test) and would have dominated global coverage; multiple August 2026 news items (Ulchi Freedom Shield warnings, DPRK statements on US nuclear strategy) discuss only rhetoric and missile/naval activity. Benchmark weaknesses: (1) this is a low-information \"status quo persists\" claim with a very high prior on YES (~95%+ ex ante), so it discriminates poorly between forecasters; (2) it is trivially settled by a single lookup; (3) the criteria text itself hints at the answer by pre-emptively enumerating the missile/rocket tests that \"even if\" occurred still yield YES. Criteria wording is otherwise unambiguous (nuclear detonation vs. delivery-system tests)."
+    },
+    {
+      "id": "cr-99a636876e",
+      "ground_truth": "YES",
+      "resolution_source": "NATO official statements and parliamentary research (NATO.int, UK House of Commons Library)",
+      "settlement_record": "NATO's official \"Ankara Summit Declaration\" (issued by NATO Heads of State and Government, North Atlantic Council, Ankara, 8 July 2026, nato.int official texts) — the only NATO leaders-level decision document in the window — contains no invitation for Ukraine to begin accession talks (reporting notes it did not even repeat the 2024 Washington \"irreversible path\" membership language, pledging €70bn in 2026 support instead). No NAC decision inviting Ukraine to accede exists in the 1 Jan – 15 Aug 2026 period.",
+      "source_urls": [
+        "https://www.nato.int/cps/en/natohq/topics_192648.htm",
+        "https://commonslibrary.parliament.uk/research-briefings/cbp-9819/",
+        "https://www.fair.org.ua/en/ukraina-v-nato-shliakh-suchasnyi-status-ta-perspektyvy-chlenstva/"
+      ],
+      "verifier_sources": [
+        "https://www.nato.int/en/about-us/official-texts-and-resources/official-texts/2026/07/08/the-ankara-summit-declaration",
+        "https://www.congress.gov/crs-product/R49018",
+        "https://www.aljazeera.com/news/2026/7/8/nato-pledges-70-billion-euros-for-ukraine-as-trump-praises-peace-progress",
+        "https://kyivindependent.com/the-ankara-nato-summit-a-reality-check-on-words-and-deeds/",
+        "https://breakingdefense.com/2026/07/six-take-aways-from-the-2026-nato-summit/",
+        "https://en.wikipedia.org/wiki/2026_Ankara_NATO_summit"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-negative",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires distinguishing NATO's repeated rhetorical commitments ('Ukraine's future is in NATO', 'irreversible path') from an actual formal membership invitation, a distinction frequently blurred in general news coverage.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.047209600000000004
+      },
+      "verifier_notes": "The NO branch (formal agreement by all 32 allies to invite Ukraine to begin accession) is clearly unmet: the July 7–8, 2026 Ankara summit ended without any membership invitation, and Zelensky publicly renewed unanswered calls for one. Minor wrinkle: the YES branch's wording assumes NATO would have \"reaffirmed Ukraine's 'irreversible path',\" but reporting indicates the Ankara declaration actually dropped membership language altogether — i.e., even less than the YES text describes. This does not create a defensible NO reading, but a pedantic reader could note the YES description is not literally satisfied. Weak benchmark item: extremely high prior (a NATO invitation during an active war requiring unanimity was near-impossible), and the criteria's own phrasing (\"consistent with the requirement of unanimous consent\") telegraphs the expected answer; settled by a single lookup of the Ankara Summit Declaration."
+    },
+    {
+      "id": "cr-8c7d396e6a",
+      "ground_truth": "YES",
+      "resolution_source": "Financial press coverage of OpenAI's IPO preparations (CNBC, Forbes, ThinkMarkets)",
+      "settlement_record": "No IPO occurred: OpenAI remained privately held as of Aug 15, 2026. Corroborated by CNBC (Aug 10, 2026) \"OpenAI wraps $7 billion share sale ahead of potential IPO\" (secondary sale at ~$852B private valuation), Forge Global private-market quote page for OpenAI stock (still pre-IPO, ~$721.85/share as of mid-Aug 2026), and Polymarket's open \"OpenAI IPO by...?\" market, which was still unresolved/trading with ~85% implied \"No IPO by Dec 31, 2026\" in August 2026. No exchange listing/first-trade record exists for OpenAI; only a confidential S-1 (reported May/June 2026), which the criteria explicitly exclude.",
+      "source_urls": [
+        "https://www.cnbc.com/2026/08/10/openai-wraps-7-billion-share-sale-ahead-of-potential-ipo-.html",
+        "https://www.forbes.com/sites/investor-hub/article/openai-ipo-things-to-know/",
+        "https://www.thinkmarkets.com/en/trading-academy/market-events/openai-ipo-2026-date-valuation-and-how-to-trade/"
+      ],
+      "verifier_sources": [
+        "https://www.cnbc.com/2026/08/10/openai-wraps-7-billion-share-sale-ahead-of-potential-ipo-.html",
+        "https://forgeglobal.com/openai_stock/",
+        "https://polymarket.com/event/openai-ipo-by",
+        "https://forgeglobal.com/openai_ipo/",
+        "https://finance.yahoo.com/news/openai-ipo-know-most-anticipated-174800027.html"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-negative",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires separating a confidential SEC draft registration and an internal $7 billion secondary share sale (both widely reported as 'IPO' news) from an actual completed public listing, which had not occurred as of the deadline.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.022534000000000002
+      },
+      "verifier_notes": "Criteria are clean and explicitly pre-empt the near-miss cases (confidential S-1, secondary sales, IPO prep), which all in fact occurred in 2026 — so the carve-outs are doing real work rather than being decorative. However, as a benchmark item this is weak: it is a status-quo/negative claim that is trivially settled by a single lookup (any absence of an OpenAI ticker), and the very detailed carve-out language arguably telegraphs the intended answer. Base rate for such 'company X did not IPO in an 8-month window' claims is overwhelmingly YES, so it carries little discriminative signal."
+    },
+    {
+      "id": "cr-e46eda20b5",
+      "ground_truth": "NO",
+      "resolution_source": "Contemporaneous news coverage of the Peruvian Congress vote (Bloomberg, Al Jazeera)",
+      "settlement_record": "Official record of the Congress of the Republic of Peru's extraordinary plenary session of 17 February 2026, which approved by 75 votes in favor, 24 against and 3 abstentions the censure/removal of José Jerí, then sitting President of the Republic (holding the office by constitutional succession as President of Congress); José María Balcázar was elected and sworn in as President of Peru on 18 February 2026. Corroborated by CNN, Al Jazeera, PBS NewsHour, Reuters/Yahoo, Xinhua and the Wikipedia articles on the censure of José Jerí and the presidency of José María Balcázar.",
+      "source_urls": [
+        "https://www.bloomberg.com/news/articles/2026-02-17/peru-s-congress-removes-president-jeri-after-four-months-in-office",
+        "https://www.aljazeera.com/news/2026/2/17/perus-congress-votes-to-remove-president-jose-jeri-in-latest-shake-up",
+        "https://en.wikipedia.org/wiki/Impeachment_of_Jos%C3%A9_Jer%C3%AD"
+      ],
+      "verifier_sources": [
+        "https://www.cnn.com/2026/02/17/americas/peru-president-jose-jeri-ousted-intl-latam",
+        "https://aljazeera.com/news/2026/2/17/perus-congress-votes-to-remove-president-jose-jeri-in-latest-shake-up",
+        "https://www.pbs.org/newshour/amp/world/perus-congress-removes-interim-president-jose-jeri-as-he-faces-corruption-probe",
+        "https://en.wikipedia.org/wiki/Censure_of_Jos%C3%A9_Jer%C3%AD",
+        "https://en.wikipedia.org/wiki/Presidency_of_Jos%C3%A9_Mar%C3%ADa_Balc%C3%A1zar",
+        "https://english.news.cn/20260219/0035612cb7d3473ca4bfa999d068e622/c.html",
+        "https://peoplesdispatch.org/2026/02/19/balcazar-sworn-in-as-perus-eighth-president-in-10-years/",
+        "https://www.dentons.com/en/insights/alerts/2026/february/23/jose-maria-balcazar-appointed-as-interim-president-of-peru"
+      ],
+      "verifier_confidence": 0.96,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-negative",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires distinguishing this presidential removal from Peru's earlier 2025 removal of Dina Boluarte, correctly identifying that a further, separate removal of her successor José Jerí occurred just months later within the specified window.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.016801000000000003
+      },
+      "verifier_notes": "Resolution is clear: on 17 Feb 2026, within the window, Peru's Congress voted to oust the sitting president, José Jerí, over the 'Chifa-gate' influence-peddling scandal; José María Balcázar was sworn in on 18 Feb 2026 and served until the 28 July 2026 handover to the winner of the April 12 election. One technical nuance worth flagging: the vote was formally a censure motion stripping Jerí of the Congress presidency (simple majority, 66 votes needed; 75 obtained) rather than a 'vacancia por incapacidad moral' impeachment requiring 87 votes — but because he held the Republic's presidency ex officio, the congressional vote directly removed a sitting president, which satisfies the stated criterion of 'voted to remove/impeach a sitting president from office.' A resolver applying a strict 'impeachment only' reading could in principle argue otherwise, though contemporaneous coverage (Al Jazeera, PBS, CNN) uniformly framed it as Congress removing/impeaching the president. As a benchmark item it is somewhat easy: a single lookup of Peru's 2026 political news settles it, and the claim asserts stability in a country with an unusually high base rate of presidential removals."
+    },
+    {
+      "id": "cr-4371f7b617",
+      "ground_truth": "NO",
+      "resolution_source": "World Health Organization official announcements",
+      "settlement_record": "WHO official news release, 17 May 2026: \"Epidemic of Ebola Disease caused by Bundibugyo virus in the Democratic Republic of the Congo and Uganda determined a public health emergency of international concern\" (who.int/news), corroborated by WHO Disease Outbreak News 2026-DON602 and the 22 May 2026 IHR Emergency Committee temporary recommendations.",
+      "source_urls": [
+        "https://www.who.int/news/item/17-05-2026-epidemic-of-ebola-disease-in-the-democratic-republic-of-the-congo-and-uganda-determined-a-public-health-emergency-of-international-concern",
+        "https://news.un.org/en/story/2026/05/1167531",
+        "https://www.statnews.com/2026/05/17/who-ebola-drc-uganda-bundibugyo-pheic-public-health-emergency/"
+      ],
+      "verifier_sources": [
+        "https://www.who.int/news/item/17-05-2026-epidemic-of-ebola-disease-in-the-democratic-republic-of-the-congo-and-uganda-determined-a-public-health-emergency-of-international-concern",
+        "https://www.who.int/news/item/22-05-2026-first-meeting-of-the-ihr-emergency-committee-regarding-the-epidemic-of-ebola-bundibugyo-virus-disease-in-the-democratic-republic-of-the-congo-and-uganda-2026-temporary-recommendations",
+        "https://www.who.int/emergencies/disease-outbreak-news/item/2026-DON602",
+        "https://www.who.int/emergencies/situations/ebola-outbreak---drc-2026",
+        "https://news.un.org/en/story/2026/05/1167531",
+        "https://www.statnews.com/2026/05/17/who-ebola-drc-uganda-bundibugyo-pheic-public-health-emergency/"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-negative",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires searching beyond generic outbreak news to confirm whether WHO's Director-General took the specific formal legal step of declaring a PHEIC (as opposed to routine outbreak monitoring), which it did for a Bundibugyo-virus Ebola outbreak in May 2026.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.014183999999999999
+      },
+      "verifier_notes": "Clean resolution: the WHO DG determined a new PHEIC (Ebola Bundibugyo virus, DRC & Uganda) on 17 May 2026, inside the 1 Jan – 15 Aug 2026 window, so the claim (\"no new PHEIC\") is FALSE → NO. Two minor wrinkles worth flagging for benchmark use: (1) the determination was made under IHR Art. 12 without a prior Emergency Committee recommendation — a first — but it is unambiguously a DG determination of a PHEIC, which is exactly what the criteria require; (2) WHO explicitly stated it did NOT meet the higher 'pandemic emergency' threshold, which is irrelevant to these criteria. Weakness as a benchmark item: it is trivially settled by a single lookup of a widely-reported, high-salience event, so it offers little discriminative power. The criteria do not give away the answer, however."
+    },
+    {
+      "id": "cr-64319a9292",
+      "ground_truth": "NO",
+      "resolution_source": "Congressional Research Service reporting and contemporaneous coverage of the 2026 shutdowns",
+      "settlement_record": "Congressional/White House record of the FY2026 appropriations lapses: the partial federal funding lapse of Jan 31–Feb 3, 2026 (ended by Trump's signature on the ~$1.2T five-bill appropriations package plus two-week DHS CR on Feb 3, 2026), and the subsequent DHS-only funding lapse Feb 14–Apr 30, 2026, as documented in contemporaneous reporting and the Wikipedia article \"2026 United States federal government shutdowns.\"",
+      "source_urls": [
+        "https://en.wikipedia.org/wiki/2026_United_States_federal_government_shutdowns",
+        "https://www.congress.gov/crs-product/R48832",
+        "https://case.house.gov/government-shutdown/"
+      ],
+      "verifier_sources": [
+        "https://en.wikipedia.org/wiki/2026_United_States_federal_government_shutdowns",
+        "https://www.cnn.com/2026/02/03/politics/government-funding-bill-house-trump-dhs",
+        "https://www.aha.org/news/headline/2026-02-03-house-passes-appropriations-package-end-partial-government-shutdown",
+        "https://www.conference-board.org/research/CED-Newsletters-Alerts/partial-government-shutdown-ends",
+        "https://www.chds.us/c/timeline/early-2026-government-shutdowns/"
+      ],
+      "verifier_confidence": 0.97,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-negative",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires identifying that two separate, partially overlapping shutdowns occurred in early-to-mid 2026 (a brief broad shutdown followed by a longer partial DHS-only shutdown), details not captured by a single headline search.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": null,
+        "confidence": null,
+        "abstain": null,
+        "correct": null,
+        "cost_usd": 0,
+        "error": true
+      },
+      "verifier_notes": "Criteria explicitly cover partial shutdowns (\"some federal departments or agencies\"), so both the Jan 31–Feb 3 half-government lapse and the Feb 14–Apr 30 DHS-only lapse clearly trigger NO. Item is unambiguous but relatively easy — a single lookup of a high-salience news event settles it, so it may be low-difficulty for a benchmark. No self-answering language in the claim itself."
+    },
+    {
+      "id": "cr-a1034fe924",
+      "ground_truth": "YES",
+      "resolution_source": "Vietnamese state and international press coverage of Le Minh Hung's election as Prime Minister and his prior central bank role",
+      "settlement_record": "Resolution No. of the 16th National Assembly of Vietnam (first session, 7 April 2026) electing Lê Minh Hưng as Prime Minister for the 2026–2031 term (495/495 votes), as reported by the Vietnam News Agency/VietnamPlus and Báo Chính phủ; combined with his official biography (VietnamPlus/VOV \"Brief biography of Prime Minister Le Minh Hung\"), which lists service as Governor of the State Bank of Vietnam from April 2016 to October/November 2020.",
+      "source_urls": [
+        "https://vietnamnet.vn/en/le-minh-hung-elected-prime-minister-for-2026-2031-term-2504250.html",
+        "https://e.vnexpress.net/news/news/politics/le-minh-hung-ex-central-bank-governor-elected-vietnam-s-prime-minister-5059596.html"
+      ],
+      "verifier_sources": [
+        "https://en.vietnamplus.vn/national-assembly-elects-prime-minister-for-20262031-term-post340628.vnp",
+        "https://en.vietnamplus.vn/brief-biography-of-prime-minister-le-minh-hung-post340634.vnp",
+        "https://baotintuc.vn/thoi-su/ong-le-minh-hung-duoc-bau-giu-chuc-thu-tuong-chinh-phu-nhiem-ky-2026-2031-20260407151319167.htm",
+        "https://vov.vn/chinh-tri/quoc-hoi-bau-ong-le-minh-hung-giu-chuc-thu-tuong-chinh-phu-nhiem-ky-2026-2031-post1281712.vov",
+        "https://e.vnexpress.net/news/news/politics/le-minh-hung-ex-central-bank-governor-elected-vietnam-s-prime-minister-5059596.html",
+        "https://www.bernama.com/en/news.php?id=2542115",
+        "https://fulcrum.sg/banker-in-the-hot-seat-who-is-vietnams-new-prime-minister/"
+      ],
+      "verifier_confidence": 0.98,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-multihop",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires first identifying the newly elected (and internationally obscure) Vietnamese premier, then separately verifying his earlier central-bank career from biographical sources rather than the election coverage alone.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.015303
+      },
+      "verifier_notes": "Lê Minh Hưng was elected PM on 7 April 2026 (before the 30 April deadline), succeeding Phạm Minh Chính. He was SBV Governor from April 2016 to late 2020, so the same person held both posts — claim resolves YES. Caveat as a benchmark item: it is trivially settled by a single lookup, and much of the international coverage headlines him explicitly as \"ex-central bank governor,\" so the answer is near-immediate for any model with post-April-2026 web access or knowledge. It also had a strongly telegraphed prior (Hưng was the widely expected pick after the 14th Party Congress in January 2026), making it low-discrimination."
+    },
+    {
+      "id": "cr-52c1d8853d",
+      "ground_truth": "YES",
+      "resolution_source": "Al Jazeera coverage of Takaichi's October 2025 confirmation and CNBC/NPR coverage of the UAE's April 2026 OPEC exit announcement",
+      "settlement_record": "Prime Minister's Office of Japan official record of the 21 October 2025 Diet designation vote (Takaichi Sanae designated PM), compared against the UAE Ministry of Energy and Infrastructure statement carried by Emirates News Agency (WAM) on 28 April 2026 announcing withdrawal from OPEC/OPEC+ effective 1 May 2026.",
+      "source_urls": [
+        "https://www.aljazeera.com/news/2025/10/21/japans-parliament-confirms-hardliner-takaichi-as-countrys-first-female-pm",
+        "https://www.cnbc.com/2026/04/28/uae-opec-oil-iran.html"
+      ],
+      "verifier_sources": [
+        "https://japan.kantei.go.jp/104/actions/202510/index.html",
+        "https://www.wam.ae/en/article/bzxzuh7-uae-announces-decision-exit-opec-opec+",
+        "https://www.cnbc.com/2026/04/28/uae-opec-oil-iran.html",
+        "https://www.aljazeera.com/news/2026/4/28/what-are-opec-and-opec-and-why-has-the-uae-quit",
+        "https://www.enerdata.net/publications/daily-energy-news/uae-announces-exit-opec-effective-1-may-2026-after-59-years.html",
+        "https://www.cfr.org/articles/the-uae-announces-exit-from-opec"
+      ],
+      "verifier_confidence": 0.95,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-multihop",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires pairing two unrelated, individually obscure-to-connect events from different domains (Japanese parliamentary politics and Gulf oil-cartel diplomacy) and establishing their chronological order from separate news sources.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "UNRESOLVABLE",
+        "confidence": 0,
+        "abstain": true,
+        "correct": false,
+        "cost_usd": 0.023261
+      },
+      "verifier_notes": "Both underlying dates are unambiguous and well-documented: Takaichi's Diet designation on 21 Oct 2025 and the UAE's public OPEC withdrawal announcement on 28 Apr 2026 (effective 1 May 2026), both before the 15 May 2026 deadline. Minor caveat: 'confirmed by the National Diet' could in principle be read as the designation vote (21 Oct 2025) versus formal imperial appointment/cabinet formation the same evening — but both fall on the same day, so the comparison is unaffected. Weakness as a benchmark item: it is a simple two-date lookup with a wide margin (six months), so it is nearly trivially settled and carries little discriminative difficulty."
+    },
+    {
+      "id": "cr-28a328acec",
+      "ground_truth": "YES",
+      "resolution_source": "NASA Artemis program announcements and space industry press (Space.com, TwistedSifter)",
+      "settlement_record": "NASA Artemis program official mission records: Artemis II (nasa.gov mission page and post-flight news release \"NASA Welcomes Record-Setting Artemis II Moonfarers Back to Earth\") documents an April 1–10, 2026 crewed lunar flyby with no landing; NASA's February 2026 Artemis manifest revision moves the first crewed lunar surface landing to Artemis III (mid-2027 at earliest, restructured) / Artemis IV (NET 2028). No NASA crewed lunar landing occurred in the Jan 1 – Aug 15, 2026 window.",
+      "source_urls": [
+        "https://www.space.com/space-exploration/artemis/nasa-delays-artemis-2-moon-mission-to-april-2026-artemis-3-lunar-landing-to-mid-2027",
+        "https://twistedsifter.com/2026/05/nasas-artemis-iii-mission-slips-to-late-2027-delaying-the-next-crewed-moon-landing/",
+        "https://www.space.com/space-exploration/artemis/artemis-3-has-been-pushed-to-late-2027-can-nasa-still-land-astronauts-on-the-moon-in-2028"
+      ],
+      "verifier_sources": [
+        "https://www.nasa.gov/mission/artemis-ii/",
+        "https://www.nasa.gov/news-release/nasa-welcomes-record-setting-artemis-ii-moonfarers-back-to-earth/",
+        "https://www.nasa.gov/humans-in-space/artemis/",
+        "https://www.cnn.com/2026/02/27/science/nasa-moon-landing-artemis-schedule"
+      ],
+      "verifier_confidence": 0.99,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-negative",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires tracking a moving target of repeatedly revised Artemis program schedules (Artemis II crewed flyby vs. Artemis III landing) across multiple 2025-2026 delay announcements to confirm no landing occurred in the window.",
+      "contamination_risk": "low",
+      "closed_book": {
+        "answer": "YES",
+        "confidence": 0.98,
+        "abstain": false,
+        "correct": true,
+        "cost_usd": 0.016052
+      },
+      "verifier_notes": "Resolution is clear but the item is near-trivial as a benchmark question: the last human lunar landing was Apollo 17 (1972), and NASA's own published manifest never had a crewed landing before 2027. The criteria text even names Artemis II as an orbital/flyby mission, which effectively signals the answer. Verified by a single authoritative lookup — low discriminative value for a forecasting benchmark, though valid as ground truth."
+    },
+    {
+      "id": "cr-8c53d3a504",
+      "ground_truth": "NO",
+      "resolution_source": "ECB monetary policy decision announcements and financial press timelines for 2025",
+      "settlement_record": "ECB official \"Key ECB interest rates\" statistical table plus the ECB monetary policy decision press releases for 30 Jan, 6 Mar, 17 Apr, 5 Jun, 24 Jul, 11 Sep, 30 Oct and 18 Dec 2025",
+      "source_urls": [
+        "https://www.euronews.com/business/2025/06/05/ecb-lowers-rates-for-the-eighth-time-as-trade-tensions-threaten-growth",
+        "https://global.morningstar.com/en-gb/economy/european-central-bank-holds-interest-rates-last-meeting-2025"
+      ],
+      "verifier_sources": [
+        "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html",
+        "https://www.ecb.europa.eu/press/pr/date/2025/html/ecb.mp250605~3b5f67d007.en.html",
+        "https://www.ecb.europa.eu/press/pr/date/2025/html/ecb.mp251218~58b0e415a6.en.html",
+        "https://www.euronews.com/business/2025/12/18/ecb-holds-interest-rates-as-eurozone-economic-growth-remains-robust",
+        "https://fred.stlouisfed.org/series/ECBDFR"
+      ],
+      "verifier_confidence": 0.98,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-multihop",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires reconstructing a full-year timeline of ECB decisions from multiple scattered news reports and correctly separating the four 2025 cuts from the four cuts that occurred in 2024 as part of the same easing cycle.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "NO",
+        "confidence": 0.8,
+        "abstain": false,
+        "correct": true,
+        "cost_usd": 0.021214
+      },
+      "verifier_notes": "Deposit facility rate path in 2025: 3.00% -> 2.75% (30 Jan, effective 5 Feb) -> 2.50% (6 Mar, effective 12 Mar) -> 2.25% (17 Apr, effective 23 Apr) -> 2.00% (5 Jun, effective 11 Jun), then unchanged at 2.00% through the July, September, October and December meetings. Exactly four cuts, so the \"five or more\" threshold fails. Criteria are clear and countable; the only mild concern for benchmark use is that this is a single-lookup factual item with a well-documented official record, so it is easy rather than discriminating. No ambiguity: all cuts occurred at scheduled Governing Council monetary policy meetings within the calendar year, and no intermeeting moves occurred."
+    },
+    {
+      "id": "cr-69c09c497e",
+      "ground_truth": "YES",
+      "resolution_source": "NATO's official announcement of Finland's accession and press coverage of Hungary's ratification vote for Sweden",
+      "settlement_record": "U.S. Department of State depositary notification No. 2023-008 (Deposit of Finland's instrument of accession to the North Atlantic Treaty, 4 April 2023) and the Hungarian National Assembly's 26 February 2024 ratification vote (188–6) on Sweden's NATO accession protocol.",
+      "source_urls": [
+        "https://www.nato.int/en/news-and-events/articles/news/2023/04/04/finland-joins-nato-as-31st-ally",
+        "https://www.aljazeera.com/news/2024/2/26/hungary-ratifies-swedens-nato-bid-clearing-final-obstacle-to-membership"
+      ],
+      "verifier_sources": [
+        "https://www.state.gov/nato-finland-deposit-of-instrument-april-4-2023",
+        "https://www.state.gov/wp-content/uploads/2023/04/NATO-North-Atlantic-Treaty-Notification-of-Deposit-of-Instrument-Finland-April-4-2023.pdf",
+        "https://www.nato.int/en/news-and-events/articles/news/2023/04/04/finland-joins-nato-as-31st-ally",
+        "https://www.aljazeera.com/news/2024/2/26/hungary-ratifies-swedens-nato-bid-clearing-final-obstacle-to-membership",
+        "https://www.washingtonpost.com/world/2024/02/26/hungary-sweden-nato-vote/"
+      ],
+      "verifier_confidence": 0.99,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-multihop",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires separately sourcing Finland's April 2023 NATO accession date and Hungary's February 2024 ratification vote for a different country's (Sweden's) membership, then correctly relating two distinct national accession processes.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "YES",
+        "confidence": 0.97,
+        "abstain": false,
+        "correct": true,
+        "cost_usd": 0.029190099999999997
+      },
+      "verifier_notes": "Weak benchmark item: this is not a forecast but a comparison of two well-known historical dates (4 Apr 2023 vs 26 Feb 2024), both settled long before the stated 2026-03-01 deadline and trivially verifiable with a single lookup. No genuine uncertainty existed at any point after Feb 2024. Minor edge: the Hungarian parliament's speaker signed off and the president signed the ratification in early March 2024, but the criteria explicitly specify the parliamentary vote date, so no ambiguity in outcome."
+    },
+    {
+      "id": "cr-98925e16de",
+      "ground_truth": "NO",
+      "resolution_source": "National government records and international news coverage of G7 leadership during 2025 (Meloni in Italy for the full year; Takaichi in Japan only from 21 October 2025; male leaders in the other five countries)",
+      "settlement_record": "Official/authoritative rosters of G7 heads of government for 2025: G7 Canadian Presidency official site (Kananaskis Summit leaders list, June 2025), Japan's National Diet election of Sanae Takaichi as 104th PM (Oct 21, 2025), French government records of Bayrou/Lecornu premierships, German Bundestag election of Friedrich Merz (May 6, 2025), and Canadian PMO record of Carney succeeding Trudeau (Mar 14, 2025).",
+      "source_urls": [
+        "https://www.aljazeera.com/news/2025/10/21/japans-parliament-confirms-hardliner-takaichi-as-countrys-first-female-pm",
+        "https://www.courthousenews.com/merz-sworn-in-as-germanys-new-chancellor/"
+      ],
+      "verifier_sources": [
+        "https://g7.canada.ca/en/canadian-presidency/events-calendar/g7-leaders-summit",
+        "https://www.aljazeera.com/news/2025/6/15/g7-summit-who-is-attending-and-whats-on-the-agenda",
+        "https://www.aljazeera.com/news/2025/10/21/who-is-sanae-takaichi-japans-iron-lady-and-first-female-prime-minister",
+        "https://www.europarl.europa.eu/thinktank/en/document/EPRS_BRI(2025)777965",
+        "https://www.cnn.com/2025/09/09/europe/sebastien-lecornu-france-prime-minister-latam-intl",
+        "https://www.npr.org/2025/10/21/nx-s1-5581255/sanae-takaichi-japan-prime-minister"
+      ],
+      "verifier_confidence": 0.99,
+      "verifier_model": "claude-opus-5",
+      "curator_model": "claude-sonnet-5",
+      "bucket": "hard-multihop",
+      "difficulty": "medium",
+      "disputed": false,
+      "why_nontrivial": "Requires individually verifying the head of government for all seven G7 countries across a full calendar year, including a mid-year German chancellor transition and a late-year Japanese premiership change, before tallying how many were women.",
+      "contamination_risk": "high",
+      "closed_book": {
+        "answer": "NO",
+        "confidence": 0.9,
+        "abstain": false,
+        "correct": true,
+        "cost_usd": 0.019344
+      },
+      "verifier_notes": "Only two G7 countries had a female head of government at any point in 2025: Italy (Giorgia Meloni, entire year) and Japan (Sanae Takaichi from Oct 21, 2025). Canada (Trudeau→Carney), France (Bayrou→Lecornu), Germany (Scholz→Merz), UK (Starmer), and US (Trump) were all led by men throughout. Weakness as a benchmark item: this is a low-difficulty, trivially verifiable factual claim settled by a single lookup of well-known world leaders; it requires no genuine forecasting or deep research. The threshold of four is far from the actual count of two, so there is no edge-case risk. Minor note: for France the head of government is the PM (not President Macron), which the criteria handle correctly by saying \"as applicable.\""
+    }
+  ]
+}

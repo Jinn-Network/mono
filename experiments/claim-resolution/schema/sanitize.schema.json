@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["claim", "criteria", "rewritten", "is_trivial_lookup", "gives_away_answer", "notes"],
+  "properties": {
+    "claim": { "type": "string" },
+    "criteria": { "type": "string" },
+    "rewritten": { "type": "boolean" },
+    "is_trivial_lookup": { "type": "boolean" },
+    "gives_away_answer": { "type": "boolean" },
+    "notes": { "type": "string" }
+  }
+}

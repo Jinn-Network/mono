@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["answer", "confidence", "evidence", "reasoning_summary", "abstain"],
+  "properties": {
+    "answer": {
+      "type": "string",
+      "enum": ["YES", "NO", "UNRESOLVABLE"],
+      "description": "YES or NO against the resolution criteria; UNRESOLVABLE only when abstain is true."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Calibrated probability that the stated answer matches the external resolution."
+    },
+    "abstain": {
+      "type": "boolean",
+      "description": "True when the claim cannot be safely resolved from the evidence found."
+    },
+    "reasoning_summary": {
+      "type": "string",
+      "description": "How the evidence maps onto the resolution criteria."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["url", "claim_supported", "relevance"],
+        "properties": {
+          "url": { "type": "string" },
+          "claim_supported": { "type": "string" },
+          "relevance": { "type": "string" }
+        }
+      }
+    }
+  }
+}

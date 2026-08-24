@@ -1,0 +1,251 @@
+{
+  "n": 35,
+  "rejected": [
+    {
+      "claim": "A federal appeals court allowed President Trump's executive order tightening mail-in voting rules to take effect across the 23 states it targeted, ahead of the November 2026 elections.",
+      "bucket": "us-policy",
+      "reasons": [
+        "fewer than two provenance URLs"
+      ]
+    },
+    {
+      "claim": "xAI publicly released its next flagship model, Grok 5, on or before August 15, 2026.",
+      "bucket": "ai-tech",
+      "reasons": [
+        "near-duplicate of \"xAI publicly released a model officially branded 'Grok 4.5' on or befo...\""
+      ]
+    },
+    {
+      "claim": "Apple's redesigned, fully conversational Gemini-powered version of Siri became available to the general public on or before August 15, 2026.",
+      "bucket": "ai-tech",
+      "reasons": [
+        "criteria judged ambiguous"
+      ]
+    },
+    {
+      "claim": "Nvidia shipped substantial volumes of H200 AI chips to customers in mainland China on or before August 15, 2026.",
+      "bucket": "ai-tech",
+      "reasons": [
+        "verifier confidence 0.76 < 0.85",
+        "criteria judged ambiguous"
+      ]
+    },
+    {
+      "claim": "Spain's 2026 FIFA World Cup title, won on July 19, 2026, extended an unbeaten run across all competitive matches (including their 2024 European Championship win) to at least 35 consecutive matches, and this World Cup victory was Spain's second World Cup title overall.",
+      "bucket": "compound",
+      "reasons": [
+        "criteria judged ambiguous"
+      ]
+    },
+    {
+      "claim": "Israel's Knesset was formally dissolved by mid-July 2026 after Prime Minister Benjamin Netanyahu's coalition collapsed over the ultra-Orthodox military draft law.",
+      "bucket": "elections",
+      "reasons": [
+        "criteria judged ambiguous"
+      ]
+    },
+    {
+      "claim": "Prime Minister Nikol Pashinyan's Civil Contract party lost its majority in Armenia's National Assembly as a result of the June 2026 parliamentary election.",
+      "bucket": "elections",
+      "reasons": [
+        "near-duplicate of \"Nikol Pashinyan's Civil Contract party won an outright majority of sea...\""
+      ]
+    },
+    {
+      "claim": "At the NATO summit held in the Netherlands in late June 2025, Ukrainian President Volodymyr Zelenskyy's public appearances were described by a clear consensus of major international news outlets as him wearing a suit, marking a departure from the military-style clothing he had worn since Russia's 2022 invasion.",
+      "bucket": "historical-hard",
+      "reasons": [
+        "criteria judged ambiguous"
+      ]
+    },
+    {
+      "claim": "OPEC+ (the group of seven voluntary-cut members) agreed at its early-July 2026 meeting to raise collective oil production for August 2026 by 411,000 barrels per day.",
+      "bucket": "energy-commodities",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "The stage musical adaptation of 'The Lost Boys' won the Tony Award for Best Musical at the 2026 Tony Awards ceremony.",
+      "bucket": "culture",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "Christopher Nolan's film 'The Odyssey' held onto the title of the single biggest opening weekend of any film released in 2026, as measured through August 15, 2026.",
+      "bucket": "culture",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "Among all series nominated for the 78th Primetime Emmy Awards (nominations announced July 8, 2026), the comedy series 'Hacks' received more total nominations than any other program.",
+      "bucket": "culture",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "The Golden Leopard, the top prize at the 2026 Locarno Film Festival, was awarded to a film made by a Romanian director.",
+      "bucket": "culture",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "Author Susan Choi won the 2026 Women's Prize for Fiction for her shortlisted novel.",
+      "bucket": "culture",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "The US Federal Reserve's FOMC held its federal funds rate target range unchanged at both its June 2026 meeting and its July 2026 meeting, with no rate cut or rate hike at either meeting.",
+      "bucket": "compound",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "Bitcoin traded above $100,000 on at least one day between June 1, 2026 and July 31, 2026.",
+      "bucket": "compound",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "Both the US Department of Justice and the European Commission granted antitrust approval to the Paramount Skydance-Warner Bros. Discovery merger before August 15, 2026.",
+      "bucket": "compound",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "Slovakia's July 2026 referendum on stripping Prime Minister Robert Fico of his lifelong pension and restoring the Special Prosecutor's Office achieved the voter turnout required to make the result legally binding.",
+      "bucket": "elections",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "When UK Prime Minister Keir Starmer resigned in June 2026, his successor Andy Burnham became prime minister through a Labour Party leadership process rather than through a general election.",
+      "bucket": "elections",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "Moldova's Prime Minister Alexandru Munteanu resigned in July 2026 amid pressure over alleged corruption at a state-owned company, automatically triggering the resignation of his entire government.",
+      "bucket": "elections",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "The U.S. Supreme Court's June 2026 ruling in the birthright-citizenship case upheld the constitutionality of President Trump's Executive Order restricting automatic citizenship for children born in the U.S. to parents who are undocumented or hold only temporary immigration status, allowing the administration to enforce it.",
+      "bucket": "us-policy",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "In its June 2026 decision resolving the West Virginia and Idaho transgender-athlete cases, the U.S. Supreme Court struck down state laws banning transgender girls from girls' school sports teams, ruling such bans unconstitutional or in violation of federal civil rights law nationwide.",
+      "bucket": "us-policy",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "The U.S. Senate voted to invoke cloture and pass its version of the National Defense Authorization Act for Fiscal Year 2027 before August 15, 2026.",
+      "bucket": "us-policy",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "The U.S. House of Representatives passed its version of the National Defense Authorization Act for Fiscal Year 2027 before the chamber's August 2026 recess.",
+      "bucket": "us-policy",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "A federal appeals court ruling in early August 2026 allowed construction of the new White House ballroom to resume immediately, reversing a lower court's injunction that had halted above-ground work on the project.",
+      "bucket": "us-policy",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "A federal appeals court ruling on July 26, 2026 lifted the injunction against President Trump's executive order creating a national list of 'eligible voters' and restricting mail-ballot delivery to people on that list, allowing the order to take effect nationwide.",
+      "bucket": "us-policy",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "In July 2026, the Department of Homeland Security finalized a rule eliminating open-ended 'duration of status' admission for F, J, and I nonimmigrants (international students, exchange visitors, and foreign media representatives), replacing it with a fixed period of admission.",
+      "bucket": "us-policy",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "Cracker Barrel's chief executive officer, Julie Masino, remained in the CEO role through August 10, 2026, without a permanent successor having assumed the position by that date.",
+      "bucket": "corporate",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "The proposed merger between Shutterstock and Getty Images was successfully completed on or before July 7, 2026.",
+      "bucket": "corporate",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "Esquire Financial Holdings finalized its previously announced acquisition of Signature Bancorporation by August 1, 2026.",
+      "bucket": "corporate",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "Republic National Distributing Company (RNDC), a major U.S. wine and spirits distributor, filed for Chapter 11 bankruptcy protection on or before July 31, 2026.",
+      "bucket": "corporate",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "Western Asset Management Company (WAMCO) agreed to pay a civil penalty of at least $75 million to settle SEC charges related to a former co-CIO's alleged cherry-picking trade allocation scheme, with the settlement finalized by June 30, 2026.",
+      "bucket": "corporate",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "The proposed merger between Union Pacific Corporation and Norfolk Southern Corporation received final regulatory approval and closed on or before August 15, 2026.",
+      "bucket": "corporate",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "China's Tianwen-2 spacecraft reached and began close-proximity operations at near-Earth asteroid 469219 Kamo'oalewa before August 15, 2026.",
+      "bucket": "space-science",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    },
+    {
+      "claim": "ERCOT (the Texas grid operator) recorded a new all-time system peak electricity demand record, surpassing the prior record of 85,508 megawatts set in August 2023, at some point before August 15, 2026.",
+      "bucket": "energy-commodities",
+      "reasons": [
+        "surplus beyond target"
+      ]
+    }
+  ]
+}

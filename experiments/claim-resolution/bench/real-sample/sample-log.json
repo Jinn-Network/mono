@@ -1,0 +1,4864 @@
+{
+  "target": 150,
+  "family_cap": 10,
+  "in_population": 1120,
+  "kept": 150,
+  "dropped": 970,
+  "by_tier": {
+    "arbitrated": 10,
+    "invalid_too_soon": 25,
+    "bonded_only": 115
+  },
+  "dropped_detail": [
+    {
+      "id": "rd-realityeth-1fc829042971",
+      "reason": "special-cap(25)",
+      "family": "who will be the richest person"
+    },
+    {
+      "id": "rd-realityeth-230430343d32",
+      "reason": "special-cap(25)",
+      "family": "will marine le pen be the"
+    },
+    {
+      "id": "rd-realityeth-2325aba78a4d",
+      "reason": "special-cap(25)",
+      "family": "will the avici app on the"
+    },
+    {
+      "id": "rd-realityeth-29bc218b3340",
+      "reason": "special-cap(25)",
+      "family": "one month from today will there"
+    },
+    {
+      "id": "rd-realityeth-29d0be45c38d",
+      "reason": "special-cap(25)",
+      "family": "will the video titled sam altman"
+    },
+    {
+      "id": "rd-realityeth-2ee79ea3ab66",
+      "reason": "special-cap(25)",
+      "family": "will liverpool win the fourth round"
+    },
+    {
+      "id": "rd-realityeth-3a956f5fe927",
+      "reason": "special-cap(25)",
+      "family": "will amol rajan remain the official"
+    },
+    {
+      "id": "rd-realityeth-3d16a659feeb",
+      "reason": "special-cap(25)",
+      "family": "will donald trump and vladimir putin"
+    },
+    {
+      "id": "rd-realityeth-3ec31a59f040",
+      "reason": "special-cap(25)",
+      "family": "will an israeli combat aircraft be"
+    },
+    {
+      "id": "rd-realityeth-43fbf35c19a7",
+      "reason": "special-cap(25)",
+      "family": "will more than 60 of respondents"
+    },
+    {
+      "id": "rd-realityeth-464506c0b772",
+      "reason": "special-cap(25)",
+      "family": "will jimmy fallon announce he will"
+    },
+    {
+      "id": "rd-realityeth-498501436789",
+      "reason": "special-cap(25)",
+      "family": "will sabalenka win the us open"
+    },
+    {
+      "id": "rd-realityeth-4fd2b21819e9",
+      "reason": "special-cap(25)",
+      "family": "will president trump announce the implementation"
+    },
+    {
+      "id": "rd-realityeth-5c56008a60de",
+      "reason": "special-cap(25)",
+      "family": "will i be enrolled at the"
+    },
+    {
+      "id": "rd-realityeth-5ef562e009b7",
+      "reason": "special-cap(25)",
+      "family": "will kamala harris win the state"
+    },
+    {
+      "id": "rd-realityeth-66c423ad2e3d",
+      "reason": "special-cap(25)",
+      "family": "test will rome reach 40 degrees"
+    },
+    {
+      "id": "rd-realityeth-6721e4c59f69",
+      "reason": "special-cap(25)",
+      "family": "will nvidia s stock price on"
+    },
+    {
+      "id": "rd-realityeth-6eaf28a0a73f",
+      "reason": "special-cap(25)",
+      "family": "one month from today will trump"
+    },
+    {
+      "id": "rd-realityeth-6f9fdd3e76be",
+      "reason": "special-cap(25)",
+      "family": "will the dxdao proposal immediately halt"
+    },
+    {
+      "id": "rd-realityeth-740cd60e6cc7",
+      "reason": "special-cap(25)",
+      "family": "one month from today will chat"
+    },
+    {
+      "id": "rd-realityeth-752f11c8bb49",
+      "reason": "special-cap(25)",
+      "family": "will the grand jury return a"
+    },
+    {
+      "id": "rd-realityeth-75ff55680a0c",
+      "reason": "special-cap(25)",
+      "family": "will carolina wilga be found alive"
+    },
+    {
+      "id": "rd-realityeth-7c24dbde031d",
+      "reason": "special-cap(25)",
+      "family": "will the new york times publish"
+    },
+    {
+      "id": "rd-realityeth-7d588d1e045d",
+      "reason": "special-cap(25)",
+      "family": "what will donald trump s net"
+    },
+    {
+      "id": "rd-realityeth-816643db3db5",
+      "reason": "special-cap(25)",
+      "family": "will hamas kill more than 9"
+    },
+    {
+      "id": "rd-realityeth-82d7ee379182",
+      "reason": "special-cap(25)",
+      "family": "will the us economy continue to"
+    },
+    {
+      "id": "rd-realityeth-8509436f393a",
+      "reason": "special-cap(25)",
+      "family": "apple iphone 17 event on september"
+    },
+    {
+      "id": "rd-realityeth-8b081ce15c11",
+      "reason": "special-cap(25)",
+      "family": "one month from today will gamestop"
+    },
+    {
+      "id": "rd-realityeth-96fada44dcb0",
+      "reason": "special-cap(25)",
+      "family": "will the devconnect 2025 conference be"
+    },
+    {
+      "id": "rd-realityeth-9c4ad66d61f0",
+      "reason": "special-cap(25)",
+      "family": "will gemini pass chatgpt in us"
+    },
+    {
+      "id": "rd-realityeth-9db3edcbe5c4",
+      "reason": "special-cap(25)",
+      "family": "will the united states officially announce"
+    },
+    {
+      "id": "rd-realityeth-9e0d4289f764",
+      "reason": "special-cap(25)",
+      "family": "will there be a global implementation"
+    },
+    {
+      "id": "rd-realityeth-9f9f1fceb921",
+      "reason": "special-cap(25)",
+      "family": "will harvey weinstein be convicted on"
+    },
+    {
+      "id": "rd-realityeth-9fa62f920d74",
+      "reason": "special-cap(25)",
+      "family": "will nissan and fisker strike a"
+    },
+    {
+      "id": "rd-realityeth-a9c8ef8280d2",
+      "reason": "special-cap(25)",
+      "family": "will donald trump take any official"
+    },
+    {
+      "id": "rd-realityeth-ac35bc253699",
+      "reason": "special-cap(25)",
+      "family": "will spotify acquire an ai music"
+    },
+    {
+      "id": "rd-realityeth-b81b2e213399",
+      "reason": "special-cap(25)",
+      "family": "will the u s senate vote"
+    },
+    {
+      "id": "rd-realityeth-ba45b638efc3",
+      "reason": "special-cap(25)",
+      "family": "one month from today will hollow"
+    },
+    {
+      "id": "rd-realityeth-bc20b48d4271",
+      "reason": "special-cap(25)",
+      "family": "will advent of code 2025 release"
+    },
+    {
+      "id": "rd-realityeth-c3648c17dde0",
+      "reason": "special-cap(25)",
+      "family": "will the 2024 u s presidential"
+    },
+    {
+      "id": "rd-realityeth-caf13c446c30",
+      "reason": "special-cap(25)",
+      "family": "will oliver s car start on"
+    },
+    {
+      "id": "rd-realityeth-cccf1f6db13f",
+      "reason": "special-cap(25)",
+      "family": "will any major ai hardware company"
+    },
+    {
+      "id": "rd-realityeth-cf226fe47da6",
+      "reason": "special-cap(25)",
+      "family": "will anthropic release a new claude"
+    },
+    {
+      "id": "rd-realityeth-cfa88190c3d5",
+      "reason": "special-cap(25)",
+      "family": "what is the chance that coinbase"
+    },
+    {
+      "id": "rd-realityeth-d55f495a7a30",
+      "reason": "special-cap(25)",
+      "family": "how many serious injuries or violent"
+    },
+    {
+      "id": "rd-realityeth-d6fbe407e158",
+      "reason": "special-cap(25)",
+      "family": "will donald trump issue an official"
+    },
+    {
+      "id": "rd-realityeth-d842cf8ae994",
+      "reason": "special-cap(25)",
+      "family": "will there be more than 10"
+    },
+    {
+      "id": "rd-realityeth-d9707617313d",
+      "reason": "special-cap(25)",
+      "family": "will apollo quiboloy be convicted for"
+    },
+    {
+      "id": "rd-realityeth-d9a78da93251",
+      "reason": "special-cap(25)",
+      "family": "will paul biya win the 2025"
+    },
+    {
+      "id": "rd-realityeth-e53810922f32",
+      "reason": "special-cap(25)",
+      "family": "will president donald trump announce a"
+    },
+    {
+      "id": "rd-realityeth-e6c31fb4fecd",
+      "reason": "special-cap(25)",
+      "family": "will thomas middleditch triple his youtube"
+    },
+    {
+      "id": "rd-realityeth-e7520af4b6ea",
+      "reason": "special-cap(25)",
+      "family": "will donald trump win the 2024"
+    },
+    {
+      "id": "rd-realityeth-e8ebca43245b",
+      "reason": "special-cap(25)",
+      "family": "will jd vance be publicly accused"
+    },
+    {
+      "id": "rd-realityeth-ea1add3ebc25",
+      "reason": "special-cap(25)",
+      "family": "will spain officially regularize at least"
+    },
+    {
+      "id": "rd-realityeth-eb91f075f30c",
+      "reason": "special-cap(25)",
+      "family": "will demis hassabis still work at"
+    },
+    {
+      "id": "rd-realityeth-f7a24ee8ec32",
+      "reason": "special-cap(25)",
+      "family": "will joe weisenthal s ice maker"
+    },
+    {
+      "id": "rd-realityeth-cc09b6b62d3e",
+      "reason": "over-target",
+      "family": "will the supreme court rule to"
+    },
+    {
+      "id": "rd-realityeth-ccc4a980ef8a",
+      "reason": "over-target",
+      "family": "will the united states or iran"
+    },
+    {
+      "id": "rd-realityeth-d0124109e594",
+      "reason": "over-target",
+      "family": "will nasa publicly confirm on or"
+    },
+    {
+      "id": "rd-realityeth-d8b6009d389f",
+      "reason": "over-target",
+      "family": "will the peronist coalition fuerza patria"
+    },
+    {
+      "id": "rd-realityeth-dbef0845df56",
+      "reason": "over-target",
+      "family": "will end to end encryption for"
+    },
+    {
+      "id": "rd-realityeth-dfaaaaf53498",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-dfaf5302a38b",
+      "reason": "over-target",
+      "family": "will the department of justice and"
+    },
+    {
+      "id": "rd-realityeth-e3e789c0b6f7",
+      "reason": "over-target",
+      "family": "will the teamsters endorse any candidate"
+    },
+    {
+      "id": "rd-realityeth-e47333a942f0",
+      "reason": "over-target",
+      "family": "will omen have at least one"
+    },
+    {
+      "id": "rd-realityeth-e58592673ed5",
+      "reason": "over-target",
+      "family": "will apple announce a price increase"
+    },
+    {
+      "id": "rd-realityeth-ec19a58d83c5",
+      "reason": "over-target",
+      "family": "will great britain win any gold"
+    },
+    {
+      "id": "rd-realityeth-ecbda7bc1185",
+      "reason": "over-target",
+      "family": "will the august 2025 consumer price"
+    },
+    {
+      "id": "rd-realityeth-edbb39409743",
+      "reason": "over-target",
+      "family": "will jeannette jara s support be"
+    },
+    {
+      "id": "rd-realityeth-ee006d3e0952",
+      "reason": "over-target",
+      "family": "will the hungarian government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-f0eae3fac54b",
+      "reason": "over-target",
+      "family": "will the american diabetes association publicly"
+    },
+    {
+      "id": "rd-realityeth-f1c76eb7d8fa",
+      "reason": "over-target",
+      "family": "will the hungarian government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-f37de5405b58",
+      "reason": "over-target",
+      "family": "will yougov s published net approval"
+    },
+    {
+      "id": "rd-realityeth-f64c554a195f",
+      "reason": "over-target",
+      "family": "will google publicly announce the integration"
+    },
+    {
+      "id": "rd-realityeth-f8c8793199a8",
+      "reason": "over-target",
+      "family": "will the tennessee state legislature officially"
+    },
+    {
+      "id": "rd-realityeth-f95e64952a04",
+      "reason": "over-target",
+      "family": "will the 50501 movement s nationwide"
+    },
+    {
+      "id": "rd-realityeth-fe2a460ae1c7",
+      "reason": "over-target",
+      "family": "will the house oversight committee refrain"
+    },
+    {
+      "id": "rd-realityeth-078acf3d0fc3",
+      "reason": "over-target",
+      "family": "will at least one reputable independent"
+    },
+    {
+      "id": "rd-realityeth-0fc534104008",
+      "reason": "over-target",
+      "family": "will alabama execute its second inmate"
+    },
+    {
+      "id": "rd-realityeth-1a47ebcb236a",
+      "reason": "over-target",
+      "family": "will any major commercial airline publicly"
+    },
+    {
+      "id": "rd-realityeth-1b00c3186d60",
+      "reason": "over-target",
+      "family": "will microsoft and quantinuum announce a"
+    },
+    {
+      "id": "rd-realityeth-21e6332e8541",
+      "reason": "over-target",
+      "family": "will the chinese government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-220ff3a4831c",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-2641e1e363c7",
+      "reason": "over-target",
+      "family": "will any of the exempted countries"
+    },
+    {
+      "id": "rd-realityeth-26815e75fc16",
+      "reason": "over-target",
+      "family": "will the case of the barbers"
+    },
+    {
+      "id": "rd-realityeth-2cd73afac052",
+      "reason": "over-target",
+      "family": "will bad bunny announce additional concert"
+    },
+    {
+      "id": "rd-realityeth-2e2bacc5f6cf",
+      "reason": "over-target",
+      "family": "will fifa publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-319759eebab9",
+      "reason": "over-target",
+      "family": "will the ukrainian government announce a"
+    },
+    {
+      "id": "rd-realityeth-390c904283b5",
+      "reason": "over-target",
+      "family": "will microsoft and quantinuum announce another"
+    },
+    {
+      "id": "rd-realityeth-3a0aedc94bf1",
+      "reason": "over-target",
+      "family": "will north korea announce the reopening"
+    },
+    {
+      "id": "rd-realityeth-407112745da6",
+      "reason": "over-target",
+      "family": "will tesla unveil a fully autonomous"
+    },
+    {
+      "id": "rd-realityeth-44f77dc723f3",
+      "reason": "over-target",
+      "family": "will the thai government officially confirm"
+    },
+    {
+      "id": "rd-realityeth-49963ea8dba9",
+      "reason": "over-target",
+      "family": "will google be found guilty in"
+    },
+    {
+      "id": "rd-realityeth-4c0cd0096fe5",
+      "reason": "over-target",
+      "family": "will the ukrainian government announce a"
+    },
+    {
+      "id": "rd-realityeth-4ce5f3c1a073",
+      "reason": "over-target",
+      "family": "will furiosaai publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-54735b035511",
+      "reason": "over-target",
+      "family": "will the cuban government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-5ad7f2e322d4",
+      "reason": "over-target",
+      "family": "will the israeli troops withdraw from"
+    },
+    {
+      "id": "rd-realityeth-69fb7d453fb8",
+      "reason": "over-target",
+      "family": "will any major u s private"
+    },
+    {
+      "id": "rd-realityeth-6b06745c4a31",
+      "reason": "over-target",
+      "family": "will president joe biden announce a"
+    },
+    {
+      "id": "rd-realityeth-6ff4940ad625",
+      "reason": "over-target",
+      "family": "will president ahmad al sharaa reference"
+    },
+    {
+      "id": "rd-realityeth-7a482875b057",
+      "reason": "over-target",
+      "family": "will the world health organization s"
+    },
+    {
+      "id": "rd-realityeth-7ef7c1994ff6",
+      "reason": "over-target",
+      "family": "will mikel arteta remain the manager"
+    },
+    {
+      "id": "rd-realityeth-80c1a08861ce",
+      "reason": "over-target",
+      "family": "will the chinese government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-8b4fc646ca20",
+      "reason": "over-target",
+      "family": "will the european commission publicly announce"
+    },
+    {
+      "id": "rd-realityeth-8b9de81b577e",
+      "reason": "over-target",
+      "family": "will huawei announce a new client"
+    },
+    {
+      "id": "rd-realityeth-93b7111110a4",
+      "reason": "over-target",
+      "family": "will any nato member state publicly"
+    },
+    {
+      "id": "rd-realityeth-963a98a8b1ac",
+      "reason": "over-target",
+      "family": "will nevada implement google ai to"
+    },
+    {
+      "id": "rd-realityeth-98c118679700",
+      "reason": "over-target",
+      "family": "will google or back market publicly"
+    },
+    {
+      "id": "rd-realityeth-9cc94fc9712e",
+      "reason": "over-target",
+      "family": "will the youtube s new hype"
+    },
+    {
+      "id": "rd-realityeth-a8c4e604d5aa",
+      "reason": "over-target",
+      "family": "will instagram test the integration of"
+    },
+    {
+      "id": "rd-realityeth-ab37475c3e17",
+      "reason": "over-target",
+      "family": "will the bowelbabe fund publicly announce"
+    },
+    {
+      "id": "rd-realityeth-b4eb6b0b1ae2",
+      "reason": "over-target",
+      "family": "will google s smart circle to"
+    },
+    {
+      "id": "rd-realityeth-b99acd2c874c",
+      "reason": "over-target",
+      "family": "will the sec publicly announce any"
+    },
+    {
+      "id": "rd-realityeth-cc0bb416a7d7",
+      "reason": "over-target",
+      "family": "will the nimo n172 laptop be"
+    },
+    {
+      "id": "rd-realityeth-d8ac9f518fa0",
+      "reason": "over-target",
+      "family": "will any major cybersecurity firm publicly"
+    },
+    {
+      "id": "rd-realityeth-e1b7cdcee14d",
+      "reason": "over-target",
+      "family": "will argus media or s p"
+    },
+    {
+      "id": "rd-realityeth-e2c3a85d3e32",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-e4e5ce98c427",
+      "reason": "over-target",
+      "family": "will the national weather service officially"
+    },
+    {
+      "id": "rd-realityeth-e6be4957e9f8",
+      "reason": "over-target",
+      "family": "will home depot face any other"
+    },
+    {
+      "id": "rd-realityeth-ebd865749abb",
+      "reason": "over-target",
+      "family": "bitcoin above 60 000 on september"
+    },
+    {
+      "id": "rd-realityeth-f15a98a5f6f0",
+      "reason": "over-target",
+      "family": "will the suspect in the tremonton"
+    },
+    {
+      "id": "rd-realityeth-f290efec5899",
+      "reason": "over-target",
+      "family": "will the u s environmental protection"
+    },
+    {
+      "id": "rd-realityeth-f49ae3dd116f",
+      "reason": "over-target",
+      "family": "will the bill to strengthen u"
+    },
+    {
+      "id": "rd-realityeth-f60c285c151d",
+      "reason": "over-target",
+      "family": "will the national weather service issue"
+    },
+    {
+      "id": "rd-realityeth-ffc049c0c7cb",
+      "reason": "over-target",
+      "family": "will a spacex rocket successfully dock"
+    },
+    {
+      "id": "rd-realityeth-00125221ac66",
+      "reason": "over-target",
+      "family": "will donald trump permanently cease to"
+    },
+    {
+      "id": "rd-realityeth-00afa75a896b",
+      "reason": "over-target",
+      "family": "will the marseille wildfire be officially"
+    },
+    {
+      "id": "rd-realityeth-00bf603ec640",
+      "reason": "over-target",
+      "family": "will nvidia s stock price recover"
+    },
+    {
+      "id": "rd-realityeth-00d94f052aed",
+      "reason": "over-target",
+      "family": "will the powerball jackpot be won"
+    },
+    {
+      "id": "rd-realityeth-010ba19d1405",
+      "reason": "over-target",
+      "family": "will the financial conduct authority fca"
+    },
+    {
+      "id": "rd-realityeth-022996735a75",
+      "reason": "over-target",
+      "family": "will the u s and china"
+    },
+    {
+      "id": "rd-realityeth-02712ddf702b",
+      "reason": "over-target",
+      "family": "will donald trump make a public"
+    },
+    {
+      "id": "rd-realityeth-0280f3127136",
+      "reason": "over-target",
+      "family": "will the blvd announce a new"
+    },
+    {
+      "id": "rd-realityeth-02a0edf25b23",
+      "reason": "over-target",
+      "family": "will intel publicly announce the completion"
+    },
+    {
+      "id": "rd-realityeth-02b71244a2c3",
+      "reason": "over-target",
+      "family": "will the uk department for education"
+    },
+    {
+      "id": "rd-realityeth-037c186998a1",
+      "reason": "over-target",
+      "family": "will the u s supreme court"
+    },
+    {
+      "id": "rd-realityeth-03950fa0ce0e",
+      "reason": "over-target",
+      "family": "will the u s government officially"
+    },
+    {
+      "id": "rd-realityeth-03e7dfc0a37f",
+      "reason": "over-target",
+      "family": "will jeanette vizguerra be released from"
+    },
+    {
+      "id": "rd-realityeth-04146f5910aa",
+      "reason": "over-target",
+      "family": "will amazon s new alexa voice"
+    },
+    {
+      "id": "rd-realityeth-041f222810b4",
+      "reason": "over-target",
+      "family": "will jacob wohl s ai lobbying"
+    },
+    {
+      "id": "rd-realityeth-04447b2d32c2",
+      "reason": "over-target",
+      "family": "will instavolt officially announce the opening"
+    },
+    {
+      "id": "rd-realityeth-04f5c5b87220",
+      "reason": "over-target",
+      "family": "will the israeli government announce the"
+    },
+    {
+      "id": "rd-realityeth-050f059c2f84",
+      "reason": "over-target",
+      "family": "will the usda publicly announce before"
+    },
+    {
+      "id": "rd-realityeth-0579310d41ee",
+      "reason": "over-target",
+      "family": "will general motors publicly announce on"
+    },
+    {
+      "id": "rd-realityeth-062077708e2f",
+      "reason": "over-target",
+      "family": "will unesco publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-06d5357b2350",
+      "reason": "over-target",
+      "family": "will the global chess ban on"
+    },
+    {
+      "id": "rd-realityeth-06e3bbad387d",
+      "reason": "over-target",
+      "family": "will any additional u s state"
+    },
+    {
+      "id": "rd-realityeth-07189199be4b",
+      "reason": "over-target",
+      "family": "will special counsel jack smith announce"
+    },
+    {
+      "id": "rd-realityeth-074b8029a071",
+      "reason": "over-target",
+      "family": "will the cdc report a total"
+    },
+    {
+      "id": "rd-realityeth-07d995f5f079",
+      "reason": "over-target",
+      "family": "will the iphone 16 model be"
+    },
+    {
+      "id": "rd-realityeth-081b27468088",
+      "reason": "over-target",
+      "family": "will susan monarez publicly announce her"
+    },
+    {
+      "id": "rd-realityeth-08ee7da05b35",
+      "reason": "over-target",
+      "family": "will unesco publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-09940d4a15c2",
+      "reason": "over-target",
+      "family": "will the uk and us governments"
+    },
+    {
+      "id": "rd-realityeth-09c0f0003623",
+      "reason": "over-target",
+      "family": "will the romanian constitutional court confirm"
+    },
+    {
+      "id": "rd-realityeth-09fcbd4ccfe3",
+      "reason": "over-target",
+      "family": "will taiwan s president lai ching"
+    },
+    {
+      "id": "rd-realityeth-0a10fb9d69f4",
+      "reason": "over-target",
+      "family": "will any major news outlet report"
+    },
+    {
+      "id": "rd-realityeth-0a94443fd14c",
+      "reason": "over-target",
+      "family": "will the ukrainian government announce the"
+    },
+    {
+      "id": "rd-realityeth-0ace723e6d39",
+      "reason": "over-target",
+      "family": "will the coconino county sheriff s"
+    },
+    {
+      "id": "rd-realityeth-0b4a342a8c49",
+      "reason": "over-target",
+      "family": "will the perseverance rover complete its"
+    },
+    {
+      "id": "rd-realityeth-0b5a44cd7d4f",
+      "reason": "over-target",
+      "family": "will the texas department of state"
+    },
+    {
+      "id": "rd-realityeth-0c32ee3dfe80",
+      "reason": "over-target",
+      "family": "will viktor hovland be officially ranked"
+    },
+    {
+      "id": "rd-realityeth-0c77fc593f0d",
+      "reason": "over-target",
+      "family": "will the top chatbot arena model"
+    },
+    {
+      "id": "rd-realityeth-0d32003bceb4",
+      "reason": "over-target",
+      "family": "will president trump announce the implementation"
+    },
+    {
+      "id": "rd-realityeth-0d4ac30faf73",
+      "reason": "over-target",
+      "family": "will the uk government officially publish"
+    },
+    {
+      "id": "rd-realityeth-0d63d0e792b1",
+      "reason": "over-target",
+      "family": "will the investigation into the naples"
+    },
+    {
+      "id": "rd-realityeth-0dc664f14ab3",
+      "reason": "over-target",
+      "family": "will google officially announce the availability"
+    },
+    {
+      "id": "rd-realityeth-0dca75cb024e",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-0e30905e17e5",
+      "reason": "over-target",
+      "family": "will nasa announce a new partnership"
+    },
+    {
+      "id": "rd-realityeth-0e50d1d89cd5",
+      "reason": "over-target",
+      "family": "will china announce new trade measures"
+    },
+    {
+      "id": "rd-realityeth-0e512cfaaacd",
+      "reason": "over-target",
+      "family": "will the uk government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-0e98ea1df3c1",
+      "reason": "over-target",
+      "family": "will zohran mamdani receive more than"
+    },
+    {
+      "id": "rd-realityeth-0ea4eec3752a",
+      "reason": "over-target",
+      "family": "will the conservative party formally announce"
+    },
+    {
+      "id": "rd-realityeth-0eaf23cee199",
+      "reason": "over-target",
+      "family": "will any major ai company such"
+    },
+    {
+      "id": "rd-realityeth-0fa613814392",
+      "reason": "over-target",
+      "family": "will the u s government accountability"
+    },
+    {
+      "id": "rd-realityeth-0fc276c99067",
+      "reason": "over-target",
+      "family": "will at least one major web"
+    },
+    {
+      "id": "rd-realityeth-0fc614a0a9df",
+      "reason": "over-target",
+      "family": "will vladimir putin and donald trump"
+    },
+    {
+      "id": "rd-realityeth-0ff57d64c2fb",
+      "reason": "over-target",
+      "family": "will the labour government s borders"
+    },
+    {
+      "id": "rd-realityeth-0ffbc5618c8e",
+      "reason": "over-target",
+      "family": "will google be granted an emergency"
+    },
+    {
+      "id": "rd-realityeth-10d77d7d3c99",
+      "reason": "over-target",
+      "family": "will any former high ranking official"
+    },
+    {
+      "id": "rd-realityeth-10e1696a540a",
+      "reason": "over-target",
+      "family": "will microstrategy announce a bitcoin purchase"
+    },
+    {
+      "id": "rd-realityeth-1128bcb7cc14",
+      "reason": "over-target",
+      "family": "will ford launch a new model"
+    },
+    {
+      "id": "rd-realityeth-1145e05be8df",
+      "reason": "over-target",
+      "family": "will the loan agreement between the"
+    },
+    {
+      "id": "rd-realityeth-122badf475f4",
+      "reason": "over-target",
+      "family": "will any major blockchain or cryptocurrency"
+    },
+    {
+      "id": "rd-realityeth-128dad14bcca",
+      "reason": "over-target",
+      "family": "will nato officially announce a new"
+    },
+    {
+      "id": "rd-realityeth-1313ea9d4f09",
+      "reason": "over-target",
+      "family": "will any major social media platform"
+    },
+    {
+      "id": "rd-realityeth-13776add47ba",
+      "reason": "over-target",
+      "family": "will rivian s stock price increase"
+    },
+    {
+      "id": "rd-realityeth-138515d1b1c7",
+      "reason": "over-target",
+      "family": "by september 18 2025 will xinhua"
+    },
+    {
+      "id": "rd-realityeth-13948258667f",
+      "reason": "over-target",
+      "family": "will russia publicly acknowledge the presence"
+    },
+    {
+      "id": "rd-realityeth-13f70a14ec9a",
+      "reason": "over-target",
+      "family": "will the transportation safety board of"
+    },
+    {
+      "id": "rd-realityeth-13f72415aa81",
+      "reason": "over-target",
+      "family": "will eth trade on coinbase above"
+    },
+    {
+      "id": "rd-realityeth-143f26d860d2",
+      "reason": "over-target",
+      "family": "will the global forecast system gfs"
+    },
+    {
+      "id": "rd-realityeth-145cd867ca17",
+      "reason": "over-target",
+      "family": "will the israeli government announce any"
+    },
+    {
+      "id": "rd-realityeth-1481f89306af",
+      "reason": "over-target",
+      "family": "will a robot finish in the"
+    },
+    {
+      "id": "rd-realityeth-1486dea9c024",
+      "reason": "over-target",
+      "family": "will any u s state government"
+    },
+    {
+      "id": "rd-realityeth-149246c34a88",
+      "reason": "over-target",
+      "family": "will there be another significant increase"
+    },
+    {
+      "id": "rd-realityeth-149f48d1f4e4",
+      "reason": "over-target",
+      "family": "will judge james boasberg issue a"
+    },
+    {
+      "id": "rd-realityeth-14fe9d5c3d01",
+      "reason": "over-target",
+      "family": "will the israeli government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-1536a7c39e60",
+      "reason": "over-target",
+      "family": "will microsoft officially announce a new"
+    },
+    {
+      "id": "rd-realityeth-153837eb02dc",
+      "reason": "over-target",
+      "family": "will l a officially start preparing"
+    },
+    {
+      "id": "rd-realityeth-153851666007",
+      "reason": "over-target",
+      "family": "will the flex rv processing unit"
+    },
+    {
+      "id": "rd-realityeth-1547d7052c78",
+      "reason": "over-target",
+      "family": "will the uk government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-16103a68c9f8",
+      "reason": "over-target",
+      "family": "will the percent of pakistanis in"
+    },
+    {
+      "id": "rd-realityeth-17933cbe42b2",
+      "reason": "over-target",
+      "family": "will any major u s pharmaceutical"
+    },
+    {
+      "id": "rd-realityeth-17c70765922c",
+      "reason": "over-target",
+      "family": "will apple publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-17e3869d47a4",
+      "reason": "over-target",
+      "family": "will nvidia publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-17f774464400",
+      "reason": "over-target",
+      "family": "will the cdc issue a public"
+    },
+    {
+      "id": "rd-realityeth-18221ee8b2fd",
+      "reason": "over-target",
+      "family": "will the world health organization officially"
+    },
+    {
+      "id": "rd-realityeth-182bebe72256",
+      "reason": "over-target",
+      "family": "will rodynske remain under ukrainian control"
+    },
+    {
+      "id": "rd-realityeth-188ca57ebf32",
+      "reason": "over-target",
+      "family": "will xreal publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-18b508adbf5c",
+      "reason": "over-target",
+      "family": "will the organization of american states"
+    },
+    {
+      "id": "rd-realityeth-191fbed6511d",
+      "reason": "over-target",
+      "family": "will hallmark and venmo expand their"
+    },
+    {
+      "id": "rd-realityeth-192295ecfa9c",
+      "reason": "over-target",
+      "family": "will spain announce new immigration policies"
+    },
+    {
+      "id": "rd-realityeth-1a3b42d3b177",
+      "reason": "over-target",
+      "family": "will general motors electric vehicle owners"
+    },
+    {
+      "id": "rd-realityeth-1a5a4c1081c4",
+      "reason": "over-target",
+      "family": "will there be a new wordle"
+    },
+    {
+      "id": "rd-realityeth-1ac019d7d4b7",
+      "reason": "over-target",
+      "family": "will north korea and russia exchange"
+    },
+    {
+      "id": "rd-realityeth-1af259240953",
+      "reason": "over-target",
+      "family": "will marco rubio visit the hutchison"
+    },
+    {
+      "id": "rd-realityeth-1b69190ffae8",
+      "reason": "over-target",
+      "family": "will scottish authorities publicly release the"
+    },
+    {
+      "id": "rd-realityeth-1b8f59caa5f9",
+      "reason": "over-target",
+      "family": "will the social security administration announce"
+    },
+    {
+      "id": "rd-realityeth-1b974319236c",
+      "reason": "over-target",
+      "family": "will there be an official ceasefire"
+    },
+    {
+      "id": "rd-realityeth-1bc28c6c826d",
+      "reason": "over-target",
+      "family": "will the white house task force"
+    },
+    {
+      "id": "rd-realityeth-1bd24a4bf382",
+      "reason": "over-target",
+      "family": "will any florida state legislator introduce"
+    },
+    {
+      "id": "rd-realityeth-1bd75f7ece9b",
+      "reason": "over-target",
+      "family": "will openai s new o1 reasoning"
+    },
+    {
+      "id": "rd-realityeth-1c0b7b32ce2b",
+      "reason": "over-target",
+      "family": "will the israeli government announce the"
+    },
+    {
+      "id": "rd-realityeth-1c9d3f14e40f",
+      "reason": "over-target",
+      "family": "will qatar initiate a drone missile"
+    },
+    {
+      "id": "rd-realityeth-1d0296363437",
+      "reason": "over-target",
+      "family": "will stanford university officially announce a"
+    },
+    {
+      "id": "rd-realityeth-1d37ccc4ecac",
+      "reason": "over-target",
+      "family": "will microsoft publicly announce the integration"
+    },
+    {
+      "id": "rd-realityeth-1d483b224cad",
+      "reason": "over-target",
+      "family": "will any major cybersecurity firm such"
+    },
+    {
+      "id": "rd-realityeth-1dd79a7c695d",
+      "reason": "over-target",
+      "family": "will the uk government officially announce"
+    },
+    {
+      "id": "rd-realityeth-1df98965380e",
+      "reason": "over-target",
+      "family": "will the board of openai announce"
+    },
+    {
+      "id": "rd-realityeth-1e01419543d8",
+      "reason": "over-target",
+      "family": "will kylie jenner walk the runway"
+    },
+    {
+      "id": "rd-realityeth-1e2516e12dc0",
+      "reason": "over-target",
+      "family": "will jair bolsonaro issue a public"
+    },
+    {
+      "id": "rd-realityeth-1e2f56feee00",
+      "reason": "over-target",
+      "family": "will vanderbilt win another major game"
+    },
+    {
+      "id": "rd-realityeth-1f17b25a7e42",
+      "reason": "over-target",
+      "family": "will the department of homeland security"
+    },
+    {
+      "id": "rd-realityeth-1f23e0d0b985",
+      "reason": "over-target",
+      "family": "will the nyc subway report at"
+    },
+    {
+      "id": "rd-realityeth-1f34cc85d5b1",
+      "reason": "over-target",
+      "family": "will the u s supreme court"
+    },
+    {
+      "id": "rd-realityeth-1f761d25ebad",
+      "reason": "over-target",
+      "family": "will north korea and russia publicly"
+    },
+    {
+      "id": "rd-realityeth-1f8bfa6448e3",
+      "reason": "over-target",
+      "family": "will the identities of both powerball"
+    },
+    {
+      "id": "rd-realityeth-1fb00d6222c4",
+      "reason": "over-target",
+      "family": "will a government agency issue a"
+    },
+    {
+      "id": "rd-realityeth-1fd80d9c36a5",
+      "reason": "over-target",
+      "family": "will the democratic party s national"
+    },
+    {
+      "id": "rd-realityeth-1fdfbfca7555",
+      "reason": "over-target",
+      "family": "will russia be at war with"
+    },
+    {
+      "id": "rd-realityeth-1fe4b6366a8f",
+      "reason": "over-target",
+      "family": "will a suspect in the seattle"
+    },
+    {
+      "id": "rd-realityeth-1ffb189a0775",
+      "reason": "over-target",
+      "family": "will paramount publicly announce the appointment"
+    },
+    {
+      "id": "rd-realityeth-20027ba93625",
+      "reason": "over-target",
+      "family": "will the rac issue another public"
+    },
+    {
+      "id": "rd-realityeth-203732074636",
+      "reason": "over-target",
+      "family": "will the japanese meteorological agency publicly"
+    },
+    {
+      "id": "rd-realityeth-20b23ce0153f",
+      "reason": "over-target",
+      "family": "will any country officially announce the"
+    },
+    {
+      "id": "rd-realityeth-20da5443c00a",
+      "reason": "over-target",
+      "family": "microstrategy purchases 4000 btc september 9"
+    },
+    {
+      "id": "rd-realityeth-2152c879e3a6",
+      "reason": "over-target",
+      "family": "will samsung electronics chairman lee jae"
+    },
+    {
+      "id": "rd-realityeth-216efd8c2914",
+      "reason": "over-target",
+      "family": "will the minnesota legislature pass and"
+    },
+    {
+      "id": "rd-realityeth-21b551b326b6",
+      "reason": "over-target",
+      "family": "will microsoft s recall feature for"
+    },
+    {
+      "id": "rd-realityeth-21e47ed507e5",
+      "reason": "over-target",
+      "family": "will the nsf budget for fy"
+    },
+    {
+      "id": "rd-realityeth-2251c568ad50",
+      "reason": "over-target",
+      "family": "will the european union announce a"
+    },
+    {
+      "id": "rd-realityeth-22de1687f145",
+      "reason": "over-target",
+      "family": "will the national weather service officially"
+    },
+    {
+      "id": "rd-realityeth-22f45df24755",
+      "reason": "over-target",
+      "family": "will the department of homeland security"
+    },
+    {
+      "id": "rd-realityeth-2347bce212ab",
+      "reason": "over-target",
+      "family": "will robinhood publicly announce the general"
+    },
+    {
+      "id": "rd-realityeth-2367c6b3165e",
+      "reason": "over-target",
+      "family": "will rory mcilroy win a major"
+    },
+    {
+      "id": "rd-realityeth-2379f49f90d5",
+      "reason": "over-target",
+      "family": "will spacex s polaris dawn mission"
+    },
+    {
+      "id": "rd-realityeth-239c0087dc52",
+      "reason": "over-target",
+      "family": "will rob jetten have the highest"
+    },
+    {
+      "id": "rd-realityeth-23b42d691f60",
+      "reason": "over-target",
+      "family": "will huawei announce a new partnership"
+    },
+    {
+      "id": "rd-realityeth-23d2b3b5c2d8",
+      "reason": "over-target",
+      "family": "will any of the top three"
+    },
+    {
+      "id": "rd-realityeth-247159b06200",
+      "reason": "over-target",
+      "family": "will the government of gujarat publicly"
+    },
+    {
+      "id": "rd-realityeth-2483dbe70382",
+      "reason": "over-target",
+      "family": "will idaho officially enact a law"
+    },
+    {
+      "id": "rd-realityeth-24e3390c7f24",
+      "reason": "over-target",
+      "family": "will argentina secure qualification for the"
+    },
+    {
+      "id": "rd-realityeth-2561d1576fcf",
+      "reason": "over-target",
+      "family": "will nvidia launch the geforce rtx"
+    },
+    {
+      "id": "rd-realityeth-25df38209bb0",
+      "reason": "over-target",
+      "family": "will the iaea issue a formal"
+    },
+    {
+      "id": "rd-realityeth-269f9c53eda4",
+      "reason": "over-target",
+      "family": "will a new report be issued"
+    },
+    {
+      "id": "rd-realityeth-26bbd3590a4d",
+      "reason": "over-target",
+      "family": "will the houthis publicly claim responsibility"
+    },
+    {
+      "id": "rd-realityeth-270d4efac4d6",
+      "reason": "over-target",
+      "family": "will the updated novavax covid 19"
+    },
+    {
+      "id": "rd-realityeth-2737ad082f84",
+      "reason": "over-target",
+      "family": "will the icelandic government officially announce"
+    },
+    {
+      "id": "rd-realityeth-27e7598f09eb",
+      "reason": "over-target",
+      "family": "will the texas district court publicly"
+    },
+    {
+      "id": "rd-realityeth-28565d0fb81b",
+      "reason": "over-target",
+      "family": "will the usps increase the cost"
+    },
+    {
+      "id": "rd-realityeth-289476eff42a",
+      "reason": "over-target",
+      "family": "will the council of the european"
+    },
+    {
+      "id": "rd-realityeth-28b81513394e",
+      "reason": "over-target",
+      "family": "will anti trump protests occur in"
+    },
+    {
+      "id": "rd-realityeth-29924bc9c075",
+      "reason": "over-target",
+      "family": "will south korea s ministry of"
+    },
+    {
+      "id": "rd-realityeth-29a9992a452c",
+      "reason": "over-target",
+      "family": "will germany s far right afd"
+    },
+    {
+      "id": "rd-realityeth-29c3ffbb51d5",
+      "reason": "over-target",
+      "family": "will meta publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-29f96f10be31",
+      "reason": "over-target",
+      "family": "will there be a major public"
+    },
+    {
+      "id": "rd-realityeth-2a236e8edac9",
+      "reason": "over-target",
+      "family": "will any of the top five"
+    },
+    {
+      "id": "rd-realityeth-2a553d960b19",
+      "reason": "over-target",
+      "family": "will the department of homeland security"
+    },
+    {
+      "id": "rd-realityeth-2abe5f533ca3",
+      "reason": "over-target",
+      "family": "will alpha genesis face any legal"
+    },
+    {
+      "id": "rd-realityeth-2aca5ba44c0b",
+      "reason": "over-target",
+      "family": "will the ai art debate be"
+    },
+    {
+      "id": "rd-realityeth-2b7345d93f89",
+      "reason": "over-target",
+      "family": "will google or the tennessee valley"
+    },
+    {
+      "id": "rd-realityeth-2b894f76baef",
+      "reason": "over-target",
+      "family": "biden resigns from presidency by august"
+    },
+    {
+      "id": "rd-realityeth-2bd51078b9ae",
+      "reason": "over-target",
+      "family": "will the russian government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-2be80e2fdc14",
+      "reason": "over-target",
+      "family": "will google gemini rank 1 on"
+    },
+    {
+      "id": "rd-realityeth-2bfd71c501af",
+      "reason": "over-target",
+      "family": "will susan crawford be officially declared"
+    },
+    {
+      "id": "rd-realityeth-2c0893c6b224",
+      "reason": "over-target",
+      "family": "will hyundai glovis publicly announce the"
+    },
+    {
+      "id": "rd-realityeth-2c66e5bdc701",
+      "reason": "over-target",
+      "family": "will fadu publicly announce before or"
+    },
+    {
+      "id": "rd-realityeth-2c72071777ec",
+      "reason": "over-target",
+      "family": "will the zimbabwe parks and wildlife"
+    },
+    {
+      "id": "rd-realityeth-2ce6bbef900c",
+      "reason": "over-target",
+      "family": "will the us department of health"
+    },
+    {
+      "id": "rd-realityeth-2d362f435e7b",
+      "reason": "over-target",
+      "family": "will gno be above 1000 in"
+    },
+    {
+      "id": "rd-realityeth-2d7a89260929",
+      "reason": "over-target",
+      "family": "will taiwan s confidence in u"
+    },
+    {
+      "id": "rd-realityeth-2e99072694be",
+      "reason": "over-target",
+      "family": "will twitter implement a new misinformation"
+    },
+    {
+      "id": "rd-realityeth-2f44f394a505",
+      "reason": "over-target",
+      "family": "will any law enforcement agency or"
+    },
+    {
+      "id": "rd-realityeth-2f92da766d74",
+      "reason": "over-target",
+      "family": "will meta publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-2fc6aaecdfdf",
+      "reason": "over-target",
+      "family": "will the u s congress publicly"
+    },
+    {
+      "id": "rd-realityeth-2fdc8e36b0d8",
+      "reason": "over-target",
+      "family": "will the waterbury public schools announce"
+    },
+    {
+      "id": "rd-realityeth-2ff8111bd82f",
+      "reason": "over-target",
+      "family": "will a u s federal court"
+    },
+    {
+      "id": "rd-realityeth-3027b3849d93",
+      "reason": "over-target",
+      "family": "will microstrategy announce a bitcoin purchase"
+    },
+    {
+      "id": "rd-realityeth-303f84590206",
+      "reason": "over-target",
+      "family": "will a major international organization issue"
+    },
+    {
+      "id": "rd-realityeth-305dfc3246a7",
+      "reason": "over-target",
+      "family": "will the us government still be"
+    },
+    {
+      "id": "rd-realityeth-307740afdd39",
+      "reason": "over-target",
+      "family": "will the biden administration announce new"
+    },
+    {
+      "id": "rd-realityeth-30e1fb182fc4",
+      "reason": "over-target",
+      "family": "will google publicly revise its performance"
+    },
+    {
+      "id": "rd-realityeth-30e5ad4aaf64",
+      "reason": "over-target",
+      "family": "will the department of health and"
+    },
+    {
+      "id": "rd-realityeth-30f92e699b3e",
+      "reason": "over-target",
+      "family": "will jude mcatamney remain on the"
+    },
+    {
+      "id": "rd-realityeth-31727d9719d5",
+      "reason": "over-target",
+      "family": "will the media report on a"
+    },
+    {
+      "id": "rd-realityeth-31e7c0e06051",
+      "reason": "over-target",
+      "family": "will the august 2025 real seasonally"
+    },
+    {
+      "id": "rd-realityeth-31f503005951",
+      "reason": "over-target",
+      "family": "will stellantis publicly announce additional layoffs"
+    },
+    {
+      "id": "rd-realityeth-31f811e1fdfb",
+      "reason": "over-target",
+      "family": "will meta officially announce the commercial"
+    },
+    {
+      "id": "rd-realityeth-3225a21bd9fd",
+      "reason": "over-target",
+      "family": "will intel announce any new partnerships"
+    },
+    {
+      "id": "rd-realityeth-3255d9aa0c5c",
+      "reason": "over-target",
+      "family": "will claire s uk and ireland"
+    },
+    {
+      "id": "rd-realityeth-3280f77baa5a",
+      "reason": "over-target",
+      "family": "will tesla release a timeline for"
+    },
+    {
+      "id": "rd-realityeth-32c84c88fd09",
+      "reason": "over-target",
+      "family": "will garmin launch the world s"
+    },
+    {
+      "id": "rd-realityeth-32d56532274a",
+      "reason": "over-target",
+      "family": "will the coconino county sheriff s"
+    },
+    {
+      "id": "rd-realityeth-33bd975d8554",
+      "reason": "over-target",
+      "family": "will viktor gyokeres be officially announced"
+    },
+    {
+      "id": "rd-realityeth-348b57313141",
+      "reason": "over-target",
+      "family": "will ibm officially announce the availability"
+    },
+    {
+      "id": "rd-realityeth-34c63ba10145",
+      "reason": "over-target",
+      "family": "will the united nations security council"
+    },
+    {
+      "id": "rd-realityeth-34c90a637c1b",
+      "reason": "over-target",
+      "family": "will turkey officially host a negotiation"
+    },
+    {
+      "id": "rd-realityeth-356b31dc323c",
+      "reason": "over-target",
+      "family": "will any major pharmaceutical company publicly"
+    },
+    {
+      "id": "rd-realityeth-359f4940648f",
+      "reason": "over-target",
+      "family": "will any us based semiconductor company"
+    },
+    {
+      "id": "rd-realityeth-35defea68e05",
+      "reason": "over-target",
+      "family": "will a new regulatory guideline addressing"
+    },
+    {
+      "id": "rd-realityeth-360ff8e5ce5d",
+      "reason": "over-target",
+      "family": "will surrey win their fourth straight"
+    },
+    {
+      "id": "rd-realityeth-3660dc2c5ea0",
+      "reason": "over-target",
+      "family": "will the house of representatives pass"
+    },
+    {
+      "id": "rd-realityeth-36939a0e6470",
+      "reason": "over-target",
+      "family": "will israel and hamas reach an"
+    },
+    {
+      "id": "rd-realityeth-369c6ee1c469",
+      "reason": "over-target",
+      "family": "will the israeli security cabinet formally"
+    },
+    {
+      "id": "rd-realityeth-36efce51c891",
+      "reason": "over-target",
+      "family": "will larry ellison be ranked as"
+    },
+    {
+      "id": "rd-realityeth-37826925dc51",
+      "reason": "over-target",
+      "family": "will any leading ai research organization"
+    },
+    {
+      "id": "rd-realityeth-37d2e9ed3765",
+      "reason": "over-target",
+      "family": "microstrategy announces 1000 btc purchase november"
+    },
+    {
+      "id": "rd-realityeth-39d43344bc2d",
+      "reason": "over-target",
+      "family": "will sony publicly announce an additional"
+    },
+    {
+      "id": "rd-realityeth-3a47ed34cc8b",
+      "reason": "over-target",
+      "family": "will the house oversight committee s"
+    },
+    {
+      "id": "rd-realityeth-3a64d9619b3a",
+      "reason": "over-target",
+      "family": "will vitalik buterin explicitly mention seer"
+    },
+    {
+      "id": "rd-realityeth-3a687d0d87d0",
+      "reason": "over-target",
+      "family": "will the palestinians become a full"
+    },
+    {
+      "id": "rd-realityeth-3aa3024f4474",
+      "reason": "over-target",
+      "family": "will any uk bank report an"
+    },
+    {
+      "id": "rd-realityeth-3bc162f78d39",
+      "reason": "over-target",
+      "family": "will ruben amorim be officially announced"
+    },
+    {
+      "id": "rd-realityeth-3bfd5ae05495",
+      "reason": "over-target",
+      "family": "will southwest airlines publicly announce before"
+    },
+    {
+      "id": "rd-realityeth-3c0201afe142",
+      "reason": "over-target",
+      "family": "will indonesian authorities publicly announce on"
+    },
+    {
+      "id": "rd-realityeth-3d1f752d01b6",
+      "reason": "over-target",
+      "family": "will delta air lines announce the"
+    },
+    {
+      "id": "rd-realityeth-3d4b2b23541d",
+      "reason": "over-target",
+      "family": "are there at least 250 000"
+    },
+    {
+      "id": "rd-realityeth-3d8fa214b373",
+      "reason": "over-target",
+      "family": "will any u s state government"
+    },
+    {
+      "id": "rd-realityeth-3d9c2558769a",
+      "reason": "over-target",
+      "family": "will google deepmind officially announce the"
+    },
+    {
+      "id": "rd-realityeth-3da3fac4a8c0",
+      "reason": "over-target",
+      "family": "will missouri attorney general andrew bailey"
+    },
+    {
+      "id": "rd-realityeth-3e43904e0de6",
+      "reason": "over-target",
+      "family": "will the liberal democratic party of"
+    },
+    {
+      "id": "rd-realityeth-3e463b380a95",
+      "reason": "over-target",
+      "family": "will robert f kennedy jr s"
+    },
+    {
+      "id": "rd-realityeth-3e7b23aea41c",
+      "reason": "over-target",
+      "family": "will the u s office of"
+    },
+    {
+      "id": "rd-realityeth-3e9551892725",
+      "reason": "over-target",
+      "family": "will the pickett fire in napa"
+    },
+    {
+      "id": "rd-realityeth-3f46ff3f0512",
+      "reason": "over-target",
+      "family": "will the north korean hackers activity"
+    },
+    {
+      "id": "rd-realityeth-3f94c690f834",
+      "reason": "over-target",
+      "family": "will tiktok publicly respond to the"
+    },
+    {
+      "id": "rd-realityeth-3f9ea4671d4f",
+      "reason": "over-target",
+      "family": "will israel officially announce a permanent"
+    },
+    {
+      "id": "rd-realityeth-40237e0d717a",
+      "reason": "over-target",
+      "family": "will israel issue new tenders for"
+    },
+    {
+      "id": "rd-realityeth-411598774a39",
+      "reason": "over-target",
+      "family": "will the government of maharashtra impose"
+    },
+    {
+      "id": "rd-realityeth-413963572ef6",
+      "reason": "over-target",
+      "family": "will the state of michigan continue"
+    },
+    {
+      "id": "rd-realityeth-4168f9bbfb6b",
+      "reason": "over-target",
+      "family": "will general motors electric vehicle adapter"
+    },
+    {
+      "id": "rd-realityeth-41a4f9dd0ea3",
+      "reason": "over-target",
+      "family": "will president donald trump sign an"
+    },
+    {
+      "id": "rd-realityeth-41cf7b5acc24",
+      "reason": "over-target",
+      "family": "will the u s government announce"
+    },
+    {
+      "id": "rd-realityeth-41d796ed25f6",
+      "reason": "over-target",
+      "family": "will novak djokovic defeat carlos alcaraz"
+    },
+    {
+      "id": "rd-realityeth-4223567463f2",
+      "reason": "over-target",
+      "family": "will the number of google searches"
+    },
+    {
+      "id": "rd-realityeth-42b61e98cb7d",
+      "reason": "over-target",
+      "family": "will kamala harris face impeachment proceedings"
+    },
+    {
+      "id": "rd-realityeth-42df3ae3c3a7",
+      "reason": "over-target",
+      "family": "will the us send an anti"
+    },
+    {
+      "id": "rd-realityeth-4323dce88c18",
+      "reason": "over-target",
+      "family": "will nato officially respond to russia"
+    },
+    {
+      "id": "rd-realityeth-433628795ba3",
+      "reason": "over-target",
+      "family": "will germany s scholz announce a"
+    },
+    {
+      "id": "rd-realityeth-4385d58f4e45",
+      "reason": "over-target",
+      "family": "will the fbi publicly announce before"
+    },
+    {
+      "id": "rd-realityeth-43ab0c6d0553",
+      "reason": "over-target",
+      "family": "will the biden administration announce new"
+    },
+    {
+      "id": "rd-realityeth-43c2cd4f6b45",
+      "reason": "over-target",
+      "family": "will the louisiana department of health"
+    },
+    {
+      "id": "rd-realityeth-44740b6bd8f8",
+      "reason": "over-target",
+      "family": "will black win more games than"
+    },
+    {
+      "id": "rd-realityeth-44d5c6bdbc2b",
+      "reason": "over-target",
+      "family": "will president donald trump publicly announce"
+    },
+    {
+      "id": "rd-realityeth-4503e5c1a3d7",
+      "reason": "over-target",
+      "family": "will tesla s global deliveries increase"
+    },
+    {
+      "id": "rd-realityeth-450b32de29e6",
+      "reason": "over-target",
+      "family": "will the new nypd commissioner remain"
+    },
+    {
+      "id": "rd-realityeth-457ef0b53357",
+      "reason": "over-target",
+      "family": "will russia succeed in its battle"
+    },
+    {
+      "id": "rd-realityeth-4626e3b8fcc8",
+      "reason": "over-target",
+      "family": "will president elect donald trump announce"
+    },
+    {
+      "id": "rd-realityeth-4635aeaffb26",
+      "reason": "over-target",
+      "family": "will any new evidence regarding the"
+    },
+    {
+      "id": "rd-realityeth-46c388100122",
+      "reason": "over-target",
+      "family": "will the national weather service announce"
+    },
+    {
+      "id": "rd-realityeth-46cb8231a10f",
+      "reason": "over-target",
+      "family": "will jerome powell cease to be"
+    },
+    {
+      "id": "rd-realityeth-470508ebab54",
+      "reason": "over-target",
+      "family": "will any of the new sports"
+    },
+    {
+      "id": "rd-realityeth-472578f17e55",
+      "reason": "over-target",
+      "family": "will the u s centers for"
+    },
+    {
+      "id": "rd-realityeth-4738cf475114",
+      "reason": "over-target",
+      "family": "will nasa publish findings on potential"
+    },
+    {
+      "id": "rd-realityeth-4739b6cf5b43",
+      "reason": "over-target",
+      "family": "will anker s new 100w charger"
+    },
+    {
+      "id": "rd-realityeth-47b58be0f69c",
+      "reason": "over-target",
+      "family": "will the uk ministry of defence"
+    },
+    {
+      "id": "rd-realityeth-47c9cb3c596f",
+      "reason": "over-target",
+      "family": "will the california department of forestry"
+    },
+    {
+      "id": "rd-realityeth-47f5d6f0fcab",
+      "reason": "over-target",
+      "family": "will any major health organization issue"
+    },
+    {
+      "id": "rd-realityeth-488572b76c77",
+      "reason": "over-target",
+      "family": "will the u s federal government"
+    },
+    {
+      "id": "rd-realityeth-48b76d80d2f2",
+      "reason": "over-target",
+      "family": "will the united states announce new"
+    },
+    {
+      "id": "rd-realityeth-497a48e30ba2",
+      "reason": "over-target",
+      "family": "will any eu member state impose"
+    },
+    {
+      "id": "rd-realityeth-49af3a3e0033",
+      "reason": "over-target",
+      "family": "will microstrategy announce a bitcoin purchase"
+    },
+    {
+      "id": "rd-realityeth-4a5739f0b7ef",
+      "reason": "over-target",
+      "family": "will israel cease its strikes in"
+    },
+    {
+      "id": "rd-realityeth-4a5da7f5dc49",
+      "reason": "over-target",
+      "family": "will kelly ayotte win the general"
+    },
+    {
+      "id": "rd-realityeth-4ad7898b4995",
+      "reason": "over-target",
+      "family": "will the weight loss drug liraglutide"
+    },
+    {
+      "id": "rd-realityeth-4afb10532174",
+      "reason": "over-target",
+      "family": "will the national weather service officially"
+    },
+    {
+      "id": "rd-realityeth-4b538cb30602",
+      "reason": "over-target",
+      "family": "will former u s president donald"
+    },
+    {
+      "id": "rd-realityeth-4b67597c4b64",
+      "reason": "over-target",
+      "family": "will any us tech giant publicly"
+    },
+    {
+      "id": "rd-realityeth-4b956ceffb6b",
+      "reason": "over-target",
+      "family": "will the israeli military publicly release"
+    },
+    {
+      "id": "rd-realityeth-4b9f89e7593e",
+      "reason": "over-target",
+      "family": "will any major automaker publicly announce"
+    },
+    {
+      "id": "rd-realityeth-4ba17d4cdde4",
+      "reason": "over-target",
+      "family": "will any major electric vehicle manufacturer"
+    },
+    {
+      "id": "rd-realityeth-4bdbee905749",
+      "reason": "over-target",
+      "family": "will the heatwave in the southwest"
+    },
+    {
+      "id": "rd-realityeth-4c0fc6fc972b",
+      "reason": "over-target",
+      "family": "will at least one u s"
+    },
+    {
+      "id": "rd-realityeth-4c9842d93133",
+      "reason": "over-target",
+      "family": "will the egyptian ministry of tourism"
+    },
+    {
+      "id": "rd-realityeth-4d259137b34f",
+      "reason": "over-target",
+      "family": "will a new study confirming the"
+    },
+    {
+      "id": "rd-realityeth-4d54285d699b",
+      "reason": "over-target",
+      "family": "will the u s and eu"
+    },
+    {
+      "id": "rd-realityeth-4e755cdd4ca4",
+      "reason": "over-target",
+      "family": "will the did covid 19 come"
+    },
+    {
+      "id": "rd-realityeth-4eab815e6f29",
+      "reason": "over-target",
+      "family": "will former president trump make another"
+    },
+    {
+      "id": "rd-realityeth-4ecbcdcff4e5",
+      "reason": "over-target",
+      "family": "will planned parenthood north central states"
+    },
+    {
+      "id": "rd-realityeth-4ed8de86a241",
+      "reason": "over-target",
+      "family": "will donald trump s economic plan"
+    },
+    {
+      "id": "rd-realityeth-4efaf335e174",
+      "reason": "over-target",
+      "family": "will it rain in ho chi"
+    },
+    {
+      "id": "rd-realityeth-4f39defda85c",
+      "reason": "over-target",
+      "family": "will any country publicly announce the"
+    },
+    {
+      "id": "rd-realityeth-4f4c1d204261",
+      "reason": "over-target",
+      "family": "will the texas department of state"
+    },
+    {
+      "id": "rd-realityeth-4f7101bd473a",
+      "reason": "over-target",
+      "family": "will israel formally respond to the"
+    },
+    {
+      "id": "rd-realityeth-4fcb1eaadd31",
+      "reason": "over-target",
+      "family": "will neeraj agrawal neerajka write a"
+    },
+    {
+      "id": "rd-realityeth-5004f4402458",
+      "reason": "over-target",
+      "family": "will the court grant a preliminary"
+    },
+    {
+      "id": "rd-realityeth-503e84687df7",
+      "reason": "over-target",
+      "family": "will github publicly remove or restrict"
+    },
+    {
+      "id": "rd-realityeth-50e959a61735",
+      "reason": "over-target",
+      "family": "will president trump deliver his remarks"
+    },
+    {
+      "id": "rd-realityeth-50fc7c24ab64",
+      "reason": "over-target",
+      "family": "will the beijing municipal government publicly"
+    },
+    {
+      "id": "rd-realityeth-511e2be1aa21",
+      "reason": "over-target",
+      "family": "will the air force announce the"
+    },
+    {
+      "id": "rd-realityeth-5129a8f7486c",
+      "reason": "over-target",
+      "family": "will the uk home office announce"
+    },
+    {
+      "id": "rd-realityeth-51dde049e769",
+      "reason": "over-target",
+      "family": "will rusty return"
+    },
+    {
+      "id": "rd-realityeth-5265f3eddd8b",
+      "reason": "over-target",
+      "family": "will google s ai powered note"
+    },
+    {
+      "id": "rd-realityeth-527d349850d7",
+      "reason": "over-target",
+      "family": "will the cdc publicly announce that"
+    },
+    {
+      "id": "rd-realityeth-5320f0bafe01",
+      "reason": "over-target",
+      "family": "will the apple watch series 10"
+    },
+    {
+      "id": "rd-realityeth-53392fc12b03",
+      "reason": "over-target",
+      "family": "will the vatican release any additional"
+    },
+    {
+      "id": "rd-realityeth-538303de5a04",
+      "reason": "over-target",
+      "family": "will meta publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-53a041c45560",
+      "reason": "over-target",
+      "family": "will shawn monper be formally charged"
+    },
+    {
+      "id": "rd-realityeth-540d14296b61",
+      "reason": "over-target",
+      "family": "will the swiss federal government publicly"
+    },
+    {
+      "id": "rd-realityeth-5410698a46a1",
+      "reason": "over-target",
+      "family": "will germany officially announce a change"
+    },
+    {
+      "id": "rd-realityeth-5459a33299a2",
+      "reason": "over-target",
+      "family": "will the european union officially issue"
+    },
+    {
+      "id": "rd-realityeth-54ddac42deab",
+      "reason": "over-target",
+      "family": "will the powerball jackpot be won"
+    },
+    {
+      "id": "rd-realityeth-5506d4c6dcf2",
+      "reason": "over-target",
+      "family": "will any player win their first"
+    },
+    {
+      "id": "rd-realityeth-554b4ec612b9",
+      "reason": "over-target",
+      "family": "will xai announce any new features"
+    },
+    {
+      "id": "rd-realityeth-5556b656934e",
+      "reason": "over-target",
+      "family": "will ups announce the closure of"
+    },
+    {
+      "id": "rd-realityeth-55ad636fec73",
+      "reason": "over-target",
+      "family": "will zeropoint technologies ai memory compression"
+    },
+    {
+      "id": "rd-realityeth-55ed1c39ef9b",
+      "reason": "over-target",
+      "family": "will the biden administration announce a"
+    },
+    {
+      "id": "rd-realityeth-55f32ea7cf52",
+      "reason": "over-target",
+      "family": "will the population of california drop"
+    },
+    {
+      "id": "rd-realityeth-560238b0a0b2",
+      "reason": "over-target",
+      "family": "will at least one member of"
+    },
+    {
+      "id": "rd-realityeth-56252ceef758",
+      "reason": "over-target",
+      "family": "will the coalition for humane immigrant"
+    },
+    {
+      "id": "rd-realityeth-568685b22a2a",
+      "reason": "over-target",
+      "family": "will the supreme court of the"
+    },
+    {
+      "id": "rd-realityeth-569a91b7e442",
+      "reason": "over-target",
+      "family": "will ethereum have multiple reorgs per"
+    },
+    {
+      "id": "rd-realityeth-5808af8538cf",
+      "reason": "over-target",
+      "family": "will netflix publicly announce before or"
+    },
+    {
+      "id": "rd-realityeth-584284155ee2",
+      "reason": "over-target",
+      "family": "will any new military coup occur"
+    },
+    {
+      "id": "rd-realityeth-5864025b371d",
+      "reason": "over-target",
+      "family": "will the nypd publicly announce that"
+    },
+    {
+      "id": "rd-realityeth-58e50ece3bba",
+      "reason": "over-target",
+      "family": "will google workspace introduce any new"
+    },
+    {
+      "id": "rd-realityeth-58f382dbb343",
+      "reason": "over-target",
+      "family": "will the us department of health"
+    },
+    {
+      "id": "rd-realityeth-59acc2c19097",
+      "reason": "over-target",
+      "family": "will the uk met office publicly"
+    },
+    {
+      "id": "rd-realityeth-59c8c417e3ec",
+      "reason": "over-target",
+      "family": "will the iphone 16 pro and"
+    },
+    {
+      "id": "rd-realityeth-59d79e1b0a5f",
+      "reason": "over-target",
+      "family": "will the u s attorney s"
+    },
+    {
+      "id": "rd-realityeth-5a17164790f8",
+      "reason": "over-target",
+      "family": "will johannes kaiser be included as"
+    },
+    {
+      "id": "rd-realityeth-5a5d0f4c2a55",
+      "reason": "over-target",
+      "family": "will the iphone 16 with 8gb"
+    },
+    {
+      "id": "rd-realityeth-5a8761123bec",
+      "reason": "over-target",
+      "family": "will snglsdao io web app launch"
+    },
+    {
+      "id": "rd-realityeth-5aa1e0fc4a29",
+      "reason": "over-target",
+      "family": "will the second nitrogen gas execution"
+    },
+    {
+      "id": "rd-realityeth-5aae2a12ba05",
+      "reason": "over-target",
+      "family": "will the new salem s lot"
+    },
+    {
+      "id": "rd-realityeth-5b2f8acb7b08",
+      "reason": "over-target",
+      "family": "will there be a tornado reported"
+    },
+    {
+      "id": "rd-realityeth-5b68b23a8b69",
+      "reason": "over-target",
+      "family": "will mexico transfer at least 200"
+    },
+    {
+      "id": "rd-realityeth-5bd88b2e0dcc",
+      "reason": "over-target",
+      "family": "will president elect donald trump announce"
+    },
+    {
+      "id": "rd-realityeth-5bf85678d39a",
+      "reason": "over-target",
+      "family": "will china increase its military flights"
+    },
+    {
+      "id": "rd-realityeth-5c53d2c377ca",
+      "reason": "over-target",
+      "family": "will the u s government officially"
+    },
+    {
+      "id": "rd-realityeth-5c84f92a9680",
+      "reason": "over-target",
+      "family": "will south korea announce new military"
+    },
+    {
+      "id": "rd-realityeth-5cb50f592de4",
+      "reason": "over-target",
+      "family": "will the russian and chinese governments"
+    },
+    {
+      "id": "rd-realityeth-5ccefdc6cfb0",
+      "reason": "over-target",
+      "family": "there are more doors than wheels"
+    },
+    {
+      "id": "rd-realityeth-5d14bb7f2a6e",
+      "reason": "over-target",
+      "family": "will jeju air announce any immediate"
+    },
+    {
+      "id": "rd-realityeth-5daa72eafc63",
+      "reason": "over-target",
+      "family": "will the cdc publicly report on"
+    },
+    {
+      "id": "rd-realityeth-5e11b52d7895",
+      "reason": "over-target",
+      "family": "will any major news outlet or"
+    },
+    {
+      "id": "rd-realityeth-5e5a4b356e45",
+      "reason": "over-target",
+      "family": "will the united states resume sharing"
+    },
+    {
+      "id": "rd-realityeth-5e6184ad27b9",
+      "reason": "over-target",
+      "family": "will amd publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-5ebd6f04c3f8",
+      "reason": "over-target",
+      "family": "will any new regulation or law"
+    },
+    {
+      "id": "rd-realityeth-5f19531370d5",
+      "reason": "over-target",
+      "family": "will the israeli government approve the"
+    },
+    {
+      "id": "rd-realityeth-5f257f93b950",
+      "reason": "over-target",
+      "family": "will nissan publicly announce before or"
+    },
+    {
+      "id": "rd-realityeth-5f4e961a4c0b",
+      "reason": "over-target",
+      "family": "will amazon s october prime day"
+    },
+    {
+      "id": "rd-realityeth-5fb93fcef5c4",
+      "reason": "over-target",
+      "family": "will boeing issue a public statement"
+    },
+    {
+      "id": "rd-realityeth-5fc14504782d",
+      "reason": "over-target",
+      "family": "will wendy s announce any additional"
+    },
+    {
+      "id": "rd-realityeth-61760894984a",
+      "reason": "over-target",
+      "family": "will princess zelda appear in the"
+    },
+    {
+      "id": "rd-realityeth-617e22c5f5e9",
+      "reason": "over-target",
+      "family": "will the norwegian government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-62163a5f1684",
+      "reason": "over-target",
+      "family": "will the game developed by capcom"
+    },
+    {
+      "id": "rd-realityeth-624ce86a7134",
+      "reason": "over-target",
+      "family": "will morocco announce any changes to"
+    },
+    {
+      "id": "rd-realityeth-63012a74c53c",
+      "reason": "over-target",
+      "family": "will voter turnout in the 2026"
+    },
+    {
+      "id": "rd-realityeth-63143f824906",
+      "reason": "over-target",
+      "family": "will arsenal make another bid for"
+    },
+    {
+      "id": "rd-realityeth-632f6e05cd94",
+      "reason": "over-target",
+      "family": "will michelle wu be re elected"
+    },
+    {
+      "id": "rd-realityeth-636d5dc5c814",
+      "reason": "over-target",
+      "family": "will nikki haley win the gop"
+    },
+    {
+      "id": "rd-realityeth-6385c0c712ef",
+      "reason": "over-target",
+      "family": "will the u s bureau of"
+    },
+    {
+      "id": "rd-realityeth-643f7c82a1eb",
+      "reason": "over-target",
+      "family": "will the u s bureau of"
+    },
+    {
+      "id": "rd-realityeth-64b790584e53",
+      "reason": "over-target",
+      "family": "will toyota publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-65902b23dd3e",
+      "reason": "over-target",
+      "family": "will the government of myanmar officially"
+    },
+    {
+      "id": "rd-realityeth-660649bfc767",
+      "reason": "over-target",
+      "family": "will grant hardin be apprehended by"
+    },
+    {
+      "id": "rd-realityeth-6628c94587fc",
+      "reason": "over-target",
+      "family": "will fidesz kdnp win the most"
+    },
+    {
+      "id": "rd-realityeth-6632cb387a07",
+      "reason": "over-target",
+      "family": "will the uk home office publicly"
+    },
+    {
+      "id": "rd-realityeth-6664bcc5b134",
+      "reason": "over-target",
+      "family": "will oriole networks receive additional funding"
+    },
+    {
+      "id": "rd-realityeth-66b2b20972df",
+      "reason": "over-target",
+      "family": "will the united states department of"
+    },
+    {
+      "id": "rd-realityeth-670bab50f0d3",
+      "reason": "over-target",
+      "family": "will any major web hosting provider"
+    },
+    {
+      "id": "rd-realityeth-670bcd7f631e",
+      "reason": "over-target",
+      "family": "will brandon aiyuk sign a new"
+    },
+    {
+      "id": "rd-realityeth-67c42dcc0eb9",
+      "reason": "over-target",
+      "family": "will d matrix publicly announce on"
+    },
+    {
+      "id": "rd-realityeth-67cb65f75568",
+      "reason": "over-target",
+      "family": "will ikea and best buy publicly"
+    },
+    {
+      "id": "rd-realityeth-67e5545ebca9",
+      "reason": "over-target",
+      "family": "will danish or norwegian authorities publicly"
+    },
+    {
+      "id": "rd-realityeth-691115643cb7",
+      "reason": "over-target",
+      "family": "will dell publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-6920e81c2627",
+      "reason": "over-target",
+      "family": "will any state lottery organization report"
+    },
+    {
+      "id": "rd-realityeth-695d33a6f742",
+      "reason": "over-target",
+      "family": "will peru s foreign minister announce"
+    },
+    {
+      "id": "rd-realityeth-6990eb8fe224",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-69b076a31e76",
+      "reason": "over-target",
+      "family": "will a major electric vehicle manufacturer"
+    },
+    {
+      "id": "rd-realityeth-69d593ac470a",
+      "reason": "over-target",
+      "family": "will the national weather service issue"
+    },
+    {
+      "id": "rd-realityeth-69f7c49b40c0",
+      "reason": "over-target",
+      "family": "will the uk health and social"
+    },
+    {
+      "id": "rd-realityeth-6a6f33d1a9d1",
+      "reason": "over-target",
+      "family": "will google kairos power or the"
+    },
+    {
+      "id": "rd-realityeth-6a73569d7323",
+      "reason": "over-target",
+      "family": "will donald trump s proposed 100"
+    },
+    {
+      "id": "rd-realityeth-6b2f7f976728",
+      "reason": "over-target",
+      "family": "will microsoft announce a new incentive"
+    },
+    {
+      "id": "rd-realityeth-6b4fa2d15d57",
+      "reason": "over-target",
+      "family": "will the us healthcare sector experience"
+    },
+    {
+      "id": "rd-realityeth-6bcf3a639c83",
+      "reason": "over-target",
+      "family": "will the u s environmental protection"
+    },
+    {
+      "id": "rd-realityeth-6c0f4023a9b4",
+      "reason": "over-target",
+      "family": "will there be a significant hurricane"
+    },
+    {
+      "id": "rd-realityeth-6c2b63bc5c36",
+      "reason": "over-target",
+      "family": "will the us supreme court limit"
+    },
+    {
+      "id": "rd-realityeth-6c3951d5c622",
+      "reason": "over-target",
+      "family": "will the cdc issue an updated"
+    },
+    {
+      "id": "rd-realityeth-6c596ce2449a",
+      "reason": "over-target",
+      "family": "will the desi collaboration officially announce"
+    },
+    {
+      "id": "rd-realityeth-6cd72d96b029",
+      "reason": "over-target",
+      "family": "will neymar score a goal in"
+    },
+    {
+      "id": "rd-realityeth-6d006b2a3396",
+      "reason": "over-target",
+      "family": "will the uk government announce any"
+    },
+    {
+      "id": "rd-realityeth-6d1f38de477c",
+      "reason": "over-target",
+      "family": "will the royal college of nursing"
+    },
+    {
+      "id": "rd-realityeth-6d3a08c491d1",
+      "reason": "over-target",
+      "family": "will the us government make a"
+    },
+    {
+      "id": "rd-realityeth-6ded8557f85a",
+      "reason": "over-target",
+      "family": "will the department of education successfully"
+    },
+    {
+      "id": "rd-realityeth-6df74a1c9f5e",
+      "reason": "over-target",
+      "family": "will the pentagon officially announce the"
+    },
+    {
+      "id": "rd-realityeth-6e2abbd58630",
+      "reason": "over-target",
+      "family": "will google face legal consequences for"
+    },
+    {
+      "id": "rd-realityeth-6e3857c7c8f8",
+      "reason": "over-target",
+      "family": "will the fda announce additional seizures"
+    },
+    {
+      "id": "rd-realityeth-6e495fe9b671",
+      "reason": "over-target",
+      "family": "will elon musk announce a new"
+    },
+    {
+      "id": "rd-realityeth-6e4e4e5ae4f6",
+      "reason": "over-target",
+      "family": "will south korea s ministry of"
+    },
+    {
+      "id": "rd-realityeth-6e5a9baf0710",
+      "reason": "over-target",
+      "family": "will nasa publicly announce a contingency"
+    },
+    {
+      "id": "rd-realityeth-6eca0f2e2b30",
+      "reason": "over-target",
+      "family": "will stake com post the regular"
+    },
+    {
+      "id": "rd-realityeth-6ef74def3bb0",
+      "reason": "over-target",
+      "family": "will google release a new update"
+    },
+    {
+      "id": "rd-realityeth-6f0ffdc5ddf3",
+      "reason": "over-target",
+      "family": "will the sale of the boston"
+    },
+    {
+      "id": "rd-realityeth-6f5b039e1116",
+      "reason": "over-target",
+      "family": "will mike tyson win the fight"
+    },
+    {
+      "id": "rd-realityeth-6f8c2adda75e",
+      "reason": "over-target",
+      "family": "will the us supreme court issue"
+    },
+    {
+      "id": "rd-realityeth-6fb5ada54372",
+      "reason": "over-target",
+      "family": "by 23 59 59 utc on"
+    },
+    {
+      "id": "rd-realityeth-6fbc11321f38",
+      "reason": "over-target",
+      "family": "will prince harry make another publicized"
+    },
+    {
+      "id": "rd-realityeth-701d659a51a5",
+      "reason": "over-target",
+      "family": "will nvidia publicly announce before or"
+    },
+    {
+      "id": "rd-realityeth-70351dc4fde2",
+      "reason": "over-target",
+      "family": "will boeing publicly comment on the"
+    },
+    {
+      "id": "rd-realityeth-7097b7597b10",
+      "reason": "over-target",
+      "family": "will hyundai s transformers style walking"
+    },
+    {
+      "id": "rd-realityeth-711d07b13220",
+      "reason": "over-target",
+      "family": "will the united states congress publicly"
+    },
+    {
+      "id": "rd-realityeth-71347aaa49c0",
+      "reason": "over-target",
+      "family": "will marine le pen s national"
+    },
+    {
+      "id": "rd-realityeth-714f6bf7ce33",
+      "reason": "over-target",
+      "family": "will law enforcement or any collaborating"
+    },
+    {
+      "id": "rd-realityeth-716640c54f30",
+      "reason": "over-target",
+      "family": "will the eu impose duties on"
+    },
+    {
+      "id": "rd-realityeth-71a54a8afbd1",
+      "reason": "over-target",
+      "family": "will a u s company publicly"
+    },
+    {
+      "id": "rd-realityeth-71b693b83b39",
+      "reason": "over-target",
+      "family": "will dell officially announce the signing"
+    },
+    {
+      "id": "rd-realityeth-726028653891",
+      "reason": "over-target",
+      "family": "will the atlantic hurricane season peak"
+    },
+    {
+      "id": "rd-realityeth-72638669f038",
+      "reason": "over-target",
+      "family": "will haaland achieve his 100th goal"
+    },
+    {
+      "id": "rd-realityeth-72ad3c8af58c",
+      "reason": "over-target",
+      "family": "will any major social media platform"
+    },
+    {
+      "id": "rd-realityeth-73636f23553a",
+      "reason": "over-target",
+      "family": "will the fed balance sheet be"
+    },
+    {
+      "id": "rd-realityeth-74c6193658e4",
+      "reason": "over-target",
+      "family": "will hp publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-75577bfe7d53",
+      "reason": "over-target",
+      "family": "will the united states impose new"
+    },
+    {
+      "id": "rd-realityeth-75fa04d455fa",
+      "reason": "over-target",
+      "family": "will the us marshals service announce"
+    },
+    {
+      "id": "rd-realityeth-765757e210b7",
+      "reason": "over-target",
+      "family": "will doran start in more than"
+    },
+    {
+      "id": "rd-realityeth-765e04883c68",
+      "reason": "over-target",
+      "family": "will intel publicly announce the appointment"
+    },
+    {
+      "id": "rd-realityeth-7679aa097b53",
+      "reason": "over-target",
+      "family": "will justin timberlake enter a new"
+    },
+    {
+      "id": "rd-realityeth-767a10aedbf6",
+      "reason": "over-target",
+      "family": "will the iranian government issue another"
+    },
+    {
+      "id": "rd-realityeth-76d2994865ca",
+      "reason": "over-target",
+      "family": "will the us supreme court give"
+    },
+    {
+      "id": "rd-realityeth-77722d5fb9f3",
+      "reason": "over-target",
+      "family": "will ai safety for fleshy humans"
+    },
+    {
+      "id": "rd-realityeth-778e89f70bb3",
+      "reason": "over-target",
+      "family": "will the california department of forestry"
+    },
+    {
+      "id": "rd-realityeth-77c527641731",
+      "reason": "over-target",
+      "family": "will the trump administration officially announce"
+    },
+    {
+      "id": "rd-realityeth-78404d5f960e",
+      "reason": "over-target",
+      "family": "will any major health organization release"
+    },
+    {
+      "id": "rd-realityeth-798796582be4",
+      "reason": "over-target",
+      "family": "will the israeli cabinet publicly approve"
+    },
+    {
+      "id": "rd-realityeth-79aae03220e7",
+      "reason": "over-target",
+      "family": "will any nato country publicly announce"
+    },
+    {
+      "id": "rd-realityeth-7a22dc7db770",
+      "reason": "over-target",
+      "family": "will microsoft announce the general availability"
+    },
+    {
+      "id": "rd-realityeth-7a5d1206a93b",
+      "reason": "over-target",
+      "family": "will donald trump in an official"
+    },
+    {
+      "id": "rd-realityeth-7b0e44f48398",
+      "reason": "over-target",
+      "family": "will google publicly announce any changes"
+    },
+    {
+      "id": "rd-realityeth-7b3841d15b1b",
+      "reason": "over-target",
+      "family": "will the humanoid robots complete the"
+    },
+    {
+      "id": "rd-realityeth-7b9b530fbba9",
+      "reason": "over-target",
+      "family": "will the u s state department"
+    },
+    {
+      "id": "rd-realityeth-7c1344be43b2",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-7c1a9d088498",
+      "reason": "over-target",
+      "family": "will the pennsylvania state government announce"
+    },
+    {
+      "id": "rd-realityeth-7ca4ca205d89",
+      "reason": "over-target",
+      "family": "will denmark officially announce the deployment"
+    },
+    {
+      "id": "rd-realityeth-7caae353ddbd",
+      "reason": "over-target",
+      "family": "will king charles iii be declared"
+    },
+    {
+      "id": "rd-realityeth-7cc52efe06d8",
+      "reason": "over-target",
+      "family": "will the uk government officially announce"
+    },
+    {
+      "id": "rd-realityeth-7cfd311a1a6c",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-7d27960b38c6",
+      "reason": "over-target",
+      "family": "will china introduce a new private"
+    },
+    {
+      "id": "rd-realityeth-7d9db357377f",
+      "reason": "over-target",
+      "family": "does ordengg guild have more than"
+    },
+    {
+      "id": "rd-realityeth-7e0c41fc3de5",
+      "reason": "over-target",
+      "family": "will the faa issue a new"
+    },
+    {
+      "id": "rd-realityeth-7eeffa6d3b9a",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-7ef001276923",
+      "reason": "over-target",
+      "family": "will openai officially announce a new"
+    },
+    {
+      "id": "rd-realityeth-7f4ed8087510",
+      "reason": "over-target",
+      "family": "will the newquay zoo born lynx"
+    },
+    {
+      "id": "rd-realityeth-7f7a420c569a",
+      "reason": "over-target",
+      "family": "will the german federal office for"
+    },
+    {
+      "id": "rd-realityeth-7fb26f26ee5a",
+      "reason": "over-target",
+      "family": "will the international paralympic committee announce"
+    },
+    {
+      "id": "rd-realityeth-8028a89f3765",
+      "reason": "over-target",
+      "family": "will lewis hamilton win his first"
+    },
+    {
+      "id": "rd-realityeth-805966a5d75d",
+      "reason": "over-target",
+      "family": "will the chinese government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-80d1e86473ee",
+      "reason": "over-target",
+      "family": "was 2019 the highest annual return"
+    },
+    {
+      "id": "rd-realityeth-8137161f2c50",
+      "reason": "over-target",
+      "family": "will ikea announce a new matter"
+    },
+    {
+      "id": "rd-realityeth-81553b2ca6ff",
+      "reason": "over-target",
+      "family": "will the ios 17 adoption rate"
+    },
+    {
+      "id": "rd-realityeth-815f9288b9dc",
+      "reason": "over-target",
+      "family": "will a ceasefire agreement between ukraine"
+    },
+    {
+      "id": "rd-realityeth-81c0f7983486",
+      "reason": "over-target",
+      "family": "will pete hegseth resign voluntarily from"
+    },
+    {
+      "id": "rd-realityeth-82045908ef13",
+      "reason": "over-target",
+      "family": "will the georgia department of agriculture"
+    },
+    {
+      "id": "rd-realityeth-82170ea3f2b9",
+      "reason": "over-target",
+      "family": "will any major electric vehicle manufacturer"
+    },
+    {
+      "id": "rd-realityeth-821fa065d266",
+      "reason": "over-target",
+      "family": "will the paris 2024 paralympics conclude"
+    },
+    {
+      "id": "rd-realityeth-826390ef86b9",
+      "reason": "over-target",
+      "family": "will any major european airline publicly"
+    },
+    {
+      "id": "rd-realityeth-8300a4510b21",
+      "reason": "over-target",
+      "family": "will the potential tropical storm eight"
+    },
+    {
+      "id": "rd-realityeth-834fde95777f",
+      "reason": "over-target",
+      "family": "will youtube tv and fox publicly"
+    },
+    {
+      "id": "rd-realityeth-83545f34cd9e",
+      "reason": "over-target",
+      "family": "will the british basketball federation announce"
+    },
+    {
+      "id": "rd-realityeth-83c443686710",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-83e6ed3a4196",
+      "reason": "over-target",
+      "family": "will nasa officially announce the first"
+    },
+    {
+      "id": "rd-realityeth-8421aba21954",
+      "reason": "over-target",
+      "family": "metaculus will norway announce a referendum"
+    },
+    {
+      "id": "rd-realityeth-85281e514106",
+      "reason": "over-target",
+      "family": "will the florida republican party publicly"
+    },
+    {
+      "id": "rd-realityeth-85755d1c6d6f",
+      "reason": "over-target",
+      "family": "will lenovo release the new copilot"
+    },
+    {
+      "id": "rd-realityeth-85a102040dd0",
+      "reason": "over-target",
+      "family": "will the public health agency of"
+    },
+    {
+      "id": "rd-realityeth-85af21480cbd",
+      "reason": "over-target",
+      "family": "will any major news outlet report"
+    },
+    {
+      "id": "rd-realityeth-85bde997f32c",
+      "reason": "over-target",
+      "family": "will brent crude oil prices remain"
+    },
+    {
+      "id": "rd-realityeth-85d81c3e273f",
+      "reason": "over-target",
+      "family": "will m a d mobile officially"
+    },
+    {
+      "id": "rd-realityeth-867c0d05d29d",
+      "reason": "over-target",
+      "family": "will any major u s city"
+    },
+    {
+      "id": "rd-realityeth-86a928af3de1",
+      "reason": "over-target",
+      "family": "will the united states and the"
+    },
+    {
+      "id": "rd-realityeth-86d634d68862",
+      "reason": "over-target",
+      "family": "will the uk government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-8756c9021122",
+      "reason": "over-target",
+      "family": "will china have covid lockdowns before"
+    },
+    {
+      "id": "rd-realityeth-876999b028d5",
+      "reason": "over-target",
+      "family": "will the united nations publicly announce"
+    },
+    {
+      "id": "rd-realityeth-8785ff46c558",
+      "reason": "over-target",
+      "family": "will meta connect 2024 release a"
+    },
+    {
+      "id": "rd-realityeth-8787f06af74a",
+      "reason": "over-target",
+      "family": "will the national retail federation publicly"
+    },
+    {
+      "id": "rd-realityeth-879b06460e20",
+      "reason": "over-target",
+      "family": "will the new tariffs announced by"
+    },
+    {
+      "id": "rd-realityeth-87fd9434e7b7",
+      "reason": "over-target",
+      "family": "will real madrid win their next"
+    },
+    {
+      "id": "rd-realityeth-886cd5f5d942",
+      "reason": "over-target",
+      "family": "will amazon prime video publicly announce"
+    },
+    {
+      "id": "rd-realityeth-88c9a72abd79",
+      "reason": "over-target",
+      "family": "will tesla recall any more vehicles"
+    },
+    {
+      "id": "rd-realityeth-8a60a7c11e7b",
+      "reason": "over-target",
+      "family": "will the fulton county da be"
+    },
+    {
+      "id": "rd-realityeth-8a74f8858f5c",
+      "reason": "over-target",
+      "family": "will the chinese government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-8a7b1be9e154",
+      "reason": "over-target",
+      "family": "will the syrian foreign ministry issue"
+    },
+    {
+      "id": "rd-realityeth-8acc507142aa",
+      "reason": "over-target",
+      "family": "will the uk government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-8b3915eafd25",
+      "reason": "over-target",
+      "family": "will raspberry pi s ai camera"
+    },
+    {
+      "id": "rd-realityeth-8b99d25355cd",
+      "reason": "over-target",
+      "family": "will epic and disney announce their"
+    },
+    {
+      "id": "rd-realityeth-8bcf0859efe8",
+      "reason": "over-target",
+      "family": "will the lebanese government officially request"
+    },
+    {
+      "id": "rd-realityeth-8c8fcee308c0",
+      "reason": "over-target",
+      "family": "will the state of alabama announce"
+    },
+    {
+      "id": "rd-realityeth-8c9cc359e5dd",
+      "reason": "over-target",
+      "family": "will armenia s parliament pass the"
+    },
+    {
+      "id": "rd-realityeth-8cb143356062",
+      "reason": "over-target",
+      "family": "will travis james mullis be executed"
+    },
+    {
+      "id": "rd-realityeth-8cb6eb47cc63",
+      "reason": "over-target",
+      "family": "will juan soto s contract with"
+    },
+    {
+      "id": "rd-realityeth-8cd8ab1b740e",
+      "reason": "over-target",
+      "family": "will israel and hamas announce a"
+    },
+    {
+      "id": "rd-realityeth-8d542e110cea",
+      "reason": "over-target",
+      "family": "will the us announce any new"
+    },
+    {
+      "id": "rd-realityeth-8dde00abfb07",
+      "reason": "over-target",
+      "family": "will the uk government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-8e0e5c636af6",
+      "reason": "over-target",
+      "family": "will there be a public announcement"
+    },
+    {
+      "id": "rd-realityeth-8e0ee8db021a",
+      "reason": "over-target",
+      "family": "will the u s government publicly"
+    },
+    {
+      "id": "rd-realityeth-8e14354918f6",
+      "reason": "over-target",
+      "family": "will there be a verdict in"
+    },
+    {
+      "id": "rd-realityeth-8e14a63d069f",
+      "reason": "over-target",
+      "family": "will the sony a7 v camera"
+    },
+    {
+      "id": "rd-realityeth-8e3ef5f8892c",
+      "reason": "over-target",
+      "family": "will president trump and president putin"
+    },
+    {
+      "id": "rd-realityeth-8f2cdcdbe1ee",
+      "reason": "over-target",
+      "family": "will the newly proposed atom smasher"
+    },
+    {
+      "id": "rd-realityeth-8f70a0819366",
+      "reason": "over-target",
+      "family": "will tesla publicly announce the scheduling"
+    },
+    {
+      "id": "rd-realityeth-8f7af81cb477",
+      "reason": "over-target",
+      "family": "will opec announce in its post"
+    },
+    {
+      "id": "rd-realityeth-8faa44422d34",
+      "reason": "over-target",
+      "family": "will google be required to allow"
+    },
+    {
+      "id": "rd-realityeth-8fbbe4294016",
+      "reason": "over-target",
+      "family": "will google publicly release before or"
+    },
+    {
+      "id": "rd-realityeth-8fc9419b0ade",
+      "reason": "over-target",
+      "family": "will the new tariffs announced by"
+    },
+    {
+      "id": "rd-realityeth-904aaa9bdb47",
+      "reason": "over-target",
+      "family": "will the united states government announce"
+    },
+    {
+      "id": "rd-realityeth-90d35e43ff60",
+      "reason": "over-target",
+      "family": "will amd launch a new ai"
+    },
+    {
+      "id": "rd-realityeth-90f90b87a683",
+      "reason": "over-target",
+      "family": "will the new button dedicated to"
+    },
+    {
+      "id": "rd-realityeth-90fd03644b8c",
+      "reason": "over-target",
+      "family": "will any automaker publicly announce on"
+    },
+    {
+      "id": "rd-realityeth-9218a16a0f43",
+      "reason": "over-target",
+      "family": "will nvidia shares recover from their"
+    },
+    {
+      "id": "rd-realityeth-92aa50014777",
+      "reason": "over-target",
+      "family": "will the national weather service publicly"
+    },
+    {
+      "id": "rd-realityeth-931cdb475786",
+      "reason": "over-target",
+      "family": "will any major u s city"
+    },
+    {
+      "id": "rd-realityeth-93465625e530",
+      "reason": "over-target",
+      "family": "will the u s immigration and"
+    },
+    {
+      "id": "rd-realityeth-934e13df5086",
+      "reason": "over-target",
+      "family": "will queen guitarist brian may completely"
+    },
+    {
+      "id": "rd-realityeth-936d8d799423",
+      "reason": "over-target",
+      "family": "will the texas state legislature publicly"
+    },
+    {
+      "id": "rd-realityeth-9378087b5dbf",
+      "reason": "over-target",
+      "family": "will the pentagon officially announce the"
+    },
+    {
+      "id": "rd-realityeth-93c4e346edec",
+      "reason": "over-target",
+      "family": "will the international astronomical union announce"
+    },
+    {
+      "id": "rd-realityeth-93ebd4a83541",
+      "reason": "over-target",
+      "family": "will any other u s state"
+    },
+    {
+      "id": "rd-realityeth-93f04e8da6c4",
+      "reason": "over-target",
+      "family": "will microstrategy announce a bitcoin purchase"
+    },
+    {
+      "id": "rd-realityeth-941924f52ecf",
+      "reason": "over-target",
+      "family": "will hezbollah announce any ceasefire agreement"
+    },
+    {
+      "id": "rd-realityeth-945e323ace87",
+      "reason": "over-target",
+      "family": "will meta s ai powered video"
+    },
+    {
+      "id": "rd-realityeth-94601536ee39",
+      "reason": "over-target",
+      "family": "will the digital cinema camera with"
+    },
+    {
+      "id": "rd-realityeth-9490c858d7f3",
+      "reason": "over-target",
+      "family": "will the iranian government officially announce"
+    },
+    {
+      "id": "rd-realityeth-94d85ec8823b",
+      "reason": "over-target",
+      "family": "will equinor officially announce a delay"
+    },
+    {
+      "id": "rd-realityeth-95899501eaad",
+      "reason": "over-target",
+      "family": "will any other major golf tournament"
+    },
+    {
+      "id": "rd-realityeth-964f2002a23b",
+      "reason": "over-target",
+      "family": "will authorities arrest a suspect in"
+    },
+    {
+      "id": "rd-realityeth-965e68012b75",
+      "reason": "over-target",
+      "family": "will the us trade representative announce"
+    },
+    {
+      "id": "rd-realityeth-968996b3093b",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-96f08296bd35",
+      "reason": "over-target",
+      "family": "will robomart publicly announce the official"
+    },
+    {
+      "id": "rd-realityeth-975d7d0a4c53",
+      "reason": "over-target",
+      "family": "will altria group sell more than"
+    },
+    {
+      "id": "rd-realityeth-979ebeacc082",
+      "reason": "over-target",
+      "family": "will target publicly announce any revisions"
+    },
+    {
+      "id": "rd-realityeth-97b4bd98f2ce",
+      "reason": "over-target",
+      "family": "will the benton county sheriff s"
+    },
+    {
+      "id": "rd-realityeth-9826cf15da18",
+      "reason": "over-target",
+      "family": "will great britain win more than"
+    },
+    {
+      "id": "rd-realityeth-98d2643810fe",
+      "reason": "over-target",
+      "family": "will any romanian political party publicly"
+    },
+    {
+      "id": "rd-realityeth-98e61d4ea80f",
+      "reason": "over-target",
+      "family": "will baidu announce an expansion of"
+    },
+    {
+      "id": "rd-realityeth-991137223f6d",
+      "reason": "over-target",
+      "family": "will the department of justice s"
+    },
+    {
+      "id": "rd-realityeth-9938b018f595",
+      "reason": "over-target",
+      "family": "will the line fire in san"
+    },
+    {
+      "id": "rd-realityeth-9a585c82bebf",
+      "reason": "over-target",
+      "family": "will the uk government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-9a7a29d4faa7",
+      "reason": "over-target",
+      "family": "will nasa announce a new initiative"
+    },
+    {
+      "id": "rd-realityeth-9a8ba30aafd9",
+      "reason": "over-target",
+      "family": "will tomorrowland announce the cancellation of"
+    },
+    {
+      "id": "rd-realityeth-9aeea81ad7a3",
+      "reason": "over-target",
+      "family": "will the world health organization announce"
+    },
+    {
+      "id": "rd-realityeth-9bc8e2601d81",
+      "reason": "over-target",
+      "family": "will green greenlucid be unbanned from"
+    },
+    {
+      "id": "rd-realityeth-9c02a64ce3f8",
+      "reason": "over-target",
+      "family": "will the fbi s cryptocurrency bait"
+    },
+    {
+      "id": "rd-realityeth-9c24e6c5a5d5",
+      "reason": "over-target",
+      "family": "will any major ai or tech"
+    },
+    {
+      "id": "rd-realityeth-9c314fde1d82",
+      "reason": "over-target",
+      "family": "will the solar eclipse event create"
+    },
+    {
+      "id": "rd-realityeth-9c54b60058e0",
+      "reason": "over-target",
+      "family": "will meta publicly announce before or"
+    },
+    {
+      "id": "rd-realityeth-9c5c51f45acc",
+      "reason": "over-target",
+      "family": "will minneapolis police publicly announce the"
+    },
+    {
+      "id": "rd-realityeth-9cb5c095afa2",
+      "reason": "over-target",
+      "family": "will there be any other similar"
+    },
+    {
+      "id": "rd-realityeth-9cc9d640d188",
+      "reason": "over-target",
+      "family": "will the uk government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-9d360c249b17",
+      "reason": "over-target",
+      "family": "will the u s bureau of"
+    },
+    {
+      "id": "rd-realityeth-9e2b51dbc622",
+      "reason": "over-target",
+      "family": "will the ai powered teddy bear"
+    },
+    {
+      "id": "rd-realityeth-9e44fcfd893b",
+      "reason": "over-target",
+      "family": "will the noaa officially announce a"
+    },
+    {
+      "id": "rd-realityeth-9e7ea9a1fdff",
+      "reason": "over-target",
+      "family": "upgrade proxyadmin ownership corrected"
+    },
+    {
+      "id": "rd-realityeth-9ec12434ecff",
+      "reason": "over-target",
+      "family": "will any member state of the"
+    },
+    {
+      "id": "rd-realityeth-9ee34220650c",
+      "reason": "over-target",
+      "family": "will the united nations security council"
+    },
+    {
+      "id": "rd-realityeth-9f00fdd54ebd",
+      "reason": "over-target",
+      "family": "will jeju air announce a temporary"
+    },
+    {
+      "id": "rd-realityeth-a065ca0c7760",
+      "reason": "over-target",
+      "family": "will meta announce a new consumer"
+    },
+    {
+      "id": "rd-realityeth-a0cd96c4033a",
+      "reason": "over-target",
+      "family": "will any of the following major"
+    },
+    {
+      "id": "rd-realityeth-a0e26c8c797a",
+      "reason": "over-target",
+      "family": "will stephen miran be confirmed by"
+    },
+    {
+      "id": "rd-realityeth-a128b32ffff1",
+      "reason": "over-target",
+      "family": "will a major automaker publicly announce"
+    },
+    {
+      "id": "rd-realityeth-a1523287846a",
+      "reason": "over-target",
+      "family": "will google gemini rank as the"
+    },
+    {
+      "id": "rd-realityeth-a24ba42f10b4",
+      "reason": "over-target",
+      "family": "will elias rodriguez enter a plea"
+    },
+    {
+      "id": "rd-realityeth-a26701a88cfa",
+      "reason": "over-target",
+      "family": "will any major chinese data center"
+    },
+    {
+      "id": "rd-realityeth-a2a4f526e1cb",
+      "reason": "over-target",
+      "family": "will north korea launch a ballistic"
+    },
+    {
+      "id": "rd-realityeth-a2d4dcea24e4",
+      "reason": "over-target",
+      "family": "will any major sports organization induct"
+    },
+    {
+      "id": "rd-realityeth-a38406ec8e87",
+      "reason": "over-target",
+      "family": "will a new vw equipped with"
+    },
+    {
+      "id": "rd-realityeth-a3dbc75ce41b",
+      "reason": "over-target",
+      "family": "will disney publicly announce before or"
+    },
+    {
+      "id": "rd-realityeth-a444ed03d0a2",
+      "reason": "over-target",
+      "family": "will the moldovan government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-a44ef8f4e084",
+      "reason": "over-target",
+      "family": "will the trump administration announce a"
+    },
+    {
+      "id": "rd-realityeth-a450969a8186",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-a4a2a39d19b6",
+      "reason": "over-target",
+      "family": "will vince mcmahon be proven guilty"
+    },
+    {
+      "id": "rd-realityeth-a4c74279b201",
+      "reason": "over-target",
+      "family": "will intel or nvidia publicly announce"
+    },
+    {
+      "id": "rd-realityeth-a5a8dc38451b",
+      "reason": "over-target",
+      "family": "will the yield on the 10"
+    },
+    {
+      "id": "rd-realityeth-a5e26fd6e724",
+      "reason": "over-target",
+      "family": "will microsoft publicly confirm on or"
+    },
+    {
+      "id": "rd-realityeth-a5faec54c988",
+      "reason": "over-target",
+      "family": "will any major media outlet publish"
+    },
+    {
+      "id": "rd-realityeth-a60216a169b4",
+      "reason": "over-target",
+      "family": "will any peer reviewed scientific journal"
+    },
+    {
+      "id": "rd-realityeth-a69913d1e09c",
+      "reason": "over-target",
+      "family": "will the american gaming association publicly"
+    },
+    {
+      "id": "rd-realityeth-a6c9a61828c4",
+      "reason": "over-target",
+      "family": "will the migrant detention facility at"
+    },
+    {
+      "id": "rd-realityeth-a7a3471ba320",
+      "reason": "over-target",
+      "family": "will the national transportation safety board"
+    },
+    {
+      "id": "rd-realityeth-a8059a078eb8",
+      "reason": "over-target",
+      "family": "will arch manning lead the texas"
+    },
+    {
+      "id": "rd-realityeth-a8792e5902cf",
+      "reason": "over-target",
+      "family": "will robert f kennedy jr or"
+    },
+    {
+      "id": "rd-realityeth-a87efd2535b3",
+      "reason": "over-target",
+      "family": "will chinese authorities publicly announce the"
+    },
+    {
+      "id": "rd-realityeth-a89d2b098a68",
+      "reason": "over-target",
+      "family": "will any major uk pharmacy chain"
+    },
+    {
+      "id": "rd-realityeth-a8b129feef5a",
+      "reason": "over-target",
+      "family": "will pop mart publicly report a"
+    },
+    {
+      "id": "rd-realityeth-a8bc50d1fb6a",
+      "reason": "over-target",
+      "family": "will espn s use of ai"
+    },
+    {
+      "id": "rd-realityeth-a982db2275b4",
+      "reason": "over-target",
+      "family": "will a similar power outage due"
+    },
+    {
+      "id": "rd-realityeth-a9866a333c27",
+      "reason": "over-target",
+      "family": "will the u s army publicly"
+    },
+    {
+      "id": "rd-realityeth-a9ce7aa7eb83",
+      "reason": "over-target",
+      "family": "will the new snapdragon x series"
+    },
+    {
+      "id": "rd-realityeth-aa09f5cb3226",
+      "reason": "over-target",
+      "family": "will the conflict between russia and"
+    },
+    {
+      "id": "rd-realityeth-aa98bde61f6a",
+      "reason": "over-target",
+      "family": "will the department for work and"
+    },
+    {
+      "id": "rd-realityeth-aabef0d833e1",
+      "reason": "over-target",
+      "family": "will the fcc issue a public"
+    },
+    {
+      "id": "rd-realityeth-aadf342fb766",
+      "reason": "over-target",
+      "family": "will there be a ceasefire deal"
+    },
+    {
+      "id": "rd-realityeth-ab241679143f",
+      "reason": "over-target",
+      "family": "will google publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-ab58bbcbf6b7",
+      "reason": "over-target",
+      "family": "will the department of justice formally"
+    },
+    {
+      "id": "rd-realityeth-ac03cb55e443",
+      "reason": "over-target",
+      "family": "will the court case related to"
+    },
+    {
+      "id": "rd-realityeth-ac3850e20d82",
+      "reason": "over-target",
+      "family": "will grant hardin be apprehended by"
+    },
+    {
+      "id": "rd-realityeth-ac511155e488",
+      "reason": "over-target",
+      "family": "will the texas parks and wildlife"
+    },
+    {
+      "id": "rd-realityeth-ac658ffafdd2",
+      "reason": "over-target",
+      "family": "will quinas technology publicly announce before"
+    },
+    {
+      "id": "rd-realityeth-ac982698a67f",
+      "reason": "over-target",
+      "family": "will the myanmar government officially declare"
+    },
+    {
+      "id": "rd-realityeth-acd697ee90f2",
+      "reason": "over-target",
+      "family": "will amd s pensando salina dpu"
+    },
+    {
+      "id": "rd-realityeth-ad31a55c4e08",
+      "reason": "over-target",
+      "family": "will captain america brave new world"
+    },
+    {
+      "id": "rd-realityeth-ad717fe9e7aa",
+      "reason": "over-target",
+      "family": "will the microsoft paint update with"
+    },
+    {
+      "id": "rd-realityeth-adb9ad530646",
+      "reason": "over-target",
+      "family": "will south africa win the afcon"
+    },
+    {
+      "id": "rd-realityeth-ae7f7ca2dea5",
+      "reason": "over-target",
+      "family": "will the fyre festival reboot occur"
+    },
+    {
+      "id": "rd-realityeth-aef1c62f64fe",
+      "reason": "over-target",
+      "family": "will the us department of homeland"
+    },
+    {
+      "id": "rd-realityeth-aef5b0e9f009",
+      "reason": "over-target",
+      "family": "will michail chkhikvishvili be granted bail"
+    },
+    {
+      "id": "rd-realityeth-af04ed4e84b3",
+      "reason": "over-target",
+      "family": "will any major pharmacy chain announce"
+    },
+    {
+      "id": "rd-realityeth-af3b6acce07a",
+      "reason": "over-target",
+      "family": "will president xi jinping and president"
+    },
+    {
+      "id": "rd-realityeth-afe76d45219f",
+      "reason": "over-target",
+      "family": "will the irs officially announce an"
+    },
+    {
+      "id": "rd-realityeth-b064508b401b",
+      "reason": "over-target",
+      "family": "will bitcoin btc trade strictly above"
+    },
+    {
+      "id": "rd-realityeth-b12bb68cce78",
+      "reason": "over-target",
+      "family": "will the austrian government announce a"
+    },
+    {
+      "id": "rd-realityeth-b154ddaec0b8",
+      "reason": "over-target",
+      "family": "will super typhoon yagi hit vietnam"
+    },
+    {
+      "id": "rd-realityeth-b1f824e5eaad",
+      "reason": "over-target",
+      "family": "will pennsylvania court reverse its decision"
+    },
+    {
+      "id": "rd-realityeth-b22257ba6a77",
+      "reason": "over-target",
+      "family": "will prime minister benjamin netanyahu reinstate"
+    },
+    {
+      "id": "rd-realityeth-b340f4f18225",
+      "reason": "over-target",
+      "family": "will sam bankman fried receive a"
+    },
+    {
+      "id": "rd-realityeth-b35229d5e5fd",
+      "reason": "over-target",
+      "family": "will weightwatchers emerge from bankruptcy as"
+    },
+    {
+      "id": "rd-realityeth-b35495c97e86",
+      "reason": "over-target",
+      "family": "will the united states impose additional"
+    },
+    {
+      "id": "rd-realityeth-b3f8d1a9eeb9",
+      "reason": "over-target",
+      "family": "will uk mortgage lenders announce reductions"
+    },
+    {
+      "id": "rd-realityeth-b4223458bc17",
+      "reason": "over-target",
+      "family": "will the department of the treasury"
+    },
+    {
+      "id": "rd-realityeth-b497d8043660",
+      "reason": "over-target",
+      "family": "will google comply with the court"
+    },
+    {
+      "id": "rd-realityeth-b4a67388b27f",
+      "reason": "over-target",
+      "family": "will any government agency in the"
+    },
+    {
+      "id": "rd-realityeth-b4b7e0bfbf40",
+      "reason": "over-target",
+      "family": "will panama s migrant authority report"
+    },
+    {
+      "id": "rd-realityeth-b4e620a53795",
+      "reason": "over-target",
+      "family": "will any new lawsuits be filed"
+    },
+    {
+      "id": "rd-realityeth-b51334e6a974",
+      "reason": "over-target",
+      "family": "will the postal regulatory commission approve"
+    },
+    {
+      "id": "rd-realityeth-b534c4295e4c",
+      "reason": "over-target",
+      "family": "will president donald trump host a"
+    },
+    {
+      "id": "rd-realityeth-b554dc200308",
+      "reason": "over-target",
+      "family": "will inter miami win their first"
+    },
+    {
+      "id": "rd-realityeth-b597155753f9",
+      "reason": "over-target",
+      "family": "will u s representative ashley hinson"
+    },
+    {
+      "id": "rd-realityeth-b5c014921e5d",
+      "reason": "over-target",
+      "family": "will the us conduct another stealth"
+    },
+    {
+      "id": "rd-realityeth-b5d9578d2b01",
+      "reason": "over-target",
+      "family": "will any major ai company such"
+    },
+    {
+      "id": "rd-realityeth-b694465ddb10",
+      "reason": "over-target",
+      "family": "will any national government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-b72c33e1e8fc",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-b76eb1fa91d8",
+      "reason": "over-target",
+      "family": "will the acquisition of cybersecurity firm"
+    },
+    {
+      "id": "rd-realityeth-b77f91ce71da",
+      "reason": "over-target",
+      "family": "will the amd rx 8700 xt"
+    },
+    {
+      "id": "rd-realityeth-b7b166a0888c",
+      "reason": "over-target",
+      "family": "will tesla launch a new model"
+    },
+    {
+      "id": "rd-realityeth-b7da17abee8f",
+      "reason": "over-target",
+      "family": "will finchetto publicly announce the successful"
+    },
+    {
+      "id": "rd-realityeth-b817bbf9dd42",
+      "reason": "over-target",
+      "family": "will the california state legislature introduce"
+    },
+    {
+      "id": "rd-realityeth-b830e8ede9f6",
+      "reason": "over-target",
+      "family": "will the google pixel 9 pro"
+    },
+    {
+      "id": "rd-realityeth-b86804292191",
+      "reason": "over-target",
+      "family": "will endor labs or any major"
+    },
+    {
+      "id": "rd-realityeth-b8b87af33d21",
+      "reason": "over-target",
+      "family": "will the trial to determine what"
+    },
+    {
+      "id": "rd-realityeth-b8f7b1ca6e1b",
+      "reason": "over-target",
+      "family": "will the u s state department"
+    },
+    {
+      "id": "rd-realityeth-b9491303dd36",
+      "reason": "over-target",
+      "family": "will the united nations security council"
+    },
+    {
+      "id": "rd-realityeth-b9552cf0edd9",
+      "reason": "over-target",
+      "family": "will all 43 escaped monkeys from"
+    },
+    {
+      "id": "rd-realityeth-b9c33cd7e7c8",
+      "reason": "over-target",
+      "family": "will either intel or amd publicly"
+    },
+    {
+      "id": "rd-realityeth-bb84a0826b79",
+      "reason": "over-target",
+      "family": "will the brazilian government announce a"
+    },
+    {
+      "id": "rd-realityeth-bbb231e928e9",
+      "reason": "over-target",
+      "family": "will google publicly announce before or"
+    },
+    {
+      "id": "rd-realityeth-bc7e4c5f8945",
+      "reason": "over-target",
+      "family": "will amazon officially announce the deployment"
+    },
+    {
+      "id": "rd-realityeth-bc8aaa5e27e7",
+      "reason": "over-target",
+      "family": "will roblox reach 1 billion users"
+    },
+    {
+      "id": "rd-realityeth-bce07a7be306",
+      "reason": "over-target",
+      "family": "will tesla launch its unsupervised full"
+    },
+    {
+      "id": "rd-realityeth-bd2a896ce183",
+      "reason": "over-target",
+      "family": "will the texas department of state"
+    },
+    {
+      "id": "rd-realityeth-bdf35c07448c",
+      "reason": "over-target",
+      "family": "will apple publicly announce the completion"
+    },
+    {
+      "id": "rd-realityeth-be80251256d1",
+      "reason": "over-target",
+      "family": "will donald trump s support lead"
+    },
+    {
+      "id": "rd-realityeth-be9f32990e31",
+      "reason": "over-target",
+      "family": "will the us complete the military"
+    },
+    {
+      "id": "rd-realityeth-bf0496c8fa39",
+      "reason": "over-target",
+      "family": "will the united states or a"
+    },
+    {
+      "id": "rd-realityeth-bf4ec4948f79",
+      "reason": "over-target",
+      "family": "will a federal monitor be appointed"
+    },
+    {
+      "id": "rd-realityeth-bf66531bf979",
+      "reason": "over-target",
+      "family": "will unesco publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-bf9871df6c1e",
+      "reason": "over-target",
+      "family": "is chainlink a real oracle"
+    },
+    {
+      "id": "rd-realityeth-bfc68032b584",
+      "reason": "over-target",
+      "family": "will nvidia officially announce the commercial"
+    },
+    {
+      "id": "rd-realityeth-bfeda85f845b",
+      "reason": "over-target",
+      "family": "will turkey lend money from imf"
+    },
+    {
+      "id": "rd-realityeth-bff34bb175ed",
+      "reason": "over-target",
+      "family": "will the republic of ireland win"
+    },
+    {
+      "id": "rd-realityeth-c033478a5f5b",
+      "reason": "over-target",
+      "family": "will a single ticket win the"
+    },
+    {
+      "id": "rd-realityeth-c0da2dad3957",
+      "reason": "over-target",
+      "family": "will mega millions announce any additional"
+    },
+    {
+      "id": "rd-realityeth-c0e7014472c1",
+      "reason": "over-target",
+      "family": "will fortinet announce a patch for"
+    },
+    {
+      "id": "rd-realityeth-c123791135f8",
+      "reason": "over-target",
+      "family": "will the pentagon publicly announce before"
+    },
+    {
+      "id": "rd-realityeth-c15f0141ab28",
+      "reason": "over-target",
+      "family": "will any major us healthcare organization"
+    },
+    {
+      "id": "rd-realityeth-c178de74ab76",
+      "reason": "over-target",
+      "family": "will the japanese government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-c1bad4498c93",
+      "reason": "over-target",
+      "family": "will the administrator of the 600"
+    },
+    {
+      "id": "rd-realityeth-c1cc278cf890",
+      "reason": "over-target",
+      "family": "will apple announce a new mac"
+    },
+    {
+      "id": "rd-realityeth-c231dc7f461b",
+      "reason": "over-target",
+      "family": "will there be an official announcement"
+    },
+    {
+      "id": "rd-realityeth-c27ff70d0fde",
+      "reason": "over-target",
+      "family": "will the national hurricane center announce"
+    },
+    {
+      "id": "rd-realityeth-c30e4adf754c",
+      "reason": "over-target",
+      "family": "will microsoft resolve the 365 outages"
+    },
+    {
+      "id": "rd-realityeth-c3ac90c77b4d",
+      "reason": "over-target",
+      "family": "will the supreme court of brazil"
+    },
+    {
+      "id": "rd-realityeth-c3cc43942131",
+      "reason": "over-target",
+      "family": "will microstrategy announce a bitcoin purchase"
+    },
+    {
+      "id": "rd-realityeth-c3fdeb725b89",
+      "reason": "over-target",
+      "family": "will president trump announce a new"
+    },
+    {
+      "id": "rd-realityeth-c40ee1cbe506",
+      "reason": "over-target",
+      "family": "will anthropic release claude opus 4"
+    },
+    {
+      "id": "rd-realityeth-c43dc8bd2c75",
+      "reason": "over-target",
+      "family": "will any major cybersecurity firm such"
+    },
+    {
+      "id": "rd-realityeth-c4487a77fc1c",
+      "reason": "over-target",
+      "family": "will the journal nature geoscience publish"
+    },
+    {
+      "id": "rd-realityeth-c45cf48e3ab7",
+      "reason": "over-target",
+      "family": "will donald trump jr s prediction"
+    },
+    {
+      "id": "rd-realityeth-c460d2d0357f",
+      "reason": "over-target",
+      "family": "will any major cybersecurity firm announce"
+    },
+    {
+      "id": "rd-realityeth-c486855d7308",
+      "reason": "over-target",
+      "family": "will a federal judge issue a"
+    },
+    {
+      "id": "rd-realityeth-c4d937ca68bb",
+      "reason": "over-target",
+      "family": "will samsung publicly announce the commencement"
+    },
+    {
+      "id": "rd-realityeth-c51a6beca46f",
+      "reason": "over-target",
+      "family": "will the baltimore city council officially"
+    },
+    {
+      "id": "rd-realityeth-c523399139f3",
+      "reason": "over-target",
+      "family": "will a judge publicly order on"
+    },
+    {
+      "id": "rd-realityeth-c52b270599d8",
+      "reason": "over-target",
+      "family": "will the cuban government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-c6a66d5e114f",
+      "reason": "over-target",
+      "family": "will the washington litigation group publicly"
+    },
+    {
+      "id": "rd-realityeth-c6c711d04126",
+      "reason": "over-target",
+      "family": "will any major cybersecurity firm such"
+    },
+    {
+      "id": "rd-realityeth-c72563802dfe",
+      "reason": "over-target",
+      "family": "will the adaptation of junji ito"
+    },
+    {
+      "id": "rd-realityeth-c7b04cae7008",
+      "reason": "over-target",
+      "family": "will the chinese government officially announce"
+    },
+    {
+      "id": "rd-realityeth-c7d5dffd13eb",
+      "reason": "over-target",
+      "family": "will the third nuclear power plant"
+    },
+    {
+      "id": "rd-realityeth-c7ed40e88105",
+      "reason": "over-target",
+      "family": "will wendy s open at least"
+    },
+    {
+      "id": "rd-realityeth-c8072f9ab1bf",
+      "reason": "over-target",
+      "family": "will president trump publicly announce a"
+    },
+    {
+      "id": "rd-realityeth-c8bf3b23e407",
+      "reason": "over-target",
+      "family": "will the us air force complete"
+    },
+    {
+      "id": "rd-realityeth-c92868b1c653",
+      "reason": "over-target",
+      "family": "will the ukrainian government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-c944dc1d266b",
+      "reason": "over-target",
+      "family": "will the florida fish and wildlife"
+    },
+    {
+      "id": "rd-realityeth-c95aec7ca3ae",
+      "reason": "over-target",
+      "family": "will new mexico governor michelle lujan"
+    },
+    {
+      "id": "rd-realityeth-ca261334478b",
+      "reason": "over-target",
+      "family": "will the uk government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-ca26d466f84b",
+      "reason": "over-target",
+      "family": "will acting secret service director ronald"
+    },
+    {
+      "id": "rd-realityeth-ca3dee500771",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-ca8cdc36cfec",
+      "reason": "over-target",
+      "family": "will the lawsuit against gun maker"
+    },
+    {
+      "id": "rd-realityeth-cb00f852d42b",
+      "reason": "over-target",
+      "family": "will donald trump increase his campaign"
+    },
+    {
+      "id": "rd-realityeth-cbef9c249415",
+      "reason": "over-target",
+      "family": "will royal mail publicly confirm the"
+    },
+    {
+      "id": "rd-realityeth-cc1746ace7a2",
+      "reason": "over-target",
+      "family": "will the united states announce new"
+    },
+    {
+      "id": "rd-realityeth-cc8460e765e3",
+      "reason": "over-target",
+      "family": "will the liquidators for evergrande publicly"
+    },
+    {
+      "id": "rd-realityeth-cd3dbe255cac",
+      "reason": "over-target",
+      "family": "will the iphone 17 with new"
+    },
+    {
+      "id": "rd-realityeth-cd78986a9e1d",
+      "reason": "over-target",
+      "family": "will warner bros discovery and paramount"
+    },
+    {
+      "id": "rd-realityeth-cdb4397b5038",
+      "reason": "over-target",
+      "family": "will the usda issue a new"
+    },
+    {
+      "id": "rd-realityeth-cddad10d3c91",
+      "reason": "over-target",
+      "family": "will any major global telecommunications company"
+    },
+    {
+      "id": "rd-realityeth-cddd819db9c0",
+      "reason": "over-target",
+      "family": "will israel agree to a ceasefire"
+    },
+    {
+      "id": "rd-realityeth-ce453fbc1c6e",
+      "reason": "over-target",
+      "family": "will roblox publicly announce before or"
+    },
+    {
+      "id": "rd-realityeth-cea67dafed1c",
+      "reason": "over-target",
+      "family": "will the university of california santa"
+    },
+    {
+      "id": "rd-realityeth-ceac6241dc03",
+      "reason": "over-target",
+      "family": "will any federal court in the"
+    },
+    {
+      "id": "rd-realityeth-d0691e22a3b2",
+      "reason": "over-target",
+      "family": "will the texas house pass hb"
+    },
+    {
+      "id": "rd-realityeth-d0a27ec3557a",
+      "reason": "over-target",
+      "family": "will commonwealth fusion systems secure additional"
+    },
+    {
+      "id": "rd-realityeth-d11ab64cd2b8",
+      "reason": "over-target",
+      "family": "will any major news outlet report"
+    },
+    {
+      "id": "rd-realityeth-d175a36af876",
+      "reason": "over-target",
+      "family": "will the vietnamese government announce an"
+    },
+    {
+      "id": "rd-realityeth-d1f36d2ded26",
+      "reason": "over-target",
+      "family": "will opera officially announce the expansion"
+    },
+    {
+      "id": "rd-realityeth-d254fa4a5d1b",
+      "reason": "over-target",
+      "family": "will samsung release an official fix"
+    },
+    {
+      "id": "rd-realityeth-d2b925b00744",
+      "reason": "over-target",
+      "family": "will vanellope hope wilkins be discharged"
+    },
+    {
+      "id": "rd-realityeth-d3b3f26b9277",
+      "reason": "over-target",
+      "family": "will the u s justice department"
+    },
+    {
+      "id": "rd-realityeth-d44360027a36",
+      "reason": "over-target",
+      "family": "will any major uk news outlet"
+    },
+    {
+      "id": "rd-realityeth-d448b1026eca",
+      "reason": "over-target",
+      "family": "will coindesk com mention agave or"
+    },
+    {
+      "id": "rd-realityeth-d4ddf94c0188",
+      "reason": "over-target",
+      "family": "will the national transportation safety board"
+    },
+    {
+      "id": "rd-realityeth-d5170431694d",
+      "reason": "over-target",
+      "family": "will ford publicly confirm before or"
+    },
+    {
+      "id": "rd-realityeth-d5530408abdd",
+      "reason": "over-target",
+      "family": "will karen tumlin s legal challenge"
+    },
+    {
+      "id": "rd-realityeth-d5c2648a7533",
+      "reason": "over-target",
+      "family": "will the us department of defense"
+    },
+    {
+      "id": "rd-realityeth-d65abc359378",
+      "reason": "over-target",
+      "family": "will the uk department for work"
+    },
+    {
+      "id": "rd-realityeth-d674a8112750",
+      "reason": "over-target",
+      "family": "will any us based robotaxi company"
+    },
+    {
+      "id": "rd-realityeth-d6a1dce9c073",
+      "reason": "over-target",
+      "family": "will the case of the afghan"
+    },
+    {
+      "id": "rd-realityeth-d6bddf970e18",
+      "reason": "over-target",
+      "family": "will the russia ukraine u s"
+    },
+    {
+      "id": "rd-realityeth-d723b69e3e14",
+      "reason": "over-target",
+      "family": "will mark carney remain the prime"
+    },
+    {
+      "id": "rd-realityeth-d750ea01ba97",
+      "reason": "over-target",
+      "family": "will the international olympic committee officially"
+    },
+    {
+      "id": "rd-realityeth-d7b3f3257d40",
+      "reason": "over-target",
+      "family": "will shonen jump announce a break"
+    },
+    {
+      "id": "rd-realityeth-d7dc52b00571",
+      "reason": "over-target",
+      "family": "will it rain in paris tomorrow"
+    },
+    {
+      "id": "rd-realityeth-d8396be9fb40",
+      "reason": "over-target",
+      "family": "will the cuban government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-d864da0c1d64",
+      "reason": "over-target",
+      "family": "will over 5 million people attend"
+    },
+    {
+      "id": "rd-realityeth-d8b5527e1a9e",
+      "reason": "over-target",
+      "family": "will congress publicly announce before or"
+    },
+    {
+      "id": "rd-realityeth-d9cfa9216567",
+      "reason": "over-target",
+      "family": "will the man who allegedly poured"
+    },
+    {
+      "id": "rd-realityeth-da72f02563cc",
+      "reason": "over-target",
+      "family": "will israel officially announce the successful"
+    },
+    {
+      "id": "rd-realityeth-daa13f1949ff",
+      "reason": "over-target",
+      "family": "will the ai tool developed by"
+    },
+    {
+      "id": "rd-realityeth-dab2dfced6dc",
+      "reason": "over-target",
+      "family": "will the new thermal steam vent"
+    },
+    {
+      "id": "rd-realityeth-db5adf7091b5",
+      "reason": "over-target",
+      "family": "will the united nations officially acknowledge"
+    },
+    {
+      "id": "rd-realityeth-db61942c7a42",
+      "reason": "over-target",
+      "family": "will president trump announce any new"
+    },
+    {
+      "id": "rd-realityeth-db84db78abdd",
+      "reason": "over-target",
+      "family": "will emma raducanu win the korea"
+    },
+    {
+      "id": "rd-realityeth-db9756364646",
+      "reason": "over-target",
+      "family": "trump imposes 100 tariffs on chinese"
+    },
+    {
+      "id": "rd-realityeth-dbb1cdb2db21",
+      "reason": "over-target",
+      "family": "will mattel announce the opening of"
+    },
+    {
+      "id": "rd-realityeth-dc3f1a5bd08e",
+      "reason": "over-target",
+      "family": "will the centers for medicare medicaid"
+    },
+    {
+      "id": "rd-realityeth-dc92b27e78ad",
+      "reason": "over-target",
+      "family": "will lenovo publicly announce on or"
+    },
+    {
+      "id": "rd-realityeth-dc9fc795bf1c",
+      "reason": "over-target",
+      "family": "will the united states reopen its"
+    },
+    {
+      "id": "rd-realityeth-dcc30d529223",
+      "reason": "over-target",
+      "family": "will a new apple vision pro"
+    },
+    {
+      "id": "rd-realityeth-dd6d183be8c2",
+      "reason": "over-target",
+      "family": "will the powerball jackpot be won"
+    },
+    {
+      "id": "rd-realityeth-dd9c09c45e52",
+      "reason": "over-target",
+      "family": "will the united states congress pass"
+    },
+    {
+      "id": "rd-realityeth-ddddd88f28d6",
+      "reason": "over-target",
+      "family": "will revel publicly announce the sale"
+    },
+    {
+      "id": "rd-realityeth-ddf33f2183dd",
+      "reason": "over-target",
+      "family": "will taylor swift hold the number"
+    },
+    {
+      "id": "rd-realityeth-de171d864c04",
+      "reason": "over-target",
+      "family": "will judge boasberg issue a ruling"
+    },
+    {
+      "id": "rd-realityeth-de43c8bc42fa",
+      "reason": "over-target",
+      "family": "will the international atomic energy agency"
+    },
+    {
+      "id": "rd-realityeth-de95d653eed1",
+      "reason": "over-target",
+      "family": "will any major cybersecurity firm publicly"
+    },
+    {
+      "id": "rd-realityeth-deedca5b9dc3",
+      "reason": "over-target",
+      "family": "will micah parsons appear in at"
+    },
+    {
+      "id": "rd-realityeth-e01e7cd8e0e6",
+      "reason": "over-target",
+      "family": "will any african government announce a"
+    },
+    {
+      "id": "rd-realityeth-e02334369d9b",
+      "reason": "over-target",
+      "family": "will microstrategy announce a bitcoin purchase"
+    },
+    {
+      "id": "rd-realityeth-e04d559bcf1b",
+      "reason": "over-target",
+      "family": "will yulia navalnaya be listed among"
+    },
+    {
+      "id": "rd-realityeth-e0bf5cbc1651",
+      "reason": "over-target",
+      "family": "will rigoberto miranda orozco be sentenced"
+    },
+    {
+      "id": "rd-realityeth-e0e01f9e60d0",
+      "reason": "over-target",
+      "family": "will the screen of huawei s"
+    },
+    {
+      "id": "rd-realityeth-e0f20edf7e02",
+      "reason": "over-target",
+      "family": "will the german bundestag vote to"
+    },
+    {
+      "id": "rd-realityeth-e165cea67d90",
+      "reason": "over-target",
+      "family": "will any major environmental organization formally"
+    },
+    {
+      "id": "rd-realityeth-e18235cc074b",
+      "reason": "over-target",
+      "family": "will south korea s ministry of"
+    },
+    {
+      "id": "rd-realityeth-e1c125ecfbcf",
+      "reason": "over-target",
+      "family": "will a proposal to make fema"
+    },
+    {
+      "id": "rd-realityeth-e2392f53112c",
+      "reason": "over-target",
+      "family": "will the government of india publicly"
+    },
+    {
+      "id": "rd-realityeth-e29c42542fe1",
+      "reason": "over-target",
+      "family": "will the california department of food"
+    },
+    {
+      "id": "rd-realityeth-e307a8d8ae66",
+      "reason": "over-target",
+      "family": "will the brownlee foundation announce a"
+    },
+    {
+      "id": "rd-realityeth-e333c564880c",
+      "reason": "over-target",
+      "family": "will the israel hamas war still"
+    },
+    {
+      "id": "rd-realityeth-e3c24cc3a871",
+      "reason": "over-target",
+      "family": "will there be a publication break"
+    },
+    {
+      "id": "rd-realityeth-e4f90b3c6f8b",
+      "reason": "over-target",
+      "family": "will tropical storm ileana reach the"
+    },
+    {
+      "id": "rd-realityeth-e526a334f695",
+      "reason": "over-target",
+      "family": "will any major asian cosmetic manufacturer"
+    },
+    {
+      "id": "rd-realityeth-e55ae3507927",
+      "reason": "over-target",
+      "family": "will the governments of cambodia and"
+    },
+    {
+      "id": "rd-realityeth-e565935a3e12",
+      "reason": "over-target",
+      "family": "will there be a public protest"
+    },
+    {
+      "id": "rd-realityeth-e569bcd0e1cb",
+      "reason": "over-target",
+      "family": "will angela chao face legal consequences"
+    },
+    {
+      "id": "rd-realityeth-e60b82ba53d5",
+      "reason": "over-target",
+      "family": "will the japanese government announce a"
+    },
+    {
+      "id": "rd-realityeth-e6ff9f793793",
+      "reason": "over-target",
+      "family": "will the miami dolphins win their"
+    },
+    {
+      "id": "rd-realityeth-e7438e1709b1",
+      "reason": "over-target",
+      "family": "will the uk government publicly announce"
+    },
+    {
+      "id": "rd-realityeth-e7bd04955ef3",
+      "reason": "over-target",
+      "family": "will any major data center operator"
+    },
+    {
+      "id": "rd-realityeth-e89eda26aa51",
+      "reason": "over-target",
+      "family": "will fifth third bank publicly announce"
+    },
+    {
+      "id": "rd-realityeth-e8a2c7e56675",
+      "reason": "over-target",
+      "family": "will the mega millions consortium report"
+    },
+    {
+      "id": "rd-realityeth-e8ce9db49924",
+      "reason": "over-target",
+      "family": "will a class action lawsuit be"
+    },
+    {
+      "id": "rd-realityeth-e8fe2088975f",
+      "reason": "over-target",
+      "family": "will amazon publicly release a post"
+    },
+    {
+      "id": "rd-realityeth-e91112dd85e3",
+      "reason": "over-target",
+      "family": "will the us department of defense"
+    },
+    {
+      "id": "rd-realityeth-e95d13e2a2fd",
+      "reason": "over-target",
+      "family": "will any major cryptocurrency project publicly"
+    },
+    {
+      "id": "rd-realityeth-e9f96ecf7dbe",
+      "reason": "over-target",
+      "family": "will any other pharmaceutical company besides"
+    },
+    {
+      "id": "rd-realityeth-eadbd5f57c5c",
+      "reason": "over-target",
+      "family": "will the coca cola company officially"
+    },
+    {
+      "id": "rd-realityeth-eb0f0e43f7dc",
+      "reason": "over-target",
+      "family": "will the pentagon officially announce the"
+    },
+    {
+      "id": "rd-realityeth-eb4a37e209e3",
+      "reason": "over-target",
+      "family": "will spacex officially announce the successful"
+    },
+    {
+      "id": "rd-realityeth-eb8be082eb47",
+      "reason": "over-target",
+      "family": "will the offshore wind project mentioned"
+    },
+    {
+      "id": "rd-realityeth-ebf0e0b146ac",
+      "reason": "over-target",
+      "family": "will the uk and nigeria publicly"
+    },
+    {
+      "id": "rd-realityeth-ec48a5c3e573",
+      "reason": "over-target",
+      "family": "upgrade proxyadmin ownership"
+    },
+    {
+      "id": "rd-realityeth-ecf271bfd0ea",
+      "reason": "over-target",
+      "family": "will congress publicly announce the passage"
+    },
+    {
+      "id": "rd-realityeth-ed5c602f457b",
+      "reason": "over-target",
+      "family": "will any of the major u"
+    },
+    {
+      "id": "rd-realityeth-ed60ab21014f",
+      "reason": "over-target",
+      "family": "will the guatemalan government officially declare"
+    },
+    {
+      "id": "rd-realityeth-ed7dba21bef7",
+      "reason": "over-target",
+      "family": "will the major hurricane approaching florida"
+    },
+    {
+      "id": "rd-realityeth-eddffdfbdffe",
+      "reason": "over-target",
+      "family": "will google complete the rollout of"
+    },
+    {
+      "id": "rd-realityeth-ee478450cfe6",
+      "reason": "over-target",
+      "family": "will ukraine s drones target moscow"
+    },
+    {
+      "id": "rd-realityeth-ee821c2fc6b6",
+      "reason": "over-target",
+      "family": "will dua lipa win a grammy"
+    },
+    {
+      "id": "rd-realityeth-eec967ef63f8",
+      "reason": "over-target",
+      "family": "will any of the caspian sea"
+    },
+    {
+      "id": "rd-realityeth-eeeac0e1ab0a",
+      "reason": "over-target",
+      "family": "will the us treasury department announce"
+    },
+    {
+      "id": "rd-realityeth-ef12b2c20131",
+      "reason": "over-target",
+      "family": "will the consejo nacional electoral cne"
+    },
+    {
+      "id": "rd-realityeth-ef742e9409e1",
+      "reason": "over-target",
+      "family": "will the u s bureau of"
+    },
+    {
+      "id": "rd-realityeth-ef981b3f4f29",
+      "reason": "over-target",
+      "family": "will the south korean government officially"
+    },
+    {
+      "id": "rd-realityeth-f052844bdd8e",
+      "reason": "over-target",
+      "family": "will more than 1m new wallets"
+    },
+    {
+      "id": "rd-realityeth-f13506818e29",
+      "reason": "over-target",
+      "family": "will the storm prediction center officially"
+    },
+    {
+      "id": "rd-realityeth-f1838b72643a",
+      "reason": "over-target",
+      "family": "will starbucks announce a strategic partnership"
+    },
+    {
+      "id": "rd-realityeth-f1e6e342cfc5",
+      "reason": "over-target",
+      "family": "will there be a major transfer"
+    },
+    {
+      "id": "rd-realityeth-f2026336a512",
+      "reason": "over-target",
+      "family": "will a peer reviewed study be"
+    },
+    {
+      "id": "rd-realityeth-f2866f952286",
+      "reason": "over-target",
+      "family": "will real ice announce the completion"
+    },
+    {
+      "id": "rd-realityeth-f2c309f58746",
+      "reason": "over-target",
+      "family": "will the federal reserve signal a"
+    },
+    {
+      "id": "rd-realityeth-f2e8f2e57fab",
+      "reason": "over-target",
+      "family": "will nanoleaf launch another smart switch"
+    },
+    {
+      "id": "rd-realityeth-f2f238f96133",
+      "reason": "over-target",
+      "family": "will netflix geeked week 2024 announce"
+    },
+    {
+      "id": "rd-realityeth-f3af5f00943c",
+      "reason": "over-target",
+      "family": "will tyreek hill play in the"
+    },
+    {
+      "id": "rd-realityeth-f3c1c573f25f",
+      "reason": "over-target",
+      "family": "will the trial date for sean"
+    },
+    {
+      "id": "rd-realityeth-f44e8c1ac5d0",
+      "reason": "over-target",
+      "family": "will any country officially recognize the"
+    },
+    {
+      "id": "rd-realityeth-f47f254ed735",
+      "reason": "over-target",
+      "family": "will the united states real gross"
+    },
+    {
+      "id": "rd-realityeth-f48276aa00f8",
+      "reason": "over-target",
+      "family": "will manchester united hold a press"
+    },
+    {
+      "id": "rd-realityeth-f5b9916a5af3",
+      "reason": "over-target",
+      "family": "will the australian government announce a"
+    },
+    {
+      "id": "rd-realityeth-f66be3e42790",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-f6a15e8bc065",
+      "reason": "over-target",
+      "family": "will any major ai company announce"
+    },
+    {
+      "id": "rd-realityeth-f71e29e157ee",
+      "reason": "over-target",
+      "family": "will president yoon suk yeol be"
+    },
+    {
+      "id": "rd-realityeth-f73821862cf7",
+      "reason": "over-target",
+      "family": "will any major media outlet publish"
+    },
+    {
+      "id": "rd-realityeth-f7d1e94c96e7",
+      "reason": "over-target",
+      "family": "will the swedish government announce new"
+    },
+    {
+      "id": "rd-realityeth-f7d8a33887c1",
+      "reason": "over-target",
+      "family": "will the u s house of"
+    },
+    {
+      "id": "rd-realityeth-f83782d441d0",
+      "reason": "over-target",
+      "family": "will any women s football club"
+    },
+    {
+      "id": "rd-realityeth-f875b151be6b",
+      "reason": "over-target",
+      "family": "will the us inflation rate stay"
+    },
+    {
+      "id": "rd-realityeth-f89a217cc904",
+      "reason": "over-target",
+      "family": "will the u s department of"
+    },
+    {
+      "id": "rd-realityeth-f8a0bc7a4eaa",
+      "reason": "over-target",
+      "family": "will reddit publicly confirm before or"
+    },
+    {
+      "id": "rd-realityeth-f8d695af21da",
+      "reason": "over-target",
+      "family": "will the stargate project announce the"
+    },
+    {
+      "id": "rd-realityeth-f8f2087122c9",
+      "reason": "over-target",
+      "family": "will the canada industrial relations board"
+    },
+    {
+      "id": "rd-realityeth-f9398594d79b",
+      "reason": "over-target",
+      "family": "will the digital industry group make"
+    },
+    {
+      "id": "rd-realityeth-f9617ebe329c",
+      "reason": "over-target",
+      "family": "will spacex secure a new government"
+    },
+    {
+      "id": "rd-realityeth-f9d85581badc",
+      "reason": "over-target",
+      "family": "will at least one of the"
+    },
+    {
+      "id": "rd-realityeth-f9dd2b83a143",
+      "reason": "over-target",
+      "family": "will the uk government announce a"
+    },
+    {
+      "id": "rd-realityeth-fa20099a0dcc",
+      "reason": "over-target",
+      "family": "will the texas state legislature pass"
+    },
+    {
+      "id": "rd-realityeth-faebfe3d959c",
+      "reason": "over-target",
+      "family": "will the winner of the 1"
+    },
+    {
+      "id": "rd-realityeth-fb33f9798011",
+      "reason": "over-target",
+      "family": "will the indonesian disaster management authorities"
+    },
+    {
+      "id": "rd-realityeth-fc1d9f5ee731",
+      "reason": "over-target",
+      "family": "will the federal office of information"
+    },
+    {
+      "id": "rd-realityeth-fc2a2c434d44",
+      "reason": "over-target",
+      "family": "will any international aid organization announce"
+    },
+    {
+      "id": "rd-realityeth-fc7cc2d93e66",
+      "reason": "over-target",
+      "family": "will any national disability rights organization"
+    },
+    {
+      "id": "rd-realityeth-fcce3c92e6db",
+      "reason": "over-target",
+      "family": "will openai or meta publicly announce"
+    },
+    {
+      "id": "rd-realityeth-fcd2f1ee4d92",
+      "reason": "over-target",
+      "family": "will the federal student aid s"
+    },
+    {
+      "id": "rd-realityeth-fce26ee6c39b",
+      "reason": "over-target",
+      "family": "will any new research study be"
+    },
+    {
+      "id": "rd-realityeth-fd9bff93b09b",
+      "reason": "over-target",
+      "family": "will brucepac successfully recall all 10"
+    },
+    {
+      "id": "rd-realityeth-fe383d73dff6",
+      "reason": "over-target",
+      "family": "will any government health agency endorse"
+    },
+    {
+      "id": "rd-realityeth-fe56b7506dcc",
+      "reason": "over-target",
+      "family": "will the jordanian royal air force"
+    },
+    {
+      "id": "rd-realityeth-feaebec5cea6",
+      "reason": "over-target",
+      "family": "will the japanese government announce any"
+    },
+    {
+      "id": "rd-realityeth-fef750a7aba2",
+      "reason": "over-target",
+      "family": "will typhoon bebinca make a direct"
+    },
+    {
+      "id": "rd-realityeth-ff7f3e9124bf",
+      "reason": "over-target",
+      "family": "will microstrategy incorporated or michael saylor"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["candidates"],
+  "properties": {
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim", "criteria", "deadline", "ground_truth", "resolution_source", "source_urls", "why_nontrivial", "difficulty", "disputed"],
+        "properties": {
+          "claim": { "type": "string" },
+          "criteria": { "type": "string" },
+          "deadline": { "type": "string" },
+          "ground_truth": { "type": "string", "enum": ["YES", "NO"] },
+          "resolution_source": { "type": "string" },
+          "source_urls": { "type": "array", "items": { "type": "string" } },
+          "why_nontrivial": { "type": "string" },
+          "difficulty": { "type": "string", "enum": ["medium", "hard"] },
+          "disputed": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
