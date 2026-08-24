@@ -1,0 +1,19 @@
+{
+  "name": "defi-longtail-probe-harness",
+  "private": true,
+  "type": "module",
+  "description": "Long-tail protocol probe harness (opus-5 baseline on pinned Base + Ethereum forks). Not part of the shipped client.",
+  "scripts": {
+    "ref": "tsx src/reference-solve.ts",
+    "trial": "tsx src/run-trial.ts",
+    "matrix": "tsx src/run-matrix.ts"
+  },
+  "dependencies": {
+    "tsx": "^4.19.0",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "typescript": "^7.0.2"
+  }
+}

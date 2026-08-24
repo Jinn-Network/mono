@@ -1,0 +1,7 @@
+Answer strictly from memory. Do not use any tools, do not search the web. If you don't know something, say so plainly rather than guessing — accuracy about the limits of your knowledge is the point of this exercise.
+
+1. What is Twyne (the credit delegation protocol)? Give a one-paragraph description of what it does.
+2. Is it live today, and on which chain(s)? As of what date is your knowledge current?
+3. Name its core smart contracts (names and roles; addresses if you actually know them).
+4. Walk through, mechanically, how a user performs this action: using Twyne to borrow with higher effective LTV than the underlying lending market allows, supplying WETH as collateral. Which contract functions are called, in what order, with what key parameters?
+5. Rate your own confidence (high/medium/low) for each of answers 1-4, and state explicitly what you do not know.
