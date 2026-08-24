@@ -139,8 +139,10 @@ auth), attach a `/data` volume (`railway volume add --mount-path /data`), set
 the Variables panel (the bind-host override is required — Railway's edge proxy
 cannot reach a loopback-bound process), and enable a public domain over port
 `7331`. Put the console elsewhere. Headless-operator base details —
-`JINN_STATE_DIR=/data`, the deploy contract, the optional claim-relayer
-service — live in [`deploy/README.md`](deploy/README.md).
+`JINN_STATE_DIR=/data` and the deploy contract — live in
+[`deploy/README.md`](deploy/README.md). Earning is OLAS-native: the
+daemon's `reward-claim` loop settles stOLAS distributor rewards. There is
+no claim-relayer service.
 
 ## Build the daemon image from source
 

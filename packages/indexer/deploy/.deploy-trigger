@@ -1,6 +1,7 @@
 # Trigger file for Railway watchPatterns rebuild (#1151).
 #
-# Touching any file under packages/indexer/** or packages/sdk/** causes
+# Touching any file under packages/indexer/** or its portal siblings
+# (task-execution/protocol, trust/core, benchmarking/records) causes
 # Railway to build current next HEAD instead of SKIPPING the deploy.
 # This marker exists so future redeploys can be triggered by editing a
 # timestamp here, without touching live indexer source or the Dockerfile.

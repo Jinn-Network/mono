@@ -6,8 +6,8 @@ export const INDEX_SCHEMA_VERSION = 1 as const;
  * `unicode61` treats every non-alphanumeric character as a separator, so `snake_case`,
  * dotted, and slashed identifiers tokenize correctly with no help. camelCase is closed
  * product-side by `expandIdentifiers` into the `*_idents` columns. `trigram` is rejected
- * for v1: it is optional in some SQLite builds (see the in-repo precedent's dedicated
- * error branch at `apps/jinn-agent/hermes_state.py:992`), doubles the index, and its
+ * for v1: it is optional in some SQLite builds (see stock Hermes
+ * `hermes_state.py`'s dedicated trigram-tokenizer error branch), doubles the index, and its
  * three-character minimum degrades short terms. CJK segmentation is consequently
  * unsupported in v1, and the index is rebuildable, so the choice is reversible.
  */
