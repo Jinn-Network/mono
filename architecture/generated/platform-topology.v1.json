@@ -2028,7 +2028,7 @@
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 6,
-      "discoveredFirstPartySurfaces": 4189,
+      "discoveredFirstPartySurfaces": 4190,
       "generatedOutputSources": 1414,
       "generatorSources": 685,
       "marketplaceControl": 2,
@@ -14819,6 +14819,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/plugins/resolve-no-vendor.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/plugins/vendor-gc.test.ts"
       },
       {
         "categories": [
