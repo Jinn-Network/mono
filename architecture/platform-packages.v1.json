@@ -118,6 +118,10 @@
       "kind": "workflow",
       "path": ".github/workflows/broadcast-bot.yml"
     },
+    "contracts-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/contracts-ci.yml"
+    },
     "client-ci": {
       "kind": "workflow",
       "path": ".github/workflows/ci.yml"
@@ -278,12 +282,13 @@
       "stable": true
     },
     "implementations-v1": {
-      "expectedPackageCount": 60,
+      "expectedPackageCount": 61,
       "publishPolicies": [
         "canary-and-stable"
       ],
       "requiredGateIds": [
         "benchmarking-ci",
+        "contracts-ci",
         "environments-ci",
         "evidence-ci",
         "marketplace-ci",
@@ -3164,6 +3169,45 @@
         "conformance": [
           "./testing"
         ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/contract-abis",
+      "path": "packages/contract-abis",
+      "domain": "contracts",
+      "role": "authoritative generated contract ABIs and consumer slices",
+      "tier": 2,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-08-24-shared-contract-abis-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-and-stable",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "contracts-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/contracts-ci.yml"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
       },
       "supersedes": [],
       "replacedBy": []
