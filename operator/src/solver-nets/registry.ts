@@ -1,4 +1,9 @@
-import { resolveSolverPlugin } from '../plugins/index.js';
+import {
+  defaultSolverPluginVendorRoot,
+  gcOrphanedBundledLocalVendorCopies,
+  remoteVendorNamesFromEntries,
+  resolveSolverPlugin,
+} from '../plugins/index.js';
 import type { SolverPluginEntry } from '../plugins/types.js';
 import type { RuntimePlugin } from '../harnesses/types.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from '../harnesses/names.js';
@@ -381,6 +386,20 @@ export async function loadSolverNets(
     executionWiring?: readonly ExecutionWiringConfigEntry[];
   },
 ): Promise<SolverNetRegistry> {
+  const pluginEntriesForGc: SolverPluginEntry[] = [JINN_NETWORK_TOOLS_PLUGIN];
+  for (const wiring of config.executionWiring ?? []) {
+    pluginEntriesForGc.push(...wiring.plugins);
+    const contractRef = contractRefFromWorkKind(wiring.workKind);
+    if (contractRef) {
+      const solverType = `${contractRef.id}.${contractRef.version}`;
+      pluginEntriesForGc.push(...defaultRuntimePluginsForSolverType(solverType));
+    }
+  }
+  gcOrphanedBundledLocalVendorCopies(
+    defaultSolverPluginVendorRoot(),
+    remoteVendorNamesFromEntries(pluginEntriesForGc),
+  );
+
   const registry = new SolverNetRegistry();
   for (const entry of config.executionWiring ?? []) {
     await registerWiringEntry(registry, entry);
