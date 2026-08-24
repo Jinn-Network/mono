@@ -75,15 +75,30 @@ jobs:
         with:
           node-version: 22
       - run: node --test .github/scripts/workflow-selection-shell.test.mjs
+  skills-mirror:
+    name: Skills mirror
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Skill-mirror unit tests
+        run: node --test scripts/sync-skills.test.mjs
+      - name: Fail on generated skill-mirror drift
+        run: ./scripts/sync-skills.sh --check
   repo-structure-gate:
     # The check-run name GitHub reports is this job's display `name:` below, and that
     # string is the required-status-check context registered on the `next` ruleset
     # (DR-2026-08-18-b D3) — keep them in sync.
     name: repo-structure-gate
-    needs: [gitlinks, identifier-origin, evidence-architecture, workflow-selection]
+    needs: [gitlinks, identifier-origin, evidence-architecture, workflow-selection, skills-mirror]
     if: always()
     runs-on: ubuntu-latest
-    # Three `test`s against upstream results. The bound keeps a wedged runner from
+    # One `test` per upstream result. The bound keeps a wedged runner from
     # holding the required context open for the 360-minute default.
     timeout-minutes: 5
     steps:
@@ -93,8 +108,10 @@ jobs:
           IDENTIFIER_ORIGIN_RESULT: ${{ needs.identifier-origin.result }}
           EVIDENCE_ARCHITECTURE_RESULT: ${{ needs.evidence-architecture.result }}
           WORKFLOW_SELECTION_RESULT: ${{ needs.workflow-selection.result }}
+          SKILLS_MIRROR_RESULT: ${{ needs.skills-mirror.result }}
         run: |
           test "${GITLINKS_RESULT}" = success
           test "${IDENTIFIER_ORIGIN_RESULT}" = success
           test "${EVIDENCE_ARCHITECTURE_RESULT}" = success
           test "${WORKFLOW_SELECTION_RESULT}" = success
+          test "${SKILLS_MIRROR_RESULT}" = success
