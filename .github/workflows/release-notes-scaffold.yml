@@ -12,7 +12,7 @@
 #
 # Reference:
 # - docs/engineering/handbook.md §The shipping machine
-# - log/decisions/2026-05-18-bd-vs-gh-substrate.md (DR-2026-05-18 — issue substrate retirement)
+# - DR-2026-05-18 — issue substrate retirement
 # - Hermes v0.13.0 release notes for the shape reference
 #
 # Two-train cadence: this workflow targets `next` (integration branch). Captain's Publish
