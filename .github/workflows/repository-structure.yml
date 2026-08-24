@@ -31,6 +31,10 @@ jobs:
         run: node --test .github/scripts/demo1-historical-artifacts.test.mjs
       - name: Autopilot fail-closed resolution
         run: node --test .github/scripts/resolve-autopilot.test.mjs
+      - name: Every script test is workflow-wired
+        run: node --test .github/scripts/workflow-script-tests.test.mjs
+      - name: Published-artifacts-smoke workflow shape
+        run: node --test .github/scripts/published-artifacts-smoke-workflow.test.mjs
   identifier-origin:
     name: Identifier origin tripwire
     runs-on: ubuntu-latest
