@@ -129,7 +129,7 @@ The shape taxonomy above is the stable surface. The per-shape skill chains are v
 
 Friction observed in a shape's flow → file a GitHub Issue under the engineering handbook umbrella → refinement, via one of three paths:
 
-1. **Author a new shape-specific skill.** If friction recurs and no existing skill covers it. New skill lands in `.claude/skills/` (symlinked to `.cursor/skills/` and `.codex/skills/` via `./scripts/sync-skills.sh`); the shape's v0 skill chain in this handbook updates to invoke it.
+1. **Author a new shape-specific skill.** If friction recurs and no existing skill covers it. New skill lands in `.claude/skills/` (the only editable tree) and is published by `./scripts/sync-skills.sh` into the generated `.agents/skills/` mirror plus Cursor/Codex compatibility mirrors; the shape's v0 skill chain in this handbook updates to invoke it.
 2. **Amend an existing skill.** If friction is in how an existing skill (e.g., `superpowers:systematic-debugging`) fits the shape's context. The amendment is itself a `docs` change in the relevant skill's repo.
 3. **Revise the handbook.** If the friction is taxonomic (e.g., `chore` should split into `chore(deps)` vs `chore(ci)`). `docs`-shape change against this file.
 
