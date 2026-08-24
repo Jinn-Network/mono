@@ -46,11 +46,15 @@ export interface SpawnResult {
   stderr: string;
 }
 
+export type AuthProbeValidity = 'valid' | 'invalid' | 'malformed' | 'error';
+
 export interface AuthProbeResult {
   authenticated: boolean;
   context: AuthContext;
   detail: string;
   email?: string;
+  /** Presence of a login is `authenticated`; this classifies *why* a probe failed. */
+  validity?: AuthProbeValidity;
 }
 
 export interface ProbeOptions {
@@ -112,16 +116,33 @@ export function detectAuthContext(opts: DetectContextOptions): AuthContext {
  * Probe whether `claude` is authenticated in the given context.
  * When `spawnResult` is provided (testing) no subprocess is created.
  */
+export function classifyClaudeAuthValidity(
+  result: Pick<AuthProbeResult, 'authenticated' | 'detail' | 'validity'>,
+): AuthProbeValidity {
+  if (result.validity) return result.validity;
+  if (result.authenticated) return 'valid';
+  const detail = result.detail ?? '';
+  if (/not valid JSON/i.test(detail)) return 'malformed';
+  if (/not found on PATH|timed out|ETIMEDOUT/i.test(detail)) return 'error';
+  if (detail === 'not logged in') return 'invalid';
+  return 'error';
+}
+
 export function probeClaudeAuth(opts: ProbeOptions): AuthProbeResult {
   const { context, cwd } = opts;
 
   const sr: SpawnResult = opts.spawnResult ?? _spawnAuthStatus(context, cwd, opts.claudePath);
 
   if (sr.status !== 0) {
+    const timedOut =
+      sr.status === null || /timed out/i.test(sr.stderr);
     return {
       authenticated: false,
       context,
-      detail: sr.stderr || 'claude auth status exited with non-zero status',
+      detail:
+        sr.stderr ||
+        (timedOut ? 'claude auth status timed out' : 'claude auth status exited with non-zero status'),
+      validity: 'error',
     };
   }
 
@@ -133,6 +154,7 @@ export function probeClaudeAuth(opts: ProbeOptions): AuthProbeResult {
       authenticated: false,
       context,
       detail: 'claude auth status output is not valid JSON',
+      validity: 'malformed',
     };
   }
 
@@ -142,7 +164,7 @@ export function probeClaudeAuth(opts: ProbeOptions): AuthProbeResult {
     !('loggedIn' in parsed) ||
     (parsed as Record<string, unknown>).loggedIn !== true
   ) {
-    return { authenticated: false, context, detail: 'not logged in' };
+    return { authenticated: false, context, detail: 'not logged in', validity: 'invalid' };
   }
 
   const email =
@@ -155,6 +177,7 @@ export function probeClaudeAuth(opts: ProbeOptions): AuthProbeResult {
     context,
     detail: email ? `logged in as ${email}` : 'logged in',
     email,
+    validity: 'valid',
   };
 }
 
@@ -183,12 +206,20 @@ function _spawnAuthStatus(context: AuthContext, cwd: string, claudePath = 'claud
     args = ['auth', 'status'];
   }
 
-  const result = spawnSync(command, args, { encoding: 'utf8' });
-  if ((result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+  const result = spawnSync(command, args, { encoding: 'utf8', timeout: 10_000 });
+  const errCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  if (errCode === 'ENOENT') {
     return {
       status: -1,
       stdout: '',
       stderr: `claude binary ${claudePath} not found on PATH`,
+    };
+  }
+  if (errCode === 'ETIMEDOUT' || (result.status === null && result.signal != null)) {
+    return {
+      status: null,
+      stdout: '',
+      stderr: 'claude auth status timed out',
     };
   }
   return {

@@ -362,6 +362,7 @@ configuration:
   - writable_volume             state directory is writable (write+fsync+unlink probe)
   - state_on_volume             state resolves under JINN_STATE_DIR in a deployment context
   - credentials_resolvable      agent-CLI credentials resolvable (presence-only; no secret echo)
+  - credentials_valid           required-runtime credential validity (Claude / Hermes / Codex)
   - agent_cli_non_root          daemon not running as root (uid 0)
   - portfolio_impl_state_dir    HL impl state directory present and readable
   - hl_api_wallet               HL API wallet generated and approved by operator

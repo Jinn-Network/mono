@@ -16,6 +16,7 @@
  *   - `writable_volume`        — the one genuinely new primitive (write+fsync+unlink probe)
  *   - `state_on_volume`        — assert resolved state lives on the configured volume
  *   - `credentials_resolvable` — reuses `detectAuthContext`; presence-only, NEVER echoes secrets
+ *   - `credentials_valid`      — runtime-specific Claude / Hermes / Codex probes (#1001)
  *   - `agent_cli_non_root`     — uid 0 is unfit (the agent CLI refuses to run as root)
  *
  * Every check is side-effect-light and NEVER throws — a failure becomes a
@@ -29,7 +30,19 @@ import { randomBytes } from 'node:crypto';
 
 import { emitEnvelope, type EnvelopeSinks } from '../errors/envelope.js';
 import { emitStructured } from '../events/emitter.js';
-import { detectAuthContext as defaultDetectAuthContext, type AuthContext } from './claude-auth.js';
+import {
+  detectAuthContext as defaultDetectAuthContext,
+  type AuthContext,
+  type AuthProbeResult,
+  type ProbeOptions,
+} from './claude-auth.js';
+import {
+  checkCredentialsValid,
+  productionCredentialValidityDeps,
+  requiredCredentialRuntimes,
+  type CheckCredentialsValidDeps,
+  type RuntimeCredentialFact,
+} from './credential-validity.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,10 +53,13 @@ export interface DeploymentCheckResult {
     | 'writable_volume'
     | 'state_on_volume'
     | 'credentials_resolvable'
+    | 'credentials_valid'
     | 'agent_cli_non_root';
   ok: boolean;
   detail: string;
   remedy?: string;
+  /** `credentials_valid` only — per-runtime classification, never secret material. */
+  runtimes?: RuntimeCredentialFact[];
 }
 
 /** Inputs that come from the resolved config / process — never secret values. */
@@ -63,6 +79,16 @@ export interface DeploymentReadinessInputs {
    * the bare-local regression guarantee.
    */
   runtimeMode: AuthContext | undefined;
+  /**
+   * Configured participation wiring. Harness names here are the required
+   * runtimes for `credentials_valid`. Empty / omitted means no runtime is
+   * required, so invalid auth cannot be boot-fatal.
+   */
+  executionWiring?: ReadonlyArray<{ harness: string }>;
+  claudePath?: string;
+  hermesPath?: string;
+  hermesProvider?: string;
+  codexPath?: string;
 }
 
 /** Injectable dependencies — tests pass doubles; production uses the defaults. */
@@ -71,6 +97,10 @@ export interface DeploymentReadinessDeps {
   /** `process.getuid` (undefined on platforms without it, e.g. Windows). */
   getuid: (() => number) | undefined;
   detectAuthContext: typeof defaultDetectAuthContext;
+  probeClaudeAuth?: (opts: ProbeOptions) => AuthProbeResult | Promise<AuthProbeResult>;
+  probeHermesAuthStatus?: CheckCredentialsValidDeps['probeHermesAuthStatus'];
+  probeCodexDoctor?: CheckCredentialsValidDeps['probeCodexDoctor'];
+  validityTimeoutMs?: number;
 }
 
 export interface DeploymentReadinessReport {
@@ -91,6 +121,7 @@ const HARD_CHECK_NAMES: ReadonlySet<DeploymentCheckResult['name']> = new Set([
   'writable_volume',
   'state_on_volume',
   'agent_cli_non_root',
+  'credentials_valid',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -340,10 +371,29 @@ export async function runDeploymentReadinessChecks(
   // The writable-volume probe targets the volume root when set, else earningDir.
   const probeDir = inputs.stateDir ?? inputs.earningDir;
 
+  const productionValidity = productionCredentialValidityDeps();
+  const validityDeps: CheckCredentialsValidDeps = {
+    probeClaudeAuth: deps.probeClaudeAuth ?? productionValidity.probeClaudeAuth,
+    probeHermesAuthStatus: deps.probeHermesAuthStatus ?? productionValidity.probeHermesAuthStatus,
+    probeCodexDoctor: deps.probeCodexDoctor ?? productionValidity.probeCodexDoctor,
+    ...(deps.validityTimeoutMs !== undefined ? { validityTimeoutMs: deps.validityTimeoutMs } : {}),
+  };
+
   const checks: DeploymentCheckResult[] = [
     await checkWritableVolume(probeDir),
     checkStateOnVolume({ deployment, stateDir: inputs.stateDir, earningDir: inputs.earningDir }),
     checkCredentialsResolvable({ context: authContext, env: deps.env }),
+    await checkCredentialsValid(
+      {
+        requiredRuntimes: requiredCredentialRuntimes(inputs.executionWiring),
+        env: deps.env,
+        ...(inputs.claudePath !== undefined ? { claudePath: inputs.claudePath } : {}),
+        ...(inputs.hermesPath !== undefined ? { hermesPath: inputs.hermesPath } : {}),
+        ...(inputs.hermesProvider !== undefined ? { hermesProvider: inputs.hermesProvider } : {}),
+        ...(inputs.codexPath !== undefined ? { codexPath: inputs.codexPath } : {}),
+      },
+      validityDeps,
+    ),
     checkAgentCliNonRoot(deps.getuid),
   ];
 

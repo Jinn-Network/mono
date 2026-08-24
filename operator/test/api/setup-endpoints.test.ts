@@ -65,6 +65,34 @@ describe('GET /v1/auth/claude', () => {
       claudePath: '/custom/claude',
     }));
   });
+
+  it('reports validity separately from presence when Claude auth is invalid', async () => {
+    const app = new Hono();
+    addSetupRoutes(app, {
+      claudePath: '/custom/claude',
+      checkClaudeBinary: async () => ({
+        ok: true,
+        detail: '/custom/claude is executable',
+        resolvedPath: '/custom/claude',
+      }),
+      probeClaudeAuth: () => ({
+        authenticated: false,
+        context: 'bare' as const,
+        detail: 'not logged in',
+        validity: 'invalid',
+      }),
+    });
+    const res = await app.request('/v1/auth/claude');
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      authenticated: boolean;
+      validity?: string;
+      binary: { ok: boolean };
+    };
+    expect(body.binary.ok).toBe(true);
+    expect(body.authenticated).toBe(false);
+    expect(body.validity).toBe('invalid');
+  });
 });
 
 describe('POST /v1/setup/claude/install', () => {

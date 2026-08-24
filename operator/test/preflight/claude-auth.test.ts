@@ -125,6 +125,63 @@ describe('probeClaudeAuth', () => {
       },
     });
     expect(result.authenticated).toBe(false);
+    expect(result.validity).toBe('malformed');
+  });
+
+  it('classifies a non-zero spawn as an error, not a valid login', () => {
+    const result = probeClaudeAuth({
+      context: 'bare',
+      cwd: '/tmp',
+      spawnResult: {
+        status: 1,
+        stdout: '',
+        stderr: 'error',
+      },
+    });
+    expect(result.authenticated).toBe(false);
+    expect(result.validity).toBe('error');
+  });
+
+  it('classifies a timed-out spawn as an error', () => {
+    const result = probeClaudeAuth({
+      context: 'bare',
+      cwd: '/tmp',
+      spawnResult: {
+        status: null,
+        stdout: '',
+        stderr: 'claude auth status timed out',
+      },
+    });
+    expect(result.authenticated).toBe(false);
+    expect(result.validity).toBe('error');
+  });
+
+  it('classifies loggedIn:false as invalid', () => {
+    const result = probeClaudeAuth({
+      context: 'bare',
+      cwd: '/tmp',
+      spawnResult: {
+        status: 0,
+        stdout: JSON.stringify({ loggedIn: false }),
+        stderr: '',
+      },
+    });
+    expect(result.authenticated).toBe(false);
+    expect(result.validity).toBe('invalid');
+  });
+
+  it('classifies loggedIn:true as valid', () => {
+    const result = probeClaudeAuth({
+      context: 'bare',
+      cwd: '/tmp',
+      spawnResult: {
+        status: 0,
+        stdout: JSON.stringify({ loggedIn: true }),
+        stderr: '',
+      },
+    });
+    expect(result.authenticated).toBe(true);
+    expect(result.validity).toBe('valid');
   });
 
   it('accepts a configured claudePath while preserving injected probe results', () => {

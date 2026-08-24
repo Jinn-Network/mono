@@ -36,7 +36,7 @@ import {
   writeFaucetTopupRecord,
 } from '../earning/faucet-topup-store.js';
 import { createJinnPublicClient, type JinnOnchainNetwork } from '../earning/viem-clients.js';
-import { detectAuthContext, probeClaudeAuth } from '../preflight/claude-auth.js';
+import { classifyClaudeAuthValidity, detectAuthContext, probeClaudeAuth } from '../preflight/claude-auth.js';
 import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../preflight/claude-binary.js';
 import { DEFAULT_CONFIG_PATH, persistTopLevelConfigValue } from '../config.js';
 import { canonicalHarnessName } from '../harnesses/names.js';
@@ -215,6 +215,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     return c.json({
       schemaVersion: 1,
       authenticated: probe.authenticated,
+      validity: classifyClaudeAuthValidity(probe),
       context,
       detail: probe.detail,
       binary,

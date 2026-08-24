@@ -1,0 +1,256 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import {
+  checkCredentialsValid,
+  requiredCredentialRuntimes,
+  type CheckCredentialsValidDeps,
+} from '../../src/preflight/credential-validity.js';
+import type { AuthProbeResult } from '../../src/preflight/claude-auth.js';
+import type { CodexAuthStatus } from '../../src/api/codex-doctor-endpoint.js';
+import type { HermesAuthStatus } from '../../src/api/hermes-doctor-endpoint.js';
+
+const SECRET = 'sk-ant-SUPERSECRET-DO-NOT-LEAK';
+
+function claudeProbe(overrides: Partial<AuthProbeResult> = {}): AuthProbeResult {
+  return {
+    authenticated: true,
+    context: 'container',
+    detail: 'logged in',
+    validity: 'valid',
+    ...overrides,
+  };
+}
+
+function hermesProbe(overrides: Partial<HermesAuthStatus> = {}): HermesAuthStatus {
+  return {
+    provider: 'openrouter',
+    authed: true,
+    raw: 'openrouter (1 credentials):\n  #0 api_key',
+    ...overrides,
+  };
+}
+
+function validityDeps(overrides: Partial<CheckCredentialsValidDeps> = {}): CheckCredentialsValidDeps {
+  return {
+    probeClaudeAuth: () => claudeProbe(),
+    probeHermesAuthStatus: async () => hermesProbe(),
+    probeCodexDoctor: async () => ({
+      installed: true,
+      authenticated: true,
+      authStatus: 'ok' as CodexAuthStatus,
+      exitCode: 0,
+    }),
+    ...overrides,
+  };
+}
+
+describe('requiredCredentialRuntimes', () => {
+  it('returns an empty list when no execution wiring is configured', () => {
+    expect(requiredCredentialRuntimes(undefined)).toEqual([]);
+    expect(requiredCredentialRuntimes([])).toEqual([]);
+  });
+
+  it('maps wired harness names onto distinct Claude / Hermes / Codex runtimes', () => {
+    expect(
+      requiredCredentialRuntimes([
+        { harness: 'claude-code' },
+        { harness: 'hermes-agent' },
+        { harness: 'codex' },
+        { harness: 'prediction-v1-baseline' },
+      ]),
+    ).toEqual(['claude', 'hermes', 'codex']);
+  });
+
+  it('canonicalizes learner aliases and Claude MCP harnesses onto the Claude runtime', () => {
+    expect(
+      requiredCredentialRuntimes([
+        { harness: 'claude-code-learner' },
+        { harness: 'claude-mcp-prediction' },
+        { harness: 'codex-code-learner' },
+      ]),
+    ).toEqual(['claude', 'codex']);
+  });
+});
+
+describe('checkCredentialsValid', () => {
+  it('reports valid for a required Claude runtime whose probe authenticates', async () => {
+    const result = await checkCredentialsValid(
+      { requiredRuntimes: ['claude'], env: { ANTHROPIC_API_KEY: SECRET } },
+      validityDeps(),
+    );
+    expect(result.name).toBe('credentials_valid');
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([{ runtime: 'claude', validity: 'valid' }]);
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  it('keeps absent distinct from invalid when the required runtime has no credential', async () => {
+    const result = await checkCredentialsValid(
+      { requiredRuntimes: ['claude'], env: {} },
+      validityDeps({
+        probeClaudeAuth: () =>
+          claudeProbe({
+            authenticated: false,
+            detail: 'not logged in',
+            validity: 'invalid',
+          }),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([{ runtime: 'claude', validity: 'absent' }]);
+    expect(result.detail).toMatch(/claude: absent/i);
+  });
+
+  it('fails when a required runtime credential is present but invalid', async () => {
+    const result = await checkCredentialsValid(
+      { requiredRuntimes: ['claude'], env: { ANTHROPIC_API_KEY: SECRET } },
+      validityDeps({
+        probeClaudeAuth: () =>
+          claudeProbe({
+            authenticated: false,
+            detail: 'not logged in',
+            validity: 'invalid',
+          }),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.runtimes).toEqual([{ runtime: 'claude', validity: 'invalid' }]);
+    expect(result.detail).toMatch(/claude: invalid/i);
+    expect(result.remedy).toMatch(/claude/i);
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  it('fails when a required Claude probe returns malformed auth output', async () => {
+    const result = await checkCredentialsValid(
+      { requiredRuntimes: ['claude'], env: { ANTHROPIC_API_KEY: SECRET } },
+      validityDeps({
+        probeClaudeAuth: () =>
+          claudeProbe({
+            authenticated: false,
+            detail: 'claude auth status output is not valid JSON',
+            validity: 'malformed',
+          }),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.runtimes).toEqual([{ runtime: 'claude', validity: 'malformed' }]);
+    expect(result.detail).toMatch(/claude: malformed/i);
+  });
+
+  it('treats a probe timeout as advisory, not invalid', async () => {
+    const result = await checkCredentialsValid(
+      { requiredRuntimes: ['claude'], env: { ANTHROPIC_API_KEY: SECRET } },
+      validityDeps({
+        validityTimeoutMs: 20,
+        probeClaudeAuth: () => new Promise(() => undefined),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([{ runtime: 'claude', validity: 'error' }]);
+    expect(result.detail).toMatch(/claude: error/i);
+    expect(result.detail).toMatch(/timed out/i);
+  });
+
+  it('treats a probe throw as advisory, not invalid', async () => {
+    const result = await checkCredentialsValid(
+      { requiredRuntimes: ['hermes'], env: { OPENROUTER_API_KEY: 'or-secret' } },
+      validityDeps({
+        probeHermesAuthStatus: async () => {
+          throw new Error('spawn failed');
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([{ runtime: 'hermes', validity: 'error' }]);
+    expect(JSON.stringify(result)).not.toContain('or-secret');
+  });
+
+  it('does not treat a Hermes credential as valid Claude authentication', async () => {
+    const hermes = vi.fn(async () => hermesProbe());
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['claude'],
+        env: { OPENROUTER_API_KEY: 'or-secret' },
+      },
+      validityDeps({
+        probeHermesAuthStatus: hermes,
+        probeClaudeAuth: () =>
+          claudeProbe({
+            authenticated: false,
+            detail: 'not logged in',
+            validity: 'invalid',
+          }),
+      }),
+    );
+    expect(hermes).not.toHaveBeenCalled();
+    expect(result.runtimes).toEqual([{ runtime: 'claude', validity: 'absent' }]);
+    expect(result.ok).toBe(true);
+  });
+
+  it('does not treat a Claude credential as valid Hermes authentication', async () => {
+    const claude = vi.fn(() => claudeProbe());
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['hermes'],
+        env: { ANTHROPIC_API_KEY: SECRET },
+      },
+      validityDeps({
+        probeClaudeAuth: claude,
+        probeHermesAuthStatus: async () => hermesProbe({ authed: false, raw: '' }),
+      }),
+    );
+    expect(claude).not.toHaveBeenCalled();
+    expect(result.runtimes).toEqual([{ runtime: 'hermes', validity: 'absent' }]);
+    expect(result.ok).toBe(true);
+  });
+
+  it('fails only the required Codex runtime when its session is expired', async () => {
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['codex'],
+        env: { OPENAI_API_KEY: 'sk-openai-secret' },
+      },
+      validityDeps({
+        probeCodexDoctor: async () => ({
+          installed: true,
+          authenticated: false,
+          authStatus: 'expired',
+          exitCode: 0,
+        }),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.runtimes).toEqual([{ runtime: 'codex', validity: 'invalid' }]);
+    expect(result.remedy).toMatch(/codex/i);
+    expect(JSON.stringify(result)).not.toContain('sk-openai-secret');
+  });
+
+  it('skips probes when no runtime is required', async () => {
+    const probeClaudeAuth = vi.fn(() => claudeProbe());
+    const result = await checkCredentialsValid(
+      { requiredRuntimes: [], env: { ANTHROPIC_API_KEY: SECRET } },
+      validityDeps({ probeClaudeAuth }),
+    );
+    expect(probeClaudeAuth).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([]);
+    expect(result.detail).toMatch(/no required runtime/i);
+  });
+
+  it('never copies probe stdout or secret provider payloads into the result', async () => {
+    const result = await checkCredentialsValid(
+      { requiredRuntimes: ['hermes'], env: { OPENROUTER_API_KEY: 'or-secret' } },
+      validityDeps({
+        probeHermesAuthStatus: async () =>
+          hermesProbe({
+            authed: false,
+            raw: `openrouter (1 credentials):\n  #0 api_key or-secret Authorization: Bearer or-secret`,
+          }),
+      }),
+    );
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('or-secret');
+    expect(serialized).not.toContain('Authorization');
+    expect(serialized).not.toContain('Bearer');
+  });
+});

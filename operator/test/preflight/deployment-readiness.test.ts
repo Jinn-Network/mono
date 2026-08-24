@@ -244,6 +244,7 @@ describe('runDeploymentReadinessChecks', () => {
       [
         'agent_cli_non_root',
         'credentials_resolvable',
+        'credentials_valid',
         'state_on_volume',
         'writable_volume',
       ].sort(),
@@ -353,6 +354,108 @@ describe('runDeploymentReadinessChecks', () => {
     expect(Array.isArray(report.checks)).toBe(true);
     expect(report.checks.length).toBeGreaterThan(0);
   });
+
+  it('keeps presence and validity as separate checks in the aggregate', async () => {
+    const secret = 'sk-ant-SUPERSECRET-DO-NOT-LEAK';
+    const report = await runDeploymentReadinessChecks(
+      {
+        stateDir: tmp,
+        earningDir: join(tmp, 'earning'),
+        runtimeMode: undefined,
+        executionWiring: [{ harness: 'claude-code' }],
+      },
+      baseDeps({
+        env: { JINN_STATE_DIR: tmp, ANTHROPIC_API_KEY: secret },
+        getuid: () => 1000,
+        detectAuthContext: () => 'container',
+        probeClaudeAuth: () => ({
+          authenticated: false,
+          context: 'container',
+          detail: 'not logged in',
+          validity: 'invalid',
+        }),
+      }),
+    );
+    const presence = report.checks.find((c) => c.name === 'credentials_resolvable');
+    const validity = report.checks.find((c) => c.name === 'credentials_valid');
+    expect(presence?.ok).toBe(true);
+    expect(validity?.ok).toBe(false);
+    expect(validity?.detail).toMatch(/claude: invalid/i);
+    expect(JSON.stringify(report)).not.toContain(secret);
+  });
+
+  it('hosted invalid auth for a required runtime IS boot-fatal', async () => {
+    const report = await runDeploymentReadinessChecks(
+      {
+        stateDir: tmp,
+        earningDir: join(tmp, 'earning'),
+        runtimeMode: undefined,
+        executionWiring: [{ harness: 'claude-code' }],
+      },
+      baseDeps({
+        env: { JINN_STATE_DIR: tmp, ANTHROPIC_API_KEY: 'sk-ant-xxxx' },
+        getuid: () => 1000,
+        detectAuthContext: () => 'container',
+        probeClaudeAuth: () => ({
+          authenticated: false,
+          context: 'container',
+          detail: 'not logged in',
+          validity: 'invalid',
+        }),
+      }),
+    );
+    expect(report.deployment).toBe(true);
+    expect(report.bootFatal).toBe(true);
+    expect(report.checks.find((c) => c.name === 'credentials_valid')?.ok).toBe(false);
+  });
+
+  it('hosted probe timeout for a required runtime is advisory, not boot-fatal', async () => {
+    const report = await runDeploymentReadinessChecks(
+      {
+        stateDir: tmp,
+        earningDir: join(tmp, 'earning'),
+        runtimeMode: undefined,
+        executionWiring: [{ harness: 'hermes-agent' }],
+      },
+      baseDeps({
+        env: { JINN_STATE_DIR: tmp, OPENROUTER_API_KEY: 'or-xxxx' },
+        getuid: () => 1000,
+        detectAuthContext: () => 'container',
+        validityTimeoutMs: 20,
+        probeHermesAuthStatus: () => new Promise(() => undefined),
+      }),
+    );
+    expect(report.deployment).toBe(true);
+    expect(report.bootFatal).toBe(false);
+    const validity = report.checks.find((c) => c.name === 'credentials_valid');
+    expect(validity?.ok).toBe(true);
+    expect(validity?.detail).toMatch(/hermes: error/i);
+  });
+
+  it('REGRESSION GUARD: bare-local invalid auth stays advisory, not boot-fatal', async () => {
+    const report = await runDeploymentReadinessChecks(
+      {
+        stateDir: undefined,
+        earningDir: tmp,
+        runtimeMode: undefined,
+        executionWiring: [{ harness: 'claude-code' }],
+      },
+      baseDeps({
+        env: { ANTHROPIC_API_KEY: 'sk-ant-xxxx' },
+        getuid: () => 1000,
+        detectAuthContext: () => 'bare',
+        probeClaudeAuth: () => ({
+          authenticated: false,
+          context: 'bare',
+          detail: 'not logged in',
+          validity: 'invalid',
+        }),
+      }),
+    );
+    expect(report.deployment).toBe(false);
+    expect(report.bootFatal).toBe(false);
+    expect(report.checks.find((c) => c.name === 'credentials_valid')?.ok).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -396,6 +499,63 @@ describe('applyDeploymentReadinessGate', () => {
       chmodSync(tmp, 0o700);
     }
     expect(exits).toEqual([]); // advisory only — local boot proceeds
+  });
+
+  it('does NOT gate a bare-local operator with invalid required-runtime auth', async () => {
+    const exits: number[] = [];
+    await applyDeploymentReadinessGate(
+      {
+        stateDir: undefined,
+        earningDir: tmp,
+        runtimeMode: undefined,
+        executionWiring: [{ harness: 'claude-code' }],
+      },
+      baseDeps({
+        env: { ANTHROPIC_API_KEY: 'sk-ant-xxxx' },
+        getuid: () => 1000,
+        detectAuthContext: () => 'bare',
+        probeClaudeAuth: () => ({
+          authenticated: false,
+          context: 'bare',
+          detail: 'not logged in',
+          validity: 'invalid',
+        }),
+      }),
+      { writer: { write: () => true }, exit: (c: number) => void exits.push(c) },
+    );
+    expect(exits).toEqual([]);
+  });
+
+  it('emits a fail-loud envelope when hosted required-runtime auth is invalid', async () => {
+    const writes: string[] = [];
+    const exits: number[] = [];
+    const secret = 'sk-ant-SUPERSECRET-DO-NOT-LEAK';
+    await applyDeploymentReadinessGate(
+      {
+        stateDir: tmp,
+        earningDir: join(tmp, 'earning'),
+        runtimeMode: undefined,
+        executionWiring: [{ harness: 'claude-code' }],
+      },
+      baseDeps({
+        env: { JINN_STATE_DIR: tmp, ANTHROPIC_API_KEY: secret },
+        getuid: () => 1000,
+        detectAuthContext: () => 'container',
+        probeClaudeAuth: () => ({
+          authenticated: false,
+          context: 'container',
+          detail: 'not logged in',
+          validity: 'invalid',
+        }),
+      }),
+      { writer: { write: (s: string) => (writes.push(s), true) }, exit: (c: number) => void exits.push(c) },
+    );
+    expect(exits.length).toBe(1);
+    expect(exits[0]).not.toBe(0);
+    const envelope = JSON.parse(writes[0]!);
+    expect(envelope.code).toBe('invalid_invocation');
+    expect(JSON.stringify(envelope)).not.toContain(secret);
+    expect(JSON.stringify(envelope)).toMatch(/credentials_valid|claude/i);
   });
 
   it('emits a fail-loud envelope (non-zero exit) in deployment context running as root', async () => {
