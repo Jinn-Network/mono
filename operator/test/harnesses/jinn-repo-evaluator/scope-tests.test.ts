@@ -94,7 +94,6 @@ describe('scopeTestsForChangedFiles — multi-package', () => {
       'packages/layer',
       'operator',
       'contracts',
-      'packages/autopilot',
       'apps/broadcast-bot',
     ]);
     expect(KNOWN_LIVE_EVAL_PACKAGES).toContain(SDK_PACKAGE);

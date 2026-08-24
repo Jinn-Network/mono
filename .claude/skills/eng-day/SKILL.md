@@ -21,12 +21,14 @@ not a dispatcher, reaper, merge tool, or recovery writer.
 Run independent reads in parallel:
 
 ```bash
+# shellcheck disable=SC1091
+. "$(git rev-parse --show-toplevel)/.github/scripts/resolve-autopilot.sh"
 gh project item-list 1 --owner Jinn-Network --format json --limit 800
 gh issue list --repo Jinn-Network/mono --state open \
   --json number,title,labels,assignees,createdAt,updatedAt --limit 300
 gh pr list --repo Jinn-Network/mono --state open \
   --json number,title,author,createdAt,updatedAt,reviewDecision,mergeable,isDraft,headRefName,headRefOid
-yarn --cwd packages/autopilot autopilot --mode observe --once --json status
+autopilot --mode observe --once --json status
 ```
 
 Issue Type still comes from GraphQL because the ordinary issue-list JSON does
@@ -43,8 +45,10 @@ board is paint-only — never treat it as authority.
 For a disputed item, use:
 
 ```bash
-yarn --cwd packages/autopilot autopilot --mode observe --once explain issue <N>
-yarn --cwd packages/autopilot autopilot --mode observe --once explain pr <N>
+# shellcheck disable=SC1091
+. "$(git rev-parse --show-toplevel)/.github/scripts/resolve-autopilot.sh"
+autopilot --mode observe --once explain issue <N>
+autopilot --mode observe --once explain pr <N>
 ```
 
 ## State distinctions

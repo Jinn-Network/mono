@@ -140,7 +140,6 @@ function downstreamScopes(changedFiles: readonly string[]): PackageScope[] {
       'packages/indexer',
       'packages/indexer-enrichment',
       'operator',
-      'packages/autopilot',
     ],
     'packages/indexer': [
       'packages/indexer',
@@ -150,7 +149,6 @@ function downstreamScopes(changedFiles: readonly string[]): PackageScope[] {
     'packages/layer': ['packages/layer', 'operator'],
     operator: ['operator'],
     contracts: ['contracts'],
-    'packages/autopilot': ['packages/autopilot'],
     'apps/broadcast-bot': ['apps/broadcast-bot'],
   };
   for (const scope of direct) {
@@ -398,7 +396,6 @@ export function makeDockerImmutableMechanicalVerifier(options: {
           'packages/indexer-enrichment',
           'operator',
           'contracts',
-          'packages/autopilot',
           'apps/broadcast-bot',
         ].filter((root) => requiredRoots.has(root));
         for (const root of installRoots) {

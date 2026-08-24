@@ -18,7 +18,9 @@ base is another open PR branch; do not filter the initial query to `base:next`.
 Use the v2 observer for lifecycle ownership and Human diagnostics:
 
 ```bash
-yarn --cwd packages/autopilot autopilot --mode observe --once --json status
+# shellcheck disable=SC1091
+. "$(git rev-parse --show-toplevel)/.github/scripts/resolve-autopilot.sh"
+autopilot --mode observe --once --json status
 ```
 
 ## 2. Exclude v2-managed PRs

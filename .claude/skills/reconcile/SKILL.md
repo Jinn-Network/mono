@@ -21,7 +21,8 @@ created a detached attempt worktree, and set
 `JINN_AUTOPILOT_SESSION_MANIFEST`. Fail closed if that context is missing.
 
 ```bash
-AUTOPILOT_PACKAGE_DIR="${JINN_AUTOPILOT_PACKAGE_DIR:-<repo-root>/packages/autopilot}"
+# shellcheck disable=SC1091
+. "$(git rev-parse --show-toplevel)/.github/scripts/resolve-autopilot.sh"
 SESSION_REPORT_DIR="$(dirname -- "$JINN_AUTOPILOT_SESSION_MANIFEST")/reports"
 mkdir -p -- "$SESSION_REPORT_DIR"
 chmod 700 -- "$SESSION_REPORT_DIR"
@@ -30,9 +31,9 @@ chmod 700 -- "$SESSION_REPORT_DIR"
 Shared mutations:
 
 ```bash
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session checkpoint
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session child-complete
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
+autopilot session checkpoint
+autopilot session child-complete
+autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
 ```
 
 ## Conflict taxonomy (routing, not refusal)

@@ -29,6 +29,8 @@ jobs:
         run: node --test .github/scripts/docs-key-guard.test.mjs
       - name: Demo-1 sealed pre-run artifacts
         run: node --test .github/scripts/demo1-historical-artifacts.test.mjs
+      - name: Autopilot fail-closed resolution
+        run: node --test .github/scripts/resolve-autopilot.test.mjs
   identifier-origin:
     name: Identifier origin tripwire
     runs-on: ubuntu-latest
