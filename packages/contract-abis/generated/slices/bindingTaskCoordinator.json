@@ -43,11 +43,13 @@
         },
         {
           "type": "bytes32",
-          "name": "taskCidDigest"
+          "name": "taskCidDigest",
+          "indexed": false
         },
         {
           "type": "uint32",
-          "name": "maxClaims"
+          "name": "maxClaims",
+          "indexed": false
         }
       ]
     },

@@ -91,15 +91,18 @@
         },
         {
           "type": "bytes32",
-          "name": "requestId"
+          "name": "requestId",
+          "indexed": false
         },
         {
           "type": "uint256",
-          "name": "deliveryRate"
+          "name": "deliveryRate",
+          "indexed": false
         },
         {
           "type": "bytes",
-          "name": "data"
+          "name": "data",
+          "indexed": false
         }
       ]
     }

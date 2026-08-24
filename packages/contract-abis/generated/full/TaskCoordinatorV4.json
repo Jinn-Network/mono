@@ -407,11 +407,13 @@
       },
       {
         "type": "uint32",
-        "name": "added"
+        "name": "added",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "newMaxTotal"
+        "name": "newMaxTotal",
+        "indexed": false
       }
     ]
   },
@@ -452,11 +454,13 @@
       },
       {
         "type": "address",
-        "name": "evaluator"
+        "name": "evaluator",
+        "indexed": false
       },
       {
         "type": "uint64",
-        "name": "deadline"
+        "name": "deadline",
+        "indexed": false
       }
     ]
   },
@@ -476,11 +480,13 @@
       },
       {
         "type": "uint64",
-        "name": "releaseMinHoldSeconds"
+        "name": "releaseMinHoldSeconds",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "maxSimultaneousClaimsPerOperator"
+        "name": "maxSimultaneousClaimsPerOperator",
+        "indexed": false
       }
     ]
   },
@@ -521,7 +527,8 @@
       },
       {
         "type": "uint64",
-        "name": "deadline"
+        "name": "deadline",
+        "indexed": false
       }
     ]
   },
@@ -562,35 +569,43 @@
       },
       {
         "type": "bytes32",
-        "name": "submissionDigest"
+        "name": "submissionDigest",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "maxTotal"
+        "name": "maxTotal",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "maxConcurrent"
+        "name": "maxConcurrent",
+        "indexed": false
       },
       {
         "type": "uint64",
-        "name": "submissionDeadline"
+        "name": "submissionDeadline",
+        "indexed": false
       },
       {
         "type": "uint64",
-        "name": "closeAt"
+        "name": "closeAt",
+        "indexed": false
       },
       {
         "type": "uint64",
-        "name": "responseTimeout"
+        "name": "responseTimeout",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "minVerdicts"
+        "name": "minVerdicts",
+        "indexed": false
       },
       {
         "type": "bool",
-        "name": "requireDistinctEvaluator"
+        "name": "requireDistinctEvaluator",
+        "indexed": false
       }
     ]
   },
@@ -615,7 +630,8 @@
       },
       {
         "type": "bytes32",
-        "name": "solutionDigest"
+        "name": "solutionDigest",
+        "indexed": false
       }
     ]
   },
@@ -656,15 +672,18 @@
       },
       {
         "type": "address",
-        "name": "evaluator"
+        "name": "evaluator",
+        "indexed": false
       },
       {
         "type": "bytes32",
-        "name": "evaluationDeliveryDigest"
+        "name": "evaluationDeliveryDigest",
+        "indexed": false
       },
       {
         "type": "uint8",
-        "name": "verdictCode"
+        "name": "verdictCode",
+        "indexed": false
       }
     ]
   },
@@ -689,7 +708,8 @@
       },
       {
         "type": "address",
-        "name": "evaluator"
+        "name": "evaluator",
+        "indexed": false
       }
     ]
   },

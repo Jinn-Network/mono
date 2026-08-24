@@ -116,15 +116,18 @@
       },
       {
         "type": "bytes32",
-        "name": "requestId"
+        "name": "requestId",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "deliveryRate"
+        "name": "deliveryRate",
+        "indexed": false
       },
       {
         "type": "bytes",
-        "name": "data"
+        "name": "data",
+        "indexed": false
       }
     ]
   },
@@ -134,7 +137,8 @@
     "inputs": [
       {
         "type": "uint256",
-        "name": "maxDeliveryRate"
+        "name": "maxDeliveryRate",
+        "indexed": false
       }
     ]
   },
@@ -144,7 +148,8 @@
     "inputs": [
       {
         "type": "uint256",
-        "name": "numRequests"
+        "name": "numRequests",
+        "indexed": false
       }
     ]
   },
@@ -159,11 +164,13 @@
       },
       {
         "type": "bytes32",
-        "name": "requestId"
+        "name": "requestId",
+        "indexed": false
       },
       {
         "type": "bytes",
-        "name": "data"
+        "name": "data",
+        "indexed": false
       }
     ]
   },
@@ -173,7 +180,8 @@
     "inputs": [
       {
         "type": "bytes32",
-        "name": "requestId"
+        "name": "requestId",
+        "indexed": false
       }
     ]
   },

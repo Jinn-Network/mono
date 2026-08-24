@@ -481,11 +481,13 @@
       },
       {
         "type": "uint32",
-        "name": "added"
+        "name": "added",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "newMaxTotal"
+        "name": "newMaxTotal",
+        "indexed": false
       }
     ]
   },
@@ -510,19 +512,23 @@
       },
       {
         "type": "uint32",
-        "name": "attemptIndex"
+        "name": "attemptIndex",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "verdictIndex"
+        "name": "verdictIndex",
+        "indexed": false
       },
       {
         "type": "uint64",
-        "name": "attemptDeadline"
+        "name": "attemptDeadline",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "deliveryRate"
+        "name": "deliveryRate",
+        "indexed": false
       }
     ]
   },
@@ -547,19 +553,23 @@
       },
       {
         "type": "address",
-        "name": "activityChecker"
+        "name": "activityChecker",
+        "indexed": false
       },
       {
         "type": "address",
-        "name": "olasToken"
+        "name": "olasToken",
+        "indexed": false
       },
       {
         "type": "bytes32",
-        "name": "tokenPaymentType"
+        "name": "tokenPaymentType",
+        "indexed": false
       },
       {
         "type": "address",
-        "name": "tokenBalanceTracker"
+        "name": "tokenBalanceTracker",
+        "indexed": false
       }
     ]
   },
@@ -600,15 +610,18 @@
       },
       {
         "type": "bytes32",
-        "name": "requestId"
+        "name": "requestId",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "rate"
+        "name": "rate",
+        "indexed": false
       },
       {
         "type": "uint8",
-        "name": "legKind"
+        "name": "legKind",
+        "indexed": false
       }
     ]
   },
@@ -633,11 +646,13 @@
       },
       {
         "type": "uint256",
-        "name": "taskId"
+        "name": "taskId",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "attemptIndex"
+        "name": "attemptIndex",
+        "indexed": false
       }
     ]
   },
@@ -662,15 +677,18 @@
       },
       {
         "type": "uint32",
-        "name": "attemptIndex"
+        "name": "attemptIndex",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "nonce"
+        "name": "nonce",
+        "indexed": false
       },
       {
         "type": "bytes32",
-        "name": "deliveryDigest"
+        "name": "deliveryDigest",
+        "indexed": false
       }
     ]
   },
@@ -695,15 +713,18 @@
       },
       {
         "type": "uint32",
-        "name": "attemptIndex"
+        "name": "attemptIndex",
+        "indexed": false
       },
       {
         "type": "uint64",
-        "name": "attemptDeadline"
+        "name": "attemptDeadline",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "deliveryRate"
+        "name": "deliveryRate",
+        "indexed": false
       }
     ]
   },
@@ -723,11 +744,13 @@
       },
       {
         "type": "uint256",
-        "name": "solutionAmount"
+        "name": "solutionAmount",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "verdictAmount"
+        "name": "verdictAmount",
+        "indexed": false
       }
     ]
   },
@@ -768,51 +791,63 @@
       },
       {
         "type": "uint256",
-        "name": "taskId"
+        "name": "taskId",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "maxTotal"
+        "name": "maxTotal",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "maxConcurrent"
+        "name": "maxConcurrent",
+        "indexed": false
       },
       {
         "type": "uint64",
-        "name": "submissionDeadline"
+        "name": "submissionDeadline",
+        "indexed": false
       },
       {
         "type": "uint64",
-        "name": "closeAt"
+        "name": "closeAt",
+        "indexed": false
       },
       {
         "type": "uint64",
-        "name": "responseTimeout"
+        "name": "responseTimeout",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "minVerdicts"
+        "name": "minVerdicts",
+        "indexed": false
       },
       {
         "type": "bool",
-        "name": "requireDistinctEvaluator"
+        "name": "requireDistinctEvaluator",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "solutionMaxDeliveryRate"
+        "name": "solutionMaxDeliveryRate",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "verdictMaxDeliveryRate"
+        "name": "verdictMaxDeliveryRate",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "solutionBudget"
+        "name": "solutionBudget",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "verdictBudget"
+        "name": "verdictBudget",
+        "indexed": false
       }
     ]
   },
@@ -837,19 +872,23 @@
       },
       {
         "type": "uint256",
-        "name": "taskId"
+        "name": "taskId",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "attemptIndex"
+        "name": "attemptIndex",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "verdictIndex"
+        "name": "verdictIndex",
+        "indexed": false
       },
       {
         "type": "uint8",
-        "name": "verdictCode"
+        "name": "verdictCode",
+        "indexed": false
       }
     ]
   },
@@ -874,23 +913,28 @@
       },
       {
         "type": "uint32",
-        "name": "attemptIndex"
+        "name": "attemptIndex",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "verdictIndex"
+        "name": "verdictIndex",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "nonce"
+        "name": "nonce",
+        "indexed": false
       },
       {
         "type": "bytes32",
-        "name": "deliveryDigest"
+        "name": "deliveryDigest",
+        "indexed": false
       },
       {
         "type": "uint8",
-        "name": "verdictCode"
+        "name": "verdictCode",
+        "indexed": false
       }
     ]
   },

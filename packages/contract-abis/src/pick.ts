@@ -17,7 +17,7 @@ export type AbiItem = AbiComponent & {
 export function normalizeAbiValue(value: AbiComponent): AbiComponent {
   const out: AbiComponent = { type: value.type };
   if (value.name !== undefined) out.name = value.name;
-  if (value.indexed === true) out.indexed = true;
+  if (value.indexed !== undefined) out.indexed = value.indexed;
   if (value.components !== undefined) {
     out.components = value.components.map(normalizeAbiValue);
   }

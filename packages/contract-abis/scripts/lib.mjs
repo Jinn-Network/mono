@@ -33,7 +33,7 @@ export function normalizeAbiValue(value) {
   /** @type {Record<string, unknown>} */
   const out = { type: input.type };
   if (input.name !== undefined) out.name = input.name;
-  if (input.indexed === true) out.indexed = true;
+  if (input.indexed !== undefined) out.indexed = input.indexed;
   if (input.anonymous === true) out.anonymous = true;
   if (input.stateMutability !== undefined) out.stateMutability = input.stateMutability;
   if (input.inputs !== undefined) out.inputs = normalizeAbiValue(input.inputs);

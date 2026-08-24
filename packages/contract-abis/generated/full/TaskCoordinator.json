@@ -349,7 +349,8 @@
       },
       {
         "type": "address",
-        "name": "evaluator"
+        "name": "evaluator",
+        "indexed": false
       }
     ]
   },
@@ -448,11 +449,13 @@
       },
       {
         "type": "bytes32",
-        "name": "taskCidDigest"
+        "name": "taskCidDigest",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "maxClaims"
+        "name": "maxClaims",
+        "indexed": false
       }
     ]
   },
@@ -477,15 +480,18 @@
       },
       {
         "type": "bytes32",
-        "name": "requestId"
+        "name": "requestId",
+        "indexed": false
       },
       {
         "type": "bytes32",
-        "name": "solutionCidDigest"
+        "name": "solutionCidDigest",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "solutionWeight"
+        "name": "solutionWeight",
+        "indexed": false
       }
     ]
   },
@@ -510,15 +516,18 @@
       },
       {
         "type": "address",
-        "name": "evaluator"
+        "name": "evaluator",
+        "indexed": false
       },
       {
         "type": "bytes32",
-        "name": "verdictCidDigest"
+        "name": "verdictCidDigest",
+        "indexed": false
       },
       {
         "type": "uint8",
-        "name": "verdictCode"
+        "name": "verdictCode",
+        "indexed": false
       }
     ]
   },
@@ -543,7 +552,8 @@
       },
       {
         "type": "bytes32",
-        "name": "requestId"
+        "name": "requestId",
+        "indexed": false
       }
     ]
   },

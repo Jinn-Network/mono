@@ -108,15 +108,18 @@
         },
         {
           "type": "uint256",
-          "name": "numRequests"
+          "name": "numRequests",
+          "indexed": false
         },
         {
           "type": "bytes32[]",
-          "name": "requestIds"
+          "name": "requestIds",
+          "indexed": false
         },
         {
           "type": "bytes[]",
-          "name": "requestDatas"
+          "name": "requestDatas",
+          "indexed": false
         }
       ]
     }

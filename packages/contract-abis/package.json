@@ -42,7 +42,8 @@
     "./pick": {
       "import": "./dist/pick.js",
       "types": "./dist/pick.d.ts"
-    }
+    },
+    "./generated/full/*": "./generated/full/*"
   },
   "scripts": {
     "generate": "node scripts/generate.mjs",

@@ -163,19 +163,23 @@
       },
       {
         "type": "uint256",
-        "name": "availableRewards"
+        "name": "availableRewards",
+        "indexed": false
       },
       {
         "type": "uint256[]",
-        "name": "serviceIds"
+        "name": "serviceIds",
+        "indexed": false
       },
       {
         "type": "uint256[]",
-        "name": "rewards"
+        "name": "rewards",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "epochLength"
+        "name": "epochLength",
+        "indexed": false
       }
     ]
   },
@@ -190,15 +194,18 @@
       },
       {
         "type": "uint256",
-        "name": "amount"
+        "name": "amount",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "balance"
+        "name": "balance",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "availableRewards"
+        "name": "availableRewards",
+        "indexed": false
       }
     ]
   },
@@ -208,7 +215,8 @@
     "inputs": [
       {
         "type": "uint256",
-        "name": "epoch"
+        "name": "epoch",
+        "indexed": false
       },
       {
         "type": "uint256",
@@ -227,11 +235,13 @@
       },
       {
         "type": "uint256[]",
-        "name": "nonces"
+        "name": "nonces",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "reward"
+        "name": "reward",
+        "indexed": false
       }
     ]
   },
@@ -241,7 +251,8 @@
     "inputs": [
       {
         "type": "uint256",
-        "name": "epoch"
+        "name": "epoch",
+        "indexed": false
       },
       {
         "type": "uint256",
@@ -260,7 +271,8 @@
       },
       {
         "type": "uint256[]",
-        "name": "nonces"
+        "name": "nonces",
+        "indexed": false
       }
     ]
   },
@@ -270,7 +282,8 @@
     "inputs": [
       {
         "type": "uint256",
-        "name": "epoch"
+        "name": "epoch",
+        "indexed": false
       },
       {
         "type": "uint256",
@@ -289,15 +302,18 @@
       },
       {
         "type": "uint256[]",
-        "name": "nonces"
+        "name": "nonces",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "reward"
+        "name": "reward",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "availableRewards"
+        "name": "availableRewards",
+        "indexed": false
       }
     ]
   },
@@ -312,7 +328,8 @@
       },
       {
         "type": "uint256",
-        "name": "amount"
+        "name": "amount",
+        "indexed": false
       }
     ]
   },

@@ -256,19 +256,23 @@
       },
       {
         "type": "bytes32",
-        "name": "requestId"
+        "name": "requestId",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "deliveryRate"
+        "name": "deliveryRate",
+        "indexed": false
       },
       {
         "type": "bytes",
-        "name": "requestData"
+        "name": "requestData",
+        "indexed": false
       },
       {
         "type": "bytes",
-        "name": "deliveryData"
+        "name": "deliveryData",
+        "indexed": false
       }
     ]
   },
@@ -294,19 +298,23 @@
       },
       {
         "type": "address[]",
-        "name": "requesters"
+        "name": "requesters",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "numDeliveries"
+        "name": "numDeliveries",
+        "indexed": false
       },
       {
         "type": "bytes32[]",
-        "name": "requestIds"
+        "name": "requestIds",
+        "indexed": false
       },
       {
         "type": "bool[]",
-        "name": "deliveredRequests"
+        "name": "deliveredRequests",
+        "indexed": false
       }
     ]
   },
@@ -326,11 +334,13 @@
       },
       {
         "type": "uint256",
-        "name": "numDeliveries"
+        "name": "numDeliveries",
+        "indexed": false
       },
       {
         "type": "bytes32[]",
-        "name": "requestIds"
+        "name": "requestIds",
+        "indexed": false
       }
     ]
   },
@@ -340,15 +350,18 @@
     "inputs": [
       {
         "type": "uint256",
-        "name": "fee"
+        "name": "fee",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "minResponseTimeout"
+        "name": "minResponseTimeout",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "maxResponseTimeout"
+        "name": "maxResponseTimeout",
+        "indexed": false
       }
     ]
   },
@@ -368,15 +381,18 @@
       },
       {
         "type": "uint256",
-        "name": "numRequests"
+        "name": "numRequests",
+        "indexed": false
       },
       {
         "type": "bytes32[]",
-        "name": "requestIds"
+        "name": "requestIds",
+        "indexed": false
       },
       {
         "type": "bytes[]",
-        "name": "requestDatas"
+        "name": "requestDatas",
+        "indexed": false
       }
     ]
   },
@@ -397,11 +413,13 @@
     "inputs": [
       {
         "type": "address[]",
-        "name": "mechFactories"
+        "name": "mechFactories",
+        "indexed": false
       },
       {
         "type": "bool[]",
-        "name": "statuses"
+        "name": "statuses",
+        "indexed": false
       }
     ]
   },
@@ -411,11 +429,13 @@
     "inputs": [
       {
         "type": "bytes32[]",
-        "name": "paymentTypes"
+        "name": "paymentTypes",
+        "indexed": false
       },
       {
         "type": "address[]",
-        "name": "balanceTrackers"
+        "name": "balanceTrackers",
+        "indexed": false
       }
     ]
   },

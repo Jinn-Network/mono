@@ -126,15 +126,18 @@
     "inputs": [
       {
         "type": "address[]",
-        "name": "stakingProxies"
+        "name": "stakingProxies",
+        "indexed": false
       },
       {
         "type": "uint256[]",
-        "name": "serviceIds"
+        "name": "serviceIds",
+        "indexed": false
       },
       {
         "type": "uint256[]",
-        "name": "rewards"
+        "name": "rewards",
+        "indexed": false
       }
     ]
   },
@@ -170,7 +173,8 @@
       },
       {
         "type": "uint256",
-        "name": "amount"
+        "name": "amount",
+        "indexed": false
       }
     ]
   },
@@ -216,19 +220,23 @@
       },
       {
         "type": "uint256",
-        "name": "agentId"
+        "name": "agentId",
+        "indexed": false
       },
       {
         "type": "bytes32",
-        "name": "configHash"
+        "name": "configHash",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "stakingDeposit"
+        "name": "stakingDeposit",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "stakedBalance"
+        "name": "stakedBalance",
+        "indexed": false
       }
     ]
   },
@@ -253,11 +261,13 @@
       },
       {
         "type": "uint256",
-        "name": "stakingDeposit"
+        "name": "stakingDeposit",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "stakedBalance"
+        "name": "stakedBalance",
+        "indexed": false
       }
     ]
   },
@@ -289,7 +299,8 @@
     "inputs": [
       {
         "type": "uint256",
-        "name": "amount"
+        "name": "amount",
+        "indexed": false
       }
     ]
   },
@@ -320,15 +331,18 @@
       },
       {
         "type": "uint256",
-        "name": "collectorAmount"
+        "name": "collectorAmount",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "protocolAmount"
+        "name": "protocolAmount",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "curatingAgentAmount"
+        "name": "curatingAgentAmount",
+        "indexed": false
       }
     ]
   },
@@ -348,11 +362,13 @@
       },
       {
         "type": "address[]",
-        "name": "managingAgents"
+        "name": "managingAgents",
+        "indexed": false
       },
       {
         "type": "bool[]",
-        "name": "statuses"
+        "name": "statuses",
+        "indexed": false
       }
     ]
   },
@@ -362,11 +378,13 @@
     "inputs": [
       {
         "type": "address[]",
-        "name": "managingAgents"
+        "name": "managingAgents",
+        "indexed": false
       },
       {
         "type": "bool[]",
-        "name": "statuses"
+        "name": "statuses",
+        "indexed": false
       }
     ]
   },
@@ -376,11 +394,13 @@
     "inputs": [
       {
         "type": "address[]",
-        "name": "stakingProxies"
+        "name": "stakingProxies",
+        "indexed": false
       },
       {
         "type": "uint256[]",
-        "name": "proxyTypes"
+        "name": "proxyTypes",
+        "indexed": false
       }
     ]
   },
@@ -411,11 +431,13 @@
       },
       {
         "type": "uint256",
-        "name": "amount"
+        "name": "amount",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "unstakeRequestedAmount"
+        "name": "unstakeRequestedAmount",
+        "indexed": false
       }
     ]
   },

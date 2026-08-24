@@ -17,15 +17,18 @@
         },
         {
           "type": "uint256",
-          "name": "collectorAmount"
+          "name": "collectorAmount",
+          "indexed": false
         },
         {
           "type": "uint256",
-          "name": "protocolAmount"
+          "name": "protocolAmount",
+          "indexed": false
         },
         {
           "type": "uint256",
-          "name": "curatingAgentAmount"
+          "name": "curatingAgentAmount",
+          "indexed": false
         }
       ]
     }

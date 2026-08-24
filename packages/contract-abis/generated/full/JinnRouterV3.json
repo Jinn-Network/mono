@@ -210,19 +210,23 @@
       },
       {
         "type": "bytes32",
-        "name": "requestId"
+        "name": "requestId",
+        "indexed": false
       },
       {
         "type": "address",
-        "name": "evaluator"
+        "name": "evaluator",
+        "indexed": false
       },
       {
         "type": "address",
-        "name": "priorityMech"
+        "name": "priorityMech",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "deliveryRate"
+        "name": "deliveryRate",
+        "indexed": false
       }
     ]
   },
@@ -247,7 +251,8 @@
       },
       {
         "type": "address",
-        "name": "activityChecker"
+        "name": "activityChecker",
+        "indexed": false
       }
     ]
   },
@@ -288,7 +293,8 @@
       },
       {
         "type": "uint32",
-        "name": "attemptIndex"
+        "name": "attemptIndex",
+        "indexed": false
       }
     ]
   },
@@ -313,15 +319,18 @@
       },
       {
         "type": "address",
-        "name": "operator"
+        "name": "operator",
+        "indexed": false
       },
       {
         "type": "address",
-        "name": "priorityMech"
+        "name": "priorityMech",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "deliveryRate"
+        "name": "deliveryRate",
+        "indexed": false
       }
     ]
   },
@@ -341,11 +350,13 @@
       },
       {
         "type": "uint256",
-        "name": "solutionAmount"
+        "name": "solutionAmount",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "verdictAmount"
+        "name": "verdictAmount",
+        "indexed": false
       }
     ]
   },
@@ -370,19 +381,23 @@
       },
       {
         "type": "bytes32",
-        "name": "taskCidDigest"
+        "name": "taskCidDigest",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "maxClaims"
+        "name": "maxClaims",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "solutionBudget"
+        "name": "solutionBudget",
+        "indexed": false
       },
       {
         "type": "uint256",
-        "name": "verdictBudget"
+        "name": "verdictBudget",
+        "indexed": false
       }
     ]
   },
@@ -407,15 +422,18 @@
       },
       {
         "type": "uint32",
-        "name": "attemptIndex"
+        "name": "attemptIndex",
+        "indexed": false
       },
       {
         "type": "uint32",
-        "name": "verdictIndex"
+        "name": "verdictIndex",
+        "indexed": false
       },
       {
         "type": "uint8",
-        "name": "verdictCode"
+        "name": "verdictCode",
+        "indexed": false
       }
     ]
   },
