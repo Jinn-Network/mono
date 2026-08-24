@@ -419,6 +419,11 @@ Examples:
           stateDir: config.stateDir,
           earningDir: config.earningDir,
           runtimeMode: config.runtimeMode,
+          executionWiring: config.executionWiring,
+          claudePath: config.claudePath,
+          ...(config.hermesPath !== undefined ? { hermesPath: config.hermesPath } : {}),
+          ...(config.hermesProvider !== undefined ? { hermesProvider: config.hermesProvider } : {}),
+          ...(config.codexPath !== undefined ? { codexPath: config.codexPath } : {}),
         },
         {
           env: ctx.env,

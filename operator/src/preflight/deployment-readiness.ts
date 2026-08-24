@@ -387,6 +387,7 @@ export async function runDeploymentReadinessChecks(
       {
         requiredRuntimes: requiredCredentialRuntimes(inputs.executionWiring),
         env: deps.env,
+        authContext,
         ...(inputs.claudePath !== undefined ? { claudePath: inputs.claudePath } : {}),
         ...(inputs.hermesPath !== undefined ? { hermesPath: inputs.hermesPath } : {}),
         ...(inputs.hermesProvider !== undefined ? { hermesProvider: inputs.hermesProvider } : {}),

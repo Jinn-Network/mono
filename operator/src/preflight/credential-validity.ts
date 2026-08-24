@@ -19,6 +19,7 @@ import {
 import {
   classifyClaudeAuthValidity,
   probeClaudeAuth as defaultProbeClaudeAuth,
+  type AuthContext,
   type AuthProbeResult,
   type ProbeOptions,
 } from './claude-auth.js';
@@ -52,6 +53,8 @@ export interface CredentialValidityCheckResult {
 export interface CheckCredentialsValidInput {
   requiredRuntimes: readonly CredentialRuntime[];
   env: NodeJS.ProcessEnv;
+  /** Auth context for the Claude probe (container / docker-compose / bare). */
+  authContext: AuthContext;
   claudePath?: string;
   hermesPath?: string;
   hermesProvider?: string;
@@ -186,7 +189,7 @@ async function runProbe(
   switch (runtime) {
     case 'claude': {
       const probe = await deps.probeClaudeAuth({
-        context: 'bare',
+        context: input.authContext,
         cwd: process.cwd(),
         ...(input.claudePath !== undefined ? { claudePath: input.claudePath } : {}),
       });

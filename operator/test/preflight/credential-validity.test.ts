@@ -10,6 +10,7 @@ import type { CodexAuthStatus } from '../../src/api/codex-doctor-endpoint.js';
 import type { HermesAuthStatus } from '../../src/api/hermes-doctor-endpoint.js';
 
 const SECRET = 'sk-ant-SUPERSECRET-DO-NOT-LEAK';
+const AUTH_CTX = 'container' as const;
 
 function claudeProbe(overrides: Partial<AuthProbeResult> = {}): AuthProbeResult {
   return {
@@ -75,7 +76,7 @@ describe('requiredCredentialRuntimes', () => {
 describe('checkCredentialsValid', () => {
   it('reports valid for a required Claude runtime whose probe authenticates', async () => {
     const result = await checkCredentialsValid(
-      { requiredRuntimes: ['claude'], env: { ANTHROPIC_API_KEY: SECRET } },
+      { requiredRuntimes: ['claude'], env: { ANTHROPIC_API_KEY: SECRET }, authContext: AUTH_CTX },
       validityDeps(),
     );
     expect(result.name).toBe('credentials_valid');
@@ -86,7 +87,7 @@ describe('checkCredentialsValid', () => {
 
   it('keeps absent distinct from invalid when the required runtime has no credential', async () => {
     const result = await checkCredentialsValid(
-      { requiredRuntimes: ['claude'], env: {} },
+      { requiredRuntimes: ['claude'], env: {}, authContext: AUTH_CTX },
       validityDeps({
         probeClaudeAuth: () =>
           claudeProbe({
@@ -103,7 +104,7 @@ describe('checkCredentialsValid', () => {
 
   it('fails when a required runtime credential is present but invalid', async () => {
     const result = await checkCredentialsValid(
-      { requiredRuntimes: ['claude'], env: { ANTHROPIC_API_KEY: SECRET } },
+      { requiredRuntimes: ['claude'], env: { ANTHROPIC_API_KEY: SECRET }, authContext: AUTH_CTX },
       validityDeps({
         probeClaudeAuth: () =>
           claudeProbe({
@@ -122,7 +123,7 @@ describe('checkCredentialsValid', () => {
 
   it('fails when a required Claude probe returns malformed auth output', async () => {
     const result = await checkCredentialsValid(
-      { requiredRuntimes: ['claude'], env: { ANTHROPIC_API_KEY: SECRET } },
+      { requiredRuntimes: ['claude'], env: { ANTHROPIC_API_KEY: SECRET }, authContext: AUTH_CTX },
       validityDeps({
         probeClaudeAuth: () =>
           claudeProbe({
@@ -139,7 +140,7 @@ describe('checkCredentialsValid', () => {
 
   it('treats a probe timeout as advisory, not invalid', async () => {
     const result = await checkCredentialsValid(
-      { requiredRuntimes: ['claude'], env: { ANTHROPIC_API_KEY: SECRET } },
+      { requiredRuntimes: ['claude'], env: { ANTHROPIC_API_KEY: SECRET }, authContext: AUTH_CTX },
       validityDeps({
         validityTimeoutMs: 20,
         probeClaudeAuth: () => new Promise(() => undefined),
@@ -153,7 +154,7 @@ describe('checkCredentialsValid', () => {
 
   it('treats a probe throw as advisory, not invalid', async () => {
     const result = await checkCredentialsValid(
-      { requiredRuntimes: ['hermes'], env: { OPENROUTER_API_KEY: 'or-secret' } },
+      { requiredRuntimes: ['hermes'], env: { OPENROUTER_API_KEY: 'or-secret' }, authContext: AUTH_CTX },
       validityDeps({
         probeHermesAuthStatus: async () => {
           throw new Error('spawn failed');
@@ -171,6 +172,7 @@ describe('checkCredentialsValid', () => {
       {
         requiredRuntimes: ['claude'],
         env: { OPENROUTER_API_KEY: 'or-secret' },
+        authContext: AUTH_CTX,
       },
       validityDeps({
         probeHermesAuthStatus: hermes,
@@ -193,6 +195,7 @@ describe('checkCredentialsValid', () => {
       {
         requiredRuntimes: ['hermes'],
         env: { ANTHROPIC_API_KEY: SECRET },
+        authContext: AUTH_CTX,
       },
       validityDeps({
         probeClaudeAuth: claude,
@@ -209,6 +212,7 @@ describe('checkCredentialsValid', () => {
       {
         requiredRuntimes: ['codex'],
         env: { OPENAI_API_KEY: 'sk-openai-secret' },
+        authContext: AUTH_CTX,
       },
       validityDeps({
         probeCodexDoctor: async () => ({
@@ -228,7 +232,7 @@ describe('checkCredentialsValid', () => {
   it('skips probes when no runtime is required', async () => {
     const probeClaudeAuth = vi.fn(() => claudeProbe());
     const result = await checkCredentialsValid(
-      { requiredRuntimes: [], env: { ANTHROPIC_API_KEY: SECRET } },
+      { requiredRuntimes: [], env: { ANTHROPIC_API_KEY: SECRET }, authContext: AUTH_CTX },
       validityDeps({ probeClaudeAuth }),
     );
     expect(probeClaudeAuth).not.toHaveBeenCalled();
@@ -239,7 +243,7 @@ describe('checkCredentialsValid', () => {
 
   it('never copies probe stdout or secret provider payloads into the result', async () => {
     const result = await checkCredentialsValid(
-      { requiredRuntimes: ['hermes'], env: { OPENROUTER_API_KEY: 'or-secret' } },
+      { requiredRuntimes: ['hermes'], env: { OPENROUTER_API_KEY: 'or-secret' }, authContext: AUTH_CTX },
       validityDeps({
         probeHermesAuthStatus: async () =>
           hermesProbe({
