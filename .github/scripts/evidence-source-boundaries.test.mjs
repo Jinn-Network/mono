@@ -735,7 +735,7 @@ test('IPFS production boundary configuration catches application and legacy esca
       `import ${JSON.stringify(localSpecifier(join(root, 'packages', 'core', 'src')))};`,
       `import ${JSON.stringify(localSpecifier(join(root, 'packages', 'layer', 'src')))};`,
       `import ${JSON.stringify(localSpecifier(join(root, 'operator', 'src')))};`,
-      `import ${JSON.stringify(localSpecifier(join(root, 'apps', 'jinn-agent')))};`,
+      `import ${JSON.stringify(localSpecifier(join(root, 'apps', 'operator-console')))};`,
       'await import(`@jinn-network/evidence-protocol`);',
       `require(\`${localSpecifier(join(root, 'operator', 'plugins'))}\`);`,
     ].join('\n'));

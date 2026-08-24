@@ -4,9 +4,8 @@
  *
  * Scope: claude-code ONLY. codex/cursor/gemini-cli hook file formats are
  * NOT independently verified against those tools' real hook schemas (the
- * claude-code shape was confirmed against
- * apps/jinn-agent/skills/autonomous-ai-agents/claude-code/SKILL.md's
- * documented example — a real, wrong-schema bug was caught here in review).
+ * claude-code shape was confirmed against Claude Code's documented
+ * Stop-hook example — a real, wrong-schema bug was caught here in review).
  * Their pure patch/remove functions stay in `src/cli/hook-installers/` with
  * coverage in `test/scripts/install-hooks.test.ts`, but are not wired into
  * `integrations.ts` — see the follow-up issue for verifying and wiring them.

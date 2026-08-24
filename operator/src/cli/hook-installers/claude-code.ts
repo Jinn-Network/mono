@@ -1,9 +1,8 @@
 import { DEFAULT_STOP_HOOK_COMMAND, parseJsonObject, stableJson } from './common.js';
 
 /**
- * Claude Code's real hook schema (confirmed against
- * `apps/jinn-agent/skills/autonomous-ai-agents/claude-code/SKILL.md` — this
- * repo's own documented example — and the operator's live
+ * Claude Code's real hook schema (confirmed against Claude Code's
+ * documented Stop-hook example and the operator's live
  * `~/.claude/settings.json`):
  *
  *   { "hooks": { "Stop": [ { "matcher"?: string, "hooks": [ { "type": "command", "command": string } ] } ] } }

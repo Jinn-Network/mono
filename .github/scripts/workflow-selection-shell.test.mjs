@@ -4,9 +4,9 @@
 // filters and onto a per-workflow `changes` job that recomputes the same selection
 // from the event's own diff. Three sibling tests
 // (`layer-publish-workflow.test.mjs`, `operator/test/scripts/pack-workflows.test.ts`,
-// `apps/jinn-agent/tests/plugins/test_jinn_stage1_acceptance_gate.py`) pin the
-// pattern list by re-evaluating those strings in a JavaScript or Python regular
-// expression engine. None of them runs the shell.
+// and the cold-stock contract tests in this file) pin the pattern list by
+// re-evaluating those strings in a JavaScript regular expression engine. None
+// of them runs the shell.
 //
 // That gap hid a live fail-open. The first cut matched with
 // `printf '%s\n' "${changed}" | grep -qE -f ...`: `grep -q` exits on its first
@@ -52,7 +52,7 @@ const LANES = [
   },
   {
     workflow: 'jinn-agent-ci.yml',
-    selects: 'apps/jinn-agent/scripts/cold-stock-e2e.sh',
+    selects: 'plugin/scripts/cold-stock-e2e.sh',
     ignores: 'docs/operator/rotating-harness-keys.md',
   },
 ];
@@ -251,4 +251,20 @@ test('every terminal gate rejects a selection output it cannot parse', () => {
       `${lane.workflow}: the gate must validate SELECTED against true|false; an empty output must never be read as an unselected lane`,
     );
   }
+});
+
+test('the cold-stock proof lives under plugin/scripts and does not import the host', () => {
+  const repoRoot = resolve(import.meta.dirname, '../..');
+  const script = readFileSync(join(repoRoot, 'plugin/scripts/cold-stock-e2e.sh'), 'utf8');
+  const driver = readFileSync(join(repoRoot, 'plugin/scripts/stage1-stock-product.py'), 'utf8');
+  const workflow = source('jinn-agent-ci.yml');
+  assert.match(script, /python3 -m pip wheel --no-deps --wheel-dir "\$WORK\/wheels" "\$REPO_ROOT\/plugin\/frozen"/u);
+  assert.match(script, /HERMES_UPSTREAM_SHA="9df5f879b4a5925c0f8f947e7e16ed8e845932c3"/u);
+  assert.match(script, /"\$WORK\/venv\/bin\/python" "\$SCRIPTS\/stage1-stock-product\.py"/u);
+  assert.doesNotMatch(script, /apps\/jinn-agent/u);
+  assert.match(driver, /REPO_ROOT = Path\(__file__\)\.resolve\(\)\.parents\[2\]/u);
+  assert.doesNotMatch(driver, /apps\/jinn-agent/u);
+  assert.doesNotMatch(workflow, /working-directory:[ \t]+apps\/jinn-agent/u);
+  assert.match(workflow, /run: bash plugin\/scripts\/cold-stock-e2e\.sh/u);
+  assert.match(workflow, /^    name: jinn-agent-gate$/mu);
 });
