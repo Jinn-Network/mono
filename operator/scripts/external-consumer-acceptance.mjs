@@ -129,11 +129,36 @@ function run(command, args, options = {}) {
 function runOrThrow(command, args, label, options = {}) {
   const result = run(command, args, options);
   if (result.error || result.status !== 0) {
+    const combined = [result.stdout, result.stderr]
+      .filter((chunk) => typeof chunk === 'string' && chunk.trim().length > 0)
+      .join('\n');
     throw new Error(
-      `${label} failed with exit ${result.status}: ${result.error?.message ?? result.stderr ?? result.stdout}`,
+      `${label} failed with exit ${result.status}: ${result.error?.message ?? (combined || '(no output)')}`,
     );
   }
   return result;
+}
+
+export function bareVersionFromPackageSpec(packageName, spec) {
+  const prefix = `${packageName}@`;
+  if (typeof spec !== 'string' || !spec.startsWith(prefix) || spec.length === prefix.length) {
+    throw new Error(`${packageName} registry spec must use an exact version`);
+  }
+  return spec.slice(prefix.length);
+}
+
+export function yarnConsumerManifest(options) {
+  return {
+    private: true,
+    packageManager: 'yarn@4.13.0',
+    dependencies: {
+      '@jinn-network/sdk': bareVersionFromPackageSpec('@jinn-network/sdk', options.sdkSpec),
+      [productNameFromSpec(options.clientSpec)]: bareVersionFromPackageSpec(
+        productNameFromSpec(options.clientSpec),
+        options.clientSpec,
+      ),
+    },
+  };
 }
 
 function packTo(packageRootOrSpec, destination, label, registry = false) {
@@ -260,20 +285,12 @@ function runRegistryYarnConsumerAcceptance(options, consumerRoot) {
   mkdirSync(yarnConsumerRoot, { recursive: true });
   writeFileSync(
     join(yarnConsumerRoot, 'package.json'),
-    `${JSON.stringify({
-      private: true,
-      packageManager: 'yarn@4.13.0',
-      dependencies: {
-        '@jinn-network/sdk': options.sdkSpec,
-        [productNameFromSpec(options.clientSpec)]: options.clientSpec,
-      },
-    }, null, 2)}\n`,
+    `${JSON.stringify(yarnConsumerManifest(options), null, 2)}\n`,
   );
   writeFileSync(
     join(yarnConsumerRoot, '.yarnrc.yml'),
     'nodeLinker: node-modules\n',
   );
-  writeFileSync(join(yarnConsumerRoot, 'yarn.lock'), '');
   const yarnEnv = isolatedConsumerEnv(yarnConsumerRoot);
   runOrThrow(
     'corepack', ['yarn', 'install', '--no-immutable'],
