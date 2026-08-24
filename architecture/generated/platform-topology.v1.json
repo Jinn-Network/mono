@@ -2028,9 +2028,9 @@
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 6,
-      "discoveredFirstPartySurfaces": 4189,
+      "discoveredFirstPartySurfaces": 4190,
       "generatedOutputSources": 1414,
-      "generatorSources": 685,
+      "generatorSources": 686,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 7
@@ -15692,6 +15692,17 @@
           "@ritsukai"
         ],
         "path": "operator/test/scripts/layer-operator-identity.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/scripts/npx-operator-invocation.test.ts"
       },
       {
         "categories": [
