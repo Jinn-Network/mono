@@ -2028,7 +2028,7 @@
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 6,
-      "discoveredFirstPartySurfaces": 4189,
+      "discoveredFirstPartySurfaces": 4191,
       "generatedOutputSources": 1414,
       "generatorSources": 685,
       "marketplaceControl": 2,
@@ -11918,6 +11918,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "operator/test/events/emitter-sanitize.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "operator/test/events/ring-buffer.test.ts"
       },
       {
@@ -14609,6 +14619,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/observability/debug-report-assemble.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/observability/emit-event.test.ts"
       },
       {
         "categories": [
