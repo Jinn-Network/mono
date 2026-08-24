@@ -1408,7 +1408,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   // ── Harness registry ─────────────────────────────────────────────────────────
 
-  const solverNetRegistry = await loadSolverNets(config);
+  const solverNetRegistry = await loadSolverNets(config, { gcOrphanedVendorCopies: true });
   for (const net of solverNetRegistry.list()) {
     const plugins = net.runtimePlugins
       .map((plugin) => `${plugin.name}@${plugin.version}`)

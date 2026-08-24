@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,8 @@ import {
   remoteVendorNamesFromEntries,
 } from '../../src/plugins/vendor-gc.js';
 import { safeVendorName } from '../../src/plugins/resolvers.js';
+import { loadSolverNets } from '../../src/solver-nets/registry.js';
+import * as vendorGc from '../../src/plugins/vendor-gc.js';
 
 describe('solver plugin vendor GC', () => {
   it('removes orphaned bundled/local copies but keeps remote materializations', () => {
@@ -40,5 +42,17 @@ describe('solver plugin vendor GC', () => {
     expect(() => {
       gcOrphanedBundledLocalVendorCopies(vendorRoot, new Set());
     }).not.toThrow();
+  });
+
+  it('loadSolverNets skips vendor GC unless the boot path opts in', async () => {
+    const gcSpy = vi.spyOn(vendorGc, 'gcOrphanedBundledLocalVendorCopies');
+
+    await loadSolverNets({ executionWiring: [] });
+    expect(gcSpy).not.toHaveBeenCalled();
+
+    await loadSolverNets({ executionWiring: [] }, { gcOrphanedVendorCopies: true });
+    expect(gcSpy).toHaveBeenCalledOnce();
+
+    gcSpy.mockRestore();
   });
 });

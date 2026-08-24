@@ -381,24 +381,36 @@ export async function registerWiringEntry(
   });
 }
 
+export interface LoadSolverNetsOptions {
+  /**
+   * Run one-shot vendor cleanup for legacy bundled/local copies. Only the
+   * daemon boot path opts in — eval/UX helpers call loadSolverNets with a
+   * partial wiring slice and must not GC remote materializations (#1242).
+   */
+  gcOrphanedVendorCopies?: boolean;
+}
+
 export async function loadSolverNets(
   config: {
     executionWiring?: readonly ExecutionWiringConfigEntry[];
   },
+  opts: LoadSolverNetsOptions = {},
 ): Promise<SolverNetRegistry> {
-  const pluginEntriesForGc: SolverPluginEntry[] = [JINN_NETWORK_TOOLS_PLUGIN];
-  for (const wiring of config.executionWiring ?? []) {
-    pluginEntriesForGc.push(...wiring.plugins);
-    const contractRef = contractRefFromWorkKind(wiring.workKind);
-    if (contractRef) {
-      const solverType = `${contractRef.id}.${contractRef.version}`;
-      pluginEntriesForGc.push(...defaultRuntimePluginsForSolverType(solverType));
+  if (opts.gcOrphanedVendorCopies) {
+    const pluginEntriesForGc: SolverPluginEntry[] = [JINN_NETWORK_TOOLS_PLUGIN];
+    for (const wiring of config.executionWiring ?? []) {
+      pluginEntriesForGc.push(...wiring.plugins);
+      const contractRef = contractRefFromWorkKind(wiring.workKind);
+      if (contractRef) {
+        const solverType = `${contractRef.id}.${contractRef.version}`;
+        pluginEntriesForGc.push(...defaultRuntimePluginsForSolverType(solverType));
+      }
     }
+    gcOrphanedBundledLocalVendorCopies(
+      defaultSolverPluginVendorRoot(),
+      remoteVendorNamesFromEntries(pluginEntriesForGc),
+    );
   }
-  gcOrphanedBundledLocalVendorCopies(
-    defaultSolverPluginVendorRoot(),
-    remoteVendorNamesFromEntries(pluginEntriesForGc),
-  );
 
   const registry = new SolverNetRegistry();
   for (const entry of config.executionWiring ?? []) {
