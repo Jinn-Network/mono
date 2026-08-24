@@ -40,6 +40,7 @@ import {
   SCREENING_POOL_PROTOCOL,
   SCREENING_POOL_V2_PROTOCOL,
   SCREENING_POOL_V2_RESERVE_SELECTION_PROTOCOL,
+  REGISTERED_SCREENING_SAMPLE_COMMITMENT_V1_SCHEMA,
   SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
   PromptedScreeningProcedureV1Schema,
   ScreeningPoolV1Schema,
@@ -1312,7 +1313,7 @@ describe("binary screened-operator-sampled admission", () => {
     const sampleItemSha256s = [...computeScreeningSample({ itemSha256s: poolIdentities, sampleSeed: "synthetic-prompted-seed", sampleSize: 72 }).sample]
       .sort(compareCodeUnitStrings);
     const registeredCommitment = RegisteredScreeningSampleCommitmentV1Schema.parse({
-          schema: "https://fixtures.example.test/screening-commitment/v1",
+          schema: REGISTERED_SCREENING_SAMPLE_COMMITMENT_V1_SCHEMA,
           candidateItemDigests: [...poolIdentities].sort(compareCodeUnitStrings),
           committedAt: "2026-08-15T08:20:00.000Z",
           poolDigest: pool.value.identityCommitmentSha256,
@@ -1423,6 +1424,60 @@ describe("binary screened-operator-sampled admission", () => {
     expect(closure.accepted).toHaveLength(240);
     expect(closure.excluded).toEqual([expect.objectContaining({ receivingSlotId: "slot-001" })]);
     expect(closure.promptedScreening?.sampleAgreementRate).toBe(1);
+  }, 60_000);
+
+  it("orders a shared-reserve ledger by receiving slot even when valid mains arrive out of slot order", () => {
+    const context = setup();
+    const fixture = promptedScreeningInput(context, true);
+    const pool = ScreeningPoolV2Schema.parse(JSON.parse(Buffer.from(
+      fixture.screening.poolBase64,
+      "base64",
+    ).toString("utf8")));
+    const firstSlotId = pool.items[0]!.poolKind === "main" ? pool.items[0]!.slotId : undefined;
+    const secondSlotId = pool.items[1]!.poolKind === "main" ? pool.items[1]!.slotId : undefined;
+    if (firstSlotId === undefined || secondSlotId === undefined) throw new Error("fixture mains lack slots");
+    const reorderedPool = sealHumanReviewDocument(ScreeningPoolV2Schema, {
+      ...pool,
+      items: pool.items.map((item, index) => {
+        if (item.poolKind !== "main") return item;
+        if (index === 0) return { ...item, slotId: secondSlotId };
+        if (index === 1) return { ...item, slotId: firstSlotId };
+        return item;
+      }),
+    }, "reordered screening pool v2");
+    const additionallyExcluded = fixture.candidates[1]!.itemSha256;
+    const rows = fixture.screening.rows.map((row) => row.itemSha256 === additionallyExcluded
+      ? {
+          ...row,
+          ritsuDecision: {
+            checked: true as const,
+            verdict: "exclude" as const,
+            decidedAt: "2026-08-15T08:30:00.000Z",
+          },
+        }
+      : row);
+    const result = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "screened-operator-sampled",
+      candidates: fixture.candidates,
+      screening: {
+        ...fixture.screening,
+        poolSha256: reorderedPool.digest,
+        poolBase64: Buffer.from(reorderedPool.bytes).toString("base64"),
+        rows,
+      },
+    });
+    expect(result.ok, result.ok ? "" : JSON.stringify(result.error)).toBe(true);
+    if (!result.ok) return;
+    const ledger = HumanReviewReplacementLedgerSchema.parse(JSON.parse(new TextDecoder().decode(
+      getSealedBytes(context.workspaceDir, result.result.replacementLedgerSha256.slice("sha256:".length)),
+    )));
+    expect(ledger.entries.map((entry) => entry.receivingSlotId)).toEqual(["slot-001", "slot-002"]);
+    expect(() => verifyBinaryJudgmentAdmissionClosureInWorkspace({
+      workspaceDir: context.workspaceDir,
+      admissionManifestSha256: result.result.admissionManifestSha256 as AdmissionSha256,
+      expectedDraftId: "review-run",
+    })).not.toThrow();
   }, 60_000);
 
   it("refuses prompted-v2 nested-byte tampering before storing a partial closure", () => {

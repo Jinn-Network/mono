@@ -9,6 +9,7 @@ import {
   SCREENING_POOL_PROTOCOL,
   SCREENING_POOL_V2_PROTOCOL,
   SCREENING_POOL_V2_RESERVE_SELECTION_PROTOCOL,
+  REGISTERED_SCREENING_SAMPLE_COMMITMENT_V1_SCHEMA,
   SCREENING_POOL_STRATA,
   SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
   SCREENING_TABLE_V2_PROTOCOL,
@@ -254,7 +255,7 @@ describe("RegisteredScreeningSampleCommitmentV1Schema", () => {
       .map((item) => item.screeningIdentitySha256)
       .sort();
     const commitment = RegisteredScreeningSampleCommitmentV1Schema.parse({
-      schema: "https://fixtures.example.test/screening-commitment/v1",
+      schema: REGISTERED_SCREENING_SAMPLE_COMMITMENT_V1_SCHEMA,
       candidateItemDigests: identities,
       committedAt: "2026-08-21T10:00:00.000Z",
       poolDigest: computeScreeningPoolDigest(identities),
@@ -272,8 +273,23 @@ describe("RegisteredScreeningSampleCommitmentV1Schema", () => {
       .map((item) => item.screeningIdentitySha256)
       .sort();
     expect(RegisteredScreeningSampleCommitmentV1Schema.safeParse({
-      schema: "https://fixtures.example.test/screening-commitment/v1",
+      schema: REGISTERED_SCREENING_SAMPLE_COMMITMENT_V1_SCHEMA,
       candidateItemDigests: identities.with(0, identities[1]!).with(1, identities[0]!),
+      committedAt: "2026-08-21T10:00:00.000Z",
+      poolDigest: computeScreeningPoolDigest(identities),
+      sampleSeed: "registered-seed",
+      sampleSize: 72,
+      samplingScriptSha256: digest(9_999),
+    }).success).toBe(false);
+  });
+
+  test("refuses a different external schema identifier", () => {
+    const identities = sharedReservePool().items
+      .map((item) => item.screeningIdentitySha256)
+      .sort();
+    expect(RegisteredScreeningSampleCommitmentV1Schema.safeParse({
+      schema: "https://fixtures.example.test/screening-commitment/v1",
+      candidateItemDigests: identities,
       committedAt: "2026-08-21T10:00:00.000Z",
       poolDigest: computeScreeningPoolDigest(identities),
       sampleSeed: "registered-seed",

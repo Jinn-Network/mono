@@ -1045,6 +1045,12 @@ export function admitHumanTruth(
             }
           : { ...common };
       });
+      if (promptedPool?.protocol === SCREENING_POOL_V2_PROTOCOL) {
+        ledgerEntries.sort((left, right) => compareCodeUnitStrings(
+          "receivingSlotId" in left ? left.receivingSlotId ?? "" : "",
+          "receivingSlotId" in right ? right.receivingSlotId ?? "" : "",
+        ));
+      }
       for (const replacement of promptedPool === undefined ? accepted.filter((entry) => entry.candidate.replacesItemSha256 !== undefined) : []) {
         if (!excluded.some((entry) => entry.candidate.itemSha256 === replacement.candidate.replacesItemSha256)) {
           refuse("validation", "candidates.replacesItemSha256", "replacement points to an item that was not excluded by this admission");

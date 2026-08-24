@@ -21,6 +21,7 @@ export const SCREENING_POOL_PROTOCOL = "https://spec.jinn.network/binary-judgmen
 export const SCREENING_POOL_V2_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-pool/v2" as const;
 export const SCREENING_POOL_V2_RESERVE_SELECTION_PROTOCOL = "shared-slice-first-admissible/1" as const;
 export const SCREENING_SAMPLE_COMMITMENT_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-sample-commitment/v1" as const;
+export const REGISTERED_SCREENING_SAMPLE_COMMITMENT_V1_SCHEMA = "https://colophon-claims.github.io/locomo-judge-report/sampling-commitment/v1" as const;
 export const SCREENING_TABLE_V2_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-table/v2" as const;
 export const SCREENING_REVEAL_RECEIPT_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-reveal-receipt/v1" as const;
 
@@ -452,7 +453,7 @@ export type ScreeningSampleCommitmentV1 = z.infer<typeof ScreeningSampleCommitme
  * sample size, script digest, and timestamp are sufficient to replay the committed sample.
  */
 export const RegisteredScreeningSampleCommitmentV1Schema = z.strictObject({
-  schema: z.string().url(),
+  schema: z.literal(REGISTERED_SCREENING_SAMPLE_COMMITMENT_V1_SCHEMA),
   candidateItemDigests: z.array(DigestSchema).length(664),
   committedAt: TimestampSchema,
   poolDigest: DigestSchema,
