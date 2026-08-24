@@ -8,6 +8,7 @@ import {
   readNormalizedArtifactAbi,
   resolveContractsArtifactsDir,
   stableStringify,
+  emitTypeScriptConstExport,
 } from "./lib.mjs";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -19,6 +20,8 @@ const contractsArtifactsDir = resolveContractsArtifactsDir(manifest, packageRoot
 
 mkdirSync(join(outputRoot, "full"), { recursive: true });
 mkdirSync(join(outputRoot, "slices"), { recursive: true });
+const tsSliceRoot = join(packageRoot, "src", "generated", "slices");
+mkdirSync(tsSliceRoot, { recursive: true });
 
 /** @type {Record<string, readonly unknown[]>} */
 const fullAbis = {};
@@ -39,6 +42,10 @@ for (const [sliceKey, slice] of Object.entries(slicesManifest.slices)) {
   writeFileSync(
     join(outputRoot, "slices", `${sliceKey}.json`),
     stableStringify({ export: slice.export, items: picked }),
+  );
+  writeFileSync(
+    join(tsSliceRoot, `${sliceKey}.ts`),
+    emitTypeScriptConstExport(slice.export, picked),
   );
 }
 

@@ -88,3 +88,8 @@ export function pickAbiItems(fullAbi, names) {
 export function stableStringify(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
+
+/** @param {string} exportName @param {readonly unknown[]} items */
+export function emitTypeScriptConstExport(exportName, items) {
+  return `export const ${exportName} = ${JSON.stringify(items, null, 2)} as const;\n`;
+}
