@@ -1,0 +1,12 @@
+{
+  "name": "defi-longtail-probe",
+  "private": true,
+  "type": "module",
+  "description": "Long-tail protocol probe root — hoists viem for the instances tree (harness has its own copy).",
+  "dependencies": {
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2"
+  }
+}
