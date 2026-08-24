@@ -86,6 +86,7 @@ export * from "./profile/binary-judge-manifest.js";
 export * from "./profile/binary-qualification.js";
 export { ClaimPackageSchema } from "./profile/claim.js";
 export type { ClaimPackage } from "./profile/claim.js";
+export { firstDifference } from "./profile/claim-consistency.js";
 export { VERIFIER_VERSION, renderVerifiedBundle, runVerifierCli } from "./cli.js";
 export type { VerifierCliDeps, VerifierCliResult } from "./cli.js";
 export {
