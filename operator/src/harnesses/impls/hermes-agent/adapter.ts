@@ -16,6 +16,7 @@ import type { TaskSessionInputs } from '../learner/types.js';
 import { writePerTaskHermesConfig } from './bootstrap.js';
 import {
   assertResolvedHermesModelFromConfig,
+  formatResolvedHermesModelGuardEvidence,
   parseT31ResolvedModelGuardPolicy,
 } from './resolved-model-guard.js';
 import { buildInitialPrompt } from './prompt.js';
@@ -245,11 +246,14 @@ export class HermesHarnessAdapter {
 
     const t31ModelGuard = parseT31ResolvedModelGuardPolicy();
     if (t31ModelGuard) {
-      assertResolvedHermesModelFromConfig({
+      const guardEvidence = assertResolvedHermesModelFromConfig({
         configPath: join(hermesHome, 'config.yaml'),
         requested: t31ModelGuard.requested,
         approvedOverride: t31ModelGuard.approvedOverride,
       });
+      console.log(
+        `[hermes-agent] T3.1 resolved-model guard ok: ${formatResolvedHermesModelGuardEvidence(guardEvidence)}`,
+      );
     }
 
     // Step 2: build prompt + args.

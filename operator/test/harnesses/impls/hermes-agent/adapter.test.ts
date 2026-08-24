@@ -881,6 +881,7 @@ describe('HermesHarnessAdapter T3.1 resolved-model guard', () => {
     process.env['JINN_HERMES_MODEL'] = 'google/gemini-2.5-flash';
     process.env['JINN_HERMES_PROVIDER'] = 'openrouter';
 
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const spawnCalls: SpawnCall[] = [];
     const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
     const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
@@ -903,7 +904,12 @@ describe('HermesHarnessAdapter T3.1 resolved-model guard', () => {
       task.provider = 'openrouter';
       await adapter.runTask(task);
       expect(spawnCalls).toHaveLength(1);
+      expect(logSpy.mock.calls.some(([line]) =>
+        String(line).includes('T3.1 resolved-model guard ok') &&
+        String(line).includes('approved override of requested model=deepseek/deepseek-v4-flash'),
+      )).toBe(true);
     } finally {
+      logSpy.mockRestore();
       rmSync(home, { recursive: true, force: true });
       rmSync(work, { recursive: true, force: true });
     }
