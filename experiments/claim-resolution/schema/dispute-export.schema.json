@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Historical oracle dispute export — one record per case",
+  "description": "Shape expected by bench/ingest-disputes.mjs. See DATA_REQUEST.md. uint256 values are decimal STRINGS (bonds overflow 2^53). bytes32 values are 0x-prefixed hex, undecoded.",
+  "type": "object",
+  "required": ["source_protocol", "case_id", "question_raw", "final_answer_raw", "answer_history", "finalize_ts"],
+  "properties": {
+    "source_protocol": { "enum": ["reality.eth", "kleros", "uma"] },
+    "case_id": { "type": "string", "description": "reality.eth question_id / kleros disputeID / uma assertionId" },
+    "chain_id": { "type": "integer" },
+    "contract_address": { "type": "string" },
+    "contract_version": { "type": "string" },
+
+    "template_id": { "type": "integer", "description": "reality.eth: 0/1 bool, 2 uint, 3 single-select, 4 multi-select, 5 datetime" },
+    "template_text": { "type": "string", "description": "format string from LogNewTemplate or the built-in template" },
+    "question_raw": { "type": "string", "description": "RAW delimiter-separated string exactly as emitted by LogNewQuestion. Never pre-split." },
+
+    "content_hash": { "type": "string" },
+    "asker": { "type": "string" },
+    "created_ts": { "type": "integer" },
+    "opening_ts": { "type": "integer" },
+    "timeout": { "type": "integer" },
+    "min_bond": { "type": "string" },
+    "bond_token": {
+      "type": "object",
+      "properties": {
+        "kind": { "enum": ["native", "erc20"] },
+        "address": { "type": "string" },
+        "symbol": { "type": "string" },
+        "decimals": { "type": "integer" }
+      }
+    },
+
+    "answer_history": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Ordered, complete. One entry per LogNewAnswer / LogAnswerReveal.",
+      "items": {
+        "type": "object",
+        "required": ["answer_raw", "bond", "ts"],
+        "properties": {
+          "answer_raw": { "type": "string" },
+          "bond": { "type": "string" },
+          "ts": { "type": "integer" },
+          "user": { "type": "string" },
+          "is_commitment": { "type": "boolean" },
+          "history_hash": { "type": "string" },
+          "block_number": { "type": "integer" },
+          "tx_hash": { "type": "string" }
+        }
+      }
+    },
+
+    "arbitration": {
+      "type": "object",
+      "description": "Present when LogNotifyOfArbitrationRequest fired.",
+      "properties": {
+        "arbitrator": { "type": "string" },
+        "arbitrator_name": { "type": "string" },
+        "requested_by": { "type": "string" },
+        "requested_ts": { "type": "integer" },
+        "fee_paid": { "type": "string" },
+        "cancelled": { "type": "boolean" },
+        "arbitrator_answer_raw": { "type": "string" },
+        "arbitrator_answer_ts": { "type": "integer" },
+        "kleros_dispute_id": { "type": "string" },
+        "court_id": { "type": "string" },
+        "jurors": { "type": "integer" },
+        "rounds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "round": { "type": "integer" },
+              "votes": { "type": "object", "additionalProperties": { "type": "integer" } },
+              "appealed": { "type": "boolean" },
+              "start_ts": { "type": "integer" },
+              "end_ts": { "type": "integer" }
+            }
+          }
+        },
+        "ruling_raw": { "type": "string" },
+        "ruling_ts": { "type": "integer" },
+        "evidence": {
+          "type": "array",
+          "description": "Content inline, not bare IPFS CIDs — IPFS is unreachable here.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "submitter": { "type": "string" },
+              "ts": { "type": "integer" },
+              "content": { "type": "string" },
+              "cid": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "final_answer_raw": { "type": "string", "description": "LogFinalize.answer / DVM resolvedPrice. Preserve 0xffff..ffff (Invalid) and 0xffff..fffe (Too Soon) verbatim." },
+    "finalize_ts": { "type": "integer" },
+    "finalize_tx": { "type": "string" },
+    "reopened_as": { "type": "string" },
+    "reopened_from": { "type": "string" },
+
+    "uma": {
+      "type": "object",
+      "properties": {
+        "identifier": { "type": "string" },
+        "ancillary_data_raw": { "type": "string" },
+        "ancillary_data_decoded": { "type": "string" },
+        "proposer": { "type": "string" },
+        "proposed_price": { "type": "string" },
+        "proposal_ts": { "type": "integer" },
+        "disputer": { "type": "string" },
+        "dispute_ts": { "type": "integer" },
+        "resolved_price": { "type": "string" },
+        "market_slug": { "type": "string" },
+        "market_title": { "type": "string" },
+        "market_description": { "type": "string" },
+        "resolution_source_text": { "type": "string" }
+      }
+    }
+  }
+}

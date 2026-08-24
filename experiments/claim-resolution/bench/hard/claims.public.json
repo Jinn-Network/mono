@@ -1,0 +1,322 @@
+{
+  "note": "Solver-visible fields ONLY. Ground truth lives in bench/truth.json and is never read on the solver path.",
+  "generated_at": "2026-08-19T10:30:48.387Z",
+  "n": 45,
+  "claims": [
+    {
+      "id": "cr-3647f0ef2a",
+      "claim": "In the June 7, 2026 runoff of Peru's presidential election, the winning candidate's final certified margin of victory over the runner-up was at least 49,000 votes.",
+      "criteria": "Resolved YES if Peru's electoral authority's final, 100%-counted tally showed the winning candidate ahead of the second-place candidate by 49,000 votes or more; resolved NO if the certified margin was smaller.",
+      "deadline": "2026-07-01",
+      "split": "eval"
+    },
+    {
+      "id": "cr-a5147a3db1",
+      "claim": "Between January 1, 2026 and August 15, 2026, no United Nations member state other than Israel granted formal diplomatic recognition to Somaliland as an independent country.",
+      "criteria": "Resolves NO if any UN member state besides Israel formally and officially recognized Somaliland as a sovereign, independent state at any point between January 1, 2026 and August 15, 2026. Resolves YES if, as of August 15, 2026, Israel remained the only UN member state to have formally extended such recognition, even if other states were reported to be considering or preparing recognition.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-797052856d",
+      "claim": "Boeing had formally entered a guilty plea in federal court to the criminal fraud conspiracy charge tied to the two fatal 737 MAX crashes.",
+      "criteria": "Resolves YES if Boeing had pleaded guilty to the charge and been sentenced accordingly by the deadline; resolves NO if the criminal case had instead been resolved through dismissal or a non-prosecution arrangement without a guilty plea being entered.",
+      "deadline": "2026-04-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-61c7892c28",
+      "claim": "A peer-reviewed study that tracked excess all-cause mortality across more than 40 countries from 2020 to 2022, first published in 2024 and later cited during a June 2026 U.S. Senate Permanent Subcommittee on Investigations hearing on COVID-19 vaccine safety, was formally retracted by its publishing journal on or before August 15, 2026.",
+      "criteria": "Resolves YES if the journal BMJ Public Health published an official retraction notice for the paper (lead author Saskia Mostert et al., covering global excess mortality 2020-2022) on or before August 15, 2026. Resolves NO if the paper remained published without a retraction notice as of that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-280d5fa64e",
+      "claim": "Iranian Foreign Ministry spokesman Esmail Baghaei's public statement, issued shortly after Israeli and U.S. strikes on Tehran on February 28, 2026, that Supreme Leader Ali Khamenei was safe and remained 'firmly' in command, turned out to be the accurate, final account of what happened to Khamenei.",
+      "criteria": "Resolves YES if Khamenei was never subsequently confirmed dead by the Iranian government. Resolves NO if Iran's own state media later confirmed that Khamenei had in fact been killed in the February 28, 2026 strikes.",
+      "deadline": "2026-03-05",
+      "split": "eval"
+    },
+    {
+      "id": "cr-2d0fecc83e",
+      "claim": "In its 16 April 2026 decision (No. 26-D-05) sanctioning a cartel over brand allocation among organic-food distributors, France's Autorité de la concurrence imposed a higher individual fine on Carrefour's organic-retail subsidiary Greenweez than on Les Mousquetaires' central purchasing entity ITM Entreprises.",
+      "criteria": "Resolves YES if the individual fine listed for Greenweez in Decision 26-D-05 exceeds the individual fine listed for ITM Entreprises in the same decision. Resolves NO otherwise.",
+      "deadline": "2026-04-20",
+      "split": "eval"
+    },
+    {
+      "id": "cr-d39b9848e7",
+      "claim": "In its February 2026 decision sanctioning three South Korean sugar manufacturers for coordinating price changes between 2021 and 2025, South Korea's Fair Trade Commission imposed a larger individual fine on Samyang Corporation than on CJ Cheiljedang.",
+      "criteria": "Resolves YES if Samyang Corporation's individual fine in the KFTC sugar-cartel decision exceeds CJ Cheiljedang's individual fine. Resolves NO otherwise.",
+      "deadline": "2026-02-28",
+      "split": "eval"
+    },
+    {
+      "id": "cr-a224b8ca99",
+      "claim": "Brazil's Federal Regional Court for the 2nd Region (TRF-2), ruling on an appeal filed by securities regulator CVM, upheld a lower court's decision that had annulled a CVM administrative fine imposed on the operator of an investment-focused blog accused of manipulating a stock's price through misleading social-media posts.",
+      "criteria": "Resolves YES if the TRF-2 panel's ruling affirmed (left in place) the trial court's annulment of the CVM fine. Resolves NO if the TRF-2 panel reversed the trial court and reinstated the fine.",
+      "deadline": "2026-04-16",
+      "split": "eval"
+    },
+    {
+      "id": "cr-3b879d996e",
+      "claim": "MCJ Corporation, the Tokyo-listed parent of the Mouse Computer PC brand, was delisted from the Tokyo Stock Exchange in 2026 because it failed to satisfy the exchange's minimum listed-market-value requirements once TSE's transitional relief measures for listing-maintenance standards expired.",
+      "criteria": "Resolves YES if TSE/JPX notices or corporate disclosures state MCJ's 2026 delisting was triggered by failure to meet listing-maintenance financial criteria. Resolves NO if the delisting instead resulted from a corporate action such as a management buyout (MBO) taking the company private.",
+      "deadline": "2026-06-16",
+      "split": "eval"
+    },
+    {
+      "id": "cr-1609101b26",
+      "claim": "In Virginia's April 2026 special election on the constitutional amendment governing how the state's congressional districts are drawn, the 'yes' side won more than 51% of the valid votes cast.",
+      "criteria": "Resolved YES if final vote totals reported after the April 21, 2026 election show votes in favor of the amendment making up more than 51.0% of all valid yes/no votes cast; resolved NO if the 'yes' share was 51.0% or lower.",
+      "deadline": "2026-04-23",
+      "split": "eval"
+    },
+    {
+      "id": "cr-a20577e50f",
+      "claim": "President Trump's March 2026 executive order imposing new mail-in ballot verification requirements was being fully implemented by the U.S. Postal Service nationwide for the 2026 midterm elections.",
+      "criteria": "Resolves YES if, by the deadline, USPS had begun nationwide implementation of the Section 3 mail-ballot verification/list-submission requirements of the executive order without a court injunction blocking it; resolves NO if a federal court injunction was still in effect blocking implementation and the Supreme Court had not lifted it.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-719adacc8d",
+      "claim": "Hamas had completed the handover of its weapons to Gaza's new governing authority under the disarmament framework negotiated by the Board of Peace.",
+      "criteria": "Resolves YES if Hamas had physically surrendered its weapons per the disarmament roadmap by the deadline; resolves NO if only a framework agreement on disarmament had been reached, with actual weapons handover not yet completed.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-74d0ba608d",
+      "claim": "Between January 1, 2026 and August 15, 2026, no Boeing Starliner spacecraft carried NASA astronauts to the International Space Station.",
+      "criteria": "Resolves NO if any Boeing Starliner capsule launched with NASA astronauts aboard and docked with the ISS between January 1, 2026 and August 15, 2026. Resolves YES if no such crewed Starliner flight occurred in that window, regardless of whether uncrewed cargo missions were flown or scheduled.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-0b532847d0",
+      "claim": "Of the nine countries that granted formal diplomatic recognition to the State of Palestine for the first time during 2024, at least one of them had earlier voted against the UN General Assembly resolution that suspended Russia from the UN Human Rights Council in April 2022.",
+      "criteria": "Identify the set of countries reported by major news outlets as having recognized the State of Palestine for the first time in 2024 (Armenia, Slovenia, Ireland, Norway, Spain, the Bahamas, Trinidad and Tobago, Jamaica, and Barbados). Separately identify the 24 countries that cast a 'no' vote on UNGA Resolution ES-11/3 (7 April 2022) suspending Russia's UN Human Rights Council membership. The claim is true if and only if at least one country appears on both lists.",
+      "deadline": "2026-01-31",
+      "split": "eval"
+    },
+    {
+      "id": "cr-c4bcdc057c",
+      "claim": "The EU-Mercosur Partnership and Trade Agreement, signed by EU and Mercosur leaders in January 2026, had formally entered into force by mid-August 2026.",
+      "criteria": "Resolves YES if all EU member states and all Mercosur states had completed ratification and the treaty had formally entered into force by the deadline; resolves NO if the agreement was only signed and/or provisionally applying its trade pillar, with full ratification (including EU Parliament consent and member-state ratification) still incomplete.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-0e8efcd5d9",
+      "claim": "Between January 1, 2026 and August 15, 2026, the International Court of Justice did not issue a final judgment on the merits of South Africa's case accusing Israel of genocide in Gaza.",
+      "criteria": "Resolves NO if the ICJ publicly issued a final judgment ruling on the merits of the case 'Application of the Convention on the Prevention and Punishment of the Crime of Genocide in the Gaza Strip (South Africa v. Israel)' at any point between January 1, 2026 and August 15, 2026. Resolves YES if, as of August 15, 2026, only provisional-measures orders and procedural/scheduling orders had been issued, with no merits judgment rendered. Interim orders on provisional measures (e.g., the January 2024 order) do not count as a merits judgment.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-8b76120dda",
+      "claim": "Of the five countries that became full BRICS members on 1 January 2024 (Egypt, Ethiopia, Iran, Saudi Arabia, and the United Arab Emirates), at least four were, at that same time, also member states of OPEC.",
+      "criteria": "Cross-reference the list of countries that formally joined BRICS on 1 January 2024 with the list of OPEC member states as of that date, and count how many of the five appear on both lists. The claim is true only if four or more of the five were OPEC members at that time.",
+      "deadline": "2026-02-01",
+      "split": "eval"
+    },
+    {
+      "id": "cr-a3a58e4cf7",
+      "claim": "The number of victims killed by the gunman in the April 2026 mass shooting and hostage-taking at a Kyiv supermarket, as first reported by major international wire services within roughly a day of the attack, matched exactly the final civilian death toll later confirmed by Kyiv city officials, with no additional deaths added in the days that followed.",
+      "criteria": "Resolves YES if the death-toll figure reported by major outlets within about 24 hours of the April 18, 2026 attack (excluding the perpetrator) was never revised upward by Kyiv officials afterward. Resolves NO if the confirmed toll rose above that initial figure because a hospitalized victim later died.",
+      "deadline": "2026-04-25",
+      "split": "eval"
+    },
+    {
+      "id": "cr-439a0a2d2b",
+      "claim": "Nigerian authorities' initial public explanation for the 2025 detention of 16 military officers -- that it involved only internal 'acts of indiscipline' unrelated to any plot against the government -- was never contradicted by any subsequent criminal charges against those officers or associated individuals.",
+      "criteria": "Resolves YES if, through August 15, 2026, no formal treason- or coup-related charges were filed against any of the detained officers or associated individuals in connection with the 2025 arrests. Resolves NO if Nigerian prosecutors filed such charges.",
+      "deadline": "2026-04-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-3dc0cb69ac",
+      "claim": "A meta-analysis of dozens of studies on ChatGPT's effects on student learning outcomes, published in a Springer Nature journal in mid-2025 and viewed by hundreds of thousands of readers, was formally retracted by that journal before August 15, 2026.",
+      "criteria": "Resolves YES if Humanities and Social Sciences Communications (Springer Nature) issued an official retraction notice for the Wang & Fan ChatGPT meta-analysis on or before August 15, 2026. Resolves NO if the paper remained published without a retraction as of that date.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-4ab0b3e636",
+      "claim": "In a nationwide referendum held on 4 April 2026, a majority of Maldivian voters approved a proposed constitutional amendment to align the timing of presidential and parliamentary elections beginning in 2028.",
+      "criteria": "Resolves YES if official results (Maldives Elections Commission tally, corroborated by news reporting) show more 'Yes' votes than 'No' votes cast on the referendum question. Resolves NO if 'No' votes outnumbered 'Yes' votes.",
+      "deadline": "2026-04-10",
+      "split": "eval"
+    },
+    {
+      "id": "cr-dd84db3d84",
+      "claim": "Reneuco Berhad's appeal against Bursa Malaysia's decision to suspend and delist its shares succeeded, allowing the company to remain listed on the Main Market of Bursa Malaysia past May 2026.",
+      "criteria": "Resolves YES if Bursa Malaysia's appeals process overturned the suspension/delisting notice and Reneuco's shares continued trading after May 2026. Resolves NO if the appeal was dismissed and Reneuco's shares were delisted.",
+      "deadline": "2026-05-12",
+      "split": "eval"
+    },
+    {
+      "id": "cr-26c22e305d",
+      "claim": "Sentoria Group Bhd was delisted from the Main Market of Bursa Malaysia in June 2026 after failing to submit a regularisation plan to address its PN17 financially-distressed status by its extended deadline.",
+      "criteria": "Resolves YES if Sentoria's shares were suspended and subsequently delisted from Bursa Malaysia's Main Market in June 2026 due to failure to submit an acceptable regularisation plan by the extended deadline. Resolves NO if Sentoria submitted a regularisation plan in time and retained its listing.",
+      "deadline": "2026-06-16",
+      "split": "eval"
+    },
+    {
+      "id": "cr-5339402f59",
+      "claim": "In Hungary's April 2026 parliamentary election, the winning opposition party's final seat total in the 199-seat National Assembly met the two-thirds threshold required for a constitutional supermajority (at least 133 seats).",
+      "criteria": "Resolved YES if the official final, fully-counted seat total (including mail-in ballots, votes from overseas missions, and compensation-list seats) for the largest party elected on 12 April 2026 was 133 seats or more out of 199; resolved NO if it fell below 133.",
+      "deadline": "2026-04-20",
+      "split": "eval"
+    },
+    {
+      "id": "cr-b15ee58f80",
+      "claim": "Across the school-funding ballot referenda decided by Wisconsin voters in the April 2026 Spring Election, more than 60% of the individual questions on the ballot were approved by voters.",
+      "criteria": "Resolved YES if the number of Wisconsin school-district referendum questions approved on April 7, 2026, divided by the total number of such questions on the ballot statewide, exceeds 0.60; resolved NO if the passage rate is 0.60 or lower.",
+      "deadline": "2026-04-09",
+      "split": "eval"
+    },
+    {
+      "id": "cr-c93bb4a10b",
+      "claim": "When the U.S. House of Representatives passed the SAVE America Act (the federal voter-citizenship-verification bill) in February 2026, the bill cleared the chamber by a margin of more than 5 votes.",
+      "criteria": "Resolved YES if the difference between 'yea' and 'nay' votes on the House floor vote finally passing the SAVE America Act on February 11, 2026 was greater than 5; resolved NO if the margin was 5 votes or fewer.",
+      "deadline": "2026-02-12",
+      "split": "eval"
+    },
+    {
+      "id": "cr-7d33233fbd",
+      "claim": "In the first round of Costa Rica's February 2026 presidential election, the winning candidate received more than half of all valid votes cast.",
+      "criteria": "Resolved YES if the official first-round vote share of the candidate who won the presidency outright in a single round exceeds 50.0% of valid votes cast; resolved NO if it does not.",
+      "deadline": "2026-02-05",
+      "split": "eval"
+    },
+    {
+      "id": "cr-145f38ae21",
+      "claim": "Apple's revenue for its fiscal 2026 first quarter (the October-December 2025 holiday quarter) exceeded $144 billion.",
+      "criteria": "Resolved YES if the quarterly revenue figure in Apple's official earnings release for the quarter ended in late December 2025 is above $144.0 billion; resolved NO if it is $144.0 billion or below.",
+      "deadline": "2026-01-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-e9fdd8df6b",
+      "claim": "The U.S. Supreme Court had issued a ruling on the legality of tariffs imposed by the Trump administration under the International Emergency Economic Powers Act (IEEPA).",
+      "criteria": "Resolves YES if the Supreme Court had issued a merits decision on IEEPA tariff authority by the deadline; resolves NO if the case was still pending before the Court with only lower-court rulings issued.",
+      "deadline": "2026-03-01",
+      "split": "eval"
+    },
+    {
+      "id": "cr-47cce54163",
+      "claim": "The agreement to divest TikTok's U.S. operations to a new American-led joint venture had closed, transferring operational control, by late January 2026.",
+      "criteria": "Resolves YES if the transaction had legally closed (ownership/control transferred to the new joint venture) by the deadline; resolves NO if the deal had only been agreed or signed but not yet closed.",
+      "deadline": "2026-01-25",
+      "split": "eval"
+    },
+    {
+      "id": "cr-310de2b893",
+      "claim": "The U.S. Court of Appeals for the Second Circuit had issued its decision on Sean Combs's appeal challenging his 50-month federal prison sentence.",
+      "criteria": "Resolves YES if the Second Circuit panel had issued a ruling (affirming, vacating, or remanding the sentence) by the deadline; resolves NO if the panel had heard oral argument but not yet ruled.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-07509f2be6",
+      "claim": "NASA's Artemis II mission, including the crew's splashdown return to Earth after their lunar flyby, had been completed by mid-April 2026.",
+      "criteria": "Resolves YES if the Artemis II crew had launched, completed the lunar flyby, and safely splashed down by the deadline; resolves NO if the mission had not yet launched or the crew had not yet returned by the deadline.",
+      "deadline": "2026-04-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-fec10a6ed7",
+      "claim": "The labor contract between Boeing and the SPEEA-represented engineers and technicians at the former Spirit AeroSystems Wichita plant had been ratified by union members.",
+      "criteria": "Resolves YES if union members had voted to formally ratify the contract by the deadline; resolves NO if only a tentative agreement between negotiators existed without a completed ratification vote.",
+      "deadline": "2026-02-05",
+      "split": "eval"
+    },
+    {
+      "id": "cr-597b92db2c",
+      "claim": "Between January 1, 2026 and August 15, 2026, North Korea did not conduct a nuclear weapons test.",
+      "criteria": "Resolves NO if North Korea detonated a nuclear device (an actual nuclear test, as distinct from ballistic missile or rocket-launcher tests) at any point between January 1, 2026 and August 15, 2026. Resolves YES if no nuclear detonation test occurred in that window, even if missile, rocket, or other conventional weapons tests took place.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-99a636876e",
+      "claim": "Between January 1, 2026 and August 15, 2026, NATO did not extend a formal invitation for Ukraine to join the alliance.",
+      "criteria": "Resolves NO if NATO's member states formally agreed to invite Ukraine to begin accession to the alliance at any point between January 1, 2026 and August 15, 2026. Resolves YES if, as of August 15, 2026, NATO had only reaffirmed Ukraine's 'irreversible path' to membership without extending an actual formal invitation, consistent with the requirement of unanimous consent from all 32 member states.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-8c7d396e6a",
+      "claim": "Between January 1, 2026 and August 15, 2026, OpenAI did not complete an initial public offering of its stock on a public exchange.",
+      "criteria": "Resolves NO if OpenAI's shares began trading on a public stock exchange following a completed IPO at any point between January 1, 2026 and August 15, 2026. Resolves YES if, as of August 15, 2026, OpenAI remained a privately held company, regardless of confidential S-1 filings, secondary share sales, or reported IPO preparations.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-e46eda20b5",
+      "claim": "Between January 1, 2026 and August 15, 2026, Peru's Congress did not remove a sitting president from office.",
+      "criteria": "Resolves NO if the Peruvian Congress voted to remove/impeach a sitting president from office at any point between January 1, 2026 and August 15, 2026. Resolves YES if no sitting president was removed by Congress in that window.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-4371f7b617",
+      "claim": "Between January 1, 2026 and August 15, 2026, the World Health Organization did not declare any new Public Health Emergency of International Concern.",
+      "criteria": "Resolves NO if the WHO Director-General declared a new Public Health Emergency of International Concern (PHEIC) at any point between January 1, 2026 and August 15, 2026. Resolves YES if no new PHEIC was declared in that window.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-64319a9292",
+      "claim": "Between January 1, 2026 and August 15, 2026, the United States federal government did not experience a shutdown.",
+      "criteria": "Resolves NO if any federal government funding lapse causing a shutdown of some federal departments or agencies occurred at any point between January 1, 2026 and August 15, 2026. Resolves YES if no shutdown occurred in that window.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-a1034fe924",
+      "claim": "The person elected by Vietnam's National Assembly as Prime Minister for the 2026-2031 term had previously served as Governor of the State Bank of Vietnam, the country's central bank.",
+      "criteria": "Identify who was elected Vietnam's Prime Minister for the 2026-2031 term, and check that individual's biography for prior service as Governor of the State Bank of Vietnam. The claim is true only if the same person held both positions.",
+      "deadline": "2026-04-30",
+      "split": "eval"
+    },
+    {
+      "id": "cr-52c1d8853d",
+      "claim": "Sanae Takaichi was confirmed as Japan's Prime Minister by the National Diet before the United Arab Emirates publicly announced its withdrawal from OPEC.",
+      "criteria": "Compare the date Sanae Takaichi was confirmed as Japan's prime minister by the National Diet with the date the United Arab Emirates announced it was leaving OPEC. The claim is true only if the Diet confirmation date is earlier.",
+      "deadline": "2026-05-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-28a328acec",
+      "claim": "Between January 1, 2026 and August 15, 2026, NASA did not land astronauts on the surface of the Moon.",
+      "criteria": "Resolves NO if a NASA-sponsored crewed mission landed astronauts on the lunar surface at any point between January 1, 2026 and August 15, 2026. Resolves YES if no such crewed lunar landing occurred in that window, regardless of uncrewed missions, orbital missions (e.g., Artemis II), or announced future landing dates.",
+      "deadline": "2026-08-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-8c53d3a504",
+      "claim": "During calendar year 2025, the European Central Bank cut its key deposit facility interest rate on at least five separate occasions.",
+      "criteria": "Count the number of ECB Governing Council monetary policy meetings during January-December 2025 at which the deposit facility rate was reduced, using ECB press releases and financial press coverage. The claim is true only if five or more distinct rate cuts occurred within 2025.",
+      "deadline": "2026-01-15",
+      "split": "eval"
+    },
+    {
+      "id": "cr-69c09c497e",
+      "claim": "Finland's formal accession to NATO was completed before the Hungarian National Assembly cast its ratification vote approving Sweden's NATO membership.",
+      "criteria": "Compare the official date Finland deposited its instrument of accession to become a NATO member with the date Hungary's parliament voted to ratify Sweden's NATO accession protocol. The claim is true only if Finland's accession date is earlier.",
+      "deadline": "2026-03-01",
+      "split": "eval"
+    },
+    {
+      "id": "cr-98925e16de",
+      "claim": "At some point during calendar year 2025, at least four of the seven G7 member countries (Canada, France, Germany, Italy, Japan, the United Kingdom, and the United States) were led by a woman serving as head of government.",
+      "criteria": "For each of the seven G7 countries, identify who held the position of head of government (Prime Minister, Chancellor, or President as applicable) at any point during 2025, based on official government records and news reporting. The claim is true only if four or more of these seven countries had a female head of government at some point in the year.",
+      "deadline": "2026-01-15",
+      "split": "eval"
+    }
+  ]
+}

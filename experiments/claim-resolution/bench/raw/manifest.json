@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-08-19T14:12:46.150Z",
+  "filter": "finalized AND (>=2 distinct effective answers OR arbitration requested)",
+  "deployments": {
+    "eth-2.0": {
+      "questions": 702,
+      "candidates": 71,
+      "exported": 71,
+      "unfinalized": 0,
+      "snapshotBlock": 25789621
+    },
+    "eth-3.0": {
+      "questions": 418,
+      "candidates": 58,
+      "exported": 54,
+      "unfinalized": 4,
+      "snapshotBlock": 25789528
+    },
+    "eth-3.2": {
+      "questions": 0,
+      "candidates": 0,
+      "exported": 0,
+      "unfinalized": 0,
+      "snapshotBlock": 25789507
+    },
+    "gno-2.1": {
+      "questions": 23949,
+      "candidates": 1129,
+      "exported": 1129,
+      "unfinalized": 0,
+      "snapshotBlock": 47806314
+    },
+    "gno-3.0": {
+      "questions": 8153,
+      "candidates": 257,
+      "exported": 237,
+      "unfinalized": 20,
+      "snapshotBlock": 47806367
+    },
+    "gno-3.2": {
+      "questions": 3,
+      "candidates": 0,
+      "exported": 0,
+      "unfinalized": 0,
+      "snapshotBlock": 47806504
+    }
+  }
+}

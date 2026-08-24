@@ -1,0 +1,2044 @@
+{
+  "summary": {
+    "export_file": "bench/raw/dispute-export.jsonl",
+    "lines_read": 1491,
+    "admitted": 1120,
+    "excluded": 157,
+    "needs_review": 213,
+    "malformed": 1,
+    "by_dispute_class": {
+      "bonded-only": 1110,
+      "arbitrated": 10
+    },
+    "by_resolution_kind": {
+      "invalid": 74,
+      "answer": 1038,
+      "too_soon": 8
+    },
+    "distinct_answer_counts": {
+      "1": 3,
+      "2": 1090,
+      "3": 26,
+      "4": 1
+    },
+    "admitted_without_criteria": 1120
+  },
+  "excluded": [
+    {
+      "case_id": "0x260149d3ec8af221fd8c84e58dedab9e9df96c7f08e6c3e560982f22f061d51c",
+      "reason": "topic:price",
+      "matched": "ath ",
+      "title": "Will there be a day with at least 1000 reported Corona death in the US in the first 14 days of July?"
+    },
+    {
+      "case_id": "0xa4519435cc7221745d9d28446d203c9f4ffa6f771960dcd077d3112acbb0747f",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "nothingtoseehere"
+    },
+    {
+      "case_id": "0xe816c94db21af295e1c38a9b8175590ac0b88b42d3a76af7c1ff4eaa8ea69305",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "hello-world"
+    },
+    {
+      "case_id": "0x71a012d42f59f3b169e521375fdd61ba224a1b3f04efebb3fe6be6a18f724bd3",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "QmV7WfE1vxPdwNYoom57zTRBVB38hWRPCZJgXEgD2zxK65"
+    },
+    {
+      "case_id": "0xab84aea2c330f8c4eeddde515859305141e523f52617c551984bd639ba8b26a2",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x10a88a873f693c5388ade1286255871745cb6b66c66b4149f154676294d73100"
+    },
+    {
+      "case_id": "0xe4030d40335b427f23a99f82ca939d4a60d02a116989289428aabb0400c51ffa",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "xdvf"
+    },
+    {
+      "case_id": "0xbca3d232c176a2f39b8653b61830203279cf59738ad58fea95ea8cecf7deecad",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "safekeeping"
+    },
+    {
+      "case_id": "0xe301edcfe72538e3d069ceb324ecea0806db7dea2683ed641b6e08e71a81c19f",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "HELLO"
+    },
+    {
+      "case_id": "0x0b39ce2294d34ca4dfc0b6f325eda4b8bb8e8f9d30d5dcecc0096b5da6933e00",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "hello-world"
+    },
+    {
+      "case_id": "0x59c4a7b7abe50c6a63a7de0dd30baa59084912765ed78006121a2440982ac497",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "03c8383ee60f92a3408770e9ea37d350f1db88cb36c78c2f1bbd53e51c4fa93a"
+    },
+    {
+      "case_id": "0x53fabb632d6c732ea6320359c64c2abfb77e10b88c00c5bc559b0ee27ec028f1",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "QmaT7phQunNejSqRaE7z7E9SaeUzefbpgCJTg6sPYSW5td"
+    },
+    {
+      "case_id": "0x7282d9aabbde3bf9c49179ccbde501a7abba59c10d57169bc74224a0f8130b4f",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "enable-module-0x1517e2b56cdbe91a7e3b571fed7cebb8f7c067fa"
+    },
+    {
+      "case_id": "0x6fdb6a9087194ae1df70dd073b983b9adea8fd1d23ab7770e40b555480e61edd",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "fucknorthkorea"
+    },
+    {
+      "case_id": "0x787c3e9ccfd3635fc3325825d177476d4ce68b28e8d6967336a55d1f33648680",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "enable-module-0xf56fc2be4a88188ecc6370096b8fe20db2ef8fd7"
+    },
+    {
+      "case_id": "0xb6c7aec88f8543103c080b78d846049255e843827dada16d866d8c567c57ed35",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "i377_gov_bypass_test"
+    },
+    {
+      "case_id": "0xc9efccb7e27c20594bc4e23a42c5ad93221316a9c3bbb6966cc244fd4209cb10",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "codex-p5-all-assets-20260602"
+    },
+    {
+      "case_id": "0xd3b28e35b312db1e3d43f5ac85d88306a00de79f088eb924188e9ab9dc2a4e21",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "enable-module-0xcb9254d30eb22317719d2393dc4402a61781e482"
+    },
+    {
+      "case_id": "0xb34c4fd46381d15aaf9de7b79c6c11f96fe9b3c1ecaed7509b26fee9b32c93ec",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "os"
+    },
+    {
+      "case_id": "0x6099b1967e5ffb1f9fe1587f1118d3cedf70989580f0ae67af0db1b43a99ed14",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "opium-keeper"
+    },
+    {
+      "case_id": "0x6f69ce67dde2364b3f298241f1b24b149b3f774a433dd56c292d1be0c818ec87",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x36fa4840f20afbbf85b9a7e4a518b0598e76dd77e5d3f58cb12faf657a18afb7"
+    },
+    {
+      "case_id": "0x8bd76e1ddea2e69e550e2e4185fdb1c98b1c836c52001cd7aa8f9738da818cce",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "QmXMezg1aA4Khyz6sb8b5SR6x4DUx7PHh5kKTuctv89nBC"
+    },
+    {
+      "case_id": "0x3ea27273f7df92e1e99cce23164f7080325db689572f5dde76459fc4251c47dc",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "QmWkvsf2AB2Y2pNq3GLkQQGsaUs5P2BEjfGZCdk754PfYZ"
+    },
+    {
+      "case_id": "0xf4059c193337205104ef19c72473c3c38620a0421b313248266096a810098806",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0xcf354432cda3db9204df1286b0695d9aad3d1c13604e14daed38cc76570a5b31"
+    },
+    {
+      "case_id": "0x3e5e03c8b53c5ddea0dd20ed7521d4a7d588b960cf2d9daed0f9c27e232ddde3",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x5a18cdcbf0d1c3ea8d90ed3dc9eaa3973c59ece488666e2228d15ea4be73b616"
+    },
+    {
+      "case_id": "0xc2c6989415e3c4d0540d00823fc530875d2a99d1cc293ded35062e780ae3e7d5",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x5e7e64915124ad027e89ba2ae4644ff000198d157e8e86ebef80481d669a9a91"
+    },
+    {
+      "case_id": "0x660829d111f7d62bea4a3045535499a8446cbcea7e8cfaeef479d59d5990f138",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0xc11492547c530ffa65c990cb8f6719175370d19ee9cc2348f595410d3f80642d"
+    },
+    {
+      "case_id": "0x063e9821ada82fdf0d09126ca04a9ca7706370f948d7399e70e3ce0bdda984ea",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x4f632a4c2f6709f6e6957941eff92ab727499c4f0357f4e351b964bdabc7962d"
+    },
+    {
+      "case_id": "0xc782d0bf4169a14912002b26830dfee627fa0895acb7f68fa3acdd8a708be62b",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x281a361897d5d37ba6f00374aecdf4edb4794e170ad4800b74491a6695673e04"
+    },
+    {
+      "case_id": "0x8afd3900f9e4567abcb14ca309c26f59de6afed77f567f53884f70996be7f3a0",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x7bff0d4d7b5f48b0a71bb34a54f79d6de893a3263201b282c62766a261c85d9c"
+    },
+    {
+      "case_id": "0xe9fbfdea6ba06aba60d46c0866daa97bcb84b7456c154a6feebc589b572dae0b",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0xa54ccf46e0886fdde39aeda3113366586c936dcb158f2472a3ef09cb94afc33f"
+    },
+    {
+      "case_id": "0x98d47adbdcad6f6edccd4d85e61d84dc5402d3b9a7eaabe6a5a161efa870ba3d",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x41963dbcba9f4f120fe8af7ce72f214a27c151e7d464c2c5457912ff3cb8e94c"
+    },
+    {
+      "case_id": "0xece86cb56745425a4b5e4eb45355500051819f113d354cdfa4df91f6b96b67f5",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "QmNQ9iXmTQaTH6LNfwGkLH9HfiHA6Cz8nyY9LhSJ4uD4Y4"
+    },
+    {
+      "case_id": "0x7f8c17d387863ae4d813a0aa4f50bd8221c6c9a7bfa522a17bc66159837f6d4c",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "QmNyEZCy9g1yVPmyoRndHBY5TGW87cPweLxc5RoBKcVUqf"
+    },
+    {
+      "case_id": "0x925ed77ce2bc2a72e9e14219a07f40dea59dbcdd5c0ec821dff05d438dad2b27",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x5e7e64915124ad027e89ba2ae4644ff000198d157e8e86ebef80481d669a9a92"
+    },
+    {
+      "case_id": "0x6e10c00932d94e6df26e58af4c2a228021b7aee5431d9a4cec0ca631116a0397",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "QmWuHy1DnV2wJ44v4SPmwM1B4fSvPpYLrX6gboRWofLE7m"
+    },
+    {
+      "case_id": "0x6f4f42ad8c4e1922a41aa34dd353776b7ac4746d2f9fcd912ea954fd350cbdf0",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0xf8968c4aca45c3be883e8a627e4050d9a3c2d9edc9b9d28e2595a5a1aba931d0"
+    },
+    {
+      "case_id": "0x2f3d6f296a26e887d21297f5b731156d0ab61b39e914266e4e1af5025fb15c62",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x2443c995f28cd6ffe479aa302f90c036791d114adf40b86eca13f22854667ee9"
+    },
+    {
+      "case_id": "0x97cde08635d6354ea37bb1d808461f320aa956536086e696aa75e0970f84e282",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x31a87a876f693c2088ade1286255871745cb6b66c66b4149f154676294d73100"
+    },
+    {
+      "case_id": "0xd71abb70b7f085cddaf0f236f00b695d3ba368270c27624c306fb3b506f64626",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0xe5b987e09c6d509657d44122a9f6e2275e144b2b77a61bd7d6302c11e8274120"
+    },
+    {
+      "case_id": "0x306592f70c0599ffacd5ef9a6d0f4b2fb9397df10a68ac1f06bef2b25cc8bcc2",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "dead"
+    },
+    {
+      "case_id": "0xbef8f583dd3ca1431a15bbaf4bc1600445434d32db4859ee49b44f0cb427f03a",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "dead"
+    },
+    {
+      "case_id": "0xe93e9305ae5eca9f3b7b7867e8c39e9c8f1b8b810636a9030618fa3484f7d16c",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "dead"
+    },
+    {
+      "case_id": "0x5c9b3348e470e9bd41339bd21726475794b1a215ccf496a473a64a5e69213340",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "dead"
+    },
+    {
+      "case_id": "0xb303716637ace441eb88f1861949c7956ec14ce1ae8ba6df89c1e7849074c6db",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0xfcf822a3f2859c0a5578f816bdec667234d9256ae77170ed4d6a23056cd884ff"
+    },
+    {
+      "case_id": "0x5a7ad13e3294849f4dedd3dc69da336ba30c3ae61fa067ae4f3a7f7dda04845f",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x17d9fa50f753852e429908f7574d443a48ebefc3784a7f4445f30a4119e050fa"
+    },
+    {
+      "case_id": "0xb481f36e77bab5b1319cdc1c43e021eb5f5b2a47f483a18a7ef1f11e3179beb1",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x5ad099c1b1632f979bb51672350303d84104aa3e64a04deefebf85c336115d0a"
+    },
+    {
+      "case_id": "0x9445ee273576d2569abe07dabc6afb6781365627b44733b8f81c14bd129d839f",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "QmRntRUTZqDWCQkKzzvyAwQvbP4YGZiFJh8d8jrtUpRkRP"
+    },
+    {
+      "case_id": "0x474abf6f44ebc04b90a9a900f149e040ceba91c05fa10a2abc6898e654c4be95",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0xb90a94fdb3494b2ed84154811848333d858e8b47cc36d4fad09df2e75086a3ea"
+    },
+    {
+      "case_id": "0x73b6e8b4d0f066e7b2f32e5b30b1ede73c8956a3ad02c17c0ece6e99a86a27e8",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "QmRU7hhfC6eiV5beQsfGG1krE1LKWqRjqvWganWFsLtVNt"
+    },
+    {
+      "case_id": "0x98c9d4834beca28bd809e32afa67212786b3cf72d85d2d03fd17c8197c7c4eb8",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x5256a3ade0ffdebc7dfc7d119aa44dfa4db5c3d1aca932409f8ea048766ae488"
+    },
+    {
+      "case_id": "0x2b2595786c74bd2e82555500fea837219560a16f3341993b66c65a062235c13f",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "QmdwhaBGNPGSPgMFa6mbhhodsvN2mdHwYpwSzq3Cavg4P6"
+    },
+    {
+      "case_id": "0xfc045a4fa5f852ce3450d40c8ba73aa2871f54b9634983f14aec63fabead6575",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x26488bafc190aca4cf941bbd56fce2945c8de35f8f2a8ee10ed4a600579cdd8f"
+    },
+    {
+      "case_id": "0x9b0e6d9d95282c50fd95b0d9ddf2f5c9273155d60041a20e166085d5a334aa3b",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x4195b95089726f57caab2727aa16075794d9f817007ffac6ba40cabadaadc956"
+    },
+    {
+      "case_id": "0xbe2a3a7ca900921080798692bde93397ad1bd3c6ebc24c5de822efb639ca35c1",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x25b4af4eff06f4744ad95916cc44f4ede048ddfced350d624b75d7f79fab94e3"
+    },
+    {
+      "case_id": "0xce3bbe54c000e0d51f340a461a2c567c939f8c363148e918ef03401dfd08c991",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "QmQpH7v98KGRptyX5FwSm26BzECFtcrrzqF8X7ukawQFkK"
+    },
+    {
+      "case_id": "0x28851ef210ad85a14cdbda3f0c9a1fd35b1a4fb82f845bebdc7c354df0446432",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x09cb43353c0ece5544919bf70a9810908098c728f27f9ca3e211871f7ad6bf1c"
+    },
+    {
+      "case_id": "0x40b4409075aee67081c6af808a6ae4204e79741cf7039273365710d0760d5d8a",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0xfc6919616f4b287944bb26ea97a689edf024f2fb8bd5465e676e0ce00f5918d8"
+    },
+    {
+      "case_id": "0x30e0b051d8d0d187e94b23a4c360a2a3cdc1f37d9826e1030c86b259ccd55496",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "reality-recover-fe94655f"
+    },
+    {
+      "case_id": "0x8eba545fa457fc4f20d284aa65a25524f1f79b8c550a9f1058ceca1a5c4d5d00",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "reality-recover-f27AC88a"
+    },
+    {
+      "case_id": "0x2ae27297f0c425221341a72adda3f567a14f826d63771b2d84071eec8ae650d9",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x9e92693a564510f761ed01b6cd8672989183fbdab40c315a397805edd2fa1321"
+    },
+    {
+      "case_id": "0xf86c8c4f44c5f34aed87915a3f01181912887b77f6c54a61fe260465d00ad7c6",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "dto"
+    },
+    {
+      "case_id": "0x89f0d707015ece401916ce453d19e1841de0d80701ae24d9622d87446135f031",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "MIGRATION"
+    },
+    {
+      "case_id": "0xa8d8230437f4148cf3224817777070cb0e29083e92f9c0feac1409b98a479563",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "recovery"
+    },
+    {
+      "case_id": "0xf392972fc938066fe1942bc599c0f4b8866d68e50087f61fe3d1dc80349f5842",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "rb9-eth-6c853005B4-01"
+    },
+    {
+      "case_id": "0x1a6da2dda04c30bc34dc39440c5d6e609ffc25091df46b6953a178c364a98f3e",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x80228c88532abd9f4f2ce27fdce1bdfa21839db277033c27ca46a595a79cfa20"
+    },
+    {
+      "case_id": "0x7abee51e437664d2ada3521ce5404ff6049fc2f4608ec79b390a5e85c3073315",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "drain"
+    },
+    {
+      "case_id": "0x944661c51cd61eb4e4309ca0f2d93f3ecff6c593657ae68fd362a89c6591d106",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0xa5377c64242a3d3da8eefe354bed0929484dd600852b8a9fb8736fca16c5b12e"
+    },
+    {
+      "case_id": "0x5adacb2c8fd789d6bdc7e60094501965b56359208f64e523061c074ddbb79dc0",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0xf01b9667c0dfc908fb6af43d23b71bd4aa829c638345f22634712b64af4f3ab5"
+    },
+    {
+      "case_id": "0xba5941c55705440726311f65e3d580dde0608d34aac17a903a8327d407e3049f",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x11ee8d8605c843e7c7302633fd9b50e91a2eeb5de9798d7418f516b426cc6318"
+    },
+    {
+      "case_id": "0x5a5bb6a90b51da0b3b6d3c8b655bc083d9591de9c446a32e79995bb8e7e9d247",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x15f7ebdd55a80ba3257aed362656202112e9d615aa5beedf07906ce0436198fd"
+    },
+    {
+      "case_id": "0xbf6d4e50a9142bf3466c7ec687f1ddb403994a28bfe78d457301a5230d07c281",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "QmQyv5Ykh8hmSeDg21r8hyZZmV4YZYc5eEw2HbReza7geW"
+    },
+    {
+      "case_id": "0x33ad18798c8b4d2b47248f3da5a57a0440871a86ead53a0866058549271c4ec9",
+      "reason": "topic:sports",
+      "matched": "grand prix",
+      "title": "Will Lando Norris close the title gap on Max Verstappen at the Italian Grand Prix?"
+    },
+    {
+      "case_id": "0xa4d67d552ab66333a2b2b4614a6f8d205da383931e3ea81c42278950de977cce",
+      "reason": "topic:sports",
+      "matched": "rugby",
+      "title": "Will New Zealand win another rugby match against Australia on 29 September 2024?"
+    },
+    {
+      "case_id": "0x3c4b9d82a304777e4dbae6ab68679191180e1b4758a09b1d9542f321041fe549",
+      "reason": "topic:sports",
+      "matched": "la liga",
+      "title": "Will Barcelona maintain its winning streak in La Liga till 2 October 2024?"
+    },
+    {
+      "case_id": "0x2bf98d4f9a72d098d8e13fe067170a95199f9de8dbb88be075c821f271b2fcfc",
+      "reason": "topic:sports",
+      "matched": "bundesliga",
+      "title": "Will Harry Kane score more than 50 goals in Bundesliga by 30 September 2024?"
+    },
+    {
+      "case_id": "0x937e9447607f67df748125b290619ee339036d6832e489bff0282593dae0a472",
+      "reason": "topic:sports",
+      "matched": "premier league",
+      "title": "Will Newcastle United win against Manchester City in the Premier League match on 5 October 2024?"
+    },
+    {
+      "case_id": "0xaa5852170ba5d3f2b98b591f22e0bbafee7bf5117a5242abe40d445c5239be2a",
+      "reason": "topic:price",
+      "matched": "ath ",
+      "title": "Will the aftermath of Hurricane Helene in North Carolina be declared a state of emergency by October 10, 2024?"
+    },
+    {
+      "case_id": "0x39d75fd6567481736bfa0ef4dd6511a8bb41086d6e4896cc73eca9cd3d78fe3b",
+      "reason": "topic:sports",
+      "matched": "premier league",
+      "title": "Will the Premier League game between Ipswich Town and Aston Villa result in a draw on 8 October 2024?"
+    },
+    {
+      "case_id": "0x08627cacfd5336627ff9092d34a772cd0a1f6b29322a410934bf5f32155d31ab",
+      "reason": "topic:sports",
+      "matched": "wta ",
+      "title": "Will Coco Gauff win another WTA title by 14 October 2024?"
+    },
+    {
+      "case_id": "0xb2f1a794449e565d9a29c6d37eb29ea3ac2bf7cffe2b8112bb5fc858a2877c73",
+      "reason": "topic:sports",
+      "matched": "premier league",
+      "title": "Will Arsenal win their next Premier League match against Southampton on 14 October 2024?"
+    },
+    {
+      "case_id": "0x31c16666a9a5482f71b02b9ebbe8cfbb38eb1631e3de55488db0dca283d3a55a",
+      "reason": "topic:sports",
+      "matched": "formula 1",
+      "title": "Will Max Verstappen win the FORMULA 1 LENOVO GRANDE PRÊMIO DE SÃO PAULO 2024 full length race?"
+    },
+    {
+      "case_id": "0xaaca69432c6ee9f11e9d8ca244233854df25632844a819dd3a64d5e56cd7b3df",
+      "reason": "topic:price",
+      "matched": "exceed $",
+      "title": "Will Moana 2's opening weekend domestic box office gross exceed $100 million?"
+    },
+    {
+      "case_id": "0xfd9c313aca5b704d6d4920ab7dd4c6d1ebcdfa0242df8dc517a050643419285b",
+      "reason": "topic:sports",
+      "matched": "grand prix",
+      "title": "Will George Russell win the FORMULA 1 HEINEKEN SILVER LAS VEGAS GRAND PRIX 2024?"
+    },
+    {
+      "case_id": "0xf270264620e4ffbee3ddd3c61e9c9cdf55ba3d9431c82a940180520ac74f1a27",
+      "reason": "topic:sports",
+      "matched": "grand prix",
+      "title": "Will a McLaren driver win the Abu Dhabi Grand Prix on December 10, 2024?"
+    },
+    {
+      "case_id": "0x0bd384a8ae5de982d731d1eb393dc2cbcf2bb55091d6e13d61ce472cbfc7f06a",
+      "reason": "topic:price",
+      "matched": "exceed $",
+      "title": "Will Elon Musk's net worth exceed $500 billion by January 25, 2025?"
+    },
+    {
+      "case_id": "0x1d9a9d71f3e8de2aca3eb0decbb0aee76d09669f8c9f97306cb80cb6bcc72eda",
+      "reason": "topic:sports",
+      "matched": "serie a",
+      "title": "Will Juventus beat Inter Milan (Serie A Derby D'Italia match February 16, 2025)?"
+    },
+    {
+      "case_id": "0x553a5e49ecfa6aba73768f4c54467f9e99160a9dc2ac8d1b240618fd454e8889",
+      "reason": "topic:sports",
+      "matched": "super bowl",
+      "title": "Will the Philadelphia Eagles win Super Bowl LIX?"
+    },
+    {
+      "case_id": "0x495fbecbfcdbbece62b9d9a7e987e02f80e96b123acd8187153234c9d7d22667",
+      "reason": "topic:price",
+      "matched": "ath ",
+      "title": "Will the Santa Fe County Sheriff's Office announce an official cause of death for Gene Hackman and Betsy Arakawa by March 8, 2025?"
+    },
+    {
+      "case_id": "0x5bd2eca5b4986166c0805ca78e19e78d952418433207e95bb7e0af1efb95bfcb",
+      "reason": "topic:price",
+      "matched": "ath ",
+      "title": "Will the United States Department of Defense confirm the death of another high-ranking ISIS leader in Iraq by March 21, 2025?"
+    },
+    {
+      "case_id": "0x727200dbdef623e4ef40eb5f4f673bbd81d6e784b2f949997b754c662a101517",
+      "reason": "topic:price",
+      "matched": "price of",
+      "title": "Will the US Department of Commerce officially report an increase in the average price of imported vehicles by 5% or more as a result of the new tariffs by April 3, 2025?"
+    },
+    {
+      "case_id": "0x27ce30191929ac08d00152e32ae5166f30a9a22b1578d364ee107e2871877aa8",
+      "reason": "topic:sports",
+      "matched": "nfl ",
+      "title": "Will the NFL team owners publicly approve the NFL's 10% equity stake in ESPN as part of the new media rights deal before or on August 11, 2025?"
+    },
+    {
+      "case_id": "0x925a4dba763bc2bbffba1e4cbe2cd6928bf9889814937f6315aa7d15052e2453",
+      "reason": "topic:sports",
+      "matched": "mlb ",
+      "title": "Will Jen Pawol umpire at least one additional Major League Baseball regular season game before or on August 15, 2025, as publicly confirmed by MLB or official box scores?"
+    },
+    {
+      "case_id": "0x9c5dd846262589a94893f5114b3d020b648c0577d344186f4a8d71c02c861670",
+      "reason": "topic:sports",
+      "matched": "premier league",
+      "title": "Will any Premier League club publicly announce the signing of a player for a transfer fee of at least £110 million before or on August 27, 2025?"
+    },
+    {
+      "case_id": "0x66b9fc3f803085310cc17266200945c35ad73833a5f34f932d08a744d54c1da2",
+      "reason": "topic:sports",
+      "matched": " v. ",
+      "title": "Will any U.S. federal court publicly announce a ruling on the merits (not a dismissal or procedural decision) in the Minnesota v. TikTok lawsuit regarding the app's alleged addictive nature before or on August 27, 2025?"
+    },
+    {
+      "case_id": "0xa3d62e9a21888465849c4e1aa547eeb1eba12c045ec13194e689e73c93d13766",
+      "reason": "topic:price",
+      "matched": "price of",
+      "title": "Will the price of Bitcoin close above $125,000 on any day before or on September 4, 2025, as reported by CoinMarketCap or CoinGecko?"
+    },
+    {
+      "case_id": "0x068ea3d96de47539bc8688354c74a2931b0ece9a1f7b9d6d4b0e60b9400495df",
+      "reason": "topic:price",
+      "matched": "closing price",
+      "title": "Will Metaplanet's stock price (Tokyo Stock Exchange: 3350) close at least 5% higher on September 10, 2025, compared to its closing price on September 2, 2025?"
+    },
+    {
+      "case_id": "0x03b51be34777afdee93d280f95c34305fdbfe3aaaa70de2c4eb512060e0d7a29",
+      "reason": "topic:price",
+      "matched": "reach $",
+      "title": "Will GOOG reach $260 this week?"
+    },
+    {
+      "case_id": "0x666782cbbd0d6a26b4baddeef0d5df45f2f5ee1d6c65994deb091dc4d377f2fc",
+      "reason": "topic:price",
+      "matched": "price of",
+      "title": "Will the price of Bitcoin reach $150 by December 31, 2025?"
+    },
+    {
+      "case_id": "0x892ec67d9a87c669da4829e17d0a2c8acf4f7917e9fed94bb4cbab670b1c1362",
+      "reason": "topic:price",
+      "matched": "price of",
+      "title": "Will the BTC-USD trading pair on Coinbase reach a price of $118,000 or higher at any time between 2025-09-01 00:00:00 UTC and 2025-09-30 23:59:59 UTC?"
+    },
+    {
+      "case_id": "0xf1aac75d83a234ca803e015ffe0c2d7a3607a04755a90bd4127941d3cff13f0b",
+      "reason": "topic:price",
+      "matched": "reach $",
+      "title": "Will the Federal Reserve decrease interest rates by at least 25 bps, Bitcoin reach $150k, and Ethereum reach $5000 during September 2025 ET?"
+    },
+    {
+      "case_id": "0x72ce83360afcc8a9ddade1f28da3364df943c2f6bf6f6b39b682a2b402696e22",
+      "reason": "topic:sports",
+      "matched": "nfl ",
+      "title": "Will Christian McCaffrey be reported by a reliable source to have sustained a confirmed Achilles tendon tear or rupture in either leg between September 7, 2025, and February 8, 2026, during the 49ers’ 2025 NFL regular season and postseason?"
+    },
+    {
+      "case_id": "0x63f50db552df6de0715357cfd6ecc5c755eb831c434048670f983bbf4989da95",
+      "reason": "topic:sports",
+      "matched": "premier league",
+      "title": "Will Liverpool finish first in the official Premier League table for the 2025–26 season after the final match round on Sunday, 24 May 2026?"
+    },
+    {
+      "case_id": "0xd0ba5bba5b89c708d0c1580ceee4ff15d7d0cc1e639e5f7e3c6b007e79088c3b",
+      "reason": "topic:price",
+      "matched": "ath ",
+      "title": "Will Ayatollah Seyed Mojtaba Khamenei be publicly inaugurated or take the oath of office as Supreme Leader of Iran on or before March 14, 2026, as reported by Iranian state media or other major international news sources?"
+    },
+    {
+      "case_id": "0xc7f3d03b1a0c982628a643766eade9ec0e058da7dd3d894c67df63389ad8f429",
+      "reason": "topic:price",
+      "matched": "price of",
+      "title": "Will TrendForce publicly report, on or before March 26, 2026, that the average contract price of DRAM has at least doubled compared to the average price in Q1 2026, as confirmed by an official TrendForce report or major news outlet?"
+    },
+    {
+      "case_id": "0xab14e8c4277af86a88bb84dd8915e3842741911bd25570272923cae08a2c3b73",
+      "reason": "topic:sports",
+      "matched": " v. ",
+      "title": "Will any U.S. city publicly announce, on or before March 26, 2026, the revision or repeal of a local ordinance restricting the location of public demonstrations in direct response to the Supreme Court's March 20, 2024, ruling in Olivier v. City of Brandon, as confirmed by an official city statement or major news outlet?"
+    },
+    {
+      "case_id": "0x54cae7b36a5ecfefe942a1ae11b4dc99d28bc68218929cfe61a61a1ae85862f4",
+      "reason": "topic:sports",
+      "matched": "nfl ",
+      "title": "Will the NFL publicly announce, on or before March 31, 2026, the use of replacement referees for any regular season or playoff game due to an ongoing labor dispute with the NFL Referees Association, as confirmed by an official NFL statement or major news outlet?"
+    },
+    {
+      "case_id": "0x5bd32ebc423ac4674807ed7e5a09cc47092ba1c074fa30bf7c7e42a58b3029ce",
+      "reason": "topic:price",
+      "matched": "exceed $",
+      "title": "Will the national average gas price in the United States, as reported by AAA, reach or exceed $5.00 per gallon at any point on or before April 8, 2026?"
+    },
+    {
+      "case_id": "0x4ee37522a49b2cc1f1ede3191e446d85f351bb6dcea343704f8a52617a8ae08b",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "nerosiss"
+    },
+    {
+      "case_id": "0x1f12573248f14d55e7b3c04e0dbd5fc194037bcd02f8b57f58d0c033756d0110",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "heyitsjohn"
+    },
+    {
+      "case_id": "0x3a10a5914d9870d33ba1f4f8a5643d881156d4c6a5b249415fd1e451845d14bb",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "nerosiss"
+    },
+    {
+      "case_id": "0x92974ab4853a8daea3583f5832cb77343e04eef4c10e6c7ce92190a9255ce207",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "nerosiss"
+    },
+    {
+      "case_id": "0x7ea25c70181a7a7e2c395090847f082404f4fcaea59ab8a7eea016c8ed89d6c7",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "rossthehoss"
+    },
+    {
+      "case_id": "0xb46bd38a693b09403b5fccf28eec8082d8b9e89ad9e00f82ed0ac64a7776e36c",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "nerosiss"
+    },
+    {
+      "case_id": "0x20e6814265f5821e64f14498d0b4f4b99e5ff9c870621a3298a496d2f1be490d",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "Midhav"
+    },
+    {
+      "case_id": "0x3baba795421e23d8b0a8200f5c6e6ec3ef8c9ff9629f68ec1c1fe5c07f8119aa",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x9ac3140b1bff1012ee1a383a5de52ac39537d36bee9961714c9d1eab6d389068"
+    },
+    {
+      "case_id": "0x2fa275c908d0b2f290b31959863abe2c9b65c58dbc0f759afd95cc573f183d87",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "FranL11"
+    },
+    {
+      "case_id": "0x0e99bd6b314665a278f6e834c4aa504f2d53c50e6096b2846f910180ec7a6b63",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "disputereth"
+    },
+    {
+      "case_id": "0xc9cc2c3251efa4d9dbf3fa19d06004b8a74aa5b4ceb42dfdcc43acfdefa7a647",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "clesaege"
+    },
+    {
+      "case_id": "0xe7b6812b55c1ce90641a7fa6afe9bb79d8542e1daa8e02256d87f539782516ee",
+      "reason": "topic:sports",
+      "matched": " vs ",
+      "title": "Will Netherlands receive at least one red card at Netherlands vs Argentina - FIFA World Cup Qatar 2022 - Quarter Finals?"
+    },
+    {
+      "case_id": "0xf06a05463e2abff712106854300c744fa53b2d909cd7c433e6c4fe2f139ba1b2",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "rentoid"
+    },
+    {
+      "case_id": "0xc408940471007475709453b20b1d2061e2aaf3e541e516413d27424e8ea8234f",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "bafkreihh2vx4rlabt7tsk46br2sxjhf4nkr6s35ow3yhr673jcztpjyt4y-0"
+    },
+    {
+      "case_id": "0x055842a3d9420a8b8506f84d90c52249964166fb509c72ef65ef0804f4b5eae3",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "berty_00"
+    },
+    {
+      "case_id": "0x00398cf5b6285f24c761ef7b3bdb5b1de73687d842d87357d8f3f9219483cbd1",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "bafkreic2iumt7yg7pzzkcjiqkc4ztslsvwsmukin3mr5s6crp3hl4kw2am-0"
+    },
+    {
+      "case_id": "0xea6786fd1466f40753abadedb0e984bf30d8e676f30cd6d47d41f3aaf9dc60f2",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "iam_nowhere"
+    },
+    {
+      "case_id": "0xb76f9ca089893a67597d4aa506f69711df9c06abb647ddcc0c03d0574a74cff5",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "bafkreihh2vx4rlabt7tsk46br2sxjhf4nkr6s35ow3yhr673jcztpjyt4y-0"
+    },
+    {
+      "case_id": "0xb3e827d7521cc32ad054c80c26a872d44ce4322ab7a13898808a929b17e5065d",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "bafkreib3z4xgtudzt3kzlqxlab6u7ncfhpoxc5gwezxwczzdfv26toxe6q-0"
+    },
+    {
+      "case_id": "0x6071bc25c109c010c23328dfe65de765b809917284ccb602456f2697d7caf9f9",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "bafkreieaccooqrmdkggeidjtk7pq5utg7yv3ktmtrlf5asukglp4jxv7tu-0"
+    },
+    {
+      "case_id": "0x7dbba3f9d2902405202ed71f8a123ce51dd8d9c1f1e8cd5fd53bd1bc445131ec",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "r0ssthehoss"
+    },
+    {
+      "case_id": "0xd79c473ca489e4e61ba0d61961ac4dce4683ccbdcde00870bbb6fb3f8cbe0528",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "bafkreic2iumt7yg7pzzkcjiqkc4ztslsvwsmukin3mr5s6crp3hl4kw2am-0"
+    },
+    {
+      "case_id": "0xa93880d8588e29d42d5555a6cdbfe21967d31b4773c9b38d1efd396e59b983c1",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "true_and_honest"
+    },
+    {
+      "case_id": "0x435a0c31089dccbb616286c77f0f660521d972105cd7ac42054a0ca844b0fb99",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "bafkreic2iumt7yg7pzzkcjiqkc4ztslsvwsmukin3mr5s6crp3hl4kw2am"
+    },
+    {
+      "case_id": "0xa033c3b188a36b3476a0ebe7afdc27e37d0938379eca1d3e55bc52033d822757",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "BuggattiChad"
+    },
+    {
+      "case_id": "0x10e39ebef162e065daa2561fdab40384ba034a1077e70e68e307b2111296b68c",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "true_and_honest"
+    },
+    {
+      "case_id": "0xbc51af11864b1e8cf4b6c8a9dcbcbcb42c06a0fc3ce1e66ecc9322ffd0b2a356",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "prodichigo"
+    },
+    {
+      "case_id": "0x9afa1df13d0c2fcbdd9fd9c0bdd83a0736e7603e5291a8cc0e7bdad0d09de8a6",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "mythrust"
+    },
+    {
+      "case_id": "0x2c645be3bfefa0dd2bd8cbdebaa9fdfb090c057fda05f23e496995c2b1f2f65e",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "true_and_honest"
+    },
+    {
+      "case_id": "0x108021586fb5d2134ee83184200ee5ae757abf3da29aa55d2cd17663a5d64a4e",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "FedericoAst1"
+    },
+    {
+      "case_id": "0xe41087703f6d73c69b96a82a8dbcaefe0c77e64b8aa3a3082a23ef20c7800642",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "bafkreib3z4xgtudzt3kzlqxlab6u7ncfhpoxc5gwezxwczzdfv26toxe6q-0"
+    },
+    {
+      "case_id": "0x1023bee4b0b5d037c5d55f7bea5f211c67923ce7c8b360ee444e13643dc7c64a",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "degenape6"
+    },
+    {
+      "case_id": "0x89618a7862ec826ba71a743fd457c42700d17086f3932125068a8ceb9ab27473",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "disputereth"
+    },
+    {
+      "case_id": "0x7a3f2108b8589443d269c5940c57a2cc1c5d889e67933cee9c0d0ca0da85af18",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "MoonsamaBill"
+    },
+    {
+      "case_id": "0xb0895d6ad28d2f8603a15bfe02d1232c06937193c0ef48911ed9408d61ece5c1",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "MoonsamaBill"
+    },
+    {
+      "case_id": "0xf6319b25c7b957c6ef42e92dfe41a90423d98246a11199cf0c08de7cce67c3c0",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "disputereth"
+    },
+    {
+      "case_id": "0xc6f43ca8782fa7ef3aacd13f42adb8a5e5c04f35b5173f944067051b931c6918",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "real_telegram_username"
+    },
+    {
+      "case_id": "0xbc4dcae25ddd828104dd26bef10a4f4d86e0f47f71b32eb9f1e08aa5604005d5",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "rentoid"
+    },
+    {
+      "case_id": "0x7866588b8a8320abb3faaabb1a94e3d84cac9e45753741aaa7eeb0ac398bcbc3",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "c2eth"
+    },
+    {
+      "case_id": "0xf0d5989f35a27db90540bc56c830a39e0f9933c47ccf07fad65bb1bdf8d5f95f",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "test"
+    },
+    {
+      "case_id": "0x2b8978c2cecf503c18866c7753b1a61ef3741a0c89b1182817af753cd924415d",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "0x3843b481b74b42610c1664a790f8f18d5ac189bc0cb4b506b12c6899c1210660"
+    },
+    {
+      "case_id": "0x3c8d68a85f628edfb94d78470ead2cfdb9baa93ee978ff5c61f9c59d16eca78e",
+      "reason": "topic:sports",
+      "matched": "nba ",
+      "title": "Should the market 'Who will win the NBA finals?' be resolved to Invalid?"
+    },
+    {
+      "case_id": "0x28382369b8a31d76b39985a1b73f4939ced933acaa5319a0acec117f4a5b8a19",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "Bees"
+    },
+    {
+      "case_id": "0xdcc7723812edefe4ba27f924afd8c80aed1d01606834ce1534896e4dd661a8d4",
+      "reason": "topic:price",
+      "matched": "ath ",
+      "title": "Will Kristi Noem testify under oath to the U.S. Senate in 2025 that she shot a dog?"
+    },
+    {
+      "case_id": "0x41340c8637a05a61871a9b1fabda77957aec0a35cd8ffc2e41fad1b07698ab71",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "Question B"
+    },
+    {
+      "case_id": "0xee3dbd470abc6258e117f6b07094f8837d7c8b04ef5dae7c0359aa5750e3b47f",
+      "reason": "topic:sports",
+      "matched": "grand prix",
+      "title": "Will Lando Norris win the FORMULA 1 ETIHAD AIRWAYS ABU DHABI GRAND PRIX 2024?"
+    },
+    {
+      "case_id": "0x3c5b9e0599db63e470d1a86fcdd8125fbe8844e563fb16565b37619ce25426f4",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "/ipfs/QmbyKc4b79uCZZiGraXLW7bZujdmuFgBaXom5jVDmXouJW/item.json"
+    },
+    {
+      "case_id": "0xfe301de8af24fd299394001a757e2e71861dea3819fda3fdc64a5ffa1c776013",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "/ipfs/QmbhSpYMei4um6UMzBQ8GeG2W5pghqHwkFD8ttiK4uBJtE/item.json"
+    },
+    {
+      "case_id": "0x9b6886a5d56201838c4ee553afa02cda2ca73b35fd25ea336bd64caacd0eb409",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "/ipfs/QmWxGdXCgVtnR1QS7V3asioU9FL946YaeuNGdkracPCjbr/item.json"
+    },
+    {
+      "case_id": "0xc7f41cb37632581cb2eff3cddf91a5cc1a546d735265fdf1cb3a3d9c8cb72f5d",
+      "reason": "topic:no-researchable-proposition",
+      "matched": "<3 words",
+      "title": "/ipfs/QmQ6F8VGHEebJ6GCeBofFYtnfS24t4vk5XCUn8oamgntC6"
+    }
+  ],
+  "review": [
+    {
+      "case_id": "0x09492943dcd46310fca617adc7b313d251846489dd561906d4cd7e0f2e6654dd",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "A: This statement (A) is false."
+    },
+    {
+      "case_id": "0xb2275c92dae5047f4fc1f9d7ed81ba1c369e5e7c8e68c79bdb41ecdde2c13c65",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Among the following, which are Pluto’s moons, known as of today: "
+    },
+    {
+      "case_id": "0x1f90d659253bc3e65730525a6d3d663d317a5112f7a09f364a37bcae2c0cde75",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Which Politic Party will win the elections in Spain next 10th of November??"
+    },
+    {
+      "case_id": "0x3ff848d6dc43e677c0dc56398cbe5d3d0d50c2f7fea7f8ec0955b3b8e6d10f11",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What was the highest temperature in Toronto (Cananda) the 11/02/2019 (in Kelvin)?"
+    },
+    {
+      "case_id": "0xcf1cc459dd83e1f292b2d5b40a503c211711eb12e8996412457a227efa9351ca",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "As of today, how many hard-forks has Ethereum known since it was launched?"
+    },
+    {
+      "case_id": "0x9851cb695e49947b87bc8fa1d2cfe7275109b1af3c7915d2385a8939104a3d35",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "\\\"The next sentence is true. The previous sentence is false. What is the truth value of the first sentence?\\n"
+    },
+    {
+      "case_id": "0x204c6010500e4f7b0a062e51de6e83698b17ce8593d964a60fe5a1207e51d360",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What was the price of ETH as listed on Coinmarketcap.com at 0:00 UTC on April 9th 2019"
+    },
+    {
+      "case_id": "0xc7e86d18ba36c3f69fcb2ea89032ab3c311ff23391843d37e7fa106918eecdd2",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who first published a picture of Santa Claus in a red costume?\\n"
+    },
+    {
+      "case_id": "0x637931c2788d352104368214ff873bbbed06f22c9e3c5f17fb8dcee9c7a6648a",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "If it is true that the larger a black die is, the higher its probability of landing on a 6, and it is also true that the larger a white die is, then the higher its probability of landing on a 6, then supposing we have a bag that consists only of black and white dice, we can conclude about the dice in that bag that:\\n"
+    },
+    {
+      "case_id": "0xf8c4164f5dfdd17145218278749575ebeca4efbcc3a9445bf211c65abb6b54f0",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What is the fastest ever lap around the Nurburgring?"
+    },
+    {
+      "case_id": "0x044dc87b544511d0983eadbe51d4be831ae70f82010f97ef2de28fde85924fbd",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Which party got the most votes in Great Britain in the 2019 European Parliament elections?"
+    },
+    {
+      "case_id": "0x2193f52443cd157051bc401462cd6576716afe86045e17c0896b17c8857360b6",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What is the Bitcoin (BTC) max protocol blocksize limit in MB?"
+    },
+    {
+      "case_id": "0x60b6221be8f42503c4fc1b911cbc01c069ef7422dcb79e3e3bc0474a75d23910",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Is Alderaan a planet from the Star Wars franchise or the Star Trek franchise?"
+    },
+    {
+      "case_id": "0x557daa9ffeee08cbd2b7dbf89fe2034f21341c7b5dc5c88e4aad66f2a338995f",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What did Marie-Antoinette said when she heard that the French peasantry were starving due to a shortage of bread?"
+    },
+    {
+      "case_id": "0xde6d5c706bda584e9eb8fd890356c63573eb9520675ce30be55647eba3202304",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "With what country does France have its longest land border?\\n"
+    },
+    {
+      "case_id": "0x94958ae4c91a885d30c17ee6ef0c3c22d7e1386823612f5d7a43e5cc3887de58",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "If red dice roll higher than blue dice most of the time and blue dice roll higher than green dice most of the time. What can we conclude:"
+    },
+    {
+      "case_id": "0x23c6c3a66d9c7bd52b1bfddb67be8c21649b0fb1b42949d55185929a0f4665d6",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "In which century was Muḥammad ibn Mūsā al-Khwārizmī, from whose name we derived the word algorithm, born?"
+    },
+    {
+      "case_id": "0x476fa6579c2409afc72fa019051120c4e0851381434c31d6f65d20b222a33962",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who coined the name “Smart Contract”?"
+    },
+    {
+      "case_id": "0xfb6171953e38b4dd2dc8f603f62c7f9a699861c5c91ec07fea15641c18bb3249",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "On which of the following places are primates present? (multiple answers)\\n"
+    },
+    {
+      "case_id": "0xd2e9880dfe93c4f0936ef3fb725f7d66574cedd73e6016fa1b93d8c0b96c0583",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Will the President or the White House endorse the general use of masks in public?"
+    },
+    {
+      "case_id": "0x18124f472016197b2ce0cc89202582fa6ece5814cc8e8eb8a55c91bf6b587795",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Will this \\\"question\\\" look okay?"
+    },
+    {
+      "case_id": "0x7cb9216f7857dd4e7f3fcff1c7f7ca827d61fc31150f9b9ac5f1bbf5a49f4aeb",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Which movie will win the Academy Award for Best Picture in 2020?"
+    },
+    {
+      "case_id": "0xf6d2b8ee64dc6def6060c2566ce038ffc77e2d4602b578d362744e70523d93bd",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How will the Kleros court rule in case 302? (1000 corona death)"
+    },
+    {
+      "case_id": "0xe6bd07f1d5de2ab5266e94083c49bcfd364707385e633362d52d9d6a562c5ca7",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Which candidate will win Pennsylvania in the 2024 US election?"
+    },
+    {
+      "case_id": "0x1618b48d6a0efad927a992ca6f1a8fee5f0408105dd7ee7b1997cc38bb2a0cf6",
+      "reason": "cannot resolve template (custom-template-not-supplied); export must supply template_text for template_id 158",
+      "title": null
+    },
+    {
+      "case_id": "0x51d08b072992a75587c461bfa3ac437e6e2319c5c50631e01fc13f01bff98c87",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Which will have the highest 7 day percentage gain on June 30th at 4:00PM UTC? (Source: Coin Gecko)"
+    },
+    {
+      "case_id": "0x1b2ed38e80f5d6c7f86edb1c118bf2b945ae3b09bd74aa523f7a8ef8d8a46ccf",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will the $USD Bitcoin price be at the end of 29th April 2021 UTC?"
+    },
+    {
+      "case_id": "0x07171ad8097f10cc65b88049b22062f474d0d7e78b59a20a4f50ce7d809c6b21",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "INVALID Finalization pr [Fucks]"
+    },
+    {
+      "case_id": "0x77d7bce4202ffdc63fe2962671e635dd27b417cf31922ef098769834ed125b51",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who won the fight between Logan Paul and Floyd Mayweather on June 6th in Miami?"
+    },
+    {
+      "case_id": "0xfb83672e455ef11c86083a668816a3d275f490d8b1dc1e5688715d4e77a2070c",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will Joe Biden's approval rating percent be by the end of June 2021? Source: https://projects.fivethirtyeight.com/biden-approval-rating/ [% Approval]"
+    },
+    {
+      "case_id": "0xec9984796d834043c6a34e02b761e64a56aabfcba8ba12316a73986fc04d8835",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Russia v Denmark - Who will win this UEFA Euro 2020 Group B match?"
+    },
+    {
+      "case_id": "0x970fe7c0247d62b558acae9cf8f5073e73c5ecf2b77da8642b8c0ac4a75292c6",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "INVLAID Testing xDai [Violets]"
+    },
+    {
+      "case_id": "0xfc4ff0d99554923d1704c637d20b2df58eefb37533bbddb85d5578c5f5d495fd",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "asasas [egre]"
+    },
+    {
+      "case_id": "0x10378db51becca80399e199f3ae9b231d42111381c47e6643930aa60681aac18",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Which player will rank #1 in Dark Forest v0.6 Round 1: Fascinated Manager?"
+    },
+    {
+      "case_id": "0x8859749166525c856279a1d9b8e6e5c5bf5683d5550b9343ec18e7a179922bf6",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Which will have the highest 7 day percentage gain on June 27th 2021 at 4:00PM UTC? (Source: Coin Gecko)"
+    },
+    {
+      "case_id": "0xb14fbca57adf524a30a517eaaf012cafc1227782aea1e900fbba1fb7c8ba5993",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "QmVkdW8dsvDyyQCEPPALzti44y9nTkEoJhACeeJtiq9uvy"
+    },
+    {
+      "case_id": "0x527518fd81a80a173e6392fcd5b06bd0440bc8961f44e5137f8d752d553312b0",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who won the fight between Logan Paul and Floyd Mayweather on June 6th in Miami?"
+    },
+    {
+      "case_id": "0xc9f9e22017837663bb90d01bca41fb0c0718226e6f1808dc07b73940daef021c",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "QmbtatKs5Urd2uHVADJLaR7awV37uc1K89Yq8wosQ2tuSd"
+    },
+    {
+      "case_id": "0xa196c0e33df7a4b7729a2b3d3d3083d00510f05f932bfadabaa56bf8a8253c55",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "QmQbRJssWNtzN9eNS25vGAzYfmvLNnLEMLeYobMQ7M348P"
+    },
+    {
+      "case_id": "0xaa79603608b0afd28493637164a684361723674fb6aa1ca250dc819351b323dd",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Will daily average Agave TVL be between 1m USD and 10m USD from Sep 20th to Oct 10th?"
+    },
+    {
+      "case_id": "0x4aabf5bb8662f4538bf9ab883b2eafa7e1a61211bdf8edbc2c9dc1ed24053418",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "QmeSLprQ8e3KmRfo4usP4iropTYfSgbCSb5UnLUi2sw16v"
+    },
+    {
+      "case_id": "0x6738978bdf9745447f75838dc723d85f2a3ebc6e0fa1d0ba15a47149af9d96d2",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "QmZka1df5eSj8bebFLxbp1dnNxZUm3vW1uA7meahV9r6Ci"
+    },
+    {
+      "case_id": "0xb7f26f13c03b9d59efc938ec35a68cce0d28609cf2e54803fd444c588c08b103",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "QmdqTSR7uYVRM2GtJvvSzYRyixw1N55QCrauzQkv4w7zjf"
+    },
+    {
+      "case_id": "0x77f6cfbd16b87692f1953daa1abd6a1fd3b2e4e8df43c7d914c3243336cf1d65",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "QmSwaXoN5vuvaeHRWWPwQRgFtFw43VZhQgrSEVtucTsnAe"
+    },
+    {
+      "case_id": "0x2c78cb63725a89689babcc4470cab507d45b2e9eda91da0b2a7b78211b0cb05d",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "QmayRVsXxzHRNvk1BWnv9M5YMbKiTfuvamVyoTzGhDCXnu"
+    },
+    {
+      "case_id": "0x8d96b649698862bb79638b5e6a249dfee4bf9c2e0e153033da7c5a84a94d94e9",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "QmR8YFmubXYsH7ezbPJUgXiYBTdD1sdCAmny2hV6Skhs8P"
+    },
+    {
+      "case_id": "0x0fab349ce651faedbbec6999f5142c73a58ea5b73e02bb4850062320bbc4f665",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "QmYZ89fiCjtDP3w4Am1XhTSmhTxzB4BnQnmtp8TeJp6vvj"
+    },
+    {
+      "case_id": "0x09feb7fbdd6dfdbd92ac8d787070c29b9cf188b85f8244e487e8c74d4e7eb737",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who won the match between C and D at Test V?"
+    },
+    {
+      "case_id": "0x22588661c1e1079f4f6949958fa87d4e63a7c114bd1962659376840e88e90102",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will be the result of the Independiente vs Atletico Tucuman match at La Liga - Torneo Binance 2022 - Fecha #10?"
+    },
+    {
+      "case_id": "0x950234c4ee2ebcfb906b28522dff5c2ea84321e2106220fe0721f206e4b5d29a",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will be the result of the Colon vs Aldosivi match at La Liga - Torneo Binance 2022 - Fecha #9?"
+    },
+    {
+      "case_id": "0xb1097c5dfc4654efbd8641221c55ee2e1f7d8ed7a01460dc109a08ffcfb82643",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Wich engine will score the most points at Test multiselect?"
+    },
+    {
+      "case_id": "0x7274ed5b7c1489273377cf04aa4dec25683a40df1c3f654ba97d74c7442b4787",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will be the result of the Colón vs Arsenal match at La Liga - Torneo Binance 2022 - Fecha #13?"
+    },
+    {
+      "case_id": "0x0170d9953fde9dc878930eef0c591ea7f3806b79e3c7266c05d9a49bac237a4a",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Wich engine will score the most points at Test multiselect 2?"
+    },
+    {
+      "case_id": "0xb053c5c86552bc58f742e1dd7bbc50aeebf961939cfd5b90315a4b64b1fbd713",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will get the pole-position at F1 Rolex Belgian Grand Prix 2022?"
+    },
+    {
+      "case_id": "0x3ca82031f7dfb8ba769906553eedc268d40d64994e50ab84f877918c694dc731",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Which driver will make the fastest pit stop at F1 Rolex Belgian Grand Prix 2022?"
+    },
+    {
+      "case_id": "0x7d157ac6b18dfc1419b92643aa7007c9ccb259367d2706674eeffa342cd33ea3",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Wich engine will score the most points at F1 Singapore Airlines Singapure Grand Prix 2022?"
+    },
+    {
+      "case_id": "0x835abe937d1a02482654ec9ec0d26946791118c62e0cfd33a730bcf67d9cac1f",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many tries will score Pumas vs Springboks at the Rugby Championship 2022?"
+    },
+    {
+      "case_id": "0x28a8e3d27d78245885ab81c24359e5b7acdbc00ff3d5d90b131ca5b31cdf6da9",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who Finished first on Qatar FIFA World Cup 2022??????"
+    },
+    {
+      "case_id": "0xcb4a11685cdb6a0215d84906c3c5231d8de522744f6f9d7e68497cad9d493262",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will be the result of the Defensa Y Justicia vs Estudiantes L.P. match at Liga Profesional Argentina 2023 - Fecha 16?"
+    },
+    {
+      "case_id": "0xe5cb43d22034d4a356d88eb28b958003e21333a384f6f3a81c6a78929c162b7a",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will win the quarter-finals match (before penalty shootout) between Croatia and Brazil at the FIFA World Cup Qatar 2022?"
+    },
+    {
+      "case_id": "0x8b9355b881ef0614ffa9a31bba7f2a9162fed81ad13e96498837b9eb50f4689a",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will win the quarter-finals match (before penalty shootout) between Netherlands and Argentina at the FIFA World Cup Qatar 2022?"
+    },
+    {
+      "case_id": "0xfea08f3afc1d31c17b9a2f57a64ffda916c525ab3fa786d33c9cb2b64095ee8e",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Cuantos goles hara Fork DAO en el segundo tiempo?"
+    },
+    {
+      "case_id": "0xb419ec21fd2f78ed550062d6fed990027ca465850230b098f82ff72fcaca4dcf",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will be the next Argentinean President?"
+    },
+    {
+      "case_id": "0x81b4d6dcd05e3989f04890f5bf1e3e93a8cbb4ca2f45cdff19fc5b444be72324",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What was the outcome of the first rolled dice in the Telegram Group BetsiGroupTesting after Sun, 17 Sep 2023 22:20:09 GMT?"
+    },
+    {
+      "case_id": "0xbe5ee42e584a2200dbeb676b61e500643f1401ffe842e00ac58331f04b0661a5",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Test Zero Categorical"
+    },
+    {
+      "case_id": "0xa38024b8b4aaf776187022edbb479915aa1d1139ebf084fddc62779968e0f212",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "categorical"
+    },
+    {
+      "case_id": "0x44913f94daa9d0e446d6f7066545795e10b6109c10ffb2c996595443a1ae08aa",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will be the outcome of the first rolled dice in the Telegram Group BetsiGroupTesting after Sun, 17 Sep 2023 22:58:29 GMT?"
+    },
+    {
+      "case_id": "0xa6a34ec3aacc67989975a0c4429e10a51794533d87b0c040ed4da9b9254159ba",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "scalar [goals]"
+    },
+    {
+      "case_id": "0xf662216d176a1f29ec8f2df289bf0354582b0c98606030ea14ca893104a38d95",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "A cuanto estara el dolar Crypto el dia 20 de Noviembre de 2023, 12 horas Argentina?"
+    },
+    {
+      "case_id": "0xc354f9fbd1d41b5cd00fb2685a1b7c99e670cb580e735c5e85cde1061f3becc5",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many goals will Lionel Messi score in the 2024 Copa America?"
+    },
+    {
+      "case_id": "0x6821d7ffb9b655c19bcddcd36084425240d1c621d934fd24ac5263665a539231",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Pick the colours"
+    },
+    {
+      "case_id": "0x317a0abe9a8a54f3f4c0120a11ffcdf98e0f11c362abc0cda1d0f3b8627b04a9",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Test Test [goals]"
+    },
+    {
+      "case_id": "0x7ae227c920812f4b14ed5934acd039daef84728e449d6a447f3e35f6191eb0ca",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "multi categorical"
+    },
+    {
+      "case_id": "0xf8ec3627b0033c08a546a0c90024c71f215cff7e563de8466acde09e8f6fe0a5",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will advance to the Champions League 2024 Semi Finals?"
+    },
+    {
+      "case_id": "0xe82642a9ebb9cb08fbb93014d025b6540bed9e098fca89027057a39b4f7b93a9",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Which ball is orange?"
+    },
+    {
+      "case_id": "0x3455f712c75e6f51f7356af3d78ae6a5ca95d87509f6d66abcfe0be6448875c5",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many people will attend ETHCC[7]? [People]"
+    },
+    {
+      "case_id": "0xb19204ee6be488e728c3209e42efa8aac8c9d5356656ab77548d7a75675c7ff0",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Winner of the run-off in the 2024 Romanian presidential election?"
+    },
+    {
+      "case_id": "0x66d5366344edcac514bdbfbc58ac46265d0b8d98e7ac37015d9063a6fdc3e10a",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Test Market"
+    },
+    {
+      "case_id": "0x2257c79beb92acb1260cc6c9aa9d4d7d88ccbc764dad357831a087df575efa44",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many votes will bbb get?"
+    },
+    {
+      "case_id": "0x2703ce72afee88da2cb1e7b405c6d5354af732d9893538f684083698763ef35a",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Control of U.S. Congress after the 2024 election?"
+    },
+    {
+      "case_id": "0x0b528fa15a3490fe290ac6b22aacc18cc842c35d04b6a5f82c5adadf76dc3542",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many people will attend Clement Lesaege’s prediction market workshop at devcon on November 12? [Individuals]"
+    },
+    {
+      "case_id": "0x38dd81b62378ca8d07bdb83e8b13d414b14a768cbad5cf6ecca915227d3778e0",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What color is the sky?"
+    },
+    {
+      "case_id": "0x6cd6b066f7446995dd3546b0cfa6398b8bafaee187124e0484887fb32654e57f",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many people will be deported (removals, returns & expulsions) from the United States during 2025? [Individuals]"
+    },
+    {
+      "case_id": "0x4aa6ea15ae296cff390386a5b07a10e31f022e85958d0342955b911a44724c3c",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": " What will be the price of ETH on December 31, 2024?  [ ]"
+    },
+    {
+      "case_id": "0xa9346382c57665f8be8e300f098d897433a3097eb2b7c94f60edcfa20e219a3d",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will be on stage at the September 10th Presidential debate?"
+    },
+    {
+      "case_id": "0x16920c548c92d6c437af80788698986eddd259b95aff15473611c5096fe7ee33",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will win the Copa America 2024?"
+    },
+    {
+      "case_id": "0xf5deced51ce77b25553578a77e25aea7f1627924ee7e396cebeadae972005a63",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Which candidate will win North Carolina in US 2024 presidential elections."
+    },
+    {
+      "case_id": "0x705b9fb6ac4e57f9830e046ff52f263e8f5d3194e04595f790ff548422b873fa",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Which candidate will win the state of Michigan in the 2024 US election?"
+    },
+    {
+      "case_id": "0x97779903d3167d03124ebf5ff03186529d193c76aa0cd2f042dab9389d7061c7",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "[DC DEMO] What will Acme’s stock price be in 6 months? [USD/Share]"
+    },
+    {
+      "case_id": "0x03bb32c62b5455a48998cb3ab4a564fbc17427202016b91ee46f4c5053b200f0",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will be the winner of the 2028 US Presidential election?"
+    },
+    {
+      "case_id": "0xa5109cdb9aa9098e4cab49c616de5de09bbe243ee2667a08289a9025cb416562",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Winner of the run-off in the 2024 Romanian presidential election?"
+    },
+    {
+      "case_id": "0x909a852ce39bab419e2d9f366518e921adff23024bee065b79fcccb13f384612",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many seats in France’s National Assembly will Left (UG, LFI, SOC, COM, VEC, RDG, DVG, EXG, …) win in the next French legislative election? "
+    },
+    {
+      "case_id": "0x13c0c44ad6e4d21e533e156ac62f6edb83632c5630bec230a22e7a286290b3c9",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will be the result of the Independiente vs San Martín match at Liga Profesional Argentina - Matchday 13?"
+    },
+    {
+      "case_id": "0x3a198a4c3555d335cefb94275a72b9accb38d7ffef890a5ca37429f7c5bac8b4",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will be the result of the San Martín vs San Lorenzo match at Liga Profesional Argentina - Matchday 12?"
+    },
+    {
+      "case_id": "0x0ae7712dc5dc195e4588b06aacb59f85d0bdee4467bce390829d04f21a7d7bb0",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "The HICP inflation rate in the European Union for 2025? [Annual average rate of change, 1 decimal]"
+    },
+    {
+      "case_id": "0x25d0f215d0f815c655af7c7dfb50abf77b533c1a543affe714143df08190e607",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many seats in France’s National Assembly will Centre (ENS, REN, MDM, HOR, UDI, DVC, …) win in the next French legislative election? "
+    },
+    {
+      "case_id": "0x617bcb76ec951441e5677ba2358c980216fc1b0900b921104373e1ffaa5d26e8",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many seats in France’s National Assembly will Other (REG, ECO, DIV, …) win in the next French legislative election? "
+    },
+    {
+      "case_id": "0x73d06775230856af91ca26bad4f99cfcaa7bfe853f6570b45b3e21efca300149",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will be the result of the San Lorenzo vs Atletico Tucumán match at Liga Profesional Argentina - Matchday 13?"
+    },
+    {
+      "case_id": "0xc2af27a2719bd98251cd6d48ed6a9e09b262bf4e438b36b8e7f87cce383e4654",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will be the result of the Barracas Central vs Tigre match at Liga Profesional Argentina - Matchday 13?"
+    },
+    {
+      "case_id": "0x2a7e7b835a57d34c67b1c39ecf1bace0b037810cdd4aa75fd3ef238db3d18b96",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many seats in France’s National Assembly will Far Right (RN, UXD, REC, DSV, EXD, ...) win in the next French legislative election? "
+    },
+    {
+      "case_id": "0xb12ec99becf505380cf704a1832012708f031a5c3bb57c8b4b0608e62e5ecc8b",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many seats in France’s National Assembly will Right (LR, DVD, …) win in the next French legislative election? "
+    },
+    {
+      "case_id": "0x9c27f40c6ea461fcb17af70f7e74c7d1a365d47eb080cb25ba0f52c3b216f706",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will be the result of the Belgrano vs Boca Juniors match at Liga Profesional Argentina - Matchday 13?"
+    },
+    {
+      "case_id": "0x246bd13584958b15c3bfe38e0b034d0746518be99c14a78ad71c28384a55119b",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of Premier League 2024-25, gameweek 31, at contract 0xd1006d96bbb6b5fb744959f390735d5be8126631, per the guidelines: https://cdn.kleros.link/ipfs/QmdKSuCTMNzJ2EiAug9MFfZsWm1d7kNyUagmYs1ZuMDgWS/fantasy-football-league-games-policy.pdf ?"
+    },
+    {
+      "case_id": "0x0c002637e87838efc2a9488e33d23dddc1a78cf12af9dfa4e5bc3a45b9313138",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will be the result of the Argentinos Juniors vs Defensa y Justicia match at Liga Profesional Argentina - Matchday 12?"
+    },
+    {
+      "case_id": "0x895fa4778d7020f1ecdf2b1b0b64e473b8ed0bc7afd20633982da088cb372144",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Winner of the run-off in the 2024 Romanian presidential election?"
+    },
+    {
+      "case_id": "0x9c707ec6f3b295afe1eb201c6830a177cb309b92e323d08f6f73290fc79c4023",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many North Atlantic hurricanes in 2025? [Hurricanes]"
+    },
+    {
+      "case_id": "0xcf41ddf419dec352c55227afcc409183897ba37d079095a1e538a0d6d54b63fd",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will win Democrats' nomination for NYC Mayor on 24 June 2025?"
+    },
+    {
+      "case_id": "0x6fd6913f131cf1f724985445759b8b839a79b195e5822ee5200c04e158051320",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": " How many seats will the Independents & parties entering the Assembly of the Republic win in the upcoming Portuguese legislative election? [seats]"
+    },
+    {
+      "case_id": "0xe355d8abd6bc020024d4cb0c206e4e7ec51f12c913c8bb7cd6fdfe12e2818820",
+      "reason": "non-boolean template (multiple-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will win the New York City mayoral election of 2025 ? "
+    },
+    {
+      "case_id": "0x69024d2d980823a56c0333a3342750b43bebb34bd382811840d66eb4dff21ec0",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many seats will the Chega & Liberal Initiative win in the upcoming Portuguese legislative election? [seats]"
+    },
+    {
+      "case_id": "0x0850ab413fd8d41e4832fa6722322c6e414ddc81ea08a577b82ad0e09420dde3",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Gnosis Pay total volume week of 12-18 May 2025? [USD]"
+    },
+    {
+      "case_id": "0x31e310beb4cb1286aaa827884868b0327d2b29dc21b9e980b00ee8f2001ef68b",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will be the runner-up of group F at the FIFA Club World Cup 2025?"
+    },
+    {
+      "case_id": "0xf9820fb64edfc2c8d592641dc8c6b23b637ef2229a20ac30c53e9316de16a0d1",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many seats will Business and Professionals Alliance for Hong Kong (BPA) directly win in Hong Kong's Legislative Council election in December 2025? [seats]"
+    },
+    {
+      "case_id": "0x928c22cbe038a9f7b93b6cb0feefd7b600928df571bc73294a7f8f4c9fe8beab",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many people will attend Seer's X space on Thursday July 24th 2025?  [Attendees]"
+    },
+    {
+      "case_id": "0x07d0403fab958755d82d1ef7f07a49949f13840864136a4836b09f7b7b2ae1f3",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Jaula - Apertura 2025, gameweek 10, at contract 0x41d2cc8b5a8ccbc02d0f9bccf56491c7e43a5a14, per the guidelines: Default rules ?"
+    },
+    {
+      "case_id": "0x4eed205795d9984d2e977342de6715d442fc9b0762929af267a8e3953028cc04",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of URBA Top 12, gameweek 14, at contract 0xfb07d19a68cec037e635126a135560c7caadbf64, per the guidelines: Default rules ?"
+    },
+    {
+      "case_id": "0xd290fc04733da033644225874cd77ded02ca9926e80ea21a6357c2b70315e8e9",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": " How many seats will the Democratic Alliance (PSD & CDS–PP) win in the upcoming Portuguese legislative election? [seats]"
+    },
+    {
+      "case_id": "0xac471e13ecf5f86096f2ec11cf3d43e6282ff756592f6248ae4722f4abab0044",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Jaula - Playoffs Apertura 2025, gameweek 13, at contract 0x352da0f523f1bcdf148344cda9a439e7fdebcbc5, per the guidelines: Default rules ?"
+    },
+    {
+      "case_id": "0x8734360f278a4b10c9e7d5e35de628be7d31f4d2c95a1e147b5d5ec79688c993",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Which percentile score will Clément assign to Judge Dredd (1995)? [Rating] [%]"
+    },
+    {
+      "case_id": "0x295616f61615d109b271d7f58296f8d170c90ad5c75ffd7c532cee8631d44c5c",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many people will attend Seer's X space on Wednesday July 30th 2025?  [Attendees]"
+    },
+    {
+      "case_id": "0x2b26bfe83176f31ba30a5926cad99ad7276c390df6d28998e2e1e073fd4deaae",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many seats will Democratic Alliance for the Betterment and Progress of Hong Kong (DAB)  directly win in Hong Kong's Legislative Council election in December 2025? [seats]"
+    },
+    {
+      "case_id": "0x2713dfc18461ec33d69140aa76576eee13ba5f4ed063b34da45f5a6b4e651fac",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of URBA Top 12, gameweek 14, at contract 0x0a05a2bedbebc03199c2255147795767d809fa9c, per the guidelines: Default rules ?"
+    },
+    {
+      "case_id": "0x11e697c10573b4f3246451d93193811eb1ec377939a0784a7b4b25bfbbf8fc3f",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of URBA Top 12, gameweek 14, at contract 0x8c686a04f4884c2b1aeae7660a20a30457ed57f6, per the guidelines: Default rules ?"
+    },
+    {
+      "case_id": "0x764cf1c69f471fac2aa5c8748211e45ae408ebe8c69a2294eb1459c2276cdee5",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of TORNEO 1, gameweek 6, at contract 0x0ca99815c960ddbb1693a830f43587440c85493d, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x93ef4d52817ca6492ef62fa1145a8ad028d8befca76f94d9e8d316d5cd910ec2",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of URBA Top 12, gameweek 16, at contract 0x2fc825c6dd5ebad815862da8a7d24ddbe076c945, per the guidelines: Default rules ?"
+    },
+    {
+      "case_id": "0x0ddb0266c7ed8cd171b97a0dca7a90d535db594cdefccd3c8bdc1e4b4ca08709",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Jaula - Clausura 2025 Div I, gameweek 6, at contract 0xdc8bff65253c70e3601a1879e94f2c5e90e6195f, per the guidelines: Default rules ?"
+    },
+    {
+      "case_id": "0xa6654b9a3861f71b3ddb9379487c1a9f0eb810c1e371acb510c1865f9dc133a7",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many people will attend Seer's X space live on February 4th 2026?  [Attendees]"
+    },
+    {
+      "case_id": "0x356f4cb049ebf16389a9806600cde42b6f7a1fac540279ec52fadf669535d954",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FT Argentina 2026, gameweek 6, at contract 0x3410bb764ce70b240bd27c934f5618e1df1bace3, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x67c59fbb8d83585e60ed2ba28ddf1b81186717ebd4b3129d317316670adaa8bf",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of Torneo Apertura Argentina 2026, gameweek 3, at contract 0x06599abccba09cc6c6b21f06f8bfaf4d2dcd65c9, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x38cd84807a2661955d7567405604a29bab4e1d21331374408bf32e65813d8ee8",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "How many seats will Nepali Communist Party (NCP) win in Nepalese general election (House of Representatives) in 2026? "
+    },
+    {
+      "case_id": "0x08b22fc6084fc1362522aa381df4758d2a17946363cc64d7b6db7ad30b47380b",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of BIP League #3, gameweek 3, at contract 0x43b8bbcedb2fc6f72fc68706e56bc0eeb42ba494, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x94f3d554632b9e7d90c68d83e97d437e427392c7243b94f13ada307199d1e5e3",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of URBA Top 12, gameweek 22, at contract 0x2fc825c6dd5ebad815862da8a7d24ddbe076c945, per the guidelines: Default rules ?"
+    },
+    {
+      "case_id": "0x223d801433950ae3e3181c80797ad8fc18780458657e8a1eb45e5dd5a1e1a672",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "test question?"
+    },
+    {
+      "case_id": "0xb24d75280b1b371983081f25e010c33a3769ae01fce6fd33da39e93298b05a11",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will be the next prime minister of the Netherlands? "
+    },
+    {
+      "case_id": "0x201f5c81725481e43e17805f8fba384a11e2cfc8989503332817706f93da1e09",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Jaula - Clausura 2025 Div I, gameweek 10, at contract 0xdc8bff65253c70e3601a1879e94f2c5e90e6195f, per the guidelines: Default rules ?"
+    },
+    {
+      "case_id": "0x9a0d5060dd33d0ef1411d95f17f17fbc0d922e76826b1ed192923ed4cc1ee852",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FT Argentina 2026, gameweek 4, at contract 0x3410bb764ce70b240bd27c934f5618e1df1bace3, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xb4949663da08edc6d4a99c0a14594467f27b6c2f38c08145643897afc1341bd5",
+      "reason": "non-boolean template (uint) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What will be the average Ethereum BASEFEE (in gwei) for the period 1–31 January 2026 (UTC), as calculated from Ethereum block data on Dune Analytics? [gwei]"
+    },
+    {
+      "case_id": "0xb9401efbbb9a9cb5535661b9b245858f2110ec9cbf4e59dd1c1016f2305f5030",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Troglioneta, gameweek 6, at contract 0x55414a2d1c1f5a17350cbf5f17a7475b80fa86d7, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xe04e40051dfea70d5ccc15775909a9f1b0b37cd025fa28d1903d664ff4f7fba0",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of Super Rugby Américas 2026, gameweek 2, at contract 0x6254b7479919be601560334567fe9eb30f2caf8d, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x3312c33b6b112934a5868e85673a626cc07168aedc69ccb16298c130949da3e2",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 6, at contract 0xa23fe0e5d871def19ad769fb5d82520acd2d051f, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x28f73df2e58db1a5d0ad14f171e2b3a2c2d58770510cf15945b4215a8424306c",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of Super Rugby Américas 2026, gameweek 1, at contract 0x6254b7479919be601560334567fe9eb30f2caf8d, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xd1024d83aaa04d080ff7a0b4469b3582e262aaabe77f10b68594a6b497fd3abb",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of InterPerejiles2, gameweek 7, at contract 0x894c24e14f2c5b5f555e095d741051e517a35e41, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x0e4c288d137e5ff959ecd74188fc9bffdbb1bbf3674082f5353f2681f90cfdea",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 7, at contract 0xa23fe0e5d871def19ad769fb5d82520acd2d051f, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x356e4e6b4b390fab76664c36d84894ac363c2281295e5088ce24e6f23765fbcb",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of Tobonis Fantasy, gameweek 6, at contract 0xf20bfff6f0495da4f16d415fa30fba6ec27f8c9e, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x0ba2a80122596391cbb72b81e9299efee4de6d2cae4709b2c84ecbeeb63ab1fd",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FT Argentina 2026, gameweek 8, at contract 0x3410bb764ce70b240bd27c934f5618e1df1bace3, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x636bae2c39f88f23f328957abb642ff847257f852fb9ad4edfaaa0a5aacd4229",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of BUENOS JUGAS, gameweek 6, at contract 0x8976d79ac9b309fab3f5e34a92dc38b9877248bc, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x1cb9825f8ac28f3902ab467d646107bb98d1b8be331e4bbafb1a131c25bc5e12",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of EZE., gameweek 6, at contract 0xbed43210f5faf6c1051f4dd715c4aea86691ee83, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x934a696151786c9ffc55751f08c8f0b8a1e80b5910632673523c16a0ce35da45",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of TORNEO 1, gameweek 7, at contract 0x0ca99815c960ddbb1693a830f43587440c85493d, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xbb226ca0ba40d7d4d15a684fabfb363ab85db65aa28e63adad2f04b8b8ed4f75",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FT Argentina 2026, gameweek 7, at contract 0x3410bb764ce70b240bd27c934f5618e1df1bace3, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x510ac8b2f64f4f78f8410cf20e5fc7f3f88295dfef10644ef527fea76854ae8c",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 7, at contract 0xdfa42950a948c44834ddb1e9b5cdf8d8f575d040, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xb66fe25f5fdfd2f517e559a141bbff6884058311865f9f832535117df493caf5",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of BUENOS JUGAS, gameweek 7, at contract 0x8976d79ac9b309fab3f5e34a92dc38b9877248bc, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x3b185aa64ce180d81df0fe64837a4237b015f64a91783605ae1c66b2fe8910c8",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Troglioneta, gameweek 7, at contract 0x55414a2d1c1f5a17350cbf5f17a7475b80fa86d7, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xe2daa90e2b545433370d5ac6f1319e7c82cd997eccc179c8dbb793772b722181",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of SASHAJRR, gameweek 6, at contract 0x69db0d8b18a24d3663c6f96d136d509050775746, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xda724723957b9351825b57be5d91651669ebe742750fd965d4c2e5c0f9cf57bd",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Escalerita, gameweek 7, at contract 0x42920658401d8963312f63e6794043d97b90c0fa, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x6a1f5f01163070cbe28ec7d93bf2d1821a747519d9b49b1707e4c94e8ee5b890",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 6, at contract 0xdfa42950a948c44834ddb1e9b5cdf8d8f575d040, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x685244103ac5e646995059581707fb6a4e4fc1a2e33ab27305839651a178798d",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of EZE., gameweek 7, at contract 0xbed43210f5faf6c1051f4dd715c4aea86691ee83, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x456be47816a400b0cc88e0c89e6205ebb4a7422debf6c474e8bce9c34cb683cf",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of SASHAJRR, gameweek 7, at contract 0x69db0d8b18a24d3663c6f96d136d509050775746, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xeb212afc1a4fcc2eca12238a9771f2a1823d242f973321cfa89f96d7e1f86a5e",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of TORNEO 1, gameweek 9, at contract 0x0ca99815c960ddbb1693a830f43587440c85493d, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x9c83e68cac1c7228a3a838a4e399a9d2b7d22c07d8d09ba38157e5ef78f63af5",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Troglioneta, gameweek 9, at contract 0x55414a2d1c1f5a17350cbf5f17a7475b80fa86d7, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xe8feece32fdd1fb129cddcde4d03836cfd6b022a29b297e621649502e8e274ea",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 9, at contract 0xdfa42950a948c44834ddb1e9b5cdf8d8f575d040, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xa31382ddf017d17a7237b675820a38217b54ddbd727c386694dd29a23422db7e",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 9, at contract 0xa23fe0e5d871def19ad769fb5d82520acd2d051f, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x2cda67c3b3151db90a5067348689cb03323ebd42463547bb5a2c02b215a49191",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FT Argentina 2026, gameweek 10, at contract 0x3410bb764ce70b240bd27c934f5618e1df1bace3, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x3a7177f818735a04536e81bb305bf145aa99bcdd746d9c69c36288aa46f48f55",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Fecha 2 URBA Primera A 2026: ¿Cuál va a ser el partido con mayor diferencia de puntos?"
+    },
+    {
+      "case_id": "0x29fd7202be82c1947e39ea2aa602f01e8b4750aaa1521597af74cbbad4e98dfe",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of TORNEO 1, gameweek 10, at contract 0x0ca99815c960ddbb1693a830f43587440c85493d, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x2e8293ee9ca50b9624f1db08411107eb43e68495571173454ea55e6f37d5671f",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of SASHAJRR, gameweek 9, at contract 0x69db0d8b18a24d3663c6f96d136d509050775746, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xd42d5be1661c1f487ad9aeecc453b7d6e14b1dabcbb9a57b1bd3a5138952f428",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of SASHAJRR, gameweek 10, at contract 0x69db0d8b18a24d3663c6f96d136d509050775746, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xc2851545d199d3df83777ae6a087cbcb1ebb9c4ed544adea1b44251e7a724773",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of SASHAJRR, gameweek 11, at contract 0x69db0d8b18a24d3663c6f96d136d509050775746, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x2677e16d146b4403a7a6c9ce059a5660056df1331f9b3d4550e89a4b57db032d",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of BUENOS JUGAS, gameweek 9, at contract 0x8976d79ac9b309fab3f5e34a92dc38b9877248bc, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xc6ead18291bffad3618de2f6b266bc62df4dd1733f55d52472040cef3b298ae3",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of BIP League Argentina, gameweek 9, at contract 0x45ef45b2e4a6a3c11abac4f899ba98e7a184025d, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x5c40de0d8557f02ecb8582763a5505708f3f902042a557094a5b6483b06fd7ef",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FT Argentina 2026, gameweek 11, at contract 0x3410bb764ce70b240bd27c934f5618e1df1bace3, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xab8389b90cb395c7719b079a6c938c46b0331ed827784990aee5602a874addcd",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of Tobonis Fantasy, gameweek 9, at contract 0xf20bfff6f0495da4f16d415fa30fba6ec27f8c9e, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xd9cb217458767b9153cb7c812840f163c93a58a3086ab88202f8bb2dc1e1b3fc",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of BIP League Argentina, gameweek 10, at contract 0x45ef45b2e4a6a3c11abac4f899ba98e7a184025d, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x2e3488cfa1c14c308318503cfb2205600235f24ba5daa6847d7c62038edddc43",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Troglioneta, gameweek 10, at contract 0x55414a2d1c1f5a17350cbf5f17a7475b80fa86d7, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xf2f0c6779390e21a95aa9ee0f0accb71031703cfd1123ef2df1304edd3693ec2",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FT Argentina 2026, gameweek 9, at contract 0x3410bb764ce70b240bd27c934f5618e1df1bace3, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x91038c952d2b97fd556b1f5fcab42497569964c6aec05456b0793c3bd1908e12",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 11, at contract 0xa23fe0e5d871def19ad769fb5d82520acd2d051f, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x513d79bd1e55081005575a2ade7ff46c6318a2c547d2396f1e0bb4c32ca39fb6",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Troglioneta, gameweek 11, at contract 0x55414a2d1c1f5a17350cbf5f17a7475b80fa86d7, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xfba3169b9fcbca2c2946873bc6cbaacae74b7f0612ae887b7aa0d3fe77824348",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of Chiqui Mafia Pro League, gameweek 9, at contract 0xd4eb62c98bcc55c218dfa6dbee4cd86189e634ba, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x560175a4f540f377690db9b441efdcc29b04cf781b538f6cfb45053249a4c7be",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of EZE., gameweek 12, at contract 0xbed43210f5faf6c1051f4dd715c4aea86691ee83, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x3649661911b29d5ce20ad69bb5d1014eb621191ee062860c40769a464136f51f",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FT Argentina 2026, gameweek 12, at contract 0x3410bb764ce70b240bd27c934f5618e1df1bace3, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x37dc05ea786327a56d9ccc21018b18f45005e055a3c7c174833f111e0fac98cd",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Troglioneta, gameweek 12, at contract 0x55414a2d1c1f5a17350cbf5f17a7475b80fa86d7, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xea11374b9dc390221d19c9f957172ef733653455745c93f5be6639e556e13217",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of SASHAJRR, gameweek 12, at contract 0x69db0d8b18a24d3663c6f96d136d509050775746, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x88b013a1dcbe084756dba6363652fdcee24d5fe285beecf00065df5d067967ac",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 12, at contract 0xa23fe0e5d871def19ad769fb5d82520acd2d051f, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xd218ae398caeb8c1c439627f268f86ddc5e319cb3251cf13ab0d03fa70908d7e",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Where will Devcon 9 be held?"
+    },
+    {
+      "case_id": "0x6c67b6594e89f474345979cff2e3721007914a3bc5b736a39700429ce11d39ac",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of SASHAJRR, gameweek 14, at contract 0x69db0d8b18a24d3663c6f96d136d509050775746, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xd337b8f17a9a3e20f9b6b23c05ccd94cdb65b0261252034d5b53997dae83b4f8",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of Tobonis Fantasy, gameweek 14, at contract 0xf20bfff6f0495da4f16d415fa30fba6ec27f8c9e, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xb4e4e4fd6a58cf4841fe5f1d50e307cdecf68c6b2a887a57bdad60992daa4442",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 14, at contract 0xa23fe0e5d871def19ad769fb5d82520acd2d051f, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xc4bec7376ec8fcd67c39208fe2536a2f35b71842e4bf4514b06c9c11859b7bf6",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Troglioneta, gameweek 15, at contract 0x55414a2d1c1f5a17350cbf5f17a7475b80fa86d7, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x1667c56eeff00b2681c7d3708fed1d5c9427f91c7f2e348ac74121a7c42989d8",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 12, at contract 0xdfa42950a948c44834ddb1e9b5cdf8d8f575d040, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x4cc459c948d9d198b63d9a493b6c98a9d39b26fc428b94ba59f5e45145c00c9e",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Escalerita, gameweek 15, at contract 0x42920658401d8963312f63e6794043d97b90c0fa, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xbc27e41cdc9b1fc2897d5c56299d0aca1c45fdf8a8d3f63242b8721057d6fcb7",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FT Argentina 2026, gameweek 15, at contract 0x3410bb764ce70b240bd27c934f5618e1df1bace3, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x07671697c061f1846e2180a47e3d6f0d57748734fe4a597bcddf94bdb187d371",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Troglioneta, gameweek 14, at contract 0x55414a2d1c1f5a17350cbf5f17a7475b80fa86d7, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xf7a5f83d067cef19c0d8a97831da02d226df68767135c3b563df2d0772013845",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of TORNEO 1, gameweek 15, at contract 0x0ca99815c960ddbb1693a830f43587440c85493d, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x17a68a2706ecb0d7673e518c703d4ecc844108bfbc8ee7711cde2588399039cb",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 14, at contract 0xdfa42950a948c44834ddb1e9b5cdf8d8f575d040, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xe456b61326fa24d375bda9466a27225df4f81167945eefb07626be3cd888d25b",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of Chiqui Mafia Pro League, gameweek 14, at contract 0xd4eb62c98bcc55c218dfa6dbee4cd86189e634ba, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x20b8d961e6e8d2b379403959cd98dbf5943bb162b69b674bea917f979103f99b",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of BUENOS JUGAS, gameweek 14, at contract 0x8976d79ac9b309fab3f5e34a92dc38b9877248bc, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x40eda88d539eebac486e4ad02ae40033974a1ab0c526c91a3c26adb3f707efca",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FT Argentina 2026, gameweek 14, at contract 0x3410bb764ce70b240bd27c934f5618e1df1bace3, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x17ce505fde92597a399b5df587114b25d75b74d0aa5ab2a81ffae24cfaeb15d5",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of BIP League Argentina, gameweek 12, at contract 0x45ef45b2e4a6a3c11abac4f899ba98e7a184025d, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x6f349b83b33f92981c6f6f28cd5c4ae6d33547451c99340c0317996505e19ed5",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 15, at contract 0xa23fe0e5d871def19ad769fb5d82520acd2d051f, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x6abb0737e23a4e8470341b9a2c30e0428038054428d1545b2d4bd28061e32279",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FT Argentina 2026, gameweek 16, at contract 0x3410bb764ce70b240bd27c934f5618e1df1bace3, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x1f54180650b65b216aed07f5ff859df1d819ce3eba46f74a2f8df5a534a8767a",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 15, at contract 0xdfa42950a948c44834ddb1e9b5cdf8d8f575d040, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xe3bd38170c715e23c9088c25fa596b5cffb280c152cb5896d191e669779e3b4d",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of LA BANDA DEL HAT TRICKI, gameweek 16, at contract 0xa23fe0e5d871def19ad769fb5d82520acd2d051f, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xd366a0bbf53c7cd368589667bcafbcc07435a79847bc3b86e22294cc3cc12d67",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FIFA World Cup 2026, gameweek 1, at contract 0xd68b9e3cf980a5671f71cd4f9d9927b52dbecffb, per the guidelines: https://cdn.kleros.link/ipfs/QmTjK6DCiaGWYeaEFDz2fRkiiNLQheePKwYqCyxyEWSD2W ?"
+    },
+    {
+      "case_id": "0x96251248a1c44cd4ecdb774a80cc360608b720de078fb2f9b20a2b46861f9d73",
+      "reason": "non-boolean template (single-select) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "Who will be elected as the Bosniak member of the Presidency of Bosnia and Herzegovina in 2026?"
+    },
+    {
+      "case_id": "0x7a8812d7863f404f37e5be1b1550cf13e5bae4878f742e8083ee3f386315f1c9",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of BUENOS JUGAS, gameweek 15, at contract 0x8976d79ac9b309fab3f5e34a92dc38b9877248bc, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xc265dc11bad0b48eb266b7124b2ed5d6475e0d91241b218d177626f07a5e4050",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of La Troglioneta, gameweek 16, at contract 0x55414a2d1c1f5a17350cbf5f17a7475b80fa86d7, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x23875db140580b9621e384e89006275757de4b5127b2746a61261bb1eeede839",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FIFA World Cup 2026, gameweek 2, at contract 0xd68b9e3cf980a5671f71cd4f9d9927b52dbecffb, per the guidelines: https://cdn.kleros.link/ipfs/QmTjK6DCiaGWYeaEFDz2fRkiiNLQheePKwYqCyxyEWSD2W ?"
+    },
+    {
+      "case_id": "0xbee13076086a30ab9b2d33f97c8a5b3fb7dfd5da9e52992c820cea8d3e17676d",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of SASHAJRR, gameweek 15, at contract 0x69db0d8b18a24d3663c6f96d136d509050775746, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0x737f959a11d9ee54934912f82c306aa333f58579467f888e7201bcb77d956aca",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FIFA World Cup 2026, gameweek 5, at contract 0xd68b9e3cf980a5671f71cd4f9d9927b52dbecffb, per the guidelines: https://cdn.kleros.link/ipfs/QmTjK6DCiaGWYeaEFDz2fRkiiNLQheePKwYqCyxyEWSD2W ?"
+    },
+    {
+      "case_id": "0x8e3854915df4881cd0b7db37f142db4c3d2b5aa0555d79fe9e83c3ecd7718ac6",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FIFA World Cup 2026, gameweek 1, at contract 0x6137724a019a5daef73519dca75e8048a71e010e, per the guidelines: https://cdn.kleros.link/ipfs/QmTjK6DCiaGWYeaEFDz2fRkiiNLQheePKwYqCyxyEWSD2W ?"
+    },
+    {
+      "case_id": "0xe53dd3878fb5bd2ba8912b1cd592f4ca4def0a65e521dc91f27d9ce9f945df2f",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FIFA World Cup 2026, gameweek 5, at contract 0x6137724a019a5daef73519dca75e8048a71e010e, per the guidelines: https://cdn.kleros.link/ipfs/QmTjK6DCiaGWYeaEFDz2fRkiiNLQheePKwYqCyxyEWSD2W ?"
+    },
+    {
+      "case_id": "0x7351a1f85baadda3fc63f41f8c0a0bb88b6f469d48e8d90e83e360ea02fa4d02",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of BIP League Argentina, gameweek 15, at contract 0x45ef45b2e4a6a3c11abac4f899ba98e7a184025d, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xf25f0355737d08efeb1ee652d5a0ca0dcf326f4d38f71d5fa226c8cb34f6a3e8",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of BUENOS JUGAS, gameweek 16, at contract 0x8976d79ac9b309fab3f5e34a92dc38b9877248bc, per the guidelines: Fantasy League Rules ?"
+    },
+    {
+      "case_id": "0xb4ffba179cfd7d6f81b25110a556f682c11636ea9df37b5133c33350a9bb6dd7",
+      "reason": "non-boolean template (bytes32) — held for secondary set; solver schema is YES/NO/UNRESOLVABLE",
+      "title": "What hash represents the results of FIFA World Cup 2026, gameweek 2, at contract 0x6137724a019a5daef73519dca75e8048a71e010e, per the guidelines: https://cdn.kleros.link/ipfs/QmTjK6DCiaGWYeaEFDz2fRkiiNLQheePKwYqCyxyEWSD2W ?"
+    }
+  ],
+  "problems": [
+    {
+      "line": 109,
+      "case_id": "0xe3769cf1d8abc74ce68c81c480fbad99a3fdbf946f486075ae6352569aa3da77",
+      "error": "question_raw did not split into a title — was it pre-processed?"
+    }
+  ]
+}

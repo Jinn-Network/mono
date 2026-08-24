@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["answer", "confidence", "settlement_record", "sources", "criteria_are_unambiguous", "notes"],
+  "properties": {
+    "answer": { "type": "string", "enum": ["YES", "NO", "UNVERIFIABLE"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "settlement_record": { "type": "string" },
+    "sources": { "type": "array", "items": { "type": "string" } },
+    "criteria_are_unambiguous": { "type": "boolean" },
+    "notes": { "type": "string" }
+  }
+}

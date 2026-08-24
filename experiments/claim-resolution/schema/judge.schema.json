@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["answer", "confidence", "abstain", "reasoning_summary", "which_solvers_were_right"],
+  "properties": {
+    "answer": { "type": "string", "enum": ["YES", "NO", "UNRESOLVABLE"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "abstain": { "type": "boolean" },
+    "reasoning_summary": { "type": "string" },
+    "which_solvers_were_right": { "type": "array", "items": { "type": "string" } }
+  }
+}

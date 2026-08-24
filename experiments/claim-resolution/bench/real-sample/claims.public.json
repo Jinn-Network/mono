@@ -1,0 +1,2107 @@
+{
+  "note": "Solver-visible fields ONLY. Ground truth lives in truth.json and is never read on the solver path.",
+  "source": "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/g2b-crb-followup-pr-618ab1/experiments/claim-resolution/bench/real (deterministic sample: tiers arbitrated > invalid/too-soon > bonded-only, intensity-ordered, family cap 10, target 150)",
+  "n": 150,
+  "claims": [
+    {
+      "id": "rd-realityeth-4a34990e23a9",
+      "question": "Will Joe Biden win the 2020 United States presidential election?",
+      "resolution_criteria": "",
+      "cutoff_time": "2020-12-22T00:16:57.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "News & Politics",
+        "lang": "en_US",
+        "opening_time": "2020-12-20T19:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-56614d5e81da",
+      "question": "🇺🇲 FUFU 🇺🇲",
+      "resolution_criteria": "",
+      "cutoff_time": "2022-11-25T19:58:25.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "🇺🇲 FUFU 🇺🇲",
+        "lang": "5751462780",
+        "opening_time": "2022-11-24T17:05:21.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-ded5fe828e5a",
+      "question": "Was the weather good in Paris on Bastille Day?",
+      "resolution_criteria": "",
+      "cutoff_time": "2018-10-26T07:34:36.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "weather",
+        "lang": "en_US",
+        "opening_time": null
+      }
+    },
+    {
+      "id": "rd-realityeth-6ca03f39facf",
+      "question": "Was 2019 the highest annual return on the S&P500 of the past decade (2010-2019)",
+      "resolution_criteria": "",
+      "cutoff_time": "2020-01-03T17:27:43.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "business-finance",
+        "lang": "en_US",
+        "opening_time": "2020-01-03T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-7c104b1fdc58",
+      "question": "Does the Proof of Humanity profile with address 0x8b405dbf2f30844b608b08dad20447a6955a6c6e belong to the same person as the removed profile with address 0xd714dd60e22bbb1cbafd0e40de5cfa7bbdd3f3c8?",
+      "resolution_criteria": "",
+      "cutoff_time": "2022-02-11T23:05:00.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "misc",
+        "lang": "en_US",
+        "opening_time": "2022-02-11T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-952598eb1a0a",
+      "question": "Will the number of confirmed cases in the US be above 150,000 on Monday night?",
+      "resolution_criteria": "",
+      "cutoff_time": "2020-03-30T20:13:18.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Miscellaneous",
+        "lang": "en_US",
+        "opening_time": "2020-03-29T22:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-a179036590de",
+      "question": "Was Volodymyr Zelenskyy photographed or videotaped wearing a suit between May 22 and June 30, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-07-08T15:16:45.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No \"",
+        "category": "misc",
+        "lang": "en_US",
+        "opening_time": "2025-07-06T17:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-4753d013ff35",
+      "question": "Is Lionel Messi the greatest football player of all time?",
+      "resolution_criteria": "",
+      "cutoff_time": "2022-12-19T03:00:00.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "sports",
+        "lang": "en_US",
+        "opening_time": "2022-12-18T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-5d5eb988a80d",
+      "question": "Was 2019 the highest annual return on the S&P500 of the past decade (2010-2019)",
+      "resolution_criteria": "",
+      "cutoff_time": "2020-01-03T17:40:43.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "business-finance",
+        "lang": "en_US",
+        "opening_time": "2020-01-03T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-9d3dd99ecf54",
+      "question": "First DXdao scalar market?",
+      "resolution_criteria": "",
+      "cutoff_time": "2021-01-27T22:11:50.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "cryptocurrency",
+        "lang": "en_US",
+        "opening_time": "2021-01-27T11:30:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-581b86911244",
+      "question": "Kleros is bad.",
+      "resolution_criteria": "",
+      "cutoff_time": "2023-08-31T19:40:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "misc",
+        "lang": null,
+        "opening_time": "2023-08-26T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-a865736351c6",
+      "question": "Does Augur suck?",
+      "resolution_criteria": "",
+      "cutoff_time": "2019-04-30T23:38:34.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "cryptocurrency",
+        "lang": "en_US",
+        "opening_time": "2019-04-30T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-05b1bda386cb",
+      "question": "Will the gas prices rise above $5 a gallon by 27 August 2023?",
+      "resolution_criteria": "",
+      "cutoff_time": "2023-08-29T07:59:45.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "economy",
+        "lang": "en_US",
+        "opening_time": "2023-08-28T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-219d1c93294d",
+      "question": "Is BCH a scam?",
+      "resolution_criteria": "",
+      "cutoff_time": "2019-04-30T23:28:30.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "cryptocurrency",
+        "lang": "en_US",
+        "opening_time": "2019-04-30T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-596577a45df8",
+      "question": "Ethereum ETF approved by May 31, 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-04-29T15:48:50.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2024-04-26T21:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-5e2bff6d019d",
+      "question": "Will OpenAI release another model superior to the current one by 27 September 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-09-29T16:30:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2024-09-28T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-798b4a0e068f",
+      "question": "Ethereum ETF approved by May 31, 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-05-25T05:59:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2024-04-26T21:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-7c57d4707f3e",
+      "question": "Will Samsung make Galaxy AI a paid service beyond 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-06T08:23:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2024-10-06T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-a9a45119a80c",
+      "question": "Will Hezbollah leader Hassan Nasrallah be confirmed dead by 6 October 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-08T17:02:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2024-10-07T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-15b83f8ff0f3",
+      "question": "Will Alice Weidel become the next Chancellor of Germany after the February 2025 election?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-04-22T02:20:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "misc",
+        "lang": "en_US",
+        "opening_time": "2025-03-01T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-dd23114e2e12",
+      "question": "Will OpenAI publicly announce, on or before March 22, 2026, a settlement agreement with Encyclopedia Britannica or Merriam-Webster regarding the copyright lawsuit filed in March 2026, as confirmed by an official company statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-23T22:02:15.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2026-03-23T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-506a41e737fe",
+      "question": "Will bitcoin go above $5000 on Kraken by end of December 31st 2018?",
+      "resolution_criteria": "",
+      "cutoff_time": "2018-12-04T01:18:52.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "cryptocurrency",
+        "lang": "en_US",
+        "opening_time": "2018-11-27T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-5c628cab7ed3",
+      "question": "Will Harris win the 2024 US Presidential Election?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-01T16:18:00.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "politics",
+        "lang": "en_US",
+        "opening_time": "2024-10-01T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-63befad3046b",
+      "question": "Will Kamala Harris win the 2024 Presidential Election?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-09-24T12:25:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "politics",
+        "lang": "en_US",
+        "opening_time": "2024-09-23T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-9153dd923ca7",
+      "question": "Will Kamala Harris win the 2024 Presidential Election?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-17T10:54:50.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "politics",
+        "lang": "en_US",
+        "opening_time": "2024-10-17T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-a42c58d5c943",
+      "question": "Will Donald Trump win the Michigan vote in the 2024 Presidential Election?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-05T08:28:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "politics",
+        "lang": "en_US",
+        "opening_time": "2024-10-05T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-f320e732c98c",
+      "question": "Will Tottenham defeat Qarabag in the Europa League match on 6 October 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-07T06:39:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sports",
+        "lang": "en_US",
+        "opening_time": "2024-10-07T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-0021e9048f83",
+      "question": "Will direct holders of rsETH on Ethereum mainnet suffer a direct loss due to the April 18 rsETH bridge hack on Kelp DAO?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-05-18T08:22:40.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "misc",
+        "lang": "en_US",
+        "opening_time": "2026-04-21T03:05:16.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-00c442ab54b8",
+      "question": "Will the NYPD release an official motive for the murder of Brian Thompson by December 10, 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-12-11T00:40:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2024-12-11T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-05f4cb4ac48d",
+      "question": "What will be the outcome of the November 2025 elections for Mayor of New York, Governor of Virginia, and Governor of New Jersey, specifically whether Zohran Mandani is elected Mayor of New York, Abigail Spanberger is elected Governor of Virginia, and Mikie Sherrill is elected Governor of New Jersey?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-11-12T18:39:50.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "'🏛️ politics'",
+        "lang": "en",
+        "opening_time": "2025-11-10T23:59:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-064c690f68ee",
+      "question": "My 5th Substack post exceeds 260 views before September 24th, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-10-01T09:30:40.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en",
+        "opening_time": "2025-09-30T11:59:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-0c5a1ed5e071",
+      "question": "Will Google's AI-powered NotebookLM be widely adopted by users by 18 December 2023?",
+      "resolution_criteria": "",
+      "cutoff_time": "2023-12-20T12:46:15.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2023-12-19T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-125ef762439e",
+      "question": "Will China reduce oil or coal supplies to North Korea in response to its alignment with Russia by November 7, 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-11-08T12:38:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2024-11-08T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-1372db74a5df",
+      "question": "Will the length of a penis measured on October 25, 2025, exceed 6 inches?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-11-02T16:35:00.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "health",
+        "lang": "en",
+        "opening_time": "2025-11-01T16:04:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-1e4b31999e84",
+      "question": "Will California AI regulation bill SB 1047 become law this session?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-09-30T21:09:10.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "🏛️ politics",
+        "lang": "en",
+        "opening_time": "2024-09-08T03:59:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-c54e9bdecf42",
+      "question": "Will GNO hit $1000 in 2 minutes from creation of this market?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-03-25T10:45:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "cryptocurrency",
+        "lang": "en",
+        "opening_time": "2024-03-22T14:55:20.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-6582ee6f0e66",
+      "question": "Will the U.S. Environmental Protection Agency (EPA) publicly announce, on or before April 8, 2026, the implementation of a national regulation under the Safe Drinking Water Act specifically targeting pharmaceuticals as a contaminant in public water systems, as confirmed by an official EPA statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-10T09:38:45.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sustainability",
+        "lang": "en_US",
+        "opening_time": "2026-04-09T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-4c707b43f5fe",
+      "question": "Will Amazon publicly announce, on or before September 10, 2025, that it has enabled AI curricula for at least 2,500 educators in the United States as part of its stated goal for 2028?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-16T12:31:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2025-09-11T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-55b3b7c9948a",
+      "question": "Will the U.S. Department of Justice publicly announce, on or before September 10, 2025, the filing of criminal charges against any individuals or entities in connection with the record-breaking seizure of drug precursor chemicals described by ICE in July 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-14T09:31:30.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "politics",
+        "lang": "en_US",
+        "opening_time": "2025-09-11T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-6b8231e91bce",
+      "question": "Will the UN Security Council adopt, on or before April 8, 2026, a resolution authorizing member states to use defensive measures to secure transit passage through the Strait of Hormuz, as confirmed by an official UN statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-09T17:45:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2026-04-09T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-6dcc59eef49b",
+      "question": "Will Meta publicly announce, before or on August 29, 2025, the integration of Midjourney's AI image generation technology into Facebook's main feed for users in any country?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-02T16:17:30.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2025-08-30T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-72dfaccffff0",
+      "question": "Will Mercedes-Benz and Factorial release their new 'Solstice' EV battery tech by 20 September 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-09-23T11:38:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2024-09-21T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-88b02901fa1f",
+      "question": "Will North Korea face international sanctions for revealing photos of a banned uranium enrichment site by 19 September 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-09-22T11:05:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2024-09-20T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-a86b70f95d42",
+      "question": "Will the Israeli government publicly confirm conducting at least one additional airstrike on Houthi targets in Yemen before or on August 30, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-02T16:12:15.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2025-08-31T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-ab044f3f0d3c",
+      "question": "Will Governor Greg Abbott publicly announce the signing of the new mid-census congressional redistricting map into law before or on August 28, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-01T15:11:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "politics",
+        "lang": "en_US",
+        "opening_time": "2025-08-29T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-ac0cbdee534d",
+      "question": "Will the UK government publicly announce, before or on August 29, 2025, the establishment of a new statutory body to oversee and prioritize asylum appeals as part of its proposed overhaul of the asylum appeals system?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-01T15:09:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "economy",
+        "lang": "en_US",
+        "opening_time": "2025-08-30T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-b4dc61a122b8",
+      "question": "Will the lawsuit against Alabama officials for allegedly suppressing new citizens' voting rights be resolved by 20 September 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-09-23T11:26:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "politics",
+        "lang": "en_US",
+        "opening_time": "2024-09-21T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-b6b8896f33d4",
+      "question": "Will Baidu publicly announce, on or before April 8, 2026, the implementation of a new safety protocol or technical fix specifically aimed at preventing system-wide robotaxi outages in Wuhan, as confirmed by an official company statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-09T12:41:40.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2026-04-09T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-de9971f650a8",
+      "question": "Will Andrew Bailey be publicly confirmed to have assumed the role of FBI Co-Deputy Director before or on August 24, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-08-25T17:19:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "politics",
+        "lang": "en_US",
+        "opening_time": "2025-08-25T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-ec862756f69f",
+      "question": "Will the National Transportation Safety Board publicly release preliminary findings from its investigation into the August 2024 Pembroke tour bus crash before or on August 30, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-02T16:14:50.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "health",
+        "lang": "en_US",
+        "opening_time": "2025-08-31T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-f3b50ad554e7",
+      "question": "Will Shelly Kittleson, the American journalist abducted in Baghdad on April 2, 2024, be confirmed publicly by a major news outlet or the U.S. or Iraqi government as released or found safe on or before April 8, 2026?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-09T17:48:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2026-04-09T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-f4055370d9b4",
+      "question": "Will the Pickett Fire in Napa County, California, be declared at least 90% contained by state or local authorities before or on August 30, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-02T16:13:15.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "weather",
+        "lang": "en_US",
+        "opening_time": "2025-08-31T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-fce891b69e02",
+      "question": "Will President Emmanuel Macron publicly announce the appointment of a new prime minister from within his own political camp (excluding members of the Socialist Party or other opposition parties) on or before September 14, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-18T08:55:15.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "politics",
+        "lang": "en_US",
+        "opening_time": "2025-09-15T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-15f1602ae311",
+      "question": "Will any major cybersecurity vendor publicly announce, on or before March 23, 2026, the development or release of a security product or feature specifically designed to detect or prevent autonomous AI agent-initiated privilege escalation or data exfiltration within enterprise networks, as confirmed by an official company statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-25T20:16:40.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2026-03-24T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-2bc35ba5f5e8",
+      "question": "Will the Cuban government publicly announce, on or before March 23, 2026, the implementation of a nationwide policy specifically restricting or rationing aviation fuel for commercial airlines, as confirmed by an official government statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-25T20:15:40.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2026-03-24T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-37bd6fa25530",
+      "question": "Will the Cuban government publicly announce, on or before March 22, 2026, the implementation of a nationwide policy allowing Cubans residing abroad to become legal partners or owners of private companies in Cuba, as confirmed by an official government statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-25T19:42:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2026-03-23T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-5c4f2db9e6ca",
+      "question": "Will the National Weather Service confirm, on or before March 22, 2026, that Phoenix, Arizona, reached at least 100 degrees Fahrenheit for the first time in the month of March 2026, as reported by an official statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-25T19:41:25.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "weather",
+        "lang": "en_US",
+        "opening_time": "2026-03-23T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-8af2b9a21dcb",
+      "question": "Will the Cuban government publicly announce, on or before March 22, 2026, the implementation of new nationwide electricity rationing measures or scheduled rolling blackouts, as confirmed by an official government statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-25T19:40:40.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2026-03-23T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-90c05d3e87d6",
+      "question": "Will any major enterprise cybersecurity vendor publicly announce, on or before March 23, 2026, the development or commercial release of a dedicated security product or feature specifically designed to detect or prevent autonomous AI agent-initiated privilege escalation or data exfiltration within corporate networks, as confirmed by an official company statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-25T20:17:10.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2026-03-24T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-b9af8cd09bea",
+      "question": "Will at least one major Indian pharmaceutical company publicly announce the commercial launch of a generic semaglutide injection for weight loss or diabetes treatment on or before March 23, 2026, as confirmed by an official company statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-25T20:16:10.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "health",
+        "lang": "en_US",
+        "opening_time": "2026-03-24T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-92a6aa680df1",
+      "question": "Will OpenAI announce a new CTO by October 4, 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-07T16:54:25.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2024-10-05T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-1baffc224df4",
+      "question": "Will Emirates publicly announce, on or before March 31, 2026, the restoration of its full pre-conflict flight schedule at Dubai International Airport, as confirmed by an official company statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-01T20:34:15.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "travel",
+        "lang": "en_US",
+        "opening_time": "2026-04-01T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-62eba365e2b5",
+      "question": "Will CrossSense Ltd. publicly announce, on or before April 1, 2026, the commercial availability of its AI-powered smart glasses system for dementia support in at least one country, as confirmed by an official company statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-02T19:05:45.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "health",
+        "lang": "en_US",
+        "opening_time": "2026-04-02T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-87cb608d97ef",
+      "question": "Will the United States Department of Justice or the Federal Bureau of Investigation publicly announce, on or before April 1, 2026, the successful extradition or return to U.S. custody of Alen Zheng in connection with the improvised explosive device incident at MacDill Air Force Base, as confirmed by an official agency statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-02T19:00:10.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2026-04-02T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-e63ebbb46af1",
+      "question": "Will Netflix publicly announce, on or before April 1, 2026, another price increase for any of its U.S. subscription tiers, as confirmed by an official company statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-02T18:54:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "business",
+        "lang": "en_US",
+        "opening_time": "2026-04-02T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-12d6074b3aca",
+      "question": "Will it resolve?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-08-29T11:40:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "misc",
+        "lang": null,
+        "opening_time": "2024-08-29T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-4c7e08fb064c",
+      "question": "Will the second season of Jujutsu Kaisen end by 6 September 2023?",
+      "resolution_criteria": "",
+      "cutoff_time": "2023-09-09T09:55:10.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "entertainment",
+        "lang": "en_US",
+        "opening_time": "2023-09-07T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-a3040882cb3b",
+      "question": "Will SNX market cap surpass MKR market cap on CoinGecko at any time before Aug 1 2020?",
+      "resolution_criteria": "",
+      "cutoff_time": "2020-08-01T04:42:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "cryptocurrency",
+        "lang": "en_US",
+        "opening_time": "2020-08-01T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-b98253f30273",
+      "question": "Will the UK government publicly announce, on or before March 28, 2026, the implementation of new financial incentives or subsidies specifically aimed at reducing the upfront cost of residential heat pump installations, as confirmed by an official government statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-01T19:18:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sustainability",
+        "lang": "en_US",
+        "opening_time": "2026-03-29T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-00ca1a924db2",
+      "question": "Transfer ProxyAdmin ownership to 0x977f28 (i256 corrected)",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-06-28T21:24:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": null,
+        "lang": null,
+        "opening_time": null
+      }
+    },
+    {
+      "id": "rd-realityeth-04edd9474049",
+      "question": "Will Nvidia or any of its commercial space partners publicly announce, on or before March 23, 2026, the successful completion of a real-time disaster response operation utilizing the Space-1 Vera Rubin Module in an operational orbital data center, as confirmed by an official company statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-25T20:18:10.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2026-03-24T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-072fe5479733",
+      "question": "Will the World Health Organization publicly announce, on or before March 22, 2026, the launch of a global initiative specifically aimed at promoting physical activity in response to rising temperatures, as confirmed by an official WHO statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-23T22:00:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "health",
+        "lang": "en_US",
+        "opening_time": "2026-03-23T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-1bfe5c2fa566",
+      "question": "Will the Cuban government publicly announce, on or before March 22, 2026, the implementation of a nationwide fuel rationing policy restricting private vehicle fuel purchases to less than 10 liters per week, as confirmed by an official government statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-23T22:01:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2026-03-23T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-1d875aa9708d",
+      "question": "Will the Pew Research Center release another survey measuring American public opinion toward Israel on or before April 14, 2026, as confirmed by publication on the official Pew Research Center website or coverage by a major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-16T07:18:30.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2026-04-15T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-40392a1f744c",
+      "question": "Will the Cuban government publicly announce, on or before March 23, 2026, the implementation of a nationwide fuel rationing policy restricting private vehicle fuel purchases to less than 10 liters per week, as confirmed by an official government statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-25T20:19:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2026-03-24T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-4e9527fbc62a",
+      "question": "Will GNO be above $1000 in 1 second from now?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-09-02T06:47:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "cryptocurrency",
+        "lang": "en",
+        "opening_time": "2024-09-02T06:46:21.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-5bd68c4eff29",
+      "question": "Will any major cybersecurity firm or government agency publicly announce, on or before March 29, 2026, the disruption or takedown of at least 500 fraudulent e-commerce domains attributed to the Chinese-speaking threat actor described in the March 2024 NordVPN and TechRadar report, as confirmed by an official statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-01T19:56:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2026-03-30T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-b4e3b9f66f16",
+      "question": "Will MSI publicly announce, on or before March 23, 2026, an additional reduction of at least 10% in its low-end notebook production beyond the 30% cut already confirmed, as a response to the ongoing RAM crisis, as verified by an official company statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-25T20:17:40.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "business",
+        "lang": "en_US",
+        "opening_time": "2026-03-24T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-b6aa5fa58f60",
+      "question": "Will any of Amazon, Google, Meta, or Microsoft publicly announce, on or before March 22, 2026, the implementation of a new policy or initiative to reduce their carbon credit purchases for data center emissions compared to their 2025 levels, as confirmed by an official company statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-23T22:01:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sustainability",
+        "lang": "en_US",
+        "opening_time": "2026-03-23T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-d0b59e52b970",
+      "question": "Will the UK Health Security Agency publicly announce, on or before March 23, 2026, that the menB strain responsible for the Canterbury outbreak is genetically distinct from previously known menB strains, as confirmed by whole genome sequencing results?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-25T20:19:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "health",
+        "lang": "en_US",
+        "opening_time": "2026-03-24T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-d0d71ca51785",
+      "question": "Will FIFA publicly announce, on or before March 23, 2026, any change to the scheduled locations of Iran's 2026 World Cup group stage matches from the United States to another country, as confirmed by an official FIFA statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-25T20:18:45.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2026-03-24T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-7e6d8446fd70",
+      "question": "Will the tropical depression PTC Four make landfall in Florida by 8 August 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-08-09T12:40:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "weather",
+        "lang": "en_US",
+        "opening_time": "2024-08-09T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-ade597009b8e",
+      "question": "Will Donald Trump be inaugurated for his second term as President of the USA on Inauguration Day, January 20th, 2021?",
+      "resolution_criteria": "",
+      "cutoff_time": "2021-01-23T07:04:03.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"No\",\"Yes\"",
+        "category": "news & politics",
+        "lang": "en_US",
+        "opening_time": "2021-01-22T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-b07d46263bb3",
+      "question": "Will OpenAI publicly announce, on or before April 19, 2026, the signing of a multi-year, nine-figure enterprise deal with a Fortune 500 company, as confirmed by an official company statement or reporting by a major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-21T09:53:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "business",
+        "lang": "en_US",
+        "opening_time": "2026-04-20T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-0161f7ea9db4",
+      "question": "Will iFixit or a comparable major repair advocacy group publicly rate the MacBook Neo as more repairable than any other MacBook model released in the last 10 years, on or before April 14, 2026, as confirmed by an official statement or coverage by a major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-15T19:24:50.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2026-04-15T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-028d8ff3cd32",
+      "question": "Will the United Nations officially announce the delivery of humanitarian aid to Gaza by March 31, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-04-01T10:52:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2025-04-01T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-07b790480537",
+      "question": "Will Indian imports of Russian crude oil average at least 1.5 million barrels per day between September 12 and September 18, 2025, according to Kpler or Vortexa shipping data?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-24T08:07:50.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Infinite Games",
+        "lang": "en",
+        "opening_time": "2025-09-19T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-0a5f796e160f",
+      "question": "Will NASA publicly release, on or before April 9, 2026, images or videos taken with personal smartphones by Artemis II astronauts during their mission, as confirmed by an official NASA source or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-10T17:34:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "science",
+        "lang": "en_US",
+        "opening_time": "2026-04-10T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-0e93aef1d9a4",
+      "question": "Will the Catholic Church officially declare Carlo Acutis a saint at a canonization ceremony on or before September 10, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-11T09:36:25.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "social",
+        "lang": "en_US",
+        "opening_time": "2025-09-11T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-11fc5756ee95",
+      "question": "Will Russia reveal its secret war drones project in China by October 1, 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-03T01:04:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2024-10-02T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-131d4412fc13",
+      "question": "Will King Charles III officially resume public engagements in Birmingham by April 2, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-04-03T08:47:25.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2025-04-03T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-135e1eb22d68",
+      "question": "Will the Texas county succeed in its appeal to keep 17 books off its shelves on 2 October 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-03T18:19:35.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "social",
+        "lang": "en_US",
+        "opening_time": "2024-10-03T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-137decc35be2",
+      "question": "与党は参議院の過半数を獲得できた？",
+      "resolution_criteria": "",
+      "cutoff_time": "2019-07-28T15:14:56.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "misc",
+        "lang": "en_US",
+        "opening_time": "2019-07-22T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-13e000233699",
+      "question": "Will the United Nations or any international organization announce a humanitarian aid package specifically to address the water crisis in Kabul by July 24, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-07-25T17:34:40.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sustainability",
+        "lang": "en_US",
+        "opening_time": "2025-07-25T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-16684d9a722e",
+      "question": "Will be more than 20,000 new cases in the US be reported on March 30th?",
+      "resolution_criteria": "",
+      "cutoff_time": "2020-04-01T11:23:37.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Coronavirus",
+        "lang": "en_US",
+        "opening_time": "2020-03-30T21:59:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-17c3363dad41",
+      "question": "Will any country in the European Union publicly announce, on or before April 9, 2026, the granting of a construction license for a small modular reactor (SMR) project, as confirmed by an official government statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-10T18:03:30.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sustainability",
+        "lang": "en_US",
+        "opening_time": "2026-04-10T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-1a927e998560",
+      "question": "Will the National Weather Service or NOAA publicly confirm, on or before April 6, 2026, that at least one area in the United States received 6 or more inches of rainfall from March 31 to April 3, 2026, as a result of this severe weather system, as reported in official rainfall summaries or by major news outlets?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-07T16:03:15.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "weather",
+        "lang": "en_US",
+        "opening_time": "2026-04-07T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-1ad29a6c426b",
+      "question": "Will the FBI announce the arrest of the rioter who fired at ICE agents during the July 10, 2025, raid on the California marijuana farms by July 17, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-07-18T18:34:45.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2025-07-18T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-1b348acb8b0f",
+      "question": "Will the Chinese State Council announce any new nationwide food safety regulations in response to the Tianshui kindergarten lead poisoning incident by July 21, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-07-22T17:36:45.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2025-07-22T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-1c3752a75ad9",
+      "question": "Is ONO Social Network a scam?",
+      "resolution_criteria": "",
+      "cutoff_time": "2019-06-17T01:23:01.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "bool",
+        "outcomes": null,
+        "category": "cryptocurrency",
+        "lang": "en_US",
+        "opening_time": "2019-06-15T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-1d11684476f9",
+      "question": "Will Wavel Ramkalawan’s support in public opinion polls released on or around September 14, 2025, drop by at least 2 percentage points compared to the most recent late August 2025 polls?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-20T15:33:40.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Infinite Games",
+        "lang": "en",
+        "opening_time": "2025-09-17T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-1e3db49fe05b",
+      "question": "Will a major international humanitarian organization (such as the UN, ICRC, or MSF) issue a formal emergency appeal or public condemnation specifically referencing the humanitarian consequences of the Gaza City evacuation between September 9, 2025 and September 16, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-18T08:48:50.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Infinite Games",
+        "lang": "en",
+        "opening_time": "2025-09-17T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-22298484e054",
+      "question": "Will the Russian Ministry of Defense announce the capture of Rodynske, a town in Donetsk Oblast, Ukraine, by August 31, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-02T16:09:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Infinite Games",
+        "lang": "en",
+        "opening_time": "2025-09-01T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-2547fb9ac1ed",
+      "question": "Will Apple release another iPhone model beyond the iPhone 16 and 16 Plus by 27 September 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-09-29T14:06:00.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2024-09-28T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-261829f4e5a3",
+      "question": "Will Italy's government publicly announce, on or before April 9, 2026, the submission of draft legislation to repeal its longstanding ban on nuclear power, as confirmed by an official government statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-10T20:47:15.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sustainability",
+        "lang": "en_US",
+        "opening_time": "2026-04-10T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-27ca1ae590e9",
+      "question": "Will any additional major sponsor publicly announce, on or before April 11, 2026, the withdrawal of their sponsorship from the Wireless Festival 2026 due to Kanye West's involvement, as confirmed by an official company statement or reporting by a major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-12T08:01:00.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "business",
+        "lang": "en_US",
+        "opening_time": "2026-04-12T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-27ec9772f3b3",
+      "question": "Will the Liberal Democratic Party of Japan publicly announce, on or before October 15, 2024, the selection of a new party president to replace Shigeru Ishiba?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-14T09:23:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2025-09-13T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-33197d2616ef",
+      "question": "Will at least one Russian naval vessel dock at Port Sudan between September 14 and September 21, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-24T08:02:25.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Infinite Games",
+        "lang": "en",
+        "opening_time": "2025-09-22T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-3670479174d5",
+      "question": "Will one of the five largest container shipping companies by TEU capacity announce a suspension of all Red Sea transits due to security concerns by August 23, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-08-27T15:11:45.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Infinite Games",
+        "lang": "en",
+        "opening_time": "2025-08-24T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-3c31085f3538",
+      "question": "Will GIP-1 pass? (GIP-1: One-time 5% GNO airdrop to active GnosisDAO participants)",
+      "resolution_criteria": "",
+      "cutoff_time": "2020-12-02T05:01:16.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "gnosis impact",
+        "lang": "en_US",
+        "opening_time": "2020-12-01T17:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-3f8194a0ec29",
+      "question": "Will Sporting Lisbon officially announce Ruben Amorim's departure from the club by November 3, 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-11-04T07:56:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sports",
+        "lang": "en_US",
+        "opening_time": "2024-11-04T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-456f353faa2c",
+      "question": "Will there be more than 10 000 000 KNC staked on the KyberDAO by 10th of July 2020 UTC12:00:00?",
+      "resolution_criteria": "",
+      "cutoff_time": "2020-07-13T10:54:51.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Cryptocurrency",
+        "lang": "en_US",
+        "opening_time": "2020-07-12T12:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-46bbf802edf9",
+      "question": "Will the government of Mexico publicly announce, on or before April 14, 2026, an official increase in federal law enforcement presence or new security measures specifically for highways in response to the April 2026 truckers and farmers protests, as confirmed by an official government statement or reporting by a major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-15T19:00:30.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2026-04-15T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-46e9e0673225",
+      "question": "Will Manchester City win their next match against Slovan Bratislava on 9 October 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-11T23:12:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sports",
+        "lang": "en_US",
+        "opening_time": "2024-10-10T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-4e17c23da446",
+      "question": "Will any EU country publicly announce, on or before April 9, 2026, the allocation of new government funding specifically earmarked for the construction or development of small modular reactors (SMRs), as confirmed by an official government statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-10T20:15:50.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sustainability",
+        "lang": "en_US",
+        "opening_time": "2026-04-10T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-5b58f55cde71",
+      "question": "Will the Springs Fire east of Moreno Valley in Riverside County, California, be confirmed as fully contained by Cal Fire on or before April 9, 2026, as verified by an official Cal Fire statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-10T20:57:45.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "weather",
+        "lang": "en_US",
+        "opening_time": "2026-04-10T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-5dcd61a5c571",
+      "question": "Will Oslo police publicly announce, on or before March 14, 2026, the identification or apprehension of at least one suspect in connection with the March 8, 2026 explosion at the U.S. embassy in Oslo?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-16T03:02:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2026-03-15T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-62208de14649",
+      "question": "Will Swapr on xDai have more liquidity than Honeyswap at the end of Q2 2021?",
+      "resolution_criteria": "",
+      "cutoff_time": "2021-07-07T09:42:00.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "cryptocurrency",
+        "lang": "en_US",
+        "opening_time": "2021-07-06T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-63f7a10a862b",
+      "question": "Will the American Psychiatric Association publicly announce, on or before September 13, 2025, a formal review or recommendation to change the official name of schizophrenia in the DSM (Diagnostic and Statistical Manual of Mental Disorders)?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-15T08:12:10.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "health",
+        "lang": "en_US",
+        "opening_time": "2025-09-14T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-6429b51c8b22",
+      "question": "Will the LA Dodgers win their play-off match against the San Diego Padres on 14 October 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-15T22:06:15.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sports",
+        "lang": "en_US",
+        "opening_time": "2024-10-15T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-66dc18e93454",
+      "question": "Will a major international humanitarian organization issue a new public warning or report on worsening civilian suffering in Gaza by August 24, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-08-27T15:08:50.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Infinite Games",
+        "lang": "en",
+        "opening_time": "2025-08-25T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-677d437f90ef",
+      "question": "Will a university announce a major breakthrough in 6G technology development by 21 September 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-09-24T12:21:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2024-09-22T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-67bdd4ce85f8",
+      "question": "Will the U.S. unemployment rate, as reported by the Bureau of Labor Statistics, reach or exceed 4.6% in any monthly jobs report released on or before April 6, 2026?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-07T15:57:10.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "finance",
+        "lang": "en_US",
+        "opening_time": "2026-04-07T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-6973dfc20937",
+      "question": "Will the investigation into the exploding pagers in Lebanon conclude by 29 September 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-09-30T17:24:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2024-09-30T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-6e9cb8baf641",
+      "question": "Will the UK Department for Work and Pensions publicly announce, on or before April 9, 2026, any further changes to the planned timeline for increasing the state pension age to 67, as confirmed by an official government statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-10T21:23:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "finance",
+        "lang": "en_US",
+        "opening_time": "2026-04-10T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-70d686ebd0ea",
+      "question": "Will the House Committee on Rules report out to the House floor any appropriations bill or continuing resolution containing at least one significant policy rider (defined as an amendment that substantively alters policy beyond funding allocations, such as changes to health care subsidies or IRS funding) by 23:59:59 UTC on September 18, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-22T09:35:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Infinite Games",
+        "lang": "en",
+        "opening_time": "2025-09-19T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-7176e85d934e",
+      "question": "Will NATO announce additional deterrence or readiness measures in Eastern Europe by 23:59:59 UTC on September 19, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-22T09:31:40.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Infinite Games",
+        "lang": "en",
+        "opening_time": "2025-09-20T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-74beae5ccbd4",
+      "question": "Will General Motors publicly announce, on or before March 14, 2026, the commercial launch of a new plug-in hybrid vehicle model for the North American market?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-16T03:01:50.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sustainability",
+        "lang": "en_US",
+        "opening_time": "2026-03-15T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-799eeed3c966",
+      "question": "Will the National Transportation Safety Board (NTSB) publicly release a preliminary report on the March 2026 LaGuardia Airport plane and fire truck collision on or before March 29, 2026, as confirmed by an official NTSB statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-01T19:25:45.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "travel",
+        "lang": "en_US",
+        "opening_time": "2026-03-30T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-7c683f301404",
+      "question": "Will Greta Thunberg be detained or arrested by Israeli authorities before 00:00:00 UTC on September 22, 2025, in connection with the Global Sumud Flotilla's attempt to breach the Gaza blockade?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-25T09:12:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Infinite Games",
+        "lang": "en",
+        "opening_time": "2025-09-22T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-7eefd092db67",
+      "question": "Will Meta Connect 2024 showcase the new Quest 3S and Meta AR glasses by 1 October 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-03T00:51:30.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2024-10-02T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-8c7c8d6046cb",
+      "question": "Will NASA publicly confirm, on or before April 13, 2026, the safe return of the Artemis II crew to Earth following their historic lunar flyby, as reported by NASA or a major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-15T06:54:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "science",
+        "lang": "en_US",
+        "opening_time": "2026-04-14T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-8c89b1ec8220",
+      "question": "Will Tim Walz be publicly accused of a sex crime before October 15?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-24T15:49:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "crime",
+        "lang": "en",
+        "opening_time": "2024-10-22T03:59:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-9227a0b0a969",
+      "question": "Will the season 3 of 'The Legend of Vox Machina' debut on Prime Video by 4 October 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-05T08:31:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "entertainment",
+        "lang": "en_US",
+        "opening_time": "2024-10-05T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-9821f98b66c4",
+      "question": "Will GNO be above $1000 in 1 second from now?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-08-30T06:37:15.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "cryptocurrency",
+        "lang": "en",
+        "opening_time": "2024-08-30T06:36:25.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-9924efec3c0d",
+      "question": "Will the American Heart Association publicly announce, on or before September 5, 2025, a revision to its clinical guidelines recommending against routine beta-blocker use for post-heart attack patients with preserved ejection fraction (above 50%)?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-07T09:23:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "health",
+        "lang": "en_US",
+        "opening_time": "2025-09-06T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-9c90e8e80a7e",
+      "question": "Between July 28 and August 2, 2025, will a senior Saudi official (such as Crown Prince Mohammed bin Salman, Foreign Minister Faisal bin Farhan, or an official Saudi foreign ministry spokesperson) publicly reaffirm that normalization with Israel remains contingent on a credible pathway to Palestinian statehood?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-08-04T13:05:40.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "Infinite Games",
+        "lang": "en",
+        "opening_time": "2025-08-03T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-9eed3e5d8187",
+      "question": "Will the U.S. Treasury Department publicly announce, on or before March 25, 2026, that it has fully assumed operational responsibility for the collection of all defaulted federal student loans, as confirmed by an official government statement or major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-03-28T20:54:10.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "finance",
+        "lang": "en_US",
+        "opening_time": "2026-03-26T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-a1362d349fd3",
+      "question": "Will Ukrainian authorities publicly announce the apprehension or identification of a suspect in the assassination of Andriy Parubiy before or on September 5, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-09-06T12:23:00.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "international",
+        "lang": "en_US",
+        "opening_time": "2025-09-06T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-a5f7bf38e073",
+      "question": "Will Skydance and RedBird Capital publicly announce the completion of the Paramount merger by transferring operational control of CBS and Paramount Pictures before or on July 30, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-07-31T08:07:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "business",
+        "lang": "en_US",
+        "opening_time": "2025-07-31T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-a86b3d03c734",
+      "question": "Will Sarah McBride become the first transgender member of the U.S. Congress by 20 September 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-09-22T10:53:25.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "politics",
+        "lang": "en_US",
+        "opening_time": "2024-09-21T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-aa0e313a2c93",
+      "question": "Will GNO be above $1000 in 1 second from now?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-08-30T06:27:15.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "cryptocurrency",
+        "lang": "en",
+        "opening_time": "2024-08-30T06:26:39.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-b04ebc0d77f9",
+      "question": "Will Microsoft announce any new features for its AI playground, Copilot Pages, on 25 September 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-09-26T14:13:00.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2024-09-26T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-b62779b029fa",
+      "question": "Will Tesla publicly announce the opening of an additional diner and drive-in Supercharger station in a city other than Los Angeles before or on July 27, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-07-28T19:11:55.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "business",
+        "lang": "en_US",
+        "opening_time": "2025-07-28T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-c1da7158ea7b",
+      "question": "Will evidence of secret talks between former President Trump and Russian President Putin after Trump left office be confirmed by 16 October 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-17T18:00:20.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "politics",
+        "lang": "en_US",
+        "opening_time": "2024-10-17T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-c5b4d8ea0666",
+      "question": "Will the World Health Organization publicly update its adult physical activity guidelines to include a recommendation for a daily step count (such as 7,000 steps) before or on July 29, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-07-30T13:15:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "health",
+        "lang": "en_US",
+        "opening_time": "2025-07-30T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-c96f9d31d2f1",
+      "question": "Will Tyson Fury announce, on or before April 14, 2026, that he has signed a contract to fight Anthony Joshua in a professional boxing match, as confirmed by an official statement or reporting by a major news outlet?",
+      "resolution_criteria": "",
+      "cutoff_time": "2026-04-15T18:53:30.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "sports",
+        "lang": "en_US",
+        "opening_time": "2026-04-15T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-c9876a4bd38a",
+      "question": "Will Qualcomm's new Snapdragon X-series chip, code-named Project Glymur, be released by 9 October 2024?",
+      "resolution_criteria": "",
+      "cutoff_time": "2024-10-11T23:11:00.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "technology",
+        "lang": "en_US",
+        "opening_time": "2024-10-10T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-c9e07005f1fb",
+      "question": "Will any Alaskan city officially declare a state of emergency due to the earthquake or tsunami advisory by July 22, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-07-23T19:20:05.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "weather",
+        "lang": "en_US",
+        "opening_time": "2025-07-23T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "rd-realityeth-cb0d0f08a22d",
+      "question": "Will the United States and the European Union publicly announce a trade agreement reducing auto tariffs on European vehicles to 15% before or on July 31, 2025?",
+      "resolution_criteria": "",
+      "cutoff_time": "2025-08-01T06:47:10.000Z",
+      "source_protocol": "reality.eth",
+      "public_metadata": {
+        "template_type": "single-select",
+        "outcomes": "\"Yes\",\"No\"",
+        "category": "business",
+        "lang": "en_US",
+        "opening_time": "2025-08-01T00:00:00.000Z"
+      }
+    }
+  ]
+}

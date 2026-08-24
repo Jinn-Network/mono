@@ -1,0 +1,921 @@
+====================================================================================================
+rd-realityeth-6ca03f39facf  [arbitrated | distinct=2 flips=1 answers=2]
+QUESTION: Was 2019 the highest annual return on the S&P500 of the past decade (2010-2019)
+CUTOFF:   2020-01-03T17:27:43.000Z   opening: 2020-01-03T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2020-03-26T17:43:49.000Z  src reality.eth:1:0x325a2e0F3CCA2ddbaeBB4DfC38Df8D19ca165b47:0x6ca03f39facfed20a4b0a665fc749fe9e83ae577874093ab883647ef99772e99
+  bond ladder: NO@10000000000000000 -> INVALID@0
+  arbitration: requested 2020-01-03T17:27:43.000Z cancelled=false
+A_opus:   NO conf=0.96 abstain=false [wrong]
+  reasoning: The claim asks whether 2019 was the best annual S&P 500 return of 2010-2019. Contemporaneous reporting (CNBC, Dec 31, 2019; Forbes, Jan 1, 2020) states the S&P 500 gained 28.9% in 2019, its largest gain since 2013, when it rose 29.6%. Total-return data agree (2013: 32.39% vs 2019: 31.49%). Since 2013 falls inside the 2010-2019 window and exceeded 2019 on both price and total-return bases, 2019 was
+  ev: https://www.cnbc.com/2019/12/31/dow-futures-last-trading-day-of-2019.html
+  ev: https://www.slickcharts.com/sp500/returns
+  ev: https://www.forbes.com/sites/sergeiklebnikov/2020/01/01/heres-how-2019-turned-out-to-be-a-historic-year-for-the-stock-market/
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.9579999999999999 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.95 :: Multiple contemporaneous, pre-cutoff sources (CNBC, Axios, Forbes, published Dec 31 2019–Jan 1 2020) explicitly state that 2019's S&P 500 return (~28.9% price return, ~31.5% total return) was the best
+  B2 (sonnet-5/adversarial): NO conf=0.95 :: As of the cutoff (early Jan 2020), contemporaneous financial reporting (CNBC, Dec 31, 2019) stated the S&P 500's 2019 gain of ~28.9% was its 'biggest one-year gain since 2013, when it rallied 29.6%.' 
+  B3 (sonnet-5/criteria): NO conf=0.92 :: The claim asks whether 2019 was the single highest annual return year for the S&P 500 among 2010-2019. Historical, well-established total-return data (available long before the Jan 2020 cutoff, since 
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.99 :: The S&P 500's 2013 annual return was 32.15%, while 2019's was 31.26%. 2013 was the highest annual return of the 2010-2019 decade. The claim that 2019 was the highest is therefore false. This data was 
+  B5 (haiku-4-5-20251001/default): NO conf=0.98 :: The S&P 500's annual returns for 2010-2019 show that 2013 had the highest return at 32.05% (total return with dividends reinvested), while 2019 achieved 31.20%. 2019 was the second-best performing yea
+
+====================================================================================================
+rd-realityeth-581b86911244  [bonded-only | distinct=3 flips=4 answers=5]
+QUESTION: Kleros is bad.
+CUTOFF:   2023-08-31T19:40:35.000Z   opening: 2023-08-26T00:00:00.000Z
+GROUND TRUTH: ANSWERED_TOO_SOON (too_soon)  finalized 2023-09-07T19:40:35.000Z  src reality.eth:100:0xE78996A233895bE74a66F451f1019cA9734205cc:0x581b86911244beba0d87753b785e5746f489af207c749fcd438dac8a678be2ee
+  bond ladder: NO@10000000000000000 -> INVALID@20000000000000000 -> ANSWERED_TOO_SOON@40000000000000000 -> INVALID@80000000000000000 -> ANSWERED_TOO_SOON@160000000000000000
+A_opus:   NO conf=0.68 abstain=false [wrong]
+  reasoning: The claim is a bare subjective value judgment ("Kleros is bad") with no published resolution criteria, so it must be resolved exactly as worded. Direct web research was unavailable — every query naming the subject was blocked by the leakage guard — so no admissible source could be cited. Resolving on general principles: as of the 2023-08-31 cut-off, Kleros was an operational decentralized arbitrat
+network:  unanimous=true n_abstain=5
+C_judge:  UNRESOLVABLE conf=0.39 abstain=true via unanimous [correct]
+  B1 (sonnet-5/default): UNRESOLVABLE conf=0.5 :: The claim "Kleros is bad" is a subjective opinion statement with no objective resolution criteria (no defined metric, event, or threshold). There is no factual, verifiable outcome that reputable sourc
+  B2 (sonnet-5/adversarial): UNRESOLVABLE conf=0.95 :: The claim "Kleros is bad" is a purely subjective statement with no objective, verifiable resolution criteria published beyond the question itself. There is no factual event, metric, or measurable outc
+  B3 (sonnet-5/criteria): UNRESOLVABLE conf=0.5 :: The claim "Kleros is bad" is a subjective, opinion-based statement with no objective resolution criteria published beyond the question wording itself. There is no measurable threshold, event, or fact 
+  B4 (haiku-4-5-20251001/timeline): UNRESOLVABLE conf=0 :: The claim "Kleros is bad" contains no objective resolution criteria. "Bad" is a purely subjective descriptor without measurable thresholds or defined standards. The instructions specify that resolutio
+  B5 (haiku-4-5-20251001/default): UNRESOLVABLE conf=0 :: The claim "Kleros is bad" is inherently subjective without specific resolution criteria. The instructions specify no criteria beyond the question itself. Additionally, direct searches for Kleros are b
+
+====================================================================================================
+rd-realityeth-05b1bda386cb  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Will the gas prices rise above $5 a gallon by 27 August 2023?
+CUTOFF:   2023-08-29T07:59:45.000Z   opening: 2023-08-28T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2023-08-30T07:59:45.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x05b1bda386cbd8ee7edc202be396b5e2f6fc0cea11c68a1a21d63398edeb5206
+  bond ladder: NO@10000000000000000000 -> YES@20000000000000000000 -> INVALID@40000000000000000000
+A_opus:   NO conf=0.96 abstain=false [wrong]
+  reasoning: The claim asks whether gas prices rose above $5/gallon by 27 August 2023. The U.S. national average retail gasoline price in August 2023 hovered in the $3.80s, peaking for the year at roughly $3.88/gallon (AAA), and EIA data show the 2023 annual average was about $3.52. No plausible reading of the national average crossed $5 by 27 August 2023, so the claim resolves NO. (Only isolated state markets
+  ev: https://gasprices.aaa.com/did-we-reach-the-top-gas-price-for-2023-stay-tuned/
+  ev: https://info.oregon.aaa.com/pump-prices-continue-to-rise-national-average-for-regular-gas-reaches-highest-price-ever-for-this-time-of-year/
+  ev: https://www.eia.gov/todayinenergy/detail.php?id=61162
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.9219999999999999 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.97 :: The question asks whether gas prices would rise above $5/gallon by August 27, 2023. Multiple sources (AAA national average data, corroborated by independent reporting) show the U.S. national average g
+  B2 (sonnet-5/adversarial): NO conf=0.97 :: The question asks whether gas prices would rise above $5/gallon by August 27, 2023, worded without specifying a particular grade, state, or region — interpreted as the standard reference (U.S. nationa
+  B3 (sonnet-5/criteria): NO conf=0.88 :: The question asks whether gas prices would rise above $5/gallon by August 27, 2023, interpreted (absent other criteria) as the U.S. national average retail gasoline price. Multiple sources (AAA gas pr
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.82 :: The national average gasoline price on August 28, 2023 was $3.81 per gallon, and throughout August 2023 it ranged from approximately $3.78-$3.83 per gallon. This was well below the $5 per gallon thres
+  B5 (haiku-4-5-20251001/default): NO conf=0.97 :: National average gas prices in August 2023 peaked at $3.875 on August 17 and declined to approximately $3.81 by August 28. The highest gas price for all of 2023 was $3.88 in mid-September. Multiple au
+
+====================================================================================================
+rd-realityeth-219d1c93294d  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Is BCH a scam?
+CUTOFF:   2019-04-30T23:28:30.000Z   opening: 2019-04-30T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2019-04-30T23:31:30.000Z  src reality.eth:1:0x325a2e0F3CCA2ddbaeBB4DfC38Df8D19ca165b47:0x219d1c93294dff99504c1439c202e51785ec187aecbc99511538732d3186d6c4
+  bond ladder: YES@200000000000000 -> NO@400000000000000 -> INVALID@800000000000000
+A_opus:   NO conf=0.75 abstain=false [wrong]
+  reasoning: The claim is subjective and has no published criteria, so it must be resolved on the plain question as of 2019-04-30. As of that date, Bitcoin Cash was an open-source fork of Bitcoin launched in August 2017, among the top cryptocurrencies by market capitalization, and listed on major regulated exchanges including Coinbase, Kraken and Binance. No regulator, court, or authoritative body had determin
+  ev: https://isthiscoinascam.com/check/bitcoin-cash
+  ev: https://coinsutra.com/bitcoin-cash-bch/sell/
+  ev: https://www.fxstreet.com/amp/cryptocurrencies/news/bitcoin-sv-bsv-flips-past-bitcoin-cash-bch-as-bitmain-and-roger-ver-face-lawsuit-201812071353
+  ev: https://medium.com/@MishaGuttentag/coinbase-should-stop-selling-bitcoin-cash-bch-seriously-ba601d395023
+network:  unanimous=false n_abstain=2
+C_judge:  NO conf=0.72 abstain=false via judge [wrong]
+  judge: Solvers split 3 NO vs 2 UNRESOLVABLE, but agree on the underlying facts; the disagreement is only over whether an unscoped 'scam' claim is answerable. The UNRESOLVABLE solvers (B1, B3) cite only rhetorical sources — Steemit posts and an affiliate blog — which show partisans in the BTC/BCH fork war using 'scam' as a slur, not evidence of fraud. B1 even cites the same FXStreet market-activity source
+  B1 (sonnet-5/default): UNRESOLVABLE conf=0.85 :: The question 'Is BCH a scam?' has no published objective resolution criteria and is inherently a subjective/opinion-based claim about a cryptocurrency's legitimacy, not a factual event with a verifiab
+  B2 (sonnet-5/adversarial): NO conf=0.55 :: The question 'Is BCH a scam?' lacks any objective resolution criteria and 'scam' is inherently a subjective characterization rather than a verifiable fact. As of the April 2019 cutoff, Bitcoin Cash wa
+  B3 (sonnet-5/criteria): UNRESOLVABLE conf=0.9 :: The question 'Is BCH a scam?' has no published objective resolution criteria and asks for a subjective value judgment rather than a verifiable fact. Web evidence as of the cutoff (April 2019) shows on
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.85 :: Bitcoin Cash (BCH) was an established cryptocurrency as of April 30, 2019, with legitimate merchant adoption (~2000 companies), trading on major exchanges, and active development. While some Bitcoin p
+  B5 (haiku-4-5-20251001/default): NO conf=0.68 :: As of April 30, 2019, there was no official regulatory or governmental determination that Bitcoin Cash was a scam. While Bitcoin Cash was controversial and critics accused it of misleading marketing p
+
+====================================================================================================
+rd-realityeth-596577a45df8  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Ethereum ETF approved by May 31, 2024?
+CUTOFF:   2024-04-29T15:48:50.000Z   opening: 2024-04-26T21:00:00.000Z
+GROUND TRUTH: ANSWERED_TOO_SOON (too_soon)  finalized 2024-05-01T03:48:50.000Z  src reality.eth:100:0xE78996A233895bE74a66F451f1019cA9734205cc:0x596577a45df88a5ee0f9476af10bf06d2003a8bf8bfb208ed983db1fabb01237
+  bond ladder: YES@100000000000000000 -> NO@200000000000000000 -> ANSWERED_TOO_SOON@400000000000000000
+A_opus:   YES conf=0.85 abstain=false [wrong]
+  reasoning: The question asks whether an Ethereum ETF was approved by May 31, 2024. The SEC's final statutory deadline (VanEck) fell on May 23, 2024, inside the window. On that date the SEC approved the 19b-4 exchange rule-change filings for eight spot ether ETFs across Cboe BZX, NYSE Arca and Nasdaq — reported across primary and secondary sources as 'SEC approves spot Ethereum ETFs.' The only ambiguity is th
+  ev: https://www.coindesk.com/markets/2024/05/23/sec-approves-spot-ether-etf-listing-still-needs-to-approve-products
+  ev: https://blockchain.bakermckenzie.com/2024/05/24/us-sec-surprises-crypto-community-by-approving-ether-etfs/
+  ev: https://www.mayerbrown.com/en/insights/publications/2024/05/sec-approves-listings-of-spot-ether-etfs-waiting-is-the-hardest-part
+  ev: https://cointelegraph.com/news/sec-pushes-deadline-vaneck-spot-ether-etf
+network:  unanimous=false n_abstain=0
+C_judge:  YES conf=0.85 abstain=false via judge [wrong]
+  judge: The claim as written asks whether an Ethereum ETF was approved by May 31, 2024. That is a determinate historical fact: the SEC approved the 19b-4 rule-change filings permitting eight spot Ether ETFs on May 23, 2024 (CNBC, Forbes, Mayer Brown, and essentially all financial press). Solvers B1, B2, and B3 did not dispute this fact; they instead disqualified it on the grounds that reporting postdates 
+  B1 (sonnet-5/default): NO conf=0.58 :: The question resolves on whether a spot Ethereum ETF was approved by May 31, 2024. Because the evidence cutoff (2024-04-29) predates the actual SEC decision (which occurred May 23, 2024, per later rep
+  B2 (sonnet-5/adversarial): NO conf=0.58 :: The question asks whether a spot Ethereum ETF was approved by May 31, 2024, but the evaluation cutoff is April 29, 2024 — before the actual SEC decision (which historically came on May 23, 2024) and b
+  B3 (sonnet-5/criteria): NO conf=0.68 :: The question asks whether a spot Ethereum ETF would be approved by May 31, 2024. Per instructions, only evidence published before the April 29, 2024 cutoff may be used, and the actual SEC approval (wh
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.98 :: The SEC approved eight spot Ethereum ETFs on May 23, 2024, via Form 19b-4 filings. This approval occurred before the May 31, 2024 deadline specified in the question. The approval is well-documented ac
+  B5 (haiku-4-5-20251001/default): YES conf=0.75 :: The SEC approved Ethereum ETFs on May 23, 2024, before the May 31, 2024 deadline specified in the question. Multiple independent sources (CNBC, Forbes, CoinDesk, Mayer Brown) confirm this approval. Ho
+
+====================================================================================================
+rd-realityeth-5e2bff6d019d  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Will OpenAI release another model superior to the current one by 27 September 2024?
+CUTOFF:   2024-09-29T16:30:20.000Z   opening: 2024-09-28T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2024-09-30T16:30:20.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x5e2bff6d019d6a7842a3ce770415bac310cde49d923ae02f296cfe76115c4831
+  bond ladder: NO@1000000000000000000 -> YES@10000000000000000000 -> INVALID@20000000000000000000
+A_opus:   YES conf=0.7 abstain=false [wrong]
+  reasoning: The question asks whether OpenAI released another model superior to the then-current one by 27 September 2024. On 12 September 2024 — within the question window — OpenAI released o1-preview (and o1-mini), explicitly marketed and widely reported as outperforming the then-current flagship GPT-4o on reasoning, math, coding and science benchmarks. That is a clear release of a superior model before the
+  ev: https://openai.com/index/introducing-openai-o1-preview/
+  ev: https://en.wikipedia.org/wiki/OpenAI_o1
+  ev: https://gizmodo.com/openai-releases-its-highly-anticipated-gpt-o1-model-2000498162
+  ev: https://openai.com/index/openai-o1-mini-advancing-cost-efficient-reasoning/
+network:  unanimous=true n_abstain=0
+C_judge:  YES conf=0.89 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): YES conf=0.85 :: The question asks whether OpenAI would release a model superior to 'the current one' (implicitly GPT-4o, the flagship model at the time the question was likely created) by September 27, 2024. OpenAI r
+  B2 (sonnet-5/adversarial): YES conf=0.85 :: The question asks whether OpenAI would release a model superior to 'the current one' by September 27, 2024. On September 12, 2024, OpenAI publicly released o1-preview and o1-mini, explicitly marketed 
+  B3 (sonnet-5/criteria): YES conf=0.85 :: The question asks whether OpenAI would release a model superior to its "current" one (at question creation, most likely GPT-4o, OpenAI's flagship model through mid-2024) by September 27, 2024. OpenAI 
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.95 :: OpenAI released o1-preview and o1-mini on September 12, 2024, prior to the September 27, 2024 deadline. These models demonstrate superior performance compared to GPT-4o (the current model) across comp
+  B5 (haiku-4-5-20251001/default): YES conf=0.95 :: OpenAI released o1-preview on September 12, 2024, which was before the September 27, 2024 deadline. The o1-preview demonstrated clear superiority to GPT-4o across multiple benchmarks: 83% vs 13% on IM
+
+====================================================================================================
+rd-realityeth-798b4a0e068f  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Ethereum ETF approved by May 31, 2024?
+CUTOFF:   2024-05-25T05:59:05.000Z   opening: 2024-04-26T21:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2024-05-26T17:59:05.000Z  src reality.eth:100:0xE78996A233895bE74a66F451f1019cA9734205cc:0x798b4a0e068f5a7938d64f955498654f96da49d5c7a8cbcf592cf31099187ce5
+  bond ladder: NO@100000000000000000 -> ANSWERED_TOO_SOON@200000000000000000 -> INVALID@400000000000000000
+A_opus:   YES conf=0.93 abstain=false [wrong]
+  reasoning: On May 23, 2024 — two days before the cut-off and eight days before the stated May 31 deadline — the SEC issued Release 34-100224 granting accelerated approval of the proposed rule changes (19b-4 filings) permitting Nasdaq, NYSE Arca and Cboe BZX to list and trade eight spot ether ETPs (BlackRock, Fidelity, Grayscale, Bitwise, VanEck, Franklin, ARK 21Shares, Invesco Galaxy). This was universally r
+  ev: https://www.sec.gov/file/34-100224
+  ev: https://www.coindesk.com/markets/2024/05/23/sec-approves-spot-ether-etf-listing-still-needs-to-approve-products
+  ev: https://blockchain.bakermckenzie.com/2024/05/24/us-sec-surprises-crypto-community-by-approving-ether-etfs/
+  ev: https://www.mayerbrown.com/en/insights/publications/2024/05/sec-approves-listings-of-spot-ether-etfs-waiting-is-the-hardest-part
+network:  unanimous=true n_abstain=0
+C_judge:  YES conf=0.908 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): YES conf=0.88 :: The question asks whether an Ethereum ETF was "approved" by May 31, 2024. On May 23, 2024 (before the May 25 cutoff), the SEC approved the 19b-4 rule change filings from multiple exchanges (NYSE, Nasd
+  B2 (sonnet-5/adversarial): YES conf=0.85 :: On May 23, 2024, the SEC approved the 19b-4 rule change filings submitted by exchanges (NYSE Arca, Nasdaq, Cboe BZX) to list spot Ethereum ETFs from issuers including BlackRock, Fidelity, Grayscale, B
+  B3 (sonnet-5/criteria): YES conf=0.85 :: The question asks whether an Ethereum ETF was 'approved' by May 31, 2024, with no further resolution criteria specified. Contemporaneous reporting from May 23-24, 2024 (before the May 25 cutoff for ev
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.98 :: The SEC approved spot Ethereum ETFs on May 23, 2024, which is before both the May 31, 2024 deadline and the May 25, 2024 cut-off date. Multiple reputable sources (Forbes, CNBC, Mayer Brown) published 
+  B5 (haiku-4-5-20251001/default): YES conf=0.98 :: The SEC approved spot Ethereum ETFs on May 23, 2024, as confirmed by multiple independent, reputable financial news sources (CNBC, Forbes, Mayer Brown, CoinDesk). This approval occurred on May 23, whi
+
+====================================================================================================
+rd-realityeth-7c57d4707f3e  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Will Samsung make Galaxy AI a paid service beyond 2025?
+CUTOFF:   2024-10-06T08:23:05.000Z   opening: 2024-10-06T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2024-10-07T08:23:05.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x7c57d4707f3e3c18299aa5b3cc09cea42b2841a75a8797ffc30c08073691394f
+  bond ladder: YES@1000000000000000 -> NO@10000000000000000000 -> INVALID@20000000000000000000
+A_opus:   NO conf=0.83 abstain=false [wrong]
+  reasoning: At the cut-off (Oct 2024), the only firm public position was Samsung's boilerplate that Galaxy AI would be free 'until the end of 2025,' plus speculative reports that Samsung might charge for some advanced features; Samsung's own executives (TM Roh) framed this as a free tier plus optional premium capabilities rather than converting Galaxy AI into a paid service. Subsequent primary-source Samsung 
+  ev: https://www.samsung.com/ae/support/mobile-devices/is-there-a-subscription-fee-for-the-galaxy-ai-features-similar-to-other-popular-ai-services/
+  ev: https://www.androidpolice.com/samsung-core-galaxy-ai-features-indefinitely-free/
+  ev: https://www.androidauthority.com/samsung-galaxy-ai-features-free-3632510/
+  ev: https://m.gsmarena.com/samsung_may_start_charging_for_galaxy_ai_features_in_2025-news-64730.php
+network:  unanimous=false n_abstain=0
+C_judge:  YES conf=0.6 abstain=false via judge [wrong]
+  judge: All five solvers agree on the same underlying factual record; they differ only in how to read it against an unstated resolution bar. The strongest evidence cited is first-party, not speculative: Samsung's own press-release footnotes for the Galaxy Tab S10 series and Galaxy S24 FE (late September 2024, i.e., days before the 2024-10-06 deadline) state "Fees may apply to certain AI features at the en
+  B1 (sonnet-5/default): NO conf=0.55 :: As of the Oct 6, 2024 cutoff, all available reporting indicates Samsung had only committed to keeping Galaxy AI free through the end of 2025, and mobile chief TM Roh explicitly stated no decision had 
+  B2 (sonnet-5/adversarial): YES conf=0.58 :: The question asks whether Samsung will make Galaxy AI a paid service beyond 2025, with no additional resolution criteria specified, and the answer must be based solely on evidence published before the
+  B3 (sonnet-5/criteria): YES conf=0.55 :: As of the 2024-10-06 cutoff, Samsung had not issued a definitive, final policy on Galaxy AI pricing beyond 2025, but the available official evidence leaned toward eventual monetization: (1) Samsung's 
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.68 :: As of October 6, 2024, Samsung had officially indicated through press release disclaimers that "Fees may apply to certain AI features at the end of 2025." Samsung executives, including TM Roh, explici
+  B5 (haiku-4-5-20251001/default): YES conf=0.72 :: As of October 6, 2024, Samsung had repeatedly warned through official press releases and footnotes that "Fees may apply to certain AI features at the end of 2025." This warning appeared consistently i
+
+====================================================================================================
+rd-realityeth-a9a45119a80c  [bonded-only | distinct=2 flips=3 answers=5]
+QUESTION: Will Hezbollah leader Hassan Nasrallah be confirmed dead by 6 October 2024?
+CUTOFF:   2024-10-08T17:02:20.000Z   opening: 2024-10-07T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2024-10-09T17:02:20.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0xa9a45119a80cf024cf8db715e14571ed3e6b3ecf7cd677b3e8b035d477d333da
+  bond ladder: YES@1000000000000000 -> YES@10000000000000000000 -> INVALID@20000000000000000000 -> YES@40000000000000000000 -> INVALID@80000000000000000000
+A_opus:   YES conf=0.99 abstain=false [wrong]
+  reasoning: Israel announced on 27 September 2024 that it had killed Hassan Nasrallah in a strike on Hezbollah's headquarters in Dahiyeh, Beirut. On 28 September 2024, Hezbollah itself issued a statement confirming Nasrallah's death, corroborated by NPR, CNN, CBS News and numerous other outlets. This confirmation occurred more than a week before the 6 October 2024 deadline, so the claim resolves YES.
+  ev: https://www.npr.org/2024/09/28/g-s1-25279/israels-military-says-it-killed-hezbollah-leader
+  ev: https://edition.cnn.com/2024/09/28/middleeast/hezbollah-nasrallah-killed-israel-strikes-intl
+  ev: https://www.cbsnews.com/news/israel-lebanon-hezbollah-hassan-nasrallah-killed-beirut-strike/
+network:  unanimous=true n_abstain=0
+C_judge:  YES conf=0.9879999999999999 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): YES conf=0.99 :: Hassan Nasrallah was killed in an Israeli airstrike on his underground headquarters in Beirut on September 27, 2024. Hezbollah officially confirmed his death on September 28, 2024. This confirmation o
+  B2 (sonnet-5/adversarial): YES conf=0.99 :: Hassan Nasrallah was killed in an Israeli airstrike on Hezbollah's underground headquarters in Beirut on September 27, 2024. Both the Israeli military and Hezbollah officially confirmed his death on S
+  B3 (sonnet-5/criteria): YES conf=0.99 :: Hassan Nasrallah was killed in an Israeli airstrike on his headquarters in Beirut on September 27, 2024. Both the Israeli military and Hezbollah itself confirmed his death on September 28, 2024 — well
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.98 :: Hassan Nasrallah was confirmed dead by Hezbollah on September 28, 2024, following an Israeli airstrike on September 27, 2024. This confirmation occurred 9 days before the October 6, 2024 deadline spec
+  B5 (haiku-4-5-20251001/default): YES conf=0.99 :: Hassan Nasrallah was killed in an Israeli airstrike on September 27, 2024, and Hezbollah officially confirmed his death on September 28, 2024. This confirmation occurred well before the October 6, 202
+
+====================================================================================================
+rd-realityeth-15b83f8ff0f3  [bonded-only | distinct=2 flips=3 answers=4]
+QUESTION: Will Alice Weidel become the next Chancellor of Germany after the February 2025 election?
+CUTOFF:   2025-04-22T02:20:35.000Z   opening: 2025-03-01T00:00:00.000Z
+GROUND TRUTH: ANSWERED_TOO_SOON (too_soon)  finalized 2025-04-25T14:20:35.000Z  src reality.eth:100:0xE78996A233895bE74a66F451f1019cA9734205cc:0x15b83f8ff0f34e4a4151d7c1b7fb87d7cbd839558ab56c3131b42adbeea11e1f
+  bond ladder: NO@10000000000000000000 -> ANSWERED_TOO_SOON@20000000000000000000 -> NO@40000000000000000000 -> ANSWERED_TOO_SOON@80000000000000000000
+A_opus:   NO conf=0.99 abstain=false [wrong]
+  reasoning: The February 23, 2025 election was won by CDU/CSU; the AfD, led by Alice Weidel, came second and was excluded from coalition talks by all other parties. By April 9, 2025 (before the cut-off), Merz had concluded a coalition agreement with the SPD, and the Bundestag was scheduled to elect him Chancellor on May 6, 2025. Alice Weidel did not and would not become Chancellor, so the claim resolves No.
+  ev: https://www.wsws.org/en/articles/2025/02/24/3ca3-f24.html
+  ev: https://www.bloomberg.com/news/articles/2025-04-09/merz-seals-coalition-deal-with-spd-to-secure-german-chancellery
+  ev: https://euronews.com/2025/04/14/german-parliament-set-to-elect-merz-as-chancellor-on-6-may
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.984 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.98 :: Germany's federal election on February 23, 2025 was won by the CDU/CSU alliance, with Alice Weidel's AfD finishing second (its best-ever result, but not first). Friedrich Merz, the CDU/CSU leader, exp
+  B2 (sonnet-5/adversarial): NO conf=0.99 :: In Germany's February 23, 2025 federal election, the CDU/CSU under Friedrich Merz won the most votes, with the AfD (led by chancellor candidate Alice Weidel) placing second with its best-ever result b
+  B3 (sonnet-5/criteria): NO conf=0.98 :: The February 23, 2025 German federal election was won by the CDU/CSU (28.6%), with the AfD, led by chancellor candidate Alice Weidel, finishing second (20.8%). All major parties, including the CDU, pu
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.99 :: The February 23, 2025 German federal election resulted in a CDU/CSU victory (28.5%) over the AfD (20.8%), with Alice Weidel as the AfD's chancellor candidate. By the April 22, 2025 cut-off date, CDU/C
+  B5 (haiku-4-5-20251001/default): NO conf=0.98 :: By the cut-off date of April 22, 2025, Alice Weidel did not become Chancellor. The AfD finished second in the February 23, 2025 election with 20.8% of votes. All mainstream German parties refused to f
+
+====================================================================================================
+rd-realityeth-dd23114e2e12  [bonded-only | distinct=2 flips=3 answers=4]
+QUESTION: Will OpenAI publicly announce, on or before March 22, 2026, a settlement agreement with Encyclopedia Britannica or Merriam-Webster regarding the copyright lawsuit filed in March 2026, as confirmed by an official company statement or major news outlet?
+CUTOFF:   2026-03-23T22:02:15.000Z   opening: 2026-03-23T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2026-03-24T22:02:15.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0xdd23114e2e12b7a2e9591f1c274e4c7da6843fb79495f07535a88b71c85effbb
+  bond ladder: YES@1000000000000000 -> INVALID@10000000000000000 -> YES@20000000000000000 -> INVALID@40000000000000000
+A_opus:   NO conf=0.97 abstain=false [wrong]
+  reasoning: Britannica and Merriam-Webster filed the copyright suit against OpenAI on ~March 13, 2026 (reported March 16-18). OpenAI publicly rejected the allegations, saying its models are trained on publicly available data and grounded in fair use. No source published on or before March 22-23, 2026 reports any settlement agreement; reporting through March 18 describes active, contested litigation, and the S
+  ev: https://techcrunch.com/2026/03/16/merriam-webster-openai-encyclopedia-brittanica-lawsuit/
+  ev: https://www.washingtontimes.com/news/2026/mar/17/encyclopedia-britannica-merriam-webster-sue-openai-massive-copyright/
+  ev: https://fortune.com/2026/03/18/dictionaries-suing-openai-chatgpt-copyright-infringement/
+  ev: https://www.courtlistener.com/docket/72492986/encyclopaedia-britannica-inc-v-openai-inc/
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.9359999999999999 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.9 :: Encyclopedia Britannica and Merriam-Webster filed suit against OpenAI in mid-March 2026 (around March 13-16, 2026) alleging copyright infringement. Multiple reputable outlets (Washington Times, TechCr
+  B2 (sonnet-5/adversarial): NO conf=0.93 :: The lawsuit by Encyclopedia Britannica and Merriam-Webster against OpenAI was filed on March 13, 2026 in the Southern District of New York. Contemporary reporting through at least March 19, 2026 shows
+  B3 (sonnet-5/criteria): NO conf=0.95 :: The lawsuit by Encyclopedia Britannica and Merriam-Webster against OpenAI was filed on March 13, 2026 in Manhattan federal court. Multiple reputable news sources (TechCrunch, Yahoo Finance, National T
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.92 :: No evidence exists of any settlement announcement by OpenAI with Encyclopedia Britannica or Merriam-Webster on or before March 22, 2026. The lawsuit was filed on March 13, 2026, and extensively covere
+  B5 (haiku-4-5-20251001/default): NO conf=0.98 :: Encyclopedia Britannica and Merriam-Webster filed their copyright lawsuit against OpenAI on March 13, 2026. Extensive reporting from major news outlets (TechCrunch, Fortune, Washington Times, Engadget
+
+====================================================================================================
+rd-realityeth-506a41e737fe  [bonded-only | distinct=2 flips=1 answers=4]
+QUESTION: Will bitcoin go above $5000 on Kraken by end of December 31st 2018?
+CUTOFF:   2018-12-04T01:18:52.000Z   opening: 2018-11-27T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2018-12-11T01:18:52.000Z  src reality.eth:1:0x325a2e0F3CCA2ddbaeBB4DfC38Df8D19ca165b47:0x506a41e737fe4861372b0c9a9cf5e21dd399e0dcbed58608a66b0a5403f370b3
+  bond ladder: NO@200000000000000 -> NO@1000000000000000 -> NO@10000000000000000 -> INVALID@20000000000000000
+A_opus:   NO conf=0.97 abstain=false [wrong]
+  reasoning: At the cut-off (Dec 4, 2018) bitcoin was trading around $3,900–$4,100 after a steep November collapse from ~$6,400, requiring a ~25–30% rally within four weeks to exceed $5,000. Contemporaneous market data show BTC instead continued falling: it opened December near $4,041, broke below $3,400 on Dec 7, bottomed at ~$3,122 on Dec 15, and closed the year at $3,742.70. Bitcoin's December 2018 high (~$
+  ev: https://www.coindesk.com/markets/2018/12/07/bitcoin-drops-below-34k-to-set-a-new-2018-low
+  ev: https://www.statmuse.com/money/ask/bitcoin-price-december-2018
+  ev: https://cryptopotato.com/exactly-one-year-ago-bitcoin-price-nailed-2018-bear-market-at-3122/
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.9 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.9 :: As of the cutoff (Dec 4, 2018), Bitcoin had crashed roughly 37% during November 2018, falling from above $6,300 to about $4,000, breaking key support near $5,850 along the way, and was described as be
+  B2 (sonnet-5/adversarial): NO conf=0.8 :: As of the Dec 4, 2018 cutoff, Bitcoin had just crashed 37% in November, falling from over $6,300 to below $4,000, and was only marginally back at the $4,000 level on the cutoff date itself. This repre
+  B3 (sonnet-5/criteria): NO conf=0.82 :: As of the Dec 4, 2018 cutoff, Bitcoin was trading around $3,700-$3,900, having fallen sharply (~37% in November plus an additional 8% drop on Dec 3). Contemporaneous analyst forecasts for December 201
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.99 :: Bitcoin was trading at approximately $3,956 on December 4, 2018. To resolve YES, Bitcoin would have needed to rise above $5,000 by December 31, 2018—a 26.4% gain in 27 days during a severe bear market
+  B5 (haiku-4-5-20251001/default): NO conf=0.99 :: Bitcoin closed at $3,742.70 on December 31, 2018, well below the $5,000 threshold required by the claim. The cryptocurrency experienced a severe bear market throughout late 2018, with a 37% crash in N
+
+====================================================================================================
+rd-realityeth-5c628cab7ed3  [bonded-only | distinct=2 flips=1 answers=3]
+QUESTION: Will Harris win the 2024 US Presidential Election?
+CUTOFF:   2024-10-01T16:18:00.000Z   opening: 2024-10-01T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2024-10-02T16:18:00.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x5c628cab7ed3a3b5548dc85283fdd1dd6b8d2728ebb1654b1074790465f1a618
+  bond ladder: NO@1000000000000000 -> NO@10000000000000000000 -> INVALID@20000000000000000000
+A_opus:   NO conf=0.58 abstain=false [wrong]
+  reasoning: The claim asks whether Harris wins the 2024 US presidential election; it resolves on the actual election outcome, in which Donald Trump was elected. The answer against the criteria is therefore NO. Restricting myself to evidence available at the 2024-10-01 cut-off, the race was a genuine toss-up: Harris led the national popular vote by roughly 1.5-2.5 points, but tipping-point battlegrounds (Penns
+  ev: https://emersoncollegepolling.com/september-2024-swing-state-polls-trump-and-harris-locked-in-tight-presidential-race/
+  ev: https://www.270towin.com/2024-presidential-election-polls/
+  ev: https://www.washingtonpost.com/elections/interactive/2024/presidential-polling-averages/?itid=lk_inline_manual_6
+network:  unanimous=true n_abstain=5
+C_judge:  UNRESOLVABLE conf=0.5740000000000001 abstain=true via unanimous [correct]
+  B1 (sonnet-5/default): UNRESOLVABLE conf=0.95 :: The resolution cutoff (2024-10-01T16:18:00Z) predates Election Day (November 5, 2024) by over a month. Since only evidence published before the cutoff is admissible, and the election had not yet taken
+  B2 (sonnet-5/adversarial): UNRESOLVABLE conf=0.95 :: The question asks whether Harris would win the 2024 U.S. Presidential Election. The stated cut-off for admissible evidence is 2024-10-01T16:18:00Z, but the general election itself did not occur until 
+  B3 (sonnet-5/criteria): UNRESOLVABLE conf=0.97 :: The resolution cut-off (2024-10-01T16:18:00Z) falls more than a month before Election Day (November 5, 2024). Because the election had not yet taken place at the cut-off, no admissible evidence existe
+  B4 (haiku-4-5-20251001/timeline): UNRESOLVABLE conf=0 :: The question asks "Will Harris win the 2024 US Presidential Election?" with a cutoff of October 1, 2024. The election occurred on November 5, 2024 - after the cutoff. All evidence of the actual outcom
+  B5 (haiku-4-5-20251001/default): UNRESOLVABLE conf=0 :: The cut-off date (October 1, 2024) occurs 35 days before the 2024 US Presidential Election (November 5, 2024). Pre-cut-off evidence shows forecasts with Harris slightly favored (53% in FiveThirtyEight
+
+====================================================================================================
+rd-realityeth-63befad3046b  [bonded-only | distinct=2 flips=1 answers=3]
+QUESTION: Will Kamala Harris win the 2024 Presidential Election?
+CUTOFF:   2024-09-24T12:25:20.000Z   opening: 2024-09-23T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2024-09-25T12:25:20.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x63befad3046bb17f6c1603efc43dfd2ec6dc3eafa7edd41a1e576b134e3821bb
+  bond ladder: NO@1000000000000000000 -> NO@10000000000000000000 -> INVALID@20000000000000000000
+A_opus:   NO conf=0.62 abstain=false [wrong]
+  reasoning: The question resolves YES only if Kamala Harris won the 2024 presidential election. Evidence available as of the 2024-09-24 cutoff showed a genuine toss-up: Harris held a small national polling lead (NBC 49-44; Marist ~1 point), but battleground polling (Emerson, NYT/Siena) showed Trump narrowly ahead or tied in most tipping-point states — Georgia, Arizona, Pennsylvania, Nevada, Wisconsin — implyi
+  ev: https://emersoncollegepolling.com/september-2024-swing-state-polls-trump-and-harris-locked-in-tight-presidential-race/
+  ev: https://www.nbcnews.com/politics/2024-election/poll-newly-popular-harris-challenging-trump-change-rcna171308
+  ev: https://maristpoll.marist.edu/polls/the-u-s-presidential-contest-september-2024/
+  ev: https://www.washingtonpost.com/elections/interactive/2024/presidential-polling-averages/
+network:  unanimous=false n_abstain=3
+C_judge:  NO conf=0.88 abstain=false via judge [wrong]
+  judge: No resolution criteria were published beyond the question itself, and nothing in them restricts admissible evidence to material predating the listed deadline. Solvers B1–B3 abstained solely because they imported an "evidence cut-off" rule from their own prompts, treating the 2024-09-24 timestamp as an evidentiary embargo — a reading of the spirit of their instructions rather than of the criteria a
+  B1 (sonnet-5/default): UNRESOLVABLE conf=0.9 :: The claim asks whether Kamala Harris would win the 2024 Presidential Election, with a cut-off of 2024-09-24T12:25:20Z. The general election was held on November 5, 2024 — over six weeks after the cut-
+  B2 (sonnet-5/adversarial): UNRESOLVABLE conf=0.97 :: The cut-off (2024-09-24) predates the actual 2024 U.S. Presidential Election (held November 5, 2024, with results not confirmed until early November). As of the cut-off, the election had not occurred 
+  B3 (sonnet-5/criteria): UNRESOLVABLE conf=0.95 :: The claim asks whether Kamala Harris would win the 2024 Presidential Election. The stated cutoff (September 24, 2024) predates Election Day (November 5, 2024) by more than five weeks, and any reportin
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.99 :: The 2024 presidential election occurred on November 5, 2024. Donald Trump won with 312 electoral votes, defeating Kamala Harris who received 226 electoral votes. This is now historical fact. While for
+  B5 (haiku-4-5-20251001/default): NO conf=0.99 :: The 2024 Presidential Election occurred on November 5, 2024, with Donald Trump defeating Kamala Harris decisively (312 to 226 electoral votes, 49.8% to 48.3% in popular vote). Harris conceded the elec
+
+====================================================================================================
+rd-realityeth-9153dd923ca7  [bonded-only | distinct=2 flips=1 answers=3]
+QUESTION: Will Kamala Harris win the 2024 Presidential Election?
+CUTOFF:   2024-10-17T10:54:50.000Z   opening: 2024-10-17T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2024-10-18T10:54:50.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x9153dd923ca7c8b4ad8bac8958ff4101912872c69e949fa12a9b15b3493497bb
+  bond ladder: NO@1000000000000000 -> NO@10000000000000000000 -> INVALID@20000000000000000000
+A_opus:   NO conf=0.62 abstain=false [wrong]
+  reasoning: The question asks whether Kamala Harris would win the 2024 presidential election, resolved as worded. Evidence available at the 2024-10-17 cut-off showed an extremely close race: national polls narrowly favored Harris, but swing-state averages had just tipped toward Trump (NPR, Oct 15-16), Quinnipiac's Oct 16 releases showed Trump ahead in Georgia and a tie in North Carolina, and quantitative fore
+  ev: https://www.npr.org/2024/10/15/nx-s1-5153420/swing-state-map-donald-trump-kamala-harris-polls
+  ev: https://poll.qu.edu/poll-release?releaseid=3914
+  ev: https://www.newsweek.com/donald-trump-kamala-harris-polls-swing-states-nate-silver-prediction-favorite-change-1980250
+network:  unanimous=false n_abstain=4
+C_judge:  NO conf=0.88 abstain=false via judge [wrong]
+  judge: Four solvers abstained on procedural grounds: the deadline (2024-10-17) precedes Election Day (2024-11-05), so under a strict "no post-cutoff sources" rule the outcome was not yet knowable. B4 answered YES purely from pre-election forecasts (538 at Harris 53%, Nate Silver at Trump 50.1%) — a coin-flip, which is not evidence of an outcome and is a very weak basis for YES. The aggregation stage must
+  B1 (sonnet-5/default): UNRESOLVABLE conf=0.55 :: The cut-off (2024-10-17) precedes Election Day (2024-11-05) by nearly three weeks. At the cut-off, no actual election result existed — only polling data and forecasts, which showed an extremely close,
+  B2 (sonnet-5/adversarial): UNRESOLVABLE conf=0.97 :: The resolution cutoff (2024-10-17T10:54:50Z) falls nearly three weeks before Election Day (November 5, 2024). No vote had been cast or counted yet at the cutoff, so there was no public evidence prior 
+  B3 (sonnet-5/criteria): UNRESOLVABLE conf=0.9 :: The resolution cut-off (2024-10-17T10:54:50Z) falls nearly three weeks before Election Day (November 5, 2024) and well before any vote counting, media race calls, or the certification of results. As o
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.53 :: As of the October 17, 2024 cutoff date, predictive evidence available showed Harris with approximately 53% probability of winning according to FiveThirtyEight's forecast, a national popular vote lead 
+  B5 (haiku-4-5-20251001/default): UNRESOLVABLE conf=0 :: The cutoff date of October 17, 2024 precedes the 2024 Presidential Election (November 5, 2024). The actual resolution of this claim—the election outcome—was only determined and published after the cut
+
+====================================================================================================
+rd-realityeth-a42c58d5c943  [bonded-only | distinct=2 flips=1 answers=3]
+QUESTION: Will Donald Trump win the Michigan vote in the 2024 Presidential Election?
+CUTOFF:   2024-10-05T08:28:20.000Z   opening: 2024-10-05T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2024-10-06T08:28:20.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0xa42c58d5c9436eca09bdcb99caf1bc36d4163511605fe8c2d1d7616d7a9f2839
+  bond ladder: NO@1000000000000000 -> NO@10000000000000000000 -> INVALID@20000000000000000000
+A_opus:   YES conf=0.97 abstain=false [wrong]
+  reasoning: The question asks whether Trump won the Michigan vote in the 2024 presidential election. Certified state results and multiple independent outlets (Detroit News, CBS, NBC, Michigan Advance) confirm Trump carried Michigan with about 49.7% to Harris's 48.3%, a margin of roughly 80,000 votes. This maps directly to a YES resolution. Pre-cutoff polling in October 2024 showed a toss-up, which is consiste
+  ev: https://eu.detroitnews.com/story/news/politics/elections/2024/11/20/all-michigan-counties-certified-2024-election-results-donald-trump-kamala-harris-president/76451646007/
+  ev: https://www.cbsnews.com/live-updates/michigan-election-results-2024/
+  ev: https://michiganadvance.com/2024/11/06/trump-turns-michigan-red-once-again/
+  ev: https://www.nbcnews.com/politics/2024-elections/michigan-president-results
+network:  unanimous=false n_abstain=4
+C_judge:  YES conf=0.93 abstain=false via judge [wrong]
+  judge: Four solvers abstained solely on a procedural ground: the listed resolution deadline (2024-10-05) precedes Election Day (2024-11-05), so they treated post-election reporting as inadmissible. But no resolution criteria were published beyond the question itself, and the question asks a plain factual matter — whether Trump won the Michigan vote in the 2024 Presidential Election. The deadline field is
+  B1 (sonnet-5/default): UNRESOLVABLE conf=0.55 :: The resolution cutoff (2024-10-05) predates Election Day (2024-11-05) by a full month. At the cutoff, the actual outcome of the Michigan presidential vote was unknown and unknowable — only pre-electio
+  B2 (sonnet-5/adversarial): UNRESOLVABLE conf=0.97 :: The question asks whether Trump won the actual Michigan vote in the 2024 Presidential Election, but the resolution cutoff (2024-10-05) predates Election Day (2024-11-05) by a full month. At the cutoff
+  B3 (sonnet-5/criteria): UNRESOLVABLE conf=0.5 :: The 2024 U.S. presidential election occurred on November 5, 2024, which is after the specified cut-off of October 5, 2024. All available evidence confirming Trump's win in Michigan was published after
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.99 :: Trump won Michigan in the 2024 Presidential Election with 49.73% of the vote (2,816,636 votes) compared to Kamala Harris's 48.31% (2,736,533 votes). This represents a margin of victory of 1.42 percent
+  B5 (haiku-4-5-20251001/default): UNRESOLVABLE conf=0 :: The cut-off date (October 5, 2024) precedes the election (November 5, 2024). The actual election results that would definitively answer this question were published after the cut-off and are therefore
+
+====================================================================================================
+rd-realityeth-f320e732c98c  [bonded-only | distinct=2 flips=1 answers=3]
+QUESTION: Will Tottenham defeat Qarabag in the Europa League match on 6 October 2024?
+CUTOFF:   2024-10-07T06:39:55.000Z   opening: 2024-10-07T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2024-10-08T06:39:55.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0xf320e732c98ccbfae6c0c60308ca24e9469c16136883b53742ebf9fcea16c9ad
+  bond ladder: NO@1000000000000000 -> NO@10000000000000000000 -> INVALID@20000000000000000000
+A_opus:   YES conf=0.62 abstain=false [wrong]
+  reasoning: The only Tottenham v Qarabağ Europa League meeting in 2024/25 took place on 26 September 2024, which Tottenham won 3-0 (UEFA, ESPN). On 6 October 2024 Tottenham actually played Brighton in the Premier League (lost 3-2), so the date given in the claim appears to be an artifact/error rather than a distinct fixture. Taking the substantive claim — that Tottenham defeated Qarabağ in their Europa League
+  ev: https://www.uefa.com/uefaeuropaleague/match/2042091--tottenham-vs-qarabag/
+  ev: https://www.espn.com/soccer/report/_/gameId/720521
+  ev: https://www.uefa.com/uefaeuropaleague/match/2042105--ferencvaros-vs-tottenham/
+  ev: https://www.espn.com/soccer/match/_/gameId/704341/tottenham-hotspur-brighton-hove-albion
+network:  unanimous=false n_abstain=2
+C_judge:  YES conf=0.72 abstain=false via judge [wrong]
+  judge: All five solvers agree on the facts: the only Tottenham–Qarabag Europa League fixture of 2024/25 was played 26 September 2024, won 3-0 by Tottenham (Johnson, Sarr, Solanke, with 10 men), confirmed by UEFA's official match page plus ESPN, Sky Sports, WhoScored, FotMob and Yahoo. No Europa League match occurred on 6 October 2024 (MD2 was 3 Oct vs Ferencvaros, MD3 was 24 Oct); Tottenham played Bright
+  B1 (sonnet-5/default): YES conf=0.9 :: Tottenham and Qarabağ played their only 2024/25 UEFA Europa League league-phase fixture on 26 September 2024 (not 6 October 2024 as stated in the question, which appears to be a date error since teams
+  B2 (sonnet-5/adversarial): YES conf=0.75 :: The question references a Tottenham vs Qarabağ Europa League match "on 6 October 2024," but all primary and reputable sources (UEFA.com, WhoScored, FotMob, Yahoo Sports) confirm the only Tottenham–Qar
+  B3 (sonnet-5/criteria): YES conf=0.75 :: The question asks whether Tottenham defeated Qarabağ in a Europa League match on 6 October 2024. No Tottenham-Qarabağ Europa League match actually occurred on that date — the sole meeting between the 
+  B4 (haiku-4-5-20251001/timeline): UNRESOLVABLE conf=0 :: The question specifies a match on October 6, 2024, but no Europa League matches were scheduled on that date. The 2024-25 Europa League schedule shows Matchday 2 on October 3 and Matchday 3 on October 
+  B5 (haiku-4-5-20251001/default): UNRESOLVABLE conf=0.95 :: The match described in the question—Tottenham vs Qarabag in the Europa League on October 6, 2024—did not occur. The only Tottenham vs Qarabag Europa League match took place on September 26, 2024 (whic
+
+====================================================================================================
+rd-realityeth-0021e9048f83  [bonded-only | distinct=2 flips=1 answers=2]
+QUESTION: Will direct holders of rsETH on Ethereum mainnet suffer a direct loss due to the April 18 rsETH bridge hack on Kelp DAO?
+CUTOFF:   2026-05-18T08:22:40.000Z   opening: 2026-04-21T03:05:16.000Z
+GROUND TRUTH: ANSWERED_TOO_SOON (too_soon)  finalized 2026-05-21T20:22:40.000Z  src reality.eth:100:0xE78996A233895bE74a66F451f1019cA9734205cc:0x0021e9048f8325c4221435056c7abd2155c2d789a81727da3e1bd360510e3d66
+  bond ladder: NO@10000000000000000000 -> ANSWERED_TOO_SOON@20000000000000000000
+A_opus:   NO conf=0.89 abstain=false [wrong]
+  reasoning: The April 18, 2026 exploit forged LayerZero messages to release/mint ~116,500 unbacked rsETH, leaving the shortfall in the bridge lockbox and in wrapped rsETH on ~20 L2s/sidechains. Kelp consistently stated that rsETH on Ethereum mainnet remained fully backed by its restaking deposits, and Aave/Llamarisk scenario work treated a uniform haircut on all holders as only one hypothetical option. Kelp n
+  ev: https://www.coindesk.com/tech/2026/04/19/2026-s-biggest-crypto-exploit-kelp-dao-hit-for-usd292-million-with-wrapped-ether-stranded-across-20-chains
+  ev: https://cryptobriefing.com/aave-kelp-dao-exploit-implications/
+  ev: https://www.theblock.co/post/399118/defi-united-detailed-plan
+  ev: https://crypto.news/kelp-dao-reopens-full-rseth-functionality-after-cross-chain-exploit/
+network:  unanimous=false n_abstain=0
+C_judge:  NO conf=0.84 abstain=false via judge [wrong]
+  judge: Four of five solvers (B1, B2, B3, B5) converge on NO, citing overlapping and mutually corroborating sources: CoinDesk's April 19/20/22 reporting, CryptoTimes/Llamarisk loss-allocation analysis, Messari, crypto.news, and The Block, plus direct statements from Kelp DAO ("all rsETH on mainnet is fully backed") and Aave. The mechanism described is consistent across all accounts: a compromised LayerZer
+  B1 (sonnet-5/default): NO conf=0.78 :: Multiple independent, contemporaneous reports (CoinDesk, DefiPrime, CryptoTimes, CryptoBriefing) published between April 19–22, 2026 — well before the May 18, 2026 cutoff — consistently state that the
+  B2 (sonnet-5/adversarial): NO conf=0.85 :: The April 18, 2026 Kelp DAO exploit was a cross-chain bridge/messaging attack (compromised LayerZero DVN infrastructure) that allowed an attacker to mint ~116,500 rsETH on destination chains (L2s, 20+
+  B3 (sonnet-5/criteria): NO conf=0.8 :: The April 18, 2026 Kelp DAO exploit compromised the LayerZero cross-chain bridge infrastructure (a 1-of-1 DVN setup), allowing an attacker to spoof messages and drain 116,500 rsETH (~$292M) that serve
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.72 :: Direct holders of rsETH on Ethereum mainnet suffered a direct loss as a result of the April 18, 2026 bridge hack. The hack caused rsETH to become underbacked and the token's value to depreciate (down 
+  B5 (haiku-4-5-20251001/default): NO conf=0.82 :: Direct holders of rsETH on Ethereum mainnet did not suffer a direct loss due to the April 18 bridge hack. Kelp DAO and Aave Labs both stated that mainnet rsETH remained fully backed by legitimate ETH 
+
+====================================================================================================
+rd-realityeth-00c442ab54b8  [bonded-only | distinct=2 flips=1 answers=2]
+QUESTION: Will the NYPD release an official motive for the murder of Brian Thompson by December 10, 2024?
+CUTOFF:   2024-12-11T00:40:35.000Z   opening: 2024-12-11T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2024-12-12T00:40:35.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x00c442ab54b80701554540a840e600b202677581f33fd65f67041aa5895a3db0
+  bond ladder: NO@1000000000000000 -> INVALID@10000000000000000000
+A_opus:   NO conf=0.7 abstain=false [wrong]
+  reasoning: By Dec. 10, 2024, the NYPD had publicly described the contents of Mangione's recovered handwritten document — Chief of Detectives Joseph Kenny said it showed 'ill will toward corporate America' and frustration with the healthcare system, and Commissioner Tisch said it 'speaks to both his motivation and mindset.' However, the NYPD did not release an official/determined motive: on Dec. 10 Tisch expl
+  ev: https://www.foxbusiness.com/lifestyle/unitedhealthcare-ceos-alleged-killer-has-ill-toward-corporate-america-police-say
+  ev: https://en.wikipedia.org/wiki/Luigi_Mangione
+  ev: https://www.cbsnews.com/news/united-healthcare-ceo-shot-what-we-know/
+  ev: https://www.axios.com/2024/12/10/unitedhealthcare-shooting-suspect-manifesto
+network:  unanimous=false n_abstain=0
+C_judge:  YES conf=0.62 abstain=false via judge [wrong]
+  judge: All solvers agree on the underlying facts: NYPD Chief of Detectives Joseph Kenny publicly stated on Dec 9-10, 2024 that Mangione's recovered handwritten document showed "ill will toward corporate America" and disdain for the health care industry. The disagreement is interpretive. The YES solvers (B2, B3, B5) cite specific, independently dated pre-deadline reporting — Axios (Dec 10), Rolling Stone 
+  B1 (sonnet-5/default): NO conf=0.72 :: By the December 10, 2024 cutoff (through 2024-12-11T00:40 UTC), NYPD officials had only described a preliminary 'working theory' of motive (anger toward the healthcare/corporate industry, based on a h
+  B2 (sonnet-5/adversarial): YES conf=0.68 :: The question asks whether NYPD released an official motive for Brian Thompson's murder by Dec 10, 2024 (cutoff Dec 11 00:40 UTC). Luigi Mangione was arrested Dec 9, 2024. In the immediate aftermath (D
+  B3 (sonnet-5/criteria): YES conf=0.72 :: The question asks whether NYPD released an official motive for Brian Thompson's murder by December 10, 2024. Luigi Mangione was arrested December 9, 2024, in Altoona, PA, with a three-page handwritten
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.88 :: The NYPD did not release an official motive for the murder of Brian Thompson by December 10, 2024. As of that date, Malaysia Mail reported the motive was still "under scrutiny." The first major NYPD o
+  B5 (haiku-4-5-20251001/default): YES conf=0.72 :: On December 10, 2024, NYPD Chief of Detectives Joseph Kenny publicly disclosed information about Luigi Mangione's stated motive through multiple news outlets including Axios, Rolling Stone, NPR, and O
+
+====================================================================================================
+rd-realityeth-05f4cb4ac48d  [bonded-only | distinct=2 flips=1 answers=2]
+QUESTION: What will be the outcome of the November 2025 elections for Mayor of New York, Governor of Virginia, and Governor of New Jersey, specifically whether Zohran Mandani is elected Mayor of New York, Abigail Spanberger is elected Governor of Virginia, and Mikie Sherrill is elected Governor of New Jersey?
+CUTOFF:   2025-11-12T18:39:50.000Z   opening: 2025-11-10T23:59:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2025-11-15T18:39:50.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x05f4cb4ac48dbc6bf960106be3db18cbc98842fd25bbbd8e991a0a7e69bc5932
+  bond ladder: YES@10000000000000000000 -> INVALID@20000000000000000000
+A_opus:   YES conf=0.97 abstain=false [wrong]
+  reasoning: The question asks whether Mamdani (spelled 'Mandani'), Spanberger, and Sherrill were each elected in the November 2025 elections. Multiple reputable outlets published on/around November 4-5, 2025 — well before the November 12, 2025 cut-off — report that Zohran Mamdani won the NYC mayoral election, Abigail Spanberger won the Virginia governorship (~55-45 over Winsome Earle-Sears), and Mikie Sherril
+  ev: https://www.npr.org/2025/11/04/nx-s1-5597788/election-results-zohran-mamdani-new-york-city-mayor
+  ev: https://www.cnn.com/2025/11/04/politics/nyc-mayor-zohran-mamdani-wins
+  ev: https://rollcall.com/2025/11/04/abigail-spanberger-virginia-governor-election/
+  ev: https://newjerseymonitor.com/2025/11/04/mikie-sherrill-democrat-new-jersey-governor/
+network:  unanimous=true n_abstain=0
+C_judge:  YES conf=0.984 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): YES conf=0.98 :: Multiple independent, reputable news sources (NPR, NY1, Virginia Mercury, Wikipedia, New Jersey Monitor, PBS NewsHour) reporting on and immediately after Nov 4, 2025 election night confirm that Zohran
+  B2 (sonnet-5/adversarial): YES conf=0.98 :: All three November 4, 2025 elections were decisively called on election night and confirmed by multiple reputable news outlets (NPR, Washington Post, PBS, VPM, 19th News, NJ Monitor) well before the N
+  B3 (sonnet-5/criteria): YES conf=0.98 :: All three named candidates won their respective elections held on November 4, 2025, with results called and widely reported by major news outlets (AP, NPR, NBC, NY1, Virginia Mercury, New Jersey Monit
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.99 :: All three elections occurred on November 4, 2025, before the cutoff date. All three candidates were elected: Zohran Mamdani as NYC Mayor (50.4%), Abigail Spanberger as Virginia Governor (57.2%), and M
+  B5 (haiku-4-5-20251001/default): YES conf=0.99 :: All three election outcomes are clearly established by multiple reputable news sources published before the cut-off date of November 12, 2025. Zohran Mamdani won the NYC mayoral election on November 4
+
+====================================================================================================
+rd-realityeth-0c5a1ed5e071  [bonded-only | distinct=2 flips=1 answers=2]
+QUESTION: Will Google's AI-powered NotebookLM be widely adopted by users by 18 December 2023?
+CUTOFF:   2023-12-20T12:46:15.000Z   opening: 2023-12-19T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2023-12-21T12:46:15.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x0c5a1ed5e07100c4b1e918f15a7bdc826d7d2b66d87d5df98fd98b42d47f9972
+  bond ladder: NO@10000000000000000 -> INVALID@20000000000000000
+A_opus:   NO conf=0.92 abstain=false [wrong]
+  reasoning: The claim requires that NotebookLM be 'widely adopted by users' as of 18 December 2023. Contemporaneous evidence shows NotebookLM was still an experimental Google Labs product that only dropped its waitlist on 8 December 2023, and even then was restricted to US users aged 18+. Google published no adoption metrics at the time, and mainstream/viral uptake did not occur until the Audio Overviews laun
+  ev: https://techcrunch.com/2023/12/08/googles-ai-assisted-notebooklm-note-taking-app-now-open-users-us/
+  ev: https://venturebeat.com/ai/googles-ai-note-taking-app-notebooklm-now-available-to-all-u-s-users
+  ev: https://9to5google.com/2023/12/08/notebooklm-gemini-pro-launch/
+  ev: https://blog.google/technology/ai/notebooklm-google-ai/
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.744 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.68 :: As of the Dec 20, 2023 cutoff, the most reliable contemporaneous reporting (TechCrunch, 9to5Google, VentureBeat) shows NotebookLM had only just exited its waitlist phase on Dec 8, 2023, becoming avail
+  B2 (sonnet-5/adversarial): NO conf=0.75 :: As of the 20 December 2023 cutoff, NotebookLM was still an experimental Google Labs product that had only just removed its waitlist restriction (on 8 December 2023) and become generally available to U
+  B3 (sonnet-5/criteria): NO conf=0.75 :: The question asks whether NotebookLM was "widely adopted by users" by Dec 18, 2023. Contemporaneous evidence shows NotebookLM only became available to all U.S. adult users on Dec 8, 2023 (just 10 days
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.78 :: NotebookLM was not "widely adopted" by December 18, 2023. While it showed strong early growth (1.2 million weekly active users by October), it remained in experimental status, was limited to US availa
+  B5 (haiku-4-5-20251001/default): NO conf=0.76 :: By December 18, 2023, NotebookLM had only been generally available to the public for 10 days (launched December 8). While it had achieved millions of users and strong early adoption metrics, contempor
+
+====================================================================================================
+rd-realityeth-125ef762439e  [bonded-only | distinct=2 flips=1 answers=2]
+QUESTION: Will China reduce oil or coal supplies to North Korea in response to its alignment with Russia by November 7, 2024?
+CUTOFF:   2024-11-08T12:38:55.000Z   opening: 2024-11-08T00:00:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2024-11-09T12:38:55.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x125ef762439e56bba78396fe66499561745185cd76feaa518e2a553e97772126
+  bond ladder: YES@1000000000000000 -> INVALID@10000000000000000000
+A_opus:   NO conf=0.94 abstain=false [wrong]
+  reasoning: The question asks whether China reduced oil or coal supplies to North Korea in response to Pyongyang's alignment with Russia by November 7, 2024. Multiple independent, contemporaneous sources published in the weeks immediately preceding the deadline (RFA, Oct 25, 2024; Semafor, Oct 29, 2024; Lowy Institute) all describe China as publicly silent and officially agnostic, with its economic leverage o
+  ev: https://www.rfa.org/english/korea/2024/10/25/north-korea-china-ukraine-troops/
+  ev: https://www.semafor.com/article/10/29/2024/china-under-pressure-from-us-to-confront-north-korea-over-troops-in-ukraine
+  ev: https://www.lowyinstitute.org/the-interpreter/will-north-korea-annoy-china-having-sent-troops-fight-alongside-russia
+  ev: https://www.cfr.org/backgrounders/china-north-korea-relationship
+network:  unanimous=false n_abstain=0
+C_judge:  NO conf=0.9 abstain=false via judge [wrong]
+  judge: Four of five solvers (B1, B2, B3, B5) converge on NO with mutually corroborating, specific sources (Lowy Institute, USIP, Asia Society, VOA, RFA, NCNK) showing that as of October–early November 2024 China took no punitive economic action against North Korea over its Russia alignment: Beijing's posture was 'tactical ambiguity'/silence, and China–DPRK trade actually rebounded to a year-high in Octob
+  B1 (sonnet-5/default): NO conf=0.78 :: Search results from reputable sources covering the period up to and around November 2024 show no evidence that China reduced oil or coal supplies to North Korea in response to DPRK-Russia alignment. O
+  B2 (sonnet-5/adversarial): NO conf=0.82 :: No reputable reporting from before the November 7, 2024 deadline indicates China reduced oil or coal exports to North Korea because of North Korea's alignment with Russia (including its troop deployme
+  B3 (sonnet-5/criteria): NO conf=0.82 :: The question asks whether China reduced oil or coal supplies to North Korea in response to NK's alignment with Russia, by November 7, 2024. Extensive search of contemporaneous reporting (Reuters-sourc
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.68 :: China did reduce both oil and coal supplies to North Korea by November 7, 2024. Coal imports were banned (with zero imports recorded in November), and CNPC had suspended gasoline and diesel sales sinc
+  B5 (haiku-4-5-20251001/default): NO conf=0.82 :: China did not reduce oil or coal supplies to North Korea in response to its Russia alignment by November 7, 2024. Evidence shows: (1) Multiple sources explicitly state "China has not sought to punish 
+
+====================================================================================================
+rd-realityeth-1372db74a5df  [bonded-only | distinct=2 flips=1 answers=2]
+QUESTION: Will the length of a penis measured on October 25, 2025, exceed 6 inches?
+CUTOFF:   2025-11-02T16:35:00.000Z   opening: 2025-11-01T16:04:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2025-11-05T16:35:00.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x1372db74a5df4831b465b055a71f60f83442998941e0216fad1a391eb4ac90ef
+  bond ladder: YES@10000000000000000000 -> INVALID@20000000000000000000
+A_opus:   NO conf=0.55 abstain=false [wrong]
+  reasoning: The claim names no subject, no measuring party, and no published measurement, and searches surfaced no news event, record attempt, or documented measurement dated 25 October 2025 (and nothing published before the 2 November 2025 cut-off). There is therefore no direct external fact to verify. Resolving it 'exactly as worded' with only the admissible general evidence: peer-reviewed nomogram data and
+  ev: https://pubmed.ncbi.nlm.nih.gov/32666897/
+  ev: https://www.healthline.com/health/mens-health/average-penis-size
+  ev: https://thehomoculture.com/measure-a-penis-day-2025/
+network:  unanimous=true n_abstain=5
+C_judge:  UNRESOLVABLE conf=0.31 abstain=true via unanimous [correct]
+  B1 (sonnet-5/default): UNRESOLVABLE conf=0.5 :: No identifiable underlying real-world event corresponds to "a penis measured on October 25, 2025." Web searches for this date, for related viral/meme events, and for any news reporting of such a measu
+  B2 (sonnet-5/adversarial): UNRESOLVABLE conf=0.5 :: The claim references an undefined 'measurement' event on October 25, 2025 with no published resolution criteria, no identifiable subject, and no news coverage or primary source describing what was mea
+  B3 (sonnet-5/criteria): UNRESOLVABLE conf=0.5 :: The claim references a specific 'penis measured on October 25, 2025' without identifying any subject, context, or event. Web searches turned up no news articles, studies, or public records describing 
+  B4 (haiku-4-5-20251001/timeline): UNRESOLVABLE conf=0 :: The question lacks a clear referent and identifiable public event. No documented measurement, prediction, record attempt, or claim regarding a penis measurement on October 25, 2025 was found in public
+  B5 (haiku-4-5-20251001/default): UNRESOLVABLE conf=0.05 :: No public reporting, news coverage, or documented evidence was found regarding any specific measurement event on October 25, 2025. Without additional context or public documentation of what this claim
+
+====================================================================================================
+rd-realityeth-1e4b31999e84  [bonded-only | distinct=2 flips=1 answers=2]
+QUESTION: Will California AI regulation bill SB 1047 become law this session?
+CUTOFF:   2024-09-30T21:09:10.000Z   opening: 2024-09-08T03:59:00.000Z
+GROUND TRUTH: INVALID (invalid)  finalized 2024-10-01T21:09:10.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x1e4b31999e84a355a76cf0a4b5cf0dd5b9174b1b04fa0aaf1a6641a0c406755e
+  bond ladder: NO@10000000000000000 -> INVALID@20000000000000000
+A_opus:   NO conf=0.98 abstain=false [wrong]
+  reasoning: SB 1047 passed the California legislature but was vetoed by Governor Newsom on September 29, 2024, one day before the cut-off. The legislature had adjourned (session ended Aug 31, 2024), so no override was possible in the session. Therefore the bill did not become law this session — the answer is No.
+  ev: https://techcrunch.com/2024/09/29/gov-newsom-vetoes-californias-controversial-ai-bill-sb-1047/
+  ev: https://calmatters.org/economy/2024/09/california-artificial-intelligence-bill-veto/
+  ev: https://www.gibsondunn.com/regulating-the-future-eight-key-takeaways-from-californias-sb-1047-vetoed-by-governor-newsom/
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.982 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.98 :: Multiple reputable, independent sources (TechCrunch, CalMatters, National Law Review, Gibson Dunn) all published around September 29-30, 2024 confirm that California Governor Gavin Newsom vetoed SB 10
+  B2 (sonnet-5/adversarial): NO conf=0.98 :: California Governor Gavin Newsom vetoed SB 1047 (the AI safety bill) on September 29, 2024, one day before the resolution cutoff of September 30, 2024. Multiple contemporaneous reputable sources (Tech
+  B3 (sonnet-5/criteria): NO conf=0.98 :: SB 1047 passed both chambers of the California legislature but required the Governor's signature to become law. Multiple reputable sources (CalMatters, National Law Review, CSET Georgetown, Morgan Lew
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.99 :: Governor Newsom vetoed SB 1047 on September 29, 2024, before the cutoff date of September 30, 2024. The bill therefore did not become law during the 2024 legislative session. No veto override was atte
+  B5 (haiku-4-5-20251001/default): NO conf=0.98 :: SB 1047 was passed by both the California Assembly (August 28, 2024) and Senate (August 29, 2024). However, Governor Newsom vetoed the bill on September 29, 2024 - before the cutoff date of September 
+
+====================================================================================================
+rd-realityeth-4c707b43f5fe  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Will Amazon publicly announce, on or before September 10, 2025, that it has enabled AI curricula for at least 2,500 educators in the United States as part of its stated goal for 2028?
+CUTOFF:   2025-09-16T12:31:20.000Z   opening: 2025-09-11T00:00:00.000Z
+GROUND TRUTH: YES (answer)  finalized 2025-09-17T12:31:20.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x4c707b43f5fe2e8e7251367ac30f2218ce7005023c0b9d6f75a72846a00ff763
+  bond ladder: INVALID@1000000000000000 -> NO@10000000000000000000 -> YES@20000000000000000000
+A_opus:   NO conf=0.93 abstain=false [wrong]
+  reasoning: Amazon's AI education commitment, announced with the White House 'Pledge to America's Youth' (July 2025) and reiterated at the September 4, 2025 AI Education Task Force meeting, is purely prospective: 4 million learners trained and AI curricula enabled for 10,000 U.S. educators BY 2028. Searches of Amazon's own newsroom and contemporaneous trade coverage through the September 10, 2025 date find no
+  ev: https://www.aboutamazon.com/news/policy-news-views/how-amazon-is-supporting-the-white-houses-ai-education-initiatives
+  ev: https://campustechnology.com/articles/2025/09/04/microsoft-amazon-announce-new-commitments-to-support-presidential-ai-challenge.aspx
+  ev: https://www.aboutamazon.com/news/community/amazon-future-engineer-ai-education-students
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.85 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.85 :: The claim requires Amazon to have publicly announced, by September 10, 2025, that it had already enabled AI curricula for at least 2,500 educators toward its 2028 goal. Amazon's actual public commitme
+  B2 (sonnet-5/adversarial): NO conf=0.78 :: The question requires Amazon to have publicly announced, by September 10, 2025, that it had already 'enabled AI curricula for at least 2,500 educators' as progress toward its 2028 goal. Extensive sear
+  B3 (sonnet-5/criteria): NO conf=0.82 :: The question asks whether Amazon publicly announced, on or before Sept 10, 2025, that it had already enabled AI curricula for at least 2,500 educators (as progress toward its 2028 goal). Amazon's actu
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.88 :: Amazon announced a commitment to enable AI curricula for 10,000 educators by 2028 on September 4, 2025, which falls before the September 10 deadline. However, the announcement was about a future commi
+  B5 (haiku-4-5-20251001/default): NO conf=0.92 :: Amazon did announce AI education commitments on September 4, 2025 (before the September 10 deadline), but the announcement stated a goal to "enable AI curricula for 10,000 U.S. educators by 2028," not
+
+====================================================================================================
+rd-realityeth-6dcc59eef49b  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Will Meta publicly announce, before or on August 29, 2025, the integration of Midjourney's AI image generation technology into Facebook's main feed for users in any country?
+CUTOFF:   2025-09-02T16:17:30.000Z   opening: 2025-08-30T00:00:00.000Z
+GROUND TRUTH: YES (answer)  finalized 2025-09-03T16:17:30.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x6dcc59eef49bf5458d76f3cdbd2c7feccb3ce5fab5d14b03b7fcdcbd0e900be1
+  bond ladder: INVALID@1000000000000000 -> NO@10000000000000000000 -> YES@20000000000000000000
+A_opus:   NO conf=0.79 abstain=false [wrong]
+  reasoning: Meta did make a Midjourney-related announcement within the window (Aug 22, 2025), but it was a licensing/research partnership for Midjourney's 'aesthetic technology' to be used in Meta's 'future models and products.' No financial terms, product specifics, or rollout timeline were disclosed, and Meta explicitly did not say when or how the technology would appear in any product. There is no announce
+  ev: https://techcrunch.com/2025/08/22/meta-partners-with-midjourney-on-ai-image-and-video-models
+  ev: https://venturebeat.com/ai/meta-is-partnering-with-midjourney-and-will-license-its-technology-for-future-models-and-products
+  ev: https://www.engadget.com/ai/meta-is-licensing-midjourneys-ai-image-and-video-tech-120012178.html
+  ev: https://www.techmeme.com/250822/p24
+network:  unanimous=false n_abstain=0
+C_judge:  NO conf=0.68 abstain=false via judge [wrong]
+  judge: All solvers agree Meta announced a Midjourney licensing partnership on Aug 22, 2025 (within window), but the primary source (Alexandr Wang) framed it generically as licensing "aesthetic technology" for "future models and products" — no mention of Facebook's main feed. The YES solvers' feed-specific evidence comes from low-tier aggregators (Nerdschalk, WebProNews) using speculative headline framing
+  B1 (sonnet-5/default): NO conf=0.72 :: Meta announced (Aug 22, 2025, via Alexandr Wang) a partnership to license Midjourney's 'aesthetic technology' for Meta's 'future models and products' broadly across its app family. This is a general l
+  B2 (sonnet-5/adversarial): NO conf=0.62 :: Meta and Midjourney announced a technology-licensing partnership on August 22, 2025 (before the Aug 29 deadline), but the announcement itself (from Meta Chief AI Officer Alexandr Wang) was general: li
+  B3 (sonnet-5/criteria): YES conf=0.78 :: Multiple reputable outlets (TechCrunch, Bloomberg, Engadget, Business Standard, Nerdschalk, WebProNews) reported that on August 22, 2025 — within the window before August 29, 2025 — Meta's Chief AI Of
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.99 :: Meta publicly announced on August 22, 2025—before the August 29, 2025 deadline—a partnership with Midjourney to license and integrate Midjourney's AI image and video generation technology into Faceboo
+  B5 (haiku-4-5-20251001/default): YES conf=0.88 :: Meta Chief AI Officer Alexandr Wang publicly announced on August 22, 2025 (before the August 29 deadline) a partnership with Midjourney to license and integrate their AI image generation technology in
+
+====================================================================================================
+rd-realityeth-72dfaccffff0  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Will Mercedes-Benz and Factorial release their new 'Solstice' EV battery tech by 20 September 2024?
+CUTOFF:   2024-09-23T11:38:05.000Z   opening: 2024-09-21T00:00:00.000Z
+GROUND TRUTH: NO (answer)  finalized 2024-09-24T11:38:05.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x72dfaccffff035ac389556df08743499c002a5225f1206d887f59567da8df385
+  bond ladder: INVALID@1000000000000000 -> YES@10000000000000000000 -> NO@20000000000000000000
+A_opus:   YES conf=0.83 abstain=false [wrong]
+  reasoning: Factorial Energy publicly introduced its Solstice all-solid-state battery, developed with Mercedes-Benz as key customer and development partner, via a press release dated 10 September 2024, with widespread independent coverage on 11 September 2024 (Green Car Congress, electrive, Electric Cars Report, WardsAuto). That is before the 20 September 2024 deadline, so on the announcement/unveiling readin
+  ev: https://www.businesswire.com/news/home/20240910561651/en/Factorial-Introduces-Solstice-an-All-Solid-State-Battery-with-Mercedes-Benz-as-a-Key-Customer-and-Development-Partner
+  ev: https://www.greencarcongress.com/2024/09/20240911-solstice.html
+  ev: https://www.electrive.com/2024/09/11/factorial-energy-and-mercedes-benz-present-solid-state-battery/
+  ev: https://electriccarsreport.com/2024/09/factorial-mercedes-benz-unveil-all-solid-state-battery-that-can-extend-ev-range-up-to-80/
+network:  unanimous=false n_abstain=0
+C_judge:  YES conf=0.8 abstain=false via judge [wrong]
+  judge: All five solvers agree on the underlying fact: Factorial and Mercedes-Benz publicly introduced the 'Solstice' all-solid-state battery on 10–11 September 2024, confirmed by a primary BusinessWire press release and multiple independent outlets (Electrek, Electrive, Green Car Congress, WardsAuto) — all before the 20 September 2024 deadline. The only disagreement is interpretive. B3 argues 'release' m
+  B1 (sonnet-5/default): YES conf=0.62 :: Factorial and Mercedes-Benz publicly introduced/unveiled the 'Solstice' all-solid-state EV battery technology on September 10-11, 2024, via an official press release and widespread media coverage (Bus
+  B2 (sonnet-5/adversarial): YES conf=0.72 :: Factorial Inc. and Mercedes-Benz publicly introduced/unveiled the 'Solstice' all-solid-state EV battery technology on September 10, 2024, as confirmed by a BusinessWire press release and corroborating
+  B3 (sonnet-5/criteria): NO conf=0.88 :: The question asks whether Mercedes-Benz and Factorial would 'release' the Solstice EV battery tech by 20 September 2024. Evidence shows that on September 10, 2024, Factorial and Mercedes-Benz jointly 
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.95 :: Mercedes-Benz and Factorial announced and introduced their Solstice all-solid-state battery technology on September 10-11, 2024, which is before the September 20, 2024 deadline. Multiple reputable sou
+  B5 (haiku-4-5-20251001/default): YES conf=0.92 :: Factorial and Mercedes-Benz publicly introduced their Solstice all-solid-state EV battery technology on September 10-11, 2024, which is before the September 20, 2024 deadline. The official announcemen
+
+====================================================================================================
+rd-realityeth-ab044f3f0d3c  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Will Governor Greg Abbott publicly announce the signing of the new mid-census congressional redistricting map into law before or on August 28, 2025?
+CUTOFF:   2025-09-01T15:11:05.000Z   opening: 2025-08-29T00:00:00.000Z
+GROUND TRUTH: YES (answer)  finalized 2025-09-02T15:11:05.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0xab044f3f0d3cb22301396919f59d9b6b3b561b42d6c3450ccb54a5487b8a9ecd
+  bond ladder: INVALID@1000000000000000 -> NO@10000000000000000000 -> YES@20000000000000000000
+A_opus:   NO conf=0.95 abstain=false [wrong]
+  reasoning: The Texas Legislature sent the new congressional map (HB 4) to Gov. Abbott in late August 2025; as of Aug 24 he had only said he would sign it swiftly. Multiple independent reports (Texas Tribune, CNN, ABC, Al Jazeera, Fox News) and a dated congressional press release confirm Abbott signed and publicly announced (including a video of the signing) on Friday, August 29, 2025 — one day after the Aug 
+  ev: https://www.texastribune.org/2025/08/29/greg-abbott-signs-texas-congressional-map-redistricting
+  ev: https://www.cnn.com/2025/08/29/politics/texas-redistricting-greg-abbott-house
+  ev: https://castro.house.gov/media-center/press-releases/castro-statement-on-abbott-signing-illegal-texas-congressional-map-into-law
+  ev: https://www.wbur.org/news/2025/08/24/texas-gov-abbott-says-hell-swiftly-sign-new-maps-on-his-desk-that-will-boost-gop
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.974 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.97 :: Multiple independent, reputable news sources (Texas Tribune, CNN, ABC News, Fox News, and a same-day congressional press release) consistently report that Governor Greg Abbott publicly signed Texas's 
+  B2 (sonnet-5/adversarial): NO conf=0.97 :: Multiple reputable news sources (CNN, ABC News, Texas Tribune, Fox News, KWTX) consistently report that Governor Greg Abbott signed the new Texas congressional redistricting map (House Bill 4) into la
+  B3 (sonnet-5/criteria): NO conf=0.97 :: The question asks whether Abbott would publicly announce signing the new mid-census congressional redistricting map into law on or before August 28, 2025. Multiple reputable news sources (CNN, ABC New
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.98 :: Governor Abbott signed the redistricting map on August 29, 2025, which is after the August 28, 2025 deadline specified in the question. Multiple reputable news sources confirm the August 29 signing da
+  B5 (haiku-4-5-20251001/default): NO conf=0.98 :: Governor Greg Abbott publicly announced signing the mid-census congressional redistricting map into law on August 29, 2025, which is after the specified deadline of August 28, 2025. Multiple independe
+
+====================================================================================================
+rd-realityeth-de9971f650a8  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Will Andrew Bailey be publicly confirmed to have assumed the role of FBI Co-Deputy Director before or on August 24, 2025?
+CUTOFF:   2025-08-25T17:19:35.000Z   opening: 2025-08-25T00:00:00.000Z
+GROUND TRUTH: YES (answer)  finalized 2025-08-26T17:19:35.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0xde9971f650a81a2c869f30e81a0606e5b7dd803a11e285b8f71efa1b9bfb1370
+  bond ladder: INVALID@1000000000000000 -> NO@10000000000000000000 -> YES@20000000000000000000
+A_opus:   NO conf=0.94 abstain=false [wrong]
+  reasoning: On August 18, 2025, AG Pam Bondi and FBI Director Kash Patel announced Andrew Bailey would become FBI Co-Deputy Director. However, Bailey simultaneously announced his resignation as Missouri Attorney General effective September 8, 2025, meaning he remained Missouri AG through the August 24, 2025 deadline. He was not sworn in at the FBI until September 15, 2025. Therefore, no public confirmation ex
+  ev: https://ago.mo.gov/missouri-attorney-general-andrew-bailey-announces-resignation-in-order-to-accept-federal-position/
+  ev: https://www.stlpr.org/government-politics-issues/2025-08-18/andrew-bailey-missouri-attorney-general-trump
+  ev: https://www.cnn.com/2025/08/18/politics/fbi-andrew-bailey-bongino
+  ev: https://en.wikipedia.org/wiki/Andrew_Bailey_(politician)
+network:  unanimous=false n_abstain=0
+C_judge:  NO conf=0.85 abstain=false via judge [wrong]
+  judge: The claim requires public confirmation that Bailey had ASSUMED the FBI Co-Deputy Director role by Aug 24, 2025 — not merely that he had been named to it. Four of five solvers converge on NO with concrete, dated evidence: the Aug 18, 2025 announcement by Bondi/Patel was prospective; Bailey's own AG office announced his Missouri resignation effective September 8, 2025 (so he still held the state pos
+  B1 (sonnet-5/default): NO conf=0.88 :: The question asks whether Andrew Bailey was publicly confirmed to have ASSUMED the role of FBI Co-Deputy Director by August 24, 2025. Contemporaneous reporting from August 18, 2025 shows he was only a
+  B2 (sonnet-5/adversarial): NO conf=0.9 :: Public reporting available before and at the August 25, 2025 cutoff shows that Andrew Bailey was announced/named as FBI Co-Deputy Director on August 18, 2025, but he had not assumed the role by August
+  B3 (sonnet-5/criteria): NO conf=0.85 :: The question asks whether Andrew Bailey was publicly confirmed to have ASSUMED the role of FBI Co-Deputy Director on or before August 24, 2025. Evidence shows that on August 18, 2025, Bondi and Patel 
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.75 :: By August 24, 2025, Andrew Bailey was publicly announced and confirmed as appointed to the FBI Co-Deputy Director position (announcement: August 18, 2025). However, he did not formally assume the role
+  B5 (haiku-4-5-20251001/default): YES conf=0.95 :: Andrew Bailey was publicly confirmed to assume the role of FBI Co-Deputy Director on August 18, 2025, when Attorney General Pam Bondi announced his appointment. This announcement occurred 6 days befor
+
+====================================================================================================
+rd-realityeth-ec862756f69f  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Will the National Transportation Safety Board publicly release preliminary findings from its investigation into the August 2024 Pembroke tour bus crash before or on August 30, 2025?
+CUTOFF:   2025-09-02T16:14:50.000Z   opening: 2025-08-31T00:00:00.000Z
+GROUND TRUTH: YES (answer)  finalized 2025-09-03T16:14:50.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0xec862756f69f660c42baf2e8f0d345ac06d030ddd567b583c3da9e1627b5dceb
+  bond ladder: INVALID@1000000000000000 -> NO@10000000000000000000 -> YES@20000000000000000000
+A_opus:   NO conf=0.85 abstain=false [wrong]
+  reasoning: No Pembroke tour bus crash occurred in August 2024; the referenced event is the August 22, 2025 M&Y Tours motorcoach rollover on I-90 in Pembroke, NY. NTSB investigators said on scene in late August 2025 that a preliminary report would come in roughly 30 days, and the preliminary report was in fact released on September 16, 2025 — after the August 30, 2025 threshold and after the question's cut-of
+  ev: https://en.wikipedia.org/wiki/2025_Pembroke_bus_crash
+  ev: https://spectrumlocalnews.com/product-pages/nyc/news/2025/09/16/ntsb-releases-preliminary-report-on-fatal-thruway-bus-crash
+  ev: https://www.wxxinews.org/2025-08-24/fatal-bus-crash-i-90-buffalo-pembroke-western-new-york-investigation
+  ev: https://www.wkbw.com/genesee-county/ntsb-releases-preliminary-report-on-deadly-tour-bus-crash-on-i-90-in-pembroke
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.8299999999999998 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.75 :: The question references an 'August 2024 Pembroke tour bus crash,' but no such crash occurred in August 2024. The only Pembroke, NY tour bus crash on record (I-90/Thruway, M&Y Tours motorcoach, 5 kille
+  B2 (sonnet-5/adversarial): NO conf=0.88 :: The question references an 'August 2024 Pembroke tour bus crash,' but the only notable Pembroke, NY tour bus crash occurred on August 22, 2025 (the 'August 2024' appears to be a dating error in the qu
+  B3 (sonnet-5/criteria): NO conf=0.82 :: The question references an 'August 2024 Pembroke tour bus crash,' but no such event exists in the public record. The only notable Pembroke, NY tour bus crash occurred on August 22, 2025 (5 killed, doz
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.75 :: The question asks about an "August 2024 Pembroke tour bus crash," but evidence shows the only significant Pembroke tour bus crash was on August 22, 2025. The NTSB released its preliminary report for t
+  B5 (haiku-4-5-20251001/default): NO conf=0.95 :: The NTSB preliminary report on the Pembroke tour bus crash (August 22, 2025) was released on September 16, 2025, which is after the August 30, 2025 deadline specified in the question. Multiple reliabl
+
+====================================================================================================
+rd-realityeth-f4055370d9b4  [bonded-only | distinct=3 flips=2 answers=3]
+QUESTION: Will the Pickett Fire in Napa County, California, be declared at least 90% contained by state or local authorities before or on August 30, 2025?
+CUTOFF:   2025-09-02T16:13:15.000Z   opening: 2025-08-31T00:00:00.000Z
+GROUND TRUTH: YES (answer)  finalized 2025-09-03T16:13:15.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0xf4055370d9b4cdb96122f74bd27d3774b886ac58e83029b70e9218f6d00063ee
+  bond ladder: INVALID@1000000000000000 -> NO@10000000000000000000 -> YES@20000000000000000000
+A_opus:   NO conf=0.95 abstain=false [wrong]
+  reasoning: The Pickett Fire started Aug 21, 2025 near Calistoga in Napa County. CAL FIRE and multiple independent outlets document the containment trajectory: 11% (Aug 24), 21% (Aug 26), 25% (Aug 27), 33% (Aug 28), 51% (Aug 29), ~65% (Aug 30-31), 79% (Aug 31), and 90% only on Sept 1-2, 2025. Therefore, on or before August 30, 2025, the fire was not declared at least 90% contained by state or local authoritie
+  ev: https://www.fire.ca.gov/incidents/2025/8/21/pickett-fire
+  ev: https://www.pressdemocrat.com/article/napa/pickett-fire-napa-county-3/
+  ev: https://www.cbsnews.com/sanfrancisco/news/pickett-fire-napa-county-california-week-2-containment-grows/
+  ev: https://napavalleyregister.com/news/pickett-fire-65-percent-contained-6819-acres/article_2def90c6-fd77-49ed-831c-0899220757d5.html
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.952 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.95 :: Multiple independent and primary (CAL FIRE) sources consistently show the Pickett Fire's containment percentage progressed from 11% to 21%, 33% (Aug 29), and 51% (Aug 30, Friday evening) — well below 
+  B2 (sonnet-5/adversarial): NO conf=0.95 :: Multiple reputable news sources (CBS San Francisco, NBC Bay Area, The Press Democrat, ABC7) consistently report that the Pickett Fire's containment progressed from 11% (Aug 24) to 21% (Aug 26) to 33% 
+  B3 (sonnet-5/criteria): NO conf=0.93 :: News reporting (NBC Bay Area, CBS SF, Press Democrat, and CAL FIRE incident updates) consistently shows the Pickett Fire's containment progressed from ~41% on Aug 29 to ~65% around Aug 30-31, and only
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.98 :: The Pickett Fire in Napa County, California began on August 21, 2025. According to CAL FIRE incident reports and multiple news sources, the fire reached only 65% containment by August 31, 2025, and di
+  B5 (haiku-4-5-20251001/default): NO conf=0.95 :: The Pickett Fire in Napa County started on August 21, 2025. Multiple state and local authorities, including CAL FIRE, reported that the fire reached 90% containment on September 2, 2025, when all evac
+
+====================================================================================================
+rd-realityeth-1baffc224df4  [bonded-only | distinct=2 flips=5 answers=6]
+QUESTION: Will Emirates publicly announce, on or before March 31, 2026, the restoration of its full pre-conflict flight schedule at Dubai International Airport, as confirmed by an official company statement or major news outlet?
+CUTOFF:   2026-04-01T20:34:15.000Z   opening: 2026-04-01T00:00:00.000Z
+GROUND TRUTH: YES (answer)  finalized 2026-04-02T20:34:15.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x1baffc224df4550eb452d4c1c9a406672cbc3599a88ae288735ece1c24f841b4
+  bond ladder: NO@100000000000000 -> YES@200000000000000 -> NO@400000000000000 -> YES@800000000000000 -> NO@1600000000000000 -> YES@3200000000000000
+A_opus:   NO conf=0.95 abstain=false [wrong]
+  reasoning: The conflict (US/Israel–Iran, late February 2026) shut Gulf airspace and slashed Emirates' DXB operations. Through March 2026 Emirates ran a limited schedule (~50% in early March, ~60% mid-March), and a planned 29 March return to 100% was derailed by a 30 March drone incident; on 31 March DXB was still explicitly operating limited flights. Emirates' own restoration announcements (96% of network, ~
+  ev: https://www.ibtimes.com/dubai-international-airport-open-march-31-2026-dxb-operating-limited-flights-3800601
+  ev: https://www.emirates.com/media-centre/emirates-is-reconnecting-the-world-through-dubai-with-96-of-its-global-network-restored/
+  ev: https://www.thenationalnews.com/news/uae/2026/05/02/uae-confirms-full-resumption-of-air-traffic-operations/
+  ev: https://loyaltylobby.com/2026/03/12/emirates-flydubai-operations-stabilized-203-flights-for-tursday-205-for-friday-march-12-13/
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.898 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.85 :: Search evidence (news reporting current as of late March/early April 2026) shows Emirates had targeted full (100%) restoration of its pre-conflict flight schedule at DXB by March 29, 2026, but a drone
+  B2 (sonnet-5/adversarial): NO conf=0.9 :: The question requires an official Emirates statement or major news outlet confirmation of full pre-conflict flight schedule restoration at Dubai International Airport on or before March 31, 2026. Evid
+  B3 (sonnet-5/criteria): NO conf=0.88 :: The question asks whether Emirates would publicly announce, on or before March 31, 2026, restoration of its FULL pre-conflict flight schedule at Dubai. Evidence shows the conflict-driven disruptions (
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.94 :: Emirates did not announce restoration of its full pre-conflict flight schedule at Dubai International Airport on or before March 31, 2026. While the airline publicly stated on March 6 that it would re
+  B5 (haiku-4-5-20251001/default): NO conf=0.92 :: Emirates did not publicly announce the restoration of its full pre-conflict flight schedule at Dubai International Airport on or before March 31, 2026. While the airline made statements about plans to
+
+====================================================================================================
+rd-realityeth-1d875aa9708d  [bonded-only | distinct=2 flips=3 answers=4]
+QUESTION: Will the Pew Research Center release another survey measuring American public opinion toward Israel on or before April 14, 2026, as confirmed by publication on the official Pew Research Center website or coverage by a major news outlet?
+CUTOFF:   2026-04-16T07:18:30.000Z   opening: 2026-04-15T00:00:00.000Z
+GROUND TRUTH: NO (answer)  finalized 2026-04-17T07:18:30.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x1d875aa9708db2ca6dc93b7fdf2c59a4b4076eeb2be540457eeeec8f92f2aaba
+  bond ladder: YES@1000000000000000000 -> NO@10000000000000000000 -> YES@20000000000000000000 -> NO@40000000000000000000
+A_opus:   YES conf=0.97 abstain=false [wrong]
+  reasoning: Pew Research Center published a short read on April 7, 2026 titled 'US views of Israel, Netanyahu more negative in 2026, especially among young adults,' reporting a March 2026 survey of Americans' favorability toward Israel (60% unfavorable / 37% favorable) and confidence in Netanyahu. This is a survey measuring American public opinion toward Israel, published on the official Pew website before Ap
+  ev: https://www.pewresearch.org/short-reads/2026/04/07/negative-views-of-israel-netanyahu-continue-to-rise-among-americans-especially-young-people/
+  ev: https://jewishinsider.com/2026/04/israel-americans-iran-war-netanyahu-pew-research-center-poll/
+  ev: https://mondoweiss.net/2026/04/latest-polling-paints-dire-picture-for-israel-in-u-s-politics/
+network:  unanimous=true n_abstain=0
+C_judge:  YES conf=0.978 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): YES conf=0.98 :: Pew Research Center released a short-read titled 'US views of Israel, Netanyahu more negative in 2026, especially among young adults' on April 7, 2026 (before the April 14, 2026 cutoff), which directl
+  B2 (sonnet-5/adversarial): YES conf=0.97 :: A Pew Research Center short-read titled 'US views of Israel, Netanyahu more negative in 2026, especially among young adults' was published on the official Pew Research Center website (pewresearch.org)
+  B3 (sonnet-5/criteria): YES conf=0.97 :: The question asks whether Pew Research Center would release another survey measuring American public opinion toward Israel on or before April 14, 2026. Web search found that Pew Research Center publis
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.98 :: The Pew Research Center published a survey measuring American public opinion toward Israel on April 7, 2026 - before the April 14, 2026 deadline. The survey was published on the official Pew Research 
+  B5 (haiku-4-5-20251001/default): YES conf=0.99 :: The Pew Research Center released a survey measuring American public opinion toward Israel on April 7, 2026, which is before the April 14, 2026 deadline. The survey was published on the official Pew Re
+
+====================================================================================================
+rd-realityeth-b07d46263bb3  [bonded-only | distinct=2 flips=2 answers=4]
+QUESTION: Will OpenAI publicly announce, on or before April 19, 2026, the signing of a multi-year, nine-figure enterprise deal with a Fortune 500 company, as confirmed by an official company statement or reporting by a major news outlet?
+CUTOFF:   2026-04-21T09:53:35.000Z   opening: 2026-04-20T00:00:00.000Z
+GROUND TRUTH: NO (answer)  finalized 2026-04-22T09:53:35.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0xb07d46263bb37559c6961fa355c4a34fba2e543568422d718ebd6d6c2ebb20b1
+  bond ladder: NO@100000000000000000 -> YES@200000000000000000 -> YES@400000000000000000 -> NO@800000000000000000
+A_opus:   YES conf=0.93 abstain=false [wrong]
+  reasoning: The question asks whether OpenAI publicly announced, on or before April 19, 2026, the signing of a multi-year, nine-figure enterprise deal with a Fortune 500 company, confirmed by official statement or major-outlet reporting. The OpenAI–Intuit partnership, announced jointly by OpenAI and Intuit on November 18, 2025 (within the 'on or before' window), is explicitly multi-year and valued at more tha
+  ev: https://openai.com/index/intuit-partnership/
+  ev: https://www.bloomberg.com/news/articles/2025-11-18/intuit-to-spend-over-100-million-on-openai-models-in-new-deal
+  ev: https://www.cnbc.com/2025/11/18/intuit-pays-openai-100-million-turbotax-integrates-chatgpt.html
+  ev: https://investors.intuit.com/news-events/press-releases/detail/1284/intuit-and-openai-join-forces-to-revolutionize-financial-intelligence-powering-every-person-business-and-dream-with-personalized-experiences
+network:  unanimous=true n_abstain=0
+C_judge:  YES conf=0.9460000000000001 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): YES conf=0.9 :: The question asks whether OpenAI publicly announced, on or before April 19, 2026, a multi-year, nine-figure (i.e., $100M-$999M) enterprise deal with a Fortune 500 company, confirmed by an official sta
+  B2 (sonnet-5/adversarial): YES conf=0.94 :: OpenAI and Intuit officially announced on November 18, 2025 an expanded, multi-year strategic partnership under which Intuit would spend $100M+ (nine figures) integrating OpenAI's frontier models into
+  B3 (sonnet-5/criteria): YES conf=0.95 :: The resolution criteria require OpenAI to publicly announce, on or before April 19, 2026, a multi-year, nine-figure ($100M+) enterprise deal with a Fortune 500 company, confirmed by an official statem
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.99 :: OpenAI publicly announced a multi-year, nine-figure ($50 billion) enterprise deal with Amazon (a Fortune 500 company) on February 27, 2026, well before the April 19, 2026 deadline. The announcement wa
+  B5 (haiku-4-5-20251001/default): YES conf=0.95 :: OpenAI and Amazon announced a multi-year strategic partnership on February 27, 2026 (before the April 19, 2026 deadline). The deal involved a $50 billion investment from Amazon, making it a nine-figur
+
+====================================================================================================
+rd-realityeth-028d8ff3cd32  [bonded-only | distinct=2 flips=2 answers=3]
+QUESTION: Will the United Nations officially announce the delivery of humanitarian aid to Gaza by March 31, 2025?
+CUTOFF:   2025-04-01T10:52:05.000Z   opening: 2025-04-01T00:00:00.000Z
+GROUND TRUTH: NO (answer)  finalized 2025-04-02T10:52:05.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x028d8ff3cd32593f1679223ca361808b500c0e5db28872caed373f6311d17a6a
+  bond ladder: NO@1000000000000000 -> YES@10000000000000000000 -> NO@20000000000000000000
+A_opus:   YES conf=0.96 abstain=false [wrong]
+  reasoning: The claim asks only whether the UN officially announced delivery of humanitarian aid to Gaza by 31 March 2025. Multiple official UN channels — OCHA (17 March 2025 report on the ceasefire phase-one response), UN News (February 2025), UNRWA (news release on reaching 2 million people), and WFP (first trucks crossing 19 January 2025) — publicly announced aid deliveries into and within Gaza well before
+  ev: https://www.unocha.org/publications/report/occupied-palestinian-territory/humanitarian-response-un-and-humanitarian-partners-during-phase-one-ceasefire-17-march-2025
+  ev: https://news.un.org/en/story/2025/02/1159741
+  ev: https://www.unrwa.org/newsroom/news-releases/gaza-strip-phase-one-lifesaving-ceasefire-draws-end-unrwa-reaches-2-million
+  ev: https://www.wfp.org/news/first-wfp-trucks-cross-gaza-ceasefire-opens-window-hope-hungry-families
+network:  unanimous=false n_abstain=0
+C_judge:  YES conf=0.95 abstain=false via judge [wrong]
+  judge: The claim asks only whether the UN would officially announce delivery of humanitarian aid to Gaza *by* March 31, 2025 — a cumulative deadline, not a requirement that deliveries occur during March. Solvers B1–B4 cite concrete, official UN sources (UN News 6 Feb 2025 reporting 10,000+ aid trucks entered Gaza since the ceasefire; OCHA's 17 March 2025 Phase One report documenting ~42,000 trucks; UNISP
+  B1 (sonnet-5/default): YES conf=0.94 :: The UN (through UN News, OCHA, UNRWA, and WFP) repeatedly and officially announced humanitarian aid deliveries to Gaza starting with the January 19, 2025 ceasefire, including a milestone announcement 
+  B2 (sonnet-5/adversarial): YES conf=0.9 :: The question, taken at face value, asks only whether the UN would officially announce that humanitarian aid was delivered to Gaza by March 31, 2025 — a low bar given the ongoing conflict and ceasefire
+  B3 (sonnet-5/criteria): YES conf=0.92 :: The question asks whether the UN would officially announce delivery of humanitarian aid to Gaza by March 31, 2025. Evidence shows that starting January 19, 2025, when the Gaza ceasefire took effect, t
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.95 :: The UN, through OCHA, officially announced humanitarian aid deliveries to Gaza in January and February 2025—both well before the March 31, 2025 deadline. Official OCHA situation reports documented 13.
+  B5 (haiku-4-5-20251001/default): NO conf=0.88 :: The UN's official humanitarian reports from March 2025 explicitly document that a complete blockade on humanitarian aid entry was in effect from March 2, 2025, with no aid entering Gaza throughout the
+
+====================================================================================================
+rd-realityeth-11fc5756ee95  [bonded-only | distinct=2 flips=2 answers=3]
+QUESTION: Will Russia reveal its secret war drones project in China by October 1, 2024?
+CUTOFF:   2024-10-03T01:04:20.000Z   opening: 2024-10-02T00:00:00.000Z
+GROUND TRUTH: NO (answer)  finalized 2024-10-04T01:04:20.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x11fc5756ee95efa5c3bc4d212cde9c31564a7bde2b4425eba0284e3cd7eac99d
+  bond ladder: NO@1000000000000000 -> YES@10000000000000000000 -> NO@20000000000000000000
+A_opus:   NO conf=0.78 abstain=false [correct]
+  reasoning: The claim, read as worded, requires Russia itself to reveal (publicly disclose/acknowledge) its secret war drones project in China by Oct 1, 2024. The program (IEMZ Kupol's Garpiya-3 developed and flight-tested in China) became public on Sept 25, 2024 via a Reuters exclusive based on European intelligence sources and leaked documents — an external disclosure, not a Russian revelation. IEMZ Kupol, 
+  ev: https://www.cnbc.com/2024/09/26/russia-has-secret-war-drones-project-in-china-intel-sources-say-in-reuters-report.html
+  ev: https://kyivindependent.com/russia-establishes-secret-attack-drone-programme-in-china-reuters-reports/
+  ev: https://www.japantimes.co.jp/news/2024/09/26/world/russia-war-drones-project-china/
+  ev: https://euromaidanpress.com/2024/09/25/reuters-russia-has-secret-war-drones-project-in-china/
+network:  unanimous=false n_abstain=0
+C_judge:  YES conf=0.68 abstain=false via judge [wrong]
+  judge: All five solvers agree on the underlying facts: on Sept 25–27, 2024, Reuters (corroborated by Japan Times, CNBC, The Defense Post, Ukrainska Pravda, Foreign Policy) published an exclusive based on European intelligence sources and leaked documents revealing that IEMZ Kupol/Almaz-Antey was secretly developing and producing the Garpiya-3 attack drone in China, with plans for a Kashgar facility; the 
+  B1 (sonnet-5/default): YES conf=0.93 :: Reuters published an exclusive investigative report on September 25, 2024, citing European intelligence sources and leaked documents, revealing that Russia (via IEMZ Kupol, a subsidiary of state arms 
+  B2 (sonnet-5/adversarial): YES conf=0.94 :: Reuters published an exclusive investigative report on September 25, 2024 — before the question's October 1, 2024 deadline — revealing that Russia has a secret war drones project in China. The report,
+  B3 (sonnet-5/criteria): YES conf=0.88 :: The question references a specific real-world event: Reuters' exclusive investigative report (published September 25, 2024) revealing that Russia had established a secret drone development and product
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.78 :: Russia did not reveal its secret war drones project in China by October 1, 2024. While the project was exposed through leaked intelligence documents on September 25-26, 2024 (before the deadline), thi
+  B5 (haiku-4-5-20251001/default): NO conf=0.78 :: Russia did not officially reveal or announce its secret war drones project in China by October 1, 2024. While European intelligence sources and Reuters published detailed reports about the project on 
+
+====================================================================================================
+rd-realityeth-1a927e998560  [bonded-only | distinct=2 flips=2 answers=3]
+QUESTION: Will the National Weather Service or NOAA publicly confirm, on or before April 6, 2026, that at least one area in the United States received 6 or more inches of rainfall from March 31 to April 3, 2026, as a result of this severe weather system, as reported in official rainfall summaries or by major news outlets?
+CUTOFF:   2026-04-07T16:03:15.000Z   opening: 2026-04-07T00:00:00.000Z
+GROUND TRUTH: YES (answer)  finalized 2026-04-08T16:03:15.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x1a927e998560980540d696127b4fa5dc82926ab4cf01b431f5992a084a5073ba
+  bond ladder: YES@1000000000000000 -> NO@10000000000000000000 -> YES@20000000000000000000
+A_opus:   NO conf=0.65 abstain=false [wrong]
+  reasoning: The severe weather system that began March 31, 2026 produced multi-day heavy rain focused on northern Indiana, northwest Ohio and southern Michigan. Pre-deadline reporting (The Watchers, April 6, 2026, compiling official data) put the highest localized five-day totals at "exceeding 140 mm (5.5 inches)," with NW Ohio 3–5 in and southern Michigan ~3.35 in. NWS Detroit reported 5-day totals of 3–5 in
+  ev: https://watchers.news/2026/04/06/flooding-impacts-northern-indiana-southern-michigan-and-northwest-ohio-after-heavy-rainfall/
+  ev: https://www.weather.gov/iwx/April2026Flooding
+  ev: https://www.wane.com/top-stories/record-rainfall-floods-ne-indiana-and-nw-ohio/
+  ev: https://www.spokesman.com/stories/2026/mar/31/bad-weather-is-back-in-the-us-forecast-as-april-be/
+network:  unanimous=false n_abstain=0
+C_judge:  NO conf=0.58 abstain=false via judge [wrong]
+  judge: Four of five solvers converge on NO, and their evidence is more directly responsive to the claim's wording than B1's YES. The shared primary source (NWS Northern Indiana, weather.gov/iwx/April2026Flooding) gives a rounded areal range of "3 to 6 inches" for March 31–April 4 — and, per B2, the highest binned category on the accompanying rainfall map is "5 to 6 inches," meaning no mapped area was pla
+  B1 (sonnet-5/default): YES conf=0.58 :: NWS Northern Indiana's official event summary page (weather.gov/iwx/April2026Flooding) states that rainfall from March 31 to April 4, 2026 'totaled an impressive 3 to 6 inches across the area,' with t
+  B2 (sonnet-5/adversarial): NO conf=0.68 :: Multiple NWS regional office summaries (Northern Indiana/IWX and Cleveland/CLE) and independent reporting (Watchers.news, WANE, KPC News) covering the March 31-April 4, 2026 severe weather system cons
+  B3 (sonnet-5/criteria): NO conf=0.6 :: Multiple NWS offices (Cleveland, Northern Indiana/IWX) and local news outlets described total rainfall for the March 31-April 2026 Midwest severe weather/flooding event using a rounded range of '3 to 
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.42 :: Based on official NWS and NOAA reports published before the April 7, 2026 cutoff, the March 31-April 3, 2026 severe weather system produced rainfall reported as "3 to 6 inches" across affected areas. 
+  B5 (haiku-4-5-20251001/default): NO conf=0.62 :: Official NWS sources and major news outlets reported rainfall totals from March 31 to April 4, 2026, of "3 to 6 inches" in northern Indiana, with specific maximum measurements reaching 5.5 inches (140
+
+====================================================================================================
+rd-realityeth-1c3752a75ad9  [bonded-only | distinct=2 flips=2 answers=3]
+QUESTION: Is ONO Social Network a scam?
+CUTOFF:   2019-06-17T01:23:01.000Z   opening: 2019-06-15T00:00:00.000Z
+GROUND TRUTH: YES (answer)  finalized 2019-06-18T01:23:01.000Z  src reality.eth:1:0x325a2e0F3CCA2ddbaeBB4DfC38Df8D19ca165b47:0x1c3752a75ad9ea339f681b9f610f1e23292745bf6746f13a1e220a02c3e06583
+  bond ladder: YES@2000000000000000 -> NO@4000000000000000 -> YES@8000000000000000
+A_opus:   NO conf=0.6 abstain=false [wrong]
+  reasoning: The question asks flatly whether ONO Social Network is a scam, with no published criteria, judged on evidence existing before 17 June 2019. Evidence available by that date shows ONO as a real, venture-funded Chinese startup (investors including Li Xiaolai's hard-fork capital, Fu Sheng, China Growth Capital) with a shipped beta app on EOS, extensive mainstream coverage (Forbes, TechNode, PR Newswir
+  ev: https://technode.com/2018/06/07/ono/
+  ev: https://www.forbes.com/sites/bensin/2018/08/16/chinas-first-blockchain-social-network-is-the-brainchild-of-a-24-year-old-female-poker-player/
+  ev: http://finance.eastmoney.com/a2/201903191073113660.html
+  ev: https://finance.sina.cn/2019-12-17/detail-iihnzhfz6498798.d.html
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.6199999999999999 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.55 :: The question asks whether ONO Social Network (the Beijing-based EOS blockchain decentralized social network) is a scam, with no further resolution criteria specified. Searching pre-June 17, 2019 evide
+  B2 (sonnet-5/adversarial): NO conf=0.62 :: Extensive web searches (English and Chinese-language) for evidence dated before the June 17, 2019 cutoff found no fraud allegations, regulatory warnings, exit-scam reports, or credible "scam" designat
+  B3 (sonnet-5/criteria): NO conf=0.55 :: The question has no published resolution criteria beyond its own wording, so it must be resolved on the weight of public evidence about whether ONO Social Network was regarded/established as a scam as
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.6 :: Based on available evidence from before June 17, 2019, ONO Social Network was presented as a legitimate blockchain-based social network project, not as a scam. The project was founded by Xu Ke, a 24-y
+  B5 (haiku-4-5-20251001/default): NO conf=0.78 :: As of June 17, 2019, no credible evidence existed that ONO Social Network was a scam. The project was a legitimate blockchain-based social network founded by documented entrepreneur Ke Xu, with real u
+
+====================================================================================================
+rd-realityeth-2547fb9ac1ed  [bonded-only | distinct=2 flips=2 answers=3]
+QUESTION: Will Apple release another iPhone model beyond the iPhone 16 and 16 Plus by 27 September 2024?
+CUTOFF:   2024-09-29T14:06:00.000Z   opening: 2024-09-28T00:00:00.000Z
+GROUND TRUTH: NO (answer)  finalized 2024-09-30T14:06:00.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x2547fb9ac1ed4bd477f0b8174a29bcf0dcb85a0717d19c0812b9be1f59eb6ea0
+  bond ladder: NO@1000000000000000 -> YES@10000000000000000000 -> NO@20000000000000000000
+A_opus:   YES conf=0.96 abstain=false [wrong]
+  reasoning: Apple announced the iPhone 16 Pro and iPhone 16 Pro Max alongside the iPhone 16 and 16 Plus on 9 September 2024, with retail availability from 20 September 2024 — before the 27 September 2024 deadline. Therefore additional iPhone models beyond the 16 and 16 Plus were released in the required window, resolving YES.
+  ev: https://www.apple.com/newsroom/2024/09/apple-debuts-iphone-16-pro-and-iphone-16-pro-max/
+  ev: https://www.cnbc.com/2024/09/09/apple-event-2024-live-updates-iphone-16-apple-watch-10.html
+  ev: https://en.wikipedia.org/wiki/IPhone_16_Pro
+network:  unanimous=true n_abstain=0
+C_judge:  YES conf=0.984 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): YES conf=0.98 :: The question asks whether Apple would release another iPhone model beyond the iPhone 16 and 16 Plus by September 27, 2024. Apple's September 9, 2024 'It's Glowtime' event announced the full iPhone 16 
+  B2 (sonnet-5/adversarial): YES conf=0.98 :: Apple announced the iPhone 16, 16 Plus, 16 Pro, and 16 Pro Max together at its 'Glowtime' event on September 9, 2024, with all four models going on sale September 20, 2024 — a full week before the Sep
+  B3 (sonnet-5/criteria): YES conf=0.98 :: Apple's September 9, 2024 event announced four new iPhone models: iPhone 16, iPhone 16 Plus, iPhone 16 Pro, and iPhone 16 Pro Max. All four became available for purchase starting September 20, 2024, w
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.99 :: Apple released the iPhone 16 Pro and iPhone 16 Pro Max on September 20, 2024, well before the September 27, 2024 deadline specified in the question. These are distinct iPhone models beyond the base iP
+  B5 (haiku-4-5-20251001/default): YES conf=0.99 :: Apple released the iPhone 16 Pro and iPhone 16 Pro Max on September 20, 2024, which are models beyond the iPhone 16 and 16 Plus, and this occurred before the September 27, 2024 deadline. Multiple auth
+
+====================================================================================================
+rd-realityeth-3670479174d5  [bonded-only | distinct=2 flips=2 answers=3]
+QUESTION: Will one of the five largest container shipping companies by TEU capacity announce a suspension of all Red Sea transits due to security concerns by August 23, 2025?
+CUTOFF:   2025-08-27T15:11:45.000Z   opening: 2025-08-24T00:00:00.000Z
+GROUND TRUTH: NO (answer)  finalized 2025-08-30T15:11:45.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x3670479174d5cfe3e205ec0700deda946e730b6521d0ec7221ebbf90cb9554b5
+  bond ladder: NO@1000000000000000 -> YES@10000000000000000000 -> NO@20000000000000000000
+A_opus:   NO conf=0.68 abstain=false [correct]
+  reasoning: The five largest carriers by TEU are MSC, Maersk, CMA CGM, COSCO and Hapag-Lloyd. Their full suspensions of Red Sea transits were announced in December 2023–February 2024 (Maersk, MSC, Hapag-Lloyd, COSCO in Dec 2023–Jan 2024; CMA CGM in Feb 2024) and were simply maintained thereafter. Within the period leading to 23 August 2025 — including the July 2025 Houthi sinkings of Magic Seas and Eternity C
+  ev: https://shipandbunker.com/news/world/862924-cma-cgm-halts-red-sea-transits-after-houthi-attacks-report
+  ev: https://mykn.kuehne-nagel.com/news/article/cma-cgm-resumes-suez-canal-route-for-indiamed-02-Jun-2025
+  ev: https://www.spglobal.com/energy/en/news-research/latest-news/shipping/070825-houthi-attacks-boost-insurance-rates-ship-traffic-not-yet-affected
+  ev: https://en.wikipedia.org/wiki/Attacks_on_the_Eternity_C
+network:  unanimous=false n_abstain=0
+C_judge:  YES conf=0.8 abstain=false via judge [wrong]
+  judge: The claim asks whether one of the top-five carriers by TEU (MSC, Maersk, CMA CGM, COSCO, Hapag-Lloyd) would have announced a suspension of all Red Sea transits for security reasons "by August 23, 2025." Read as written, this requires only that such an announcement exist by the deadline, not that it be newly issued in a narrow window. That condition is met unambiguously: Maersk announced on January
+  B1 (sonnet-5/default): YES conf=0.82 :: All five of the largest container carriers by TEU (MSC, Maersk, COSCO, CMA CGM, Hapag-Lloyd) had suspended Red Sea transits since December 2023/January 2024 and continued to publicly maintain and reaf
+  B2 (sonnet-5/adversarial): YES conf=0.68 :: All five of the largest container carriers by TEU capacity (MSC, Maersk, CMA CGM, COSCO, Hapag-Lloyd) had announced suspensions of Red Sea transits 'until further notice' due to Houthi security threat
+  B3 (sonnet-5/criteria): YES conf=0.88 :: The question asks whether, by August 23, 2025, one of the five largest container carriers (by TEU: MSC, Maersk, CMA CGM, COSCO, Hapag-Lloyd) would have announced a suspension of all Red Sea transits d
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.98 :: Multiple of the five largest container shipping companies by TEU capacity (Maersk, Hapag-Lloyd, CMA CGM, and MSC) announced suspensions of all Red Sea transits due to security concerns in December 202
+  B5 (haiku-4-5-20251001/default): NO conf=0.78 :: Based on web search evidence, none of the five largest container shipping companies (MSC, Maersk, CMA CGM, COSCO, Hapag-Lloyd) announced a suspension of all Red Sea transits by August 23, 2025. The ev
+
+====================================================================================================
+rd-realityeth-6429b51c8b22  [bonded-only | distinct=2 flips=2 answers=3]
+QUESTION: Will the LA Dodgers win their play-off match against the San Diego Padres on 14 October 2024?
+CUTOFF:   2024-10-15T22:06:15.000Z   opening: 2024-10-15T00:00:00.000Z
+GROUND TRUTH: YES (answer)  finalized 2024-10-16T22:06:15.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x6429b51c8b22d40abdc85bad187409ed4d5b17a5fee9fcae9946460f068bcfa5
+  bond ladder: YES@1000000000000000 -> NO@10000000000000000000 -> YES@20000000000000000000
+A_opus:   NO conf=0.93 abstain=false [wrong]
+  reasoning: The Dodgers–Padres 2024 NLDS was played October 5–11; the Dodgers clinched with a 2-0 win in Game 5 on October 11 and the Padres were eliminated. Consequently no Dodgers–Padres playoff match existed on 14 October 2024. On that date the Dodgers instead played NLCS Game 2 against the Mets and lost 7-3. Taken exactly as worded, the Dodgers did not win a playoff match against the Padres on 14 October 
+  ev: https://www.baseball-reference.com/postseason/2024_NLDS2.shtml
+  ev: https://www.espn.com/mlb/game/_/gameId/401701030/padres-dodgers
+  ev: https://www.espn.com/mlb/game/_/gameId/401701032/mets-dodgers
+network:  unanimous=false n_abstain=1
+C_judge:  NO conf=0.83 abstain=false via judge [wrong]
+  judge: All solvers concur factually: the Dodgers-Padres 2024 NLDS ended October 11 (Dodgers 2-0, series 3-2), and on October 14 the Dodgers played the Mets in NLCS Game 2 (lost 7-3). Cited box scores and Baseball-Reference postseason pages support this. The claim's specified event — a Dodgers win over the Padres on 14 October 2024 — did not occur, so the literal claim is false. B5's UNRESOLVABLE treats t
+  B1 (sonnet-5/default): NO conf=0.75 :: The Dodgers-Padres 2024 NLDS concluded on October 11, 2024, with the Dodgers winning Game 5 by a score of 2-0 to take the series 3-2 and advance to the NLCS. By October 14, 2024, the Padres were elimi
+  B2 (sonnet-5/adversarial): NO conf=0.72 :: The 2024 NLDS between the Dodgers and Padres was a best-of-5 series that concluded on October 11, 2024, when the Dodgers won Game 5 by a score of 2-0, eliminating the Padres and advancing to the NLCS.
+  B3 (sonnet-5/criteria): NO conf=0.92 :: The question presupposes a Dodgers-Padres playoff match on October 14, 2024. However, the 2024 NLDS between these two teams ended on October 11, 2024, when the Dodgers won Game 5 by 2-0, clinching the
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.99 :: The question asks whether the LA Dodgers will win their playoff match against the San Diego Padres on October 14, 2024. However, no such match occurred. The Dodgers-Padres NLDS series took place Octob
+  B5 (haiku-4-5-20251001/default): UNRESOLVABLE conf=0.95 :: The question presupposes a playoff match between the LA Dodgers and San Diego Padres on October 14, 2024. However, no such match occurred on that date. The Dodgers and Padres played each other in the 
+
+====================================================================================================
+rd-realityeth-677d437f90ef  [bonded-only | distinct=2 flips=2 answers=3]
+QUESTION: Will a university announce a major breakthrough in 6G technology development by 21 September 2024?
+CUTOFF:   2024-09-24T12:21:55.000Z   opening: 2024-09-22T00:00:00.000Z
+GROUND TRUTH: NO (answer)  finalized 2024-09-25T12:21:55.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x677d437f90efc39eb1895841e66b004889a0cf711dc539e21d9187bfdc19c6d3
+  bond ladder: NO@1000000000000000 -> YES@10000000000000000000 -> NO@20000000000000000000
+A_opus:   YES conf=0.94 abstain=false [wrong]
+  reasoning: The question asks whether a university would announce a major 6G breakthrough by 21 September 2024. Multiple university announcements explicitly billed as 6G breakthroughs predate that deadline: the University of Glasgow's 2D metamaterial for 6G satellite communications (announced early September 2024, published in Communications Engineering); Glasgow's dynamic metasurface antenna claim (April 202
+  ev: https://www.gla.ac.uk/news/archiveofnews/2024/september/headline_1108857_en.html
+  ev: https://techxplore.com/news/2024-09-2d-metamaterial-satellite-communication-6g.html
+  ev: https://www.sciencedaily.com/releases/2024/08/240829184328.htm
+  ev: https://www.publictechnology.net/2024/04/17/science-technology-and-research/glasgow-university-claims-6g-breakthrough/
+network:  unanimous=true n_abstain=0
+C_judge:  YES conf=0.858 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): YES conf=0.78 :: The question asks, in plain wording, whether 'a university' will announce 'a major breakthrough in 6G technology development' by September 21, 2024. Multiple universities (Glasgow, Adelaide, and earli
+  B2 (sonnet-5/adversarial): YES conf=0.83 :: The question asks broadly whether 'a university' will announce a 'major breakthrough' in 6G technology by Sept 21, 2024, with no further resolution criteria specified. Multiple universities (Glasgow, 
+  B3 (sonnet-5/criteria): YES conf=0.78 :: The question asks whether a university would announce a major breakthrough in 6G technology development by 21 September 2024, with no further resolution criteria specified. Evidence shows the Universi
+  B4 (haiku-4-5-20251001/timeline): YES conf=0.95 :: University of Glasgow announced a 2D metamaterial breakthrough for 6G satellite communications on September 9, 2024, well before the September 21, 2024 deadline. This qualifies as a major breakthrough
+  B5 (haiku-4-5-20251001/default): YES conf=0.95 :: The University of Glasgow announced a major breakthrough in 6G technology (2D metamaterial for satellite applications) on September 9, 2024, which falls well before the September 21, 2024 deadline and
+
+====================================================================================================
+rd-realityeth-67bdd4ce85f8  [bonded-only | distinct=2 flips=2 answers=3]
+QUESTION: Will the U.S. unemployment rate, as reported by the Bureau of Labor Statistics, reach or exceed 4.6% in any monthly jobs report released on or before April 6, 2026?
+CUTOFF:   2026-04-07T15:57:10.000Z   opening: 2026-04-07T00:00:00.000Z
+GROUND TRUTH: NO (answer)  finalized 2026-04-08T15:57:10.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x67bdd4ce85f856ed02ad34a3ff5db045ae4ce2b8400b0f92c4a519e955472308
+  bond ladder: NO@1000000000000000 -> YES@10000000000000000000 -> NO@20000000000000000000
+A_opus:   YES conf=0.72 abstain=false [wrong]
+  reasoning: Taking the wording literally — any BLS monthly jobs report released on or before April 6, 2026 — the November 2025 Employment Situation, released December 16, 2025, reported an unemployment rate of exactly 4.6% (highest since September 2021), confirmed by BLS itself and by multiple independent outlets. That satisfies 'reach or exceed 4.6%'. Later reports in the window were lower (Dec 2025: 4.4% wi
+  ev: https://www.bls.gov/opub/ted/2025/unemployment-rate-4-6-percent-in-november-2025.htm
+  ev: https://www.bls.gov/news.release/archives/empsit_12162025.htm
+  ev: https://www.cnbc.com/2025/12/16/jobs-report-november-2025-.html
+  ev: https://www.marketplace.org/story/2025/12/16/unemployment-rate-hits-fouryear-high
+network:  unanimous=false n_abstain=0
+C_judge:  YES conf=0.92 abstain=false via judge [wrong]
+  judge: Four of five solvers converge on the same specific, verifiable fact: the BLS Employment Situation report covering November 2025, delayed by the government shutdown and released December 16, 2025, showed an unemployment rate of 4.6% — a four-year high. This is cited to the BLS archive release (empsit_12162025) and corroborated independently by CNBC, CBS News, Marketplace, Trading Economics, and a R
+  B1 (sonnet-5/default): YES conf=0.96 :: The question asks whether the BLS-reported unemployment rate reached or exceeded 4.6% in any monthly jobs report released on or before April 6, 2026. Multiple independent, reputable sources (Marketpla
+  B2 (sonnet-5/adversarial): YES conf=0.97 :: The question asks whether any BLS monthly jobs report released on or before April 6, 2026 showed the unemployment rate reaching or exceeding 4.6%. The November 2025 Employment Situation report, releas
+  B3 (sonnet-5/criteria): YES conf=0.97 :: The question asks whether the U.S. unemployment rate (BLS) reached or exceeded 4.6% in any monthly jobs report released on or before April 6, 2026. The BLS Employment Situation report covering Novembe
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.98 :: The U.S. unemployment rate, as reported by the Bureau of Labor Statistics in monthly employment situation reports released on or before April 6, 2026, was: January 2026 (4.3%), February 2026 (4.4%), a
+  B5 (haiku-4-5-20251001/default): YES conf=0.98 :: The BLS Employment Situation report for November 2025 was released on December 16, 2025, well before the April 6, 2026 cutoff. This report showed an unemployment rate of exactly 4.6%, which meets the 
+
+====================================================================================================
+rd-realityeth-9821f98b66c4  [bonded-only | distinct=2 flips=2 answers=3]
+QUESTION: Will GNO be above $1000 in 1 second from now?
+CUTOFF:   2024-08-30T06:37:15.000Z   opening: 2024-08-30T06:36:25.000Z
+GROUND TRUTH: YES (answer)  finalized 2024-08-30T06:38:15.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0x9821f98b66c4cb079157b63823ab66aaadfca7e3e023562f9caba28f576f7674
+  bond ladder: YES@100000000000000 -> NO@200000000000000 -> YES@400000000000000
+A_opus:   NO conf=0.97 abstain=false [wrong]
+  reasoning: The question asks whether GNO (Gnosis) is above $1000 essentially instantaneously at the cut-off (2024-08-30). Reporting from August 2024 shows GNO consolidating in the $161–$181 range, roughly an order of magnitude below $1000. GNO's all-time high (~$1,089 in Nov 2021, or ~$1,184 by some trackers) was years earlier; no price movement could take it above $1000 within one second. Therefore the answ
+  ev: https://coinedition.com/gnosis-gno-price-prediction/
+  ev: https://www.coingecko.com/en/coins/gnosis
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.968 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.96 :: GNO (Gnosis token) was trading in the range of roughly $160-$180 throughout August 2024, including around the cutoff timestamp of 2024-08-30T06:37:15Z. This is far below the $1000 threshold specified 
+  B2 (sonnet-5/adversarial): NO conf=0.97 :: Multiple sources describing GNO price action in August 2024 indicate the token was trading in a range of roughly $161-$181, far below the $1000 threshold. There is no evidence of any price spike to $1
+  B3 (sonnet-5/criteria): NO conf=0.98 :: Multiple sources indicate GNO (Gnosis token) was trading in the $161-$181 range throughout August 2024, well below the $1000 threshold specified in the question. There is no evidence GNO ever approach
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.95 :: GNO was trading at approximately $161-$181 in August 2024, far below the $1000 threshold. There is no evidence that GNO ever approached $1000 in late August 2024. The token's all-time high of ~$1,088.
+  B5 (haiku-4-5-20251001/default): NO conf=0.98 :: GNO (Gnosis) was trading in the $161-$181 range in August 2024, far below the $1000 threshold. The highest price GNO reached in 2024 was $446.99 on March 12, 2024. On August 30, 2024 at the cutoff tim
+
+====================================================================================================
+rd-realityeth-a5f7bf38e073  [bonded-only | distinct=2 flips=2 answers=3]
+QUESTION: Will Skydance and RedBird Capital publicly announce the completion of the Paramount merger by transferring operational control of CBS and Paramount Pictures before or on July 30, 2025?
+CUTOFF:   2025-07-31T08:07:05.000Z   opening: 2025-07-31T00:00:00.000Z
+GROUND TRUTH: YES (answer)  finalized 2025-08-01T08:07:05.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0xa5f7bf38e07327f1d4918bd7248100cc6633b10744e022d0a2101ffbba1b7449
+  bond ladder: YES@1000000000000000 -> NO@10000000000000000000 -> YES@20000000000000000000
+A_opus:   NO conf=0.97 abstain=false [wrong]
+  reasoning: The FCC approved the Skydance–Paramount transaction on July 24, 2025, but Paramount and Skydance simultaneously announced that the transaction would close on August 7, 2025. No public announcement of merger completion or transfer of operational control over CBS and Paramount Pictures occurred on or before July 30, 2025; the completion press release was issued August 7, 2025. Therefore the claim re
+  ev: https://ir.paramount.com/news-releases/news-release-details/paramount-and-skydance-announce-anticipated-closing-date
+  ev: https://deadline.com/2025/07/paramount-reveals-closing-date-of-skydance-merger-1236469123/
+  ev: https://www.paramount.com/press/skydance-media-and-paramount-global-complete-merger-creating-next-generation-media-company
+  ev: https://variety.com/2025/tv/news/paramount-skydance-deal-close-date-1236470440/
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.962 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.95 :: Multiple independent, reputable sources (Deadline, NewscastStudio, and Paramount's own investor relations announcement) confirm that the Skydance-Paramount-RedBird merger did not close by July 30, 202
+  B2 (sonnet-5/adversarial): NO conf=0.97 :: As of the July 31, 2025 08:07 UTC cutoff, Paramount and Skydance had publicly announced (July 25, 2025) that the merger would close on August 7, 2025 — a date after July 30, 2025. Shareholders were st
+  B3 (sonnet-5/criteria): NO conf=0.97 :: As of the cut-off (July 31, 2025 08:07 UTC), the Skydance-Paramount merger had not yet closed. Multiple contemporaneous reports (Variety, July 2025) indicated the parties expected the deal to close on
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.97 :: Skydance and RedBird Capital did not publicly announce the completion of the Paramount merger before or on July 30, 2025. While they announced on July 25, 2025 that the merger would close on August 7,
+  B5 (haiku-4-5-20251001/default): NO conf=0.95 :: The merger completion was announced on August 7, 2025, not before or on July 30, 2025. While the FCC approved the deal on July 24, 2025, and Paramount/Skydance announced on July 25 that closing was ex
+
+====================================================================================================
+rd-realityeth-aa0e313a2c93  [bonded-only | distinct=2 flips=2 answers=3]
+QUESTION: Will GNO be above $1000 in 1 second from now?
+CUTOFF:   2024-08-30T06:27:15.000Z   opening: 2024-08-30T06:26:39.000Z
+GROUND TRUTH: YES (answer)  finalized 2024-08-31T06:27:15.000Z  src reality.eth:100:0x79e32aE03fb27B07C89c0c568F80287C01ca2E57:0xaa0e313a2c9386082e2ef58efaba6f54a79cf105e3c0ca41d4bb6c95f599f701
+  bond ladder: YES@100000000000000 -> NO@200000000000000 -> YES@400000000000000
+A_opus:   NO conf=0.97 abstain=false [wrong]
+  reasoning: As of the 2024-08-30 cut-off, Gnosis (GNO) was trading in the roughly $150–$185 range, having consolidated between $161 and $181 through early August 2024. The $1000 level has only ever been approached at GNO's November 2021 all-time high (~$1,089). A price above $1000 one second from the question's timestamp is therefore effectively impossible, so the claim resolves NO.
+  ev: https://coinedition.com/gnosis-gno-price-prediction/
+  ev: https://coinmarketcap.com/currencies/gnosis-gno/
+network:  unanimous=true n_abstain=0
+C_judge:  NO conf=0.9780000000000001 abstain=false via unanimous [wrong]
+  B1 (sonnet-5/default): NO conf=0.97 :: Multiple sources indicate GNO (Gnosis token) was trading in a narrow range of approximately $161-$181 during the first weeks of August 2024, consolidating after a prior decline. This is drastically be
+  B2 (sonnet-5/adversarial): NO conf=0.98 :: GNO (Gnosis token) was trading in the range of approximately $150-$180 in early-to-mid August 2024, with an all-time high of about $447 reached in March 2024. There is no evidence GNO ever approached 
+  B3 (sonnet-5/criteria): NO conf=0.97 :: Search results indicate GNO (Gnosis token) was trading in the range of roughly $161-$181 in late August 2024, and had peaked near $447 in March 2024, never approaching $1000 during this period. Since 
+  B4 (haiku-4-5-20251001/timeline): NO conf=0.99 :: GNO (Gnosis cryptocurrency) had an all-time high of approximately $644.20 and was trading in the $161-$181 range in August 2024. The question asks if GNO would be above $1,000 in 1 second from the cut
+  B5 (haiku-4-5-20251001/default): NO conf=0.98 :: GNO was trading in the $161-$181 range in late August 2024, far below the $1,000 threshold. Multiple sources confirm GNO never reached $1,000 by August 2024. The resolution is unambiguous.
+
+
+46 cases shown (which=all)
