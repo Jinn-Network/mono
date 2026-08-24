@@ -38,9 +38,13 @@ import {
   ScreeningRevealReceiptSchema,
   PROMPTED_SCREENING_PROCEDURE_PROTOCOL,
   SCREENING_POOL_PROTOCOL,
+  SCREENING_POOL_V2_PROTOCOL,
+  SCREENING_POOL_V2_RESERVE_SELECTION_PROTOCOL,
   SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
   PromptedScreeningProcedureV1Schema,
   ScreeningPoolV1Schema,
+  ScreeningPoolV2Schema,
+  RegisteredScreeningSampleCommitmentV1Schema,
   ScreeningSampleCommitmentV1Schema,
   computeScreeningPoolDigest,
   computeScreeningSample,
@@ -1196,7 +1200,7 @@ describe("binary screened-operator-sampled admission", () => {
     };
   }
 
-  function promptedScreeningInput(context: ReturnType<typeof setup>) {
+  function promptedScreeningInput(context: ReturnType<typeof setup>, sharedReserves = false) {
     const candidateClasses = ["correct", "specific-wrong", "vague-topical-wrong"] as const;
     const strata = ["category-1", "category-2", "category-3", "category-4"] as const;
     const source = Array.from({ length: 664 }, (_, index) => {
@@ -1216,21 +1220,46 @@ describe("binary screened-operator-sampled admission", () => {
       };
       const bytes = binaryJudgmentItemBytes(payload);
       const itemSha256 = recordDigest(bytes);
-      putSealedBytes(context.workspaceDir, bytes);
+      if (!sharedReserves) putSealedBytes(context.workspaceDir, bytes);
       const slotNumber = mainIndex + 1;
       return {
         payload,
         candidate: {
           itemSha256,
           itemId: payload.itemId,
+          ...(sharedReserves ? { itemBase64: Buffer.from(bytes).toString("base64") } : {}),
           humanReviewEvaluationSpecSha256: BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest,
           candidateClass,
           stratum,
           poolPosition: index + 1,
         },
-        poolItem: index < 240
-          ? { itemSha256, intendedLabel: candidateClass === "correct" ? "CORRECT" as const : "WRONG" as const, candidateClass, stratum, poolPosition: index + 1, slotId: `slot-${String(slotNumber).padStart(3, "0")}`, poolKind: "main" as const }
-          : { itemSha256, intendedLabel: candidateClass === "correct" ? "CORRECT" as const : "WRONG" as const, candidateClass, stratum, poolPosition: index + 1, slotId: `slot-${String(slotNumber).padStart(3, "0")}`, poolKind: "reserve" as const, reserveOrder: index < 480 ? 1 : 2 },
+        poolItem: sharedReserves
+          ? index < 240
+            ? {
+                screeningIdentitySha256: recordDigest(new TextEncoder().encode(`screening-identity-${index + 1}`)),
+                itemSha256,
+                intendedLabel: candidateClass === "correct" ? "CORRECT" as const : "WRONG" as const,
+                candidateClass,
+                stratum,
+                poolPosition: index + 1,
+                sourceQuestionLineageId: `question-${index + 1}`,
+                slotId: `slot-${String(slotNumber).padStart(3, "0")}`,
+                poolKind: "main" as const,
+              }
+            : {
+                screeningIdentitySha256: recordDigest(new TextEncoder().encode(`screening-identity-${index + 1}`)),
+                itemSha256,
+                intendedLabel: candidateClass === "correct" ? "CORRECT" as const : "WRONG" as const,
+                candidateClass,
+                stratum,
+                poolPosition: index + 1,
+                sourceQuestionLineageId: `question-${index + 1}`,
+                poolKind: "reserve" as const,
+                reserveOrder: (index < 480 ? 0 : 20) + (mainIndex % 20) + 1,
+              }
+          : index < 240
+            ? { itemSha256, intendedLabel: candidateClass === "correct" ? "CORRECT" as const : "WRONG" as const, candidateClass, stratum, poolPosition: index + 1, slotId: `slot-${String(slotNumber).padStart(3, "0")}`, poolKind: "main" as const }
+            : { itemSha256, intendedLabel: candidateClass === "correct" ? "CORRECT" as const : "WRONG" as const, candidateClass, stratum, poolPosition: index + 1, slotId: `slot-${String(slotNumber).padStart(3, "0")}`, poolKind: "reserve" as const, reserveOrder: index < 480 ? 1 : 2 },
       };
     });
     const promptBytes = new TextEncoder().encode("Synthetic opaque coordinator prompt\n");
@@ -1252,29 +1281,59 @@ describe("binary screened-operator-sampled admission", () => {
       output: { alphabet: ["CORRECT", "WRONG", "UNSURE"], invalidOutputDecision: "UNSURE" },
       retry: { maxRetries: 1, onlyWhen: "infrastructure-failure-with-no-model-output", prompt: "identical" },
       transcriptSha256,
-      sealedAt: "2026-08-15T08:00:00.000Z",
+      // The shared-reserve fixture mirrors the real append-only transport amendment: the
+      // procedure may be sealed after the pool/sample commitment, but still before admission.
+      sealedAt: sharedReserves ? "2026-08-15T08:30:00.000Z" : "2026-08-15T08:00:00.000Z",
     }, "prompted screening procedure");
-    const poolIdentities = source.map((entry) => entry.poolItem.itemSha256);
-    const pool = sealHumanReviewDocument(ScreeningPoolV1Schema, {
-      protocol: SCREENING_POOL_PROTOCOL,
-      draftId: "review-run",
-      identityCommitmentSha256: computeScreeningPoolDigest(poolIdentities),
-      items: source.map((entry) => entry.poolItem),
-      sealedAt: "2026-08-15T08:10:00.000Z",
-    }, "screening pool");
+    const poolIdentities: string[] = source.map((entry) => {
+      if (sharedReserves && "screeningIdentitySha256" in entry.poolItem) {
+        const identity = entry.poolItem.screeningIdentitySha256;
+        if (identity === undefined) throw new Error("shared reserve fixture lacks a screening identity");
+        return identity;
+      }
+      return entry.poolItem.itemSha256;
+    });
+    const pool = sharedReserves
+      ? sealHumanReviewDocument(ScreeningPoolV2Schema, {
+          protocol: SCREENING_POOL_V2_PROTOCOL,
+          reserveSelectionProtocol: SCREENING_POOL_V2_RESERVE_SELECTION_PROTOCOL,
+          draftId: "review-run",
+          identityCommitmentSha256: computeScreeningPoolDigest(poolIdentities),
+          items: source.map((entry) => entry.poolItem),
+          sealedAt: "2026-08-15T08:40:00.000Z",
+        }, "screening pool v2")
+      : sealHumanReviewDocument(ScreeningPoolV1Schema, {
+          protocol: SCREENING_POOL_PROTOCOL,
+          draftId: "review-run",
+          identityCommitmentSha256: computeScreeningPoolDigest(poolIdentities),
+          items: source.map((entry) => entry.poolItem),
+          sealedAt: "2026-08-15T08:10:00.000Z",
+        }, "screening pool");
     const sampleItemSha256s = [...computeScreeningSample({ itemSha256s: poolIdentities, sampleSeed: "synthetic-prompted-seed", sampleSize: 72 }).sample]
       .sort(compareCodeUnitStrings);
-    const commitment = sealHumanReviewDocument(ScreeningSampleCommitmentV1Schema, {
-      protocol: SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
-      draftId: "review-run",
-      poolSha256: pool.digest,
-      poolIdentityCommitmentSha256: pool.value.identityCommitmentSha256,
-      samplingProcedure: "screening-sample/1",
-      sampleSeed: "synthetic-prompted-seed",
-      sampleSize: 72,
-      sampleItemSha256s,
-      committedAt: "2026-08-15T08:20:00.000Z",
-    }, "screening sample commitment");
+    const registeredCommitment = RegisteredScreeningSampleCommitmentV1Schema.parse({
+          schema: "https://fixtures.example.test/screening-commitment/v1",
+          candidateItemDigests: [...poolIdentities].sort(compareCodeUnitStrings),
+          committedAt: "2026-08-15T08:20:00.000Z",
+          poolDigest: pool.value.identityCommitmentSha256,
+          sampleSeed: "synthetic-prompted-seed",
+          sampleSize: 72,
+          samplingScriptSha256: recordDigest(scriptBytes),
+        });
+    const registeredCommitmentBytes = new Uint8Array([...canonicalJsonBytes(registeredCommitment), 0x0a]);
+    const commitment = sharedReserves
+      ? { value: registeredCommitment, bytes: registeredCommitmentBytes, digest: recordDigest(registeredCommitmentBytes) }
+      : sealHumanReviewDocument(ScreeningSampleCommitmentV1Schema, {
+          protocol: SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
+          draftId: "review-run",
+          poolSha256: pool.digest,
+          poolIdentityCommitmentSha256: pool.value.identityCommitmentSha256,
+          samplingProcedure: "screening-sample/1",
+          sampleSeed: "synthetic-prompted-seed",
+          sampleSize: 72,
+          sampleItemSha256s,
+          committedAt: "2026-08-15T08:20:00.000Z",
+        }, "screening sample commitment");
     const rows = source.map((entry, index) => ({
       itemSha256: entry.poolItem.itemSha256,
       intendedLabel: entry.poolItem.intendedLabel,
@@ -1338,6 +1397,32 @@ describe("binary screened-operator-sampled admission", () => {
     const envelope = parseExactDsseEnvelope(getSealedBytes(context.workspaceDir, resolution.screeningTableSha256.slice("sha256:".length)));
     expect(envelope.payloadType).toBe(SCREENING_TABLE_V2_MEDIA_TYPE);
     expect(ScreeningTableV2Schema.parse(JSON.parse(new TextDecoder().decode(envelope.payloadBytes)))).toMatchObject({ operator: "Ritsu", draftId: "review-run" });
+  }, 60_000);
+
+  it("admits a privacy-identity pool with shared cell reserves and records the receiving slot", () => {
+    const context = setup();
+    const fixture = promptedScreeningInput(context, true);
+    const result = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "screened-operator-sampled",
+      ...fixture,
+    });
+    expect(result.ok, result.ok ? "" : JSON.stringify(result.error)).toBe(true);
+    if (!result.ok) return;
+    expect(result.result.resolutions).toHaveLength(240);
+    expect(result.result.exclusions).toEqual([expect.objectContaining({
+      itemSha256: fixture.candidates[0]!.itemSha256,
+      replacementItemSha256: fixture.candidates[240]!.itemSha256,
+      receivingSlotId: "slot-001",
+    })]);
+    const closure = verifyBinaryJudgmentAdmissionClosureInWorkspace({
+      workspaceDir: context.workspaceDir,
+      admissionManifestSha256: result.result.admissionManifestSha256 as AdmissionSha256,
+      expectedDraftId: "review-run",
+    });
+    expect(closure.accepted).toHaveLength(240);
+    expect(closure.excluded).toEqual([expect.objectContaining({ receivingSlotId: "slot-001" })]);
+    expect(closure.promptedScreening?.sampleAgreementRate).toBe(1);
   }, 60_000);
 
   it("refuses prompted-v2 nested-byte tampering before storing a partial closure", () => {

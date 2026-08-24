@@ -7,15 +7,21 @@ import {
   PROMPTED_SCREENING_PROFILE,
   SCREENING_POOL_CANDIDATE_CLASSES,
   SCREENING_POOL_PROTOCOL,
+  SCREENING_POOL_V2_PROTOCOL,
+  SCREENING_POOL_V2_RESERVE_SELECTION_PROTOCOL,
   SCREENING_POOL_STRATA,
   SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
   SCREENING_TABLE_V2_PROTOCOL,
   PromptedScreeningProcedureV1Schema,
   ScreeningPoolV1Schema,
+  ScreeningPoolV2Schema,
+  RegisteredScreeningSampleCommitmentV1Schema,
   ScreeningSampleCommitmentV1Schema,
   ScreeningTableV2Schema,
 } from "./contracts.js";
 import { computeScreeningPoolDigest, computeScreeningSample } from "./screening-sample.js";
+import { parseScreeningSampleCommitmentBytes } from "./prompted-commitment.js";
+import { selectPromptedScreeningPool } from "./prompted-selection.js";
 
 const DRAFT_ID = "urn:uuid:11111111-1111-4111-8111-111111111111";
 const SEALED_AT = "2026-08-21T12:00:00.000Z";
@@ -83,6 +89,62 @@ function pool() {
   } as const;
 }
 
+function sharedReservePool() {
+  const mains = [];
+  let position = 1;
+  let slot = 1;
+  for (const candidateClass of SCREENING_POOL_CANDIDATE_CLASSES) {
+    for (const stratum of SCREENING_POOL_STRATA) {
+      for (let cellIndex = 0; cellIndex < 20; cellIndex += 1) {
+        mains.push({
+          screeningIdentitySha256: digest(10_000 + position),
+          itemSha256: digest(position),
+          intendedLabel: candidateClass === "correct" ? "CORRECT" as const : "WRONG" as const,
+          candidateClass,
+          stratum,
+          poolPosition: position,
+          sourceQuestionLineageId: `question-${position}`,
+          slotId: `slot-${slot.toString().padStart(3, "0")}`,
+          poolKind: "main" as const,
+        });
+        position += 1;
+        slot += 1;
+      }
+    }
+  }
+  const cells = SCREENING_POOL_CANDIDATE_CLASSES.flatMap((candidateClass) =>
+    SCREENING_POOL_STRATA.map((stratum) => ({ candidateClass, stratum })));
+  const reserveCounts = new Map<string, number>();
+  const reserves = [];
+  for (let reserveIndex = 0; reserveIndex < 424; reserveIndex += 1) {
+    const cell = cells[reserveIndex % cells.length]!;
+    const key = `${cell.candidateClass}/${cell.stratum}`;
+    const reserveOrder = (reserveCounts.get(key) ?? 0) + 1;
+    reserveCounts.set(key, reserveOrder);
+    reserves.push({
+      screeningIdentitySha256: digest(10_000 + position),
+      itemSha256: digest(position),
+      intendedLabel: cell.candidateClass === "correct" ? "CORRECT" as const : "WRONG" as const,
+      candidateClass: cell.candidateClass,
+      stratum: cell.stratum,
+      poolPosition: position,
+      sourceQuestionLineageId: `question-${position}`,
+      poolKind: "reserve" as const,
+      reserveOrder,
+    });
+    position += 1;
+  }
+  const items = [...mains, ...reserves];
+  return {
+    protocol: SCREENING_POOL_V2_PROTOCOL,
+    reserveSelectionProtocol: SCREENING_POOL_V2_RESERVE_SELECTION_PROTOCOL,
+    draftId: DRAFT_ID,
+    identityCommitmentSha256: computeScreeningPoolDigest(items.map((item) => item.screeningIdentitySha256)) as `sha256:${string}`,
+    items,
+    sealedAt: SEALED_AT,
+  } as const;
+}
+
 describe("PromptedScreeningProcedureV1Schema", () => {
   test("accepts only the closed Sol-coordinated Luna/Terra/Sol procedure", () => {
     expect(PromptedScreeningProcedureV1Schema.parse(procedure())).toEqual(procedure());
@@ -128,6 +190,96 @@ describe("ScreeningPoolV1Schema", () => {
     ["unknown row member", (value: ReturnType<typeof pool>): unknown => ({ ...value, items: value.items.map((item, index) => index === 0 ? { ...item, note: "not in the closed row shape" } : item) })],
   ])("refuses %s", (_name, mutate) => {
     expect(ScreeningPoolV1Schema.safeParse(mutate(pool())).success).toBe(false);
+  });
+});
+
+describe("ScreeningPoolV2Schema", () => {
+  test("separates the committed screening identity from the later item digest and supports shared reserve slices", () => {
+    const parsed = ScreeningPoolV2Schema.parse(sharedReservePool());
+    expect(parsed.items).toHaveLength(664);
+    expect(parsed.items.filter((item) => item.poolKind === "main")).toHaveLength(240);
+    expect(parsed.items.filter((item) => item.poolKind === "reserve")).toHaveLength(424);
+    expect(parsed.items[0]!.screeningIdentitySha256).not.toBe(parsed.items[0]!.itemSha256);
+  });
+
+  test.each([
+    ["duplicate screening identity", (value: ReturnType<typeof sharedReservePool>): unknown => ({ ...value, items: value.items.with(1, { ...value.items[1]!, screeningIdentitySha256: value.items[0]!.screeningIdentitySha256 }) })],
+    ["duplicate item digest", (value: ReturnType<typeof sharedReservePool>): unknown => ({ ...value, items: value.items.with(1, { ...value.items[1]!, itemSha256: value.items[0]!.itemSha256 }) })],
+    ["duplicate main lineage", (value: ReturnType<typeof sharedReservePool>): unknown => ({ ...value, items: value.items.with(1, { ...value.items[1]!, sourceQuestionLineageId: value.items[0]!.sourceQuestionLineageId }) })],
+    ["reserve-order drift", (value: ReturnType<typeof sharedReservePool>): unknown => {
+      const items: unknown[] = [...value.items];
+      items[240] = { ...value.items[240]!, reserveOrder: 2 };
+      return { ...value, items };
+    }],
+  ])("refuses %s", (_name, mutate) => {
+    expect(ScreeningPoolV2Schema.safeParse(mutate(sharedReservePool())).success).toBe(false);
+  });
+
+  test("selects each cell's first admissible reserve with an unused question lineage", () => {
+    const original = ScreeningPoolV2Schema.parse(sharedReservePool());
+    const cellMains = original.items.filter((item) => item.poolKind === "main"
+      && item.candidateClass === "correct" && item.stratum === "category-1");
+    const cellReserves = original.items.filter((item) => item.poolKind === "reserve"
+      && item.candidateClass === "correct" && item.stratum === "category-1");
+    const pool = ScreeningPoolV2Schema.parse({
+      ...original,
+      items: original.items.map((item) => item.itemSha256 === cellReserves[0]!.itemSha256
+        ? { ...item, sourceQuestionLineageId: cellMains[2]!.sourceQuestionLineageId }
+        : item),
+    });
+    const excluded = new Set(cellMains.slice(0, 2).map((item) => item.itemSha256));
+    const rows = new Map(pool.items.map((item) => [item.itemSha256, {
+      itemSha256: item.itemSha256,
+      intendedLabel: item.intendedLabel,
+      screeningVerdict: item.intendedLabel,
+      ritsuDecision: excluded.has(item.itemSha256)
+        ? { checked: true as const, verdict: "exclude" as const, decidedAt: SEALED_AT }
+        : { checked: false as const },
+    }]));
+    const selection = selectPromptedScreeningPool(pool, rows);
+    expect(selection.winners).toHaveLength(240);
+    expect(selection.replacements.map((entry) => ({
+      receivingSlotId: entry.receivingSlotId,
+      replacementItemSha256: entry.replacement.itemSha256,
+    }))).toEqual([
+      { receivingSlotId: "slot-001", replacementItemSha256: cellReserves[1]!.itemSha256 },
+      { receivingSlotId: "slot-002", replacementItemSha256: cellReserves[2]!.itemSha256 },
+    ]);
+  });
+});
+
+describe("RegisteredScreeningSampleCommitmentV1Schema", () => {
+  test("accepts an exact external identity-only commitment made before the later pool bridge", () => {
+    const identities = sharedReservePool().items
+      .map((item) => item.screeningIdentitySha256)
+      .sort();
+    const commitment = RegisteredScreeningSampleCommitmentV1Schema.parse({
+      schema: "https://fixtures.example.test/screening-commitment/v1",
+      candidateItemDigests: identities,
+      committedAt: "2026-08-21T10:00:00.000Z",
+      poolDigest: computeScreeningPoolDigest(identities),
+      sampleSeed: "registered-seed",
+      sampleSize: 72,
+      samplingScriptSha256: digest(9_999),
+    });
+    const exactPublicBytes = new Uint8Array([...canonicalJsonBytes(commitment), 0x0a]);
+    expect(parseScreeningSampleCommitmentBytes(exactPublicBytes)).toEqual(commitment);
+    expect(() => parseScreeningSampleCommitmentBytes(canonicalJsonBytes(commitment))).toThrow(/canonical wire encoding/u);
+  });
+
+  test("refuses reordered registered identities", () => {
+    const identities = sharedReservePool().items
+      .map((item) => item.screeningIdentitySha256)
+      .sort();
+    expect(RegisteredScreeningSampleCommitmentV1Schema.safeParse({
+      schema: "https://fixtures.example.test/screening-commitment/v1",
+      candidateItemDigests: identities.with(0, identities[1]!).with(1, identities[0]!),
+      committedAt: "2026-08-21T10:00:00.000Z",
+      poolDigest: computeScreeningPoolDigest(identities),
+      sampleSeed: "registered-seed",
+      sampleSize: 72,
+      samplingScriptSha256: digest(9_999),
+    }).success).toBe(false);
   });
 });
 

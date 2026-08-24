@@ -18,6 +18,8 @@ export const BINARY_JUDGMENT_ADMISSION_MANIFEST_PROTOCOL = "https://spec.jinn.ne
 export const SCREENING_TABLE_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-table/v1" as const;
 export const PROMPTED_SCREENING_PROCEDURE_PROTOCOL = "https://spec.jinn.network/binary-judgment/prompted-screening-procedure/v1" as const;
 export const SCREENING_POOL_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-pool/v1" as const;
+export const SCREENING_POOL_V2_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-pool/v2" as const;
+export const SCREENING_POOL_V2_RESERVE_SELECTION_PROTOCOL = "shared-slice-first-admissible/1" as const;
 export const SCREENING_SAMPLE_COMMITMENT_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-sample-commitment/v1" as const;
 export const SCREENING_TABLE_V2_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-table/v2" as const;
 export const SCREENING_REVEAL_RECEIPT_PROTOCOL = "https://spec.jinn.network/binary-judgment/screening-reveal-receipt/v1" as const;
@@ -348,6 +350,84 @@ export const ScreeningPoolV1Schema = z.strictObject({
 });
 export type ScreeningPoolV1 = z.infer<typeof ScreeningPoolV1Schema>;
 
+const ScreeningPoolV2CommonItemSchema = z.strictObject({
+  /** Privacy-preserving identity committed before screening outcomes were observed. */
+  screeningIdentitySha256: DigestSchema,
+  /** Digest of the exact later Colophon F0 item bytes. */
+  itemSha256: DigestSchema,
+  intendedLabel: BinaryJudgmentTruthLabelSchema,
+  candidateClass: z.enum(SCREENING_POOL_CANDIDATE_CLASSES),
+  stratum: z.enum(SCREENING_POOL_STRATA),
+  poolPosition: z.number().int().positive(),
+  sourceQuestionLineageId: IdentitySchema,
+});
+export const ScreeningPoolV2ItemSchema = z.discriminatedUnion("poolKind", [
+  ScreeningPoolV2CommonItemSchema.extend({
+    poolKind: z.literal("main"),
+    slotId: z.string().regex(/^slot-[0-9]{3}$/u),
+  }),
+  ScreeningPoolV2CommonItemSchema.extend({
+    poolKind: z.literal("reserve"),
+    reserveOrder: z.number().int().positive(),
+  }),
+]);
+export type ScreeningPoolV2Item = z.infer<typeof ScreeningPoolV2ItemSchema>;
+
+/** A 240-main pool whose reserves are ordered shared slices within each class/stratum cell. */
+export const ScreeningPoolV2Schema = z.strictObject({
+  protocol: z.literal(SCREENING_POOL_V2_PROTOCOL),
+  reserveSelectionProtocol: z.literal(SCREENING_POOL_V2_RESERVE_SELECTION_PROTOCOL),
+  draftId: IdentitySchema,
+  identityCommitmentSha256: DigestSchema,
+  items: z.array(ScreeningPoolV2ItemSchema).length(664),
+  sealedAt: TimestampSchema,
+}).superRefine((pool, ctx) => {
+  const identities = new Set<string>();
+  const itemDigests = new Set<string>();
+  const mains = pool.items.filter((item): item is Extract<ScreeningPoolV2Item, { poolKind: "main" }> => item.poolKind === "main");
+  const mainSlots = new Set<string>();
+  const mainLineages = new Set<string>();
+  for (const [index, item] of pool.items.entries()) {
+    if (item.poolPosition !== index + 1) ctx.addIssue({ code: "custom", path: ["items", index, "poolPosition"], message: "poolPosition must be contiguous and match array order" });
+    if (identities.has(item.screeningIdentitySha256)) ctx.addIssue({ code: "custom", path: ["items", index, "screeningIdentitySha256"], message: "screeningIdentitySha256 must be unique" });
+    identities.add(item.screeningIdentitySha256);
+    if (itemDigests.has(item.itemSha256)) ctx.addIssue({ code: "custom", path: ["items", index, "itemSha256"], message: "itemSha256 must be unique" });
+    itemDigests.add(item.itemSha256);
+    const expectedLabel = item.candidateClass === "correct" ? "CORRECT" : "WRONG";
+    if (item.intendedLabel !== expectedLabel) ctx.addIssue({ code: "custom", path: ["items", index, "intendedLabel"], message: "intendedLabel does not derive from candidateClass" });
+    if (item.poolKind === "main") {
+      if (mainSlots.has(item.slotId)) ctx.addIssue({ code: "custom", path: ["items", index, "slotId"], message: "main slotId must be unique" });
+      mainSlots.add(item.slotId);
+      if (mainLineages.has(item.sourceQuestionLineageId)) ctx.addIssue({ code: "custom", path: ["items", index, "sourceQuestionLineageId"], message: "main sourceQuestionLineageId must be unique" });
+      mainLineages.add(item.sourceQuestionLineageId);
+    }
+  }
+  if (mains.length !== 240) ctx.addIssue({ code: "custom", path: ["items"], message: "pool must contain exactly 240 main items" });
+  const lastMainPosition = Math.max(...mains.map((item) => item.poolPosition));
+  for (const [index, item] of pool.items.entries()) {
+    if (item.poolKind === "reserve" && item.poolPosition <= lastMainPosition) ctx.addIssue({ code: "custom", path: ["items", index, "poolPosition"], message: "all shared reserves must follow all main items in pool order" });
+  }
+  const expectedSlotIds = Array.from({ length: 240 }, (_, index) => `slot-${(index + 1).toString().padStart(3, "0")}`);
+  const actualSlotIds = [...mainSlots].sort(compareCodeUnitStrings);
+  if (actualSlotIds.length !== expectedSlotIds.length || actualSlotIds.some((value, index) => value !== expectedSlotIds[index])) ctx.addIssue({ code: "custom", path: ["items"], message: "main slots must be exactly slot-001 through slot-240" });
+  for (const candidateClass of SCREENING_POOL_CANDIDATE_CLASSES) for (const stratum of SCREENING_POOL_STRATA) {
+    if (mains.filter((item) => item.candidateClass === candidateClass && item.stratum === stratum).length !== 20) ctx.addIssue({ code: "custom", path: ["items"], message: `main pool must contain 20 ${candidateClass}/${stratum} items` });
+    const reserves = pool.items
+      .filter((item): item is Extract<ScreeningPoolV2Item, { poolKind: "reserve" }> => item.poolKind === "reserve" && item.candidateClass === candidateClass && item.stratum === stratum)
+      .sort((left, right) => left.reserveOrder - right.reserveOrder);
+    for (const [index, reserve] of reserves.entries()) {
+      if (reserve.reserveOrder !== index + 1) ctx.addIssue({ code: "custom", path: ["items"], message: `${candidateClass}/${stratum} reserveOrder must be contiguous and unique` });
+    }
+  }
+});
+export type ScreeningPoolV2 = z.infer<typeof ScreeningPoolV2Schema>;
+
+export const ScreeningPoolSchema = z.discriminatedUnion("protocol", [
+  ScreeningPoolV1Schema,
+  ScreeningPoolV2Schema,
+]);
+export type ScreeningPool = z.infer<typeof ScreeningPoolSchema>;
+
 export const ScreeningSampleCommitmentV1Schema = z.strictObject({
   protocol: z.literal(SCREENING_SAMPLE_COMMITMENT_PROTOCOL),
   draftId: IdentitySchema,
@@ -364,6 +444,36 @@ export const ScreeningSampleCommitmentV1Schema = z.strictObject({
   committedAt: TimestampSchema,
 });
 export type ScreeningSampleCommitmentV1 = z.infer<typeof ScreeningSampleCommitmentV1Schema>;
+
+/**
+ * Exact public identity-only commitments made by an external registration repository. Unlike the
+ * internal v1 envelope, this record deliberately does not claim that the later label-bearing pool
+ * bridge existed at registration time. Its sorted identities, product-defined pool digest, seed,
+ * sample size, script digest, and timestamp are sufficient to replay the committed sample.
+ */
+export const RegisteredScreeningSampleCommitmentV1Schema = z.strictObject({
+  schema: z.string().url(),
+  candidateItemDigests: z.array(DigestSchema).length(664),
+  committedAt: TimestampSchema,
+  poolDigest: DigestSchema,
+  sampleSeed: z.string().min(1),
+  sampleSize: z.literal(72),
+  samplingScriptSha256: DigestSchema,
+}).superRefine((commitment, ctx) => {
+  for (let index = 1; index < commitment.candidateItemDigests.length; index += 1) {
+    if (compareCodeUnitStrings(commitment.candidateItemDigests[index - 1]!, commitment.candidateItemDigests[index]!) >= 0) {
+      ctx.addIssue({ code: "custom", path: ["candidateItemDigests"], message: "registered identities must be sorted and unique" });
+      return;
+    }
+  }
+});
+export type RegisteredScreeningSampleCommitmentV1 = z.infer<typeof RegisteredScreeningSampleCommitmentV1Schema>;
+
+export const ScreeningSampleCommitmentSchema = z.union([
+  ScreeningSampleCommitmentV1Schema,
+  RegisteredScreeningSampleCommitmentV1Schema,
+]);
+export type ScreeningSampleCommitment = z.infer<typeof ScreeningSampleCommitmentSchema>;
 
 const ScreeningDecisionSchema = z.enum(["CORRECT", "WRONG", "UNSURE"]);
 const RitsuScreeningDecisionSchema = z.discriminatedUnion("checked", [
@@ -429,6 +539,9 @@ export const HumanReviewReplacementLedgerEntrySchema = z.strictObject({
   excludedPoolPosition: z.number().int().positive(),
   replacementPoolPosition: z.number().int().positive(),
   reason: z.enum([...HUMAN_REVIEW_LEDGER_REASONS, ...SCREENING_LEDGER_REASONS]),
+  // Required by closure replay for shared-slice pool/v2 replacements. It names the main slot that
+  // receives the reserve; the reserve itself carries no static slot ownership.
+  receivingSlotId: z.string().regex(/^slot-[0-9]{3}$/u).optional(),
   // Per-item two-human apparatus (spec §6.9 deliberately drops it for the screened branch):
   // present if and only if `reason` is one of the three two-human reasons above.
   reviewVerdictSha256s: SortedUniqueDigestPairSchema.optional(),
