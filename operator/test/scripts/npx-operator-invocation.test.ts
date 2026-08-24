@@ -18,6 +18,7 @@ const pkg = JSON.parse(readFileSync(join(operatorRoot, 'package.json'), 'utf8'))
   bin: Record<string, string>;
 };
 const operatorReadme = readFileSync(join(operatorRoot, 'README.md'), 'utf8');
+const releasingDoc = readFileSync(join(operatorRoot, 'RELEASING.md'), 'utf8');
 const testnetRunbook = readFileSync(join(operatorRoot, '../docs/operator-testnet.md'), 'utf8');
 
 const tempDirs: string[] = [];
@@ -85,6 +86,8 @@ describe('public @jinn-network/operator npx invocation', () => {
     expect(operatorReadme).toContain('npx @jinn-network/operator@latest doctor');
     expect(operatorReadme).not.toMatch(/@jinn-network\/client/);
     expect(operatorReadme).not.toMatch(/npx -p @jinn-network\/operator/);
+    expect(releasingDoc).toContain('npx @jinn-network/operator@latest <verb>');
+    expect(releasingDoc).not.toMatch(/npx -p @jinn-network\/operator/);
     expect(testnetRunbook).not.toMatch(/@jinn-network\/client/);
   });
 
