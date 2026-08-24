@@ -26,6 +26,9 @@ import {
   isRpcQuotaError,
   DEFAULT_RPC_COOLDOWN_MS,
   maskUrlsInMessage,
+  sanitizeErrorText,
+  sanitizePersistedText,
+  sanitizeStructuredValue,
 } from '../../src/rpc/transport.js';
 
 describe('parseRpcUrls', () => {
@@ -783,6 +786,50 @@ describe('maskUrlsInMessage', () => {
     expect(maskUrlsInMessage('connect ECONNREFUSED 127.0.0.1:0')).toBe(
       'connect ECONNREFUSED 127.0.0.1:0',
     );
+  });
+});
+
+describe('sanitizeErrorText (#642)', () => {
+  const SECRET = 'SECRETKEY123';
+
+  it('keeps a host-only diagnostic for userinfo, path, query, and fragment secrets', () => {
+    const message = [
+      'userinfo https://operator:SECRETKEY123@paid.example',
+      'path https://base-mainnet.g.alchemy.com/v2/SECRETKEY123',
+      'query https://rpc.example/?apiKey=SECRETKEY123',
+      'fragment https://rpc.example/#token=SECRETKEY123',
+    ].join(' ');
+
+    const sanitized = sanitizeErrorText(message);
+    expect(sanitized).toContain('paid.example');
+    expect(sanitized).toContain('base-mainnet.g.alchemy.com');
+    expect(sanitized).toContain('rpc.example');
+    expect(sanitized).not.toContain(SECRET);
+    expect(sanitized).not.toContain('apiKey=');
+    expect(sanitized).not.toContain('token=');
+    expect(sanitized).not.toContain('/v2/');
+  });
+
+  it('walks Error.cause so a nested HttpRequestError cannot bypass the boundary', () => {
+    const cause = new HttpRequestError({
+      url: 'https://base-mainnet.g.alchemy.com/v2/SECRETKEY123',
+      body: { method: 'eth_blockNumber' },
+      details: 'fetch failed',
+    });
+    const err = new Error('claimDelivery failed');
+    err.cause = cause;
+
+    const sanitized = sanitizeErrorText(err);
+    expect(sanitized).toContain('claimDelivery failed');
+    expect(sanitized).toContain('caused by:');
+    expect(sanitized).toContain('base-mainnet.g.alchemy.com');
+    expect(sanitized).not.toContain(SECRET);
+  });
+
+  it('sanitizePersistedText and sanitizeStructuredValue reuse the host-only dialect', () => {
+    const url = 'https://user:SECRETKEY123@rpc.example/v2/SECRETKEY123?k=SECRETKEY123#f=SECRETKEY123';
+    expect(sanitizePersistedText(url)).toBe('rpc.example');
+    expect(sanitizeStructuredValue({ error: url })).toEqual({ error: 'rpc.example' });
   });
 });
 

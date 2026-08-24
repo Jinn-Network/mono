@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { maskUrlsInMessage } from '../rpc/transport.js';
+import { maskUrlsInMessage, sanitizePersistedText } from '../rpc/transport.js';
 import type {
   EnvelopeProjection,
   EnvelopeProjectionMetadataValue,
@@ -1551,7 +1551,7 @@ export class Store {
       txHash: event.txHash ?? null,
       solverType: event.solverType ?? null,
       outcome: event.outcome ?? null,
-      detail: event.detail ?? null,
+      detail: sanitizePersistedText(event.detail ?? null),
       credentialId: event.credentialId ?? null,
       costUsdMicros: event.costUsdMicros ?? null,
       model: event.model ?? null,
@@ -1614,7 +1614,7 @@ export class Store {
       txHash: r.tx_hash,
       solverType: r.solver_type,
       outcome: r.outcome,
-      detail: r.detail,
+      detail: sanitizePersistedText(r.detail),
       credentialId: r.credential_id,
       costUsdMicros: r.cost_usd_micros,
       model: r.model,
@@ -1908,7 +1908,7 @@ export class Store {
       txHash: r.tx_hash,
       solverType: r.solver_type,
       outcome: r.outcome,
-      detail: r.detail,
+      detail: sanitizePersistedText(r.detail),
       credentialId: r.credential_id,
       costUsdMicros: r.cost_usd_micros,
       model: r.model,
@@ -1991,7 +1991,7 @@ export class Store {
       txHash: r.tx_hash,
       solverType: r.solver_type,
       outcome: r.outcome,
-      detail: r.detail,
+      detail: sanitizePersistedText(r.detail),
       credentialId: r.credential_id,
       costUsdMicros: r.cost_usd_micros,
       model: r.model,
@@ -2037,7 +2037,7 @@ export class Store {
       txHash: r.tx_hash,
       solverType: r.solver_type,
       outcome: r.outcome,
-      detail: r.detail,
+      detail: sanitizePersistedText(r.detail),
       credentialId: r.credential_id,
       costUsdMicros: r.cost_usd_micros,
       model: r.model,

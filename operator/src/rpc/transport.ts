@@ -244,7 +244,51 @@ export function maskRpcHost(url: string): string {
  * viem `HttpRequestError`-shaped message (spec §14.2 item 2, issue #2402).
  */
 export function maskUrlsInMessage(message: string): string {
-  return message.replace(/https?:\/\/\S+/g, (url) => maskRpcHost(url));
+  return message.replace(/https?:\/\/[^\s"'<>]+/g, (url) => maskRpcHost(url));
+}
+
+/**
+ * Shared persistence/emission sanitizer for RPC-derived error text (#642).
+ * Walks `Error.cause` so nested viem HttpRequestError URLs cannot bypass
+ * {@link maskUrlsInMessage}. Uses the same host-only dialect — no second
+ * redaction vocabulary.
+ */
+export function sanitizeErrorText(input: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let cursor: unknown = input;
+  while (cursor !== undefined && cursor !== null && !seen.has(cursor)) {
+    seen.add(cursor);
+    if (cursor instanceof Error) {
+      const text = cursor.message.trim() || cursor.name;
+      if (text) parts.push(maskUrlsInMessage(text));
+      cursor = cursor.cause;
+      continue;
+    }
+    parts.push(maskUrlsInMessage(String(cursor)));
+    break;
+  }
+  return parts.join(' caused by: ');
+}
+
+export function sanitizePersistedText(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  return maskUrlsInMessage(value);
+}
+
+export function sanitizeStructuredValue(value: unknown, depth = 0): unknown {
+  if (depth > 6) return '[truncated]';
+  if (typeof value === 'string') return maskUrlsInMessage(value);
+  if (value instanceof Error) return sanitizeErrorText(value);
+  if (Array.isArray(value)) return value.map((entry) => sanitizeStructuredValue(entry, depth + 1));
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      out[key] = sanitizeStructuredValue(entry, depth + 1);
+    }
+    return out;
+  }
+  return value;
 }
 
 export interface BuildFallbackTransportOptions {
