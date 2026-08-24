@@ -49,7 +49,7 @@ From each Hardhat artifact, keep only the `abi` array. For each item, retain: `t
 | `MechMarketplace` | `src/vendor/mech/MechMarketplace.sol/MechMarketplace.json` |
 | `OlasMech` | `src/vendor/mech/OlasMech.sol/OlasMech.json` |
 | `ExternalStakingDistributor` | `src/vendor/stolas/ExternalStakingDistributor.sol/ExternalStakingDistributor.json` |
-| `StakingProxy` | `src/vendor/registries/staking/StakingProxy.sol/StakingProxy.json` |
+| `StakingTokenLocked` | `src/vendor/stolas/l2/StakingTokenLocked.sol/StakingTokenLocked.json` |
 
 ### Migration strategy (strangler)
 
