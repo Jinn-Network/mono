@@ -8,7 +8,9 @@ entirely on testnet. Operators should use `JINN_NETWORK=testnet` and follow
 
 This document will be filled in closer to Phase 2 launch with:
 
-- Mainnet token economics (OLAS bond, JINN rewards after token launch).
+- Mainnet economics (tokenless, OLAS-native): OLAS is both stake and reward.
+  No JINN token. The daemon `reward-claim` loop settles stOLAS distributor
+  rewards; there is no claim-relayer.
 - Fund-requirement specifics: operators hold real OLAS on mainnet; Phase 1b's
   pooled stOLAS model does not apply to mainnet standard staking.
 - Mainnet-specific risk rails and safety thresholds.
