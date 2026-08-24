@@ -355,6 +355,19 @@ CREATE TABLE IF NOT EXISTS eval_results (
 );
 
 `;
+type LocalArtifactCatalogHit = {
+  sha256: string;
+  artifactType: string;
+  source: 'served' | 'network';
+  envelopeCid: string | null;
+  createdAt: string;
+  contentSize: number;
+  priceUsdc?: string;
+  sourceEndpoint?: string | null;
+  sourceOperator?: string | null;
+  paidAmountUsdc?: string;
+};
+
 export class Store {
   /** Exposed for native persistence and tests — treat as package-internal. */
   readonly db: Database.Database;
@@ -688,7 +701,7 @@ export class Store {
    * artifacts. Used by MCP record search to prepend locally held matches to
    * corpus query results without loading artifact bytes.
    */
-  searchOwnAndCached(filter: { artifactType?: string; limit: number }) {
+  searchOwnAndCached(filter: { artifactType?: string; limit: number }): LocalArtifactCatalogHit[] {
     const own = this.servedArtifacts.searchRecent(filter);
     const cached = this.networkArtifacts.searchRecent(filter);
     return [
@@ -721,7 +734,7 @@ export class Store {
    * finding 2) to backfill artifact refs for a small, already-ranked set of
    * envelope CIDs regardless of how many other artifact rows exist locally.
    */
-  getArtifactsByEnvelopeCids(envelopeCids: readonly string[]) {
+  getArtifactsByEnvelopeCids(envelopeCids: readonly string[]): LocalArtifactCatalogHit[] {
     const own = this.servedArtifacts.getByEnvelopeCids(envelopeCids);
     const cached = this.networkArtifacts.getByEnvelopeCids(envelopeCids);
     return [
