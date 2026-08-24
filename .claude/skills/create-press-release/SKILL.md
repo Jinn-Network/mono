@@ -24,7 +24,10 @@ End-to-end flow for shipping a Jinn external press release. Produces a committed
 Always read these before drafting. They override anything in this skill.
 
 - [`PRINCIPLES.md`](../../../PRINCIPLES.md) — the Legibility cross-check is mandatory; the other principles (Neutral, Learning Maximised, Governance Minimal, Permissionless, Prestige) constrain framing choices.
+- [`THESIS.md`](../../../THESIS.md) — why Jinn exists.
 - [`BRAND.md`](../../../BRAND.md) — voice, headless-brand posture, content non-negotiables.
+- [`GROWTH.md`](../../../GROWTH.md) — product-led distribution; positioning derives from the GTM plan and `BRAND.md`.
+- [`docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md`](../../../docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md) — current product and go-to-market framing.
 - `CLAUDE.md` §External Communication — Jinn-specific framing, attribution, verb hygiene, PII rules.
 - The user's own `~/.claude/CLAUDE.md` §External Communication — generic comms rules (strip jargon, distil).
 
@@ -32,7 +35,7 @@ Always read these before drafting. They override anything in this skill.
 
 ### Step 0 — Read canonical docs
 
-Read in this order: `PRINCIPLES.md`, `BRAND.md`, `mono/CLAUDE.md` §External Communication. Do not skip — these rules override drafting choices.
+Read in this order: `PRINCIPLES.md`, `THESIS.md`, `BRAND.md`, `GROWTH.md`, the benchmark-product GTM plan, `mono/CLAUDE.md` §External Communication. Do not skip — these rules override drafting choices.
 
 ### Step 0.5 — Milestone status gate (check before anything else)
 
@@ -139,7 +142,7 @@ Apply this structure unless the milestone clearly demands otherwise.
 
 ## About Jinn Network
 
-Jinn Network is an open agentic knowledge economy. <Boilerplate per CLAUDE.md §External Communication framing.>
+<About-block boilerplate per CLAUDE.md §External Communication framing — product positioning from THESIS.md, BRAND.md, GROWTH.md, and the benchmark-product GTM plan; no fixed universal headline phrase.>
 
 ---
 
@@ -224,5 +227,5 @@ Commit the file to `docs/press/YYYY-MM-DD-<slug>.md` with a `docs(press):` commi
 - No dateline city. Ever.
 - No named attribution by default. Ever — until the contributor signs off explicitly.
 - No `paid` / `pays` / `team` / `co-founder` in any artifact this skill produces.
-- Frame Jinn as `an open agentic knowledge economy` in About-blocks.
+- About-block product framing derives from CLAUDE.md §External Communication authorities; do not mandate a single universal headline phrase.
 - Commit, do not merge — wait for admin approval.
