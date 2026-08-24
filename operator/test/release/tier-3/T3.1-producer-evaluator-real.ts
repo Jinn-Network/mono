@@ -76,6 +76,13 @@ import {
 import { getChainConfig } from '../../../src/earning/contracts.js';
 import { JINN_ROUTER_ABI } from '../../../src/adapters/mech/types.js';
 import {
+  T31_APPROVED_HERMES_MODEL_ENV,
+  T31_APPROVED_HERMES_PROVIDER_ENV,
+  T31_EXPECTED_HERMES_MODEL_ENV,
+  T31_EXPECTED_HERMES_PROVIDER_ENV,
+} from '../../../src/harnesses/impls/hermes-agent/resolved-model-guard.js';
+import { resolveDefaultStateDir } from '../../../src/state-dir.js';
+import {
   KNOWN_INSTANCE_ID,
   KNOWN_REPO,
   KNOWN_COMMIT,
@@ -143,12 +150,33 @@ interface ScenarioOptionsT3 extends ScenarioOptions {
 export function buildT31DaemonEnv(args: {
   hermesModel: string;
   onchainTaskId: string;
+  hermesProvider?: string;
+  approvedHermesOverride?: {
+    model: string;
+    provider?: string;
+  };
 }): NodeJS.ProcessEnv {
-  return {
+  const provider = args.hermesProvider ?? 'openrouter';
+  const env: NodeJS.ProcessEnv = {
     JINN_HERMES_MODEL: args.hermesModel,
+    JINN_HERMES_PROVIDER: provider,
     JINN_TIER3_COST_CAP_USD: COST_CAP_USD.toString(),
     JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS: args.onchainTaskId,
+    [T31_EXPECTED_HERMES_MODEL_ENV]: args.hermesModel,
+    [T31_EXPECTED_HERMES_PROVIDER_ENV]: provider,
   };
+  if (args.approvedHermesOverride?.model) {
+    env[T31_APPROVED_HERMES_MODEL_ENV] = args.approvedHermesOverride.model;
+  }
+  if (args.approvedHermesOverride?.provider) {
+    env[T31_APPROVED_HERMES_PROVIDER_ENV] = args.approvedHermesOverride.provider;
+  }
+  return env;
+}
+
+export function resolveT31SolverHermesConfigPath(homeDir: string): string {
+  const stateDir = resolveDefaultStateDir({ home: homeDir });
+  return path.join(stateDir, 'engine', 'impl-state', 'hermes-agent', 'config.yaml');
 }
 
 // ── Generic poll helper ──────────────────────────────────────────────────────

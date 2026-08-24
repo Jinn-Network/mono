@@ -4,9 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parse as yamlParse } from 'yaml';
 import { HermesHarnessAdapter } from '../../../../src/harnesses/impls/hermes-agent/adapter.js';
+import { ResolvedHermesModelMismatchError } from '../../../../src/harnesses/impls/hermes-agent/resolved-model-guard.js';
 import type { TaskSessionInputs } from '../../../../src/harnesses/impls/learner/types.js';
 
 const networkToolsRoot = fileURLToPath(new URL('../../../../plugins/network-tools/', import.meta.url));
@@ -809,6 +810,100 @@ describe('HermesHarnessAdapter', () => {
       expect(existsSync(join(work, '.hermes-agent', 'session.json'))).toBe(false);
     } finally {
       warnSpy.mockRestore();
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('HermesHarnessAdapter T3.1 resolved-model guard', () => {
+  const T31_ENV_KEYS = [
+    'JINN_T31_EXPECTED_HERMES_MODEL',
+    'JINN_T31_EXPECTED_HERMES_PROVIDER',
+    'JINN_T31_APPROVED_HERMES_MODEL',
+    'JINN_T31_APPROVED_HERMES_PROVIDER',
+    'JINN_HERMES_MODEL',
+    'JINN_HERMES_PROVIDER',
+  ] as const;
+  const saved: Partial<Record<(typeof T31_ENV_KEYS)[number], string | undefined>> = {};
+
+  afterEach(() => {
+    for (const key of T31_ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  for (const key of T31_ENV_KEYS) {
+    saved[key] = process.env[key];
+    delete process.env[key];
+  }
+
+  it('does not spawn Hermes when an unapproved env override writes a different model', async () => {
+    process.env['JINN_T31_EXPECTED_HERMES_MODEL'] = 'deepseek/deepseek-v4-flash';
+    process.env['JINN_T31_EXPECTED_HERMES_PROVIDER'] = 'openrouter';
+    process.env['JINN_HERMES_MODEL'] = 'anthropic/claude-opus-4.6';
+    process.env['JINN_HERMES_PROVIDER'] = 'anthropic';
+
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      const task = inputs(work, home);
+      task.model = 'deepseek/deepseek-v4-flash';
+      await expect(adapter.runTask(task)).rejects.toBeInstanceOf(ResolvedHermesModelMismatchError);
+      expect(spawnCalls).toHaveLength(0);
+      expect(existsSync(join(home, 'config.yaml'))).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('spawns when the written config matches an approved explicit override', async () => {
+    process.env['JINN_T31_EXPECTED_HERMES_MODEL'] = 'deepseek/deepseek-v4-flash';
+    process.env['JINN_T31_EXPECTED_HERMES_PROVIDER'] = 'openrouter';
+    process.env['JINN_T31_APPROVED_HERMES_MODEL'] = 'google/gemini-2.5-flash';
+    process.env['JINN_T31_APPROVED_HERMES_PROVIDER'] = 'openrouter';
+    process.env['JINN_HERMES_MODEL'] = 'google/gemini-2.5-flash';
+    process.env['JINN_HERMES_PROVIDER'] = 'openrouter';
+
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      const task = inputs(work, home);
+      task.model = 'google/gemini-2.5-flash';
+      task.provider = 'openrouter';
+      await adapter.runTask(task);
+      expect(spawnCalls).toHaveLength(1);
+    } finally {
       rmSync(home, { recursive: true, force: true });
       rmSync(work, { recursive: true, force: true });
     }
