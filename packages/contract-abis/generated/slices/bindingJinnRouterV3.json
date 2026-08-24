@@ -1,0 +1,417 @@
+{
+  "export": "JINN_ROUTER_V3_ABI",
+  "items": [
+    {
+      "type": "function",
+      "name": "createTask",
+      "stateMutability": "payable",
+      "inputs": [
+        {
+          "type": "bytes32",
+          "name": "taskCidDigest"
+        },
+        {
+          "type": "bytes32",
+          "name": "manifestDigest"
+        },
+        {
+          "type": "tuple",
+          "name": "policy",
+          "components": [
+            {
+              "type": "uint32",
+              "name": "maxClaims"
+            },
+            {
+              "type": "bool",
+              "name": "allowSolverSelfEvaluation"
+            }
+          ]
+        },
+        {
+          "type": "uint256",
+          "name": "solutionMaxDeliveryRate"
+        },
+        {
+          "type": "uint256",
+          "name": "verdictMaxDeliveryRate"
+        },
+        {
+          "type": "uint256",
+          "name": "responseTimeout"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "uint256",
+          "name": "taskId"
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "refundUnusedTaskBudget",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": "taskId"
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "type": "function",
+      "name": "claimTask",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": "taskId"
+        },
+        {
+          "type": "address",
+          "name": "priorityMech"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "uint32",
+          "name": "attemptIndex"
+        },
+        {
+          "type": "bytes32",
+          "name": "requestId"
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "claimEvaluation",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": "taskId"
+        },
+        {
+          "type": "uint32",
+          "name": "attemptIndex"
+        },
+        {
+          "type": "address",
+          "name": "evaluatorMech"
+        },
+        {
+          "type": "bytes32",
+          "name": "evaluationTaskCidDigest"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "uint32",
+          "name": "verdictIndex"
+        },
+        {
+          "type": "bytes32",
+          "name": "verdictRequestId"
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "claimed",
+      "stateMutability": "view",
+      "inputs": [
+        {
+          "type": "bytes32",
+          "name": ""
+        }
+      ],
+      "outputs": [
+        {
+          "type": "bool",
+          "name": ""
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "taskPayments",
+      "stateMutability": "view",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": ""
+        }
+      ],
+      "outputs": [
+        {
+          "type": "address",
+          "name": "creator"
+        },
+        {
+          "type": "bytes32",
+          "name": "taskCidDigest"
+        },
+        {
+          "type": "bytes32",
+          "name": "manifestDigest"
+        },
+        {
+          "type": "uint256",
+          "name": "solutionMaxDeliveryRate"
+        },
+        {
+          "type": "uint256",
+          "name": "verdictMaxDeliveryRate"
+        },
+        {
+          "type": "uint256",
+          "name": "responseTimeout"
+        },
+        {
+          "type": "uint256",
+          "name": "solutionBudgetRemaining"
+        },
+        {
+          "type": "uint256",
+          "name": "verdictBudgetRemaining"
+        },
+        {
+          "type": "bool",
+          "name": "solutionBudgetRefunded"
+        },
+        {
+          "type": "bool",
+          "name": "verdictBudgetRefunded"
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "claimSolutionDelivery",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        {
+          "type": "bytes32",
+          "name": "requestId"
+        },
+        {
+          "type": "bytes32",
+          "name": "solutionDigest"
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "type": "function",
+      "name": "claimVerdictDelivery",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        {
+          "type": "bytes32",
+          "name": "verdictRequestId"
+        },
+        {
+          "type": "bytes32",
+          "name": "verdictDigest"
+        },
+        {
+          "type": "uint8",
+          "name": "verdictCode"
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "type": "event",
+      "name": "TaskCreated",
+      "inputs": [
+        {
+          "type": "address",
+          "name": "creator",
+          "indexed": true
+        },
+        {
+          "type": "uint256",
+          "name": "taskId",
+          "indexed": true
+        },
+        {
+          "type": "bytes32",
+          "name": "manifestDigest",
+          "indexed": true
+        },
+        {
+          "type": "bytes32",
+          "name": "taskCidDigest"
+        },
+        {
+          "type": "uint32",
+          "name": "maxClaims"
+        },
+        {
+          "type": "uint256",
+          "name": "solutionBudget"
+        },
+        {
+          "type": "uint256",
+          "name": "verdictBudget"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "TaskAttemptCreated",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": "taskId",
+          "indexed": true
+        },
+        {
+          "type": "uint32",
+          "name": "attemptIndex",
+          "indexed": true
+        },
+        {
+          "type": "bytes32",
+          "name": "requestId",
+          "indexed": true
+        },
+        {
+          "type": "address",
+          "name": "operator"
+        },
+        {
+          "type": "address",
+          "name": "priorityMech"
+        },
+        {
+          "type": "uint256",
+          "name": "deliveryRate"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "EvaluationAttemptCreated",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": "taskId",
+          "indexed": true
+        },
+        {
+          "type": "uint32",
+          "name": "attemptIndex",
+          "indexed": true
+        },
+        {
+          "type": "uint32",
+          "name": "verdictIndex",
+          "indexed": true
+        },
+        {
+          "type": "bytes32",
+          "name": "requestId"
+        },
+        {
+          "type": "address",
+          "name": "evaluator"
+        },
+        {
+          "type": "address",
+          "name": "priorityMech"
+        },
+        {
+          "type": "uint256",
+          "name": "deliveryRate"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "SolutionDeliveryClaimed",
+      "inputs": [
+        {
+          "type": "address",
+          "name": "operator",
+          "indexed": true
+        },
+        {
+          "type": "bytes32",
+          "name": "requestId",
+          "indexed": true
+        },
+        {
+          "type": "uint256",
+          "name": "taskId",
+          "indexed": true
+        },
+        {
+          "type": "uint32",
+          "name": "attemptIndex"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "VerdictDeliveryClaimed",
+      "inputs": [
+        {
+          "type": "address",
+          "name": "evaluator",
+          "indexed": true
+        },
+        {
+          "type": "bytes32",
+          "name": "requestId",
+          "indexed": true
+        },
+        {
+          "type": "uint256",
+          "name": "taskId",
+          "indexed": true
+        },
+        {
+          "type": "uint32",
+          "name": "attemptIndex"
+        },
+        {
+          "type": "uint32",
+          "name": "verdictIndex"
+        },
+        {
+          "type": "uint8",
+          "name": "verdictCode"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "TaskBudgetRefunded",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": "taskId",
+          "indexed": true
+        },
+        {
+          "type": "address",
+          "name": "creator",
+          "indexed": true
+        },
+        {
+          "type": "uint256",
+          "name": "solutionAmount"
+        },
+        {
+          "type": "uint256",
+          "name": "verdictAmount"
+        }
+      ]
+    }
+  ]
+}

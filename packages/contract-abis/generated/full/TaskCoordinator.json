@@ -1,0 +1,1086 @@
+[
+  {
+    "type": "error",
+    "name": "TCAlreadyInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TCAttemptAlreadyRegistered",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCAttemptAlreadySubmitted",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCAttemptNotFound",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCAttemptNotRegistered",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCAttemptNotSubmitted",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCInvalidPolicy",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TCInvalidVerdictCode",
+    "inputs": [
+      {
+        "type": "uint8",
+        "name": "verdictCode"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCMaxClaimsReached",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCNotAttemptOperator",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "address",
+        "name": "operator"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCNotInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TCNotVerdictEvaluator",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "address",
+        "name": "evaluator"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCOwnerOnly",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender"
+      },
+      {
+        "type": "address",
+        "name": "owner"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCRequestAlreadyRegistered",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCRequestNotFound",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCRouterOnly",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender"
+      },
+      {
+        "type": "address",
+        "name": "router"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCSolverSelfEvaluation",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "address",
+        "name": "evaluator"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCTaskNotFound",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCTaskNotOpen",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCVerdictAlreadyDelivered",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCVerdictAlreadyRegistered",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCVerdictNotFound",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCVerdictNotRegistered",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TCZeroValue",
+    "inputs": []
+  },
+  {
+    "type": "event",
+    "name": "AuthorizedRouterUpdated",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "previousRouter",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "newRouter",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "EvaluationClaimed",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "evaluator"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Initialized",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "owner",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "authorizedRouter",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferred",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "previousOwner",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "newOwner",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TaskAttemptRequestRegistered",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TaskClaimed",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "operator",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TaskCreated",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "creator",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "manifestDigest",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "taskCidDigest"
+      },
+      {
+        "type": "uint32",
+        "name": "maxClaims"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TaskSubmitted",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "operator",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      },
+      {
+        "type": "bytes32",
+        "name": "solutionCidDigest"
+      },
+      {
+        "type": "uint256",
+        "name": "solutionWeight"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "VerdictDelivered",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "evaluator"
+      },
+      {
+        "type": "bytes32",
+        "name": "verdictCidDigest"
+      },
+      {
+        "type": "uint8",
+        "name": "verdictCode"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "VerdictRequestRegistered",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "authorizedRouter",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "claimEvaluation",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "address",
+        "name": "evaluator"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "claimTask",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "address",
+        "name": "operator"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "createTask",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "creator"
+      },
+      {
+        "type": "bytes32",
+        "name": "taskCidDigest"
+      },
+      {
+        "type": "bytes32",
+        "name": "manifestDigest"
+      },
+      {
+        "type": "tuple",
+        "name": "policy",
+        "components": [
+          {
+            "type": "uint32",
+            "name": "maxClaims"
+          },
+          {
+            "type": "bool",
+            "name": "allowSolverSelfEvaluation"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getAttempt",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "tuple",
+        "name": "attempt",
+        "components": [
+          {
+            "type": "uint256",
+            "name": "taskId"
+          },
+          {
+            "type": "uint32",
+            "name": "attemptIndex"
+          },
+          {
+            "type": "address",
+            "name": "operator"
+          },
+          {
+            "type": "bytes32",
+            "name": "requestId"
+          },
+          {
+            "type": "bytes32",
+            "name": "solutionCidDigest"
+          },
+          {
+            "type": "uint256",
+            "name": "solutionWeight"
+          },
+          {
+            "type": "uint32",
+            "name": "verdictCount"
+          },
+          {
+            "type": "uint8",
+            "name": "status"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getRequestRef",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "bool",
+        "name": "exists"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getTask",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "tuple",
+        "name": "record",
+        "components": [
+          {
+            "type": "address",
+            "name": "creator"
+          },
+          {
+            "type": "bytes32",
+            "name": "taskCidDigest"
+          },
+          {
+            "type": "bytes32",
+            "name": "manifestDigest"
+          },
+          {
+            "type": "uint8",
+            "name": "status"
+          },
+          {
+            "type": "tuple",
+            "name": "policy",
+            "components": [
+              {
+                "type": "uint32",
+                "name": "maxClaims"
+              },
+              {
+                "type": "bool",
+                "name": "allowSolverSelfEvaluation"
+              }
+            ]
+          },
+          {
+            "type": "uint32",
+            "name": "claimCount"
+          },
+          {
+            "type": "uint32",
+            "name": "submittedCount"
+          },
+          {
+            "type": "uint32",
+            "name": "finalizedAttemptCount"
+          },
+          {
+            "type": "bool",
+            "name": "creatorCredited"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getVerdict",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "tuple",
+        "name": "verdict",
+        "components": [
+          {
+            "type": "uint256",
+            "name": "taskId"
+          },
+          {
+            "type": "uint32",
+            "name": "attemptIndex"
+          },
+          {
+            "type": "uint32",
+            "name": "verdictIndex"
+          },
+          {
+            "type": "address",
+            "name": "evaluator"
+          },
+          {
+            "type": "bytes32",
+            "name": "requestId"
+          },
+          {
+            "type": "bytes32",
+            "name": "verdictCidDigest"
+          },
+          {
+            "type": "uint8",
+            "name": "verdictCode"
+          },
+          {
+            "type": "uint8",
+            "name": "status"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getVerdictRequestRef",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "bool",
+        "name": "exists"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "_owner"
+      },
+      {
+        "type": "address",
+        "name": "_authorizedRouter"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "initialized",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "nextTaskId",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "recordSubmission",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      },
+      {
+        "type": "address",
+        "name": "operator"
+      },
+      {
+        "type": "bytes32",
+        "name": "solutionCidDigest"
+      },
+      {
+        "type": "uint256",
+        "name": "solutionWeight"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "recordVerdict",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "verdictRequestId"
+      },
+      {
+        "type": "address",
+        "name": "evaluator"
+      },
+      {
+        "type": "bytes32",
+        "name": "verdictCidDigest"
+      },
+      {
+        "type": "uint8",
+        "name": "verdictCodeRaw"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": "attemptFinalized"
+      },
+      {
+        "type": "bool",
+        "name": "attemptPassed"
+      },
+      {
+        "type": "bool",
+        "name": "creditCreator"
+      },
+      {
+        "type": "address",
+        "name": "creator"
+      },
+      {
+        "type": "uint256",
+        "name": "creatorWeight"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "registerAttemptRequest",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "registerVerdictRequest",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "setAuthorizedRouter",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "newRouter"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "taskIdByRequestId",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "transferOwnership",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "newOwner"
+      }
+    ],
+    "outputs": []
+  }
+]

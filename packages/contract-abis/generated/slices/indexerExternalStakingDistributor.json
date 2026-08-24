@@ -1,0 +1,33 @@
+{
+  "export": "EXTERNAL_STAKING_DISTRIBUTOR_ABI",
+  "items": [
+    {
+      "type": "event",
+      "name": "RewardsDistributed",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": "serviceId",
+          "indexed": true
+        },
+        {
+          "type": "address",
+          "name": "multisig",
+          "indexed": true
+        },
+        {
+          "type": "uint256",
+          "name": "collectorAmount"
+        },
+        {
+          "type": "uint256",
+          "name": "protocolAmount"
+        },
+        {
+          "type": "uint256",
+          "name": "curatingAgentAmount"
+        }
+      ]
+    }
+  ]
+}

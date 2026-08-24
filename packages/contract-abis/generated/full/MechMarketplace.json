@@ -1,0 +1,1112 @@
+[
+  {
+    "type": "constructor",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "_serviceRegistry"
+      },
+      {
+        "type": "address",
+        "name": "_karma"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AlreadyInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "AlreadyRequested",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "IncorrectSignatureLength",
+    "inputs": [
+      {
+        "type": "bytes",
+        "name": "signature"
+      },
+      {
+        "type": "uint256",
+        "name": "provided"
+      },
+      {
+        "type": "uint256",
+        "name": "expected"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InsufficientBalance",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "current"
+      },
+      {
+        "type": "uint256",
+        "name": "required"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NoDepositAllowed",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "amount"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OutOfBounds",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "provided"
+      },
+      {
+        "type": "uint256",
+        "name": "min"
+      },
+      {
+        "type": "uint256",
+        "name": "max"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Overflow",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "provided"
+      },
+      {
+        "type": "uint256",
+        "name": "max"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OwnerOnly",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender"
+      },
+      {
+        "type": "address",
+        "name": "owner"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ReentrancyGuard",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SignatureNotValidated",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "requester"
+      },
+      {
+        "type": "bytes32",
+        "name": "msgHash"
+      },
+      {
+        "type": "bytes",
+        "name": "signature"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TransferFailed",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "token"
+      },
+      {
+        "type": "address",
+        "name": "from"
+      },
+      {
+        "type": "address",
+        "name": "to"
+      },
+      {
+        "type": "uint256",
+        "name": "amount"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnauthorizedAccount",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "account"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "WrongArrayLength",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "numValues1"
+      },
+      {
+        "type": "uint256",
+        "name": "numValues2"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "WrongPaymentType",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "paymentType"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "WrongServiceState",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "state"
+      },
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroValue",
+    "inputs": []
+  },
+  {
+    "type": "event",
+    "name": "CreateMech",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "mech",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "serviceId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "mechFactory",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Deliver",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "mech",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "mechServiceMultisig",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      },
+      {
+        "type": "uint256",
+        "name": "deliveryRate"
+      },
+      {
+        "type": "bytes",
+        "name": "requestData"
+      },
+      {
+        "type": "bytes",
+        "name": "deliveryData"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ImplementationUpdated",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "implementation",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "MarketplaceDelivery",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "deliveryMech",
+        "indexed": true
+      },
+      {
+        "type": "address[]",
+        "name": "requesters"
+      },
+      {
+        "type": "uint256",
+        "name": "numDeliveries"
+      },
+      {
+        "type": "bytes32[]",
+        "name": "requestIds"
+      },
+      {
+        "type": "bool[]",
+        "name": "deliveredRequests"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "MarketplaceDeliveryWithSignatures",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "deliveryMech",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "requester",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "numDeliveries"
+      },
+      {
+        "type": "bytes32[]",
+        "name": "requestIds"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "MarketplaceParamsUpdated",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "fee"
+      },
+      {
+        "type": "uint256",
+        "name": "minResponseTimeout"
+      },
+      {
+        "type": "uint256",
+        "name": "maxResponseTimeout"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "MarketplaceRequest",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "priorityMech",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "requester",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "numRequests"
+      },
+      {
+        "type": "bytes32[]",
+        "name": "requestIds"
+      },
+      {
+        "type": "bytes[]",
+        "name": "requestDatas"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "OwnerUpdated",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "owner",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SetMechFactoryStatuses",
+    "inputs": [
+      {
+        "type": "address[]",
+        "name": "mechFactories"
+      },
+      {
+        "type": "bool[]",
+        "name": "statuses"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SetPaymentTypeBalanceTrackers",
+    "inputs": [
+      {
+        "type": "bytes32[]",
+        "name": "paymentTypes"
+      },
+      {
+        "type": "address[]",
+        "name": "balanceTrackers"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "chainId",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "changeImplementation",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "newImplementation"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "changeMarketplaceParams",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "newFee"
+      },
+      {
+        "type": "uint256",
+        "name": "newMinResponseTimeout"
+      },
+      {
+        "type": "uint256",
+        "name": "newMaxResponseTimeout"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "changeOwner",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "newOwner"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "checkMech",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "mech"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "address",
+        "name": "multisig"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "create",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      },
+      {
+        "type": "address",
+        "name": "mechFactory"
+      },
+      {
+        "type": "bytes",
+        "name": "payload"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "address",
+        "name": "mech"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "deliverMarketplace",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "bytes32[]",
+        "name": "requestIds"
+      },
+      {
+        "type": "uint256[]",
+        "name": "deliveryRates"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool[]",
+        "name": "deliveredRequests"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "deliverMarketplaceWithSignatures",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "requester"
+      },
+      {
+        "type": "tuple[]",
+        "name": "deliverWithSignatures",
+        "components": [
+          {
+            "type": "bytes",
+            "name": "requestData"
+          },
+          {
+            "type": "bytes",
+            "name": "signature"
+          },
+          {
+            "type": "bytes",
+            "name": "deliveryData"
+          }
+        ]
+      },
+      {
+        "type": "uint256[]",
+        "name": "deliveryRates"
+      },
+      {
+        "type": "bytes",
+        "name": "paymentData"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "DOMAIN_SEPARATOR_TYPE_HASH",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "domainSeparator",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "fee",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getDomainSeparator",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getRequestId",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "mech"
+      },
+      {
+        "type": "address",
+        "name": "requester"
+      },
+      {
+        "type": "bytes",
+        "name": "data"
+      },
+      {
+        "type": "uint256",
+        "name": "deliveryRate"
+      },
+      {
+        "type": "bytes32",
+        "name": "paymentType"
+      },
+      {
+        "type": "uint256",
+        "name": "nonce"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getRequestStatus",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint8",
+        "name": "status"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "_fee"
+      },
+      {
+        "type": "uint256",
+        "name": "_minResponseTimeout"
+      },
+      {
+        "type": "uint256",
+        "name": "_maxResponseTimeout"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "karma",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapAgentMechFactories",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapDeliveryCounts",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapMechDeliveryCounts",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapMechFactories",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapMechServiceDeliveryCounts",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapNonces",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapPaymentTypeBalanceTrackers",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapRequestCounts",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapRequestIdInfos",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "address",
+        "name": "priorityMech"
+      },
+      {
+        "type": "address",
+        "name": "deliveryMech"
+      },
+      {
+        "type": "address",
+        "name": "requester"
+      },
+      {
+        "type": "uint256",
+        "name": "responseTimeout"
+      },
+      {
+        "type": "uint256",
+        "name": "deliveryRate"
+      },
+      {
+        "type": "bytes32",
+        "name": "paymentType"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "MAX_FEE_FACTOR",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "maxResponseTimeout",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "MECH_MARKETPLACE_PROXY",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "minResponseTimeout",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "numMechs",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "numTotalRequests",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "numUndeliveredRequests",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "request",
+    "stateMutability": "payable",
+    "inputs": [
+      {
+        "type": "bytes",
+        "name": "requestData"
+      },
+      {
+        "type": "uint256",
+        "name": "maxDeliveryRate"
+      },
+      {
+        "type": "bytes32",
+        "name": "paymentType"
+      },
+      {
+        "type": "address",
+        "name": "priorityMech"
+      },
+      {
+        "type": "uint256",
+        "name": "responseTimeout"
+      },
+      {
+        "type": "bytes",
+        "name": "paymentData"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "requestBatch",
+    "stateMutability": "payable",
+    "inputs": [
+      {
+        "type": "bytes[]",
+        "name": "requestDatas"
+      },
+      {
+        "type": "uint256",
+        "name": "maxDeliveryRate"
+      },
+      {
+        "type": "bytes32",
+        "name": "paymentType"
+      },
+      {
+        "type": "address",
+        "name": "priorityMech"
+      },
+      {
+        "type": "uint256",
+        "name": "responseTimeout"
+      },
+      {
+        "type": "bytes",
+        "name": "paymentData"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes32[]",
+        "name": "requestIds"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "serviceRegistry",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "setMechFactoryStatuses",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address[]",
+        "name": "mechFactories"
+      },
+      {
+        "type": "bool[]",
+        "name": "statuses"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "setPaymentTypeBalanceTrackers",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "bytes32[]",
+        "name": "paymentTypes"
+      },
+      {
+        "type": "address[]",
+        "name": "balanceTrackers"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "VERSION",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "string",
+        "name": ""
+      }
+    ]
+  }
+]

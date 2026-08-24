@@ -1,0 +1,90 @@
+{
+  "export": "STOLAS_STAKING_PROXY_ABI",
+  "items": [
+    {
+      "type": "function",
+      "name": "mapServiceInfo",
+      "stateMutability": "view",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": ""
+        }
+      ],
+      "outputs": [
+        {
+          "type": "address",
+          "name": "multisig"
+        },
+        {
+          "type": "address",
+          "name": "owner"
+        },
+        {
+          "type": "uint256",
+          "name": "tsStart"
+        },
+        {
+          "type": "uint256",
+          "name": "reward"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "ServiceStaked",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": "epoch"
+        },
+        {
+          "type": "uint256",
+          "name": "serviceId",
+          "indexed": true
+        },
+        {
+          "type": "address",
+          "name": "owner",
+          "indexed": true
+        },
+        {
+          "type": "address",
+          "name": "multisig",
+          "indexed": true
+        },
+        {
+          "type": "uint256[]",
+          "name": "nonces"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "Checkpoint",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": "epoch",
+          "indexed": true
+        },
+        {
+          "type": "uint256",
+          "name": "availableRewards"
+        },
+        {
+          "type": "uint256[]",
+          "name": "serviceIds"
+        },
+        {
+          "type": "uint256[]",
+          "name": "rewards"
+        },
+        {
+          "type": "uint256",
+          "name": "epochLength"
+        }
+      ]
+    }
+  ]
+}

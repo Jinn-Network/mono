@@ -1,0 +1,107 @@
+{
+  "export": "MECH_ABI",
+  "items": [
+    {
+      "type": "function",
+      "name": "paymentType",
+      "stateMutability": "view",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "bytes32",
+          "name": ""
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "maxDeliveryRate",
+      "stateMutability": "view",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "uint256",
+          "name": ""
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "deliverToMarketplace",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        {
+          "type": "bytes32[]",
+          "name": "requestIds"
+        },
+        {
+          "type": "bytes[]",
+          "name": "datas"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "bool[]",
+          "name": "deliveredRequests"
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "isOperator",
+      "stateMutability": "view",
+      "inputs": [
+        {
+          "type": "address",
+          "name": "multisig"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "bool",
+          "name": ""
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "getOperator",
+      "stateMutability": "view",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "address",
+          "name": ""
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "Deliver",
+      "inputs": [
+        {
+          "type": "address",
+          "name": "mech",
+          "indexed": true
+        },
+        {
+          "type": "address",
+          "name": "mechServiceMultisig",
+          "indexed": true
+        },
+        {
+          "type": "bytes32",
+          "name": "requestId"
+        },
+        {
+          "type": "uint256",
+          "name": "deliveryRate"
+        },
+        {
+          "type": "bytes",
+          "name": "data"
+        }
+      ]
+    }
+  ]
+}

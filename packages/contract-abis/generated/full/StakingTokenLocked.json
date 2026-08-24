@@ -1,0 +1,965 @@
+[
+  {
+    "type": "error",
+    "name": "AlreadyInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ContractOnly",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "activityChecker"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LowerThan",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "provided"
+      },
+      {
+        "type": "uint256",
+        "name": "expected"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MaxNumServicesReached",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "maxNumServices"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OwnerOnly",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender"
+      },
+      {
+        "type": "address",
+        "name": "owner"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ServiceNotFound",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ServiceNotUnstaked",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TokenTransferFailed",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "token"
+      },
+      {
+        "type": "address",
+        "name": "from"
+      },
+      {
+        "type": "address",
+        "name": "to"
+      },
+      {
+        "type": "uint256",
+        "name": "value"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnauthorizedAccount",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "account"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "WrongAgentId",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "agentId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "WrongServiceState",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "state"
+      },
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "WrongStakingToken",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "expected"
+      },
+      {
+        "type": "address",
+        "name": "provided"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroValue",
+    "inputs": []
+  },
+  {
+    "type": "event",
+    "name": "Checkpoint",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "epoch",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "availableRewards"
+      },
+      {
+        "type": "uint256[]",
+        "name": "serviceIds"
+      },
+      {
+        "type": "uint256[]",
+        "name": "rewards"
+      },
+      {
+        "type": "uint256",
+        "name": "epochLength"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Deposit",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "amount"
+      },
+      {
+        "type": "uint256",
+        "name": "balance"
+      },
+      {
+        "type": "uint256",
+        "name": "availableRewards"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "RewardClaimed",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "epoch"
+      },
+      {
+        "type": "uint256",
+        "name": "serviceId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "owner",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "multisig",
+        "indexed": true
+      },
+      {
+        "type": "uint256[]",
+        "name": "nonces"
+      },
+      {
+        "type": "uint256",
+        "name": "reward"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ServiceStaked",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "epoch"
+      },
+      {
+        "type": "uint256",
+        "name": "serviceId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "owner",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "multisig",
+        "indexed": true
+      },
+      {
+        "type": "uint256[]",
+        "name": "nonces"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ServiceUnstaked",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "epoch"
+      },
+      {
+        "type": "uint256",
+        "name": "serviceId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "owner",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "multisig",
+        "indexed": true
+      },
+      {
+        "type": "uint256[]",
+        "name": "nonces"
+      },
+      {
+        "type": "uint256",
+        "name": "reward"
+      },
+      {
+        "type": "uint256",
+        "name": "availableRewards"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Withdraw",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "to",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "amount"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "activityChecker",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "agentIds",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "availableRewards",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "balance",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "calculateStakingLastReward",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": "reward"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "calculateStakingReward",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": "reward"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "checkpoint",
+    "stateMutability": "nonpayable",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256[]",
+        "name": ""
+      },
+      {
+        "type": "uint256[]",
+        "name": ""
+      },
+      {
+        "type": "uint256[]",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "claim",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": "reward"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "configHash",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "deposit",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "amount"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "emissionsAmount",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "epochCounter",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getNextRewardCheckpointTimestamp",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": "tsNext"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getNumServiceIds",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getServiceIds",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256[]",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getServiceInfo",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "tuple",
+        "name": "sInfo",
+        "components": [
+          {
+            "type": "address",
+            "name": "multisig"
+          },
+          {
+            "type": "address",
+            "name": "owner"
+          },
+          {
+            "type": "uint256[]",
+            "name": "nonces"
+          },
+          {
+            "type": "uint256",
+            "name": "tsStart"
+          },
+          {
+            "type": "uint256",
+            "name": "reward"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getStakingState",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint8",
+        "name": "stakingState"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "tuple",
+        "name": "_stakingParams",
+        "components": [
+          {
+            "type": "bytes32",
+            "name": "metadataHash"
+          },
+          {
+            "type": "uint256",
+            "name": "maxNumServices"
+          },
+          {
+            "type": "uint256",
+            "name": "rewardsPerSecond"
+          },
+          {
+            "type": "uint256",
+            "name": "minStakingDeposit"
+          },
+          {
+            "type": "uint256",
+            "name": "livenessPeriod"
+          },
+          {
+            "type": "uint256",
+            "name": "timeForEmissions"
+          },
+          {
+            "type": "uint256[]",
+            "name": "agentIds"
+          },
+          {
+            "type": "address",
+            "name": "serviceRegistry"
+          },
+          {
+            "type": "address",
+            "name": "activityChecker"
+          },
+          {
+            "type": "address",
+            "name": "serviceRegistryTokenUtility"
+          },
+          {
+            "type": "address",
+            "name": "stakingToken"
+          },
+          {
+            "type": "address",
+            "name": "stakingManager"
+          }
+        ]
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "livenessPeriod",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapServiceInfo",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "address",
+        "name": "multisig"
+      },
+      {
+        "type": "address",
+        "name": "owner"
+      },
+      {
+        "type": "uint256",
+        "name": "tsStart"
+      },
+      {
+        "type": "uint256",
+        "name": "reward"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "maxInactivityDuration",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "maxNumInactivityPeriods",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "maxNumServices",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "metadataHash",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "minStakingDeposit",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "minStakingDuration",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "numAgentInstances",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "onERC721Received",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      },
+      {
+        "type": "address",
+        "name": ""
+      },
+      {
+        "type": "uint256",
+        "name": ""
+      },
+      {
+        "type": "bytes",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes4",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "proxyHash",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "rewardsPerSecond",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "serviceRegistry",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "serviceRegistryTokenUtility",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "setServiceIds",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "stake",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "stakingManager",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "stakingToken",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "threshold",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "timeForEmissions",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "tsCheckpoint",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "unstake",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": "reward"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "VERSION",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "string",
+        "name": ""
+      }
+    ]
+  }
+]

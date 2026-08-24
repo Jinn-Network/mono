@@ -1,0 +1,33 @@
+{
+  "export": "MECH_ABI",
+  "items": [
+    {
+      "type": "event",
+      "name": "Deliver",
+      "inputs": [
+        {
+          "type": "address",
+          "name": "mech",
+          "indexed": true
+        },
+        {
+          "type": "address",
+          "name": "mechServiceMultisig",
+          "indexed": true
+        },
+        {
+          "type": "bytes32",
+          "name": "requestId"
+        },
+        {
+          "type": "uint256",
+          "name": "deliveryRate"
+        },
+        {
+          "type": "bytes",
+          "name": "data"
+        }
+      ]
+    }
+  ]
+}

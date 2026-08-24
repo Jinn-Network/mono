@@ -1,0 +1,1108 @@
+[
+  {
+    "type": "constructor",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "_olas"
+      },
+      {
+        "type": "address",
+        "name": "_serviceManager"
+      },
+      {
+        "type": "address",
+        "name": "_safeMultisigWithRecoveryModule"
+      },
+      {
+        "type": "address",
+        "name": "_safeSameAddressMultisig"
+      },
+      {
+        "type": "address",
+        "name": "_fallbackHandler"
+      },
+      {
+        "type": "address",
+        "name": "_multiSend"
+      },
+      {
+        "type": "address",
+        "name": "_collector"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AlreadyInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ExecutionFailed",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "target"
+      },
+      {
+        "type": "bytes",
+        "name": "payload"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Overflow",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "provided"
+      },
+      {
+        "type": "uint256",
+        "name": "max"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OwnerOnly",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender"
+      },
+      {
+        "type": "address",
+        "name": "owner"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ReentrancyGuard",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UnauthorizedAccount",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "account"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnsupportedStakingType",
+    "inputs": [
+      {
+        "type": "uint8",
+        "name": "stakingType"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "WrongArrayLength",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroValue",
+    "inputs": []
+  },
+  {
+    "type": "event",
+    "name": "Claimed",
+    "inputs": [
+      {
+        "type": "address[]",
+        "name": "stakingProxies"
+      },
+      {
+        "type": "uint256[]",
+        "name": "serviceIds"
+      },
+      {
+        "type": "uint256[]",
+        "name": "rewards"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Deployed",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "serviceId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "multisig",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Deposit",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "operation",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "amount"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ExternalServiceRestaked",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "stakingProxy",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "serviceId",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ExternalServiceStaked",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "stakingProxy",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "serviceId",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "agentId"
+      },
+      {
+        "type": "bytes32",
+        "name": "configHash"
+      },
+      {
+        "type": "uint256",
+        "name": "stakingDeposit"
+      },
+      {
+        "type": "uint256",
+        "name": "stakedBalance"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ExternalServiceUnstaked",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "stakingProxy",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "serviceId",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "stakingDeposit"
+      },
+      {
+        "type": "uint256",
+        "name": "stakedBalance"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ImplementationUpdated",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "implementation",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "MultisigGuardUpdated",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "guard",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "NativeTokenReceived",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "amount"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "OwnerUpdated",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "owner",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "RewardsDistributed",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "serviceId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "multisig",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "collectorAmount"
+      },
+      {
+        "type": "uint256",
+        "name": "protocolAmount"
+      },
+      {
+        "type": "uint256",
+        "name": "curatingAgentAmount"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SetCuratingAgentStatuses",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "stakingGuard",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "stakingProxy",
+        "indexed": true
+      },
+      {
+        "type": "address[]",
+        "name": "managingAgents"
+      },
+      {
+        "type": "bool[]",
+        "name": "statuses"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SetManagingAgentStatuses",
+    "inputs": [
+      {
+        "type": "address[]",
+        "name": "managingAgents"
+      },
+      {
+        "type": "bool[]",
+        "name": "statuses"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SetStakingProxyConfigs",
+    "inputs": [
+      {
+        "type": "address[]",
+        "name": "stakingProxies"
+      },
+      {
+        "type": "uint256[]",
+        "name": "proxyTypes"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "StakingProcessorL2Updated",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "l2StakingProcessor",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Withdraw",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "operation",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "amount"
+      },
+      {
+        "type": "uint256",
+        "name": "unstakeRequestedAmount"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "changeImplementation",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "newImplementation"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "changeMultisigGuard",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "newGuard"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "changeOwner",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "newOwner"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "changeStakingProcessorL2",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "newStakingProcessorL2"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "claim",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address[]",
+        "name": "stakingProxies"
+      },
+      {
+        "type": "uint256[]",
+        "name": "serviceIds"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256[]",
+        "name": "rewards"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "collector",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "deposit",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "amount"
+      },
+      {
+        "type": "bytes32",
+        "name": "operation"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "fallbackHandler",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "guard",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "stateMutability": "nonpayable",
+    "inputs": [],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "l2StakingProcessor",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapCuratingAgents",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapManagingAgents",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapMultisigServiceIds",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapServiceIdCuratingAgents",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapStakingGuardHashCuratingAgents",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      },
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapStakingProxyConfigs",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapUnstakeOperationRequestedAmounts",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "MAX_REWARD_FACTOR",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "multiSend",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "NUM_AGENT_INSTANCES",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "olas",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "onERC721Received",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      },
+      {
+        "type": "address",
+        "name": ""
+      },
+      {
+        "type": "uint256",
+        "name": ""
+      },
+      {
+        "type": "bytes",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes4",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "PROXY_SLOT",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "recoveryModule",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "reStake",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "stakingProxy"
+      },
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "REWARD",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "safeMultisigWithRecoveryModule",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "safeSameAddressMultisig",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "serviceManager",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "serviceRegistry",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "serviceRegistryTokenUtility",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "setCuratingAgents",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "stakingProxy"
+      },
+      {
+        "type": "address[]",
+        "name": "curatingAgents"
+      },
+      {
+        "type": "bool[]",
+        "name": "statuses"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "setManagingAgents",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address[]",
+        "name": "managingAgents"
+      },
+      {
+        "type": "bool[]",
+        "name": "statuses"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "setStakingProxyConfigs",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address[]",
+        "name": "stakingProxies"
+      },
+      {
+        "type": "uint256[]",
+        "name": "configs"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "stake",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "stakingProxy"
+      },
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      },
+      {
+        "type": "uint256",
+        "name": "agentId"
+      },
+      {
+        "type": "bytes32",
+        "name": "configHash"
+      },
+      {
+        "type": "address",
+        "name": "agentInstance"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "stakedBalance",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "THRESHOLD",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "unstakeAndWithdraw",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "stakingProxy"
+      },
+      {
+        "type": "uint256",
+        "name": "serviceId"
+      },
+      {
+        "type": "bytes32",
+        "name": "operation"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "unwrapStakingConfig",
+    "stateMutability": "pure",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "config"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "address",
+        "name": "stakingGuard"
+      },
+      {
+        "type": "uint256",
+        "name": "collectorRewardFactor"
+      },
+      {
+        "type": "uint256",
+        "name": "protocolRewardFactor"
+      },
+      {
+        "type": "uint256",
+        "name": "curatingAgentRewardFactor"
+      },
+      {
+        "type": "uint8",
+        "name": "stakingType"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "VERSION",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "string",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "withdrawAndRequestUnstake",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "amount"
+      },
+      {
+        "type": "bytes32",
+        "name": "operation"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "wrapStakingConfig",
+    "stateMutability": "pure",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "stakingGuard"
+      },
+      {
+        "type": "uint256",
+        "name": "collectorRewardFactor"
+      },
+      {
+        "type": "uint256",
+        "name": "protocolRewardFactor"
+      },
+      {
+        "type": "uint256",
+        "name": "curatingAgentRewardFactor"
+      },
+      {
+        "type": "uint8",
+        "name": "stakingType"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": "config"
+      }
+    ]
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
+  }
+]

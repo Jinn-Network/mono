@@ -1,0 +1,59 @@
+{
+  "name": "@jinn-network/contract-abis",
+  "version": "0.1.0",
+  "description": "Authoritative generated ABIs from contracts/ compile output, with named consumer slices and drift checking.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/contract-abis"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "generated/",
+    "contracts.manifest.json",
+    "slices.manifest.json",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./operator": {
+      "import": "./dist/operator.js",
+      "types": "./dist/operator.d.ts"
+    },
+    "./indexer": {
+      "import": "./dist/indexer.js",
+      "types": "./dist/indexer.d.ts"
+    },
+    "./binding": {
+      "import": "./dist/binding.js",
+      "types": "./dist/binding.d.ts"
+    },
+    "./pick": {
+      "import": "./dist/pick.js",
+      "types": "./dist/pick.d.ts"
+    }
+  },
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "check-drift": "node scripts/check-drift.mjs",
+    "build": "yarn generate && tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.8"
+  }
+}

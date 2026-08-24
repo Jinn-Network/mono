@@ -1,0 +1,816 @@
+[
+  {
+    "type": "error",
+    "name": "RouterAlreadyClaimed",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterAlreadyInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterInsufficientTaskBudget",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint256",
+        "name": "available"
+      },
+      {
+        "type": "uint256",
+        "name": "required"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterInvalidOperatorMech",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "operator"
+      },
+      {
+        "type": "address",
+        "name": "mech"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterInvalidPaymentType",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "paymentType"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterNotDelivered",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterNotInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterOwnerOnly",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender"
+      },
+      {
+        "type": "address",
+        "name": "owner"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterRefundFailed",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "receiver"
+      },
+      {
+        "type": "uint256",
+        "name": "amount"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterRequestNotFound",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterTaskNotFound",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterTaskNotRefundable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterWrongDeliveryOperator",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      },
+      {
+        "type": "address",
+        "name": "expectedOperator"
+      },
+      {
+        "type": "address",
+        "name": "deliveryMech"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterWrongRequester",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      },
+      {
+        "type": "address",
+        "name": "requester"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterWrongRequestKind",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      },
+      {
+        "type": "uint8",
+        "name": "expected"
+      },
+      {
+        "type": "uint8",
+        "name": "actual"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterZeroValue",
+    "inputs": []
+  },
+  {
+    "type": "event",
+    "name": "EvaluationAttemptCreated",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      },
+      {
+        "type": "address",
+        "name": "evaluator"
+      },
+      {
+        "type": "address",
+        "name": "priorityMech"
+      },
+      {
+        "type": "uint256",
+        "name": "deliveryRate"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Initialized",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "owner",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "mechMarketplace",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "taskCoordinator",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "activityChecker"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferred",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "previousOwner",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "newOwner",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SolutionDeliveryClaimed",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "operator",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TaskAttemptCreated",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "operator"
+      },
+      {
+        "type": "address",
+        "name": "priorityMech"
+      },
+      {
+        "type": "uint256",
+        "name": "deliveryRate"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TaskBudgetRefunded",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "creator",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "solutionAmount"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictAmount"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TaskCreated",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "creator",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "manifestDigest",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "taskCidDigest"
+      },
+      {
+        "type": "uint32",
+        "name": "maxClaims"
+      },
+      {
+        "type": "uint256",
+        "name": "solutionBudget"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictBudget"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "VerdictDeliveryClaimed",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "evaluator",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "uint8",
+        "name": "verdictCode"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "activityChecker",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "claimed",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "claimEvaluation",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "address",
+        "name": "evaluatorMech"
+      },
+      {
+        "type": "bytes32",
+        "name": "evaluationTaskCidDigest"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "bytes32",
+        "name": "verdictRequestId"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "claimSolutionDelivery",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      },
+      {
+        "type": "bytes32",
+        "name": "solutionDigest"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "claimTask",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "address",
+        "name": "priorityMech"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "claimVerdictDelivery",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "verdictRequestId"
+      },
+      {
+        "type": "bytes32",
+        "name": "verdictDigest"
+      },
+      {
+        "type": "uint8",
+        "name": "verdictCode"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "createTask",
+    "stateMutability": "payable",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "taskCidDigest"
+      },
+      {
+        "type": "bytes32",
+        "name": "manifestDigest"
+      },
+      {
+        "type": "tuple",
+        "name": "policy",
+        "components": [
+          {
+            "type": "uint32",
+            "name": "maxClaims"
+          },
+          {
+            "type": "bool",
+            "name": "allowSolverSelfEvaluation"
+          }
+        ]
+      },
+      {
+        "type": "uint256",
+        "name": "solutionMaxDeliveryRate"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictMaxDeliveryRate"
+      },
+      {
+        "type": "uint256",
+        "name": "responseTimeout"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "_owner"
+      },
+      {
+        "type": "address",
+        "name": "_mechMarketplace"
+      },
+      {
+        "type": "address",
+        "name": "_taskCoordinator"
+      },
+      {
+        "type": "address",
+        "name": "_activityChecker"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "initialized",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mechMarketplace",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "NATIVE_PAYMENT_TYPE",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "refundUnusedTaskBudget",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "requestKinds",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint8",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "setActivityChecker",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "newActivityChecker"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "solutionDeliveryClaimed",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "taskCoordinator",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "taskPayments",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "address",
+        "name": "creator"
+      },
+      {
+        "type": "bytes32",
+        "name": "taskCidDigest"
+      },
+      {
+        "type": "bytes32",
+        "name": "manifestDigest"
+      },
+      {
+        "type": "uint256",
+        "name": "solutionMaxDeliveryRate"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictMaxDeliveryRate"
+      },
+      {
+        "type": "uint256",
+        "name": "responseTimeout"
+      },
+      {
+        "type": "uint256",
+        "name": "solutionBudgetRemaining"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictBudgetRemaining"
+      },
+      {
+        "type": "bool",
+        "name": "solutionBudgetRefunded"
+      },
+      {
+        "type": "bool",
+        "name": "verdictBudgetRefunded"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "transferOwnership",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "newOwner"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "verdictDeliveryClaimed",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": ""
+      }
+    ]
+  }
+]

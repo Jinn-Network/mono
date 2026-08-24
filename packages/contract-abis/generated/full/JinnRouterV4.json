@@ -1,0 +1,1740 @@
+[
+  {
+    "type": "error",
+    "name": "AuthDomainMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MRDInvalidDomain",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "domain"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MRDInvalidLegKind",
+    "inputs": [
+      {
+        "type": "uint8",
+        "name": "legKind"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MRDInvalidVerdictCode",
+    "inputs": [
+      {
+        "type": "uint8",
+        "name": "verdictCode"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MRDInvalidVersion",
+    "inputs": [
+      {
+        "type": "uint8",
+        "name": "version"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MRDZeroDigest",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterV4AlreadyClaimed",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4AlreadyInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterV4AlreadyPrepared",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4CrossBinding",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterV4InsufficientTaskBudget",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint256",
+        "name": "available"
+      },
+      {
+        "type": "uint256",
+        "name": "required"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4InvalidOperatorMech",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "operator"
+      },
+      {
+        "type": "address",
+        "name": "mech"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4InvalidPaymentType",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "paymentType"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4MarketplaceOnly",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender"
+      },
+      {
+        "type": "address",
+        "name": "marketplace"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4MarketplaceStatusUnavailable",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4MechMismatch",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "expected"
+      },
+      {
+        "type": "address",
+        "name": "actual"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4NonceMismatch",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "expected"
+      },
+      {
+        "type": "uint256",
+        "name": "actual"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4NotDelivered",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4NotInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterV4NotPrepared",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4NotReservationParty",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "expected"
+      },
+      {
+        "type": "address",
+        "name": "actual"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4Overflow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterV4OwnerOnly",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "sender"
+      },
+      {
+        "type": "address",
+        "name": "owner"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4PreparationDelivered",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4RateMismatch",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "expected"
+      },
+      {
+        "type": "uint256",
+        "name": "actual"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4RequestIdMismatch",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "expected"
+      },
+      {
+        "type": "bytes32",
+        "name": "actual"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4ReservationNotLive",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4SignatureInvalid",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterV4TaskNotFound",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4TaskNotRefundable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4TokenApproveFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterV4VerdictCodeMismatch",
+    "inputs": [
+      {
+        "type": "uint8",
+        "name": "expected"
+      },
+      {
+        "type": "uint8",
+        "name": "actual"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4WrongDeliveryOperator",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      },
+      {
+        "type": "address",
+        "name": "expected"
+      },
+      {
+        "type": "address",
+        "name": "deliveryMech"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4WrongRequester",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      },
+      {
+        "type": "address",
+        "name": "requester"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RouterV4ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterV4ZeroValue",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TokenTransferFailed",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "token"
+      },
+      {
+        "type": "address",
+        "name": "from"
+      },
+      {
+        "type": "address",
+        "name": "to"
+      },
+      {
+        "type": "uint256",
+        "name": "value"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "AttemptExpired",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "operator",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "AttemptReleased",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "operator",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "AttemptsAdded",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "creator",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "added"
+      },
+      {
+        "type": "uint32",
+        "name": "newMaxTotal"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "EvaluationAttemptCreated",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "evaluator",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "priorityMech",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "uint64",
+        "name": "attemptDeadline"
+      },
+      {
+        "type": "uint256",
+        "name": "deliveryRate"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Initialized",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "owner",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "mechMarketplace",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "taskCoordinator",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "activityChecker"
+      },
+      {
+        "type": "address",
+        "name": "olasToken"
+      },
+      {
+        "type": "bytes32",
+        "name": "tokenPaymentType"
+      },
+      {
+        "type": "address",
+        "name": "tokenBalanceTracker"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferred",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "previousOwner",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "newOwner",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ReservationForfeited",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      },
+      {
+        "type": "uint256",
+        "name": "rate"
+      },
+      {
+        "type": "uint8",
+        "name": "legKind"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SolutionDeliveryClaimed",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "operator",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "deliveryDigest",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SolutionDeliveryPrepared",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "operator",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "expectedRequestId",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint256",
+        "name": "nonce"
+      },
+      {
+        "type": "bytes32",
+        "name": "deliveryDigest"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TaskAttemptCreated",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "operator",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "priorityMech",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint64",
+        "name": "attemptDeadline"
+      },
+      {
+        "type": "uint256",
+        "name": "deliveryRate"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TaskBudgetRefunded",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "creator",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "solutionAmount"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictAmount"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TaskClosed",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "creator",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TaskCreated",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "creator",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "taskCidDigest",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "submissionDigest",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "maxTotal"
+      },
+      {
+        "type": "uint32",
+        "name": "maxConcurrent"
+      },
+      {
+        "type": "uint64",
+        "name": "submissionDeadline"
+      },
+      {
+        "type": "uint64",
+        "name": "closeAt"
+      },
+      {
+        "type": "uint64",
+        "name": "responseTimeout"
+      },
+      {
+        "type": "uint32",
+        "name": "minVerdicts"
+      },
+      {
+        "type": "bool",
+        "name": "requireDistinctEvaluator"
+      },
+      {
+        "type": "uint256",
+        "name": "solutionMaxDeliveryRate"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictMaxDeliveryRate"
+      },
+      {
+        "type": "uint256",
+        "name": "solutionBudget"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictBudget"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "VerdictDeliveryClaimed",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "evaluator",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "requestId",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "evaluationDeliveryDigest",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "uint8",
+        "name": "verdictCode"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "VerdictDeliveryPrepared",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "evaluator",
+        "indexed": true
+      },
+      {
+        "type": "bytes32",
+        "name": "expectedRequestId",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "uint256",
+        "name": "nonce"
+      },
+      {
+        "type": "bytes32",
+        "name": "deliveryDigest"
+      },
+      {
+        "type": "uint8",
+        "name": "verdictCode"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "activityChecker",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "addAttempts",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "added"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "claimed",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "claimEvaluation",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "address",
+        "name": "evaluatorMech"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "claimSolutionDelivery",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "mech"
+      },
+      {
+        "type": "bytes",
+        "name": "requestData"
+      },
+      {
+        "type": "uint256",
+        "name": "deliveryRate"
+      },
+      {
+        "type": "bytes32",
+        "name": "paymentType"
+      },
+      {
+        "type": "uint256",
+        "name": "nonce"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "claimTask",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "address",
+        "name": "priorityMech"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "claimVerdictDelivery",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "mech"
+      },
+      {
+        "type": "bytes",
+        "name": "requestData"
+      },
+      {
+        "type": "uint256",
+        "name": "deliveryRate"
+      },
+      {
+        "type": "bytes32",
+        "name": "paymentType"
+      },
+      {
+        "type": "uint256",
+        "name": "nonce"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "closeTask",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "createTask",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "taskCidDigest"
+      },
+      {
+        "type": "bytes32",
+        "name": "submissionDigest"
+      },
+      {
+        "type": "tuple",
+        "name": "policy",
+        "components": [
+          {
+            "type": "uint32",
+            "name": "maxTotal"
+          },
+          {
+            "type": "uint32",
+            "name": "maxConcurrent"
+          },
+          {
+            "type": "uint64",
+            "name": "submissionDeadline"
+          },
+          {
+            "type": "uint64",
+            "name": "closeAt"
+          },
+          {
+            "type": "uint64",
+            "name": "responseTimeout"
+          },
+          {
+            "type": "uint32",
+            "name": "minVerdicts"
+          },
+          {
+            "type": "bool",
+            "name": "requireDistinctEvaluator"
+          }
+        ]
+      },
+      {
+        "type": "uint256",
+        "name": "solutionMaxDeliveryRate"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictMaxDeliveryRate"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "encodeAuthSignature",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint8",
+        "name": "legKind"
+      },
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "address",
+        "name": "mech"
+      },
+      {
+        "type": "bytes",
+        "name": "requestData"
+      },
+      {
+        "type": "uint256",
+        "name": "rate"
+      },
+      {
+        "type": "uint256",
+        "name": "nonce"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "forfeitDeliveredReservation",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "uint8",
+        "name": "legKind"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "_owner"
+      },
+      {
+        "type": "address",
+        "name": "_mechMarketplace"
+      },
+      {
+        "type": "address",
+        "name": "_taskCoordinator"
+      },
+      {
+        "type": "address",
+        "name": "_activityChecker"
+      },
+      {
+        "type": "address",
+        "name": "_olasToken"
+      },
+      {
+        "type": "bytes32",
+        "name": "_tokenPaymentType"
+      },
+      {
+        "type": "address",
+        "name": "_tokenBalanceTracker"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "initialized",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "isValidSignature",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "hash"
+      },
+      {
+        "type": "bytes",
+        "name": "signature"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes4",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mechMarketplace",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "olasToken",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "prepareSolutionDelivery",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "bytes32",
+        "name": "deliveryDigest"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": "expectedRequestId"
+      },
+      {
+        "type": "uint256",
+        "name": "nonce"
+      },
+      {
+        "type": "bytes",
+        "name": "requestData"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "prepareVerdictDelivery",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "bytes32",
+        "name": "deliveryDigest"
+      },
+      {
+        "type": "uint8",
+        "name": "verdictCode"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": "expectedRequestId"
+      },
+      {
+        "type": "uint256",
+        "name": "nonce"
+      },
+      {
+        "type": "bytes",
+        "name": "requestData"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "refundUnusedTaskBudget",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "releaseAttempt",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "releaseVerdict",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "setActivityChecker",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "newActivityChecker"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "solutionPreparations",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      },
+      {
+        "type": "uint32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": "prepared"
+      },
+      {
+        "type": "bytes32",
+        "name": "expectedRequestId"
+      },
+      {
+        "type": "uint256",
+        "name": "preparedNonce"
+      },
+      {
+        "type": "bytes32",
+        "name": "requestDataHash"
+      },
+      {
+        "type": "bytes32",
+        "name": "deliveryDigest"
+      },
+      {
+        "type": "uint8",
+        "name": "verdictCode"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "solutionReservations",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      },
+      {
+        "type": "uint32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint8",
+        "name": "kind"
+      },
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "address",
+        "name": "party"
+      },
+      {
+        "type": "address",
+        "name": "priorityMech"
+      },
+      {
+        "type": "uint256",
+        "name": "rate"
+      },
+      {
+        "type": "uint64",
+        "name": "deadline"
+      },
+      {
+        "type": "bool",
+        "name": "settled"
+      },
+      {
+        "type": "bool",
+        "name": "released"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "taskCoordinator",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "taskPayments",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "address",
+        "name": "creator"
+      },
+      {
+        "type": "bytes32",
+        "name": "taskCidDigest"
+      },
+      {
+        "type": "bytes32",
+        "name": "submissionDigest"
+      },
+      {
+        "type": "uint256",
+        "name": "solutionMaxDeliveryRate"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictMaxDeliveryRate"
+      },
+      {
+        "type": "uint256",
+        "name": "responseTimeout"
+      },
+      {
+        "type": "uint256",
+        "name": "solutionBudgetRemaining"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictBudgetRemaining"
+      },
+      {
+        "type": "uint256",
+        "name": "solutionReserved"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictReserved"
+      },
+      {
+        "type": "uint256",
+        "name": "solutionSpentOut"
+      },
+      {
+        "type": "uint256",
+        "name": "verdictSpentOut"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "tokenBalanceTracker",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "tokenPaymentType",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "transferOwnership",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "newOwner"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "verdictPreparations",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      },
+      {
+        "type": "uint32",
+        "name": ""
+      },
+      {
+        "type": "uint32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bool",
+        "name": "prepared"
+      },
+      {
+        "type": "bytes32",
+        "name": "expectedRequestId"
+      },
+      {
+        "type": "uint256",
+        "name": "preparedNonce"
+      },
+      {
+        "type": "bytes32",
+        "name": "requestDataHash"
+      },
+      {
+        "type": "bytes32",
+        "name": "deliveryDigest"
+      },
+      {
+        "type": "uint8",
+        "name": "verdictCode"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "verdictReservations",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      },
+      {
+        "type": "uint32",
+        "name": ""
+      },
+      {
+        "type": "uint32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint8",
+        "name": "kind"
+      },
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "address",
+        "name": "party"
+      },
+      {
+        "type": "address",
+        "name": "priorityMech"
+      },
+      {
+        "type": "uint256",
+        "name": "rate"
+      },
+      {
+        "type": "uint64",
+        "name": "deadline"
+      },
+      {
+        "type": "bool",
+        "name": "settled"
+      },
+      {
+        "type": "bool",
+        "name": "released"
+      }
+    ]
+  }
+]

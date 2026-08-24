@@ -1,0 +1,146 @@
+{
+  "slices": {
+    "operatorJinnRouter": {
+      "contract": "JinnRouterV3",
+      "export": "JINN_ROUTER_ABI",
+      "items": [
+        "taskCoordinator",
+        "createTask",
+        "claimTask",
+        "TaskCreated",
+        "TaskAttemptCreated",
+        "claimEvaluation",
+        "EvaluationAttemptCreated",
+        "claimSolutionDelivery",
+        "claimVerdictDelivery",
+        "SolutionDeliveryClaimed",
+        "VerdictDeliveryClaimed",
+        "TaskBudgetRefunded",
+        "claimed"
+      ]
+    },
+    "indexerJinnRouter": {
+      "contract": "JinnRouterV3",
+      "export": "JINN_ROUTER_ABI",
+      "items": [
+        "TaskCreated",
+        "TaskAttemptCreated",
+        "SolutionDeliveryClaimed",
+        "VerdictDeliveryClaimed",
+        "TaskBudgetRefunded",
+        "taskCoordinator",
+        "createTask"
+      ]
+    },
+    "bindingJinnRouterV3": {
+      "contract": "JinnRouterV3",
+      "export": "JINN_ROUTER_V3_ABI",
+      "items": [
+        "createTask",
+        "refundUnusedTaskBudget",
+        "claimTask",
+        "claimEvaluation",
+        "claimed",
+        "taskPayments",
+        "claimSolutionDelivery",
+        "claimVerdictDelivery",
+        "TaskCreated",
+        "TaskAttemptCreated",
+        "EvaluationAttemptCreated",
+        "SolutionDeliveryClaimed",
+        "VerdictDeliveryClaimed",
+        "TaskBudgetRefunded"
+      ]
+    },
+    "bindingJinnRouterV4": {
+      "contract": "JinnRouterV4",
+      "export": "JINN_ROUTER_V4_ABI",
+      "items": [
+        "claimTask",
+        "claimEvaluation",
+        "prepareSolutionDelivery",
+        "prepareVerdictDelivery",
+        "releaseAttempt",
+        "releaseVerdict",
+        "forfeitDeliveredReservation",
+        "closeTask",
+        "claimSolutionDelivery",
+        "claimVerdictDelivery"
+      ]
+    },
+    "indexerTaskCoordinator": {
+      "contract": "TaskCoordinator",
+      "export": "TASK_COORDINATOR_ABI",
+      "items": ["nextTaskId"]
+    },
+    "bindingTaskCoordinator": {
+      "contract": "TaskCoordinator",
+      "export": "TASK_COORDINATOR_ABI",
+      "items": ["TaskClaimed", "TaskCreated", "getAttempt", "getTask"]
+    },
+    "operatorMechMarketplace": {
+      "contract": "MechMarketplace",
+      "export": "MECH_MARKETPLACE_ABI",
+      "items": [
+        "request",
+        "mapRequestCounts",
+        "minResponseTimeout",
+        "maxResponseTimeout",
+        "mapRequestIdInfos",
+        "MarketplaceRequest"
+      ]
+    },
+    "bindingMechMarketplace": {
+      "contract": "MechMarketplace",
+      "export": "MECH_MARKETPLACE_ABI",
+      "items": [
+        "mapAgentMechFactories",
+        "request",
+        "mapRequestIdInfos",
+        "MarketplaceRequest"
+      ]
+    },
+    "operatorMechMarketplaceDeliver": {
+      "contract": "MechMarketplace",
+      "export": "MECH_MARKETPLACE_DELIVER_ABI",
+      "items": ["deliverMarketplace"]
+    },
+    "operatorOlasMech": {
+      "contract": "OlasMech",
+      "export": "MECH_ABI",
+      "items": [
+        "paymentType",
+        "maxDeliveryRate",
+        "deliverToMarketplace",
+        "isOperator",
+        "getOperator",
+        "Deliver"
+      ]
+    },
+    "bindingMechDeliverEvent": {
+      "contract": "OlasMech",
+      "export": "MECH_ABI",
+      "items": ["Deliver"]
+    },
+    "bindingMechOperator": {
+      "contract": "OlasMech",
+      "export": "MECH_OPERATOR_ABI",
+      "items": ["getOperator"]
+    },
+    "bindingMechDeliverToMarketplace": {
+      "contract": "OlasMech",
+      "export": "MECH_DELIVER_TO_MARKETPLACE_ABI",
+      "items": ["deliverToMarketplace"]
+    },
+    "indexerExternalStakingDistributor": {
+      "contract": "ExternalStakingDistributor",
+      "export": "EXTERNAL_STAKING_DISTRIBUTOR_ABI",
+      "items": ["RewardsDistributed"]
+    },
+    "indexerStolasStakingProxy": {
+      "contract": "StakingTokenLocked",
+      "export": "STOLAS_STAKING_PROXY_ABI",
+      "items": ["mapServiceInfo", "ServiceStaked", "Checkpoint"]
+    }
+  }
+}
