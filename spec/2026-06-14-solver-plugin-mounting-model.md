@@ -2,7 +2,7 @@
 
 - **Date:** 2026-06-14
 - **Author:** claude (spike on `spike/296-investigate-why-are-solverplugins-copied-per-task-into-home`; Captain ritsukai)
-- **Status:** Proposal (spike finding)
+- **Status:** Implemented (#1242)
 - **Version:** 0.1
 - **Issue:** [#296](https://github.com/Jinn-Network/mono/issues/296) — investigate: why are SolverPlugins copied per-task into `$HOME/.jinn-client/solver-plugins/`, and what should the layout be?
 - **Tracks:** Phase A.2 SolverPlugin mechanism (`spec/2026-05-01-harness-pack-architecture.md` §11.6). Replaces the env-injection band-aid shipped in #294/#299.
