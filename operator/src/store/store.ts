@@ -968,19 +968,6 @@ export class Store {
     this.recordActivityEvent({ ts, kind: role, requestId });
   }
 
-  /**
-   * Membership-only variant of `recordOwnActivity`: writes the
-   * `own_activity` row but does NOT emit a generic `activity_events`
-   * row. Used by paths that emit their own enriched activity event
-   * (e.g. issue #815's claim path attaches credentialId / aiUnits /
-   * estimatedCostUsdMicros / claimStatus to the row).
-   */
-  markOwnActivity(requestId: string, role: 'created' | 'claimed' | 'delivered' | 'evaluated'): void {
-    this.db.prepare(
-      `INSERT OR REPLACE INTO own_activity (request_id, role) VALUES (?, ?)`
-    ).run(requestId, role);
-  }
-
   isOwnActivity(requestId: string): boolean {
     const row = this.db.prepare('SELECT 1 FROM own_activity WHERE request_id = ?').get(requestId);
     return row !== undefined;
@@ -2210,10 +2197,6 @@ export class Store {
     tx();
   }
 
-  getTaskEvidenceHash(_requestId: string): string | null {
-    return null;
-  }
-
   getLastProcessedBlock(): bigint | null {
     const row = this.db.prepare('SELECT value FROM config WHERE key = ?').get('last_processed_block') as { value: string } | undefined;
     return row?.value ? BigInt(row.value) : null;
@@ -2304,27 +2287,6 @@ export class Store {
     }));
   }
 
-  insertRemoteArtifact(artifact: {
-    id: string;
-    taskId: string;
-    requestId: string;
-    title: string;
-    tags: string[];
-    outcome: 'SUCCESS' | 'FAILURE' | 'UNKNOWN';
-    ownerAddress: string;
-    endpoint: string;
-    price?: string;
-  }): void {
-    this.db.prepare(`
-      INSERT OR REPLACE INTO artifacts (id, task_id, request_id, title, tags, outcome, remote, owner_address, endpoint, price)
-      VALUES (@id, @taskId, @requestId, @title, @tags, @outcome, 1, @ownerAddress, @endpoint, @price)
-    `).run({
-      ...artifact,
-      tags: JSON.stringify(artifact.tags),
-      price: artifact.price ?? null,
-    });
-  }
-
   /**
    * Text body for a catalog artifact id: local `artifacts.content`, else a peer-cached
    * blob in `network_artifacts` (via `peer_catalog_id`).
@@ -2340,19 +2302,6 @@ export class Store {
     ).get(id) as { content: Buffer } | undefined;
     if (!net) return null;
     return net.content.toString('utf-8');
-  }
-
-  /** Endpoint / owner for a remote (peer-synced) catalog row in `artifacts`. */
-  getRemoteDiscoveryMetadata(id: string): { endpoint: string; ownerAddress: string; price?: string } | null {
-    const row = this.db.prepare(
-      'SELECT endpoint, owner_address, price FROM artifacts WHERE id = ? AND remote = 1',
-    ).get(id) as { endpoint: string; owner_address: string; price: string | null } | undefined;
-    if (!row) return null;
-    return {
-      endpoint: row.endpoint,
-      ownerAddress: row.owner_address,
-      price: row.price ?? undefined,
-    };
   }
 
   getArtifactByRequestId(requestId: string, tag: string): { id: string; title: string; content: string; tags: string[]; outcome: string } | null {
