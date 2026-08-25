@@ -77,7 +77,7 @@ Classify each current-sprint item into one lane:
 
 1. **Needs Human**
    - explicit Human lifecycle overlay;
-   - CODEOWNER-sensitive PR awaiting Human approval;
+   - human-surface PR awaiting CODEOWNER Approve;
    - design/product/scope decision;
    - ambiguous legacy mapping or unpublished local work reported during
      cutover;
@@ -87,16 +87,27 @@ Classify each current-sprint item into one lane:
    - actively implementing draft;
    - ready for independent review;
    - open review-finding or reconcile child issues (marker-bearing fixes);
-   - merge candidate waiting on ordinary native gates;
+   - enqueue candidate waiting on required checks, or an entry already in the
+     merge queue;
    - stale item eligible for recovery.
 3. **Non-Autopilot**
    - epics/trackers;
    - unsupported or under-specified shapes;
    - work intentionally outside the v2 marker protocol.
 
-Automated review is not a Human review substitute. It may approve only an
-approve-eligible, non-CODEOWNER PR under a reviewer identity distinct from the
-author. Human CODEOWNER, CI, review, and merge gates remain authoritative.
+Review is a pipeline stage, not an identity ritual (handbook rule 4, rewritten
+by [`DR-2026-08-18-b`](../../../log/decisions/2026-08-18-merge-queue-on-next.md)
+and amended by
+[`DR-2026-08-20`](../../../log/decisions/2026-08-20-human-surface-enqueue-gate.md)).
+The merge queue on `next` plus the required-check set is the quality gate. The
+generic approving-review count on `next` is 0: an agent review pass is
+expected, no generic Approve is required, and no claim of independence attaches
+to the reviewing credential. CODEOWNER Approve is still required when the diff
+hits the human-surface set in `.github/CODEOWNERS`; GitHub will not record the
+authoring account's own approval, so those PRs are authored under a non-owner
+operator credential — platform plumbing, not an independence claim. Self-enqueue
+is permitted once required checks are green, and the merge queue is the only
+merger of ordinary PRs into `next`.
 
 ## Output
 
@@ -119,8 +130,9 @@ Relevant drift flags:
 - stale real progress beyond two hours;
 - Human-held PR accidentally made ready;
 - code-changing session whose PR is not draft;
-- ready PR without exact-current-head review;
-- red/pending CI or missing CODEOWNER approval;
+- human-surface PR whose CODEOWNER Approve does not match the current head
+  (a post-approval push dismisses it);
+- red/pending required checks, or a queue entry ejected for flake;
 - Done issue still open, or merged PR not projected Done;
 - cleanup retained because local state is dirty, ahead, missing, or ambiguous;
 - sprint age/bloat and canary/release drift.
@@ -133,7 +145,9 @@ Explain controls without running them:
 - `recover` — reconcile projections and recover stale v2 work, but create no
   new claims.
 - `active` — recover, claim new work within this runner’s caps, review, and
-  merge through the children ladder and ordinary gates.
+  enqueue through the children ladder and the merge queue. Autopilot enqueues;
+  it never merges, and never bypasses or weakens the queue or branch
+  protection.
 
 Do not start any mode from this skill. Do not recommend running legacy and v2
 dispatch together. If activation or recovery is needed, link the cutover
