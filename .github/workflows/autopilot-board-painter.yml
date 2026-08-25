@@ -76,4 +76,15 @@ jobs:
           JINN_AUTOPILOT_PAINTER_TOKEN: ${{ secrets.JINN_AUTOPILOT_PAINTER_TOKEN }}
           JINN_IMPL_GH_TOKEN: ${{ secrets.JINN_IMPL_GH_TOKEN }}
           GH_TOKEN: ${{ secrets.JINN_AUTOPILOT_PAINTER_TOKEN || secrets.JINN_IMPL_GH_TOKEN }}
+          # scripts/paint-board.ts calls runPaintBoard() with
+          # legacyPaintBoardOptions(), which reads the standalone repo's
+          # module-level ORG/REPO/PROJECT_NUMBER bindings
+          # (src/dispatcher/constants.ts) — it never loads
+          # .autopilot/config.json or calls configureRepositoryConstants()
+          # the way scripts/run-autopilot-v2.ts does. Those bindings default
+          # to '' / 0 unless these env vars are set, which is what produced
+          # `-F owner= -F projectNumber=0` in run 32888901880.
+          AUTOPILOT_PROJECT_OWNER: Jinn-Network
+          AUTOPILOT_PROJECT_NUMBER: '1'
+          AUTOPILOT_REPOSITORY_SLUG: Jinn-Network/mono
         run: yarn paint-board
