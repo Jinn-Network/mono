@@ -2030,7 +2030,7 @@
       "decisionRecords": 6,
       "discoveredFirstPartySurfaces": 4189,
       "generatedOutputSources": 1414,
-      "generatorSources": 686,
+      "generatorSources": 688,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 7
@@ -3167,6 +3167,26 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/required-check-set.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/resolve-autopilot.sh"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/resolve-autopilot.test.mjs"
       },
       {
         "categories": [
