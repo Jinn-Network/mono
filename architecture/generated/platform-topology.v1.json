@@ -2024,7 +2024,7 @@
       "decisionRecords": 6,
       "discoveredFirstPartySurfaces": 4045,
       "generatedOutputSources": 1414,
-      "generatorSources": 676,
+      "generatorSources": 677,
       "marketplaceControl": 2,
       "requiredGates": 24,
       "staticControl": 7
@@ -3341,6 +3341,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/stack-trusted-publishers.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/task-execution-ci-workflow.test.mjs"
       },
       {
         "categories": [
