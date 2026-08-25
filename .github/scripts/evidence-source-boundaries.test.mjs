@@ -17,7 +17,7 @@ const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
   join(root, 'operator'),
   ...[
-    'autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin',
+    'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin',
     'sdk',
   ].map((directory) => join(root, 'packages', directory)),
 ];
