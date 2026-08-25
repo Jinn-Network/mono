@@ -71,7 +71,7 @@ const JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS: Readonly<Record<JudgeModelPro
 
 const EVALUATION_PARSER_ID = "network.jinn.parser.binary-judgment-evaluation";
 const EVALUATION_PARSER_VERSION = "1.0.0";
-const EVALUATION_PARSER_SHA256 = "5a2c2d2f01c9154bb7000f3c3183d1fc27e9e9a1571445f248b56fa25f45ef0a";
+const EVALUATION_PARSER_SHA256 = "3568ee132ece234c15b7f9b6b4a7a954aefc2c417e17f2fde91729a7240bb343";
 interface FrozenResponseParse {
   readonly decision: "ACCEPT" | "REJECT";
   readonly parseValid: boolean;
@@ -82,7 +82,7 @@ interface FrozenResponseParse {
  * `unexpected-token`) into one. That is the only behavioral liberty this mirror takes, and it is
  * forced: the signed measurements this oracle replays against carry `judgeDecision` and
  * `parseValid` and no reason field, so there is nothing here for a reason to be checked against.
- * Every other line of the five behaviors is a mechanical transcription of the source named above.
+ * Every other line of the nine behaviors is a mechanical transcription of the source named above.
  */
 const RESPONSE_PARSE_INVALID: FrozenResponseParse = { decision: "REJECT", parseValid: false };
 
@@ -199,6 +199,82 @@ function parseJsonVerdictResponse(bytes: Uint8Array): FrozenResponseParse {
   return RESPONSE_PARSE_INVALID;
 }
 
+function parseObjectRoot(text: string): Record<string, unknown> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : undefined;
+}
+
+function labelDecision(accepted: boolean): FrozenResponseParse {
+  return { decision: accepted ? "ACCEPT" : "REJECT", parseValid: true };
+}
+
+function parseCompleteJsonLabelResponse(bytes: Uint8Array): FrozenResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return RESPONSE_PARSE_INVALID;
+  const parsed = parseObjectRoot(decoded);
+  if (parsed === undefined) return RESPONSE_PARSE_INVALID;
+  const label = Object.hasOwn(parsed, "label") ? parsed["label"] : "WRONG";
+  if (typeof label !== "string") return RESPONSE_PARSE_INVALID;
+  return labelDecision(label.toUpperCase() === "CORRECT");
+}
+
+function extractEvermemJson(text: string): string {
+  const fenced = /```(?:json)?\s*(\{[^`]*\})\s*```/s.exec(text);
+  if (fenced?.[1] !== undefined) return fenced[1];
+  const flat = /\{[^{}]*"label"\s*:\s*"[^"]*"[^{}]*\}/s.exec(text);
+  return flat?.[0] ?? text.trim();
+}
+
+function parseEvermemJsonLabelResponse(bytes: Uint8Array): FrozenResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return RESPONSE_PARSE_INVALID;
+  const parsed = parseObjectRoot(extractEvermemJson(decoded));
+  if (parsed === undefined) return RESPONSE_PARSE_INVALID;
+  const label = parsed["label"];
+  if (typeof label !== "string" || label.length === 0) return RESPONSE_PARSE_INVALID;
+  return labelDecision(label.trim().toUpperCase() === "CORRECT");
+}
+
+function extractMem0Json(text: string): string {
+  const trimmed = text.trim();
+  const fenced = /```(?:json)?\s*(.*?)\s*```/s.exec(trimmed);
+  return fenced?.[1] ?? trimmed;
+}
+
+function parseMem0JsonLabelResponse(bytes: Uint8Array): FrozenResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return RESPONSE_PARSE_INVALID;
+  const parsed = parseObjectRoot(extractMem0Json(decoded));
+  if (parsed === undefined || !Object.hasOwn(parsed, "label")) return RESPONSE_PARSE_INVALID;
+  return labelDecision(parsed["label"] === "CORRECT");
+}
+
+function parseStrictJsonLabelResponse(bytes: Uint8Array): FrozenResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return RESPONSE_PARSE_INVALID;
+  const parsed = parseObjectRoot(decoded);
+  if (parsed === undefined) return RESPONSE_PARSE_INVALID;
+  const memberNames = rootObjectMemberNames(decoded);
+  if (
+    memberNames.length !== 2
+    || memberNames.filter((name) => name === "label").length !== 1
+    || memberNames.filter((name) => name === "reasoning").length !== 1
+  ) return RESPONSE_PARSE_INVALID;
+  if (typeof parsed["label"] !== "string" || typeof parsed["reasoning"] !== "string") {
+    return RESPONSE_PARSE_INVALID;
+  }
+  if (parsed["label"] === "CORRECT") return labelDecision(true);
+  if (parsed["label"] === "WRONG") return labelDecision(false);
+  return RESPONSE_PARSE_INVALID;
+}
+
 function isAsciiWordCharCode(codeUnit: number): boolean {
   return (codeUnit >= 0x41 && codeUnit <= 0x5a) // A-Z
     || (codeUnit >= 0x61 && codeUnit <= 0x7a) // a-z
@@ -254,10 +330,20 @@ const RESPONSE_PARSER_REGISTRY: ReadonlyMap<string, {
     digest: "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073",
     parse: (bytes: Uint8Array) => parseWholeOutputToken(bytes, "ACCEPT", "REJECT"),
   }],
+  ["network.jinn.parser.binary-complete-json-label", {
+    version: "1.0.0",
+    digest: "sha256:db1215184eb98aec6fe26f5412e6e823fbd19f75c5c080fbb58ecd1968503f4b",
+    parse: parseCompleteJsonLabelResponse,
+  }],
   ["network.jinn.parser.binary-correct-wrong", {
     version: "1.0.0",
     digest: "sha256:2dd7e73c9ee063edb00fe7859821eee1122b483d4bd70568aebb046a6983ac4c",
     parse: (bytes: Uint8Array) => parseWholeOutputToken(bytes, "CORRECT", "WRONG"),
+  }],
+  ["network.jinn.parser.binary-evermem-json-label", {
+    version: "1.0.0",
+    digest: "sha256:4834ba3e6c817c560c72afb93a4a5b56c0cf654cf6ff1012843ea7675f507942",
+    parse: parseEvermemJsonLabelResponse,
   }],
   ["network.jinn.parser.binary-json-verdict", {
     version: "1.0.0",
@@ -268,6 +354,16 @@ const RESPONSE_PARSER_REGISTRY: ReadonlyMap<string, {
     version: "1.0.0",
     digest: "sha256:d53d23afc8734090c8d54c39de8105ead37c3ecad0cf0f454e97a535e5937f10",
     parse: parseLabelInProseResponse,
+  }],
+  ["network.jinn.parser.binary-mem0-json-label", {
+    version: "1.0.0",
+    digest: "sha256:7453de03b2614395b6cd223f6bfb104d924dfcbd05006d38328307bd7a1d825a",
+    parse: parseMem0JsonLabelResponse,
+  }],
+  ["network.jinn.parser.binary-strict-json-label", {
+    version: "1.0.0",
+    digest: "sha256:e5c723c97a55d631d26a8da2badea0df755943987cd679acf7bad7653f48dca6",
+    parse: parseStrictJsonLabelResponse,
   }],
   ["network.jinn.parser.binary-yes-no", {
     version: "1.0.0",

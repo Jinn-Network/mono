@@ -50,7 +50,19 @@ const JSON_VERDICT_PARSER_DIGEST = "sha256:543a71887f3ae95b0aede4513af3fdeadfc70
 const LABEL_IN_PROSE_PARSER_ID = "network.jinn.parser.binary-label-in-prose" as const;
 const LABEL_IN_PROSE_PARSER_VERSION = "1.0.0" as const;
 const LABEL_IN_PROSE_PARSER_DIGEST = "sha256:d53d23afc8734090c8d54c39de8105ead37c3ecad0cf0f454e97a535e5937f10" as const;
-const EVALUATION_METHOD_DIGEST = "sha256:5a2c2d2f01c9154bb7000f3c3183d1fc27e9e9a1571445f248b56fa25f45ef0a" as const;
+const COMPLETE_JSON_LABEL_PARSER_ID = "network.jinn.parser.binary-complete-json-label" as const;
+const COMPLETE_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
+const COMPLETE_JSON_LABEL_PARSER_DIGEST = "sha256:db1215184eb98aec6fe26f5412e6e823fbd19f75c5c080fbb58ecd1968503f4b" as const;
+const EVERMEM_JSON_LABEL_PARSER_ID = "network.jinn.parser.binary-evermem-json-label" as const;
+const EVERMEM_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
+const EVERMEM_JSON_LABEL_PARSER_DIGEST = "sha256:4834ba3e6c817c560c72afb93a4a5b56c0cf654cf6ff1012843ea7675f507942" as const;
+const MEM0_JSON_LABEL_PARSER_ID = "network.jinn.parser.binary-mem0-json-label" as const;
+const MEM0_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
+const MEM0_JSON_LABEL_PARSER_DIGEST = "sha256:7453de03b2614395b6cd223f6bfb104d924dfcbd05006d38328307bd7a1d825a" as const;
+const STRICT_JSON_LABEL_PARSER_ID = "network.jinn.parser.binary-strict-json-label" as const;
+const STRICT_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
+const STRICT_JSON_LABEL_PARSER_DIGEST = "sha256:e5c723c97a55d631d26a8da2badea0df755943987cd679acf7bad7653f48dca6" as const;
+const EVALUATION_METHOD_DIGEST = "sha256:3568ee132ece234c15b7f9b6b4a7a954aefc2c417e17f2fde91729a7240bb343" as const;
 const RUN_OWNER = "urn:uuid:77777777-7777-5777-8777-777777777777";
 const RESPONSE_MEDIA_TYPE = "text/plain; charset=utf-8";
 const OBSERVATION_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.observation.v1+json";
@@ -200,9 +212,15 @@ function encodeParserResponse(
   parseValid: boolean,
 ): string {
   switch (parserId) {
+    case COMPLETE_JSON_LABEL_PARSER_ID:
+      return JSON.stringify({ label: parseValid ? (decision === "ACCEPT" ? "CORRECT" : "WRONG") : 7 });
     case CORRECT_WRONG_PARSER_ID:
       if (!parseValid) return "MAYBE";
       return decision === "ACCEPT" ? "CORRECT" : "WRONG";
+    case EVERMEM_JSON_LABEL_PARSER_ID:
+      return parseValid
+        ? `Result: \`\`\`json\n${JSON.stringify({ label: decision === "ACCEPT" ? "CORRECT" : "WRONG" })}\n\`\`\``
+        : "Result: not-json";
     case JSON_VERDICT_PARSER_ID:
       return JSON.stringify({ verdict: parseValid ? decision : "MAYBE" });
     case LABEL_IN_PROSE_PARSER_ID:
@@ -212,6 +230,14 @@ function encodeParserResponse(
       return decision === "ACCEPT"
         ? "The reviewer weighed the candidate against the reference and settled on ACCEPT."
         : "The reviewer weighed the candidate against the reference and settled on REJECT.";
+    case MEM0_JSON_LABEL_PARSER_ID:
+      return parseValid
+        ? `\`\`\`json\n${JSON.stringify({ label: decision === "ACCEPT" ? "CORRECT" : "WRONG" })}\n\`\`\``
+        : JSON.stringify({ reasoning: "missing label" });
+    case STRICT_JSON_LABEL_PARSER_ID:
+      return parseValid
+        ? JSON.stringify({ label: decision === "ACCEPT" ? "CORRECT" : "WRONG", reasoning: "fixture" })
+        : JSON.stringify({ label: decision === "ACCEPT" ? "CORRECT" : "WRONG" });
     case YES_NO_PARSER_ID:
       if (!parseValid) return "MAYBE";
       return decision === "ACCEPT" ? "YES" : "NO";
@@ -937,6 +963,12 @@ describe("binary-instrument@1 qualification oracle", () => {
       responseParserDigest: YES_NO_PARSER_DIGEST,
     },
     {
+      name: "complete-json-label",
+      responseParserId: COMPLETE_JSON_LABEL_PARSER_ID,
+      responseParserVersion: COMPLETE_JSON_LABEL_PARSER_VERSION,
+      responseParserDigest: COMPLETE_JSON_LABEL_PARSER_DIGEST,
+    },
+    {
       name: "correct-wrong",
       responseParserId: CORRECT_WRONG_PARSER_ID,
       responseParserVersion: CORRECT_WRONG_PARSER_VERSION,
@@ -953,6 +985,24 @@ describe("binary-instrument@1 qualification oracle", () => {
       responseParserId: LABEL_IN_PROSE_PARSER_ID,
       responseParserVersion: LABEL_IN_PROSE_PARSER_VERSION,
       responseParserDigest: LABEL_IN_PROSE_PARSER_DIGEST,
+    },
+    {
+      name: "evermem-json-label",
+      responseParserId: EVERMEM_JSON_LABEL_PARSER_ID,
+      responseParserVersion: EVERMEM_JSON_LABEL_PARSER_VERSION,
+      responseParserDigest: EVERMEM_JSON_LABEL_PARSER_DIGEST,
+    },
+    {
+      name: "mem0-json-label",
+      responseParserId: MEM0_JSON_LABEL_PARSER_ID,
+      responseParserVersion: MEM0_JSON_LABEL_PARSER_VERSION,
+      responseParserDigest: MEM0_JSON_LABEL_PARSER_DIGEST,
+    },
+    {
+      name: "strict-json-label",
+      responseParserId: STRICT_JSON_LABEL_PARSER_ID,
+      responseParserVersion: STRICT_JSON_LABEL_PARSER_VERSION,
+      responseParserDigest: STRICT_JSON_LABEL_PARSER_DIGEST,
     },
   ])(
     "accepts an instrument naming a different registered response parser, replayed against that parser's own alphabet ($name)",
