@@ -1716,7 +1716,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 
 ## Architecture-control ownership
 
-Task 6's validator reports 5065 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 5067 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1731,7 +1731,7 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | decisionRecords | 6 |
 | discoveredFirstPartySurfaces | 4205 |
 | generatedOutputSources | 1430 |
-| generatorSources | 686 |
+| generatorSources | 688 |
 | marketplaceControl | 2 |
 | requiredGates | 25 |
 | staticControl | 7 |

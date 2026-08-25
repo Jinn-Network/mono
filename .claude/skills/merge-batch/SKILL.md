@@ -44,9 +44,11 @@ authoritative.
 Read all open PRs, including stack layers, and the v2 observer:
 
 ```bash
+# shellcheck disable=SC1091
+. "$(git rev-parse --show-toplevel)/.github/scripts/resolve-autopilot.sh"
 gh pr list --repo Jinn-Network/mono --state open \
   --json number,title,author,headRefName,headRefOid,baseRefName,isDraft,mergeable,statusCheckRollup,body
-yarn --cwd packages/autopilot autopilot --mode observe --once --json status
+autopilot --mode observe --once --json status
 ```
 
 A PR is **v2-managed** when its ordinary observer item reports
