@@ -518,28 +518,65 @@ test('hermetic-gate selects at job level so a cannot-affect diff skips the suite
   );
 });
 
-test('hermetic-gate push short-circuits to run=true without consulting the path list', () => {
-  // The publish guard queries hermetic-gate on the release SHA. That SHA's
-  // evidence is the push-to-next run. A docs land must still execute the suite
-  // there even though pull_request and merge_group skip the same paths.
+test('hermetic-gate push dedups only behind a same-SHA worker success and falls open to run=true', () => {
+  // The publish guard queries hermetic-gate on the release SHA. Under the merge
+  // queue every landing is the byte-identical commit its merge_group build
+  // verified, so the push arm may skip the suite ONLY when a completed
+  // successful WORKER check-run already covers this exact SHA (#2996). The
+  // probe must name the worker, never the `hermetic-gate` gate context: the
+  // gate is green even when selection skipped the suite, and a vacuous verdict
+  // must never be laundered onto the publish-guard SHA. Everything else about
+  // the old invariant survives: no path selection on push, and the
+  // fall-through still runs the full suite.
   const script = selectStepScript('hermetic-gate.yml');
   const pushArm = script.match(/\n[ \t]*push\)\n(?<body>[\s\S]*?)\n[ \t]*;;/u);
   assert.notEqual(pushArm, null, 'the select step must have a push) arm');
+  const body = pushArm.groups.body;
+  const guard = body.match(
+    /\[ "\$\{GITHUB_REF:-\}" = 'refs\/heads\/next' \] && \[ "\$\{GITHUB_RUN_ATTEMPT:-1\}" = '1' \]/u,
+  );
+  assert.notEqual(
+    guard,
+    null,
+    'the dedup probe must be reachable only on refs/heads/next and only on run attempt 1 - a manual re-run must execute for real, and release/* pushes carry no merge-group evidence',
+  );
   assert.match(
-    pushArm.groups.body,
-    /echo 'run=true' >> "\$\{GITHUB_OUTPUT\}"/u,
-    'push to next/release must write run=true',
+    body,
+    /check_name='Hermetic gate \(deterministic, snapshot\)'/u,
+    'the probe must name the WORKER check-run, never the hermetic-gate gate context (green even over a skipped suite)',
   );
   assert.doesNotMatch(
-    pushArm.groups.body,
-    /hermetic-selection\.mjs/u,
-    'push must not consult the path selector; the publish-guard SHA always runs the suite',
+    body,
+    /check_name='hermetic-gate'/u,
+    'probing the gate context would dedup on a selection-skipped suite',
   );
   assert.match(
-    pushArm.groups.body,
-    /exit 0/u,
-    'push must return before the git-diff path list is built',
+    body,
+    /select\(\.conclusion == "success"\)/u,
+    'only a completed successful worker justifies a dedup',
   );
+  assert.match(
+    body,
+    /\|\| echo 0/u,
+    'a probe failure must fail OPEN to the full run; an unguarded gh error under pipefail would redden a required context',
+  );
+  const dedupWrites = body.match(/echo 'run=false' >> "\$\{GITHUB_OUTPUT\}"/gu) ?? [];
+  assert.equal(dedupWrites.length, 1, 'exactly one run=false write may exist in the push arm');
+  assert.ok(
+    guard.index < body.indexOf("echo 'run=false'"),
+    'the run=false write must sit behind the ref-and-attempt guard',
+  );
+  assert.match(
+    body,
+    /echo 'run=true' >> "\$\{GITHUB_OUTPUT\}"/u,
+    'the fall-through must write run=true; a push without merge-group evidence always runs the suite',
+  );
+  assert.doesNotMatch(
+    body,
+    /hermetic-selection\.mjs/u,
+    'push must not consult the path selector; dedup is SHA-identity, never path selection',
+  );
+  assert.match(body, /exit 0/u, 'push must return before the git-diff path list is built');
 });
 
 test('the check-run producer posts its context however the gate job ends', () => {
