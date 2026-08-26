@@ -12,8 +12,8 @@
 // life of every test, and a sweep runs only after the last assertion. The per-run sweep meets the
 // same seal whenever a worker died before its own sweep could run, so both halves need the repair.
 //
-// This file is duplicated verbatim in `packages/benchmark-product/core`, alongside the other two
-// files of this seam. Graduate the set to a shared package at a third consumer.
+// One copy, shared by every Vitest config that wires it — see `isolate-tmp.ts` on why this
+// directory is not a workspace package.
 import { chmodSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -56,8 +56,9 @@ export function isSweepableRecord(recorded: string, base: string): boolean {
  * them here instead puts every retained artifact under one managed root, which is one `rm -rf` to
  * clean up rather than the scatter they used to leave.
  *
- * The list is shared verbatim by all three copies of the seam, including the copies that define
- * none of these flags themselves, so the copies cannot drift apart.
+ * One list for every suite the seam covers, including the many that define none of these flags
+ * themselves: a flag that meant "keep" in one suite and nothing in another would be worse than no
+ * flag at all.
  */
 export const KEEP_ARTIFACT_FLAGS = [
   "JINN_KEEP_TEST_TMPDIR",
