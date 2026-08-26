@@ -107,7 +107,7 @@ test('every workflow cited as by-name precedent actually restores by name', () =
   }
   assert.ok(comment.length > 0, 'the restore step must carry its explanatory comment');
 
-  const cited = [...new Set(comment.join('\n').match(/[a-z0-9-]+\.yml/g) ?? [])];
+  const cited = [...new Set(comment.join('\n').match(/[\w-]+\.ya?ml/g) ?? [])];
   assert.ok(cited.length > 0, 'the comment must cite at least one precedent workflow');
 
   for (const name of cited) {
