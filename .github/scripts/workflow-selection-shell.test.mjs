@@ -140,7 +140,7 @@ function scratchRepository(paths) {
 
 // Execute one workflow's selection script over a synthetic changed list and return
 // what it wrote to GITHUB_OUTPUT, plus the byte size of the list it saw.
-function select(workflow, paths) {
+function select(workflow, paths, probe = null) {
   const repository = scratchRepository(paths);
   const runnerTemp = mkdtempSync(join(tmpdir(), 'selection-temp-'));
   const outputPath = join(runnerTemp, 'github-output');
@@ -148,12 +148,36 @@ function select(workflow, paths) {
   writeFileSync(outputPath, '');
   writeFileSync(scriptPath, selectScript(workflow));
 
+  // The dedup-probe cases (#2996) run the push arm with the GitHub-provided
+  // identity variables defined and a stub `gh` FIRST on PATH, so no real
+  // (possibly authenticated) gh is ever consulted and the probe's answer is
+  // controlled per case. Without `probe`, the identity variables stay unset and
+  // every script's `${GITHUB_REF:-}` guard routes to the pre-#2996 behavior.
+  let probeEnv = {};
+  let pathPrefix = '';
+  if (probe !== null) {
+    const stubDir = mkdtempSync(join(tmpdir(), 'selection-gh-stub-'));
+    const stubBody = probe.fail === true
+      ? '#!/bin/bash\nexit 1\n'
+      : `#!/bin/bash\necho '${probe.count}'\n`;
+    const stubPath = join(stubDir, 'gh');
+    writeFileSync(stubPath, stubBody, { mode: 0o755 });
+    pathPrefix = `${stubDir}:`;
+    probeEnv = {
+      GITHUB_REF: 'refs/heads/next',
+      GITHUB_RUN_ATTEMPT: probe.attempt ?? '1',
+      GITHUB_REPOSITORY: 'example/example',
+      GITHUB_SHA: repository.head,
+    };
+  }
+
   execFileSync('bash', [scriptPath], {
     cwd: repository.dir,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     env: {
-      PATH: process.env.PATH,
+      ...probeEnv,
+      PATH: `${pathPrefix}${process.env.PATH}`,
       GIT_CONFIG_GLOBAL: '/dev/null',
       GIT_CONFIG_SYSTEM: '/dev/null',
       RUNNER_TEMP: runnerTemp,
@@ -249,6 +273,51 @@ test('every terminal gate rejects a selection output it cannot parse', () => {
       source(lane.workflow),
       /case "\$\{SELECTED\}" in\n\s+true\|false\) ;;\n/u,
       `${lane.workflow}: the gate must validate SELECTED against true|false; an empty output must never be read as an unselected lane`,
+    );
+  }
+});
+
+test('a push landing dedups only behind a verified same-SHA worker and fails open (#2996)', () => {
+  // ci.yml is not in the dedup set (its push trigger is main-only), so the
+  // probe exists in the other three lanes. Each case pins one leg of the
+  // invariant: a verified worker dedups even a selecting diff; a failing
+  // probe falls OPEN to the diff; and a re-run (attempt > 1) never dedups.
+  const dedupLanes = LANES.filter((lane) => lane.workflow !== 'ci.yml');
+  assert.equal(dedupLanes.length, 3, 'expected exactly three dedup lanes');
+  for (const lane of dedupLanes) {
+    const verified = select(lane.workflow, [lane.selects], { count: '1' });
+    assert.equal(
+      verified.run,
+      'false',
+      `${lane.workflow}: a verified same-SHA worker must dedup the push lane even though ${lane.selects} selects it`,
+    );
+
+    const probeDown = select(lane.workflow, [lane.selects], { fail: true });
+    assert.equal(
+      probeDown.run,
+      'true',
+      `${lane.workflow}: a failing probe must fall OPEN to the diff, which selects the lane`,
+    );
+
+    const zeroMatches = select(lane.workflow, [lane.selects], { count: '0' });
+    assert.equal(
+      zeroMatches.run,
+      'true',
+      `${lane.workflow}: no completed successful worker on the SHA means the diff decides`,
+    );
+
+    const rerun = select(lane.workflow, [lane.selects], { count: '1', attempt: '2' });
+    assert.equal(
+      rerun.run,
+      'true',
+      `${lane.workflow}: a manual re-run (attempt > 1) must execute for real, never dedup`,
+    );
+
+    const garbage = select(lane.workflow, [lane.selects], { count: 'not-a-number' });
+    assert.equal(
+      garbage.run,
+      'true',
+      `${lane.workflow}: an unparseable probe answer must fall OPEN to the diff`,
     );
   }
 });

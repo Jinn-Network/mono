@@ -40,6 +40,11 @@ jobs:
     name: jinn-agent-changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # checks: read feeds the push-lane dedup probe below (#2996). Job-level
+    # permissions replace the workflow grant, so contents: read is restated.
+    permissions:
+      contents: read
+      checks: read
     defaults:
       run:
         # This job runs no product command, and the workflow-level `plugin/scripts`
@@ -66,6 +71,7 @@ jobs:
           MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
           PUSH_HEAD_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           case "${EVENT_NAME}" in
@@ -78,6 +84,26 @@ jobs:
               diff_head="${MG_HEAD_SHA}"
               ;;
             push)
+              # Dedup a queue landing: a completed successful WORKER check-run on
+              # this exact SHA (from its merge_group build) proves the lane already
+              # ran against this tree. Worker name, never the gate context - the
+              # gate is green even when selection skipped the worker. Rationale and
+              # fail-open rules: hermetic-gate.yml push arm (#2996).
+              if [ "${GITHUB_REF:-}" = 'refs/heads/next' ] && [ "${GITHUB_RUN_ATTEMPT:-1}" = '1' ]; then
+                verified="$(gh api -X GET "repos/${GITHUB_REPOSITORY:-}/commits/${GITHUB_SHA:-}/check-runs" \
+                  -f check_name='Cold-stock Stage 1 product gate' -f status=completed -f per_page=100 \
+                  --jq '[.check_runs[] | select(.conclusion == "success")] | length' \
+                  2>/dev/null || echo 0)"
+                case "${verified}" in
+                  *[!0-9]*|'') verified=0 ;;
+                esac
+                if [ "${verified}" -gt 0 ]; then
+                  echo "::notice::cold-stock worker already ran and passed on this SHA in its merge_group build; deduplicating the push-lane run (#2996)"
+                  echo 'run=false' >> "${GITHUB_OUTPUT}"
+                  exit 0
+                fi
+                echo "::notice::no completed successful worker check-run found on this SHA; falling through to the diff"
+              fi
               diff_base="${PUSH_BEFORE_SHA}"
               diff_head="${PUSH_HEAD_SHA}"
               ;;

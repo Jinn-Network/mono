@@ -51,7 +51,10 @@ on:
 # stack-fixture-immutability.yml). Off the PR lane every run's verdict is wanted:
 # a merge-group entry that loses its gate to a cancellation gets a red context
 # and is ejected, and a superseded push to `next` still leaves the SHA-bound
-# job check the publish guard reads.
+# job check the publish guard reads. Since #2996 the publish-guard evidence on
+# a queue-landed SHA is usually the merge_group run's worker check (the push
+# arm dedups behind it); the push lane remains the evidence source whenever no
+# merge-group verdict covers the SHA (break-glass pushes, release/*).
 concurrency:
   group: hermetic-gate-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -66,6 +69,11 @@ jobs:
     name: hermetic-gate-changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # checks: read feeds the push-lane dedup probe below (#2996). Job-level
+    # permissions replace the workflow grant, so contents: read is restated.
+    permissions:
+      contents: read
+      checks: read
     outputs:
       run: ${{ steps.select.outputs.run }}
     steps:
@@ -88,6 +96,7 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           case "${EVENT_NAME}" in
@@ -100,7 +109,33 @@ jobs:
               diff_head="${MG_HEAD_SHA}"
               ;;
             push)
-              echo 'push to next/release always runs the suite (publish-guard SHA)'
+              # A queue landing is the byte-identical commit its merge_group run
+              # verified (DR-2026-08-18-b D4: MERGE, one entry per landing), so a
+              # completed successful WORKER check-run on this exact SHA proves the
+              # suite already executed against this tree. The probe names the
+              # worker, never the `hermetic-gate` gate context: the gate is green
+              # even when selection skipped the suite, and a vacuous verdict must
+              # never be laundered onto the SHA the publish guard reads (#2996).
+              # Only run attempt 1 may dedup - a manual re-run executes for real.
+              # Any probe failure falls OPEN to the full run, as do release/* and
+              # break-glass pushes (no merge-group evidence exists there).
+              if [ "${GITHUB_REF:-}" = 'refs/heads/next' ] && [ "${GITHUB_RUN_ATTEMPT:-1}" = '1' ]; then
+                verified="$(gh api -X GET "repos/${GITHUB_REPOSITORY:-}/commits/${GITHUB_SHA:-}/check-runs" \
+                  -f check_name='Hermetic gate (deterministic, snapshot)' \
+                  -f status=completed -f per_page=100 \
+                  --jq '[.check_runs[] | select(.conclusion == "success")] | length' \
+                  2>/dev/null || echo 0)"
+                case "${verified}" in
+                  *[!0-9]*|'') verified=0 ;;
+                esac
+                if [ "${verified}" -gt 0 ]; then
+                  echo "::notice::hermetic suite already ran and passed on this SHA in its merge_group build; deduplicating the push-lane run (#2996)"
+                  echo 'run=false' >> "${GITHUB_OUTPUT}"
+                  exit 0
+                fi
+                echo "::notice::no completed successful worker check-run found on this SHA; running the full suite"
+              fi
+              echo 'push to next/release runs the suite when no merge-group verdict covers this SHA (publish-guard SHA)'
               echo 'run=true' >> "${GITHUB_OUTPUT}"
               exit 0
               ;;
@@ -141,6 +176,38 @@ jobs:
               exit 1
               ;;
           esac
+
+  cache-warm:
+    # Push-to-next is the ONLY writer of the shared operator/node_modules cache:
+    # `next` is the default branch, and cache scoping makes merge_group
+    # (gh-readonly-queue/**) and PR-merge-ref saves unreadable from other refs.
+    # When the probe above dedups the suite, this job still restores the
+    # exact-key cache and repopulates it on a miss, so a landing that bumps
+    # operator/yarn.lock cannot staleify the cache the PR and merge-group
+    # hermetic runs restore from (#2996).
+    name: hermetic-cache-warm
+    if: github.event_name == 'push' && github.ref == 'refs/heads/next'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
+      ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: Cache client node_modules
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: operator/node_modules
+          key: ${{ runner.os }}-client-nodemodules-${{ hashFiles('operator/yarn.lock') }}
+      - name: Populate the cache on a miss
+        if: steps.cache.outputs.cache-hit != 'true'
+        working-directory: operator
+        run: yarn install --immutable
 
   hermetic:
     name: Hermetic gate (deterministic, snapshot)
@@ -326,7 +393,7 @@ jobs:
     # unreported required context hangs a queue entry until the check-response
     # timeout ejects it (DR-2026-08-18-b D3/D6). Fork PRs run this job too.
     name: hermetic-gate
-    needs: [changes, hermetic]
+    needs: [changes, hermetic, cache-warm]
     if: always()
     runs-on: ubuntu-latest
     # One `test` against an upstream result. The bound keeps a wedged runner from
@@ -338,6 +405,8 @@ jobs:
           SELECTED: ${{ needs.changes.outputs.run }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           HERMETIC_RESULT: ${{ needs.hermetic.result }}
+          CACHE_WARM_RESULT: ${{ needs.cache-warm.result }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           echo "selected=${SELECTED} changes=${CHANGES_RESULT} hermetic=${HERMETIC_RESULT}"
@@ -360,3 +429,10 @@ jobs:
             expected=skipped
           fi
           test "${HERMETIC_RESULT}" = "${expected}"
+          # The cache-warm job exists only on push-to-next; everywhere else its
+          # `if:` skips it and the gate requires exactly that.
+          warm_expected=skipped
+          if [ "${EVENT_NAME}" = push ] && [ "${GITHUB_REF:-}" = 'refs/heads/next' ]; then
+            warm_expected=success
+          fi
+          test "${CACHE_WARM_RESULT}" = "${warm_expected}"
