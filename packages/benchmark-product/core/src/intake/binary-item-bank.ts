@@ -482,12 +482,10 @@ export function convertBinaryItemBank(input: ConvertBinaryItemBankInput): Conver
   };
 }
 
-/** Exact public evaluator semantics bytes retained by the operation for offline closure. */
-export const BINARY_ITEM_BANK_EVALUATOR_SEMANTICS = {
-  bytes: BINARY_JUDGMENT_EVALUATION_PARSER_SEALED.bytes,
-  digest: BINARY_JUDGMENT_EVALUATION_PARSER_SEALED.digest,
-} as const;
-
+/**
+ * Exact public evaluator semantics bytes for the selected parser-invalid policy, retained by the
+ * operation for offline closure.
+ */
 export function binaryItemBankEvaluatorSemantics(parserInvalidPolicy: "reject" | "abstain") {
   const sealed = parserInvalidPolicy === "abstain"
     ? BINARY_JUDGMENT_EVALUATION_PARSER_V2_SEALED

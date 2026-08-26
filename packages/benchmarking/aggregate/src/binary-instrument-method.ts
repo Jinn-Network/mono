@@ -506,6 +506,10 @@ export const BINARY_INSTRUMENT_PARAMETER_SCHEMA: Method["parameterSchema"] = {
       uniqueItems: true,
       items: { type: "string", pattern: STRATUM_NAME.source },
     },
+    // Widened for the neutral v2 response parsers: `abstain` joins `reject`. Compatible widening
+    // (§0.4): every parameter set valid today still carries `reject`, still validates, and still
+    // seals identically, so the frozen golden fixtures' bytes do not move. Only a run whose sealed
+    // Tasks and arms both select the v2 parsers can reach the new value.
     parserInvalidPolicy: { enum: ["reject", "abstain"] },
     // Widened spec §6.7 (packet P6): a third admission mode, screened by a pinned model and
     // sampled/hand-checked by the operator. Compatible widening (§0.4): every parameter set valid
@@ -1491,6 +1495,19 @@ function validateInstrument(
   ) {
     throw new MethodInputError("binary-binding-mismatch", digest, "instrument parser must be a member of the registered response-parser registry");
   }
+  // Mirrors the sealed profiles schema's own rule, which ties `invalidOutputDecision` to the
+  // selected PARSER PAIR rather than to the run-level parameter: a v2 pair means INVALID and a v1
+  // pair means REJECT, in both directions. Without this the check above would accept a document
+  // the profiles schema refuses -- under `abstain`, an instrument pinning a v1 parser and
+  // declaring INVALID, whose sealed bytes could never have been produced.
+  const neutralParser = typeof parserId === "string"
+    ? NEUTRAL_RESPONSE_PARSER_REGISTRY.get(parserId)
+    : undefined;
+  const parserPairInvalidOutputDecision =
+    neutralParser !== undefined && parser["version"] === neutralParser.version ? "INVALID" : "REJECT";
+  if (response["invalidOutputDecision"] !== parserPairInvalidOutputDecision) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "instrument invalidOutputDecision does not match its registered parser pair");
+  }
 }
 
 function resolveArmInstruments(
@@ -2377,9 +2394,11 @@ export function projectBinaryInstrumentQualification(
 /**
  * The reduction-relevant parameters `resolveBinaryInstrumentReduction` reads. Deliberately not
  * `BinaryInstrumentParameters`: a caller whose own parameter set has no `intervalAlpha` (or no
- * `measurementProfile`/`parserInvalidPolicy`/`verdictRule`, which the resolve half never reads
- * either) can never satisfy `validateBinaryInstrumentParameters`, so the resolve half must not
- * re-run that validator — it takes exactly the four scalars it uses.
+ * `measurementProfile`/`verdictRule`, which the resolve half never reads either) can never satisfy
+ * `validateBinaryInstrumentParameters`, so the resolve half must not re-run that validator — it
+ * takes exactly the five scalars it uses. `parserInvalidPolicy` joined that set with the neutral
+ * v2 parsers: the resolve half now reads it to pick the expected evaluation-parser identity, the
+ * expected instrument `invalidOutputDecision`, and the majority rule the reduction applies.
  */
 export interface BinaryInstrumentReductionParameters {
   readonly k: number;

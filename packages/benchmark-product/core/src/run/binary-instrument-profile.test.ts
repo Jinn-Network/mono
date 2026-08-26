@@ -22,6 +22,7 @@ import {
   BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
+  BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY,
   BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE,
   BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
@@ -330,6 +331,11 @@ function setUpFixture(options: {
   /** Test-only screened admission whose instrument deliberately reuses this run arm. */
   readonly screeningInstrumentArmId?: string;
   readonly parserInvalidPolicy?: "reject" | "abstain";
+  /** Pulls the sealed Tasks' EvaluationSpec policy away from the arms', which otherwise share one
+   * value. Only a mismatched pair can reach the lock-time cross-check. */
+  readonly taskParserInvalidPolicy?: "reject" | "abstain";
+  /** Per-arm instrument policy, indexed by arm position, for the mixed-roster refusal. */
+  readonly armParserInvalidPolicies?: readonly ("reject" | "abstain")[];
 } = {}): Fixture {
   const withItemEvidence = options.withItemEvidence ?? false;
   const declaringArmIds = new Set(options.declaringArmIds ?? []);
@@ -342,13 +348,13 @@ function setUpFixture(options: {
   if (!initial.ok) throw new Error(initial.error.detail);
 
   const armConfigs = options.arms ?? DEFAULT_ARM_CONFIGS;
-  const instruments = armConfigs.map((armConfig) => {
+  const instruments = armConfigs.map((armConfig, index) => {
     const sealed = instrument(armConfig.armId, {
       model: armConfig.model,
       generation: armConfig.generation,
       declaresEvidence: declaringArmIds.has(armConfig.armId),
       preamble: armConfig.preamble,
-      parserInvalidPolicy: options.parserInvalidPolicy,
+      parserInvalidPolicy: options.armParserInvalidPolicies?.[index] ?? options.parserInvalidPolicy,
     });
     store(sealed.bytes);
     return sealed;
@@ -415,7 +421,7 @@ function setUpFixture(options: {
     if (resolution === undefined) throw new Error(`missing admitted resolution for ${itemSha256}`);
     const evaluation = evaluationSpec(
       resolution.analysisContextSha256 as `sha256:${string}`,
-      options.parserInvalidPolicy,
+      options.taskParserInvalidPolicy ?? options.parserInvalidPolicy,
     );
     store(evaluation.bytes);
     const taskBytes = sealTask({
@@ -603,6 +609,46 @@ describe("binary-instrument@1 lock-time composition", () => {
       (entry) => entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument,
     );
     expect(binaryInstrument?.parameters).toMatchObject({ parserInvalidPolicy: "abstain" });
+
+    // The tasks half of "the sealed tasks AND every arm": every Task's own EvaluationSpec names
+    // the neutral evaluation-parser semantics, so the paired refusals below are not vacuous.
+    for (const taskSha256 of fixture.taskSha256s) {
+      const task = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, taskSha256))) as {
+        readonly evaluation: { readonly digest: { readonly sha256: string } };
+      };
+      const spec = JSON.parse(new TextDecoder().decode(
+        getSealedBytes(workspaceDir, task.evaluation.digest.sha256),
+      )) as { readonly grader: { readonly digest: { readonly sha256: string } } };
+      expect(spec.grader.digest.sha256).toBe(
+        BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY.digest.slice("sha256:".length),
+      );
+    }
+  });
+
+  // Fail closed at lock. Both directions, because either half can be the stale one: a bank
+  // imported without `--parser-invalid-policy abstain` under v2 arms, or v2 tasks under a frozen
+  // v1 arm roster. Before this check both compiled and locked, then broke during paid execution.
+  test.each([
+    { name: "v1 sealed tasks under neutral arms", parserInvalidPolicy: "abstain" as const, taskParserInvalidPolicy: "reject" as const },
+    { name: "neutral sealed tasks under v1 arms", parserInvalidPolicy: "reject" as const, taskParserInvalidPolicy: "abstain" as const },
+  ])("refuses $name at lock rather than during paid execution", (scenario) => {
+    const fixture = setUpFixture({
+      parserInvalidPolicy: scenario.parserInvalidPolicy,
+      taskParserInvalidPolicy: scenario.taskParserInvalidPolicy,
+    });
+    const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+    expect(() => compileBinaryInstrumentProfile({ workspaceDir, draft: fixture.draft, benchmark }))
+      .toThrow(/EvaluationSpec parser-invalid policy differs from the run arms' instruments/u);
+  });
+
+  test("refuses a roster that mixes v1 and neutral arm instruments", () => {
+    const fixture = setUpFixture({
+      parserInvalidPolicy: "abstain",
+      armParserInvalidPolicies: ["reject", "abstain", "abstain", "abstain"],
+    });
+    const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+    expect(() => compileBinaryInstrumentProfile({ workspaceDir, draft: fixture.draft, benchmark }))
+      .toThrow(/all binary-judgment arms must share one invalid-output policy/u);
   });
 
   // Spec §3.1 site 12, the packet's headline: `deriveAdmissionProfile` used to derive

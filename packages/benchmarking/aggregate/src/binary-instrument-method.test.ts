@@ -16,6 +16,7 @@ import {
   sealDsseEnvelope,
 } from "@jinn-network/trust-core";
 import { describe, expect, test } from "vitest";
+import { validateBinaryInstrumentQualificationProjection } from "./binary-instrument-method.js";
 import { createMethodRegistry } from "./registry.js";
 import { MethodInputError } from "./resolved-inputs.js";
 import type { MethodComputeInput } from "./method.js";
@@ -439,6 +440,10 @@ function makeFixture(options: {
   readonly responseBytesParserId?: string;
   readonly evaluationParserDigest?: `sha256:${string}`;
   readonly parserInvalidPolicy?: "reject" | "abstain";
+  // Replaces the two per-item decision patterns cycled by arm index. Defaults to the frozen pair
+  // below, so every existing fixture keeps its exact bytes; only a test that needs a specific
+  // per-cell vote shape (an ACCEPT/REJECT/invalid split, say) supplies its own.
+  readonly decisionPatterns?: readonly (readonly (readonly ["ACCEPT" | "REJECT", boolean][])[])[];
   readonly extraRunArm?: boolean;
   readonly extraTestMaterial?: boolean;
   readonly extraParserField?: boolean;
@@ -698,9 +703,10 @@ function makeFixture(options: {
       [["REJECT", true], ["REJECT", true], ["REJECT", false]],
     ],
   ];
+  const decisionPatterns = options.decisionPatterns ?? DECISION_PATTERNS;
   const decisions = new Map<string, readonly ["ACCEPT" | "REJECT", boolean][]>();
   matrixArmIds.forEach((armId, armIndex) => {
-    const pattern = DECISION_PATTERNS[armIndex % DECISION_PATTERNS.length]!;
+    const pattern = decisionPatterns[armIndex % decisionPatterns.length]!;
     decisions.set(`${items[0]!.taskDigest}/${armId}`, pattern[0]!);
     decisions.set(`${items[1]!.taskDigest}/${armId}`, pattern[1]!);
   });
@@ -988,6 +994,60 @@ describe("binary-instrument@1 qualification oracle", () => {
     expect(result.itemDecisions).toHaveLength(8);
     expect(result.excluded).toEqual({ count: 0, items: [] });
     expect(Object.values(result.arms).some((arm: any) => arm.call.parseInvalid > 0)).toBe(true);
+  });
+
+  // The visible half of abstaining. A 1-1 split plus one invalid call has no valid majority, so
+  // the item-arm group must leave `itemDecisions` entirely and surface in the published
+  // qualification as a `no-valid-majority` exclusion -- never as a manufactured REJECT, and never
+  // silently dropped. The projection validator must accept the document that carries it.
+  test("publishes a no-valid-majority exclusion when an invalid call breaks the tie", () => {
+    const fixture = makeFixture({
+      parserInvalidPolicy: "abstain",
+      decisionPatterns: [
+        [
+          [["ACCEPT", true], ["ACCEPT", true], ["ACCEPT", true]],
+          // One ACCEPT, one REJECT, one parser-invalid: no side reaches the majority of 2.
+          [["ACCEPT", true], ["REJECT", true], ["REJECT", false]],
+        ],
+        [
+          [["REJECT", true], ["REJECT", true], ["ACCEPT", true]],
+          [["REJECT", true], ["REJECT", true], ["REJECT", false]],
+        ],
+      ],
+    });
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    const result = method.compute!(fixture.input).perSubject[0]!.results as any;
+
+    // Four arms cycle two patterns, so the split pattern lands on the two even-indexed arms.
+    expect(result.itemDecisions).toHaveLength(6);
+    expect(result.excluded.count).toBe(2);
+    expect(result.excluded.items.map((item: any) => item.reasons)).toEqual([
+      [{ reason: "no-valid-majority", cellKeys: expect.any(Array) }],
+      [{ reason: "no-valid-majority", cellKeys: expect.any(Array) }],
+    ]);
+    for (const item of result.excluded.items) {
+      expect(item.cellKeys).toHaveLength(3);
+      expect(item.reasons[0].cellKeys).toEqual(item.cellKeys);
+    }
+    expect(validateBinaryInstrumentQualificationProjection(result)).toEqual({ ok: true });
+  });
+
+  // The sealed profiles schema ties `invalidOutputDecision` to the selected parser PAIR, so an
+  // instrument pinning a v1 parser while declaring INVALID has bytes that could never have been
+  // sealed. Checking it against the run-level parameter alone would have admitted exactly that
+  // document under `abstain`; the aggregate mirror must refuse it the same way the schema does.
+  test("refuses an instrument that declares INVALID while pinning a v1 parser pair", () => {
+    const fixture = makeFixture({
+      parserInvalidPolicy: "abstain",
+      responseParserId: ACCEPT_REJECT_PARSER_ID,
+      responseParserVersion: "1.0.0",
+      responseParserDigest: RESPONSE_PARSER_DIGEST,
+    });
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    expect(() => method.compute!(fixture.input)).toThrow(expect.objectContaining({
+      code: "binary-binding-mismatch",
+      message: expect.stringContaining("instrument invalidOutputDecision does not match its registered parser pair"),
+    }));
   });
 
   test.each([
