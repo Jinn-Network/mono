@@ -6,12 +6,16 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_COMPLETE_JSON_LABEL_PARSER_ID,
   BINARY_CORRECT_WRONG_PARSER_IDENTITY,
   BINARY_CORRECT_WRONG_PARSER_ID,
+  BINARY_EVERMEM_JSON_LABEL_PARSER_ID,
   BINARY_JSON_VERDICT_PARSER_IDENTITY,
   BINARY_JSON_VERDICT_PARSER_ID,
   BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
   BINARY_LABEL_IN_PROSE_PARSER_ID,
+  BINARY_MEM0_JSON_LABEL_PARSER_ID,
+  BINARY_STRICT_JSON_LABEL_PARSER_ID,
   BINARY_YES_NO_PARSER_IDENTITY,
   type BinaryJudgmentResponseParserId,
 } from "@jinn-network/task-execution-profiles";
@@ -273,5 +277,59 @@ describe("binary-correct-wrong direct unit cases", () => {
     const parse = selectBinaryJudgmentResponseParser(BINARY_CORRECT_WRONG_PARSER_ID);
     expect(parse(encoder.encode("CORRECT"))).toEqual({ decision: "ACCEPT", parseValid: true });
     expect(parse(encoder.encode("WRONG"))).toEqual({ decision: "REJECT", parseValid: true });
+  });
+});
+
+describe("LoCoMo JSON-label parser contracts", () => {
+  const invalid = {
+    decision: "REJECT",
+    parseValid: false,
+    invalidReason: "unexpected-token",
+  } as const;
+
+  test("complete-json-label matches Backboard/revised label handling", () => {
+    const parse = selectBinaryJudgmentResponseParser(BINARY_COMPLETE_JSON_LABEL_PARSER_ID);
+    expect(parse(encoder.encode('{"label":"correct","reasoning":"ok"}')))
+      .toEqual({ decision: "ACCEPT", parseValid: true });
+    expect(parse(encoder.encode('{"label":" WRONG ","reasoning":"ok"}')))
+      .toEqual({ decision: "REJECT", parseValid: true });
+    expect(parse(encoder.encode('{"reasoning":"missing defaults to wrong"}')))
+      .toEqual({ decision: "REJECT", parseValid: true });
+    expect(parse(encoder.encode('```json\n{"label":"CORRECT"}\n```'))).toEqual(invalid);
+    expect(parse(encoder.encode('{"label":7}'))).toEqual(invalid);
+  });
+
+  test("evermem-json-label follows fenced, flat-object, then complete extraction order", () => {
+    const parse = selectBinaryJudgmentResponseParser(BINARY_EVERMEM_JSON_LABEL_PARSER_ID);
+    expect(parse(encoder.encode('prefix ```json\n{"label":" correct ","reasoning":"ok"}\n``` suffix')))
+      .toEqual({ decision: "ACCEPT", parseValid: true });
+    expect(parse(encoder.encode('prose {"label":"WRONG","reasoning":"no"} tail')))
+      .toEqual({ decision: "REJECT", parseValid: true });
+    expect(parse(encoder.encode('{"label":""}'))).toEqual(invalid);
+    expect(parse(encoder.encode('{"reasoning":"missing"}'))).toEqual(invalid);
+  });
+
+  test("mem0-json-label uses its first optional fence and exact case-sensitive comparison", () => {
+    const parse = selectBinaryJudgmentResponseParser(BINARY_MEM0_JSON_LABEL_PARSER_ID);
+    expect(parse(encoder.encode('prefix ```json\n{"label":"CORRECT"}\n``` suffix')))
+      .toEqual({ decision: "ACCEPT", parseValid: true });
+    expect(parse(encoder.encode('{"label":"correct"}')))
+      .toEqual({ decision: "REJECT", parseValid: true });
+    expect(parse(encoder.encode('{"label":null}')))
+      .toEqual({ decision: "REJECT", parseValid: true });
+    expect(parse(encoder.encode('{"reasoning":"missing"}'))).toEqual(invalid);
+  });
+
+  test("strict-json-label accepts only the exact two-member strict-dial shape", () => {
+    const parse = selectBinaryJudgmentResponseParser(BINARY_STRICT_JSON_LABEL_PARSER_ID);
+    expect(parse(encoder.encode('{"label":"CORRECT","reasoning":"supported"}')))
+      .toEqual({ decision: "ACCEPT", parseValid: true });
+    expect(parse(encoder.encode('{"reasoning":"unsupported","label":"WRONG"}')))
+      .toEqual({ decision: "REJECT", parseValid: true });
+    expect(parse(encoder.encode('{"label":"correct","reasoning":"case"}'))).toEqual(invalid);
+    expect(parse(encoder.encode('{"label":"CORRECT","reasoning":"ok","extra":true}')))
+      .toEqual(invalid);
+    expect(parse(encoder.encode('{"label":"CORRECT","label":"WRONG","reasoning":"dup"}')))
+      .toEqual(invalid);
   });
 });

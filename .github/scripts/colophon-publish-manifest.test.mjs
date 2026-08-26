@@ -196,7 +196,7 @@ test('Increment 1 moves only verify onto a demand-gated independent product line
   assert.equal(group.stackPublished, false);
   assert.equal(group.canary, false);
   assert.equal(group.stable, false);
-  assert.equal(catalog.releaseGroups['transitional-or-private'].expectedPackageCount, 13);
+  assert.equal(catalog.releaseGroups['transitional-or-private'].expectedPackageCount, 12);
 });
 
 test('Colophon trusted publishing is a separate workflow and never joins the stack 73', () => {

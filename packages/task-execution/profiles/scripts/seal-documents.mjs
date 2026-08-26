@@ -14,10 +14,14 @@ import { buildEvaluationTaskProfile } from "../dist/documents/evaluation-task-1.
 import { buildBinaryJudgmentProfile } from "../dist/documents/binary-judgment-2.0.js";
 import {
   buildBinaryAcceptRejectParserSemantics,
+  buildBinaryCompleteJsonLabelParserSemantics,
   buildBinaryCorrectWrongParserSemantics,
+  buildBinaryEvermemJsonLabelParserSemantics,
   buildBinaryJsonVerdictParserSemantics,
   buildBinaryJudgmentEvaluationParserSemantics,
   buildBinaryLabelInProseParserSemantics,
+  buildBinaryMem0JsonLabelParserSemantics,
+  buildBinaryStrictJsonLabelParserSemantics,
   buildBinaryYesNoParserSemantics,
 } from "../dist/binary-judgment/contracts.js";
 
@@ -59,6 +63,13 @@ const DOCUMENTS = [
     shaName: "semantics.sha256",
   },
   {
+    dir: join("profiles", "binary-judgment", "parsers", "binary-complete-json-label", "1.0.0"),
+    build: buildBinaryCompleteJsonLabelParserSemantics,
+    seal: (value) => sealDocument(value),
+    jsonName: "semantics.json",
+    shaName: "semantics.sha256",
+  },
+  {
     dir: join("profiles", "binary-judgment", "parsers", "binary-yes-no", "1.0.0"),
     build: buildBinaryYesNoParserSemantics,
     seal: (value) => sealDocument(value),
@@ -73,6 +84,13 @@ const DOCUMENTS = [
     shaName: "semantics.sha256",
   },
   {
+    dir: join("profiles", "binary-judgment", "parsers", "binary-evermem-json-label", "1.0.0"),
+    build: buildBinaryEvermemJsonLabelParserSemantics,
+    seal: (value) => sealDocument(value),
+    jsonName: "semantics.json",
+    shaName: "semantics.sha256",
+  },
+  {
     dir: join("profiles", "binary-judgment", "parsers", "binary-json-verdict", "1.0.0"),
     build: buildBinaryJsonVerdictParserSemantics,
     seal: (value) => sealDocument(value),
@@ -82,6 +100,20 @@ const DOCUMENTS = [
   {
     dir: join("profiles", "binary-judgment", "parsers", "binary-label-in-prose", "1.0.0"),
     build: buildBinaryLabelInProseParserSemantics,
+    seal: (value) => sealDocument(value),
+    jsonName: "semantics.json",
+    shaName: "semantics.sha256",
+  },
+  {
+    dir: join("profiles", "binary-judgment", "parsers", "binary-mem0-json-label", "1.0.0"),
+    build: buildBinaryMem0JsonLabelParserSemantics,
+    seal: (value) => sealDocument(value),
+    jsonName: "semantics.json",
+    shaName: "semantics.sha256",
+  },
+  {
+    dir: join("profiles", "binary-judgment", "parsers", "binary-strict-json-label", "1.0.0"),
+    build: buildBinaryStrictJsonLabelParserSemantics,
     seal: (value) => sealDocument(value),
     jsonName: "semantics.json",
     shaName: "semantics.sha256",

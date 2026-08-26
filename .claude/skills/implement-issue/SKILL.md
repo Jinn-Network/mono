@@ -47,10 +47,11 @@ possible moment, reject stale authority, publish with the required lease, and
 reconcile ambiguous outcomes. A missing local worktree on another host is
 never evidence about this attempt.
 
-Resolve the package command once:
+Resolve Autopilot fail-closed (standalone only; never `packages/autopilot`):
 
 ```bash
-AUTOPILOT_PACKAGE_DIR="${JINN_AUTOPILOT_PACKAGE_DIR:-<repo-root>/packages/autopilot}"
+# shellcheck disable=SC1091
+. "$(git rev-parse --show-toplevel)/.github/scripts/resolve-autopilot.sh"
 SESSION_REPORT_DIR="$(dirname -- "$JINN_AUTOPILOT_SESSION_MANIFEST")/reports"
 mkdir -p -- "$SESSION_REPORT_DIR"
 chmod 700 -- "$SESSION_REPORT_DIR"
@@ -66,9 +67,9 @@ You may inspect and modify files in the supplied worktree, run tests and local
 tools, and create local commits. Shared publication is restricted to:
 
 ```bash
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session checkpoint
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session implementation-complete --summary-file "$SESSION_REPORT_DIR/implementation-summary.md"
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
+autopilot session checkpoint
+autopilot session implementation-complete --summary-file "$SESSION_REPORT_DIR/implementation-summary.md"
+autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
 ```
 
 Never substitute direct GitHub or remote-Git mutations for these commands. If
@@ -123,7 +124,7 @@ starting head. If none exists, re-run the stage with that exact gap.
 After every commit-producing stage or fix pass, publish real progress:
 
 ```bash
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session checkpoint
+autopilot session checkpoint
 ```
 
 Only branch-head advancement is liveness evidence. Comments, Project edits,
@@ -175,7 +176,7 @@ Write a bounded UTF-8 summary to
 Then invoke:
 
 ```bash
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session implementation-complete --summary-file "$SESSION_REPORT_DIR/implementation-summary.md"
+autopilot session implementation-complete --summary-file "$SESSION_REPORT_DIR/implementation-summary.md"
 ```
 
 This command checkpoints the exact head, writes durable summary evidence,
@@ -207,7 +208,7 @@ For escalation, write a bounded UTF-8 reason to
 Then invoke:
 
 ```bash
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
+autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
 ```
 
 Escalation authority is the PR label `review:needs-human` plus the structured

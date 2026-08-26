@@ -32,6 +32,8 @@ import {
 } from '../earning/faucet.js';
 import {
   computeTopupQuota,
+  isHardCdpAddressCap,
+  persistCdpRateLimit,
   readFaucetTopupState,
   writeFaucetTopupRecord,
 } from '../earning/faucet-topup-store.js';
@@ -332,6 +334,15 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
         const balanceBefore = balanceWei;
         const result = await requestFunding(address, 'base-sepolia');
         if (!result.ok) {
+          if (result.rateLimited) {
+            persistCdpRateLimit({
+              earningDir,
+              address,
+              now: now(),
+              cooldownMs: faucetTopupCooldownMs,
+              existing: readFaucetTopupState(earningDir).byAddress[address.toLowerCase()],
+            });
+          }
           return c.json(
             {
               ok: false,
@@ -423,7 +434,22 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
               // A rate-limit stops the batch but is not an error (operator can
               // retry after the CDP per-address window). Any other failure also
               // stops the batch and surfaces its reason.
-              if (result.rateLimited) rateLimited = true;
+              if (result.rateLimited) {
+                rateLimited = true;
+                persistCdpRateLimit({
+                  earningDir,
+                  address,
+                  now: nowMs,
+                  cooldownMs,
+                  existing: {
+                    callsToday,
+                    batchStartedAt,
+                    ...(existing?.rateLimitedUntil !== undefined
+                      ? { rateLimitedUntil: existing.rateLimitedUntil }
+                      : {}),
+                  },
+                });
+              }
               if (txHashes.length === 0) {
                 return c.json(
                   {
@@ -501,10 +527,20 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
         }
         const result = await requestFunding(address, 'base-sepolia');
         if (!result.ok) {
-          if (result.rateLimited && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+          const hardCap = result.rateLimited === true && isHardCdpAddressCap(result.reason);
+          if (result.rateLimited && !hardCap && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
             rateLimitRetries++;
             await new Promise((r) => setTimeout(r, rateLimitBackoffMs));
             continue;
+          }
+          if (result.rateLimited) {
+            persistCdpRateLimit({
+              earningDir,
+              address,
+              now: now(),
+              cooldownMs: faucetTopupCooldownMs,
+              existing: readFaucetTopupState(earningDir).byAddress[address.toLowerCase()],
+            });
           }
           return c.json(
             {
@@ -584,7 +620,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     if (!resolved.ok) {
       // Pre-bootstrap (no fleet state / no master address): soft-render the
       // full cap so the SPA can render the card before the wallet exists.
-      return c.json({ ok: true, dailyCap, callsRemaining: dailyCap, cooldownExpiresAt: null });
+      return c.json({ ok: true, dailyCap, callsRemaining: dailyCap, cooldownExpiresAt: null, rateLimited: false });
     }
     const { address, earningDir, chain } = resolved;
     if (chain !== 'base-sepolia') {
@@ -599,6 +635,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       dailyCap,
       callsRemaining: quota.callsRemaining,
       cooldownExpiresAt: quota.cooldownExpiresAt,
+      rateLimited: quota.rateLimited,
     });
   });
 

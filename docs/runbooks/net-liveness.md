@@ -8,7 +8,7 @@ and the indexer is caught up. This is the externally-observable backstop for the
 ## What it is, and why it lives outside the daemon
 
 When the shared indexer blips, every operator daemon's discovery loops can wedge
-while the indexer-independent loops (jinn-claim, balance-topup) keep emitting
+while the indexer-independent loops (reward-claim, balance-topup) keep emitting
 on-chain activity and mask the outage. No single operator can be trusted to
 notice their own stall, so liveness must be observed from *outside* any daemon.
 

@@ -1,7 +1,7 @@
-# v0 Testnet Deploy Runbook
+# v0 Testnet Deploy Runbook (historical / superseded)
 
-> **Archived 2026-08-14 — superseded in full; do not run this.** The v0 MVI stack it
-> deploys no longer exists.
+> **Historical / superseded — do not run this.** Archived 2026-08-14. The v0 MVI
+> stack it deploys no longer exists.
 > [DR-2026-06-30](../../log/decisions/2026-06-30-tokenless-olas-native-pivot.md)
 > (tokenless, OLAS-native) dropped the JINN token, so Phase 2's L1 stack (JINN +
 > Distributor + Governor + Timelock + Messenger), Phase 3's `JinnClaimEmitter`, and
@@ -15,7 +15,7 @@
 > hashes, and verify gates below are what actually ran that day, so nothing beneath
 > this banner is retro-edited. For the current operator path see
 > [`docs/operator-testnet.md`](../operator-testnet.md); for the current daemon loop set
-> see [`operator/ARCHITECTURE.md`](../../client/ARCHITECTURE.md) §6.
+> see [`operator/ARCHITECTURE.md`](../../operator/ARCHITECTURE.md) §6.
 
 > Status: archived (was: ready)
 > Date: 2026-04-29

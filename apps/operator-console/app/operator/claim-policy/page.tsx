@@ -16,8 +16,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { claimPolicySurface } from '@/lib/claim-policy-surface';
 import { daemonJson } from '@/lib/daemon';
-import { classifySurface, SurfaceStatus, useDaemonJson } from '@/lib/use-daemon';
+import { SurfaceStatus, useDaemonJson } from '@/lib/use-daemon';
 
 type ClaimPolicy = {
   mode?: string;
@@ -44,18 +45,18 @@ export default function ClaimPolicyPage() {
   const { data, loading, error, reload } = useDaemonJson<ClaimPolicyResponse>(
     '/v1/operator/claim-policy',
   );
-  const state = classifySurface({
-    loading: loading || !data,
-    error,
-    empty: false,
-  });
+  const state = claimPolicySurface({ loading, data, error });
 
-  if (state !== 'ready' || !data) {
+  if (state === 'loading') {
     return (
       <div data-testid="claim-policy-tab-loading">
-        <SurfaceStatus name="claimPolicy" state={state === 'ready' ? 'loading' : state} />
+        <SurfaceStatus name="claimPolicy" state="loading" />
       </div>
     );
+  }
+
+  if (state !== 'ready' || !data) {
+    return <SurfaceStatus name="claimPolicy" state={state === 'ready' ? 'empty' : state} />;
   }
 
   return (

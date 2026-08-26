@@ -199,7 +199,7 @@ export function buildNotifications(input: NotificationsBuildInput): DerivedNotic
 
   if (input.executionWiring.length === 0 && input.bootstrapMode === "running") {
     out.push(
-      notice("no_solvernets_joined", "info", "No execution wiring configured. Add a work kind in Settings > Claim policy & wiring.", {
+      notice("no_solvernets_joined", "info", "No execution wiring configured. Add a work kind in Claim policy.", {
         jumpTo: "/operator/claim-policy",
       }),
     );

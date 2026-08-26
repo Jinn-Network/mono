@@ -27,7 +27,8 @@ git identity, seeds `/data/config.json` on first boot, then
 
 `BASE_TAG` must point to a base release that includes #988. See
 [`../README.md`](../README.md) for the full deploy path (the public-GHCR ops
-step, the deploy contract, the claim-relayer, and the consolidation checklist).
+step, the deploy contract, OLAS earning via the daemon `reward-claim` loop,
+and the consolidation checklist).
 
 - **`seed.sh`** — materialises per-deployment state from env vars on each boot:
   - Sets a global git identity so the harness's plugin session-start hooks can `git commit --allow-empty` to initialise their per-task workdirs without an `"Author identity unknown"` error.
@@ -95,8 +96,8 @@ The Railway CLI uploads the worktree (respecting `.gitignore`, so `node_modules`
 
 **One-time service setup (required since the recipe is not at the repo root):** in this service's Railway settings, set **Config as code → `deploy/railway-operator-codex/railway.toml`**. Without it the service falls back to nixpacks/auto-detect and won't build this Dockerfile. Do **not** move `railway.toml` back to the repo root — see the warning above (it hijacks `jinn-indexer` and every other monorepo service, #846).
 
-## Earning needs the separate claim-relayer
+## Earning is OLAS-native (no claim-relayer)
 
-The daemon is emit-only; earning settlement runs through the separate
-`packages/claim-relayer` service — deploy it alongside this operator (see
-[`../README.md`](../README.md)).
+The token-era `packages/claim-relayer` service is deleted. The daemon's
+`reward-claim` loop settles stOLAS distributor rewards. See
+[`../README.md`](../README.md).
