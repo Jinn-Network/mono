@@ -92,6 +92,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
+      # First-party workspace packages. Dependabot reads Yarn's
+      # `version: 0.0.0-use.local` workspace-resolution marker out of the
+      # lockfile as though it were an installed version, then offers the
+      # published stub as an "upgrade" — which is really a downgrade
+      # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
+      # registry, so no Dependabot update to them is ever correct.
+      - dependency-name: "@jinn-network/*"
 
   - package-ecosystem: npm
     directory: "/apps/operator-console"
@@ -142,6 +149,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
+      # First-party workspace packages. Dependabot reads Yarn's
+      # `version: 0.0.0-use.local` workspace-resolution marker out of the
+      # lockfile as though it were an installed version, then offers the
+      # published stub as an "upgrade" — which is really a downgrade
+      # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
+      # registry, so no Dependabot update to them is ever correct.
+      - dependency-name: "@jinn-network/*"
 
   # Solidity tooling workspace (Hardhat + OZ contracts)
   - package-ecosystem: npm
@@ -193,6 +207,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
+      # First-party workspace packages. Dependabot reads Yarn's
+      # `version: 0.0.0-use.local` workspace-resolution marker out of the
+      # lockfile as though it were an installed version, then offers the
+      # published stub as an "upgrade" — which is really a downgrade
+      # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
+      # registry, so no Dependabot update to them is ever correct.
+      - dependency-name: "@jinn-network/*"
 
   # First-party packages
   - package-ecosystem: npm
@@ -244,6 +265,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
+      # First-party workspace packages. Dependabot reads Yarn's
+      # `version: 0.0.0-use.local` workspace-resolution marker out of the
+      # lockfile as though it were an installed version, then offers the
+      # published stub as an "upgrade" — which is really a downgrade
+      # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
+      # registry, so no Dependabot update to them is ever correct.
+      - dependency-name: "@jinn-network/*"
 
   - package-ecosystem: npm
     directory: "/packages/indexer/explorer"
@@ -294,6 +322,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
+      # First-party workspace packages. Dependabot reads Yarn's
+      # `version: 0.0.0-use.local` workspace-resolution marker out of the
+      # lockfile as though it were an installed version, then offers the
+      # published stub as an "upgrade" — which is really a downgrade
+      # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
+      # registry, so no Dependabot update to them is ever correct.
+      - dependency-name: "@jinn-network/*"
 
   - package-ecosystem: npm
     directory: "/packages/sdk"
@@ -344,6 +379,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
+      # First-party workspace packages. Dependabot reads Yarn's
+      # `version: 0.0.0-use.local` workspace-resolution marker out of the
+      # lockfile as though it were an installed version, then offers the
+      # published stub as an "upgrade" — which is really a downgrade
+      # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
+      # registry, so no Dependabot update to them is ever correct.
+      - dependency-name: "@jinn-network/*"
 
   # Standalone worker + autopilot packages. Live and first-party, but were
   # omitted from the allowlist above — so they accrued Dependabot security
@@ -401,6 +443,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
+      # First-party workspace packages. Dependabot reads Yarn's
+      # `version: 0.0.0-use.local` workspace-resolution marker out of the
+      # lockfile as though it were an installed version, then offers the
+      # published stub as an "upgrade" — which is really a downgrade
+      # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
+      # registry, so no Dependabot update to them is ever correct.
+      - dependency-name: "@jinn-network/*"
 
   # Apps
   - package-ecosystem: npm
@@ -452,6 +501,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
+      # First-party workspace packages. Dependabot reads Yarn's
+      # `version: 0.0.0-use.local` workspace-resolution marker out of the
+      # lockfile as though it were an installed version, then offers the
+      # published stub as an "upgrade" — which is really a downgrade
+      # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
+      # registry, so no Dependabot update to them is ever correct.
+      - dependency-name: "@jinn-network/*"
 
   # External harness examples
   - package-ecosystem: npm
@@ -503,6 +559,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
+      # First-party workspace packages. Dependabot reads Yarn's
+      # `version: 0.0.0-use.local` workspace-resolution marker out of the
+      # lockfile as though it were an installed version, then offers the
+      # published stub as an "upgrade" — which is really a downgrade
+      # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
+      # registry, so no Dependabot update to them is ever correct.
+      - dependency-name: "@jinn-network/*"
 
   - package-ecosystem: npm
     directory: "/examples/external-harnesses/polymarket-forecaster"
@@ -553,6 +616,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
+      # First-party workspace packages. Dependabot reads Yarn's
+      # `version: 0.0.0-use.local` workspace-resolution marker out of the
+      # lockfile as though it were an installed version, then offers the
+      # published stub as an "upgrade" — which is really a downgrade
+      # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
+      # registry, so no Dependabot update to them is ever correct.
+      - dependency-name: "@jinn-network/*"
 
   - package-ecosystem: npm
     directory: "/examples/external-harnesses/prediction-evaluator"
@@ -603,3 +673,10 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
+      # First-party workspace packages. Dependabot reads Yarn's
+      # `version: 0.0.0-use.local` workspace-resolution marker out of the
+      # lockfile as though it were an installed version, then offers the
+      # published stub as an "upgrade" — which is really a downgrade
+      # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
+      # registry, so no Dependabot update to them is ever correct.
+      - dependency-name: "@jinn-network/*"
