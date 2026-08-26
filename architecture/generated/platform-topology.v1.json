@@ -2024,7 +2024,7 @@
       "decisionRecords": 6,
       "discoveredFirstPartySurfaces": 4061,
       "generatedOutputSources": 1430,
-      "generatorSources": 678,
+      "generatorSources": 679,
       "marketplaceControl": 2,
       "requiredGates": 24,
       "staticControl": 7
@@ -3534,6 +3534,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/verify-local-profile-host.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/vitest-tmp-isolation.test.mjs"
       },
       {
         "categories": [

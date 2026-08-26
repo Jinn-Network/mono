@@ -42,3 +42,4 @@ export function inheritedTempEnv(source: NodeJS.ProcessEnv = process.env): Recor
 export function scopedTempEnv(directory: string): Record<string, string> {
   return Object.fromEntries(TEMP_VARIABLES.map((name) => [name, directory]));
 }
+

@@ -20,6 +20,22 @@ const CARRIES_TEMP = /inheritedTempEnv\(|scopedTempEnv\(|TMPDIR|\.\.\./u;
 /** Declarations and schemas that name a field called `env`; they spawn nothing. */
 const NOT_A_SPAWN_SITE = /env:\s*(?:z\.|Readonly<|NodeJS\.ProcessEnv|dict\[|invocation\.env\b|environment\b)/u;
 
+/**
+ * The definition of the environment a site delegates to, when it passes a name rather than a
+ * literal (`env: closedHarborEnv(paths)`, `env: dockerEnvironment`). Without this, a site that
+ * builds its allowlist in one well-documented place reads to the scan as an omission, and the only
+ * way to satisfy it would be to inline the literal at every call — which is what produced the gap
+ * in the first place.
+ */
+function delegatedDefinition(source: string, site: string): string | undefined {
+  const name = /env:\s*([A-Za-z_$][\w$]*)/u.exec(site)?.[1];
+  if (name === undefined) return undefined;
+  const definition = new RegExp(`(?:const|let|function)\\s+${name}\\b`, "u").exec(source);
+  // A fixed window rather than a brace walk: these definitions are a handful of lines, and a walk
+  // would have to understand template literals, which two of them are written inside.
+  return definition === null ? undefined : source.slice(definition.index, definition.index + 600);
+}
+
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -81,6 +97,8 @@ describe("child temp-directory environment", () => {
         const site = envSite(source, match.index);
         if (NOT_A_SPAWN_SITE.test(site)) continue;
         if (CARRIES_TEMP.test(site) || JUSTIFICATION.test(site)) continue;
+        const delegated = delegatedDefinition(source, site);
+        if (delegated !== undefined && (CARRIES_TEMP.test(delegated) || JUSTIFICATION.test(delegated))) continue;
         unhandled.push(`${relative(sourceRoot, file)}: ${site.split("\n").pop()?.trim()}`);
       }
     }
