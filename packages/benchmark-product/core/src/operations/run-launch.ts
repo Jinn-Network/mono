@@ -33,6 +33,7 @@ import {
 } from "@jinn-network/benchmarking-records";
 import { randomUUID } from "node:crypto";
 import { launchAndWatch, resumeRun, type LaunchOptions } from "@jinn-network/benchmarking-run";
+import type { SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse, toErrorEnvelope } from "../errors.js";
@@ -521,6 +522,37 @@ export function runResume(
               };
 
               if (outstanding.length > 0) {
+                // A crash can occur after the local supervisor has durably written outcome.json
+                // but before it harvests outputs and journals a terminal. Exact resubmission is
+                // intentionally idempotent at the backend, but it is not itself the backend's
+                // recovery operation. Reconcile each previously captured outstanding Submission
+                // first; "absent" simply means the crash preceded backend acceptance and
+                // resumeRun will submit those same bytes normally below.
+                for (const cell of outstanding) {
+                  const submissionSha256 = journaledSubmissions.get(
+                    `${cell.cellKey}::${cell.dispatch}`,
+                  );
+                  if (submissionSha256 === undefined) continue;
+                  const submissionBytes = getSealedBytes(
+                    clockedContext.workspaceDir,
+                    submissionSha256,
+                  );
+                  const submission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
+                    submissionBytes,
+                  )) as { readonly submission?: unknown };
+                  if (
+                    typeof submission.submission !== "string"
+                    || !submission.submission.startsWith("urn:uuid:")
+                  ) {
+                    refuse(
+                      "record-integrity",
+                      `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
+                      "captured outstanding Submission carries no valid Submission URI",
+                    );
+                  }
+                  await backend.recover(submission.submission as SubmissionUri);
+                }
+
                 cancellation = createCancellationAwareBackend(backend, {
                   workspaceDir: clockedContext.workspaceDir,
                   draftId: input.draftId,

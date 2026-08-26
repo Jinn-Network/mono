@@ -19,7 +19,7 @@ import { readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { createWorkspacePublicationHttpHandler } from "../run/publication-source.js";
 import { runJournalPath } from "../workspace/layout.js";
-import { sha256Hex } from "../workspace/sealed-store.js";
+import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import type { LocalVenue } from "../venue/venue.js";
 import { armAdd } from "./arms.js";
 import { authorityGrant } from "./authority-ops.js";
@@ -102,12 +102,17 @@ function utf8(json: unknown): Uint8Array {
  * `waitForAttemptTerminal`, which this fake never reaches because `observe()` already reports
  * `terminal: true` on the very first call).
  */
-function makeStatefulFakeBackend(): { backend: ProxiedBackend; submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] } {
+function makeStatefulFakeBackend(): {
+  backend: ProxiedBackend;
+  submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[];
+  recoveries: string[];
+} {
   const byUri = new Map<string, FakeAttempt>();
   const byIdempotencyKey = new Map<string, { bytesHash: string; ack: SubmissionAck }>();
   const bytesByHex = new Map<string, Uint8Array>();
   let counter = 0;
   const submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] = [];
+  const recoveries: string[] = [];
 
   function store(bytes: Uint8Array): string {
     const hex = sha256Hex(bytes);
@@ -161,8 +166,9 @@ function makeStatefulFakeBackend(): { backend: ProxiedBackend; submits: { taskBy
       };
       return snapshot;
     },
-    async recover() {
-      throw new Error("not used by these tests");
+    async recover(ref) {
+      recoveries.push(ref);
+      return { classification: "absent" };
     },
     async deliveries(attempt) {
       const found = byUri.get(attempt as string);
@@ -181,7 +187,7 @@ function makeStatefulFakeBackend(): { backend: ProxiedBackend; submits: { taskBy
     },
     async drain() {},
   };
-  return { backend, submits };
+  return { backend, submits, recoveries };
 }
 
 function fakeVenue(backend: ProxiedBackend, evaluatorCount = 1): LocalVenue {
@@ -810,6 +816,55 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     expect(status.ok).toBe(true);
     if (!status.ok) return;
     expect(status.result.driver?.status).toBe("succeeded");
+  }, 30_000);
+
+  test("reconciles a captured in-flight Submission before resuming its exact dispatch", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend: launchBackend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(launchBackend),
+    });
+    expect(launched.ok).toBe(true);
+
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const delivered = fullEntries.find(
+      (entry) => entry.kind === "cell-event" && entry.event.kind === "delivered",
+    );
+    if (delivered?.kind !== "cell-event") throw new Error("fixture produced no delivered cell");
+    const cellKey = delivered.event.cellKey;
+    const captured = fullEntries.find(
+      (entry) => entry.kind === "submission-captured" && entry.cellKey === cellKey,
+    );
+    if (captured?.kind !== "submission-captured") throw new Error("fixture produced no captured Submission");
+
+    // Retain the pre-submit capture and dispatch event, but remove everything that says this
+    // cell reached a terminal. This is the product-journal shape of the real crash boundary:
+    // backend outcome durable, product delivery/terminal not yet observed.
+    overwriteRunJournal("draft-1", fullEntries.filter((entry) => {
+      if (entry.kind === "cell-event" && entry.event.cellKey === cellKey) {
+        return entry.event.kind === "dispatch";
+      }
+      if (
+        (entry.kind === "observation-accepted"
+          || entry.kind === "delivery"
+          || entry.kind === "evaluation")
+        && entry.cellKey === cellKey
+      ) return false;
+      return true;
+    }));
+
+    const { backend: resumeBackend, recoveries, submits } = makeStatefulFakeBackend();
+    const outcome = await runResume(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(resumeBackend),
+    });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    expect(recoveries).toHaveLength(1);
+    const capturedDocument = JSON.parse(new TextDecoder().decode(
+      getSealedBytes(workspaceDir, captured.submissionSha256),
+    )) as { readonly submission: string };
+    expect(recoveries).toEqual([capturedDocument.submission]);
+    expect(submits).toHaveLength(2);
   }, 30_000);
 
   test("a cell whose journal entries are entirely missing (crash before it was ever dispatched) is picked up; already-complete cells are untouched", async () => {

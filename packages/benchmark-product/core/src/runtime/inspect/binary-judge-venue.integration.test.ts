@@ -38,11 +38,17 @@ import {
   sealSubmission,
   sealTask,
   TASK_EXECUTION_PROTOCOL_URI,
+  type SubmissionRecord,
+  type TaskSpecification,
 } from "@jinn-network/task-execution-protocol";
 import { canonicalJsonBytes, recordDigest } from "@jinn-network/trust-core";
 import { initWorkspace } from "../../operations/init.js";
 import { runtimeHostPath } from "../../workspace/layout.js";
 import { putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
+import {
+  createEvaluationCellRegistry,
+  createLocalProvisioner,
+} from "../../venue/provisioner.js";
 import {
   createLocalVenue,
   EVALUATION_HARNESS_PIN,
@@ -362,7 +368,7 @@ describe("Inspect binary judge on the real local venue", () => {
     venues.push(venue);
     await venue.preflightRun?.();
     const cellKey = `${taskSha256}/alpha/1`;
-    const solveAck = await venue.backend.submit(taskBytes, submission({
+    const solveSubmissionBytes = submission({
       taskSha256,
       nonce: `${cellKey}:1`,
       requirements: {
@@ -371,7 +377,8 @@ describe("Inspect binary judge on the real local venue", () => {
         isolationPolicy: "oci-container",
         [BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY]: alpha.digest,
       },
-    }));
+    });
+    const solveAck = await venue.backend.submit(taskBytes, solveSubmissionBytes);
     expect(solveAck.accepted, JSON.stringify(solveAck)).toBe(true);
     if (!solveAck.accepted) throw new Error("unreachable");
     await venue.backend.drain();
@@ -401,6 +408,73 @@ describe("Inspect binary judge on the real local venue", () => {
     expect(staged.taskSha256).toBe(taskSha256);
     expect(staged.dockerArgs).toContainEqual(expect.stringMatching(/^--network=jinn-inspect-judge-.*-net$/u));
     expect(staged.dockerArgs).not.toContain("--network=none");
+
+    // A host restart loses the provisioner contract's process-local `expected` value. Recreate
+    // the selector after exact setup, restore only the already-produced output bytes, and prove
+    // the new contract can reconstruct and verify the durable input binding before harvest.
+    const taskDocument = JSON.parse(new TextDecoder().decode(taskBytes)) as TaskSpecification;
+    const submissionDocument = JSON.parse(
+      new TextDecoder().decode(solveSubmissionBytes),
+    ) as SubmissionRecord;
+    const recoveryPaths = {
+      root: join(root, "recovery-attempt"),
+      input: join(root, "recovery-attempt", "input"),
+      work: join(root, "recovery-attempt", "work"),
+      out: join(root, "recovery-attempt", "out"),
+      logs: join(root, "recovery-attempt", "logs"),
+      harnessState: join(root, "recovery-attempt", "harness-state"),
+      secrets: join(root, "recovery-attempt", "secrets"),
+      tmp: join(root, "recovery-attempt", "tmp"),
+      meta: join(root, "recovery-attempt", "meta"),
+    };
+    const recoveryInput = {
+      sealedTaskBytes: taskBytes,
+      dispatchContextBytes: canonicalJsonBytes({}),
+      task: taskDocument,
+      submission: submissionDocument,
+      attempt: {
+        attemptUri: `urn:uuid:${randomUUID()}` as const,
+        nonce: submissionDocument.nonce,
+        attemptNumber: 1,
+      },
+    };
+    const recoverySelector = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      inspectBinaryJudge: {
+        workspaceDir,
+        selectionManifestSha256,
+        manifest,
+        host: {
+          kind: "oci",
+          dockerPath: fakeDocker.path,
+          imageDigest,
+          platform: "linux/amd64",
+          user: "65532:65532",
+        },
+      },
+    });
+    const stagedContract = recoverySelector(recoveryInput).contract;
+    await stagedContract.setup({
+      task: taskDocument,
+      effectiveRequirements: {
+        ...(taskDocument.requirements ?? {}),
+        ...(submissionDocument.requirements ?? {}),
+      },
+      profile: {} as never,
+    }, recoveryPaths, []);
+    await Promise.all(resultArtifacts.map((artifact) =>
+      writeFile(join(recoveryPaths.out, artifact.name), artifact.bytes)));
+
+    const restartedContract = recoverySelector(recoveryInput).contract;
+    const recoveredHarvest = await restartedContract.harvest(recoveryPaths, taskDocument.outputs);
+    expect(recoveredHarvest.integrityViolations).toEqual([]);
+    expect(recoveredHarvest.omissions).toEqual([]);
+    expect(recoveredHarvest.manifest.map(({ path }) => path).sort()).toEqual([
+      "inspect-log",
+      "judge-observation",
+      "judge-response",
+    ]);
 
     const prepared = await venue.prepareEvaluationCell({
       subjectTaskBytes: taskBytes,
