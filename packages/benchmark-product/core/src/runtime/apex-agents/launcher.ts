@@ -6,6 +6,7 @@ import { refuse } from "../../errors.js";
 import { ARCHIPELAGO_COMMIT_PIN, type ApexAgentsSelectionManifest } from "./manifest.js";
 import { archipelagoGradePath, readArchipelagoGrade } from "./grades.js";
 import type { ApexAgentsHostBinding } from "./host.js";
+import { inheritedTempEnv } from "../child-temp-env.js";
 
 export function archipelagoRunId(runSha256: string, taskIdsSha256: string): string {
   return createHash("sha256").update(`${runSha256}:${taskIdsSha256}`).digest("hex").slice(0, 32);
@@ -70,7 +71,7 @@ export function launchArchipelago(input: {
   }
   const version = execFileSync(executable, ["--version"], {
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "" },
+    env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "" },
   }).trim().replace(/^archipelago\s+/iu, "");
   if (version !== input.manifest.archipelago.commit || version !== ARCHIPELAGO_COMMIT_PIN) {
     refuse("record-integrity", "archipelago.commit", "Archipelago commit drifted from the sealed selection");
@@ -79,7 +80,7 @@ export function launchArchipelago(input: {
   const spawned = spawnSync(executable, ["grade", "--grading-run-id", input.runId, "--task-ids", ...input.taskIds], {
     cwd: input.reportRoot,
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "", COLOPHON_APEX_REPORT_ROOT: input.reportRoot },
+    env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "", COLOPHON_APEX_REPORT_ROOT: input.reportRoot },
   });
   if (spawned.status !== 0) {
     refuse(

@@ -2024,7 +2024,7 @@
       "decisionRecords": 6,
       "discoveredFirstPartySurfaces": 4076,
       "generatedOutputSources": 1445,
-      "generatorSources": 678,
+      "generatorSources": 680,
       "marketplaceControl": 2,
       "requiredGates": 24,
       "staticControl": 7
@@ -2805,6 +2805,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": ".github/scripts/plugin-tree-ci-workflow.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": ".github/scripts/plugin-tree-guard-common.mjs"
       },
       {
@@ -3534,6 +3544,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/verify-local-profile-host.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/vitest-tmp-isolation.test.mjs"
       },
       {
         "categories": [

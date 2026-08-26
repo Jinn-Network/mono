@@ -9,6 +9,7 @@ import { runtimeHostPath } from "../../workspace/layout.js";
 import { putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
 import { HarborSelectionManifestSchema, assertSupportedHarborVersion, HARBOR_ADAPTER_ID, PIER_ADAPTER_ID, type HarborCompatibleAdapterId, type HarborDatasetInput, type HarborSelectionManifest, type HarborTaskInput } from "./manifest.js";
 import { assertSupportedPierVersion } from "../deep-swe-v1.1/manifest.js";
+import { inheritedTempEnv } from "../child-temp-env.js";
 
 export interface HarborRuntimeSelectionRequest {
   readonly executable: string;
@@ -99,7 +100,7 @@ export async function resolveHarborSelection(input: HarborRuntimeSelectionReques
   if (!lstatSync(executable).isFile()) throw new TypeError("Harbor executable must be a regular file");
   const executableSha256 = createHash("sha256").update(readFileSync(executable)).digest("hex");
   const resolvedVersion = await new Promise<string>((resolve, reject) => {
-    execFile(executable, ["--version"], { encoding: "utf8", signal, env: { PATH: process.env.PATH ?? "", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1" } }, (error, stdout) => {
+    execFile(executable, ["--version"], { encoding: "utf8", signal, env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1" } }, (error, stdout) => {
       if (error !== null) reject(new Error(`${engine} version probe failed`, { cause: error }));
       else resolve(stdout.trim().replace(/^(?:harbor|pier)\s+/iu, ""));
     });

@@ -2,6 +2,7 @@
  * downloads, starts Docker, or silently substitutes a fixture. */
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
+import { inheritedTempEnv } from "../child-temp-env.js";
 
 export type TerminalBench2ExternalReadiness =
   | { readonly ready: true }
@@ -21,7 +22,7 @@ export async function terminalBench2ExternalReadiness(input: TerminalBench2Exter
   }
   const available = await new Promise<boolean>((resolve) => {
     execFile(input.dockerExecutable, ["info", "--format", "{{json .ServerVersion}}"], {
-      encoding: "utf8", env: { PATH: process.env.PATH ?? "", DOCKER_CLI_HINTS: "false" }, timeout: 15_000,
+      encoding: "utf8", env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "", DOCKER_CLI_HINTS: "false" }, timeout: 15_000,
     }, (error) => resolve(error === null));
   });
   return available

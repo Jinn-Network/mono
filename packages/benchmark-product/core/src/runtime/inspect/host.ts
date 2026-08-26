@@ -35,6 +35,7 @@ import {
   catalogInspectOciSelection,
   probeInspectOciSelection,
 } from "./oci.js";
+import { inheritedTempEnv } from "../child-temp-env.js";
 
 const WorkerEnvelopeSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), value: z.unknown() }),
@@ -91,6 +92,7 @@ async function callWorker(
       // No ambient credential variables cross this boundary. The optional OCI provider path uses
       // the runtime host's broker port; local-Python never inherits web/server credentials.
       env: {
+        ...inheritedTempEnv(),
         PYTHONDONTWRITEBYTECODE: "1",
         PYTHONNOUSERSITE: "1",
         PYTHONUTF8: "1",

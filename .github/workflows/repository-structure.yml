@@ -85,6 +85,8 @@ jobs:
         run: node --test .github/scripts/workflow-script-tests.test.mjs
       - name: Published-artifacts-smoke workflow shape
         run: node --test .github/scripts/published-artifacts-smoke-workflow.test.mjs
+      - name: Vitest temp-directory sweep seam is wired everywhere
+        run: node --test .github/scripts/vitest-tmp-isolation.test.mjs
   identifier-origin:
     name: Identifier origin tripwire
     needs: changes
