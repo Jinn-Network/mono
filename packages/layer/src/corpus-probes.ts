@@ -7,7 +7,7 @@
  *   - `corpus-content`   — did the repo-slug query find enough evidence that
  *                         interactive pickup can actually serve?
  *
- * Both are shared so the Python doctor (apps/jinn-agent/plugins/jinn/doctor.py)
+ * Both are shared so the Python doctor (plugin/frozen/doctor.py)
  * and the layer CLI (`jinn-layer corpus probe`) render identical semantics.
  *
  * The content check deliberately mirrors pickup's two-layer, fail-closed
@@ -37,7 +37,7 @@ const CORPUS_PROBE_CANDIDATE_LIMIT = 50;
 
 /**
  * One doctor check result. Mirrors the Python doctor contract in
- * apps/jinn-agent/plugins/jinn/doctor.py: a plain `{name, ok, detail}` dict with
+ * plugin/frozen/doctor.py: a plain `{name, ok, detail}` dict with
  * `remedy` present exactly when `ok` is false — EXCEPT informational checks,
  * which never carry a remedy even when `ok` is false (there is nothing for the
  * operator to fix, so there is no copy-paste command to offer). `corpus-content`

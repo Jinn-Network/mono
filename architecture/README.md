@@ -58,6 +58,26 @@ node .github/scripts/generate-architecture.mjs --check
 Check mode regenerates into a temporary directory and byte-compares the exact tracked artifact
 set. Missing, changed, or unknown files fail.
 
+### Merge conflicts in generated topology
+
+Two PRs that change the catalog in parallel both regenerate
+`architecture/generated/platform-topology.md` and
+`architecture/generated/platform-topology.v1.json`. Git then attempts a textual
+three-way merge of independently derived bytes. The correct resolution is never a
+hand merge — discard both conflict sides and re-run the generator:
+
+```bash
+git checkout --theirs architecture/generated/platform-topology.v1.json architecture/generated/platform-topology.md
+node .github/scripts/generate-architecture.mjs
+node .github/scripts/generate-architecture.mjs --check
+git add architecture/generated
+```
+
+When merging the target base into a PR branch, `--theirs` selects the incoming base
+version before regeneration. Resolve any semantic catalog or manifest hunks first,
+then run this block once inputs are consistent. The `--check` contract above is
+unchanged.
+
 ## Atomic package procedures
 
 For every operation below, update the manifest and catalog in one change, update the owning

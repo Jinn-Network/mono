@@ -67,7 +67,7 @@ authoritative about when and why each one is used.
 
 ## Session verb roster
 
-The v2 session surface (see `packages/autopilot/src/cli/session.ts`) is:
+The v2 session surface (standalone Autopilot `session` CLI; never the vendored `packages/autopilot` tree) is:
 
 - `checkpoint`
 - `implementation-complete --summary-file <path>`

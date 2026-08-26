@@ -3,8 +3,8 @@
 # Why this file exists (2026-06-03): the service's build config had drifted in
 # the Railway dashboard to the RAILPACK auto-builder. RAILPACK builds from the
 # service Root Directory and runs `yarn install`, which cannot resolve the
-# indexer's `@jinn-network/sdk@portal:../sdk` sibling — every deploy failed at
-# the install step ("Manifest not found"), freezing the live indexer on stale
+# RAILPACK auto-builder (which cannot resolve the indexer's portal siblings)
+# failed every deploy at the install step, freezing the live indexer on stale
 # code while build-failures kept the last-good container serving. Pinning the
 # Dockerfile here makes the build reproducible and dashboard-drift-proof.
 #
@@ -17,7 +17,7 @@
 # Two one-time service settings are NOT expressible in this file (set once in
 # the Railway dashboard / API):
 #   - Root Directory = /packages  (the Dockerfile's build context: it COPYs the
-#     sibling sdk/ and indexer/ trees, matching the CI build
+#     indexer tree and its portal siblings, matching the CI build
 #     `docker build -f indexer/deploy/Dockerfile .` run from packages/).
 #   - Config as code  = packages/indexer/deploy/railway.toml
 
@@ -30,7 +30,12 @@ dockerfilePath = "indexer/deploy/Dockerfile"
 # every push to next. Gitignore-style, anchored at the REPO ROOT (per Railway's
 # monorepo docs, whose example uses /packages/backend). Base confirmed repo-root
 # on 2026-06-03: non-indexer merge #952 was SKIPPED; indexer merge #998 deployed.
-watchPatterns = ["packages/indexer/**", "packages/sdk/**"]
+watchPatterns = [
+  "packages/indexer/**",
+  "packages/task-execution/protocol/**",
+  "packages/trust/core/**",
+  "packages/benchmarking/records/**",
+]
 
 [deploy]
 # Gate traffic cutover on the new container being caught-up-to-realtime, so a

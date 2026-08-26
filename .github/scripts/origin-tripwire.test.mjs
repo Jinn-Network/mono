@@ -145,7 +145,7 @@ test('isExcludedPath: exact paths and directory prefixes both match, unrelated p
   assert.equal(isExcludedPath('log/decisions/2026-08-04-x.md', DEFAULT_EXCLUSIONS), true);
   assert.equal(isExcludedPath('docs/press/2026-08-04-x.md', DEFAULT_EXCLUSIONS), true);
   assert.equal(isExcludedPath('legacy/anything.ts', DEFAULT_EXCLUSIONS), true);
-  assert.equal(isExcludedPath('apps/jinn-agent/src/x.ts', DEFAULT_EXCLUSIONS), true);
+  assert.equal(isExcludedPath('apps/operator-console/app/page.tsx', DEFAULT_EXCLUSIONS), false);
   assert.equal(isExcludedPath('packages/core/schema.json', DEFAULT_EXCLUSIONS), false);
   // A path that merely starts with the same characters as an excluded prefix, without the
   // trailing separator, must not be treated as excluded.
@@ -229,7 +229,6 @@ test('the exclusion list is closed: widening it is a reviewed edit', () => {
     'docs/press/',
     'docs/superpowers/',
     'legacy/',
-    'apps/jinn-agent/',
   ]);
 });
 

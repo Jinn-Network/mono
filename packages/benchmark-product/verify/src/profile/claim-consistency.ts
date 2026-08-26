@@ -18,9 +18,9 @@ export interface ClaimRecordIdentities { readonly benchmarkSha256: string; reado
 const equal = (left: Uint8Array, right: Uint8Array) => left.length === right.length && left.every((byte, index) => byte === right[index]);
 /** The path of the first field that actually differs, or `undefined` when the two values are
  * equal — equal leaves must report NO difference, or the object branch returns on its first key
- * and every mismatch names the first key in sorted order instead of the edited field. Mirrors
- * `benchmark-product/core`'s own copy (`src/verification/claim-consistency.ts`). */
-function firstDifference(actual: unknown, expected: unknown, path = "claim"): string | undefined {
+ * and every mismatch names the first key in sorted order instead of the edited field. Single
+ * implementation: product core imports this helper rather than keeping a second copy. */
+export function firstDifference(actual: unknown, expected: unknown, path = "claim"): string | undefined {
   // Never hand `undefined` to canonicalJsonBytes: it is deliberately not a JSON value, and a
   // field carried by one side alone is itself the first difference.
   if (actual === undefined || expected === undefined) return actual === expected ? undefined : path;
