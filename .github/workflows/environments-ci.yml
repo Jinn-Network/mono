@@ -112,6 +112,8 @@ jobs:
           yarn typecheck
           yarn test
           yarn build
+          yarn check:fixtures
+          yarn check:schemas
           yarn pack:smoke
       - name: Verify Environment Verification
         working-directory: packages/environments/verification
@@ -128,6 +130,8 @@ jobs:
           yarn typecheck
           yarn test
           yarn build
+          yarn check:fixtures
+          yarn check:schemas
           yarn pack:smoke
       - name: Verify Chain Environment Verification
         working-directory: packages/environments/chain-verification
@@ -152,6 +156,8 @@ jobs:
           yarn typecheck
           yarn test
           yarn build
+          yarn check:fixtures
+          yarn check:schemas
           yarn pack:smoke
       - name: Prove the closed execution profile under a network-denied runtime
         working-directory: packages/environments/information-world
