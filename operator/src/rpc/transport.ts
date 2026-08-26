@@ -244,7 +244,7 @@ export function maskRpcHost(url: string): string {
  * viem `HttpRequestError`-shaped message (spec §14.2 item 2, issue #2402).
  */
 export function maskUrlsInMessage(message: string): string {
-  return message.replace(/https?:\/\/[^\s"'<>]+/g, (url) => maskRpcHost(url));
+  return message.replace(/https?:\/\/[^\s"'<>]+/gi, (url) => maskRpcHost(url));
 }
 
 /**

@@ -826,6 +826,36 @@ describe('sanitizeErrorText (#642)', () => {
     expect(sanitized).not.toContain(SECRET);
   });
 
+  it('masks mixed-case schemes: URL schemes are case-insensitive and nothing normalizes rpcUrl', () => {
+    const message = [
+      'upper HTTPS://base-mainnet.g.alchemy.com/v2/SECRETKEY123',
+      'mixed Https://rpc.example/?apiKey=SECRETKEY123',
+      'plain HTTP://insecure.example/v2/SECRETKEY123',
+    ].join(' ');
+
+    const sanitized = sanitizeErrorText(message);
+    expect(sanitized).toContain('base-mainnet.g.alchemy.com');
+    expect(sanitized).toContain('rpc.example');
+    expect(sanitized).toContain('insecure.example');
+    expect(sanitized).not.toContain(SECRET);
+    expect(sanitized).not.toContain('apiKey=');
+    expect(sanitized).not.toContain('/v2/');
+  });
+
+  it('masks a mixed-case scheme reached through the Error.cause walk', () => {
+    const cause = new HttpRequestError({
+      url: 'HTTPS://base-mainnet.g.alchemy.com/v2/SECRETKEY123',
+      body: { method: 'eth_blockNumber' },
+      details: 'fetch failed',
+    });
+    const err = new Error('claimDelivery failed');
+    err.cause = cause;
+
+    const sanitized = sanitizeErrorText(err);
+    expect(sanitized).toContain('base-mainnet.g.alchemy.com');
+    expect(sanitized).not.toContain(SECRET);
+  });
+
   it('sanitizePersistedText and sanitizeStructuredValue reuse the host-only dialect', () => {
     const url = 'https://user:SECRETKEY123@rpc.example/v2/SECRETKEY123?k=SECRETKEY123#f=SECRETKEY123';
     expect(sanitizePersistedText(url)).toBe('rpc.example');
