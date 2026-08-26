@@ -77,7 +77,13 @@ jobs:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.23.1
+      # The bundled npm of a freshly rolled runner image can regress the
+      # packed-consumer smoke (observed: node 22.23.2's npm dying with
+      # "Cannot read properties of null (reading 'edgesOut')" on yarn-packed
+      # tarballs). The old foundation job pinned both for exactly this reason.
+      - name: Pin npm for packed-consumer smoke coverage
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
