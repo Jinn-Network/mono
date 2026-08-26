@@ -53,6 +53,8 @@ const LABEL_IN_PROSE_PARSER_DIGEST = "sha256:d53d23afc8734090c8d54c39de8105ead37
 const COMPLETE_JSON_LABEL_PARSER_ID = "network.jinn.parser.binary-complete-json-label" as const;
 const COMPLETE_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
 const COMPLETE_JSON_LABEL_PARSER_DIGEST = "sha256:db1215184eb98aec6fe26f5412e6e823fbd19f75c5c080fbb58ecd1968503f4b" as const;
+const COMPLETE_JSON_LABEL_PARSER_V2_VERSION = "2.0.0" as const;
+const COMPLETE_JSON_LABEL_PARSER_V2_DIGEST = "sha256:88545378ce165666102edc22393bbe87950c3a48d325fe142fab0f1c319a1916" as const;
 const EVERMEM_JSON_LABEL_PARSER_ID = "network.jinn.parser.binary-evermem-json-label" as const;
 const EVERMEM_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
 const EVERMEM_JSON_LABEL_PARSER_DIGEST = "sha256:4834ba3e6c817c560c72afb93a4a5b56c0cf654cf6ff1012843ea7675f507942" as const;
@@ -63,6 +65,7 @@ const STRICT_JSON_LABEL_PARSER_ID = "network.jinn.parser.binary-strict-json-labe
 const STRICT_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
 const STRICT_JSON_LABEL_PARSER_DIGEST = "sha256:e5c723c97a55d631d26a8da2badea0df755943987cd679acf7bad7653f48dca6" as const;
 const EVALUATION_METHOD_DIGEST = "sha256:3568ee132ece234c15b7f9b6b4a7a954aefc2c417e17f2fde91729a7240bb343" as const;
+const EVALUATION_METHOD_V2_DIGEST = "sha256:838a8e4d21893524cba10e5a282397b334a67fe9bc516d53ae20fd4f2b915038" as const;
 const RUN_OWNER = "urn:uuid:77777777-7777-5777-8777-777777777777";
 const RESPONSE_MEDIA_TYPE = "text/plain; charset=utf-8";
 const OBSERVATION_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.observation.v1+json";
@@ -267,6 +270,7 @@ function makeInstrument(
   parserId: string = "network.jinn.parser.binary-accept-reject",
   parserVersion: string = "1.0.0",
   fieldOverrides: InstrumentFieldOverrides = {},
+  parserInvalidPolicy: "reject" | "abstain" = "reject",
 ) {
   const developerSegments: ({ readonly literal: string } | { readonly field: string })[] = [
     { literal: "Question: " },
@@ -307,7 +311,7 @@ function makeInstrument(
         version: parserVersion,
         digest: parserDigest,
       },
-      invalidOutputDecision: "REJECT",
+      invalidOutputDecision: parserInvalidPolicy === "abstain" ? "INVALID" : "REJECT",
     },
   };
 }
@@ -339,19 +343,23 @@ function resultEvaluation(input: {
   readonly cellKey: string;
   readonly responseSha256: `sha256:${string}`;
   readonly observationSha256: `sha256:${string}`;
+  readonly evaluationMethodSha256?: `sha256:${string}`;
+  readonly parserInvalidPolicy?: "reject" | "abstain";
   readonly tamper?: Tamper;
 }): Uint8Array {
   let truthLabel: "CORRECT" | "WRONG" = input.task.truthLabel;
   let instrumentSha256: string = input.instrumentSha256;
   let evaluationSpecSha256 = input.task.evaluationSpecSha256.slice("sha256:".length);
-  let decision = input.decision;
+  let decision: "ACCEPT" | "REJECT" | "INVALID" = input.parseValid || input.parserInvalidPolicy !== "abstain"
+    ? input.decision
+    : "INVALID";
   if (input.tamper?.cellKey === input.cellKey) {
     if (input.tamper.kind === "truth") truthLabel = truthLabel === "CORRECT" ? "WRONG" : "CORRECT";
     if (input.tamper.kind === "instrument") instrumentSha256 = `sha256:${"f".repeat(64)}`;
     if (input.tamper.kind === "spec") evaluationSpecSha256 = "f".repeat(64);
     if (input.tamper.kind === "invalid-accept") decision = "ACCEPT";
   }
-  const agrees = agreement(decision, truthLabel);
+  const agrees = decision === "INVALID" ? false : agreement(decision, truthLabel);
   const measurements: { name: string; value: string | boolean }[] = [
     { name: "judgeDecision", value: decision },
     { name: "truthLabel", value: truthLabel },
@@ -386,7 +394,7 @@ function resultEvaluation(input: {
       evaluator: { id: "did:key:zBinaryInstrumentFixture" },
       evaluationMethod: {
         name: PARSER_ID,
-        digest: { sha256: EVALUATION_METHOD_DIGEST.slice("sha256:".length) },
+        digest: { sha256: (input.evaluationMethodSha256 ?? EVALUATION_METHOD_DIGEST).slice("sha256:".length) },
       },
       evaluationSpecification: {
         name: "evaluation-spec.json",
@@ -394,7 +402,7 @@ function resultEvaluation(input: {
       },
       taskSubject: "task.json",
       resultSubjects: ["judge-response", "judge-observation"],
-      verdict: agrees ? "pass" : "fail",
+      verdict: decision === "INVALID" ? "inconclusive" : agrees ? "pass" : "fail",
       measurements,
       evidence: [{
         name: "label-resolution.json",
@@ -430,6 +438,7 @@ function makeFixture(options: {
   // test deliberately pulls them apart.
   readonly responseBytesParserId?: string;
   readonly evaluationParserDigest?: `sha256:${string}`;
+  readonly parserInvalidPolicy?: "reject" | "abstain";
   readonly extraRunArm?: boolean;
   readonly extraTestMaterial?: boolean;
   readonly extraParserField?: boolean;
@@ -464,8 +473,17 @@ function makeFixture(options: {
 } {
   const truthAdmission = options.truthAdmission ?? "two-human-unanimous";
   const labelTruthAdmission = options.labelTruthAdmission ?? truthAdmission;
-  const parameters = { ...PARAMETERS, truthAdmission };
-  const instrumentParserId = options.responseParserId ?? ACCEPT_REJECT_PARSER_ID;
+  const parserInvalidPolicy = options.parserInvalidPolicy ?? "reject";
+  const parameters = { ...PARAMETERS, truthAdmission, parserInvalidPolicy };
+  const instrumentParserId = options.responseParserId
+    ?? (parserInvalidPolicy === "abstain" ? COMPLETE_JSON_LABEL_PARSER_ID : ACCEPT_REJECT_PARSER_ID);
+  const responseParserVersion = options.responseParserVersion
+    ?? (parserInvalidPolicy === "abstain" ? COMPLETE_JSON_LABEL_PARSER_V2_VERSION : "1.0.0");
+  const responseParserDigest = options.responseParserDigest
+    ?? (parserInvalidPolicy === "abstain" ? COMPLETE_JSON_LABEL_PARSER_V2_DIGEST : RESPONSE_PARSER_DIGEST);
+  const evaluationParserVersion = parserInvalidPolicy === "abstain" ? "2.0.0" : PARSER_VERSION;
+  const evaluationParserDigest = options.evaluationParserDigest
+    ?? (parserInvalidPolicy === "abstain" ? EVALUATION_METHOD_V2_DIGEST : EVALUATION_METHOD_DIGEST);
   const responseBytesParserId = options.responseBytesParserId ?? instrumentParserId;
   const records = new Map<string, Uint8Array>();
   const put = (bytes: Uint8Array): `sha256:${string}` => {
@@ -479,15 +497,16 @@ function makeFixture(options: {
   for (const armId of options.extraRunArm === true ? [...matrixArmIds, "armExtra"] : matrixArmIds) {
     let document = makeInstrument(
       armId,
-      options.responseParserDigest ?? RESPONSE_PARSER_DIGEST,
+      responseParserDigest,
       options.judgeModel,
-      options.responseParserId,
-      options.responseParserVersion,
+      instrumentParserId,
+      responseParserVersion,
       {
         includeEvidence: options.evidenceArmId === armId,
         omitField: options.missingFieldArm?.armId === armId ? options.missingFieldArm.field : undefined,
         unknownField: options.unknownFieldArm?.armId === armId ? options.unknownFieldArm.field : undefined,
       },
+      parserInvalidPolicy,
     );
     if (options.undeclaredModelArm === armId) {
       document = { ...document, model: { ...document.model, requested: "gpt-9-undeclared" } };
@@ -571,20 +590,20 @@ function makeFixture(options: {
       family: "deterministic-process",
       grader: {
         name: PARSER_ID,
-        digest: { sha256: (options.evaluationParserDigest ?? EVALUATION_METHOD_DIGEST).slice("sha256:".length) },
+        digest: { sha256: evaluationParserDigest.slice("sha256:".length) },
         accessClass: "public",
       },
       familyBlock: {
         image: {
           name: options.evaluationImageName ?? "binary-judgment-evaluation-parser-semantics.json",
-          digest: { sha256: options.evaluationImageDigest ?? EVALUATION_METHOD_DIGEST.slice("sha256:".length) },
+          digest: { sha256: options.evaluationImageDigest ?? evaluationParserDigest.slice("sha256:".length) },
         },
         platform: "linux/amd64",
         workspace: {},
         parser: {
           id: PARSER_ID,
-          version: PARSER_VERSION,
-          digest: options.evaluationParserDigest ?? EVALUATION_METHOD_DIGEST,
+          version: evaluationParserVersion,
+          digest: evaluationParserDigest,
           ...(options.extraParserField === true ? { source: "inline-code-is-forbidden" } : {}),
         },
         testMaterial: [
@@ -692,7 +711,10 @@ function makeFixture(options: {
       const key = cellKey(item.taskDigest, armId, replicate);
       const expired = key === options.expireCell;
       const [decision, parseValid] = decisions.get(`${item.taskDigest}/${armId}`)![offset]!;
-      const responseText = encodeParserResponse(responseBytesParserId, decision, parseValid);
+      const encodedResponse = encodeParserResponse(responseBytesParserId, decision, parseValid);
+      const responseText = parserInvalidPolicy === "abstain" && parseValid
+        ? `\`\`\`json\n${encodedResponse}\n\`\`\``
+        : encodedResponse;
       const responseBytes = new TextEncoder().encode(
         options.tamper?.cellKey === key && options.tamper.kind === "response-bom"
           ? `\ufeff${responseText}`
@@ -733,6 +755,8 @@ function makeFixture(options: {
         cellKey: key,
         responseSha256,
         observationSha256,
+        evaluationMethodSha256: evaluationParserDigest,
+        parserInvalidPolicy,
         tamper: options.tamper,
       });
       const verdictDigest = verdictBytes === undefined ? undefined : put(verdictBytes);
@@ -953,6 +977,17 @@ describe("binary-instrument@1 qualification oracle", () => {
 
     expect(result.configuration.truthAdmission).toBe("operator-only");
     expect(result.itemDecisions).toHaveLength(8);
+  });
+
+  test("replays fenced v2 JSON, preserves neutral invalid calls, and publishes only valid majorities", () => {
+    const fixture = makeFixture({ parserInvalidPolicy: "abstain" });
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    const result = method.compute!(fixture.input).perSubject[0]!.results as any;
+
+    expect(result.configuration.parserInvalidPolicy).toBe("abstain");
+    expect(result.itemDecisions).toHaveLength(8);
+    expect(result.excluded).toEqual({ count: 0, items: [] });
+    expect(Object.values(result.arms).some((arm: any) => arm.call.parseInvalid > 0)).toBe(true);
   });
 
   test.each([

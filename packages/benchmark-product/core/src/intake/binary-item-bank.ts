@@ -19,6 +19,7 @@ import {
 } from "@jinn-network/benchmarking-records";
 import {
   BINARY_JUDGMENT_EVALUATION_PARSER_SEALED,
+  BINARY_JUDGMENT_EVALUATION_PARSER_V2_SEALED,
   BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE,
   BINARY_JUDGMENT_OBSERVATION_MEDIA_TYPE,
   BINARY_JUDGMENT_PROFILE_DIGEST,
@@ -104,6 +105,7 @@ export interface ConvertBinaryItemBankInput {
   readonly description: string;
   readonly version: string;
   readonly author: string;
+  readonly parserInvalidPolicy?: "reject" | "abstain";
   /** Exact record resolution plus reviewer and role-separated authority trust. */
   readonly admissionVerificationPorts: BinaryJudgmentAdmissionClosurePorts;
 }
@@ -194,8 +196,14 @@ function bare(digest: string): string {
   return digest.startsWith("sha256:") ? digest.slice("sha256:".length) : digest;
 }
 
-function buildEvaluationSpec(analysisContextSha256: `sha256:${string}`) {
-  const specification = buildBinaryJudgmentEvaluationSpecification(analysisContextSha256);
+function buildEvaluationSpec(
+  analysisContextSha256: `sha256:${string}`,
+  parserInvalidPolicy: "reject" | "abstain",
+) {
+  const specification = buildBinaryJudgmentEvaluationSpecification(
+    analysisContextSha256,
+    parserInvalidPolicy,
+  );
   if (!isBinaryJudgmentEvaluationSpecification(specification)) {
     throw new Error("shared binary-judgment EvaluationSpec builder failed its registered validator");
   }
@@ -233,6 +241,10 @@ function buildTask(input: {
  * is opened here: the only authority inputs are exact local manifests and F2-sealed CAS records.
  */
 export function convertBinaryItemBank(input: ConvertBinaryItemBankInput): ConvertedBinaryItemBank {
+  const parserInvalidPolicy = input.parserInvalidPolicy ?? "reject";
+  if (parserInvalidPolicy !== "reject" && parserInvalidPolicy !== "abstain") {
+    refuse("validation", "parserInvalidPolicy", "parserInvalidPolicy must be reject or abstain");
+  }
   const itemBank = parseCanonicalJsonl(
     input.itemBankJsonl,
     BinaryItemBankEntrySchema,
@@ -390,7 +402,10 @@ export function convertBinaryItemBank(input: ConvertBinaryItemBankInput): Conver
       refuse("record-integrity", `admissions.${index + 1}.itemSha256`, "item bank payload differs from admitted item bytes");
     }
 
-    const evaluationSpec = buildEvaluationSpec(verified.analysisContextSha256);
+    const evaluationSpec = buildEvaluationSpec(
+      verified.analysisContextSha256,
+      parserInvalidPolicy,
+    );
     const task = buildTask({
       item,
       itemSha256: verified.itemSha256,
@@ -472,6 +487,13 @@ export const BINARY_ITEM_BANK_EVALUATOR_SEMANTICS = {
   bytes: BINARY_JUDGMENT_EVALUATION_PARSER_SEALED.bytes,
   digest: BINARY_JUDGMENT_EVALUATION_PARSER_SEALED.digest,
 } as const;
+
+export function binaryItemBankEvaluatorSemantics(parserInvalidPolicy: "reject" | "abstain") {
+  const sealed = parserInvalidPolicy === "abstain"
+    ? BINARY_JUDGMENT_EVALUATION_PARSER_V2_SEALED
+    : BINARY_JUDGMENT_EVALUATION_PARSER_SEALED;
+  return { bytes: sealed.bytes, digest: sealed.digest } as const;
+}
 
 /** Used only by tests/fixtures that need canonical JSONL without reimplementing its byte rules. */
 export function renderCanonicalJsonl(records: readonly unknown[]): string {

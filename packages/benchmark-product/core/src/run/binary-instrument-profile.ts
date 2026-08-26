@@ -394,6 +394,7 @@ function validateRuntimeAndArms(input: {
    * instead of assuming a two-arm roster. Already parsed and reseal-checked in the loop below, so
    * returning them costs nothing and avoids a second parse of the same sealed bytes. */
   readonly armInstruments: readonly BinaryJudgmentInstrument[];
+  readonly parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"];
 } {
   const runtime = input.spec.evaluationRuntime;
   if (
@@ -445,6 +446,7 @@ function validateRuntimeAndArms(input: {
   let declaringArmIndex: number | undefined;
   let declaringArmCount = 0;
   const armInstruments: BinaryJudgmentInstrument[] = [];
+  let invalidOutputDecision: "REJECT" | "INVALID" | undefined;
   for (const [index, arm] of input.spec.arms.entries()) {
     const selected = selection.arms[index]!;
     if (
@@ -476,6 +478,15 @@ function validateRuntimeAndArms(input: {
       refuse("conflict", `spec.arms.${index}.instrument`, "instrument identity, jinn-openai model, or generation settings drifted from the runtime selection");
     }
     armInstruments.push(instrument);
+    if (invalidOutputDecision === undefined) {
+      invalidOutputDecision = instrument.response.invalidOutputDecision;
+    } else if (instrument.response.invalidOutputDecision !== invalidOutputDecision) {
+      refuse(
+        "conflict",
+        `spec.arms.${index}.instrument`,
+        "all binary-judgment arms must share one invalid-output policy",
+      );
+    }
     if (binaryJudgmentInstrumentDeclaresEvidence(instrument)) {
       declaringArmCount += 1;
       if (declaringArmIndex === undefined) declaringArmIndex = index;
@@ -505,7 +516,13 @@ function validateRuntimeAndArms(input: {
     }
   }
 
-  return { judgeModel: firstModel, declaringArmIndex, declaringArmCount, armInstruments };
+  return {
+    judgeModel: firstModel,
+    declaringArmIndex,
+    declaringArmCount,
+    armInstruments,
+    parserInvalidPolicy: invalidOutputDecision === "INVALID" ? "abstain" : "reject",
+  };
 }
 
 export function isBinaryInstrumentSpec(spec: DraftSpec): boolean {
@@ -543,7 +560,7 @@ export function compileBinaryInstrumentProfile(input: {
   if (effectiveVerdictRule !== "sole") {
     refuse("validation", "spec.assurance", "binary-instrument@1 requires resolved verdictRule=sole");
   }
-  const { judgeModel } = validateRuntimeAndArms({
+  const { judgeModel, parserInvalidPolicy } = validateRuntimeAndArms({
     workspaceDir: input.workspaceDir,
     spec,
     benchmark: input.benchmark,
@@ -557,7 +574,7 @@ export function compileBinaryInstrumentProfile(input: {
     measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
     candidateClasses: admission.candidateClasses,
     strata: admission.strata,
-    parserInvalidPolicy: "reject",
+    parserInvalidPolicy,
     truthAdmission: admission.truthAdmission,
     intervalAlpha: "0.05",
     // DERIVED from the arms' shared model.requested (validateRuntimeAndArms), never declared as
@@ -626,6 +643,7 @@ function deriveBinaryInstrumentFamilyClosure(input: {
   readonly declaringArmIndex: number | undefined;
   readonly declaringArmCount: number;
   readonly armInstruments: readonly BinaryJudgmentInstrument[];
+  readonly parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"];
 } {
   const { analysis, methodLabel } = input;
   const pathPrefix = input.pathPrefix ?? "spec.analysis";
@@ -646,7 +664,12 @@ function deriveBinaryInstrumentFamilyClosure(input: {
     refuse("validation", "spec.assurance", `${methodLabel} requires resolved verdictRule=sole`);
   }
 
-  const { declaringArmIndex, declaringArmCount, armInstruments } = validateRuntimeAndArms({
+  const {
+    declaringArmIndex,
+    declaringArmCount,
+    armInstruments,
+    parserInvalidPolicy,
+  } = validateRuntimeAndArms({
     workspaceDir: input.workspaceDir,
     spec,
     benchmark: input.benchmark,
@@ -666,6 +689,7 @@ function deriveBinaryInstrumentFamilyClosure(input: {
     declaringArmIndex,
     declaringArmCount,
     armInstruments,
+    parserInvalidPolicy,
   };
 }
 
@@ -708,7 +732,7 @@ export function compilePairwiseDisagreementProfile(input: {
     measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
     candidateClasses: closure.candidateClasses,
     strata: closure.strata,
-    parserInvalidPolicy: "reject",
+    parserInvalidPolicy: closure.parserInvalidPolicy,
     truthAdmission: closure.truthAdmission,
     intervalAlpha: "0.05",
   };
@@ -878,7 +902,7 @@ export function compilePairedMajorityDeltaProfile(input: {
     measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
     candidateClasses: closure.candidateClasses,
     strata: closure.strata,
-    parserInvalidPolicy: "reject",
+    parserInvalidPolicy: closure.parserInvalidPolicy,
     truthAdmission: closure.truthAdmission,
     baseline,
     candidate,

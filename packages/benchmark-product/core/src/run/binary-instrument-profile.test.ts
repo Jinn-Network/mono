@@ -19,6 +19,7 @@ import {
 } from "@jinn-network/benchmarking-aggregate";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
   BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE,
@@ -36,6 +37,7 @@ import {
   sealEvaluationSpec,
   type AcceptedJudgeModelId,
 } from "@jinn-network/task-execution-profiles";
+import { buildBinaryJudgmentEvaluationSpecification } from "@jinn-network/task-execution-evaluator-adapters";
 import {
   TASK_EXECUTION_PROTOCOL_URI,
   documentDigest,
@@ -166,7 +168,13 @@ function store(bytes: Uint8Array): `sha256:${string}` {
   return `sha256:${putSealedBytes(workspaceDir, bytes)}`;
 }
 
-function evaluationSpec(analysisContextSha256: `sha256:${string}`) {
+function evaluationSpec(
+  analysisContextSha256: `sha256:${string}`,
+  parserInvalidPolicy: "reject" | "abstain" = "reject",
+) {
+  if (parserInvalidPolicy === "abstain") {
+    return sealEvaluationSpec(buildBinaryJudgmentEvaluationSpecification(analysisContextSha256, "abstain"));
+  }
   return sealEvaluationSpec({
     protocol: EVALUATION_SPEC_FORMAT_URI,
     semanticsVersion: EVAL_SEMANTICS_VERSION,
@@ -216,6 +224,7 @@ function instrument(
     readonly generation?: typeof generation | typeof samplingGeneration;
     readonly declaresEvidence?: boolean;
     readonly preamble?: string;
+    readonly parserInvalidPolicy?: "reject" | "abstain";
   } = {},
 ) {
   const model = options.model ?? "gpt-5.6-luna";
@@ -248,8 +257,10 @@ function instrument(
     model: { adapter: "jinn-openai", requested: model, generation: instrumentGeneration },
     response: {
       mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
-      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
-      invalidOutputDecision: "REJECT",
+      parser: options.parserInvalidPolicy === "abstain"
+        ? BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY
+        : BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      invalidOutputDecision: options.parserInvalidPolicy === "abstain" ? "INVALID" : "REJECT",
     },
   } as never);
 }
@@ -318,6 +329,7 @@ function setUpFixture(options: {
   readonly items?: readonly AdmissionItemConfig[];
   /** Test-only screened admission whose instrument deliberately reuses this run arm. */
   readonly screeningInstrumentArmId?: string;
+  readonly parserInvalidPolicy?: "reject" | "abstain";
 } = {}): Fixture {
   const withItemEvidence = options.withItemEvidence ?? false;
   const declaringArmIds = new Set(options.declaringArmIds ?? []);
@@ -336,6 +348,7 @@ function setUpFixture(options: {
       generation: armConfig.generation,
       declaresEvidence: declaringArmIds.has(armConfig.armId),
       preamble: armConfig.preamble,
+      parserInvalidPolicy: options.parserInvalidPolicy,
     });
     store(sealed.bytes);
     return sealed;
@@ -400,7 +413,10 @@ function setUpFixture(options: {
   const admitted = candidates.map(({ payload, itemSha256 }) => {
     const resolution = admittedByItem.get(itemSha256);
     if (resolution === undefined) throw new Error(`missing admitted resolution for ${itemSha256}`);
-    const evaluation = evaluationSpec(resolution.analysisContextSha256 as `sha256:${string}`);
+    const evaluation = evaluationSpec(
+      resolution.analysisContextSha256 as `sha256:${string}`,
+      options.parserInvalidPolicy,
+    );
     store(evaluation.bytes);
     const taskBytes = sealTask({
       protocol: TASK_EXECUTION_PROTOCOL_URI,
@@ -569,6 +585,24 @@ describe("binary-instrument@1 lock-time composition", () => {
       { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: { verdictRule: "sole" } },
       { method: BENCHMARKING_METHOD_IDS.binaryInstrument, version: BENCHMARKING_METHOD_VERSION, parameters },
     ]);
+  });
+
+  test("derives neutral parser-invalid handling only when the sealed tasks and every arm select it", () => {
+    const fixture = setUpFixture({ parserInvalidPolicy: "abstain" });
+    const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+    const parameters = compileBinaryInstrumentProfile({ workspaceDir, draft: fixture.draft, benchmark });
+
+    expect(parameters.parserInvalidPolicy).toBe("abstain");
+    const compiled = compileDraft({
+      workspaceDir,
+      draft: fixture.draft,
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-16T09:00:00.000Z",
+    });
+    const binaryInstrument = compiled.plannedRun.record.analysisPlan?.find(
+      (entry) => entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument,
+    );
+    expect(binaryInstrument?.parameters).toMatchObject({ parserInvalidPolicy: "abstain" });
   });
 
   // Spec §3.1 site 12, the packet's headline: `deriveAdmissionProfile` used to derive

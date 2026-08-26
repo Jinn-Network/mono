@@ -590,6 +590,7 @@ describe("the front-half extraction (resolveBinaryInstrumentReduction)", () => {
       k: PARAMETERS.k,
       candidateClasses: PARAMETERS.candidateClasses,
       strata: PARAMETERS.strata,
+      parserInvalidPolicy: PARAMETERS.parserInvalidPolicy,
       truthAdmission: PARAMETERS.truthAdmission,
     });
     const viaExtraction = projectBinaryInstrumentQualification({

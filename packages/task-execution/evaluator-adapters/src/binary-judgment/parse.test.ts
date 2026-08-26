@@ -7,15 +7,19 @@ import { fileURLToPath } from "node:url";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
   BINARY_COMPLETE_JSON_LABEL_PARSER_ID,
+  BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_CORRECT_WRONG_PARSER_IDENTITY,
   BINARY_CORRECT_WRONG_PARSER_ID,
   BINARY_EVERMEM_JSON_LABEL_PARSER_ID,
+  BINARY_EVERMEM_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_JSON_VERDICT_PARSER_IDENTITY,
   BINARY_JSON_VERDICT_PARSER_ID,
   BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
   BINARY_LABEL_IN_PROSE_PARSER_ID,
   BINARY_MEM0_JSON_LABEL_PARSER_ID,
+  BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_STRICT_JSON_LABEL_PARSER_ID,
+  BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_YES_NO_PARSER_IDENTITY,
   type BinaryJudgmentResponseParserId,
 } from "@jinn-network/task-execution-profiles";
@@ -330,6 +334,45 @@ describe("LoCoMo JSON-label parser contracts", () => {
     expect(parse(encoder.encode('{"label":"CORRECT","reasoning":"ok","extra":true}')))
       .toEqual(invalid);
     expect(parse(encoder.encode('{"label":"CORRECT","label":"WRONG","reasoning":"dup"}')))
+      .toEqual(invalid);
+  });
+});
+
+describe("neutral-invalid optional-fence JSON-label parser contracts", () => {
+  const fenced = '```json\n{"reasoning":"ok","label":"CORRECT"}\n```';
+  const invalid = {
+    decision: "INVALID",
+    parseValid: false,
+    invalidReason: "unexpected-token",
+  } as const;
+
+  test.each([
+    BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_EVERMEM_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY,
+  ])("$id@$version accepts the exact paid-canary fence", (identity) => {
+    const parse = selectBinaryJudgmentResponseParser(identity.id, identity.version);
+    expect(parse(encoder.encode(fenced))).toEqual({ decision: "ACCEPT", parseValid: true });
+  });
+
+  test.each([
+    BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_EVERMEM_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY,
+  ])("$id@$version refuses prose and malformed output without manufacturing REJECT", (identity) => {
+    const parse = selectBinaryJudgmentResponseParser(identity.id, identity.version);
+    expect(parse(encoder.encode(`prefix ${fenced}`))).toEqual(invalid);
+    expect(parse(encoder.encode('{"label":'))).toEqual(invalid);
+  });
+
+  test("strict v2 still refuses extra members after removing the exact outer fence", () => {
+    const parse = selectBinaryJudgmentResponseParser(
+      BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY.id,
+      BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY.version,
+    );
+    expect(parse(encoder.encode('```\n{"label":"CORRECT","reasoning":"ok","extra":true}\n```')))
       .toEqual(invalid);
   });
 });
