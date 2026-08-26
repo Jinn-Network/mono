@@ -931,6 +931,16 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     )) as { readonly submission: string };
     expect(recoveries).toEqual([capturedDocument.submission]);
     expect(submits).toHaveLength(2);
+    const afterEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(afterEntries.filter(
+      (entry) => entry.kind === "submission-captured" && entry.cellKey === cellKey,
+    )).toHaveLength(1);
+    expect(afterEntries.filter(
+      (entry) => entry.kind === "submission-accepted" && entry.leg !== "evaluation" && entry.cellKey === cellKey,
+    )).toHaveLength(1);
+    expect(afterEntries.filter(
+      (entry) => entry.kind === "observation-accepted" && entry.cellKey === cellKey,
+    )).toHaveLength(1);
   }, 30_000);
 
   test("fails closed when backend recovery contradicts a captured Submission", async () => {
