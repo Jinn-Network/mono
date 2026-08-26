@@ -156,6 +156,23 @@ export interface LaunchOptions {
     attempt: string;
     snapshot: BenchmarkObservationSnapshot;
   }): HostTerminalFacts | undefined | Promise<HostTerminalFacts | undefined>;
+  /**
+   * Maximum number of distinct benchmark cells whose solve attempts may be active together.
+   * Per-cell dispatches and replacements remain sequential. Omission preserves the historical
+   * one-cell-at-a-time behavior.
+   */
+  maxConcurrentCells?: number;
+}
+
+/** Product-facing safety bound for one host-owned launch generation. */
+export const MAX_CONCURRENT_CELLS = 32;
+
+function resolvedMaxConcurrentCells(opts: LaunchOptions): number {
+  const value = opts.maxConcurrentCells ?? 1;
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_CONCURRENT_CELLS) {
+    throw new Error(`maxConcurrentCells must be an integer between 1 and ${MAX_CONCURRENT_CELLS}`);
+  }
+  return value;
 }
 
 function mergePinningMaps(
@@ -503,6 +520,7 @@ export async function* launchAndWatch(
 ): AsyncGenerator<CellStatusEvent> {
   const cells = expectedCellSet(bench, run);
   const maxPerCell = maxDispatches(run);
+  const maxConcurrentCells = resolvedMaxConcurrentCells(opts);
   const inFlight = new Set<string>();
   let runCancelled = false;
 
@@ -545,21 +563,12 @@ export async function* launchAndWatch(
     }
   };
 
-  for (const coord of cells) {
-    if (ownerCancelled(opts)) {
-      runCancelled = true;
-      break;
-    }
-    if (pastClose(run, opts)) {
-      // Natural close: stop dispatch; do not cancel.
-      break;
-    }
-
+  const runCell = async (coord: Coord): Promise<CellStatusEvent[]> => {
+    const emitted: CellStatusEvent[] = [];
     let dispatch = 1;
     let lastReplaceable = false;
     do {
       if (ownerCancelled(opts)) {
-        runCancelled = true;
         break;
       }
       if (pastClose(run, opts)) break;
@@ -573,22 +582,59 @@ export async function* launchAndWatch(
         opts,
         inFlight,
       });
-      for (const event of events) yield event;
+      emitted.push(...events);
       const terminal = events[events.length - 1]!;
       lastReplaceable = terminal.replaceable === true;
       if (!lastReplaceable) break;
       if (!run.policy.replacement.allowed) break;
       if (dispatch >= maxPerCell) break;
       if (pastClose(run, opts)) break;
-      if (ownerCancelled(opts)) {
-        runCancelled = true;
-        break;
-      }
+      if (ownerCancelled(opts)) break;
       dispatch += 1;
     } while (lastReplaceable);
+    return emitted;
+  };
 
-    if (runCancelled) break;
+  type CompletedCell =
+    | { readonly index: number; readonly events: CellStatusEvent[] }
+    | { readonly index: number; readonly error: unknown };
+  const active = new Map<number, Promise<CompletedCell>>();
+  let nextCell = 0;
+
+  const admit = (): void => {
+    while (
+      active.size < maxConcurrentCells
+      && nextCell < cells.length
+      && !ownerCancelled(opts)
+      && !pastClose(run, opts)
+    ) {
+      const index = nextCell;
+      nextCell += 1;
+      const coord = cells[index]!;
+      active.set(index, runCell(coord).then(
+        (events): CompletedCell => ({ index, events }),
+        (error): CompletedCell => ({ index, error }),
+      ));
+    }
+  };
+
+  admit();
+  while (active.size > 0) {
+    const completed = await Promise.race(active.values());
+    active.delete(completed.index);
+    if ("error" in completed) {
+      if (backend.cancel !== undefined) {
+        await Promise.allSettled([...inFlight].map((attempt) => backend.cancel!(attempt as never, "run-driver-failed")));
+      }
+      await Promise.allSettled(active.values());
+      throw completed.error;
+    }
+    for (const event of completed.events) yield event;
+    if (ownerCancelled(opts)) runCancelled = true;
+    if (!runCancelled) admit();
   }
+
+  if (ownerCancelled(opts)) runCancelled = true;
 
   if (runCancelled) {
     for await (const event of drainInFlight()) yield event;
@@ -623,9 +669,10 @@ export async function* resumeRun(
   },
 ): AsyncGenerator<CellStatusEvent> {
   void bench;
+  const maxConcurrentCells = resolvedMaxConcurrentCells(opts);
   const inFlight = new Set<string>();
-  for (const cell of opts.outstanding) {
-    if (ownerCancelled(opts)) {
+  if (ownerCancelled(opts)) {
+    for (const cell of opts.outstanding) {
       yield {
         cellKey: cell.cellKey,
         armId: cell.armId,
@@ -635,13 +682,26 @@ export async function* resumeRun(
         detail: "drain-to-boundary",
         cancelledRun: true,
       };
-      continue;
+    }
+    return;
+  }
+  const runOutstanding = async (cell: (typeof opts.outstanding)[number]): Promise<CellStatusEvent[]> => {
+    if (ownerCancelled(opts)) {
+      return [{
+        cellKey: cell.cellKey,
+        armId: cell.armId,
+        replicate: cell.replicate,
+        dispatch: cell.dispatch,
+        kind: "cancelled",
+        detail: "drain-to-boundary",
+        cancelledRun: true,
+      }];
     }
     if (pastClose(run, opts)) {
       // Natural close on resume: do not re-dispatch; leave accounting to assembly.
-      continue;
+      return [];
     }
-    const events = await dispatchAndWatchCell({
+    return dispatchAndWatchCell({
       run,
       runDigest: opts.runDigest,
       backend,
@@ -650,7 +710,56 @@ export async function* resumeRun(
       opts,
       inFlight,
     });
-    for (const event of events) yield event;
+  };
+
+  type CompletedOutstanding =
+    | { readonly index: number; readonly events: CellStatusEvent[] }
+    | { readonly index: number; readonly error: unknown };
+  const active = new Map<number, Promise<CompletedOutstanding>>();
+  let nextCell = 0;
+  const admit = (): void => {
+    while (
+      active.size < maxConcurrentCells
+      && nextCell < opts.outstanding.length
+      && !ownerCancelled(opts)
+      && !pastClose(run, opts)
+    ) {
+      const index = nextCell;
+      nextCell += 1;
+      const cell = opts.outstanding[index]!;
+      active.set(index, runOutstanding(cell).then(
+        (events): CompletedOutstanding => ({ index, events }),
+        (error): CompletedOutstanding => ({ index, error }),
+      ));
+    }
+  };
+
+  admit();
+  while (active.size > 0) {
+    const completed = await Promise.race(active.values());
+    active.delete(completed.index);
+    if ("error" in completed) {
+      if (backend.cancel !== undefined) {
+        await Promise.allSettled([...inFlight].map((attempt) => backend.cancel!(attempt as never, "run-driver-failed")));
+      }
+      await Promise.allSettled(active.values());
+      throw completed.error;
+    }
+    for (const event of completed.events) yield event;
+    admit();
+  }
+  if (ownerCancelled(opts)) {
+    for (const cell of opts.outstanding.slice(nextCell)) {
+      yield {
+        cellKey: cell.cellKey,
+        armId: cell.armId,
+        replicate: cell.replicate,
+        dispatch: cell.dispatch,
+        kind: "cancelled",
+        detail: "drain-to-boundary",
+        cancelledRun: true,
+      };
+    }
   }
 }
 

@@ -182,6 +182,9 @@ export interface LocalVenueOptions {
   /** How many venue evaluator identities to mint (integer >= 1, default 1). See
    * `LocalVenue.evaluators` for the honesty posture of what N identities do and do not prove. */
   readonly evaluatorCount?: number;
+  /** Host capacity for distinct active attempts. Product launch sets this to the requested
+   * benchmark-cell concurrency; omission preserves the backend's historical default. */
+  readonly maxConcurrentAttempts?: number;
   /** Product-owned binding for the real SWE-rebench OCI grader. Images are always addressed by
    * digest and pre-staged before evaluation dispatch; the child may only inspect that local
    * digest and runs with `--pull never`. If the image disappears after pre-stage, the child fails
@@ -701,6 +704,14 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   if (!Number.isSafeInteger(evaluatorCount) || evaluatorCount < 1) {
     refuse("validation", "evaluatorCount", "evaluatorCount must be an integer >= 1");
   }
+  if (
+    options.maxConcurrentAttempts !== undefined
+    && (!Number.isSafeInteger(options.maxConcurrentAttempts)
+      || options.maxConcurrentAttempts < 1
+      || options.maxConcurrentAttempts > 32)
+  ) {
+    refuse("validation", "maxConcurrentAttempts", "maxConcurrentAttempts must be an integer between 1 and 32");
+  }
   const sweRebenchGrader = {
     runtime: options.sweRebenchGrader?.runtime ?? "docker",
     ...(options.sweRebenchGrader?.dockerPath === undefined
@@ -1215,6 +1226,9 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
 
   const backend = makeLocalTaskExecutionBackend({
     stateRoot: join(workspaceDir, "venue", "backend-state"),
+    ...(options.maxConcurrentAttempts === undefined
+      ? {}
+      : { maxConcurrentAttempts: options.maxConcurrentAttempts }),
     source: "urn:jinn:benchmark-product:local-venue",
     executor: "urn:jinn:benchmark-product:local-venue:executor",
     profileStore,

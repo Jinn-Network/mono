@@ -32,7 +32,12 @@ import {
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
 import { randomUUID } from "node:crypto";
-import { launchAndWatch, resumeRun, type LaunchOptions } from "@jinn-network/benchmarking-run";
+import {
+  launchAndWatch,
+  MAX_CONCURRENT_CELLS,
+  resumeRun,
+  type LaunchOptions,
+} from "@jinn-network/benchmarking-run";
 import type { SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
@@ -88,6 +93,7 @@ export interface RunLaunchDeps {
 
 export interface RunLaunchInput {
   readonly draftId: string;
+  readonly maxConcurrentCells?: number;
 }
 
 export interface RunLaunchResult {
@@ -112,6 +118,7 @@ function requireProspectiveRegistrationVerified(publication: PublicationState, d
 
 export interface RunResumeInput {
   readonly draftId: string;
+  readonly maxConcurrentCells?: number;
 }
 
 export interface RunResumeResult {
@@ -205,6 +212,7 @@ async function runDriverGeneration<T>(
   draftId: string,
   operation: "launch" | "resume",
   generation: string,
+  maxConcurrentCells: number,
   run: () => Promise<T>,
 ): Promise<T> {
   const startedAt = context.clock();
@@ -213,6 +221,7 @@ async function runDriverGeneration<T>(
     at: startedAt,
     operation,
     generation,
+    maxConcurrentCells,
   });
   try {
     const result = await run();
@@ -238,6 +247,18 @@ async function runDriverGeneration<T>(
     });
     throw cause;
   }
+}
+
+function requireMaxConcurrentCells(value: number | undefined): number {
+  const resolved = value ?? 1;
+  if (!Number.isSafeInteger(resolved) || resolved < 1 || resolved > MAX_CONCURRENT_CELLS) {
+    refuse(
+      "validation",
+      "maxConcurrentCells",
+      `maxConcurrentCells must be an integer between 1 and ${MAX_CONCURRENT_CELLS}`,
+    );
+  }
+  return resolved;
 }
 
 async function createRunLaunchCapture(
@@ -298,6 +319,7 @@ export function runLaunch(
     subject: input.draftId,
     inputs: input,
     run: async () => {
+      const maxConcurrentCells = requireMaxConcurrentCells(input.maxConcurrentCells);
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "locked");
       assertLaunchableRuntime(loaded.document, input.draftId);
       const publicationIntent = requireRunState(clockedContext.workspaceDir, input.draftId).publication;
@@ -329,6 +351,7 @@ export function runLaunch(
           workspaceDir: clockedContext.workspaceDir,
           now: context.clock,
           evaluatorCount: minVerdicts,
+          maxConcurrentAttempts: maxConcurrentCells,
           agentProfileRequirements: loaded.runRecord.arms.map((arm) => arm.pinning as Readonly<Record<string, unknown>>),
           inspectEvaluationStrategy: deriveInspectEvaluationStrategy(loaded.runRecord.policy.evaluation),
           ...(deps.solveStartDelayMsForTesting !== undefined
@@ -352,6 +375,7 @@ export function runLaunch(
           input.draftId,
           "launch",
           deps.driverGenerationForTesting?.() ?? randomUUID(),
+          maxConcurrentCells,
           async () => {
             let cancellation: ReturnType<typeof createCancellationAwareBackend> | undefined;
             try {
@@ -395,6 +419,7 @@ export function runLaunch(
                 },
                 capture,
                 hostTerminalFacts: composeHostTerminalFacts(clockedContext.workspaceDir, deps.hostTerminalFacts),
+                maxConcurrentCells,
               });
               await driveCellEvents(driveDeps, events);
               return { draft };
@@ -431,6 +456,7 @@ export function runResume(
     subject: input.draftId,
     inputs: input,
     run: async () => {
+      const maxConcurrentCells = requireMaxConcurrentCells(input.maxConcurrentCells);
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "running");
       const createVenue: typeof createLocalVenue = deps.createVenue
         ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options, context.runtimeHost));
@@ -473,6 +499,7 @@ export function runResume(
           workspaceDir: clockedContext.workspaceDir,
           now: context.clock,
           evaluatorCount: minVerdicts,
+          maxConcurrentAttempts: maxConcurrentCells,
           agentProfileRequirements: loaded.runRecord.arms.map((arm) => arm.pinning as Readonly<Record<string, unknown>>),
           inspectEvaluationStrategy: deriveInspectEvaluationStrategy(loaded.runRecord.policy.evaluation),
           ...(deps.solveStartDelayMsForTesting !== undefined
@@ -496,6 +523,7 @@ export function runResume(
           input.draftId,
           "resume",
           deps.driverGenerationForTesting?.() ?? randomUUID(),
+          maxConcurrentCells,
           async () => {
             let cancellation: ReturnType<typeof createCancellationAwareBackend> | undefined;
             try {
@@ -578,6 +606,7 @@ export function runResume(
                   },
                   capture,
                   hostTerminalFacts: composeHostTerminalFacts(clockedContext.workspaceDir, deps.hostTerminalFacts),
+                  maxConcurrentCells,
                 });
                 await driveCellEvents(driveDeps, events);
               }

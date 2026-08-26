@@ -281,6 +281,233 @@ describe("launchAndWatch (§10.1 op 4 / §7.4)", () => {
     expect(events.map((event) => event.kind)).toEqual(["dispatch", "claimed", "delivered"]);
   });
 
+  test("default concurrency remains event-order equivalent to explicit one", async () => {
+    const { bench, run, runDigest, tasks } = await miniatureContext();
+    const sealedTasks = sealingTasks(tasks);
+    const collect = async (maxConcurrentCells: number | undefined) => {
+      const backend = pinningBackend();
+      const events = [];
+      for await (const event of launchAndWatch(bench, run, backend, {
+        ...baseOpts(runDigest, sealedTasks, backend),
+        ...(maxConcurrentCells === undefined ? {} : { maxConcurrentCells }),
+      })) events.push(event);
+      return events.map(({ attempt: _attempt, ...event }) => event);
+    };
+    expect(await collect(undefined)).toEqual(await collect(1));
+  });
+
+  test("runs distinct cells through a bounded concurrent pool", async () => {
+    const { bench, run, runDigest, tasks } = await miniatureContext();
+    const sealedTasks = sealingTasks(tasks);
+    const backend = pinningBackend();
+    let active = 0;
+    let maximum = 0;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let reached!: () => void;
+    const full = new Promise<void>((resolve) => { reached = resolve; });
+    const waitForTerminal: AttemptWaitPort = {
+      async waitUntilTerminal(input) {
+        active += 1;
+        maximum = Math.max(maximum, active);
+        if (active === 4) reached();
+        await released;
+        try {
+          return await driveWaitPort(backend, "delivered").waitUntilTerminal(input);
+        } finally {
+          active -= 1;
+        }
+      },
+    };
+    const collected = (async () => {
+      const events = [];
+      for await (const event of launchAndWatch(bench, run, backend, {
+        ...baseOpts(runDigest, sealedTasks, backend),
+        waitForTerminal,
+        maxConcurrentCells: 4,
+      })) events.push(event);
+      return events;
+    })();
+    await full;
+    expect(maximum).toBe(4);
+    release();
+    const events = await collected;
+    expect(events.filter((event) => event.kind === "delivered")).toHaveLength(expectedCellSet(bench, run).length);
+  });
+
+  test("keeps replacement dispatches sequential within each concurrently admitted cell", async () => {
+    const { bench, run, runDigest, tasks } = await miniatureContext();
+    const sealedTasks = sealingTasks(tasks);
+    const backend = pinningBackend();
+    const terminalCounts = new Map<string, number>();
+    const cellByAttempt = new Map<string, string>();
+    const waitForTerminal: AttemptWaitPort = {
+      async waitUntilTerminal(input) {
+        const cellKey = cellByAttempt.get(input.attempt) ?? "unknown";
+        const count = (terminalCounts.get(cellKey) ?? 0) + 1;
+        terminalCounts.set(cellKey, count);
+        return driveWaitPort(backend, count === 1 ? "expired" : "delivered").waitUntilTerminal(input);
+      },
+    };
+    const events = [];
+    for await (const event of launchAndWatch(bench, run, backend, {
+      ...baseOpts(runDigest, sealedTasks, backend),
+      waitForTerminal,
+      maxConcurrentCells: 4,
+      capture: {
+        captureSubmission() {},
+        captureObservation(input) {
+          cellByAttempt.set(input.snapshot.descriptor.attempt, input.cellKey);
+        },
+      },
+    })) events.push(event);
+    for (const cell of expectedCellSet(bench, run)) {
+      const terminals = events.filter((event) =>
+        event.cellKey === cell.cellKey && (event.kind === "delivered" || event.kind === "error"));
+      expect(terminals.map((event) => event.dispatch)).toEqual([1, 2]);
+      expect(terminals.map((event) => event.kind)).toEqual(["error", "delivered"]);
+    }
+  });
+
+  test("stops admitting cells after cancellation and drains all active workers", async () => {
+    const { bench, run, runDigest, tasks } = await miniatureContext();
+    const sealedTasks = sealingTasks(tasks);
+    const backend = pinningBackend();
+    const controller = new AbortController();
+    let submits = 0;
+    const originalSubmit = backend.submit.bind(backend);
+    backend.submit = async (...args) => {
+      submits += 1;
+      return originalSubmit(...args);
+    };
+    let active = 0;
+    let reached!: () => void;
+    const full = new Promise<void>((resolve) => { reached = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const waitForTerminal: AttemptWaitPort = {
+      async waitUntilTerminal(input) {
+        active += 1;
+        if (active === 4) reached();
+        await released;
+        return driveWaitPort(backend, "cancelled").waitUntilTerminal(input);
+      },
+    };
+    const collected = (async () => {
+      const events = [];
+      for await (const event of launchAndWatch(bench, run, backend, {
+        ...baseOpts(runDigest, sealedTasks, backend),
+        signal: controller.signal,
+        waitForTerminal,
+        maxConcurrentCells: 4,
+      })) events.push(event);
+      return events;
+    })();
+    await full;
+    controller.abort();
+    release();
+    const events = await collected;
+    expect(submits).toBe(4);
+    expect(events.filter((event) => event.cellKey !== "*" && event.kind === "cancelled")).toHaveLength(4);
+    expect(events.some((event) => event.cancelledRun === true)).toBe(true);
+  });
+
+  test("stops admitting new cells at natural close while active workers finish", async () => {
+    const { bench, run, runDigest, tasks } = await miniatureContext();
+    const sealedTasks = sealingTasks(tasks);
+    const backend = pinningBackend();
+    let submits = 0;
+    const originalSubmit = backend.submit.bind(backend);
+    backend.submit = async (...args) => {
+      submits += 1;
+      return originalSubmit(...args);
+    };
+    let closed = false;
+    let active = 0;
+    let reached!: () => void;
+    const full = new Promise<void>((resolve) => { reached = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const waitForTerminal: AttemptWaitPort = {
+      async waitUntilTerminal(input) {
+        active += 1;
+        if (active === 4) reached();
+        await released;
+        return driveWaitPort(backend, "delivered").waitUntilTerminal(input);
+      },
+    };
+    const collected = (async () => {
+      const events = [];
+      for await (const event of launchAndWatch(bench, run, backend, {
+        ...baseOpts(runDigest, sealedTasks, backend),
+        clock: { now: () => new Date(closed ? "2026-08-05T00:00:00Z" : "2026-08-01T00:00:00Z") },
+        waitForTerminal,
+        maxConcurrentCells: 4,
+      })) events.push(event);
+      return events;
+    })();
+    await full;
+    closed = true;
+    release();
+    const events = await collected;
+    expect(submits).toBe(4);
+    expect(events.filter((event) => event.kind === "delivered")).toHaveLength(4);
+    expect(events.some((event) => event.cancelledRun === true)).toBe(false);
+  });
+
+  test("resume applies the same bounded concurrency to outstanding cells", async () => {
+    const { bench, run, runDigest, tasks } = await miniatureContext();
+    const sealedTasks = sealingTasks(tasks);
+    const backend = pinningBackend();
+    let active = 0;
+    let maximum = 0;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let reached!: () => void;
+    const full = new Promise<void>((resolve) => { reached = resolve; });
+    const waitForTerminal: AttemptWaitPort = {
+      async waitUntilTerminal(input) {
+        active += 1;
+        maximum = Math.max(maximum, active);
+        if (active === 4) reached();
+        await released;
+        try {
+          return await driveWaitPort(backend, "delivered").waitUntilTerminal(input);
+        } finally {
+          active -= 1;
+        }
+      },
+    };
+    const outstanding = expectedCellSet(bench, run).slice(0, 4).map((cell) => ({ ...cell, dispatch: 1 }));
+    const collected = (async () => {
+      const events = [];
+      for await (const event of resumeRun(bench, run, backend, {
+        ...baseOpts(runDigest, sealedTasks, backend),
+        waitForTerminal,
+        maxConcurrentCells: 4,
+        outstanding,
+      })) events.push(event);
+      return events;
+    })();
+    await full;
+    expect(maximum).toBe(4);
+    release();
+    const events = await collected;
+    expect(events.filter((event) => event.kind === "delivered")).toHaveLength(4);
+  });
+
+  test("refuses unsafe concurrency values before dispatch", async () => {
+    const { bench, run, runDigest, tasks } = await miniatureContext();
+    const sealedTasks = sealingTasks(tasks);
+    const backend = pinningBackend();
+    await expect(async () => {
+      for await (const _event of launchAndWatch(bench, run, backend, {
+        ...baseOpts(runDigest, sealedTasks, backend),
+        maxConcurrentCells: 33,
+      })) void _event;
+    }).rejects.toThrow("maxConcurrentCells must be an integer between 1 and 32");
+  });
+
   test("seals opaque capability grants into each new Submission without changing requirements", async () => {
     const { bench, run, runDigest, tasks } = await miniatureContext();
     const sealedTasks = sealingTasks(tasks);

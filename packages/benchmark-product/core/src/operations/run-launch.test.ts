@@ -212,6 +212,27 @@ function fakeVenue(backend: ProxiedBackend, evaluatorCount = 1): LocalVenue {
 }
 
 describe("runLaunch — lifecycle guard", () => {
+  test("refuses concurrency outside the public 1-32 bound before changing run state", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    let venueCalls = 0;
+    const outcome = await runLaunch(contextFor(clock), {
+      draftId: "draft-1",
+      maxConcurrentCells: 33,
+    }, {
+      createVenue: () => {
+        venueCalls += 1;
+        throw new Error("must not construct venue");
+      },
+    });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: { code: "validation", issues: [{ path: "maxConcurrentCells" }] },
+    });
+    expect(venueCalls).toBe(0);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+  });
+
   test("refuses illegal-transition when the draft is not locked", async () => {
     const clock = makeClock();
     initWorkspace(contextFor(clock));
@@ -353,6 +374,51 @@ describe("runLaunch — prospective mounted publication", () => {
 });
 
 describe("runLaunch — drives a full 2-arm run to completion (fake backend)", () => {
+  test("threads the selected cell concurrency into venue capacity and the durable journal", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const capacities: Array<number | undefined> = [];
+    const outcome = await runLaunch(contextFor(clock), {
+      draftId: "draft-1",
+      maxConcurrentCells: 8,
+    }, {
+      createVenue: (options) => {
+        capacities.push(options.maxConcurrentAttempts);
+        return fakeVenue(backend);
+      },
+      driverGenerationForTesting: () => "concurrency-eight-generation",
+    });
+    expect(outcome.ok).toBe(true);
+    expect(capacities).toEqual([8]);
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toContainEqual(
+      expect.objectContaining({
+        kind: "driver-started",
+        operation: "launch",
+        generation: "concurrency-eight-generation",
+        maxConcurrentCells: 8,
+      }),
+    );
+  }, 30_000);
+
+  test("records the historical serial default explicitly", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const outcome = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(backend),
+      driverGenerationForTesting: () => "serial-default-generation",
+    });
+    expect(outcome.ok).toBe(true);
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toContainEqual(
+      expect.objectContaining({
+        kind: "driver-started",
+        generation: "serial-default-generation",
+        maxConcurrentCells: 1,
+      }),
+    );
+  }, 30_000);
+
   test("a shutdown rejection is the generation's single durable failed terminal", async () => {
     const clock = makeClock();
     await setUpLockedDraft(clock);
