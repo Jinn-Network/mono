@@ -27,6 +27,7 @@ import {
   type WorkspacePaths,
 } from "@jinn-network/task-execution-workspace";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
+import { scopedTempEnv } from "../runtime/child-temp-env.js";
 
 export const SAMPLE_UNIFORM_LAUNCHER_ID = "sample-uniform";
 export const SAMPLE_UNIFORM_HARNESS_VERSION = "0.1.0";
@@ -115,7 +116,7 @@ export function makeSampleUniformLauncher(options: { readonly probe?: () => Prom
           JINN_ATTEMPT_OUT: paths.out,
           JINN_ATTEMPT_LOGS: paths.logs,
           JINN_ATTEMPT_META: paths.meta,
-          TMPDIR: paths.tmp,
+          ...scopedTempEnv(paths.tmp),
         },
         validExitCodes: [0],
         blameExitCodes: [{ match: { signal: "SIGKILL" }, blame: "infrastructure", reasonCode: "killed" }],

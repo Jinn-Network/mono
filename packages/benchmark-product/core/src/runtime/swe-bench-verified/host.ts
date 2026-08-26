@@ -16,6 +16,7 @@ import {
   assertSupportedSwebenchHarnessVersion,
   type SwebenchVerifiedSelectionManifest,
 } from "./manifest.js";
+import { inheritedTempEnv } from "../child-temp-env.js";
 
 export interface SwebenchVerifiedSelectionRequest {
   readonly executable: string;
@@ -46,7 +47,7 @@ export type SwebenchVerifiedHostBinding = z.infer<typeof SwebenchVerifiedHostBin
 export function readSwebenchModuleVersion(executable: string): string {
   return execFileSync(realpathSync(executable), ["-c", SWEBENCH_VERSION_PROBE_SOURCE], {
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "" },
+    env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "" },
   }).trim();
 }
 
