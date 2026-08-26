@@ -48,6 +48,22 @@ describe("notification derivation kit", () => {
     expect(notices).toHaveLength(1);
     assertEnvelope(notices);
   });
+
+  it("points empty wiring at Claim policy, not Settings", () => {
+    const notices = buildNotifications({
+      ...healthy,
+      executionWiring: [],
+    });
+    expect(notices).toEqual([
+      {
+        kind: "no_solvernets_joined",
+        severity: "info",
+        title: "No SolverNets joined",
+        message: "No execution wiring configured. Add a work kind in Claim policy.",
+        jumpTo: "/operator/claim-policy",
+      },
+    ]);
+  });
 });
 
 describe("the in-tree fake", () => {

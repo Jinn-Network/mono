@@ -141,7 +141,7 @@ export interface Solution {
    * Failed working-tree diffs captured at in-session verifier/test
    * attempt boundaries during this run (#1643 / spec §10 field 4).
    * Harnesses that cannot observe boundaries omit this (engine treats
-   * as []). Reference: apps/jinn-agent/plugins/jinn `_on_post_tool_call`.
+   * as []). Reference: plugin/frozen `_on_post_tool_call`.
    * Empty strings must not appear; engine dedupes on persist.
    */
   intermediateFailureDiffs?: string[];

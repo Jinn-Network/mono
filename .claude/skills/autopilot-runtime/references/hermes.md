@@ -24,7 +24,17 @@ SESSION_REPORT_DIR="$(dirname -- "$JINN_AUTOPILOT_SESSION_MANIFEST")/reports"
 STAGE_PROMPT="$(mktemp "$SESSION_REPORT_DIR/stage-${STAGE_NUMBER}-${STAGE_NAME}.md.XXXXXX")"
 chmod 600 "$STAGE_PROMPT"
 # Write only this stage's curated prompt to "$STAGE_PROMPT".
-(cd "$WORKTREE_PATH/packages/autopilot" && yarn stage:run \
+if [ -z "${JINN_AUTOPILOT_PACKAGE_DIR:-}" ]; then
+  echo "error: stage:run requires JINN_AUTOPILOT_PACKAGE_DIR (standalone Autopilot checkout)" >&2
+  exit 1
+fi
+case "${JINN_AUTOPILOT_PACKAGE_DIR%/}" in
+  */packages/autopilot|packages/autopilot)
+    echo "error: JINN_AUTOPILOT_PACKAGE_DIR must not point at the retired vendored tree" >&2
+    exit 1
+    ;;
+esac
+(cd "$JINN_AUTOPILOT_PACKAGE_DIR" && yarn stage:run \
   --prompt-file "$STAGE_PROMPT" \
   --worktree "$WORKTREE_PATH")
 rm -f -- "$STAGE_PROMPT"

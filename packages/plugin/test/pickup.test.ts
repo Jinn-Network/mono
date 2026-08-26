@@ -703,7 +703,7 @@ describe('lexical v2 validation table (#1791 decision comment)', () => {
     ]);
   });
 
-  it("the gate's no-result message (verbatim, apps/jinn-agent/scripts/stage1-stock-product.py): scores below the floor against every fixture — honest nothing-found", () => {
+  it("the gate's no-result message (verbatim, plugin/scripts/stage1-stock-product.py): scores below the floor against every fixture — honest nothing-found", () => {
     const message =
       'Investigate why the OLAS staking reward-claim loop occasionally ' +
       'double-counts checkpoint epochs on Base Sepolia.';

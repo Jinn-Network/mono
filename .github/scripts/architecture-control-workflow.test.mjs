@@ -218,7 +218,9 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   assert.match(selectionJob, /run: \|\n\s+set -o pipefail\n/u);
   assert.match(selectionJob, /if \[ -z "\$\{diff_base\}" \] \|\| \[ -z "\$\{diff_head\}" \]; then/u);
   assert.match(selectionJob, /::error::selection endpoints unresolved on \$\{EVENT_NAME\}/u);
-  assert.doesNotMatch(source, /npm (?:publish|install)|yarn npm publish|publish-verified-platform/u);
+  assert.doesNotMatch(source, /npm (?:publish|install)|yarn npm publish/u);
+  // Ban publish-verified-platform script invocations; wiring its test file is allowed.
+  assert.doesNotMatch(source, /publish-verified-platform(?!\.test\.mjs)/u);
   const topPermissions = source.match(/^permissions:\n(?<body>[\s\S]*?)\njobs:/mu)?.groups?.body;
   assert.equal(topPermissions?.trimEnd(), '  contents: read');
   const controlJob = sliceJob(source, '  platform-architecture-control:', '  platform-verification-reusable:');

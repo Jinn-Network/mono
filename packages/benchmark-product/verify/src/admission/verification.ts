@@ -39,8 +39,8 @@ import {
   ScreeningTableSchema,
   ScreeningTableV2Schema,
   PromptedScreeningProcedureV1Schema,
-  ScreeningPoolV1Schema,
-  ScreeningSampleCommitmentV1Schema,
+  ScreeningPoolSchema,
+  SCREENING_POOL_V2_PROTOCOL,
   PROMPTED_SCREENING_LIMITATIONS,
   PROMPTED_SCREENING_PROFILE,
   type BinaryJudgmentAdmissionManifest,
@@ -49,8 +49,13 @@ import {
   type ScreeningTable,
   type PromptedScreeningRowV2,
   type ScreeningTableV2,
-  type ScreeningPoolV1,
+  type ScreeningPool,
 } from "./contracts.js";
+import { selectPromptedScreeningPool, PromptedScreeningSelectionError } from "./prompted-selection.js";
+import {
+  parseScreeningSampleCommitmentBytes,
+  promptedScreeningCommitmentView,
+} from "./prompted-commitment.js";
 import { readOrderedAdmissionVerdictMeasurements, readAdmissionVerdictEnvelope } from "./result-evaluation.js";
 import { computeScreeningPoolDigest, computeScreeningSample, ScreeningSampleError } from "./screening-sample.js";
 
@@ -187,6 +192,7 @@ export interface VerifiedBinaryJudgmentAdmissionExclusion {
     | "review-disagreement" | "review-indeterminate" | "review-incomplete"
     | "screening-disagreement" | "screening-indeterminate" | "screening-hand-excluded";
   readonly replacementItemSha256: AdmissionSha256;
+  readonly receivingSlotId?: string;
 }
 
 export interface VerifiedBinaryJudgmentAdmissionClosure {
@@ -690,7 +696,7 @@ export function verifyBinaryJudgmentAdmissionClosure(
   let screeningSampleAgreementRate: number | undefined;
   let screeningInstrumentSha256: AdmissionSha256 | undefined;
   let promptedScreeningProcedureSha256: AdmissionSha256 | undefined;
-  let promptedScreeningPool: ScreeningPoolV1 | undefined;
+  let promptedScreeningPool: ScreeningPool | undefined;
   let promptedCommittedSample: readonly string[] | undefined;
   let screeningTableAuthorityKeyId: string | undefined;
   if (manifest.truthAdmission === "screened-operator-sampled") {
@@ -751,15 +757,23 @@ export function verifyBinaryJudgmentAdmissionClosure(
         "screeningProcedure",
       );
       const pool = exactCanonical(
-        ScreeningPoolV1Schema,
+        ScreeningPoolSchema,
         resolve(state, screeningTable.poolSha256, "screeningTable.poolSha256", "screening-pool"),
         "screeningPool",
       );
-      const commitment = exactCanonical(
-        ScreeningSampleCommitmentV1Schema,
-        resolve(state, screeningTable.sampleCommitmentSha256, "screeningTable.sampleCommitmentSha256", "screening-sample-commitment"),
-        "screeningSampleCommitment",
-      );
+      let commitment: ReturnType<typeof parseScreeningSampleCommitmentBytes>;
+      try {
+        commitment = parseScreeningSampleCommitmentBytes(
+          resolve(state, screeningTable.sampleCommitmentSha256, "screeningTable.sampleCommitmentSha256", "screening-sample-commitment"),
+        );
+      } catch (cause) {
+        fail(
+          "screeningSampleCommitment",
+          cause instanceof Error ? cause.message : "screening sample commitment is invalid",
+          cause,
+        );
+      }
+      const commitmentView = promptedScreeningCommitmentView(commitment);
       resolve(state, screeningTable.coordinatorPromptSha256, "screeningTable.coordinatorPromptSha256", "screening-prompt");
       resolve(state, screeningTable.samplingScriptSha256, "screeningTable.samplingScriptSha256", "screening-sampling-script");
       resolve(state, screeningTable.transcriptSha256, "screeningTable.transcriptSha256", "screening-transcript");
@@ -767,14 +781,22 @@ export function verifyBinaryJudgmentAdmissionClosure(
         procedure.coordinatorPromptSha256 !== screeningTable.coordinatorPromptSha256
         || procedure.transcriptSha256 !== screeningTable.transcriptSha256
         || pool.draftId !== input.expectedDraftId
-        || commitment.draftId !== input.expectedDraftId
-        || commitment.poolSha256 !== screeningTable.poolSha256
-        || commitment.poolIdentityCommitmentSha256 !== pool.identityCommitmentSha256
+        || (commitmentView.draftId !== undefined && commitmentView.draftId !== input.expectedDraftId)
+        || (commitmentView.poolSha256 !== undefined && commitmentView.poolSha256 !== screeningTable.poolSha256)
+        || commitmentView.poolIdentityCommitmentSha256 !== pool.identityCommitmentSha256
+        || (commitmentView.samplingScriptSha256 !== undefined && commitmentView.samplingScriptSha256 !== screeningTable.samplingScriptSha256)
         || Date.parse(procedure.sealedAt) > Date.parse(screeningTable.sealedAt)
-        || Date.parse(pool.sealedAt) > Date.parse(commitment.committedAt)
-        || Date.parse(commitment.committedAt) > Date.parse(screeningTable.sealedAt)
+        || Date.parse(pool.sealedAt) > Date.parse(screeningTable.sealedAt)
+        || (commitmentView.poolSha256 !== undefined && Date.parse(pool.sealedAt) > Date.parse(commitmentView.committedAt))
+        || Date.parse(commitmentView.committedAt) > Date.parse(screeningTable.sealedAt)
       ) fail("screeningTable", "prompted procedure, prompt, transcript, pool, commitment, draft, or timestamps do not join");
-      const poolIdentities = pool.items.map((item) => item.itemSha256);
+      const poolIdentities = pool.protocol === SCREENING_POOL_V2_PROTOCOL
+        ? pool.items.map((item) => item.screeningIdentitySha256)
+        : pool.items.map((item) => item.itemSha256);
+      if (
+        commitmentView.registeredIdentitySha256s !== undefined
+        && !sameStrings([...poolIdentities].sort(compareCodeUnitStrings), commitmentView.registeredIdentitySha256s)
+      ) fail("screeningSampleCommitment.candidateItemDigests", "registered identities do not exactly cover the later pool bridge");
       if (computeScreeningPoolDigest(poolIdentities) !== pool.identityCommitmentSha256) fail("screeningPool.identityCommitmentSha256", "identity commitment does not match the sorted unique pool identities");
       const itemIds = new Set<string>();
       for (const [index, poolItem] of pool.items.entries()) {
@@ -783,23 +805,23 @@ export function verifyBinaryJudgmentAdmissionClosure(
         itemIds.add(item.itemId);
       }
       const rowIdentities = screeningTable.rows.map((row) => row.itemSha256);
-      const sortedPoolIdentities = [...poolIdentities].sort(compareCodeUnitStrings);
-      if (!sameStrings(rowIdentities, sortedPoolIdentities)) fail("screeningTable.rows", "v2 table must cover all 664 pool identities in sorted order");
+      const sortedPoolItemSha256s = pool.items.map((item) => item.itemSha256).sort(compareCodeUnitStrings);
+      if (!sameStrings(rowIdentities, sortedPoolItemSha256s)) fail("screeningTable.rows", "v2 table must cover all 664 pool item digests in sorted order");
       const poolByItem = new Map(pool.items.map((item) => [item.itemSha256, item]));
       for (const row of screeningTable.rows) {
         const poolItem = poolByItem.get(row.itemSha256)!;
         if (row.intendedLabel !== poolItem.intendedLabel) fail("screeningTable.rows", `row ${row.itemSha256} intended label differs from the sealed pool`);
         if (row.ritsuDecision.checked && (
-          Date.parse(row.ritsuDecision.decidedAt) < Date.parse(commitment.committedAt)
+          Date.parse(row.ritsuDecision.decidedAt) < Date.parse(commitmentView.committedAt)
           || Date.parse(row.ritsuDecision.decidedAt) > Date.parse(screeningTable.sealedAt)
         )) fail("screeningTable.rows", `row ${row.itemSha256} has a Ritsu decision outside the committed-sample-to-table interval`);
       }
-      sampleSeed = commitment.sampleSeed;
-      sampleSize = commitment.sampleSize;
+      sampleSeed = commitmentView.sampleSeed;
+      sampleSize = commitmentView.sampleSize;
       sampleIdentities = poolIdentities;
       promptedScreeningProcedureSha256 = screeningTable.procedureSha256 as AdmissionSha256;
       promptedScreeningPool = pool;
-      promptedCommittedSample = commitment.sampleItemSha256s;
+      promptedCommittedSample = commitmentView.sampleItemSha256s;
     }
     screeningRowsByItem = new Map(screeningTable.rows.map((row) => [row.itemSha256, row]));
 
@@ -825,22 +847,28 @@ export function verifyBinaryJudgmentAdmissionClosure(
     screeningSample = new Set(sampleResult.sample);
     if (promptedCommittedSample !== undefined && !sameStrings([...sampleResult.sample].sort(compareCodeUnitStrings), promptedCommittedSample)) fail("screeningSampleCommitment.sampleItemSha256s", "public sample membership differs from screening-sample/1 recomputation");
 
+    const sampledItemSha256s = promptedScreeningPool?.protocol === SCREENING_POOL_V2_PROTOCOL
+      ? new Set(promptedScreeningPool.items
+          .filter((item) => screeningSample.has(item.screeningIdentitySha256))
+          .map((item) => item.itemSha256))
+      : screeningSample;
+
     // (2) Required hand checks: flagged := rows where NOT agreed. Every row in flagged ∪ sample
     // must carry handChecked === true.
     for (const row of screeningTable.rows) {
       const flagged = !screeningRowAgreed(row);
-      if ((flagged || screeningSample.has(row.itemSha256)) && !screeningRowChecked(row)) {
+      if ((flagged || sampledItemSha256s.has(row.itemSha256)) && !screeningRowChecked(row)) {
         fail("screeningTable.rows", `row ${row.itemSha256} is flagged or sampled but was never hand-checked`);
       }
     }
 
     // (3) Sample agreement rate -- the one definition (spec §6.5(3)), symmetric on purpose. Every
     // row in `screeningSample` is hand-checked by check (2) above, so `handVerdict` is defined.
-    const sampleMatches = [...screeningSample].filter((sampledItemSha256) => {
+    const sampleMatches = [...sampledItemSha256s].filter((sampledItemSha256) => {
       const row = screeningRowsByItem.get(sampledItemSha256)!;
       return screeningRowAgreed(row) === (screeningRowHandVerdict(row) === "confirm");
     }).length;
-    screeningSampleAgreementRate = sampleMatches / screeningSample.size;
+    screeningSampleAgreementRate = sampleMatches / sampledItemSha256s.size;
   }
 
   const resolutions = manifest.labelResolutionSha256s.map((digest, index) => ({
@@ -974,20 +1002,30 @@ export function verifyBinaryJudgmentAdmissionClosure(
     fail("admissionManifest.analysisContextSha256s", "analysis-context coverage has an orphan or omission");
   }
 
-  const promptedExpectedReplacements = new Map<string, string>();
+  const promptedExpectedReplacements = new Map<string, {
+    readonly replacementItemSha256: string;
+    readonly receivingSlotId: string;
+  }>();
   if (promptedScreeningPool !== undefined) {
-    const slotIds = [...new Set(promptedScreeningPool.items.map((item) => item.slotId))].sort(compareCodeUnitStrings);
-    const expectedAccepted = new Set<string>();
-    for (const slotId of slotIds) {
-      const slotItems = promptedScreeningPool.items.filter((item) => item.slotId === slotId);
-      const main = slotItems.find((item) => item.poolKind === "main")!;
-      const reserves = slotItems
-        .filter((item): item is Extract<(typeof slotItems)[number], { poolKind: "reserve" }> => item.poolKind === "reserve")
-        .sort((left, right) => left.reserveOrder - right.reserveOrder);
-      const winner = [main, ...reserves].find((item) => screeningRowAdmitted(screeningRowsByItem.get(item.itemSha256)!));
-      if (winner === undefined) fail("screeningPool.items", `${slotId} has no admissible main or reserve candidate`);
-      expectedAccepted.add(winner.itemSha256);
-      if (winner.itemSha256 !== main.itemSha256) promptedExpectedReplacements.set(main.itemSha256, winner.itemSha256);
+    let selection: ReturnType<typeof selectPromptedScreeningPool>;
+    try {
+      selection = selectPromptedScreeningPool(
+        promptedScreeningPool,
+        screeningRowsByItem as ReadonlyMap<string, PromptedScreeningRowV2>,
+      );
+    } catch (cause) {
+      fail(
+        "screeningPool.items",
+        cause instanceof PromptedScreeningSelectionError ? cause.message : "prompted reserve selection failed",
+        cause,
+      );
+    }
+    const expectedAccepted = new Set(selection.winners.map((item) => item.itemSha256));
+    for (const replacement of selection.replacements) {
+      promptedExpectedReplacements.set(replacement.excludedMain.itemSha256, {
+        replacementItemSha256: replacement.replacement.itemSha256,
+        receivingSlotId: replacement.receivingSlotId,
+      });
     }
     const actualAccepted = [...acceptedItems].sort(compareCodeUnitStrings);
     if (!sameStrings(actualAccepted, [...expectedAccepted].sort(compareCodeUnitStrings))) fail("admissionManifest.labelResolutionSha256s", "accepted items are not the first admissible candidate in every sealed slot");
@@ -1009,7 +1047,13 @@ export function verifyBinaryJudgmentAdmissionClosure(
   let previousPosition = 0;
   for (const [index, entry] of ledger.entries.entries()) {
     const path = `replacementLedger.entries.${index}`;
-    if (entry.excludedPoolPosition <= previousPosition) fail(path, "ledger entries are not in deterministic pool order");
+    const sharedPool = promptedScreeningPool?.protocol === SCREENING_POOL_V2_PROTOCOL;
+    if (sharedPool) {
+      const previousSlotId = index === 0 ? undefined : ledger.entries[index - 1]!.receivingSlotId;
+      if (entry.receivingSlotId === undefined || (previousSlotId !== undefined && compareCodeUnitStrings(previousSlotId, entry.receivingSlotId) >= 0)) {
+        fail(path, "shared-reserve ledger entries are not in deterministic receiving-slot order");
+      }
+    } else if (entry.excludedPoolPosition <= previousPosition) fail(path, "ledger entries are not in deterministic pool order");
     previousPosition = entry.excludedPoolPosition;
     if (excludedItems.has(entry.excludedItemSha256) || acceptedItems.has(entry.excludedItemSha256)) fail(path, "excluded item is duplicated or also admitted");
     excludedItems.add(entry.excludedItemSha256);
@@ -1025,14 +1069,33 @@ export function verifyBinaryJudgmentAdmissionClosure(
     if (promptedScreeningPool !== undefined) {
       const excludedPoolItem = promptedScreeningPool.items.find((item) => item.itemSha256 === entry.excludedItemSha256);
       const replacementPoolItem = promptedScreeningPool.items.find((item) => item.itemSha256 === entry.replacementItemSha256);
+      const expected = promptedExpectedReplacements.get(entry.excludedItemSha256);
+      let sealedPoolItemsMatch = false;
+      let actualReceivingSlotId: string | undefined;
+      if (promptedScreeningPool.protocol === SCREENING_POOL_V2_PROTOCOL) {
+        if (excludedPoolItem?.poolKind === "main" && replacementPoolItem?.poolKind === "reserve") {
+          actualReceivingSlotId = entry.receivingSlotId;
+          sealedPoolItemsMatch = excludedPoolItem.candidateClass === replacementPoolItem.candidateClass
+            && excludedPoolItem.stratum === replacementPoolItem.stratum
+            && entry.receivingSlotId === excludedPoolItem.slotId;
+        }
+      } else if (
+        excludedPoolItem?.poolKind === "main"
+        && replacementPoolItem?.poolKind === "reserve"
+        && "slotId" in excludedPoolItem
+        && "slotId" in replacementPoolItem
+      ) {
+        actualReceivingSlotId = excludedPoolItem.slotId;
+        sealedPoolItemsMatch = excludedPoolItem.slotId === replacementPoolItem.slotId
+          && entry.receivingSlotId === undefined;
+      }
       if (
-        excludedPoolItem?.poolKind !== "main"
-        || replacementPoolItem?.poolKind !== "reserve"
-        || excludedPoolItem.slotId !== replacementPoolItem.slotId
-        || entry.excludedPoolPosition !== excludedPoolItem.poolPosition
-        || entry.replacementPoolPosition !== replacementPoolItem.poolPosition
-        || promptedExpectedReplacements.get(entry.excludedItemSha256) !== entry.replacementItemSha256
-      ) fail(path, "ledger does not name the deterministic first-admissible reserve for the exact sealed slot positions");
+        !sealedPoolItemsMatch
+        || entry.excludedPoolPosition !== excludedPoolItem?.poolPosition
+        || entry.replacementPoolPosition !== replacementPoolItem?.poolPosition
+        || expected?.replacementItemSha256 !== entry.replacementItemSha256
+        || expected.receivingSlotId !== actualReceivingSlotId
+      ) fail(path, "ledger does not name the deterministic first-admissible reserve and its receiving slot at the exact sealed positions");
     }
     // Branches on admission mode (spec §6.4, §6.5 check (4); ratified resolution to G-1): a
     // screened exclusion is verified against the screening table's own per-row admission rule
@@ -1096,12 +1159,13 @@ export function verifyBinaryJudgmentAdmissionClosure(
       stratum: entry.stratum,
       reason: entry.reason,
       replacementItemSha256: prefixed(entry.replacementItemSha256),
+      ...(entry.receivingSlotId === undefined ? {} : { receivingSlotId: entry.receivingSlotId }),
     });
   }
 
   if (promptedScreeningPool !== undefined) {
     const ledgerReplacements = new Map(ledger.entries.map((entry) => [entry.excludedItemSha256, entry.replacementItemSha256]));
-    if (ledgerReplacements.size !== promptedExpectedReplacements.size || [...promptedExpectedReplacements].some(([excludedItem, replacementItem]) => ledgerReplacements.get(excludedItem) !== replacementItem)) {
+    if (ledgerReplacements.size !== promptedExpectedReplacements.size || [...promptedExpectedReplacements].some(([excludedItem, expected]) => ledgerReplacements.get(excludedItem) !== expected.replacementItemSha256)) {
       fail("replacementLedger.entries", "ledger does not exactly cover every prompted main-slot replacement");
     }
   }
