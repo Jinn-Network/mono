@@ -24,8 +24,8 @@
 // teardown reads them back and removes each recorded tree. A worker killed between creating its
 // root and recording it — a window of microseconds — is the one case this cannot cover.
 //
-// This file is duplicated verbatim in `packages/benchmark-product/core`, alongside the other two
-// files of this seam. Graduate the set to a shared package at a third consumer.
+// One copy, shared by every Vitest config that wires it — see `isolate-tmp.ts` on why this
+// directory is not a workspace package.
 import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
