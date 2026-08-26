@@ -8,17 +8,19 @@ import { inheritedTempEnv, scopedTempEnv } from "./child-temp-env.js";
 const sourceRoot = resolve(import.meta.dirname, "..");
 
 /**
- * Marker a site writes when the child must NOT inherit the caller's temp directory. Spelled out so
- * the reason travels with the code and the scan below can tell a deliberate omission from an
- * oversight — which is the whole difference between the two, since they look identical.
+ * The marker a site writes when it deliberately names no temp directory — because the child must
+ * not inherit one, or because the allowlist is the caller's to build. One exact token rather than a
+ * pattern over prose, so the scan cannot be satisfied by an unrelated sentence that happens to use
+ * the right words, and `grep "temp-env:"` finds every such decision at once. The reason follows the
+ * marker inline, because a deliberate omission and an oversight are otherwise indistinguishable.
  */
-const JUSTIFICATION = /\bno `?TMPDIR`?|never inherit|not inherit|reproduce byte-for-byte|container's own environment/u;
+const JUSTIFICATION = /\btemp-env:/u;
 
 /** Accepted ways an `env:` allowlist can carry the caller's, or a pinned, temp directory. */
 const CARRIES_TEMP = /inheritedTempEnv\(|scopedTempEnv\(|TMPDIR|\.\.\./u;
 
 /** Declarations and schemas that name a field called `env`; they spawn nothing. */
-const NOT_A_SPAWN_SITE = /env:\s*(?:z\.|Readonly<|NodeJS\.ProcessEnv|dict\[|invocation\.env\b|environment\b)/u;
+const NOT_A_SPAWN_SITE = /env:\s*(?:z\.|Readonly<|NodeJS\.ProcessEnv|dict\[|invocation\.env\b)/u;
 
 /**
  * The definition of the environment a site delegates to, when it passes a name rather than a
@@ -93,7 +95,9 @@ describe("child temp-directory environment", () => {
     const unhandled: string[] = [];
     for (const file of sourceFiles(sourceRoot)) {
       const source = readFileSync(file, "utf8");
-      for (const match of source.matchAll(/\benv:/gu)) {
+      // `(?<![\w-])` and not `\b`: the justification marker is spelled `temp-env:`, and a word
+      // boundary matches after its hyphen — so every marker would be scanned as a site of its own.
+      for (const match of source.matchAll(/(?<![\w-])env:/gu)) {
         const site = envSite(source, match.index);
         if (NOT_A_SPAWN_SITE.test(site)) continue;
         if (CARRIES_TEMP.test(site) || JUSTIFICATION.test(site)) continue;
