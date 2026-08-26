@@ -1,5 +1,0 @@
-name: local-trace-distiller
-version: 0.1.0
-description: "Local trace distillation plugin. Registers /distill to derive reusable skills from private local session traces."
-author: "Jinn Network"
-kind: standalone

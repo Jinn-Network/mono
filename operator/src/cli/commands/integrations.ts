@@ -136,8 +136,7 @@ function removeTomlMcpServer(filePath: string): { ok: boolean; detail: string } 
 //
 // Scope: claude-code ONLY. `.claude/settings.json`'s `hooks.Stop` shape —
 // an array of hook GROUPS, each with a `hooks: [{type,command}]` array —
-// is confirmed against this repo's own documented example
-// (apps/jinn-agent/skills/autonomous-ai-agents/claude-code/SKILL.md) and the
+// is confirmed against Claude Code's documented Stop-hook example and the
 // operator's live settings file. codex/cursor/gemini-cli's hook file
 // formats were NOT independently verified (a real wrong-schema bug was
 // caught here in review before this scope-down) — their pure patch/remove

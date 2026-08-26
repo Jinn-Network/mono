@@ -59,7 +59,16 @@ async function installSequentialMocks(page: Page): Promise<{ dripCalls: () => nu
     (route) =>
       route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ pendingOlas: '0' }),
+        body: JSON.stringify({
+          schemaVersion: 1,
+          readState: 'ready',
+          totalPending: '0',
+          totalClaimed: '0',
+          lastClaimAt: null,
+          lastClaimTickAt: null,
+          nextCheckpointAt: null,
+          services: [],
+        }),
       }),
   );
   await page.route('**/v1/bootstrap', (route) => {

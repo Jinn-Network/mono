@@ -50,6 +50,8 @@ jobs:
         run: node --test .github/scripts/task-execution-package-inventory.test.mjs
       - name: Verify source boundaries and canaries
         run: node --test .github/scripts/task-execution-source-boundaries.test.mjs
+      - name: Verify packed-types staging matches CI verify
+        run: node --test .github/scripts/task-execution-ci-workflow.test.mjs
 
   foundation:
     runs-on: ubuntu-latest

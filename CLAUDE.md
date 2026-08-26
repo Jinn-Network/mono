@@ -580,13 +580,16 @@ Rules for any external-facing artifact about Jinn — press releases, blog posts
 
 Read first:
 - [`PRINCIPLES.md`](PRINCIPLES.md) — every public claim must satisfy Legibility (independently verifiable, on-chain where possible) and stay coherent with Neutral, Learning Maximised, Governance Minimal, Permissionless, Prestige.
+- [`THESIS.md`](THESIS.md) — why Jinn exists.
 - [`BRAND.md`](BRAND.md) — voice, headless-brand posture, protocol-vs-narrative split, content non-negotiables.
+- [`GROWTH.md`](GROWTH.md) — product-led distribution; positioning derives from the GTM plan and `BRAND.md`.
+- [`docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md`](docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md) — current product and go-to-market framing.
 
 Operate the workflow through the `create-press-release` skill (`.claude/skills/create-press-release/SKILL.md`) when the artifact is release-shaped; the skill composes `distil-writing` and enforces these rules.
 
 ### Framing and structure
 
-- **Frame Jinn as "an open agentic knowledge economy."** Use this exact phrase in About-blocks, boilerplate, and headline framings of what Jinn *is*. Older phrasings ("decentralised training protocol", "agentic intent network") are superseded.
+- **Product and external framing** come from the authorities above. Link them; do not invent a second positioning system here, and do not treat any single headline phrase as the universal product framing.
 - **There is no "team", no "co-founder", no "executive".** Do not use these words in any external artifact. Jinn is headless in the Other Internet sense (see `BRAND.md`); there is no corporate structure for the brand to point at.
 - **Attribution is role-only by default.** Quote attribution: `— Jinn contributor`. Named attribution only on explicit sign-off from the contributor concerned, and prefer affiliation over name unless naming is independently load-bearing.
 
