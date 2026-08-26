@@ -160,13 +160,24 @@ Every recipe shares the same runtime contract:
   - `JINN_PASSWORD` — keystore password (decrypts a migrated keystore, or sets
     the password for a fresh wallet).
 
-## The separate claim-relayer service
+## Earning — tokenless OLAS, no claim-relayer
 
-**Earning requires the claim-relayer.** The operator daemon is **emit-only** — it
-increments on-chain activity counters but does not itself settle reward claims.
-Deploy [`packages/claim-relayer`](../packages/claim-relayer) as its own Railway
-service alongside the operator; without it the operator accrues activity but
-never claims. See that package's README for its own deploy + env contract.
+There is **no claim-relayer service** and no JINN token. Per
+[DR-2026-06-30](../log/decisions/2026-06-30-tokenless-olas-native-pivot.md),
+OLAS (Base) is the unit of both stake and reward. The operator daemon's
+`reward-claim` loop periodically pulls pending rewards from the stOLAS
+`ExternalStakingDistributor` for staked fleet services. Activity counters
+on the Jinn recorder (TaskCoordinator behind the live
+[`JinnUpgradeableProxy`](../contracts/src/proxy/JinnUpgradeableProxy.sol))
+count completed-loop work toward OLAS staking liveness; they do not mint a
+separate token and they do not need a sidecar relayer.
+
+The token-era L2→L1 claim stack (`TaskClaimEmitter`, `JinnDistributor`,
+`packages/claim-relayer`) is deleted. Do not deploy it. Historical steps
+are in [`docs/runbooks/v0-testnet-deploy.md`](../docs/runbooks/v0-testnet-deploy.md)
+(superseded; do not run). Current operator path:
+[`docs/operator-testnet.md`](../docs/operator-testnet.md). Economics:
+[`SPEC.md`](../SPEC.md) §Economics.
 
 ## `railway.toml` — pin the Dockerfile path, never the repo root
 

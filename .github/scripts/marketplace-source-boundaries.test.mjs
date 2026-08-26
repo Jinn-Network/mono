@@ -9,7 +9,7 @@ const packages = join(root, 'packages', 'marketplace');
 const marketplaceDirectories = ['binding', 'projector', 'pipeline', 'venue-base', 'testing'];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'), join(root, 'operator'),
-  ...['autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin', 'sdk']
+  ...['core', 'indexer', 'indexer-enrichment', 'layer', 'plugin', 'sdk']
     .map((d) => join(root, 'packages', d)),
 ];
 

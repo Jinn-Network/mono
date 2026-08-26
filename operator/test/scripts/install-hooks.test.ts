@@ -4,9 +4,8 @@ import { patchCodexConfigJson, removeCodexHookJson } from '../../src/cli/hook-in
 import { patchGeminiCliSettingsJson, removeGeminiCliHookJson } from '../../src/cli/hook-installers/gemini-cli.js';
 import { patchCursorHooksJson, removeCursorHookJson } from '../../src/cli/hook-installers/cursor.js';
 
-// Claude Code's real hook schema — confirmed against
-// apps/jinn-agent/skills/autonomous-ai-agents/claude-code/SKILL.md's
-// documented example: `Stop` is an array of hook GROUPS (each with a
+// Claude Code's real hook schema — confirmed against the documented
+// Stop-hook example: `Stop` is an array of hook GROUPS (each with a
 // `hooks: [{type, command}]` array), not a flat array of `{command}`
 // objects. A flat `{command}` entry never fires.
 interface ClaudeCodeHookGroup { matcher?: string; hooks: Array<{ type: string; command: string }> }

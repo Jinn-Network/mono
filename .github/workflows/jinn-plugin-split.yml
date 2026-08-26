@@ -81,6 +81,9 @@ jobs:
         with:
           node-version: 22
 
+      - name: Verify plugin split mirror logic
+        run: node --test mono/.github/scripts/jinn-plugin-split.test.mjs
+
       - name: Resolve mono SHA and set git identity
         id: prep
         run: |

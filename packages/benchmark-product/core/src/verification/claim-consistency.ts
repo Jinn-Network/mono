@@ -1,5 +1,5 @@
 import { BENCHMARKING_METHOD_IDS, type BenchmarkRecord, type MatrixRecord, type ReportRecord, type RunRecord } from "@jinn-network/benchmarking-records";
-import type { ClaimAnchor } from "@colophon-claims/verify";
+import { firstDifference, type ClaimAnchor } from "@colophon-claims/verify";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";
@@ -25,35 +25,6 @@ export interface ClaimRecordIdentities {
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
-}
-
-function firstDifference(actual: unknown, expected: unknown, path = "claim"): string | undefined {
-  // Missing optional fields are themselves the first semantic difference. Do not pass
-  // `undefined` to canonicalJsonBytes: it is intentionally not a JSON value.
-  if (actual === undefined || expected === undefined) {
-    return actual === expected ? undefined : path;
-  }
-  if (bytesEqual(canonicalJsonBytes(actual), canonicalJsonBytes(expected))) return undefined;
-  if (
-    actual === null || expected === null || typeof actual !== "object" || typeof expected !== "object"
-    || Array.isArray(actual) !== Array.isArray(expected)
-  ) return path;
-  if (Array.isArray(actual) && Array.isArray(expected)) {
-    if (actual.length !== expected.length) return path;
-    for (let index = 0; index < actual.length; index += 1) {
-      const nested = firstDifference(actual[index], expected[index], `${path}.${index}`);
-      if (nested !== undefined) return nested;
-    }
-    return path;
-  }
-  const actualRecord = actual as Record<string, unknown>;
-  const expectedRecord = expected as Record<string, unknown>;
-  const keys = [...new Set([...Object.keys(actualRecord), ...Object.keys(expectedRecord)])].sort();
-  for (const key of keys) {
-    const nested = firstDifference(actualRecord[key], expectedRecord[key], path === "claim" ? key : `${path}.${key}`);
-    if (nested !== undefined) return nested;
-  }
-  return path;
 }
 
 /** One complete claim projection shared by workspace verify, publish preflight, and portable

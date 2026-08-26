@@ -30,7 +30,9 @@ jobs:
         with:
           node-version: '22'
       - name: Verify the fixture manifests are current
-        run: node .github/scripts/fixture-manifest.mjs --check
+        run: |
+          node .github/scripts/fixture-manifest.mjs --check
+          node --test .github/scripts/fixture-manifest.test.mjs
       - name: Verify fixture immutability against the base
         env:
           BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.before }}
@@ -50,6 +52,7 @@ jobs:
             exit 1
           fi
           node .github/scripts/fixture-immutability.mjs --base "${BASE_REF}"
+          node --test .github/scripts/fixture-immutability.test.mjs
   stack-fixture-gate:
     # The check-run name GitHub reports is this job's display `name:` below, and that
     # string is the required-status-check context registered on the `next` ruleset

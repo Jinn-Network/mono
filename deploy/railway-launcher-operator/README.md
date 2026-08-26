@@ -51,7 +51,8 @@ applies a generic Codex adapter bridge so Claude-style `SessionStart` hook
 
 `BASE_TAG` must point to a base release that includes #988. See
 [`../README.md`](../README.md) for the full deploy path (the public-GHCR ops
-step, the deploy contract, the claim-relayer, and the consolidation checklist).
+step, the deploy contract, OLAS earning via the daemon `reward-claim` loop,
+and the consolidation checklist).
 
 ## Required Railway env vars (secrets)
 
@@ -146,4 +147,4 @@ the EOA manually past the Stage-1 minimum (~0.02 ETH) first.
 - True supply redundancy needs a **second** launcher with its own wallet + launch (future).
 - Claude and Codex OAuth material may both live in Railway secrets. Keep both during temporary cutovers so rollback is config-only.
 - **Launcher + solver only.** This image installs no Docker; swe-rebench v2 *evaluation* needs a Docker daemon, so do not add the `evaluator` role to this box's `joinedSolverNets` — evaluation tasks would fail at pickup.
-- **Earning needs the separate claim-relayer.** The daemon is emit-only; deploy `packages/claim-relayer` alongside it (see [`../README.md`](../README.md)).
+- **Earning is OLAS-native.** The token-era `packages/claim-relayer` service is deleted. The daemon's `reward-claim` loop settles stOLAS distributor rewards (see [`../README.md`](../README.md)).

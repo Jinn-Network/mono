@@ -36,8 +36,8 @@ export const LedgerEntrySchema = z.strictObject({
 export type LedgerEntry = z.infer<typeof LedgerEntrySchema>;
 
 /**
- * Fork-shaped projection of a ledger entry — the row shape the TUI consumer
- * (`apps/jinn-agent/plugins/jinn/ledger_view.py`, `rows_from_json`) reads.
+ * Fork-shaped projection of a ledger entry — the row shape the frozen
+ * 0.1.2 TUI consumer reads.
  * `state` is absent for published rows; the schema also accepts a `failed`
  * state for forward-compat, even though `toLedgerRow` never emits it.
  */

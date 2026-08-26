@@ -45,7 +45,7 @@ const ENVIRONMENTS_FOREIGN_PACKAGES = [
 const FORBIDDEN_ROOTS = [
   join(root, 'apps'),
   join(root, 'operator'),
-  ...['autopilot', 'benchmarking', 'core', 'discovery', 'evidence', 'indexer',
+  ...['benchmarking', 'core', 'discovery', 'evidence', 'indexer',
     'indexer-enrichment', 'layer', 'marketplace', 'plugin', 'sdk', 'task-execution', 'trust']
     .map((directory) => join(root, 'packages', directory)),
 ];

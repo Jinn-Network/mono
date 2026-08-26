@@ -7,14 +7,16 @@ This is a **standard Ponder deployment**. The patterns here come directly from P
 The live `jinn-indexer-production` service auto-deploys from `next`. Its build/deploy
 config is pinned in [`railway.toml`](./railway.toml) (config-as-code) so it cannot
 silently drift in the dashboard — drift to the RAILPACK auto-builder is what broke
-the indexer on 2026-06-02 (RAILPACK can't resolve the `@jinn-network/sdk@portal:../sdk`
-sibling → every deploy failed at `yarn install`, freezing the live code on stale
-commit `57d6e610` for ~21 deploys while the last-good container kept serving).
+the indexer on 2026-06-02 (RAILPACK can't resolve the indexer's portal siblings →
+every deploy failed at `yarn install`, freezing the live code on stale commit
+`57d6e610` for ~21 deploys while the last-good container kept serving).
 
 `railway.toml` pins: the **Dockerfile** builder (`dockerfilePath = indexer/deploy/Dockerfile`,
 relative to the `/packages` Root Directory — the build context the Dockerfile needs to
-`COPY` the sibling `sdk/`); **watch paths** scoped to `packages/indexer/**` + `packages/sdk/**`
-so unrelated `next` merges (client SPA, dashboard, eval, …) stop redeploying the indexer;
+`COPY` the indexer tree and its portal siblings: `task-execution/protocol`,
+`trust/core`, and `benchmarking/records`); **watch paths** scoped to those trees plus
+`packages/indexer/**` so unrelated `next` merges (client SPA, dashboard, eval, …)
+stop redeploying the indexer;
 and a **`/ready` healthcheck** so a redeploy gates traffic cutover on the new container being
 caught-up-to-realtime (the missing healthcheck was the "indexer goes down momentarily when I
 merge a batch of PRs" symptom — every push redeployed, and cutover happened before the process

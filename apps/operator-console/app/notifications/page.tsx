@@ -1,8 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { NOTIFICATION_KINDS } from '@jinn-network/lifecycle-notifications';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { consoleJumpHref } from '@/lib/notification-jump';
 import { classifySurface, SurfaceStatus, useDaemonJson } from '@/lib/use-daemon';
 
 const KNOWN_KINDS = new Set<string>(NOTIFICATION_KINDS);
@@ -12,6 +14,7 @@ type Notification = {
   severity: string;
   title: string;
   message: string;
+  jumpTo?: string;
 };
 
 type NotificationsPayload = {
@@ -39,32 +42,51 @@ export default function NotificationsPage() {
         {state !== 'ready' ? (
           <SurfaceStatus name="notifications" state={state} />
         ) : (
-          items.map((item, index) => (
-            <div
-              key={`${item.kind}-${index}`}
-              data-testid="notification-item"
-              className="rounded-[var(--radius-2)] border border-border p-3"
-            >
-              <div className="mb-1 flex items-center gap-2">
-                <Badge
-                  variant={
-                    item.severity === 'blocking'
-                      ? 'destructive'
-                      : item.severity === 'warning'
-                        ? 'warning'
-                        : 'outline'
-                  }
-                >
-                  {item.severity}
-                </Badge>
-                <span className="font-mono text-[13px]">{item.title}</span>
-                {KNOWN_KINDS.has(item.kind) ? null : (
-                  <span className="font-mono text-[12px] text-muted-foreground">{item.kind}</span>
-                )}
+          items.map((item, index) => {
+            const href = consoleJumpHref(item.jumpTo);
+            const body = (
+              <>
+                <div className="mb-1 flex items-center gap-2">
+                  <Badge
+                    variant={
+                      item.severity === 'blocking'
+                        ? 'destructive'
+                        : item.severity === 'warning'
+                          ? 'warning'
+                          : 'outline'
+                    }
+                  >
+                    {item.severity}
+                  </Badge>
+                  <span className="font-mono text-[13px]">{item.title}</span>
+                  {KNOWN_KINDS.has(item.kind) ? null : (
+                    <span className="font-mono text-[12px] text-muted-foreground">{item.kind}</span>
+                  )}
+                </div>
+                <p className="m-0 font-mono text-[12px] text-muted-foreground">{item.message}</p>
+              </>
+            );
+            const className = 'rounded-[var(--radius-2)] border border-border p-3 no-underline text-inherit';
+            return href ? (
+              <Link
+                key={`${item.kind}-${index}`}
+                href={href}
+                data-testid="notification-item"
+                data-jump={href}
+                className={`${className} hover:border-foreground/40`}
+              >
+                {body}
+              </Link>
+            ) : (
+              <div
+                key={`${item.kind}-${index}`}
+                data-testid="notification-item"
+                className={className}
+              >
+                {body}
               </div>
-              <p className="m-0 font-mono text-[12px] text-muted-foreground">{item.message}</p>
-            </div>
-          ))
+            );
+          })
         )}
       </CardContent>
     </Card>

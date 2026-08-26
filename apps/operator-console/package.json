@@ -11,7 +11,8 @@
     "test": "node --import tsx --test lib/*.test.ts test/*.test.mjs",
     "e2e": "playwright test --config=playwright.config.ts",
     "e2e:app-flow": "playwright test --config=playwright.config.ts e2e/claim-policy-flow.e2e.ts e2e/posting-status.e2e.ts",
-    "e2e:funding-sequence": "playwright test --config=playwright.config.ts e2e/funding-sequence.e2e.ts"
+    "e2e:funding-sequence": "playwright test --config=playwright.config.ts e2e/funding-sequence.e2e.ts",
+    "e2e:live": "LIVE_OPERATOR_E2E=1 playwright test --config=playwright.live.config.ts"
   },
   "dependencies": {
     "@jinn-network/lifecycle-notifications": "portal:../../packages/lifecycle-notifications",

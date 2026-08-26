@@ -86,10 +86,6 @@
       "kind": "workflow",
       "path": ".github/workflows/benchmark-product-ci.yml"
     },
-    "autopilot-ci": {
-      "kind": "workflow",
-      "path": ".github/workflows/autopilot-board-painter.yml"
-    },
     "core-ci": {
       "kind": "workflow",
       "path": ".github/workflows/core-ci.yml"
@@ -199,13 +195,12 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 13,
+      "expectedPackageCount": 12,
       "publishPolicies": [
         "private",
         "never"
       ],
       "requiredGateIds": [
-        "autopilot-ci",
         "benchmark-product-ci",
         "broadcast-bot-ci",
         "environments-ci",
@@ -550,47 +545,6 @@
         "reason": "The operator is being recomposed onto cataloged platform applications.",
         "status": "independently published during recomposition",
         "sunsetCondition": "The operator-daemon cutover is complete and the legacy release coupling is retired."
-      }
-    },
-    {
-      "ownerGroup": "architecture-control",
-      "publicSurface": {
-        "schemas": [],
-        "profiles": [],
-        "fixtures": [],
-        "conformance": []
-      },
-      "supersedes": [],
-      "replacedBy": [],
-      "name": "@jinn-network/autopilot",
-      "path": "packages/autopilot",
-      "domain": "autopilot",
-      "role": "vendored tier-4 product residue",
-      "tier": 4,
-      "classification": "transitional",
-      "stability": "transitional",
-      "authority": {
-        "documents": [
-          {
-            "path": "docs/superpowers/specs/2026-07-23-autopilot-oss-maintainer-product-design.md",
-            "status": "approved"
-          }
-        ],
-        "decisionRecord": null
-      },
-      "releaseGroup": "transitional-or-private",
-      "publishPolicy": "private",
-      "requiredGateIds": [
-        "autopilot-ci"
-      ],
-      "boundaryPolicy": {
-        "kind": "workflow",
-        "path": ".github/workflows/autopilot-board-painter.yml"
-      },
-      "transition": {
-        "reason": "Autopilot has been extracted to Jinn-Network/autopilot; this package is vendored residue.",
-        "status": "removal tracked",
-        "sunsetCondition": "The monorepo no longer needs the vendored copy."
       }
     },
     {

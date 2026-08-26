@@ -17,21 +17,23 @@
 # Two one-time service settings are NOT expressible in this file (set once in the
 # Railway dashboard / API):
 #   - Root Directory = /packages  (the Dockerfile's build context: it COPYs the
-#     sibling sdk/, indexer/, and indexer-enrichment/ trees, matching the CI build
-#     `docker build -f indexer-enrichment/deploy/Dockerfile .` run from packages/).
+#     indexer tree, its portal siblings, and indexer-enrichment/, matching the CI
+#     build `docker build -f indexer-enrichment/deploy/Dockerfile .` run from packages/).
 #   - Config as code  = packages/indexer-enrichment/deploy/railway.toml
 
 [build]
 builder = "DOCKERFILE"
 # Relative to the service Root Directory (/packages).
 dockerfilePath = "indexer-enrichment/deploy/Dockerfile"
-# Redeploy only when the worker or the indexer/sdk sources it portal-imports
-# change — not on every push to next. Gitignore-style, anchored at the REPO ROOT
-# (per Railway's monorepo docs).
+# Redeploy only when the worker or its portal dependency closure changes — not
+# on every push to next. Gitignore-style, anchored at the REPO ROOT (per Railway's
+# monorepo docs).
 watchPatterns = [
   "packages/indexer-enrichment/**",
   "packages/indexer/**",
-  "packages/sdk/**",
+  "packages/task-execution/protocol/**",
+  "packages/trust/core/**",
+  "packages/benchmarking/records/**",
 ]
 
 [deploy]
