@@ -157,13 +157,17 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
-      # Restore by name, straight into the destination, the way evidence-ci.yml and
-      # marketplace-ci.yml do. A `pattern:` restore nests each artifact under
-      # `path/<artifact>/` only while two or more artifacts match; download-artifact
-      # v5 made a lone match extract directly into `path/` instead, so the pattern
-      # form silently changes shape with the artifact count. `runtime` is this
-      # workflow's only uploader, so it always matched alone. Add one named step per
-      # package when C4-C7 land further `plugin-*-dist` uploads.
+      # Restore by name, straight into the destination, the way the per-job
+      # restores in evidence-ci.yml do. A `pattern:` restore nests each artifact
+      # under `path/<artifact>/` only while two or more artifacts match;
+      # download-artifact v5 made a lone match extract directly into `path/`
+      # instead, so the pattern form silently changes shape with the artifact
+      # count. `runtime` is this workflow's only uploader, so it always matched
+      # alone. Restoring by name has no such dependency. Note the precedent is
+      # partial: evidence-ci.yml's own aggregate `verify` job still uses the
+      # pattern form, and it holds only because that workflow has many
+      # uploaders. Add one named step per package when C4-C7 land further
+      # `plugin-*-dist` uploads.
       - name: Restore Plugin Runtime distribution
         uses: actions/download-artifact@v8
         with:
