@@ -15,7 +15,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { parseMatrix, parseReport, parseRun } from "@jinn-network/benchmarking-records";
+import { expectedCellSet, parseBenchmark, parseMatrix, parseReport, parseRun } from "@jinn-network/benchmarking-records";
 import type {
   AttemptUri,
   BackendCapabilities,
@@ -517,6 +517,75 @@ async function runPairedLifecycle(scenario: PairedScenario): Promise<{
 }
 
 describe("official run path — public operations only, real local venue (AC2)", () => {
+  test(
+    "eight real local workers overlap and still assemble a canonical matrix",
+    async () => {
+      const clock = makeClock();
+      const draftId = "parallel-eight";
+      expect(initWorkspace(contextFor(clock)).ok).toBe(true);
+      expect(createDraft(contextFor(clock), { draftId, name: "Parallel Eight" }).ok).toBe(true);
+      expect((await sampleInit(contextFor(clock), { draftId })).ok).toBe(true);
+      expect(armAdd(contextFor(clock), {
+        draftId,
+        armId: "baseline",
+        pinning: { harness: SOLVE_HARNESS_PINS["prediction-v1-baseline"] },
+      }).ok).toBe(true);
+      expect(armAdd(contextFor(clock), {
+        draftId,
+        armId: "sample-uniform",
+        pinning: { harness: SOLVE_HARNESS_PINS["sample-uniform"] },
+      }).ok).toBe(true);
+      expect(updateDraft(contextFor(clock), { draftId, patch: { replicates: 2 } }).ok).toBe(true);
+      expect((await runQuote(contextFor(clock), { draftId })).ok).toBe(true);
+      const locked = runLock(contextFor(clock), { draftId });
+      expect(locked.ok).toBe(true);
+      if (!locked.ok) return;
+      const sealedRun = parseRun(getSealedBytes(workspaceDir, locked.result.runSha256));
+
+      const launched = await runLaunch(contextFor(clock), {
+        draftId,
+        maxConcurrentCells: 8,
+      }, {
+        solveStartDelayMsForTesting: 250,
+        driverGenerationForTesting: () => "parallel-eight-generation",
+      });
+      expect(launched.ok, JSON.stringify(launched)).toBe(true);
+
+      const journal = readRunJournalEntries(workspaceDir, draftId);
+      expect(journal).toContainEqual(expect.objectContaining({
+        kind: "driver-started",
+        generation: "parallel-eight-generation",
+        maxConcurrentCells: 8,
+      }));
+      const firstDelivered = journal.findIndex(
+        (entry) => entry.kind === "cell-event" && entry.event.kind === "delivered",
+      );
+      expect(firstDelivered).toBeGreaterThan(0);
+      const admittedBeforeFirstCompletion = new Set(journal.slice(0, firstDelivered)
+        .filter((entry): entry is Extract<RunJournalEntry, { kind: "submission-captured" }> =>
+          entry.kind === "submission-captured")
+        .map((entry) => entry.cellKey));
+      expect(admittedBeforeFirstCompletion.size).toBe(8);
+
+      const status = runStatus(contextFor(clock), { draftId });
+      expect(status).toMatchObject({
+        ok: true,
+        result: { counts: { expected: 12, delivered: 12, judged: 12, failed: 0 } },
+      });
+      const collected = await runCollect(contextFor(clock), { draftId });
+      expect(collected.ok, JSON.stringify(collected)).toBe(true);
+      if (!collected.ok) return;
+      const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
+      expect(matrix.cells).toHaveLength(12);
+      expect(matrix.completeness).toMatchObject({ expected: 12, judged: 12, runOutcome: "complete" });
+      expect(matrix.cells.map((cell) => cell.cellKey)).toEqual(
+        expectedCellSet(parseBenchmark(getSealedBytes(workspaceDir, sealedRun.benchmark.digest.sha256)), sealedRun)
+          .map((cell) => cell.cellKey),
+      );
+    },
+    60_000,
+  );
+
   test(
     "quote -> gated lock -> gated launch -> status -> collect -> results, end to end on the real backend",
     async () => {
