@@ -19,6 +19,7 @@ import {
   launchAndWatch,
   resumeRun,
   type AttemptWaitPort,
+  type CellStatusEvent,
   type LaunchOptions,
 } from "./launch.js";
 
@@ -268,7 +269,7 @@ describe("launchAndWatch (§10.1 op 4 / §7.4)", () => {
     const { bench, run, runDigest, tasks } = await miniatureContext();
     const sealedTasks = sealingTasks(tasks);
     const backend = pinningBackend();
-    const events = [];
+    const events: CellStatusEvent[] = [];
     for await (const event of launchAndWatch(
       bench,
       run,
@@ -349,7 +350,7 @@ describe("launchAndWatch (§10.1 op 4 / §7.4)", () => {
         return driveWaitPort(backend, count === 1 ? "expired" : "delivered").waitUntilTerminal(input);
       },
     };
-    const events = [];
+    const events: CellStatusEvent[] = [];
     for await (const event of launchAndWatch(bench, run, backend, {
       ...baseOpts(runDigest, sealedTasks, backend),
       waitForTerminal,
@@ -455,6 +456,55 @@ describe("launchAndWatch (§10.1 op 4 / §7.4)", () => {
     expect(events.some((event) => event.cancelledRun === true)).toBe(false);
   });
 
+  test("a fatal cell stops admission while healthy active peers drain to durable terminals", async () => {
+    const { bench, run, runDigest, tasks } = await miniatureContext();
+    const sealedTasks = sealingTasks(tasks);
+    const backend = pinningBackend();
+    let submits = 0;
+    const originalSubmit = backend.submit.bind(backend);
+    backend.submit = async (...args) => {
+      submits += 1;
+      return originalSubmit(...args);
+    };
+    let cancellations = 0;
+    const originalCancel = backend.cancel?.bind(backend);
+    backend.cancel = async (...args) => {
+      cancellations += 1;
+      if (originalCancel === undefined) throw new Error("fixture backend has no cancel port");
+      return originalCancel(...args);
+    };
+    let started = 0;
+    let reached!: () => void;
+    const full = new Promise<void>((resolve) => { reached = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const waitForTerminal: AttemptWaitPort = {
+      async waitUntilTerminal(input) {
+        const index = started;
+        started += 1;
+        if (started === 4) reached();
+        await full;
+        if (index === 0) throw new Error("synthetic fatal cell");
+        await released;
+        return driveWaitPort(backend, "delivered").waitUntilTerminal(input);
+      },
+    };
+    const events: CellStatusEvent[] = [];
+    const collected = (async () => {
+      for await (const event of launchAndWatch(bench, run, backend, {
+        ...baseOpts(runDigest, sealedTasks, backend),
+        waitForTerminal,
+        maxConcurrentCells: 4,
+      })) events.push(event);
+    })();
+    await full;
+    release();
+    await expect(collected).rejects.toThrow("synthetic fatal cell");
+    expect(submits).toBe(4);
+    expect(cancellations).toBe(0);
+    expect(events.filter((event) => event.kind === "delivered")).toHaveLength(3);
+  });
+
   test("resume applies the same bounded concurrency to outstanding cells", async () => {
     const { bench, run, runDigest, tasks } = await miniatureContext();
     const sealedTasks = sealingTasks(tasks);
@@ -494,6 +544,50 @@ describe("launchAndWatch (§10.1 op 4 / §7.4)", () => {
     release();
     const events = await collected;
     expect(events.filter((event) => event.kind === "delivered")).toHaveLength(4);
+  });
+
+  test("resume also drains healthy active peers after one cell fails fatally", async () => {
+    const { bench, run, runDigest, tasks } = await miniatureContext();
+    const sealedTasks = sealingTasks(tasks);
+    const backend = pinningBackend();
+    let cancellations = 0;
+    const originalCancel = backend.cancel?.bind(backend);
+    backend.cancel = async (...args) => {
+      cancellations += 1;
+      if (originalCancel === undefined) throw new Error("fixture backend has no cancel port");
+      return originalCancel(...args);
+    };
+    let started = 0;
+    let reached!: () => void;
+    const full = new Promise<void>((resolve) => { reached = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const waitForTerminal: AttemptWaitPort = {
+      async waitUntilTerminal(input) {
+        const index = started;
+        started += 1;
+        if (started === 4) reached();
+        await full;
+        if (index === 0) throw new Error("synthetic fatal resume cell");
+        await released;
+        return driveWaitPort(backend, "delivered").waitUntilTerminal(input);
+      },
+    };
+    const events: CellStatusEvent[] = [];
+    const outstanding = expectedCellSet(bench, run).slice(0, 4).map((cell) => ({ ...cell, dispatch: 1 }));
+    const collected = (async () => {
+      for await (const event of resumeRun(bench, run, backend, {
+        ...baseOpts(runDigest, sealedTasks, backend),
+        waitForTerminal,
+        maxConcurrentCells: 4,
+        outstanding,
+      })) events.push(event);
+    })();
+    await full;
+    release();
+    await expect(collected).rejects.toThrow("synthetic fatal resume cell");
+    expect(cancellations).toBe(0);
+    expect(events.filter((event) => event.kind === "delivered")).toHaveLength(3);
   });
 
   test("refuses unsafe concurrency values before dispatch", async () => {

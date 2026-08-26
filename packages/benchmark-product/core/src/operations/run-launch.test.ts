@@ -933,6 +933,52 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     expect(submits).toHaveLength(2);
   }, 30_000);
 
+  test("fails closed when backend recovery contradicts a captured Submission", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend: launchBackend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(launchBackend),
+    });
+    expect(launched.ok).toBe(true);
+
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const delivered = fullEntries.find(
+      (entry) => entry.kind === "cell-event" && entry.event.kind === "delivered",
+    );
+    if (delivered?.kind !== "cell-event") throw new Error("fixture produced no delivered cell");
+    const cellKey = delivered.event.cellKey;
+    overwriteRunJournal("draft-1", fullEntries.filter((entry) => {
+      if (entry.kind === "cell-event" && entry.event.cellKey === cellKey) {
+        return entry.event.kind === "dispatch";
+      }
+      if (
+        (entry.kind === "observation-accepted"
+          || entry.kind === "delivery"
+          || entry.kind === "evaluation")
+        && entry.cellKey === cellKey
+      ) return false;
+      return true;
+    }));
+
+    const { backend: resumeBackend, submits } = makeStatefulFakeBackend();
+    resumeBackend.recover = async () => ({
+      classification: "contradictory",
+      detail: "durable attempt differs from captured bytes",
+    });
+    const outcome = await runResume(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(resumeBackend),
+    });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: {
+        code: "record-integrity",
+        detail: expect.stringContaining("backend recovery contradicted"),
+      },
+    });
+    expect(submits).toHaveLength(0);
+  }, 30_000);
+
   test("a cell whose journal entries are entirely missing (crash before it was ever dispatched) is picked up; already-complete cells are untouched", async () => {
     const clock = makeClock();
     await setUpLockedDraft(clock);

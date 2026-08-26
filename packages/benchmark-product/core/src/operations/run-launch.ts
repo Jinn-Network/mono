@@ -578,7 +578,18 @@ export function runResume(
                       "captured outstanding Submission carries no valid Submission URI",
                     );
                   }
-                  await backend.recover(submission.submission as SubmissionUri);
+                  const reconciliation = await backend.recover(
+                    submission.submission as SubmissionUri,
+                  );
+                  if (reconciliation.classification === "contradictory") {
+                    refuse(
+                      "record-integrity",
+                      `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
+                      `backend recovery contradicted the captured Submission${
+                        reconciliation.detail === undefined ? "" : `: ${reconciliation.detail}`
+                      }`,
+                    );
+                  }
                 }
 
                 cancellation = createCancellationAwareBackend(backend, {

@@ -600,6 +600,8 @@ export async function* launchAndWatch(
     | { readonly index: number; readonly error: unknown };
   const active = new Map<number, Promise<CompletedCell>>();
   let nextCell = 0;
+  let fatal = false;
+  let fatalError: unknown;
 
   const admit = (): void => {
     while (
@@ -623,16 +625,19 @@ export async function* launchAndWatch(
     const completed = await Promise.race(active.values());
     active.delete(completed.index);
     if ("error" in completed) {
-      if (backend.cancel !== undefined) {
-        await Promise.allSettled([...inFlight].map((attempt) => backend.cancel!(attempt as never, "run-driver-failed")));
-      }
-      await Promise.allSettled(active.values());
-      throw completed.error;
+      // A driver failure stops admission, but it is not run cancellation. Let already-admitted
+      // peers reach their own durable terminal boundaries and emit those events before failing the
+      // generation; cancelling them here would turn healthy cells into non-resumable terminals.
+      if (!fatal) fatalError = completed.error;
+      fatal = true;
+    } else {
+      for (const event of completed.events) yield event;
     }
-    for (const event of completed.events) yield event;
     if (ownerCancelled(opts)) runCancelled = true;
-    if (!runCancelled) admit();
+    if (!runCancelled && !fatal) admit();
   }
+
+  if (fatal) throw fatalError;
 
   if (ownerCancelled(opts)) runCancelled = true;
 
@@ -717,6 +722,8 @@ export async function* resumeRun(
     | { readonly index: number; readonly error: unknown };
   const active = new Map<number, Promise<CompletedOutstanding>>();
   let nextCell = 0;
+  let fatal = false;
+  let fatalError: unknown;
   const admit = (): void => {
     while (
       active.size < maxConcurrentCells
@@ -739,15 +746,14 @@ export async function* resumeRun(
     const completed = await Promise.race(active.values());
     active.delete(completed.index);
     if ("error" in completed) {
-      if (backend.cancel !== undefined) {
-        await Promise.allSettled([...inFlight].map((attempt) => backend.cancel!(attempt as never, "run-driver-failed")));
-      }
-      await Promise.allSettled(active.values());
-      throw completed.error;
+      if (!fatal) fatalError = completed.error;
+      fatal = true;
+    } else {
+      for (const event of completed.events) yield event;
     }
-    for (const event of completed.events) yield event;
-    admit();
+    if (!fatal) admit();
   }
+  if (fatal) throw fatalError;
   if (ownerCancelled(opts)) {
     for (const cell of opts.outstanding.slice(nextCell)) {
       yield {
