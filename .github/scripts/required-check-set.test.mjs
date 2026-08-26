@@ -579,6 +579,50 @@ test('hermetic-gate push dedups only behind a same-SHA worker success and falls 
   assert.match(body, /exit 0/u, 'push must return before the git-diff path list is built');
 });
 
+test('the identity-only dedup probes pin their gate-name probe shape (#2996 stage 2)', () => {
+  // These two workflows probe their GATE context, which is sound only while
+  // their merge_group lane has no selection: the gate reports success only
+  // after every worker ran. If selection is ever added there, the probes must
+  // switch to worker names (see the hermetic-gate push arm).
+  const PROBES = [
+    { workflow: 'repository-structure.yml', gate: 'repo-structure-gate' },
+    { workflow: 'stack-fixture-immutability.yml', gate: 'stack-fixture-gate' },
+  ];
+  for (const { workflow, gate } of PROBES) {
+    const script = selectStepScript(workflow);
+    assert.doesNotMatch(
+      script,
+      /git /u,
+      `${workflow}: the probe is identity-only; a diff arm would silently add path filtering to a required context that has none`,
+    );
+    const guard = script.match(
+      /\[ "\$\{GITHUB_REF:-\}" = 'refs\/heads\/next' \] && \[ "\$\{GITHUB_RUN_ATTEMPT:-1\}" = '1' \]/u,
+    );
+    assert.notEqual(guard, null, `${workflow}: the dedup must be guarded on refs/heads/next and run attempt 1`);
+    assert.match(
+      script,
+      new RegExp(`check_name='${gate}'`, 'u'),
+      `${workflow}: the probe must name its own gate context`,
+    );
+    assert.match(
+      script,
+      /select\(\.conclusion == "success"\)/u,
+      `${workflow}: only a completed successful gate justifies a dedup`,
+    );
+    assert.match(
+      script,
+      /\|\| echo 0/u,
+      `${workflow}: a probe failure must fail OPEN to the full run`,
+    );
+    const dedupWrites = script.match(/echo 'run=false' >> "\$\{GITHUB_OUTPUT\}"/gu) ?? [];
+    assert.equal(dedupWrites.length, 1, `${workflow}: exactly one run=false write may exist`);
+    assert.ok(
+      guard.index < script.indexOf("echo 'run=false'"),
+      `${workflow}: the run=false write must sit behind the ref-and-attempt guard`,
+    );
+  }
+});
+
 test('the check-run producer posts its context however the gate job ends', () => {
   for (const member of REQUIRED_CHECK_SET.filter((entry) => entry.kind === 'check-run')) {
     const jobs = jobBlocks(member.workflow);

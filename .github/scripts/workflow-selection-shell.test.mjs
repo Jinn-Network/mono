@@ -322,6 +322,32 @@ test('a push landing dedups only behind a verified same-SHA worker and fails ope
   }
 });
 
+test('the identity-only dedup probes never diff and dedup only behind a verified same-SHA gate (#2996)', () => {
+  // repository-structure and stack-fixture-immutability have no diff-based
+  // selection anywhere - their probes are SHA-identity only. A diff arm
+  // creeping in would silently add path filtering to two required contexts
+  // that must not have any (stage 2 of #2996).
+  for (const workflow of ['repository-structure.yml', 'stack-fixture-immutability.yml']) {
+    const script = selectScript(workflow);
+    assert.doesNotMatch(script, /git /u, `${workflow}: the probe is identity-only and must never diff`);
+
+    const verified = select(workflow, ['docs/anything.md'], { count: '1' });
+    assert.equal(verified.run, 'false', `${workflow}: a verified same-SHA gate must dedup the push lane`);
+
+    const probeDown = select(workflow, ['docs/anything.md'], { fail: true });
+    assert.equal(probeDown.run, 'true', `${workflow}: a failing probe must fall OPEN to the full run`);
+
+    const zeroMatches = select(workflow, ['docs/anything.md'], { count: '0' });
+    assert.equal(zeroMatches.run, 'true', `${workflow}: no verdict on the SHA means the full run`);
+
+    const rerun = select(workflow, ['docs/anything.md'], { count: '1', attempt: '2' });
+    assert.equal(rerun.run, 'true', `${workflow}: a manual re-run (attempt > 1) must execute for real`);
+
+    const nonNextPush = select(workflow, ['docs/anything.md']);
+    assert.equal(nonNextPush.run, 'true', `${workflow}: a push without the next-ref identity runs in full`);
+  }
+});
+
 test('the cold-stock proof lives under plugin/scripts and does not import the host', () => {
   const repoRoot = resolve(import.meta.dirname, '../..');
   const script = readFileSync(join(repoRoot, 'plugin/scripts/cold-stock-e2e.sh'), 'utf8');
