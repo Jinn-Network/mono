@@ -25,9 +25,11 @@
  */
 
 import {
+  cellIdempotencyKey,
   expectedCellSet,
   parseBenchmark,
   parseRun,
+  submissionExtensionBlock,
   type BenchmarkRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
@@ -316,6 +318,7 @@ async function recoverProspectiveSubmissionCaptures(
   workspaceDir: string,
   draftId: string,
   run: RunRecord,
+  runSha256: string,
 ): Promise<void> {
   const runState = requireRunState(workspaceDir, draftId);
   const publication = runState.publication;
@@ -361,19 +364,52 @@ async function recoverProspectiveSubmissionCaptures(
       if (bytes === undefined) {
         refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} is missing from the source record store`);
       }
-      let submission: { readonly nonce?: unknown };
+      let submission: {
+        readonly nonce?: unknown;
+        readonly idempotencyKey?: unknown;
+        readonly annotations?: unknown;
+      };
       try {
-        submission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as { readonly nonce?: unknown };
+        submission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as typeof submission;
       } catch {
         refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} is not valid UTF-8 JSON`);
       }
-      if (typeof submission.nonce !== "string") continue;
+      const runDigest = `sha256:${runSha256}`;
+      const annotations = submission.annotations;
+      if (
+        annotations === null
+        || typeof annotations !== "object"
+        || !("run" in annotations)
+        || annotations.run !== runDigest
+      ) continue;
+      if (typeof submission.nonce !== "string") {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} for this Run has no valid nonce`);
+      }
       const nonce = /^(.*):([1-9][0-9]*)$/u.exec(submission.nonce);
-      if (nonce === null) continue;
+      if (nonce === null) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} for this Run has an invalid nonce`);
+      }
       const cellKey = nonce[1]!;
       const dispatch = Number(nonce[2]);
       const cell = expectedByCell.get(cellKey);
-      if (cell === undefined || !Number.isSafeInteger(dispatch)) continue;
+      if (cell === undefined || !Number.isSafeInteger(dispatch)) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} names no cell in this Run`);
+      }
+      const expectedAnnotations = submissionExtensionBlock(runDigest, cellKey, cell.armId);
+      const annotationKeys = Object.keys(annotations).sort();
+      if (
+        annotationKeys.length !== 3
+        || annotationKeys[0] !== "armId"
+        || annotationKeys[1] !== "cellKey"
+        || annotationKeys[2] !== "run"
+        || !("cellKey" in annotations)
+        || !("armId" in annotations)
+        || annotations.cellKey !== expectedAnnotations.cellKey
+        || annotations.armId !== expectedAnnotations.armId
+        || submission.idempotencyKey !== cellIdempotencyKey(runDigest, cellKey, dispatch)
+      ) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} does not bind exactly to this Run dispatch`);
+      }
       const coordinate = `${cellKey}::${dispatch}`;
       const digestHex = digest.slice("sha256:".length);
       const prior = existing.get(coordinate);
@@ -606,6 +642,7 @@ export function runResume(
         clockedContext.workspaceDir,
         input.draftId,
         loaded.runRecord,
+        loaded.runSha256,
       );
       const entries = readRunJournalEntries(clockedContext.workspaceDir, input.draftId);
       const fold = foldRunJournal(entries);

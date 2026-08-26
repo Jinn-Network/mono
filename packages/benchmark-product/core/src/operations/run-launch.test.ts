@@ -374,7 +374,6 @@ describe("runLaunch — prospective mounted publication", () => {
 
   test("resume reconstructs a public Submission committed before its local capture journal fact", async () => {
     const clock = makeClock();
-    await setUpLockedDraft(clock);
     const handler = createWorkspacePublicationHttpHandler(workspaceDir);
     const server = createServer(async (request, response) => {
       const externalPath = request.url ?? "/";
@@ -388,8 +387,16 @@ describe("runLaunch — prospective mounted publication", () => {
       const address = server.address();
       if (address === null || typeof address === "string") throw new Error("test server address unavailable");
       const base = `http://127.0.0.1:${address.port}/publication`;
+      await setUpLockedDraft(clock, "prior-run");
+      expect((await publicationConfigure(contextFor(clock), { draftId: "prior-run", publicBaseUrl: base })).ok).toBe(true);
+      expect((await publicationRegister(contextFor(clock), { draftId: "prior-run" })).ok).toBe(true);
+      const { backend: priorBackend } = makeStatefulFakeBackend();
+      expect((await runLaunch(contextFor(clock), { draftId: "prior-run" }, { createVenue: () => fakeVenue(priorBackend) })).ok).toBe(true);
+
+      await setUpLockedDraft(clock);
       expect((await publicationConfigure(contextFor(clock), { draftId: "draft-1", publicBaseUrl: base })).ok).toBe(true);
       expect((await publicationRegister(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+      expect(readRunState(workspaceDir, "prior-run")?.runSha256).not.toBe(readRunState(workspaceDir, "draft-1")?.runSha256);
       const { backend: launchBackend } = makeStatefulFakeBackend();
       expect((await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(launchBackend) })).ok).toBe(true);
 
