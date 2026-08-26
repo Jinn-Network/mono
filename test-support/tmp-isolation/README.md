@@ -16,13 +16,39 @@ setupFiles: ["../../test-support/tmp-isolation/isolate-tmp.ts"],
 globalSetup: ["../../test-support/tmp-isolation/global-tmp-root.ts"],
 ```
 
+A suite on a **browser-shaped environment** (`environment: "jsdom"`, and anything else
+that is not `"node"`) needs one line more. It loads its setup files through Vite's web
+transform pipeline, which serves a module outside the Vite root under a `/@fs/` URL and
+refuses the ones `server.fs.allow` does not cover — and since every package here carries
+its own lockfile with no workspace above it, that root is the package directory and this
+seam is always outside it. Without the allowance every test file in the suite dies at
+import on `Cannot find module '/@fs/…/isolate-tmp.ts'`, which reads as a failing suite
+rather than as a wiring mistake:
+
+```ts
+server: {
+  fs: {
+    allow: [
+      fileURLToPath(new URL(".", import.meta.url)),
+      fileURLToPath(new URL("../../", import.meta.url)), // reaches this directory
+    ],
+  },
+},
+```
+
+`packages/indexer/explorer/vitest.config.ts` is the repository's only such suite and
+carries the worked example.
+
 `.github/scripts/vitest-tmp-isolation.test.mjs` runs on every pull request and fails
 if any Vitest config under `packages/` (or the operator's five configs, which use the
 operator's own home-plus-temp seam at `operator/test/_support/`) names an entry that
-does not resolve to its seam, and if either seam file has moved out from under the
-configs that point at it. That is the regression coverage for
+does not resolve to its seam, if a non-Node config names a seam its own environment
+cannot reach, and if either seam file has moved out from under the configs that point at
+it. That is the regression coverage for
 the wiring; `tmp-isolation.test.ts` next to this README is the behavioural coverage
-for the seam itself, and runs under `packages/benchmark-product/core`.
+for the seam itself, and runs under `packages/benchmark-product/core`. Note what the
+wiring gate reads is config text — that a suite still *starts* is proven by the package's
+own CI job running it, not here.
 
 ## Why this is a directory and not a package
 
