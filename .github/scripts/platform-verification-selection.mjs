@@ -43,7 +43,6 @@ export const GLOBAL_SELECTORS = [
 // already guards it in the always-on `platform-architecture-control` job.
 export const IGNORABLE_PREFIXES = [
   '.agents/',
-  '.beads/',
   '.claude/',
   '.codex/',
   '.cursor/',

@@ -22,12 +22,7 @@ node_modules/
 .claude/*
 !.claude/skills/
 
-# Beads / Dolt files (added by bd init)
-.beads
-.beads.pre-helm-*/
-.dolt/
 *.db
-.beads-credential-key
 
 # Per-operator dev helpers (not collaborative)
 operator/start-daemon.sh
