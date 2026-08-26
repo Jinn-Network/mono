@@ -95,7 +95,6 @@ export const DEFAULT_EXCLUSIONS = {
     'docs/press/', // published press releases
     'docs/superpowers/', // dated design specs and implementation plans
     'legacy/', // frozen legacy surface
-    'apps/jinn-agent/', // frozen agent app, out of the re-seal's scope
   ],
 };
 

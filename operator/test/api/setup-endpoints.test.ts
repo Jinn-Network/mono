@@ -818,11 +818,12 @@ describe('POST /v1/setup/drip', () => {
     expect(body.callsRemaining).toBe(4);
 
     const sidecar = JSON.parse(readFileSync(join(earningDir, 'faucet-topup.json'), 'utf-8')) as {
-      byAddress: Record<string, { callsToday: number; batchStartedAt: number }>;
+      byAddress: Record<string, { callsToday: number; batchStartedAt: number; rateLimitedUntil?: number }>;
     };
     expect(sidecar.byAddress[master.toLowerCase()]).toEqual({
       callsToday: 1,
       batchStartedAt: 2_000,
+      rateLimitedUntil: 2_000 + 24 * 60 * 60 * 1000,
     });
   });
 
@@ -947,6 +948,7 @@ describe('POST /v1/setup/drip', () => {
     expect(body.dailyCap).toBe(7);
     expect(body.callsRemaining).toBe(7);
     expect(body.cooldownExpiresAt).toBeNull();
+    expect((body as { rateLimited?: boolean }).rateLimited).toBe(false);
   });
 
   it('GET quota reflects a drained batch after a top-up (issue #560)', async () => {
@@ -1001,6 +1003,46 @@ describe('POST /v1/setup/drip', () => {
     expect(body.dailyCap).toBe(4);
     expect(body.callsRemaining).toBe(4);
     expect(body.cooldownExpiresAt).toBeNull();
+    expect((body as { rateLimited?: boolean }).rateLimited).toBe(false);
+  });
+
+  it('GET quota reports rateLimited and remaining 0 after a CDP 24h address cap', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-quota-cdp-cap-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    const master = '0xBBBB0000000000000000000000000000000000cd';
+    await store.save({ ...state, master_address: master });
+
+    const cooldownMs = 24 * 60 * 60 * 1000;
+    const requestFunding = vi.fn(async () => ({
+      ok: false,
+      rateLimited: true,
+      reason: 'Faucet rate limited (1 claim per 24 hours per address).',
+    }));
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      faucetDailyTopupCap: 10,
+      faucetTopupCooldownMs: cooldownMs,
+      faucetRateLimitBackoffMs: 0,
+      now: () => 12_000,
+    });
+
+    const drip = await app.request('/v1/setup/drip', { method: 'POST' });
+    expect(drip.status).toBe(200);
+    expect(requestFunding).toHaveBeenCalledTimes(1);
+
+    const res = await app.request('/v1/setup/drip/quota');
+    const body = (await res.json()) as {
+      callsRemaining: number;
+      rateLimited?: boolean;
+      cooldownExpiresAt: number | null;
+    };
+    expect(body.rateLimited).toBe(true);
+    expect(body.callsRemaining).toBe(0);
+    expect(body.cooldownExpiresAt).toBe(12_000 + cooldownMs);
   });
 });
 

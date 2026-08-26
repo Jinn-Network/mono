@@ -22,8 +22,12 @@ import { ProfilesError } from "../errors.js";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
   BINARY_ACCEPT_REJECT_PARSER_SEALED,
+  BINARY_COMPLETE_JSON_LABEL_PARSER_IDENTITY,
+  BINARY_COMPLETE_JSON_LABEL_PARSER_SEALED,
   BINARY_CORRECT_WRONG_PARSER_IDENTITY,
   BINARY_CORRECT_WRONG_PARSER_SEALED,
+  BINARY_EVERMEM_JSON_LABEL_PARSER_IDENTITY,
+  BINARY_EVERMEM_JSON_LABEL_PARSER_SEALED,
   BINARY_JSON_VERDICT_PARSER_IDENTITY,
   BINARY_JSON_VERDICT_PARSER_SEALED,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
@@ -31,6 +35,10 @@ import {
   BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY,
   BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
   BINARY_LABEL_IN_PROSE_PARSER_SEALED,
+  BINARY_MEM0_JSON_LABEL_PARSER_IDENTITY,
+  BINARY_MEM0_JSON_LABEL_PARSER_SEALED,
+  BINARY_STRICT_JSON_LABEL_PARSER_IDENTITY,
+  BINARY_STRICT_JSON_LABEL_PARSER_SEALED,
   BINARY_YES_NO_PARSER_IDENTITY,
   BINARY_YES_NO_PARSER_SEALED,
   BinaryJudgmentAnalysisContextSchema,
@@ -732,7 +740,7 @@ describe("binary-judgment parser semantics goldens", () => {
       });
   });
 
-  it("pins all six sealed parser documents (the five contracts plus the umbrella) to exact on-disk bytes", async () => {
+  it("pins every sealed parser document plus the umbrella to exact on-disk bytes", async () => {
     const cases = [
       {
         root: new URL(
@@ -744,6 +752,14 @@ describe("binary-judgment parser semantics goldens", () => {
       },
       {
         root: new URL(
+          "../../profiles/binary-judgment/parsers/binary-complete-json-label/1.0.0/",
+          import.meta.url,
+        ),
+        sealed: BINARY_COMPLETE_JSON_LABEL_PARSER_SEALED,
+        identity: BINARY_COMPLETE_JSON_LABEL_PARSER_IDENTITY,
+      },
+      {
+        root: new URL(
           "../../profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/",
           import.meta.url,
         ),
@@ -752,11 +768,35 @@ describe("binary-judgment parser semantics goldens", () => {
       },
       {
         root: new URL(
+          "../../profiles/binary-judgment/parsers/binary-evermem-json-label/1.0.0/",
+          import.meta.url,
+        ),
+        sealed: BINARY_EVERMEM_JSON_LABEL_PARSER_SEALED,
+        identity: BINARY_EVERMEM_JSON_LABEL_PARSER_IDENTITY,
+      },
+      {
+        root: new URL(
           "../../profiles/binary-judgment/parsers/binary-json-verdict/1.0.0/",
           import.meta.url,
         ),
         sealed: BINARY_JSON_VERDICT_PARSER_SEALED,
         identity: BINARY_JSON_VERDICT_PARSER_IDENTITY,
+      },
+      {
+        root: new URL(
+          "../../profiles/binary-judgment/parsers/binary-mem0-json-label/1.0.0/",
+          import.meta.url,
+        ),
+        sealed: BINARY_MEM0_JSON_LABEL_PARSER_SEALED,
+        identity: BINARY_MEM0_JSON_LABEL_PARSER_IDENTITY,
+      },
+      {
+        root: new URL(
+          "../../profiles/binary-judgment/parsers/binary-strict-json-label/1.0.0/",
+          import.meta.url,
+        ),
+        sealed: BINARY_STRICT_JSON_LABEL_PARSER_SEALED,
+        identity: BINARY_STRICT_JSON_LABEL_PARSER_IDENTITY,
       },
       {
         root: new URL(
@@ -916,9 +956,13 @@ describe("binary-judgment parser semantics goldens", () => {
     expect(ids).toStrictEqual(sorted);
     expect(ids).toStrictEqual([
       "network.jinn.parser.binary-accept-reject",
+      "network.jinn.parser.binary-complete-json-label",
       "network.jinn.parser.binary-correct-wrong",
+      "network.jinn.parser.binary-evermem-json-label",
       "network.jinn.parser.binary-json-verdict",
       "network.jinn.parser.binary-label-in-prose",
+      "network.jinn.parser.binary-mem0-json-label",
+      "network.jinn.parser.binary-strict-json-label",
       "network.jinn.parser.binary-yes-no",
     ]);
   });
@@ -937,7 +981,7 @@ describe("binary-judgment instrument seal against the closed parser registry", (
     response: { ...instrument.response, parser },
   });
 
-  it("seals an instrument naming each of the five registered parser identities", () => {
+  it("seals an instrument naming each registered parser identity", () => {
     for (const identity of BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY) {
       const candidate = withParser(identity);
       expect(BinaryJudgmentInstrumentSchema.safeParse(candidate).success).toBe(true);

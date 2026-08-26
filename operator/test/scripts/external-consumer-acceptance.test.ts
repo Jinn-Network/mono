@@ -58,4 +58,18 @@ describe('external consumer acceptance helpers', () => {
       {},
     )).toBe(commentParser);
   });
+
+  it('writes Yarn consumer dependencies as bare versions, not name@version descriptors', () => {
+    expect(acceptance.yarnConsumerManifest!({
+      sdkSpec: '@jinn-network/sdk@0.1.1-canary.sha.0123456789abcdef0123456789abcdef01234567',
+      clientSpec: '@jinn-network/operator@0.2.1-canary.sha.0123456789abcdef0123456789abcdef01234567',
+    })).toEqual({
+      private: true,
+      packageManager: 'yarn@4.13.0',
+      dependencies: {
+        '@jinn-network/sdk': '0.1.1-canary.sha.0123456789abcdef0123456789abcdef01234567',
+        '@jinn-network/operator': '0.2.1-canary.sha.0123456789abcdef0123456789abcdef01234567',
+      },
+    });
+  });
 });

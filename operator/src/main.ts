@@ -26,6 +26,7 @@ import { randomBytes as cryptoRandomBytes, randomUUID as cryptoRandomUUID } from
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { writeConfigFileAtomic } from './config/atomic-write.js';
 import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
 import { startApiServer, type ApiServer } from './api/server.js';
@@ -875,6 +876,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         markOnboardingComplete: () => {
           (config as { onboardingComplete?: boolean }).onboardingComplete = true;
         },
+      },
+      claimPolicy: {
+        configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+        readConfig: () => config,
+        writeConfig: writeConfigFileAtomic,
       },
       status: {
         earningDir: config.earningDir,

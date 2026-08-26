@@ -349,61 +349,11 @@ updates:
   # omitted from the allowlist above — so they accrued Dependabot security
   # alerts with no version-update PRs to clear them. Added so routine
   # minor+patch bumps (and security updates) are auto-managed like the rest.
-  # NOTE: apps/jinn-agent is deliberately NOT listed — it is a subtree of the
-  # standalone Jinn-Network/jinn-agent repo, which carries its own
-  # .github/dependabot.yml; its updates flow in via subtree sync.
+  # NOTE: the vendored Hermes host (apps/jinn-agent) is gone. Do not add a
+  # Dependabot ecosystem for a deleted tree. Frozen adapter lives in
+  # plugin/frozen; clean-slate adapter lives in plugin/adapter-hermes.
   - package-ecosystem: npm
     directory: "/packages/indexer-enrichment"
-    schedule:
-      interval: weekly
-    groups:
-      minor-and-patch:
-        update-types:
-          - minor
-          - patch
-    ignore:
-      # Framework majors — migrations tracked in #768
-      - dependency-name: "vitest"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "typescript"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "react"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "react-dom"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@types/react"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@types/react-dom"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "vite"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "tailwindcss"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "jsdom"
-        update-types: ["version-update:semver-major"]
-      # @types/node — policy: keep aligned with the Node runtime version
-      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
-      # declines on us; the right place to bump this is when we move to a
-      # newer Node major in CI + tooling.
-      - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
-      # Hardhat ecosystem — tracked in #768 (couple-migration)
-      - dependency-name: "hardhat"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@nomicfoundation/*"
-        update-types: ["version-update:semver-major"]
-      # Library majors with non-trivial API surface — tracked in #768
-      - dependency-name: "@hono/node-server"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "sonner"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "better-sqlite3"
-        update-types: ["version-update:semver-major"]
-
-  - package-ecosystem: npm
-    directory: "/packages/autopilot"
     schedule:
       interval: weekly
     groups:

@@ -108,14 +108,6 @@ export const INDEXER_ENRICHMENT_PACKAGE: PackageSpec = {
   testScript: 'test',
 };
 
-export const AUTOPILOT_PACKAGE: PackageSpec = {
-  root: 'packages/autopilot',
-  srcDir: 'packages/autopilot/src',
-  testDir: 'packages/autopilot/test',
-  typecheckScript: 'typecheck',
-  testScript: 'test',
-};
-
 export const CONTRACTS_PACKAGE: PackageSpec = {
   root: 'contracts',
   srcDir: 'contracts/contracts',
@@ -143,7 +135,6 @@ export const KNOWN_LIVE_EVAL_PACKAGES: readonly PackageSpec[] = [
   LAYER_PACKAGE,
   CLIENT_PACKAGE,
   CONTRACTS_PACKAGE,
-  AUTOPILOT_PACKAGE,
   BROADCAST_BOT_PACKAGE,
 ];
 

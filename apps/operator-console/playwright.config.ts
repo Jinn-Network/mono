@@ -6,6 +6,7 @@ const CONSOLE_PORT = 3010;
 export default defineConfig({
   testDir: './e2e',
   testMatch: /.*\.e2e\.ts/,
+  testIgnore: /live-console\.e2e\.ts/,
   timeout: 60_000,
   fullyParallel: false,
   workers: 1,

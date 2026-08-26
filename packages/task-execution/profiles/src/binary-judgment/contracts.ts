@@ -346,6 +346,188 @@ export const BINARY_CORRECT_WRONG_PARSER_IDENTITY = {
   digest: BINARY_CORRECT_WRONG_PARSER_SEALED.digest,
 } as const;
 
+export const BINARY_COMPLETE_JSON_LABEL_PARSER_ID =
+  "network.jinn.parser.binary-complete-json-label" as const;
+export const BINARY_COMPLETE_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
+
+/** Backboard/revised-family behavior over one complete JSON object. */
+export function buildBinaryCompleteJsonLabelParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_COMPLETE_JSON_LABEL_PARSER_ID,
+      version: BINARY_COMPLETE_JSON_LABEL_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trim: "JSON-whitespace-as-accepted-by-JSON.parse",
+      normalization: "none",
+    },
+    rule: {
+      kind: "complete-json-label",
+      json: {
+        text: "one complete JSON object with no surrounding prose or code fence",
+        root: "object",
+        member: "label",
+        missingMemberValue: "WRONG",
+        memberType: "string",
+        duplicateMember: "last value wins",
+        otherMembers: "ignored",
+      },
+      comparison: "ECMAScript String.toUpperCase without trimming",
+      acceptWhen: "label.toUpperCase() === CORRECT",
+      rejectOtherwise: true,
+    },
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_COMPLETE_JSON_LABEL_PARSER_SEALED = sealDocument(
+  buildBinaryCompleteJsonLabelParserSemantics(),
+);
+export const BINARY_COMPLETE_JSON_LABEL_PARSER_IDENTITY = {
+  id: BINARY_COMPLETE_JSON_LABEL_PARSER_ID,
+  version: BINARY_COMPLETE_JSON_LABEL_PARSER_VERSION,
+  digest: BINARY_COMPLETE_JSON_LABEL_PARSER_SEALED.digest,
+} as const;
+
+export const BINARY_EVERMEM_JSON_LABEL_PARSER_ID =
+  "network.jinn.parser.binary-evermem-json-label" as const;
+export const BINARY_EVERMEM_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
+
+/** EverMemOS-family extraction followed by its truthy, trimmed, upper-cased label rule. */
+export function buildBinaryEvermemJsonLabelParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_EVERMEM_JSON_LABEL_PARSER_ID,
+      version: BINARY_EVERMEM_JSON_LABEL_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      normalization: "none",
+    },
+    rule: {
+      kind: "evermem-json-label",
+      extractionOrder: [
+        "first lowercase-json-or-untyped fenced object containing no backtick",
+        "first flat object text containing a quoted label member",
+        "complete edge-trimmed response",
+      ],
+      json: {
+        root: "object",
+        member: "label",
+        memberType: "truthy string",
+        duplicateMember: "last value wins",
+        otherMembers: "ignored",
+      },
+      comparison: "ECMAScript String.trim then String.toUpperCase",
+      acceptWhen: "label.trim().toUpperCase() === CORRECT",
+      rejectOtherwise: true,
+    },
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_EVERMEM_JSON_LABEL_PARSER_SEALED = sealDocument(
+  buildBinaryEvermemJsonLabelParserSemantics(),
+);
+export const BINARY_EVERMEM_JSON_LABEL_PARSER_IDENTITY = {
+  id: BINARY_EVERMEM_JSON_LABEL_PARSER_ID,
+  version: BINARY_EVERMEM_JSON_LABEL_PARSER_VERSION,
+  digest: BINARY_EVERMEM_JSON_LABEL_PARSER_SEALED.digest,
+} as const;
+
+export const BINARY_MEM0_JSON_LABEL_PARSER_ID =
+  "network.jinn.parser.binary-mem0-json-label" as const;
+export const BINARY_MEM0_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
+
+/** Mem0 extract_json behavior followed by its exact, case-sensitive label comparison. */
+export function buildBinaryMem0JsonLabelParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_MEM0_JSON_LABEL_PARSER_ID,
+      version: BINARY_MEM0_JSON_LABEL_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      normalization: "none",
+    },
+    rule: {
+      kind: "mem0-json-label",
+      extraction: "edge-trim, then first lowercase-json-or-untyped code fence when present; otherwise the complete trimmed response",
+      json: {
+        root: "object",
+        member: "label",
+        memberRequired: true,
+        duplicateMember: "last value wins",
+        otherMembers: "ignored",
+      },
+      comparison: "case-sensitive strict equality without member trimming or coercion",
+      acceptWhen: "label === CORRECT",
+      rejectOtherwise: true,
+    },
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_MEM0_JSON_LABEL_PARSER_SEALED = sealDocument(
+  buildBinaryMem0JsonLabelParserSemantics(),
+);
+export const BINARY_MEM0_JSON_LABEL_PARSER_IDENTITY = {
+  id: BINARY_MEM0_JSON_LABEL_PARSER_ID,
+  version: BINARY_MEM0_JSON_LABEL_PARSER_VERSION,
+  digest: BINARY_MEM0_JSON_LABEL_PARSER_SEALED.digest,
+} as const;
+
+export const BINARY_STRICT_JSON_LABEL_PARSER_ID =
+  "network.jinn.parser.binary-strict-json-label" as const;
+export const BINARY_STRICT_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
+
+/** Project-declared parser for the public strict-dial prompt. */
+export function buildBinaryStrictJsonLabelParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_STRICT_JSON_LABEL_PARSER_ID,
+      version: BINARY_STRICT_JSON_LABEL_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trim: "JSON-whitespace-as-accepted-by-JSON.parse",
+      normalization: "none",
+    },
+    rule: {
+      kind: "strict-json-label",
+      json: {
+        text: "one complete JSON object with no surrounding prose or code fence",
+        root: "object",
+        members: ["label", "reasoning"],
+        memberTypes: { label: "string", reasoning: "string" },
+        duplicateMember: "refused",
+        otherMembers: "refused",
+      },
+      comparison: "case-sensitive strict equality without member trimming",
+      tokens: { ACCEPT: "CORRECT", REJECT: "WRONG" },
+    },
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_STRICT_JSON_LABEL_PARSER_SEALED = sealDocument(
+  buildBinaryStrictJsonLabelParserSemantics(),
+);
+export const BINARY_STRICT_JSON_LABEL_PARSER_IDENTITY = {
+  id: BINARY_STRICT_JSON_LABEL_PARSER_ID,
+  version: BINARY_STRICT_JSON_LABEL_PARSER_VERSION,
+  digest: BINARY_STRICT_JSON_LABEL_PARSER_SEALED.digest,
+} as const;
+
 export const BINARY_JSON_VERDICT_PARSER_ID =
   "network.jinn.parser.binary-json-verdict" as const;
 export const BINARY_JSON_VERDICT_PARSER_VERSION = "1.0.0" as const;
@@ -450,9 +632,13 @@ export const BINARY_LABEL_IN_PROSE_PARSER_IDENTITY = {
  */
 export const BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY = [
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_COMPLETE_JSON_LABEL_PARSER_IDENTITY,
   BINARY_CORRECT_WRONG_PARSER_IDENTITY,
+  BINARY_EVERMEM_JSON_LABEL_PARSER_IDENTITY,
   BINARY_JSON_VERDICT_PARSER_IDENTITY,
   BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
+  BINARY_MEM0_JSON_LABEL_PARSER_IDENTITY,
+  BINARY_STRICT_JSON_LABEL_PARSER_IDENTITY,
   BINARY_YES_NO_PARSER_IDENTITY,
 ] as const;
 export type BinaryJudgmentResponseParserId =
@@ -498,7 +684,7 @@ const REGISTERED_PARSER_IDS = BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY.map(
 ) as [BinaryJudgmentResponseParserId, ...BinaryJudgmentResponseParserId[]];
 
 /**
- * Closed-registry membership (§4.1 rule 3): `id` must be one of the five registered parsers, and
+ * Closed-registry membership (§4.1 rule 3): `id` must be registered, and
  * `version`/`digest` must be exactly that parser's registered pair. An instrument names one
  * registered identity; it never supplies parser configuration.
  */
