@@ -31,6 +31,7 @@ import {
   type BenchmarkRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
+import { sealJson } from "@jinn-network/record-discovery-protocol";
 import { randomUUID } from "node:crypto";
 import {
   launchAndWatch,
@@ -63,7 +64,7 @@ import {
 } from "../run/journal.js";
 import { requireRunState, writeRunState, type PublicationState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
-import { getSealedBytes } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
 import { createRuntimeVenue } from "../runtime/adapter.js";
 import { APEX_SWE_DEV_ADAPTER_ID } from "../runtime/apex-swe-dev/manifest.js";
@@ -306,6 +307,135 @@ async function createRunLaunchCapture(
   });
 }
 
+/**
+ * The prospective source append intentionally precedes the local capture journal write. If the
+ * process stops between those two durable operations, reconstruct the missing local fact from the
+ * source's signed archive before `resume` decides which exact Submission bytes to reuse.
+ */
+async function recoverProspectiveSubmissionCaptures(
+  workspaceDir: string,
+  draftId: string,
+  run: RunRecord,
+): Promise<void> {
+  const runState = requireRunState(workspaceDir, draftId);
+  const publication = runState.publication;
+  if (publication?.mode !== "prospective" || publication.source.publicBaseUrl === undefined) return;
+
+  await withWorkspacePublicationSourceLock(workspaceDir, async () => {
+    const source = createWorkspacePublicationSource(workspaceDir, publication.source.name);
+    if (source.source.agent !== publication.source.agentKeyRef || run.owner !== source.source.agent) {
+      refuse("conflict", `runs.${draftId}.publication.source`, "Run owner and source agent must be the same stable workspace did:key");
+    }
+    await source.writer.recover();
+    const state = await source.writer.readState();
+    if (state === undefined) return;
+
+    const expectedByCell = new Map(expectedCellSet(
+      parseBenchmark(getSealedBytes(workspaceDir, run.benchmark.digest.sha256)),
+      run,
+    ).map((cell) => [cell.cellKey, cell] as const));
+    const existing = new Map<string, string>();
+    for (const entry of readRunJournalEntries(workspaceDir, draftId)) {
+      if (entry.kind !== "submission-captured") continue;
+      const key = `${entry.cellKey}::${entry.dispatch}`;
+      const prior = existing.get(key);
+      if (prior !== undefined && prior !== entry.submissionSha256) {
+        refuse("record-integrity", `runs.${draftId}.${entry.cellKey}.${entry.dispatch}`, "capture journal contains conflicting Submission bytes");
+      }
+      existing.set(key, entry.submissionSha256);
+    }
+
+    for (const [announcementId, announcement] of Object.entries(state.announcements)) {
+      const receipt = announcement.receipt;
+      const record = receipt.record;
+      if (
+        announcement.action !== "available"
+        || record === undefined
+        || record.contentType !== SUBMISSION_MEDIA_TYPE
+      ) continue;
+      const digest = record.digest;
+      if (announcementId !== `submission:${digest}`) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, "prospective Submission announcement identity conflicts with its record digest");
+      }
+      const bytes = await source.recordStore.getExact(digest);
+      if (bytes === undefined) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} is missing from the source record store`);
+      }
+      let submission: { readonly nonce?: unknown };
+      try {
+        submission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as { readonly nonce?: unknown };
+      } catch {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} is not valid UTF-8 JSON`);
+      }
+      if (typeof submission.nonce !== "string") continue;
+      const nonce = /^(.*):([1-9][0-9]*)$/u.exec(submission.nonce);
+      if (nonce === null) continue;
+      const cellKey = nonce[1]!;
+      const dispatch = Number(nonce[2]);
+      const cell = expectedByCell.get(cellKey);
+      if (cell === undefined || !Number.isSafeInteger(dispatch)) continue;
+      const coordinate = `${cellKey}::${dispatch}`;
+      const digestHex = digest.slice("sha256:".length);
+      const prior = existing.get(coordinate);
+      if (prior !== undefined) {
+        if (prior !== digestHex) {
+          refuse("record-integrity", `runs.${draftId}.${cellKey}.${dispatch}`, "prospective source and capture journal name different Submission bytes");
+        }
+        continue;
+      }
+
+      const pageBytes = await source.archiveStore.getExact(receipt.page);
+      if (pageBytes === undefined) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} has no signed archive page`);
+      }
+      let page: { readonly entries?: readonly { readonly entry?: {
+        readonly sequence?: unknown;
+        readonly timestamp?: unknown;
+        readonly announcements?: readonly { readonly announcementId?: unknown; readonly record?: { readonly digest?: unknown } }[];
+      } }[] };
+      try {
+        page = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(pageBytes)) as typeof page;
+      } catch {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} archive page is not valid UTF-8 JSON`);
+      }
+      const signed = page.entries?.find(({ entry }) =>
+        entry?.sequence === receipt.sequence
+        && sealJson(entry).digest === receipt.entryDigest
+        && entry.announcements?.some((row) => row.announcementId === announcementId && row.record?.digest === digest));
+      const timestamp = signed?.entry?.timestamp;
+      if (typeof timestamp !== "string") {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} archive binding is invalid`);
+      }
+
+      const observed = await fetch(publicArchiveUrl(publication.source.publicBaseUrl!, recordPath(digest)));
+      const observedBytes = observed.ok ? new Uint8Array(await observed.arrayBuffer()) : undefined;
+      if (
+        observedBytes === undefined
+        || observedBytes.length !== bytes.length
+        || !observedBytes.every((value, index) => value === bytes[index])
+      ) {
+        refuse("conflict", `runs.${draftId}.publication.source`, `prospective Submission ${digest} is not byte-exactly public`);
+      }
+      const stored = putSealedBytes(workspaceDir, bytes);
+      if (stored !== digestHex) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} failed local CAS reconstruction`);
+      }
+      appendRunJournalEntry(workspaceDir, draftId, {
+        kind: "submission-captured",
+        at: timestamp,
+        cellKey,
+        armId: cell.armId,
+        replicate: cell.replicate,
+        dispatch,
+        submissionSha256: digestHex,
+        publicationSourceSequence: receipt.sequence,
+        publicationEntrySha256: receipt.entryDigest.slice("sha256:".length),
+      });
+      existing.set(coordinate, digestHex);
+    }
+  });
+}
+
 export function runLaunch(
   context: OperationContext,
   input: RunLaunchInput,
@@ -472,6 +602,11 @@ export function runResume(
         );
       }
 
+      await recoverProspectiveSubmissionCaptures(
+        clockedContext.workspaceDir,
+        input.draftId,
+        loaded.runRecord,
+      );
       const entries = readRunJournalEntries(clockedContext.workspaceDir, input.draftId);
       const fold = foldRunJournal(entries);
       const expected = expectedCellSet(loaded.benchRecord, loaded.runRecord);

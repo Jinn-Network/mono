@@ -17,7 +17,7 @@ import { writeCancelMarker } from "../run/cancel-marker.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readRunState, writeRunState } from "../run/state.js";
-import { createWorkspacePublicationHttpHandler } from "../run/publication-source.js";
+import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource } from "../run/publication-source.js";
 import { runJournalPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import type { LocalVenue } from "../venue/venue.js";
@@ -367,6 +367,72 @@ describe("runLaunch — prospective mounted publication", () => {
       expect(requested.length).toBeGreaterThan(submits.length);
       expect(requested.every((path) => path.startsWith("/publication/"))).toBe(true);
       expect(requested.some((path) => path.startsWith("/publication/records/"))).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 30_000);
+
+  test("resume reconstructs a public Submission committed before its local capture journal fact", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+    const server = createServer(async (request, response) => {
+      const externalPath = request.url ?? "/";
+      if (!externalPath.startsWith("/publication/")) { response.writeHead(404).end(); return; }
+      const result = await handler(new Request(`http://127.0.0.1${externalPath.slice("/publication".length)}`, { method: request.method }));
+      response.writeHead(result.status, Object.fromEntries(result.headers));
+      response.end(Buffer.from(await result.arrayBuffer()));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("test server address unavailable");
+      const base = `http://127.0.0.1:${address.port}/publication`;
+      expect((await publicationConfigure(contextFor(clock), { draftId: "draft-1", publicBaseUrl: base })).ok).toBe(true);
+      expect((await publicationRegister(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+      const { backend: launchBackend } = makeStatefulFakeBackend();
+      expect((await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(launchBackend) })).ok).toBe(true);
+
+      const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+      const captured = fullEntries.find(
+        (entry) => entry.kind === "submission-captured" && entry.publicationSourceSequence !== undefined,
+      );
+      if (captured?.kind !== "submission-captured") throw new Error("fixture produced no prospective Submission capture");
+      const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+      const sourceBefore = await source.writer.readState();
+      if (sourceBefore === undefined) throw new Error("fixture produced no public source state");
+      const announcementCount = Object.keys(sourceBefore.announcements).length;
+
+      // The public append and sealed record remain, but every local fact for this coordinate is
+      // absent: the exact crash boundary between source.writer.append and the journal append.
+      overwriteRunJournal("draft-1", fullEntries.filter((entry) => {
+        if (entry.kind === "cell-event") return entry.event.cellKey !== captured.cellKey;
+        if (
+          entry.kind === "submission-captured"
+          || entry.kind === "submission-pinning-evidence"
+          || entry.kind === "submission-accepted"
+          || entry.kind === "observation-accepted"
+          || entry.kind === "delivery"
+          || entry.kind === "evaluation"
+        ) return entry.cellKey !== captured.cellKey;
+        return true;
+      }));
+
+      const { backend: resumeBackend } = makeStatefulFakeBackend();
+      const resumed = await runResume(contextFor(clock), { draftId: "draft-1" }, {
+        createVenue: () => fakeVenue(resumeBackend),
+      });
+      expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
+      const after = readRunJournalEntries(workspaceDir, "draft-1");
+      expect(after.filter(
+        (entry) => entry.kind === "submission-captured" && entry.cellKey === captured.cellKey,
+      )).toEqual([expect.objectContaining({
+        submissionSha256: captured.submissionSha256,
+        publicationSourceSequence: captured.publicationSourceSequence,
+        publicationEntrySha256: captured.publicationEntrySha256,
+      })]);
+      const sourceAfter = await source.writer.readState();
+      expect(Object.keys(sourceAfter?.announcements ?? {})).toHaveLength(announcementCount);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
