@@ -15,7 +15,7 @@ The `with-fallback` classifier also does not call `flattenErrorMessage` from `tx
 **Impact.** Inconsistent fallback behaviour: an RPC transport failure that triggers fleet-level transient handling may not trigger DiscoveryAPI fallback, or vice versa. The risk grows as new error shapes appear in the wild (new node providers, proxy errors, gRPC-mapped HTTP codes).
 
 **Acceptance criteria.**
-- [ ] The spike produces a written finding (a comment in a bd note or a short doc) that answers: (a) what signals are in one classifier but missing from the other; (b) whether `DiscoveryUnavailableError` should be incorporated into `isTransientEthReadError` or remain separate; (c) whether a single shared helper is safe to introduce without breaking either consumer; (d) a recommended next action (consolidate / keep separate with a sync test / accept divergence with documented rationale).
+- [ ] The spike produces a written finding (an issue comment or a short doc) that answers: (a) what signals are in one classifier but missing from the other; (b) whether `DiscoveryUnavailableError` should be incorporated into `isTransientEthReadError` or remain separate; (c) whether a single shared helper is safe to introduce without breaking either consumer; (d) a recommended next action (consolidate / keep separate with a sync test / accept divergence with documented rationale).
 - [ ] No production code is changed — the output is a finding only.
 
 **Files/components.** `operator/src/chain-read-errors.ts` (`isTransientEthReadError`), `operator/src/discovery/with-fallback.ts` (`isNetworkError`), `operator/src/tx-retry.ts` (`flattenErrorMessage`), `operator/test/chain-read-errors.test.ts` (existing coverage baseline).
