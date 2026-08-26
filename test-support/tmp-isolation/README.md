@@ -18,8 +18,9 @@ globalSetup: ["../../test-support/tmp-isolation/global-tmp-root.ts"],
 
 `.github/scripts/vitest-tmp-isolation.test.mjs` runs on every pull request and fails
 if any Vitest config under `packages/` (or the operator's five configs, which use the
-operator's own home-plus-temp seam at `operator/test/_support/`) is missing either
-hook, or points at a path that does not exist. That is the regression coverage for
+operator's own home-plus-temp seam at `operator/test/_support/`) names an entry that
+does not resolve to its seam, and if either seam file has moved out from under the
+configs that point at it. That is the regression coverage for
 the wiring; `tmp-isolation.test.ts` next to this README is the behavioural coverage
 for the seam itself, and runs under `packages/benchmark-product/core`.
 
