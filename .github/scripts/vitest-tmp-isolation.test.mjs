@@ -88,7 +88,12 @@ export function stripComments(source) {
     if (char === "'" || char === '"' || char === '`') {
       const start = index;
       index += 1;
+      // A `'`/`"` string cannot hold an unescaped newline, so ending the span at one bounds any
+      // mis-read to a single line. Without that an odd quote count outside a string — a regex like
+      // `/['"]/u`, since regex literals are not tokenized — would swallow the rest of the file and
+      // hand every later comment back as live source, which is the failure this whole change removes.
       while (index < source.length && source[index] !== char) {
+        if (char !== '`' && source[index] === '\n') break;
         index += source[index] === '\\' ? 2 : 1;
       }
       index += 1;
@@ -96,7 +101,10 @@ export function stripComments(source) {
       continue;
     }
     if (char === '/' && source[index + 1] === '/') {
-      while (index < source.length && source[index] !== '\n') index += 1;
+      const newline = source.indexOf('\n', index);
+      const stop = newline === -1 ? source.length : newline;
+      out += ' '.repeat(stop - index);
+      index = stop;
       continue;
     }
     if (char === '/' && source[index + 1] === '*') {
@@ -278,4 +286,11 @@ test('stripComments leaves comment markers inside strings alone', () => {
   assert.ok(stripped.includes("'https://example.test/a'"));
   assert.ok(stripped.includes("'/* not a comment */'"));
   assert.ok(!stripped.includes('gone'));
+  assert.equal(stripped.length, source.length);
+  assert.equal(stripComments("a: '\\'', b: 2 // x").trimEnd(), "a: '\\'', b: 2");
+  assert.equal(stripComments("a: 'unterminated // x"), "a: 'unterminated // x");
+
+  // A quote the scanner cannot pair off must not leak the next line's comments back as live source.
+  const afterOddQuote = stripComments("const RE = /['\"]/u;\n// setupFiles: ['isolate-tmp.ts']");
+  assert.ok(!afterOddQuote.includes('isolate-tmp'));
 });
