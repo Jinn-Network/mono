@@ -59,6 +59,8 @@ jobs:
         run: node --test .github/scripts/plugin-tree-package-inventory.test.mjs
       - name: Verify source boundaries, the frozen-trio refusal, and the custody canaries
         run: node --test .github/scripts/plugin-tree-source-boundaries.test.mjs
+      - name: Verify the distribution restore shape
+        run: node --test .github/scripts/plugin-tree-ci-workflow.test.mjs
 
   runtime:
     name: Plugin Runtime

@@ -2024,7 +2024,7 @@
       "decisionRecords": 6,
       "discoveredFirstPartySurfaces": 4061,
       "generatedOutputSources": 1430,
-      "generatorSources": 679,
+      "generatorSources": 680,
       "marketplaceControl": 2,
       "requiredGates": 24,
       "staticControl": 7
@@ -2796,6 +2796,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/plugin-tree-ast-custody.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/plugin-tree-ci-workflow.test.mjs"
       },
       {
         "categories": [
