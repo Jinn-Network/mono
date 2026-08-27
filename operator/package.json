@@ -18,7 +18,8 @@
   },
   "bin": {
     "jinn": "./dist/bin/jinn.js",
-    "jinn-stop-hook": "./dist/bin/jinn-stop-hook.js"
+    "jinn-stop-hook": "./dist/bin/jinn-stop-hook.js",
+    "operator": "./dist/bin/jinn.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
