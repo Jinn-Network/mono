@@ -196,9 +196,130 @@ Use **Node 22** where possible (`engines` in `operator/package.json`). CI should
 
 ## CI gates
 
-- Every PR: `yarn typecheck` + `yarn test`.
+- Every PR: `yarn typecheck` + `yarn lint:no-late-mount` + `yarn lint:no-error-leak`
+  + `yarn lint:no-fixed-test-port` + `yarn test`.
 - Nightly / release: all `yarn e2e*` scenarios serially.
-- E2E tests use `allocateAnvilPort()` so parallelism is safe when we add it.
+- The default suite already runs in parallel on CI — three forked workers over
+  ~850 files. See [Worker parallelism and ports](#worker-parallelism-and-ports)
+  for what that shares and the rules that follow from it. `allocateAnvilPort()`
+  is one of the three sanctioned ways to get a port.
+
+## Worker parallelism and ports
+
+`operator/vitest.config.ts` overrides none of `pool`, `isolate`,
+`fileParallelism`, or `maxWorkers`, so vitest 4 resolves them to `forks`,
+`true`, `true`, and `max(availableParallelism() - 1, 1)`. This repository is
+public, so `ubuntu-latest` is a 4-vCPU runner and **CI runs three forked
+workers** over ~850 test files.
+
+**What that isolates.** `forks` plus `isolate: true` gives every test *file* a
+fresh child process, and `test/_support/isolate-home.ts` gives that process a
+fresh `$HOME` and `$TMPDIR`. Module state, globals, `process.env`, and home
+directories therefore cannot leak between files — not by discipline, by
+construction.
+
+**What it does not.** Four things stay shared across workers: the 127.0.0.1 TCP
+port space, filesystem paths outside the isolated home, the repository checkout
+itself, and the machine's CPU and memory. Every flake measured under #1627 came
+from the last two.
+
+### Never hard-code a port in 32768–60999
+
+That band is the Linux `ip_local_port_range` default; the macOS range
+(49152–65535) sits inside it. A sibling worker's `listen(0)` can be handed any
+port in it, so a test that hard-codes one can have it taken mid-run. Three
+sanctioned forms:
+
+| The port is bound by | Use |
+|---|---|
+| a child process (Anvil, Ponder, a spawned daemon) | `await allocateAnvilPort()` from `@test/chain/port-allocator.js` |
+| the test itself | `listen(0, '127.0.0.1')`, then read `server.address().port` — the kernel assigns and holds atomically, so there is no allocate-then-rebind window |
+| nothing — the assertion *is* "nothing is listening here" | a fixed port **below 32768**, with a comment saying why |
+
+`yarn lint:no-fixed-test-port` enforces this. It also fails if
+`operator/vitest.config.ts` acquires `fileParallelism: false`, `maxWorkers: 1`,
+or a `pool:` override — switching parallelism off would make every cross-worker
+collision vanish locally and silently retire the reason these rules exist.
+
+### Beware fixed time and iteration budgets
+
+A `for (let i = 0; i < 200; i++) { await sleep(10) }` poll is a ~2s budget on an
+idle laptop and a coin flip on a runner where three workers share four vCPUs.
+Two rules:
+
+- Bound a wait by **wall clock**, not by iteration count.
+- **Assert on exhaustion.** A loop that falls through silently reports the
+  starvation as whatever the next assertion happens to check, which sends the
+  reader to the wrong subsystem entirely.
+
+### The measurement (#1627, 2026-08-27)
+
+Two instruments. Every past `Typecheck & Test` job is itself a CI-equivalent
+sample, so the CI history was mined: **1176 executed `check` jobs across 70
+days** (2026-06-18 to 2026-08-27; runs where the `changes` gate skipped `check`
+are excluded). Locally, the full suite was run at the CI worker count on a
+12-core macOS host:
+
+```bash
+cd operator
+yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core && yarn build:layer
+SKIP_HL_TESTS=1 ./node_modules/.bin/vitest run --maxWorkers=3
+```
+
+Results:
+
+- **Zero** EADDRINUSE across all 228 retrieved vitest-step failure logs. Zero
+  contact with the real `~/.jinn-client`; every home-related error names an
+  isolated `/tmp/jinn-home-*` path. No cross-file global-state leakage, as the
+  `forks` + `isolate` topology predicts.
+- Failures attributable to cross-worker interference: **70 of 1176 (5.95%)**
+  over the window, but bimodal around the fix for #2641 — **6.83% before**,
+  **2.22% after**. 64 of those 70 were that one already-fixed cause: two tests
+  ran `npm pack --dry-run` in the live checkout, whose prepack swapped
+  `node_modules/@jinn-network` symlinks for seconds and killed whichever
+  concurrent workers were spawning children through the tree. The remediation
+  (`operator/test/_support/pack-probe.ts`, a throwaway-copy pack probe) is in
+  the current tree.
+- The residual class is load-sensitive budgets, not state leakage. Fixed under
+  #1627: `swe-rebench-v2-generator-cooldown.test.ts` (a re-publication gate
+  comparing two ISO millisecond timestamps, in a block that needs
+  `shouldAdvanceTime: true` — so it required two consecutive awaited writes to
+  land in the same millisecond; 1 of 5 local full-suite runs, and 3 of 20
+  single-file runs under load, went red before the fix and 0 of 20 after) and
+  `converged-delivery-legacy-evaluator.test.ts` (the 200x10ms poll above,
+  independently confirmed by a CI run that failed on attempt 1 and passed on
+  attempt 2 of the *same* run — a same-tree flip, which is the only
+  pass/fail evidence that proves a flake rather than a moving base).
+- **No broad serialisation was added**, and none is warranted: nothing measured
+  was cross-worker *state* leakage, so `isolate: true` is doing its job.
+
+Named but not fixed here, both load-sensitive budgets with CI evidence and no
+local reproduction: `test/cli/native-identity.test.ts` (18 real process boots
+against a 60s budget) and `test/_support/chain/anvil.test.ts` /
+`olas-funding.test.ts` (a 15s anvil readiness budget while forking Base mainnet
+over the network).
+
+**Verifying that no test touched the real home.** The in-suite guards —
+`operator/test/config/home-isolation.test.ts`,
+`operator/test/config/tmp-isolation.test.ts`, and
+`.github/scripts/vitest-tmp-isolation.test.mjs` — pin the wiring from three
+angles and no fourth was added. They cannot, however, catch an out-of-band
+write (a `process.chdir`, a `'/tmp/…'` literal, a spawned child whose env
+allowlist drops `TMPDIR`), so the reproduction runs took an external stat
+manifest of `~/.jinn-operator` and `~/.jinn-client` before and after each run.
+Across five runs: no new entries, no mtime or size change, and nothing written
+into the checkout. Exclude `~/.jinn-client/autopilot` from any such manifest —
+a running autopilot writes there concurrently and guarantees a false positive.
+
+### Run `yarn test`, not a bare `vitest run`
+
+`yarn test` is `build:sdk && build:stack && build:plugin && build:core &&
+build:layer && vitest run`. A bare `vitest run` on an unbuilt tree produces
+hundreds of `Failed to resolve entry for package "@jinn-network/core"`-style
+failures — an unbuilt portal `dist/`, not a flake. The same error appears if
+anything rebuilds the portal chain *while* vitest is running, because the
+rebuild relinks `node_modules/@jinn-network` underneath the live workers. Never
+run `yarn typecheck` or `yarn build` concurrently with the suite.
 
 ## Temp directories and `$HOME`
 
