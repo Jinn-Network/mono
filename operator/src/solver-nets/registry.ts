@@ -388,6 +388,13 @@ export interface LoadSolverNetsOptions {
    * partial wiring slice and must not GC remote materializations (#1242).
    */
   gcOrphanedVendorCopies?: boolean;
+  /**
+   * Vendor root the cleanup targets. Defaults to
+   * `defaultSolverPluginVendorRoot()` — the operator's real
+   * `~/.jinn-operator/solver-plugins`. Tests must pass a temp directory so no
+   * test run can resolve, let alone delete inside, the default root.
+   */
+  vendorRoot?: string;
 }
 
 export async function loadSolverNets(
@@ -407,7 +414,7 @@ export async function loadSolverNets(
       }
     }
     gcOrphanedBundledLocalVendorCopies(
-      defaultSolverPluginVendorRoot(),
+      opts.vendorRoot ?? defaultSolverPluginVendorRoot(),
       remoteVendorNamesFromEntries(pluginEntriesForGc),
     );
   }

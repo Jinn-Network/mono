@@ -19,7 +19,7 @@ import {
   parsedLine,
 } from '../cli/commands/solver-plugins-test-helpers.js';
 
-describe('resolveSolverPlugin noVendor', () => {
+describe('resolveSolverPlugin in-place resolution (#1242)', () => {
   it('Test A: resolves a local plugin in place and writes nothing to vendorRoot', async () => {
     const localDir = withTempPlugin();
     const vendorRoot = mkdtempSync(join(tmpdir(), 'no-vendor-'));

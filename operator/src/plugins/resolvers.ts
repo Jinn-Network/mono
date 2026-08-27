@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { digestDirectory } from './digest.js';
 import { loadSolverPluginManifest } from './manifest.js';
