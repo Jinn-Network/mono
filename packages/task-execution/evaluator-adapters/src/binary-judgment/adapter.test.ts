@@ -15,6 +15,7 @@ import {
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
   BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+  BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_YES_NO_PARSER_IDENTITY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
   BINARY_JUDGMENT_EVALUATION_CONTEXT_FORMAT_URI,
@@ -1015,5 +1016,57 @@ describe("binary judgment evaluator through the real evaluation harness", () => 
     });
     expect(run.exitCode).toBe(EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE);
     await expect(readFile(join(run.paths.out, "verdict"))).rejects.toThrow();
+  });
+  /**
+   * Live-run regression (official run, cell 535 of 4,320; attempt
+   * 218889b0-9913-47f8-a0b3-fe09e054909e). The judge answered with prose followed by a fenced
+   * JSON label. The v2 fence grammar correctly refuses prose-before-fence, so under the abstain
+   * policy that must become a COUNTED neutral INVALID. Instead the delivered CompletedEvaluation
+   * was refused by the harness's own verdict-consistency check:
+   *
+   *   evaluation-harness: refused (evaluation-operational-failure): CompletedEvaluation verdict
+   *   is inconsistent: delivered inconclusive verdict has no recomputed inconclusive predicate
+   *   and no declared unscorable class
+   *
+   * and the attempt terminaled failed -> could-not-grade, permanently losing the cell. Every
+   * unparseable response lost its cell on live traffic. No canary caught it: all 54 canary
+   * responses parsed valid, so the INVALID path never reached the harness through the real
+   * adapter delivery.
+   */
+  const LIVE_PROSE_THEN_FENCE =
+    "The generated answer refers to a car-related event in San Francisco, but it does not match "
+    + "the specific activity of attending a car modification workshop mentioned in the gold "
+    + 'answer, making it incorrect. \n\n```json\n{"label": "WRONG"}\n```';
+
+  test.each([
+    ["the live cell-535 prose-then-fence response", LIVE_PROSE_THEN_FENCE],
+    ["bare garbage", "I cannot determine this."],
+    ["a double fence", '```json\n{"label":"WRONG"}\n```\n```json\n{"label":"CORRECT"}\n```'],
+    ["an empty response", ""],
+  ])("delivers a counted INVALID verdict for %s", async (_label, response) => {
+    const run = await runHarnessFixture(makeFixture({
+      truthLabel: "WRONG",
+      response: encoder.encode(response),
+      parser: BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
+      parserInvalidPolicy: "abstain",
+    }));
+    // A refusal here is the defect: the cell is lost instead of abstaining.
+    expect(run.exitCode, "the harness refused the delivery instead of sealing a verdict").toBe(0);
+    expect(run.statement?.predicate.measurements).toContainEqual({
+      name: BINARY_JUDGMENT_MEASUREMENTS.judgeDecision,
+      value: "INVALID",
+    });
+    expect(run.statement?.predicate.measurements).toContainEqual({
+      name: BINARY_JUDGMENT_MEASUREMENTS.parseValid,
+      value: false,
+    });
+    expect(run.statement?.predicate.measurements).toContainEqual({
+      name: BINARY_JUDGMENT_MEASUREMENTS.agreement,
+      value: false,
+    });
+    // The neutral-invalid outcome the abstain policy exists to record. `binary-instrument.ts`'s
+    // admission requires exactly this verdict for an abstained call (it counts a call only when
+    // `verdict === "inconclusive" && policy === "abstain" && !parseValid`).
+    expect(run.statement?.predicate.verdict).toBe("inconclusive");
   });
 });
