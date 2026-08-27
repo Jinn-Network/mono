@@ -351,7 +351,7 @@ jobs:
           ORAS_PATH: oras
         run: yarn test:registry
       - name: Upload component distribution
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: evidence-${{ matrix.component }}-dist
           path: packages/evidence/${{ matrix.component }}/dist

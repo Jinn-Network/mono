@@ -73,7 +73,7 @@ jobs:
         working-directory: packages/policy/identity
         run: yarn test:conformance:reference
       - name: Upload Policy Identity distribution
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: policy-identity-dist
           path: packages/policy/identity/dist
@@ -106,7 +106,7 @@ jobs:
           yarn build
           yarn pack:smoke
       - name: Upload Policy Outcomes distribution
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: policy-outcomes-dist
           path: packages/policy/outcomes/dist

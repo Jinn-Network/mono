@@ -108,7 +108,7 @@ jobs:
         with:
           subject-path: .platform-publication/${{ matrix.release_group }}/publication-receipt.json
       - name: Upload final publication receipt
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: platform-publication-receipt-${{ matrix.release_group }}
           path: .platform-publication/${{ matrix.release_group }}/publication-receipt.json
@@ -272,7 +272,7 @@ jobs:
               --out ".platform-live-host/${group}/live-host-receipt.json"
           done <<< "${groups}"
       - name: Upload live host receipt
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: platform-live-host-receipt
           path: .platform-live-host

@@ -260,7 +260,7 @@ jobs:
             src/runtime/inspect/broker.integration.test.ts \
             src/runtime/inspect/oci.integration.test.ts
       - name: Upload Benchmark Product runtime distributions
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-product-runtime-dists
           # The CLI embeds Next's standalone runtime under `.next`. upload-artifact excludes
