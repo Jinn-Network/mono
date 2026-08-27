@@ -19,6 +19,7 @@ import {
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
   BINARY_JUDGMENT_EVALUATION_CONTEXT_FORMAT_URI,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
+  BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY,
   BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
   BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
   BINARY_JUDGMENT_OBSERVATION_FORMAT_URI,
@@ -449,6 +450,11 @@ async function runHarnessFixture(
       predicate: {
         verdict: string;
         measurements: readonly { name: string; value: unknown }[];
+        evaluationMethod?: {
+          name?: string;
+          mediaType?: string;
+          digest: { sha256: string };
+        };
       };
     }
     : undefined;
@@ -916,6 +922,39 @@ describe("binary judgment evaluator through the real evaluation harness", () => 
       });
     },
   );
+
+  /**
+   * #3050: the sealed verdict's method disclosure must name the parser semantics the run
+   * actually scored under. An abstain-policy run used to disclose the v1 (reject) method bytes,
+   * whose text maps an invalid parse to REJECT — semantics that run does not use.
+   */
+  test.each([
+    {
+      policy: "reject" as const,
+      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      response: "ACCEPT",
+      expected: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest,
+    },
+    {
+      policy: "abstain" as const,
+      parser: BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+      response: '{"label":"CORRECT"}',
+      expected: BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY.digest,
+    },
+  ])("discloses the $policy-policy evaluation method digest", async (scenario) => {
+    const run = await runHarnessFixture(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode(scenario.response),
+      parser: scenario.parser,
+      parserInvalidPolicy: scenario.policy,
+    }));
+    expect(run.exitCode).toBe(0);
+    expect(run.statement?.predicate.evaluationMethod).toEqual({
+      name: "binary-judgment-evaluation-parser-semantics.json",
+      mediaType: "application/json",
+      digest: { sha256: scenario.expected.slice("sha256:".length) },
+    });
+  });
 
   test("seals malformed delivered output as a completed invalid parse", async () => {
     const run = await runHarnessFixture(makeFixture({

@@ -84,7 +84,11 @@ function evaluationParserFor(policy: BinaryJudgmentParserInvalidPolicy) {
     };
 }
 
-function evaluationPolicyFromSpecification(
+/**
+ * The parser-invalid policy an EvaluationSpec actually seals, read off its sealed evaluation
+ * parser identity. `undefined` for any spec this evaluator does not serve.
+ */
+export function evaluationPolicyFromSpecification(
   specification: EvaluationSpec,
 ): BinaryJudgmentParserInvalidPolicy | undefined {
   if (specification.family !== "deterministic-process") return undefined;

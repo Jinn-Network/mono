@@ -16,6 +16,7 @@ import {
   binaryJudgmentEvaluationMethodDescriptor,
   contextBinaryJudgmentMaterialSource,
   createBinaryJudgmentEvaluatorAdapter,
+  evaluationPolicyFromSpecification,
   isBinaryJudgmentEvaluationSpecification,
   validateBinaryJudgmentCompletedEvaluation,
   type BinaryJudgmentMaterialSource,
@@ -105,8 +106,14 @@ export function createBinaryJudgmentEvaluatorRegistration(
       materialSource: options.materialSource ?? contextBinaryJudgmentMaterialSource(),
     }),
     // The deterministic scientific method is generated from the profiles-owned,
-    // digest-sealed parser/comparison oracle and cannot be deployment-overridden.
-    evaluationMethod: binaryJudgmentEvaluationMethodDescriptor(),
+    // digest-sealed parser/comparison oracle and cannot be deployment-overridden. One
+    // registration serves both sealed policies, so the disclosed method is derived per
+    // EvaluationSpec — the same reading the adapter does when it scores — rather than pinned to
+    // the reject default, which used to disclose v1 semantics for an abstain-policy run.
+    evaluationMethod: (specification) =>
+      binaryJudgmentEvaluationMethodDescriptor(
+        evaluationPolicyFromSpecification(specification) ?? "reject",
+      ),
     specificationCompatibility: isBinaryJudgmentEvaluationSpecification,
     evaluatorIdentity: { id: options.evaluatorId },
     signer: { handle: options.signerHandle },
