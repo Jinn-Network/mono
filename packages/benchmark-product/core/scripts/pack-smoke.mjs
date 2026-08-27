@@ -183,6 +183,7 @@ if (jinnDependencies.length !== expectedJinnDependencies.length
 }
 const distFiles = await readdir(${JSON.stringify(join(installedRoot, "dist"))});
 if (distFiles.some((name) => name.includes(".test."))) throw new Error("test output leaked into dist");
+await readFile(${JSON.stringify(join(installedRoot, "dist", "runtime", "inspect", "binary_judge_worker.py"))});
 await readFile(${JSON.stringify(join(installedRoot, "README.md"))});
 console.log("Installed package imports, platform seam, branding, and dependency boundary verified.");
 `,

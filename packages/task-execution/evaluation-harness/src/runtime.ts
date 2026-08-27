@@ -49,6 +49,7 @@ import {
 } from "./adapter.js";
 import {
   type EvaluatorRegistration,
+  resolveEvaluationMethod,
   validateEvaluatorRegistrationSet,
 } from "./registration.js";
 
@@ -937,7 +938,7 @@ export async function runEvaluationHarness(
       verdict: completed.verdict,
       evaluationSpecification,
       evaluationMethod: resourceReference(
-        registration.evaluationMethod,
+        resolveEvaluationMethod(registration, specification),
         "evaluation method",
       ),
       measurements: normalized.measurements,

@@ -62,6 +62,9 @@ test("claim-package/2 rejects top-level and nested ranking conclusions", () => {
   prompted.verification.command = "npx @colophon-claims/verify@0.2.0 <bundle-dir>";
   prompted.verification.compatibleCommand = "npx @colophon-claims/verify@0.2 <bundle-dir>";
   assert.equal(ClaimPackageSchema.safeParse(prompted).success, true);
+  const promptedCurrent = structuredClone(prompted);
+  promptedCurrent.verification.command = "npx @colophon-claims/verify@0.2.1 <bundle-dir>";
+  assert.equal(ClaimPackageSchema.safeParse(promptedCurrent).success, true);
   const promptedWrong = structuredClone(prompted);
   promptedWrong.verification.command = "npx @colophon-claims/verify@0.1.0 <bundle-dir>";
   assert.equal(ClaimPackageSchema.safeParse(promptedWrong).success, false);

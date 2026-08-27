@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 
@@ -134,8 +135,22 @@ function readPackage(directory) {
 }
 
 function packageManifests(directory) {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  // Dot-prefixed entries are never packages - they are editor state, caches,
+  // or transient test fixtures. Skipping them (and tolerating a child that
+  // vanishes between the readdir and the recursive descent) keeps this walk
+  // immune to concurrent suites' temp directories; the boundary suite once
+  // dropped one inside repository-ipfs mid-walk and failed this test with
+  // ENOENT (run 32982011618).
+  let entries;
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+  return entries.flatMap((entry) => {
     if (!entry.isDirectory() || entry.name === 'node_modules') return [];
+    if (entry.name.startsWith('.')) return [];
     const child = join(directory, entry.name);
     const packageJson = join(child, 'package.json');
     return [
@@ -229,4 +244,24 @@ test('testing entrypoints declare Vitest as an exact optional peer', () => {
       vitest: { optional: true },
     });
   }
+});
+
+test('the manifest walk ignores dot-prefixed directories and tolerates vanished entries', () => {
+  // Regression for the boundary-fixture race (run 32982011618): a transient
+  // dot-directory inside the walked tree must neither contribute manifests
+  // nor crash the walk when it disappears mid-scan.
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-evidence-inventory-walk-'));
+  try {
+    const real = join(fixture, 'real-package');
+    const transient = join(fixture, '.transient-fixture');
+    mkdirSync(real);
+    mkdirSync(transient);
+    writeFileSync(join(real, 'package.json'), '{"name":"real"}\n');
+    writeFileSync(join(transient, 'package.json'), '{"name":"never-counted"}\n');
+    assert.deepEqual(
+      packageManifests(fixture).map((manifest) => relative(fixture, manifest)),
+      [join('real-package', 'package.json')],
+    );
+    assert.deepEqual(packageManifests(join(fixture, 'gone')), []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
