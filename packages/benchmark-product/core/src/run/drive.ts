@@ -227,6 +227,25 @@ export interface DriveDeps {
   readonly maxInfrastructureRetries?: 0 | 1;
   /** The live, unfrozen clock — journal timestamps reflect when each event actually happened. */
   readonly liveClock: () => string;
+  /**
+   * Resume's byte-exact replay seam for the EVALUATION leg, symmetric with the solve leg's
+   * `acceptedSubmissions.acceptedSubmissionBytes` (`../operations/run-launch.js`'s `resumeRun`
+   * call). Returns the exact Submission bytes the backend already accepted for this leg, or
+   * `undefined` when this leg was never submitted.
+   *
+   * Without it, a process killed between backend acceptance and the leg's verdict resumes by
+   * sealing FRESH bytes: `dispatchEvaluation`'s deadline is `liveClock() + cellWindowMs`, so the
+   * replay carries a later deadline under the SAME idempotency key. The backend rehydrates its
+   * accepted-submission scope from the durable state root and correctly refuses ("already has
+   * different exact bytes in this requester/backend scope"), which terminals the leg
+   * could-not-grade — permanently, since that completes the evalIndex.
+   */
+  readonly acceptedEvaluationSubmissionBytes?: (
+    cellKey: string,
+    dispatch: number,
+    evalIndex: number,
+    evaluationAttempt: number,
+  ) => Uint8Array | undefined;
   /** Live diagnostic stream (BP-13, CLI `launch`/`resume`) — one short line per journaled
    * cell-event or evaluation terminal, emitted right after the journal write it describes.
    * Optional and purely additive: absent, nothing streams, and every journal write and return
@@ -480,15 +499,23 @@ async function dispatchEvaluation(
     ? `eval:${deps.runSha256}:e${evalIndex}:${cellKey}:${dispatch}`
     : `eval:${deps.runSha256}:e${evalIndex}:r${evaluationAttempt}:${cellKey}:${dispatch}`;
   const submissionUri = deterministicUuidUri(idempotencyKey);
-  const deadline = new Date(Date.parse(deps.liveClock()) + deps.cellWindowMs).toISOString();
-  const evalSubmissionBytes = sealSubmission({
+  // Resume replays the bytes the backend already accepted for this leg. Sealing fresh ones would
+  // stamp a new `deadline` under this same idempotency key, which the backend refuses — see
+  // `DriveDeps.acceptedEvaluationSubmissionBytes`.
+  const replayed = deps.acceptedEvaluationSubmissionBytes?.(
+    cellKey,
+    dispatch,
+    evalIndex,
+    evaluationAttempt,
+  );
+  const evalSubmissionBytes = replayed ?? sealSubmission({
     protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: submissionUri,
     task: { digest: { sha256: prepared.taskSha256 } },
     requester: deps.owner,
     nonce: idempotencyKey,
     idempotencyKey,
-    deadline,
+    deadline: new Date(Date.parse(deps.liveClock()) + deps.cellWindowMs).toISOString(),
     requirements: { harness: EVALUATION_HARNESS_PIN, [EVALUATOR_REQUIREMENT_KEY]: evaluator.id },
   });
 
