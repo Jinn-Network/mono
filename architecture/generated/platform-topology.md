@@ -1723,25 +1723,8 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 
 ## Architecture-control ownership
 
-Task 6's validator reports 4931 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
-The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
-
-| Category | Controlled paths |
-| --- | ---: |
-| authorityDocuments | 32 |
-| boundaryPolicies | 25 |
-| catalogManifests | 96 |
-| catalogPublicSurfaces | 1383 |
-| catalogSchema | 2 |
-| conformancePackedTargets | 62 |
-| conformanceSources | 31 |
-| decisionRecords | 6 |
-| discoveredFirstPartySurfaces | 4079 |
-| generatedOutputSources | 1445 |
-| generatorSources | 680 |
-| marketplaceControl | 2 |
-| requiredGates | 24 |
-| staticControl | 7 |
+Task 6's validator enforces that every architecture-controlled path resolves to exactly these effective owners: `@oaksprout` `@ritsukai`. A path that does not reds `platform-architecture-control`.
+The exhaustive path list and its per-category counts are a file census, not architecture: they move whenever any file is added, renamed, or deleted in scope, which made independent branches mutually inconsistent under merge (#3076). They are no longer committed. Run `node .github/scripts/architecture-control.mjs` for the full report, or read the coverage artifact that `platform-architecture-control` uploads on every run.
 
 ## Transitional and deprecated entries
 
