@@ -88,6 +88,8 @@ export interface DeploymentReadinessInputs {
   claudePath?: string;
   hermesPath?: string;
   hermesProvider?: string;
+  /** `config.hermesBaseUrl` — Hermes pointed at a local provider endpoint. */
+  hermesBaseUrl?: string;
   codexPath?: string;
 }
 
@@ -391,6 +393,7 @@ export async function runDeploymentReadinessChecks(
         ...(inputs.claudePath !== undefined ? { claudePath: inputs.claudePath } : {}),
         ...(inputs.hermesPath !== undefined ? { hermesPath: inputs.hermesPath } : {}),
         ...(inputs.hermesProvider !== undefined ? { hermesProvider: inputs.hermesProvider } : {}),
+        ...(inputs.hermesBaseUrl !== undefined ? { hermesBaseUrl: inputs.hermesBaseUrl } : {}),
         ...(inputs.codexPath !== undefined ? { codexPath: inputs.codexPath } : {}),
       },
       validityDeps,

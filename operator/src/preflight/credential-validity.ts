@@ -47,9 +47,10 @@ export interface RuntimeCredentialFact {
   runtime: CredentialRuntime;
   validity: CredentialValidity;
   /**
-   * Why an `error` verdict happened, when we know: `timed out`, or the spawn
-   * errno (`ENOENT`, `EACCES`, `ETIMEDOUT`). Diagnostic only, never secret
-   * material — it names the tool that failed, not the credential.
+   * Why this verdict happened, when we know: `timed out`, the spawn errno
+   * (`ENOENT`, `EACCES`, `ETIMEDOUT`), or why the probe was not a credential
+   * question at all (`local hermes provider`). Diagnostic only, never secret
+   * material — it names the tool or mode, not the credential.
    */
   note?: string;
 }
@@ -70,6 +71,12 @@ export interface CheckCredentialsValidInput {
   claudePath?: string;
   hermesPath?: string;
   hermesProvider?: string;
+  /**
+   * `config.hermesBaseUrl` — set when Hermes is pointed at a local
+   * OpenAI-compatible endpoint. The harness bypasses the OpenRouter
+   * auth/credit gates for this mode, and so does this check.
+   */
+  hermesBaseUrl?: string;
   codexPath?: string;
 }
 
@@ -89,6 +96,8 @@ export const DEFAULT_CREDENTIAL_VALIDITY_TIMEOUT_MS = 10_000;
 
 const CLAUDE_ENV_KEYS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'] as const;
 const HERMES_ENV_KEYS = ['OPENROUTER_API_KEY'] as const;
+/** The one provider `HERMES_ENV_KEYS` says anything about. */
+const HERMES_OPENROUTER_PROVIDER = 'openrouter';
 const RUNTIME_ORDER: readonly CredentialRuntime[] = ['claude', 'hermes', 'codex'];
 
 const REMEDY: Record<CredentialRuntime, string> = {
@@ -219,7 +228,18 @@ async function runProbe(
       return { validity: envPresent(input.env, CLAUDE_ENV_KEYS) ? 'invalid' : 'absent' };
     }
     case 'hermes': {
-      const provider = input.hermesProvider?.trim() || 'openrouter';
+      // Local-provider mode: `hermesBaseUrl` points Hermes at a loopback
+      // OpenAI-compatible endpoint, and the harness
+      // (`hermes-agent/harness.ts`) deliberately bypasses the
+      // OpenRouter-specific auth/credit gates for it. Probing `hermes auth
+      // list` here would ask a provider this deployment never uses, and a
+      // pooled-credential miss would read as a rejected credential — which is
+      // boot-fatal for a required runtime in a hosted deployment. Skip the
+      // probe and stay advisory.
+      if ((input.hermesBaseUrl ?? '').trim().length > 0) {
+        return { validity: 'absent', note: 'local hermes provider' };
+      }
+      const provider = input.hermesProvider?.trim() || HERMES_OPENROUTER_PROVIDER;
       const config: HermesDoctorConfig = {};
       if (input.hermesPath !== undefined) config.hermesPath = input.hermesPath;
       const probe = await deps.probeHermesAuthStatus(provider, config);
@@ -241,6 +261,14 @@ async function runProbe(
         return { validity: 'error', note: 'hermes CLI probe failed' };
       }
       if (probe.authed) return { validity: 'valid' };
+      // `HERMES_ENV_KEYS` is OpenRouter's key and nothing else. It is only
+      // evidence that a credential was supplied-and-rejected when OpenRouter
+      // is the provider that was actually probed; for any other provider a
+      // pooled-credential miss is `absent` (advisory), not a rejection by a
+      // key belonging to someone else. This is also what keeps the hermes
+      // remedy honest — it names OPENROUTER_API_KEY, and can now only be
+      // emitted when OpenRouter really is the provider in play.
+      if (provider !== HERMES_OPENROUTER_PROVIDER) return { validity: 'absent' };
       return { validity: envPresent(input.env, HERMES_ENV_KEYS) ? 'invalid' : 'absent' };
     }
     case 'codex': {

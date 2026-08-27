@@ -263,6 +263,59 @@ describe('checkCredentialsValid', () => {
     expect(JSON.stringify(result)).not.toContain('or-secret');
   });
 
+  it('REGRESSION: hermes in local-provider mode never gates on OpenRouter auth', async () => {
+    // `hermesBaseUrl` points Hermes at a loopback OpenAI-compatible endpoint,
+    // and the harness deliberately bypasses the OpenRouter auth/credit gates
+    // for it (`hermes-agent/harness.ts`). OpenRouter has rejected nothing —
+    // it is not the provider in use — so `authed: false` here is not a
+    // credential verdict. Classifying it `invalid` is boot-fatal for a
+    // required runtime in a hosted deployment, and the operator console goes
+    // down with the daemon that serves it. `credentials_resolvable` actively
+    // steers container operators to set OPENROUTER_API_KEY, so the key being
+    // present is the expected shape of a healthy local-provider deployment.
+    const hermes = vi.fn(async () => hermesProbe({ authed: false, exitCode: 0, raw: '' }));
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['hermes'],
+        env: { OPENROUTER_API_KEY: 'or-secret' },
+        authContext: AUTH_CTX,
+        hermesBaseUrl: 'http://127.0.0.1:11434/v1',
+      },
+      validityDeps({ probeHermesAuthStatus: hermes }),
+    );
+    expect(hermes).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([
+      { runtime: 'hermes', validity: 'absent', note: 'local hermes provider' },
+    ]);
+    expect(result.remedy).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain('or-secret');
+  });
+
+  it('REGRESSION: a non-OpenRouter hermes provider is not judged by OPENROUTER_API_KEY', async () => {
+    // `hermesProvider` is first-class (#1243) and is what `runProbe` actually
+    // probes. Judging that probe's answer against the OpenRouter env key
+    // reads a provider with no pooled credential as `invalid` purely because
+    // an unrelated key is set — and emits a remedy naming the one thing that
+    // is not the problem.
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['hermes'],
+        env: { OPENROUTER_API_KEY: 'or-secret' },
+        authContext: AUTH_CTX,
+        hermesProvider: 'anthropic',
+      },
+      validityDeps({
+        probeHermesAuthStatus: async (provider) =>
+          hermesProbe({ provider, authed: false, exitCode: 0, raw: '' }),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([{ runtime: 'hermes', validity: 'absent' }]);
+    expect(result.remedy).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain('or-secret');
+  });
+
   it('does not treat a Hermes credential as valid Claude authentication', async () => {
     const hermes = vi.fn(async () => hermesProbe());
     const result = await checkCredentialsValid(

@@ -423,6 +423,7 @@ Examples:
           claudePath: config.claudePath,
           ...(config.hermesPath !== undefined ? { hermesPath: config.hermesPath } : {}),
           ...(config.hermesProvider !== undefined ? { hermesProvider: config.hermesProvider } : {}),
+          ...(config.hermesBaseUrl !== undefined ? { hermesBaseUrl: config.hermesBaseUrl } : {}),
           ...(config.codexPath !== undefined ? { codexPath: config.codexPath } : {}),
         },
         {
