@@ -38,6 +38,7 @@ import {
   INSPECT_BINARY_JUDGE_LAUNCHER_VERSION,
 } from "./binary-judge-manifest.js";
 import { inspectOciRunnerPath, inspectOciRunnerSha256 } from "./oci.js";
+import { inheritedTempEnv } from "../child-temp-env.js";
 
 export const INSPECT_BINARY_JUDGE_CONFIG_FILENAME = "inspect-run.json" as const;
 export const INSPECT_BINARY_JUDGE_INSTRUMENT_FILENAME = "judge-instrument.json" as const;
@@ -349,6 +350,7 @@ export function makeInspectBinaryJudgeLauncher(options: {
         ],
         cwd: paths.work,
         env: {
+          ...inheritedTempEnv(),
           LANG: "C.UTF-8",
           ...(options.hostConnectionDescriptor === undefined
             ? {}

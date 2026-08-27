@@ -59,6 +59,8 @@ jobs:
         run: node --test .github/scripts/plugin-tree-package-inventory.test.mjs
       - name: Verify source boundaries, the frozen-trio refusal, and the custody canaries
         run: node --test .github/scripts/plugin-tree-source-boundaries.test.mjs
+      - name: Verify the distribution restore shape
+        run: node --test .github/scripts/plugin-tree-ci-workflow.test.mjs
 
   runtime:
     name: Plugin Runtime
@@ -155,14 +157,21 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
-      - name: Restore all package distributions
+      # Restore by name, straight into the destination, the way the per-job
+      # restores in evidence-ci.yml do. A `pattern:` restore nests each artifact
+      # under `path/<artifact>/` only while two or more artifacts match;
+      # download-artifact v5 made a lone match extract directly into `path/`
+      # instead, so the pattern form silently changes shape with the artifact
+      # count. `runtime` is this workflow's only uploader, so it always matched
+      # alone. Restoring by name has no such dependency. Note the precedent is
+      # partial: evidence-ci.yml's own aggregate `verify` job still uses the
+      # pattern form, and it holds only because that workflow has many
+      # uploaders. Add one named step per package when C4-C7 land further
+      # `plugin-*-dist` uploads.
+      - name: Restore Plugin Runtime distribution
         uses: actions/download-artifact@v8
         with:
-          pattern: plugin-*-dist
-          path: .plugin-tree-dist
-      - name: Place package distributions
-        run: |
-          mkdir -p plugin/runtime/dist
-          cp -R .plugin-tree-dist/plugin-runtime-dist/. plugin/runtime/dist/
+          name: plugin-runtime-dist
+          path: plugin/runtime/dist
       - name: Compile packed public entrypoint consumers
         run: node .github/scripts/plugin-tree-packed-types.test.mjs

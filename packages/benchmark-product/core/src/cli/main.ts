@@ -111,6 +111,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --draft <draftId> --items <items.jsonl> --sources <sources.jsonl>
                    --admissions <admissions.jsonl>
                    [--name <name>] [--description <text>] [--version <ver>]
+                   [--parser-invalid-policy reject|abstain]
   human-review packet create --workspace <dir> --principal <id> --draft <draftId>
                    --file <packet-request.json>
   human-review response sign --workspace <dir> --principal <id> --draft <draftId>
@@ -153,9 +154,9 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   publication accounting --workspace <dir> --principal <id> --draft <draftId>
   publication report     --workspace <dir> --principal <id> --draft <draftId>
   launch           --workspace <dir> --principal <id> --draft <draftId>
-                   [--ack-provider-network-costs]
+                   [--concurrency <1-32>] [--ack-provider-network-costs]
   resume           --workspace <dir> --principal <id> --draft <draftId>
-                   [--ack-provider-network-costs]
+                   [--concurrency <1-32>] [--ack-provider-network-costs]
   cancel           --workspace <dir> --principal <id> --draft <draftId>
   status           --workspace <dir> --principal <id> --draft <draftId>
   collect          --workspace <dir> --principal <id> --draft <draftId>
@@ -221,7 +222,7 @@ const IMPORT_SWEBENCH_FLAGS = [
 ] as const;
 const IMPORT_ITEM_BANK_FLAGS = [
   "workspace", "principal", "json", "profile", "draft", "items", "sources", "admissions",
-  "name", "description", "version",
+  "name", "description", "version", "parser-invalid-policy",
 ] as const;
 const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
@@ -253,8 +254,8 @@ const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "
 const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
-const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
-const RESUME_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
+const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
+const RESUME_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const CANCEL_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const COLLECT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -392,6 +393,14 @@ function parseItemsFlag(raw: string): number {
   return value;
 }
 
+function parseConcurrencyFlag(raw: string): number {
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 32) {
+    refuse("invalid-invocation", "--concurrency", "--concurrency must be an integer between 1 and 32");
+  }
+  return value;
+}
+
 function handleInit(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
   assertKnownFlags(args, INIT_FLAGS);
   const opContext = buildOperationContext(args, context);
@@ -503,6 +512,18 @@ function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: b
   const name = optional(args, "name");
   const description = optional(args, "description");
   const version = optional(args, "version");
+  const parserInvalidPolicy = optional(args, "parser-invalid-policy");
+  if (
+    parserInvalidPolicy !== undefined
+    && parserInvalidPolicy !== "reject"
+    && parserInvalidPolicy !== "abstain"
+  ) {
+    refuse(
+      "invalid-invocation",
+      "--parser-invalid-policy",
+      "--parser-invalid-policy must be reject or abstain",
+    );
+  }
   const input: ImportBinaryItemBankInput = {
     profile,
     draftId: required(args, "draft"),
@@ -512,6 +533,7 @@ function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: b
     ...(name === undefined ? {} : { name }),
     ...(description === undefined ? {} : { description }),
     ...(version === undefined ? {} : { version }),
+    ...(parserInvalidPolicy === undefined ? {} : { parserInvalidPolicy }),
   };
   const operation = importBinaryItemBank(opContext, input);
   return renderResult(
@@ -1114,12 +1136,17 @@ async function handleLaunch(args: ParsedArgs, context: CliContext, jsonMode: boo
   assertKnownFlags(args, LAUNCH_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
+  const concurrency = optional(args, "concurrency");
+  const maxConcurrentCells = concurrency === undefined ? undefined : parseConcurrencyFlag(concurrency);
   const acknowledged = requireProviderNetworkCostAcknowledgement(
     args, context, opContext.workspaceDir, draftId, jsonMode,
   );
 
   const result = withProviderAcknowledgement(
-    await runLaunch(opContext, { draftId }, launchDeps(context, jsonMode)),
+    await runLaunch(opContext, {
+      draftId,
+      ...(maxConcurrentCells === undefined ? {} : { maxConcurrentCells }),
+    }, launchDeps(context, jsonMode)),
     acknowledged,
   );
   return renderResult(result, jsonMode, (value) => `launched draft ${value.draft.draftId}: run complete\n`);
@@ -1129,12 +1156,17 @@ async function handleResume(args: ParsedArgs, context: CliContext, jsonMode: boo
   assertKnownFlags(args, RESUME_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
+  const concurrency = optional(args, "concurrency");
+  const maxConcurrentCells = concurrency === undefined ? undefined : parseConcurrencyFlag(concurrency);
   const acknowledged = requireProviderNetworkCostAcknowledgement(
     args, context, opContext.workspaceDir, draftId, jsonMode,
   );
 
   const result = withProviderAcknowledgement(
-    await runResume(opContext, { draftId }, launchDeps(context, jsonMode)),
+    await runResume(opContext, {
+      draftId,
+      ...(maxConcurrentCells === undefined ? {} : { maxConcurrentCells }),
+    }, launchDeps(context, jsonMode)),
     acknowledged,
   );
   return renderResult(

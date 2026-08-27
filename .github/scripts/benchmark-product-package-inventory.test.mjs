@@ -24,7 +24,7 @@ const PRODUCT_PACKAGES = [
 const PACKAGE_VERSIONS = new Map([
   ['@colophon-claims/core', '0.1.0'],
   ['@colophon-claims/cli', '0.1.0'],
-  ['@colophon-claims/verify', '0.2.0'],
+  ['@colophon-claims/verify', '0.2.1'],
   ['@colophon-claims/web', '0.1.0'],
 ]);
 

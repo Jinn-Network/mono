@@ -71,6 +71,7 @@ import {
   BINARY_JUDGMENT_CONTEXT_KEY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_NAME,
   BINARY_JUDGMENT_PARSER,
+  BINARY_JUDGMENT_PARSER_V2,
   contextResolutionSnapshotSource,
   createBinaryJudgmentEvaluatorRegistration,
   createPredictionEvaluatorRegistration,
@@ -166,6 +167,17 @@ import {
  * Homed in `./provisioner.ts` to avoid a module cycle; this is its public re-export. */
 export { EVALUATOR_REQUIREMENT_KEY } from "./provisioner.js";
 
+/**
+ * Both sealed binary-judgment evaluation-parser identities dispatch to the one binary-judgment
+ * evaluator: v1 is the reject-policy seal, v2 the abstain-policy seal. The registration's
+ * compatibility predicate and `evaluatorAdaptersParserAllowlist()` already admit both, so a
+ * v1-only selection here refuses an abstain-policy run that every other layer accepts.
+ */
+const BINARY_JUDGMENT_PARSER_KEYS: ReadonlySet<string> = new Set([
+  parserAllowlistKey(BINARY_JUDGMENT_PARSER),
+  parserAllowlistKey(BINARY_JUDGMENT_PARSER_V2),
+]);
+
 export interface LocalVenueOptions {
   readonly workspaceDir: string;
   /** Workspace containing the immutable runtime selection and its private host binding. This
@@ -182,6 +194,9 @@ export interface LocalVenueOptions {
   /** How many venue evaluator identities to mint (integer >= 1, default 1). See
    * `LocalVenue.evaluators` for the honesty posture of what N identities do and do not prove. */
   readonly evaluatorCount?: number;
+  /** Host capacity for distinct active attempts. Product launch sets this to the requested
+   * benchmark-cell concurrency; omission preserves the backend's historical default. */
+  readonly maxConcurrentAttempts?: number;
   /** Product-owned binding for the real SWE-rebench OCI grader. Images are always addressed by
    * digest and pre-staged before evaluation dispatch; the child may only inspect that local
    * digest and runs with `--pull never`. If the image disappears after pre-stage, the child fails
@@ -701,6 +716,14 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   if (!Number.isSafeInteger(evaluatorCount) || evaluatorCount < 1) {
     refuse("validation", "evaluatorCount", "evaluatorCount must be an integer >= 1");
   }
+  if (
+    options.maxConcurrentAttempts !== undefined
+    && (!Number.isSafeInteger(options.maxConcurrentAttempts)
+      || options.maxConcurrentAttempts < 1
+      || options.maxConcurrentAttempts > 32)
+  ) {
+    refuse("validation", "maxConcurrentAttempts", "maxConcurrentAttempts must be an integer between 1 and 32");
+  }
   const sweRebenchGrader = {
     runtime: options.sweRebenchGrader?.runtime ?? "docker",
     ...(options.sweRebenchGrader?.dockerPath === undefined
@@ -1215,6 +1238,9 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
 
   const backend = makeLocalTaskExecutionBackend({
     stateRoot: join(workspaceDir, "venue", "backend-state"),
+    ...(options.maxConcurrentAttempts === undefined
+      ? {}
+      : { maxConcurrentAttempts: options.maxConcurrentAttempts }),
     source: "urn:jinn:benchmark-product:local-venue",
     executor: "urn:jinn:benchmark-product:local-venue:executor",
     profileStore,
@@ -1310,7 +1336,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
                 : "SWE-bench Verified official suite refuses the swe-rebench evaluator",
           )
           : "swe-rebench"
-        : parserKey === parserAllowlistKey(BINARY_JUDGMENT_PARSER)
+        : BINARY_JUDGMENT_PARSER_KEYS.has(parserKey)
           ? "binary-judgment"
           : inspectVerifier !== undefined && parserKey === inspectVerifier.parserAllowlistKey
             ? "inspect-log-verifier"

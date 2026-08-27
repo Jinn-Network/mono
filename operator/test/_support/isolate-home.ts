@@ -44,9 +44,10 @@
 // is a no-op (`force: true` on a missing path), which is why keeping the partial backstop is free.
 //
 // The sweep repairs permissions before giving up, and stands down under a keep-artifact flag — see
-// `sweep-tree.ts`. Both behaviours are carried by the two package-level copies of this seam
-// (`packages/task-execution/evaluator-adapters` and `packages/benchmark-product/core`,
-// `src/test-support/isolate-tmp.ts`), so all three sweeps behave identically.
+// `sweep-tree.ts`. The same two behaviours are carried by the shared package-side seam in
+// `test-support/tmp-isolation/`, which every Vitest suite under `packages/` wires, so both sweeps
+// behave identically. That seam isolates `$TMPDIR` only; this one isolates `$HOME` as well, which
+// is why the operator keeps its own.
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
