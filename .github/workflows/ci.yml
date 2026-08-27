@@ -196,6 +196,15 @@ jobs:
       # embeds the full request URL) reaches an unauthenticated response
       # unmasked. See spec §14.2 item 2, issue #2402.
       - run: yarn lint:no-error-leak
+      # No-fixed-test-port lint: blocks a hard-coded (or randomly guessed)
+      # 127.0.0.1 port inside the OS ephemeral range 32768-60999 in a test
+      # file, and blocks pinning suite parallelism in vitest.config.ts. This
+      # runner is 4 vCPU, so `yarn test` below forks 3 workers that share one
+      # kernel-global port space — a sibling's listen(0) can take a fixed port
+      # between the moment a test picks it and the moment it binds, producing
+      # an EADDRINUSE that only ever reproduces under parallel CI load. See
+      # issue #1627.
+      - run: yarn lint:no-fixed-test-port
       # SKIP_HL_TESTS gates test/venues/hyperliquid/client.test.ts, which hits
       # the live Hyperliquid testnet. Without it, transient 429/503/ECONNREFUSED
       # from that endpoint red-gate unrelated PRs (it flaked 4 PRs on 2026-06-03).

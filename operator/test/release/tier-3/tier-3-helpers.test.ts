@@ -27,21 +27,53 @@ describe('tierOpNames', () => {
   });
 });
 
+/**
+ * Bind 127.0.0.1 on a KERNEL-ASSIGNED port and hold it until `close()`.
+ *
+ * `listen(0)` assigns and holds atomically, so — unlike a hard-coded port, or
+ * an allocate-then-rebind helper — there is no window in which a sibling
+ * vitest worker can take the port out from under this test. Vitest runs ~850
+ * files across 3 forked workers on CI and they share one kernel-global
+ * 127.0.0.1 port space. Issue #1627.
+ *
+ * Kept local to this file: two call sites, one file.
+ */
+async function listenOnFreePort(): Promise<{ port: number; close: () => Promise<void> }> {
+  const net = await import('node:net');
+  const srv = net.createServer();
+  const port = await new Promise<number>((resolve, reject) => {
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address();
+      if (!addr || typeof addr === 'string') {
+        srv.close();
+        reject(new Error('could not resolve the kernel-assigned port'));
+        return;
+      }
+      resolve(addr.port);
+    });
+  });
+  return { port, close: () => new Promise<void>((resolve) => srv.close(() => resolve())) };
+}
+
 describe('isDailyDriverRunning', () => {
   it('returns false when nothing is on the daily-driver ports', async () => {
-    const running = await isDailyDriverRunning({ ports: [60001, 60002] });
+    // This assertion IS "nothing is listening", so the test cannot bind the
+    // ports itself — they have to be fixed. 9331/9332 are below 32768, and so
+    // below both the Linux ephemeral range (32768–60999) and the macOS one
+    // (49152–65535): no sibling worker's `listen(0)` can ever be handed them,
+    // and nothing in this repo binds them. Issue #1627.
+    const running = await isDailyDriverRunning({ ports: [9331, 9332] });
     expect(running).toBe(false);
   });
 
   it('returns true when something is on a daily-driver port', async () => {
-    const net = await import('node:net');
-    const srv = net.createServer();
-    await new Promise<void>((resolve) => srv.listen(60003, resolve));
+    const srv = await listenOnFreePort();
     try {
-      const running = await isDailyDriverRunning({ ports: [60003] });
+      const running = await isDailyDriverRunning({ ports: [srv.port] });
       expect(running).toBe(true);
     } finally {
-      await new Promise<void>((resolve) => srv.close(() => resolve()));
+      await srv.close();
     }
   });
 });
@@ -82,19 +114,17 @@ describe('waitForHarnessReady', () => {
 
 describe('setupTier3Scenario', () => {
   it('refuses to run when daily driver is up and mode is autonomous', async () => {
-    const net = await import('node:net');
-    const srv = net.createServer();
-    await new Promise<void>((resolve) => srv.listen(60004, resolve));
+    const srv = await listenOnFreePort();
     try {
       await expect(
         setupTier3Scenario({
           scenarioId: 'T3.X-test',
           mode: 'autonomous',
-          dailyDriverPorts: [60004],
+          dailyDriverPorts: [srv.port],
         }),
       ).rejects.toThrow(/daily driver/i);
     } finally {
-      await new Promise<void>((resolve) => srv.close(() => resolve()));
+      await srv.close();
     }
   });
 

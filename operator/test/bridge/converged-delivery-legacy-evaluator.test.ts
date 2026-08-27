@@ -215,15 +215,32 @@ async function produceBridgedDelivery(): Promise<Uint8Array> {
   });
   if (!ack.accepted) throw new Error(`submit rejected: ${ack.error.message}`);
 
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  // Wall-clock deadline, not a fixed iteration count. The old `attempt < 200`
+  // budget was only ~2.3s of polling, which a contended CI runner (3 forked
+  // vitest workers on 4 vCPUs) starves past -- and on exhaustion the loop fell
+  // through SILENTLY, so a starved poll surfaced as "expected exactly one
+  // delivery, got 0" and pointed the reader at the bridge instead of at the
+  // runner. Issue #1627.
+  const deadline = Date.now() + 15_000;
+  let lastState: string | undefined;
+  let terminal = false;
+  while (Date.now() < deadline) {
     const snapshot = await instance.observe(ack.submission);
+    lastState = snapshot.descriptor.derived.state;
     if (snapshot.descriptor.derived.terminal) {
-      if (snapshot.descriptor.derived.state !== 'delivered') {
-        throw new Error(`attempt did not deliver: ${snapshot.descriptor.derived.state}`);
+      if (lastState !== 'delivered') {
+        throw new Error(`attempt did not deliver: ${lastState}`);
       }
+      terminal = true;
       break;
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  if (!terminal) {
+    throw new Error(
+      `attempt never reached a terminal state within 15000ms (last observed state: ${lastState ?? 'none'}). ` +
+        'This is a starved poll on a contended runner, not a lost delivery -- see issue #1627.',
+    );
   }
 
   const refs = await instance.deliveries(attemptUri);

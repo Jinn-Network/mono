@@ -549,8 +549,24 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
       evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
       publishedAt: '2026-05-22T00:00:00.000Z',
     });
-    await writeVettedPoolArtifactPublication({ stateDir, ref, artifact });
+    // Seed the validated pool FIRST, then publish with an explicit `updatedAt`
+    // strictly after it. The gate under test is
+    // `scorable.updatedAt > existing.updatedAt` (swe-rebench-v2.ts), and both
+    // sides are ISO strings at millisecond precision. This describe's
+    // `beforeEach` uses `shouldAdvanceTime: true` (required — see the comment
+    // there), so `Date.now()` tracks real elapsed wall-clock time even under
+    // fake timers: relying on `writeVettedPoolArtifactPublication`'s default
+    // `new Date().toISOString()` and the store's own `new Date().toISOString()`
+    // landing in the SAME millisecond is a CPU-contention flake under parallel
+    // vitest workers (issue #1627). The explicit timestamp is load-bearing —
+    // it mirrors the `future` constant `bumpValidatedPoolMtime()` already uses.
     await seedValidatedPoolWithTwoEntries();
+    await writeVettedPoolArtifactPublication({
+      stateDir,
+      ref,
+      artifact,
+      updatedAt: '2026-05-22T01:00:00.000Z',
+    });
 
     const gen = makeTestGenerator({
       stateDir,

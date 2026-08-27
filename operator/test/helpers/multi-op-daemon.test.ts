@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { spawnMultiOpDaemons, type MultiOpHandle } from './multi-op-daemon';
+import { allocateAnvilPort } from '@test/chain/port-allocator.js';
 
 /**
  * Source of a tiny dummy node script that satisfies the multi-op helper's
@@ -61,11 +62,19 @@ describe('spawnMultiOpDaemons', () => {
   let dummyBinPath: string;
   let opAHome: string;
   let opBHome: string;
+  // Kernel-allocated, not hard-coded: these ports are bound for real by
+  // spawned daemons, and vitest runs ~850 files across 3 forked workers that
+  // share one 127.0.0.1 port space. Allocated in `beforeAll` because the same
+  // values go into the seeded config files AND the `ops:` argument. Issue #1627.
+  let opAPort: number;
+  let opBPort: number;
 
   beforeAll(async () => {
     tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'multi-op-helper-'));
     dummyBinPath = path.join(tmpRoot, 'dummy-daemon.cjs');
     await fs.writeFile(dummyBinPath, DUMMY_DAEMON_SOURCE);
+    opAPort = await allocateAnvilPort();
+    opBPort = await allocateAnvilPort();
     opAHome = path.join(tmpRoot, 'op-a');
     opBHome = path.join(tmpRoot, 'op-b');
     await fs.mkdir(path.join(opAHome, '.jinn-client'), { recursive: true });
@@ -78,8 +87,8 @@ describe('spawnMultiOpDaemons', () => {
       rpcUrl: 'https://base-sepolia.example/dummy',
       pollIntervalMs: 5000,
     });
-    await fs.writeFile(path.join(opAHome, '.jinn-client', 'config.json'), minimalCfg(7732));
-    await fs.writeFile(path.join(opBHome, '.jinn-client', 'config.json'), minimalCfg(7733));
+    await fs.writeFile(path.join(opAHome, '.jinn-client', 'config.json'), minimalCfg(opAPort));
+    await fs.writeFile(path.join(opBHome, '.jinn-client', 'config.json'), minimalCfg(opBPort));
   });
 
   afterAll(async () => {
@@ -91,17 +100,21 @@ describe('spawnMultiOpDaemons', () => {
     try {
       handle = await spawnMultiOpDaemons({
         ops: [
-          { name: 'op-a', home: opAHome, apiPort: 7732 },
-          { name: 'op-b', home: opBHome, apiPort: 7733 },
+          { name: 'op-a', home: opAHome, apiPort: opAPort },
+          { name: 'op-b', home: opBHome, apiPort: opBPort },
         ],
         readyTimeoutMs: 30000,
         jinnBinPath: dummyBinPath,
       });
       expect(Object.keys(handle.daemons).sort()).toEqual(['op-a', 'op-b']);
+      // The "distinct ports" half of this test's name, now actually asserted
+      // rather than left implicit in two different literals.
+      expect(opAPort).not.toBe(opBPort);
       // handshakeUrl may be present only if the daemon emits it; bootstrap-incomplete daemons may not.
-      // The contract: each daemon has a pid and an apiPort.
-      expect(handle.daemons['op-a'].apiPort).toBe(7732);
-      expect(handle.daemons['op-b'].apiPort).toBe(7733);
+      // The contract: each daemon has a pid and an apiPort — the helper propagates
+      // each op's requested port onto its handle.
+      expect(handle.daemons['op-a'].apiPort).toBe(opAPort);
+      expect(handle.daemons['op-b'].apiPort).toBe(opBPort);
       expect(handle.daemons['op-a'].pid).toBeGreaterThan(0);
       expect(handle.daemons['op-b'].pid).toBeGreaterThan(0);
     } finally {
@@ -111,7 +124,7 @@ describe('spawnMultiOpDaemons', () => {
 
   it('teardown is idempotent', async () => {
     const handle = await spawnMultiOpDaemons({
-      ops: [{ name: 'op-a', home: opAHome, apiPort: 7734 }],
+      ops: [{ name: 'op-a', home: opAHome, apiPort: await allocateAnvilPort() }],
       readyTimeoutMs: 30000,
       jinnBinPath: dummyBinPath,
     });
@@ -146,13 +159,8 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
     await fs.rm(tmpRoot, { recursive: true, force: true });
   });
 
-  /** Allocate a port likely to be free. Random in the ephemeral range. */
-  function pickPort(): number {
-    return 40000 + Math.floor(Math.random() * 20000);
-  }
-
   it('streams stdout + stderr to the per-daemon log file for the full lifetime', async () => {
-    const apiPort = pickPort();
+    const apiPort = await allocateAnvilPort();
     const logDir = path.join(tmpRoot, 'logs');
     const handle = await spawnMultiOpDaemons({
       ops: [{ name: 'op-a', home: opAHome, apiPort }],
@@ -197,7 +205,7 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
   }, 30000);
 
   it('does not write a log file when logDir is omitted (back-compat)', async () => {
-    const apiPort = pickPort();
+    const apiPort = await allocateAnvilPort();
     const handle = await spawnMultiOpDaemons({
       ops: [{ name: 'op-a', home: opAHome, apiPort }],
       readyTimeoutMs: 10000,
@@ -213,7 +221,7 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
   }, 30000);
 
   it('keeps the fatal daemon envelope in the readiness error after handshake output', async () => {
-    const apiPort = pickPort();
+    const apiPort = await allocateAnvilPort();
     const fatalBinPath = path.join(tmpRoot, 'fatal-after-handshake.cjs');
     await fs.writeFile(fatalBinPath, HANDSHAKE_THEN_FATAL_SOURCE);
 
