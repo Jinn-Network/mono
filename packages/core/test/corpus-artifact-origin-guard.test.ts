@@ -509,6 +509,34 @@ describe('a hostile response cannot kill the process (#1901)', () => {
     }
   });
 
+  it.each([
+    ['600', 'HTTP/1.1 600 Nope\r\nContent-Length: 2\r\n\r\nhi'],
+    ['999', 'HTTP/1.1 999 Nope\r\nContent-Length: 2\r\n\r\nhi'],
+  ])('rejects an out-of-range HTTP status %s instead of throwing', async (_label, raw) => {
+    // Node's parser accepts these; the Response constructor throws on them.
+    const { server, port } = await rawServer(raw);
+    try {
+      await expect(pinnedFetch(new URL(`http://origin.example.invalid:${port}/x`), {
+        pinnedAddresses: [{ address: '127.0.0.1', family: 4 }],
+      })).rejects.toThrow(/out-of-range HTTP status/u);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('refuses an empty pin list rather than silently resolving by DNS', async () => {
+    // `undefined` means no pin; `[]` means "pinned, nothing allowed" and must
+    // never degrade into an unrestricted lookup.
+    await expect(pinnedFetch(new URL('http://example.com/x'), { pinnedAddresses: [] }))
+      .rejects.toThrow(/must not be empty/u);
+  });
+
+  it('refuses a pin whose address does not match its declared family', async () => {
+    await expect(pinnedFetch(new URL('http://example.com/x'), {
+      pinnedAddresses: [{ address: '127.0.0.1', family: 6 }],
+    })).rejects.toThrow(/not a numeric IPv6 address/u);
+  });
+
   it('surfaces a 205 origin as an ordinary failed acquisition, not a crash', async () => {
     const { server, port } = await rawServer(
       'HTTP/1.1 205 Reset Content\r\nContent-Length: 5\r\n\r\nhello');

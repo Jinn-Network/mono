@@ -21,6 +21,7 @@
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { Readable } from 'node:stream';
+import { isIPv4, isIPv6 } from 'node:net';
 import type { LookupAddress } from 'node:dns';
 
 /** Statuses the `Response` constructor refuses to pair with a body. */
@@ -56,6 +57,22 @@ export const pinnedFetch: PinnedFetch = (url, init = {}) =>
       reject(new Error('aborted'));
       return;
     }
+    // `undefined` means "no pin requested"; an empty list means "pin requested,
+    // nothing permitted". Letting the latter fall through to ordinary DNS would
+    // turn an empty allowlist into no restriction at all — the wrong default
+    // for a security primitive, and invisible at the call site.
+    if (init.pinnedAddresses !== undefined && init.pinnedAddresses.length === 0) {
+      reject(new Error('pinnedAddresses must not be empty; omit it to use ordinary DNS'));
+      return;
+    }
+    for (const entry of init.pinnedAddresses ?? []) {
+      const matches = entry.family === 4 ? isIPv4(entry.address) : isIPv6(entry.address);
+      if (!matches) {
+        reject(new Error(
+          `pinned address ${entry.address} is not a numeric IPv${entry.family} address`));
+        return;
+      }
+    }
 
     const send = url.protocol === 'https:' ? httpsRequest : httpRequest;
     const pinned = init.pinnedAddresses;
@@ -67,7 +84,7 @@ export const pinnedFetch: PinnedFetch = (url, init = {}) =>
       // true, at the cost of a handshake per artifact fetch.
       ...(pinned === undefined ? {} : { agent: false as const }),
       // Redirects are never followed here; the caller revalidates each hop.
-      ...(pinned === undefined || pinned.length === 0 ? {} : {
+      ...(pinned === undefined ? {} : {
         // Node calls `lookup` with `{ all: true }` from some connect paths
         // and expects the array shape back there; answering the wrong shape
         // throws "Invalid IP address: undefined".
@@ -96,8 +113,17 @@ export const pinnedFetch: PinnedFetch = (url, init = {}) =>
           if (value === undefined) continue;
           headers.set(name, Array.isArray(value) ? value.join(', ') : value);
         }
+        // Node's parser accepts any status up to 999, but `Response` throws
+        // outside 200-599. Check it explicitly rather than leaning on the
+        // catch below, so a hostile `HTTP/1.1 999 Nope` reads as a bad
+        // response instead of an internal error.
         const status = incoming.statusCode ?? 502;
-        const bodyless = NULL_BODY_STATUSES.has(status) || status < 200;
+        if (status < 200 || status > 599) {
+          incoming.resume();
+          reject(new Error(`origin returned an out-of-range HTTP status ${status}`));
+          return;
+        }
+        const bodyless = NULL_BODY_STATUSES.has(status);
         if (bodyless) incoming.resume();
         resolve(new Response(
           bodyless ? null : (Readable.toWeb(incoming) as ReadableStream<Uint8Array>),
