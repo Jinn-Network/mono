@@ -55,6 +55,7 @@ import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid, manifestDigestForCidOrDigest } from './digest.js';
 import type { Store } from '../../store/store.js';
 import { emitStructured } from '../../events/emitter.js';
+import { sanitizeErrorText } from '../../rpc/transport.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
 import { signTaskV1 } from '../../tasks/signing.js';
@@ -802,7 +803,7 @@ export class MechAdapter implements ExecutionAdapter {
         details: {
           kind: claimOptions.kind,
           source: 'mech.claimDelivery',
-          error: message,
+          error: sanitizeErrorText(err),
         },
       });
       return 'retry';

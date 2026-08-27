@@ -22,6 +22,8 @@ const PIN_VERSION = `0.1.0-canary.sha.${PIN_SHA}`;
 const PRODUCT_SHA = '2f249073718111afd810127ff7bbbc19b206dc93';
 const V2_PIN_SHA = 'e00b2fc47fc5635b007eb349fb1e41aa81bb3c50';
 const V2_PIN_VERSION = `0.1.0-canary.sha.${V2_PIN_SHA}`;
+const V21_PIN_SHA = '7a138d2c104d09243e306952d0ce77caa64e4707';
+const V21_PIN_VERSION = `0.1.0-canary.sha.${V21_PIN_SHA}`;
 
 function verifyManifest() {
   return JSON.parse(readFileSync(join(repoRoot, 'packages/benchmark-product/verify/package.json'), 'utf8'));
@@ -48,35 +50,39 @@ test('the first-cut pin names one exact stack-canary receipt, not a dist-tag', (
   assert.equal(FIRST_CUT_PLATFORM_PIN_PATH, 'packages/benchmark-product/first-cut-platform-pin.json');
 });
 
-test('the verifier 0.2 exception records one attested e00 closure without changing the historical receipt', () => {
+test('the verifier 0.2 patch release selects its attested parser-capable closure without changing the historical receipt', () => {
   const manifest = verifyManifest();
   const pin = loadProductReleasePlatformPin(repoRoot, manifest);
-  assert.equal(pin.decision, 'DR-2026-08-22-a');
+  assert.equal(pin.decision, 'operator-authorization-2026-08-26');
   assert.equal(pin.product.packageName, '@colophon-claims/verify');
-  assert.equal(pin.product.version, '0.2.0');
-  assert.equal(pin.platformSourceSha, V2_PIN_SHA);
-  assert.equal(pin.platformVersion, V2_PIN_VERSION);
-  assert.equal(pin.stackPublishRunUrl, 'https://github.com/Jinn-Network/mono/actions/runs/32544891098/attempts/2');
+  assert.equal(pin.product.version, '0.2.1');
+  assert.equal(pin.platformSourceSha, V21_PIN_SHA);
+  assert.equal(pin.platformVersion, V21_PIN_VERSION);
+  assert.equal(pin.stackPublishRunUrl, 'https://github.com/Jinn-Network/mono/actions/runs/32976208098');
   assert.equal(PRODUCT_RELEASE_PLATFORM_PINS_PATH, 'packages/benchmark-product/product-release-platform-pins.json');
   assert.equal(pin.platformPackages.length, 15);
   for (const pkg of pin.platformPackages) {
-    assert.equal(pkg.version, V2_PIN_VERSION, pkg.name);
-    assert.equal(pkg.gitHead, V2_PIN_SHA, pkg.name);
+    assert.equal(pkg.version, V21_PIN_VERSION, pkg.name);
+    assert.equal(pkg.gitHead, V21_PIN_SHA, pkg.name);
     assert.match(pkg.integrity, /^sha512-/u, pkg.name);
     assert.match(pkg.provenanceUrl, /^https:\/\/registry\.npmjs\.org\/-\/npm\/v1\/attestations\/%40jinn-network%2F/u, pkg.name);
   }
+  const historical = loadProductReleasePlatformPin(repoRoot, { ...manifest, version: '0.2.0' });
+  assert.equal(historical.decision, 'DR-2026-08-22-a');
+  assert.equal(historical.platformSourceSha, V2_PIN_SHA);
+  assert.equal(historical.platformVersion, V2_PIN_VERSION);
   assert.equal(loadFirstCutPlatformPin(repoRoot).platformVersion, PIN_VERSION);
 });
 
 test('the verifier 0.2 exception cannot become an implicit product or version exception', () => {
   const manifest = verifyManifest();
   assert.throws(
-    () => loadProductReleasePlatformPin(repoRoot, { ...manifest, version: '0.2.1' }),
-    /only @colophon-claims\/verify@0\.2\.0/u,
+    () => loadProductReleasePlatformPin(repoRoot, { ...manifest, version: '0.2.2' }),
+    /no immutable platform receipt/u,
   );
   assert.throws(
     () => loadProductReleasePlatformPin(repoRoot, { ...manifest, name: '@colophon-claims/core' }),
-    /only @colophon-claims\/verify@0\.2\.0/u,
+    /registered @colophon-claims\/verify 0\.2 patch release/u,
   );
 });
 
@@ -98,13 +104,13 @@ test('the one-time receipt rejects hostile coherent rewrites and malformed regis
         row.provenanceUrl = `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(row.name)}@${copy.platformVersion}`;
       }
     }), manifest),
-    /only @colophon-claims\/verify@0\.2\.0|immutable DR-2026-08-22-a/u,
+    /registered @colophon-claims\/verify 0\.2 patch release|immutable verifier 0\.2\.1/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPin(mutate((copy) => {
       copy.platformPackages[0].integrity = 'sha512-not-a-registry-integrity';
     }), manifest),
-    /immutable DR-2026-08-22-a/u,
+    /immutable verifier 0\.2\.1/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPin(mutate((copy) => {
@@ -123,13 +129,18 @@ test('the one-time receipt rejects hostile coherent rewrites and malformed regis
 test('the receipt collection refuses added or duplicate rows and root-key drift', () => {
   const manifest = verifyManifest();
   const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  const receipts = JSON.parse(readFileSync(join(repoRoot, PRODUCT_RELEASE_PLATFORM_PINS_PATH), 'utf8')).receipts;
   assert.throws(
-    () => validateProductReleasePlatformPins({ schemaVersion: 1, receipts: [pin, structuredClone(pin)] }, manifest),
-    /exactly one immutable verifier 0\.2 receipt/u,
+    () => validateProductReleasePlatformPins({ schemaVersion: 1, receipts: [...receipts, structuredClone(pin)] }, manifest),
+    /exact ordered immutable verifier 0\.2 receipts/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPins({ receipts: [pin], schemaVersion: 1 }, manifest),
-    /exactly one immutable verifier 0\.2 receipt/u,
+    /exact ordered immutable verifier 0\.2 receipts/u,
+  );
+  assert.throws(
+    () => validateProductReleasePlatformPins({ schemaVersion: 1, receipts: [...receipts].reverse() }, manifest),
+    /exact ordered immutable verifier 0\.2 receipts/u,
   );
   const duplicate = structuredClone(pin);
   duplicate.platformPackages[1] = structuredClone(duplicate.platformPackages[0]);
@@ -143,11 +154,11 @@ test('publish transform keeps the Colophon product version and pins every Jinn r
   const pin = loadProductReleasePlatformPin(repoRoot, verifyManifest());
   const patched = transformColophonManifestForPublish(verifyManifest(), pin);
   assert.equal(patched.name, '@colophon-claims/verify');
-  assert.equal(patched.version, '0.2.0');
+  assert.equal(patched.version, '0.2.1');
   const jinnDeps = Object.entries(patched.dependencies).filter(([name]) => name.startsWith('@jinn-network/'));
   assert.ok(jinnDeps.length >= 8);
   for (const [name, version] of jinnDeps) {
-    assert.equal(version, V2_PIN_VERSION, name);
+    assert.equal(version, V21_PIN_VERSION, name);
   }
   assert.equal(patched.dependencies.zod, '4.4.3');
   assert.equal(patched.dependencies['@fontsource-variable/newsreader'], '5.3.0');

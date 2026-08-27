@@ -156,6 +156,28 @@ describe("scripted --json sequence (AC5)", () => {
   });
 });
 
+describe("launch and resume concurrency flag", () => {
+  test.each([
+    ["launch", "0"],
+    ["launch", "33"],
+    ["resume", "not-a-number"],
+  ])("%s refuses invalid --concurrency %s before running", async (verb, concurrency) => {
+    const result = await runCli([
+      verb,
+      "--workspace", workspaceDir,
+      "--principal", "sponsor-1",
+      "--draft", "draft-1",
+      "--concurrency", concurrency,
+      "--json",
+    ], contextFor(workspaceDir));
+    expect(result.exitCode).toBe(2);
+    expect(parseJson<never>(result.stdout)).toMatchObject({
+      ok: false,
+      error: { code: "invalid-invocation" },
+    });
+  });
+});
+
 describe("unknown verb", () => {
   test("--json: exit 2, envelope {ok:false, error:{code:'invalid-invocation'}}", async () => {
     const result = await runCli(["frobnicate", "--json"], contextFor(workspaceDir));
