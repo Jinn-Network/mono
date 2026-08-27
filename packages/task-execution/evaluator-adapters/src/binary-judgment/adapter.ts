@@ -154,6 +154,12 @@ export function binaryJudgmentEvaluationSpecVerdictRule(
   };
   if (parserInvalidPolicy !== "abstain") return agreementThreshold;
   return {
+    // Clause ORDER is load-bearing. `evaluateVerdictRule`'s `all` evaluates clauses in order and
+    // short-circuits: a false clause returns `fail` before a later `inconclusiveWhen` can fire,
+    // and `agreement` is false whenever `parseValid` is false — so a threshold-first ordering
+    // would score every unparseable response `fail` and silently restore the cell-535 loss.
+    // Guard first, threshold second. The prediction evaluator's guard-second order is not a
+    // counter-example: its leading clause is independent of its guard's condition.
     all: [
       {
         class: BINARY_JUDGMENT_UNPARSEABLE_RESPONSE_CLASS,

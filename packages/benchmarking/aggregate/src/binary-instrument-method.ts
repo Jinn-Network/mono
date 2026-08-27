@@ -1299,6 +1299,10 @@ function resolveTaskBinding(
     // unparseable response and the harness refuses the evaluator's `inconclusive` delivery
     // outright — the shape this oracle already expects at `verdict === "inconclusive"` for
     // `judgeDecision === "INVALID"` could never have been produced. Reject is unchanged.
+    // Clause ORDER is load-bearing: `all` short-circuits, a false clause returns `fail` before a
+    // later `inconclusiveWhen` can fire, and `agreement` is false whenever `parseValid` is false
+    // — guard at [0], threshold at [1], the same order the positional `all[0]`/`all[1]` reads
+    // where this spec is validated above enforce.
     verdictRule: parserInvalidPolicy === "abstain"
       ? {
         all: [
