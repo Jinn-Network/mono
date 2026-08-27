@@ -817,19 +817,24 @@ export function runResume(
               // Re-fold fresh: catches gaps left by THIS resume's own new deliveries as well as
               // any carried over from before it, without re-driving a solve dispatch for either.
               const freshFold = foldRunJournal(readRunJournalEntries(clockedContext.workspaceDir, input.draftId));
-              const gaps = (cancelRequested(clockedContext.workspaceDir, input.draftId)
+              // Never filtered (issue #3081): `../operations/run-collect.js` decides whether the
+              // run is terminal-accounted from this SAME unfiltered set, so dropping a gap here
+              // deadlocks the run — resume reports nothing to do while collect refuses until
+              // closeAt. A gap whose `deliverySha256` is missing is a cell killed between its
+              // `delivered` cell-event journal write and its `delivery` journal write; its
+              // Delivery is still durable in the attempt the cell-event named, and
+              // `driveEvaluationCatchUp` heals it from there.
+              const gaps = cancelRequested(clockedContext.workspaceDir, input.draftId)
                 ? []
-                : evaluationGaps(freshFold, minVerdicts, maxInfrastructureRetries)).filter(
-                (gap): gap is typeof gap & { cell: typeof gap.cell & { deliverySha256: string } } =>
-                  gap.cell.deliverySha256 !== undefined,
-              );
+                : evaluationGaps(freshFold, minVerdicts, maxInfrastructureRetries);
               if (gaps.length > 0) {
                 await driveEvaluationCatchUp(
                   driveDeps,
                   gaps.map((gap) => ({
                     cellKey: gap.cell.cellKey,
                     lastDispatch: gap.cell.lastDispatch,
-                    deliverySha256: gap.cell.deliverySha256,
+                    ...(gap.cell.deliverySha256 !== undefined ? { deliverySha256: gap.cell.deliverySha256 } : {}),
+                    ...(gap.cell.attempt !== undefined ? { attempt: gap.cell.attempt } : {}),
                     ...(gap.cell.deliveryOutputs !== undefined ? { deliveryOutputs: gap.cell.deliveryOutputs } : {}),
                     missingEvalIndexes: gap.missingEvalIndexes,
                     nextEvaluationAttempts: gap.nextEvaluationAttempts,
