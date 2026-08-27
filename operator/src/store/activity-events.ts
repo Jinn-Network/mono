@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { SEVEN_DAY_MS } from '../spend/ai-units.js';
+import { sanitizePersistedText } from '../rpc/transport.js';
 
 export interface ActivityEventInput {
   ts: string | null;
@@ -71,7 +72,7 @@ function mapRow(r: ActivityEventDbRow): ActivityEventRow {
     txHash: r.tx_hash,
     solverType: r.solver_type,
     outcome: r.outcome,
-    detail: r.detail,
+    detail: sanitizePersistedText(r.detail),
     credentialId: r.credential_id,
     costUsdMicros: r.cost_usd_micros,
     model: r.model,
@@ -149,7 +150,7 @@ export class ActivityEventsStore {
       txHash: event.txHash ?? null,
       solverType: event.solverType ?? null,
       outcome: event.outcome ?? null,
-      detail: event.detail ?? null,
+      detail: sanitizePersistedText(event.detail ?? null),
       credentialId: event.credentialId ?? null,
       costUsdMicros: event.costUsdMicros ?? null,
       model: event.model ?? null,

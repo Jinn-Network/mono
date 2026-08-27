@@ -33,6 +33,8 @@ import {
   isBinaryJudgmentEvaluationSpecification,
 } from "@jinn-network/task-execution-evaluator-adapters";
 import {
+  BINARY_JUDGMENT_EVALUATION_PARSER_SEALED,
+  BINARY_JUDGMENT_EVALUATION_PARSER_V2_SEALED,
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
   BINARY_JUDGMENT_OBSERVATION_MEDIA_TYPE,
   BINARY_JUDGMENT_PROFILE_DIGEST,
@@ -169,10 +171,26 @@ function parseTaskBytes(bytes: Uint8Array, digest: string): TaskSpecification {
   return parsed.data as TaskSpecification;
 }
 
+/**
+ * The parser-invalid policy this sealed EvaluationSpec commits to, read from the one place that
+ * carries it: the grader's digest, which is the umbrella evaluation-parser semantics document.
+ * v1 semantics map parser-invalid output to a substantive REJECT; v2 semantics make it neutral.
+ */
+function evaluationSpecParserInvalidPolicy(
+  spec: ReturnType<typeof parseEvaluationSpec>,
+): "reject" | "abstain" | undefined {
+  const graderSha256 = object(object(spec.grader)?.["digest"])?.["sha256"];
+  if (graderSha256 === bare(BINARY_JUDGMENT_EVALUATION_PARSER_V2_SEALED.digest)) return "abstain";
+  if (graderSha256 === bare(BINARY_JUDGMENT_EVALUATION_PARSER_SEALED.digest)) return "reject";
+  return undefined;
+}
+
 function validateEvaluationSpec(input: {
   readonly workspaceDir: string;
   readonly evaluationDigest: `sha256:${string}`;
   readonly manifestContexts: ReadonlySet<string>;
+  /** The policy the run's arms derived, cross-checked here (see `validateTaskClosure`). */
+  readonly parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"];
 }): `sha256:${string}` {
   const bytes = getSealedBytes(input.workspaceDir, bare(input.evaluationDigest));
   let spec: ReturnType<typeof parseEvaluationSpec>;
@@ -190,7 +208,7 @@ function validateEvaluationSpec(input: {
     !Array.isArray(testMaterial)
     || testMaterial.length !== 1
   ) {
-    refuse("conflict", "binary.evaluationSpec", "binary evaluator or parser semantics drifted from the registered v1 contract");
+    refuse("conflict", "binary.evaluationSpec", "binary evaluator or parser semantics drifted from the registered contracts");
   }
   const material = object(testMaterial[0]);
   const contextDigest = descriptorDigest(
@@ -204,6 +222,18 @@ function validateEvaluationSpec(input: {
   ) {
     refuse("conflict", "binary.evaluationSpec.analysisContext", "EvaluationSpec does not bind one admitted analysis context");
   }
+  // Fail closed at lock, not late in paid execution. `isBinaryJudgmentEvaluationSpecification`
+  // above admits either sealed evaluation-parser identity, and the derived `parserInvalidPolicy`
+  // comes from the arms alone, so a bank imported without `--parser-invalid-policy abstain` used
+  // to compile and lock cleanly against v2 arms and only break at the adapter's own join (or at
+  // aggregate time) once the run had already been paid for.
+  if (evaluationSpecParserInvalidPolicy(spec) !== input.parserInvalidPolicy) {
+    refuse(
+      "conflict",
+      "binary.evaluationSpec.parser",
+      "sealed Task EvaluationSpec parser-invalid policy differs from the run arms' instruments",
+    );
+  }
   return contextDigest;
 }
 
@@ -215,6 +245,8 @@ function validateTaskClosure(input: {
     readonly itemId: string;
   }>;
   readonly manifestContexts: ReadonlySet<string>;
+  /** Derived from the run's arms; every sealed Task's EvaluationSpec must agree with it. */
+  readonly parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"];
 }): void {
   const seenContexts = new Set<string>();
   const seenItems = new Set<string>();
@@ -270,6 +302,7 @@ function validateTaskClosure(input: {
       workspaceDir: input.workspaceDir,
       evaluationDigest,
       manifestContexts: input.manifestContexts,
+      parserInvalidPolicy: input.parserInvalidPolicy,
     });
     if (contextDigest !== contextEntry.digest || seenContexts.has(contextDigest)) {
       refuse("conflict", `tasks.${taskDigest}.evaluation`, "Task EvaluationSpec joins the wrong or a repeated analysis context");
@@ -289,6 +322,8 @@ function deriveAdmissionProfile(input: {
   readonly workspaceDir: string;
   readonly draft: DraftDocument;
   readonly benchmark: BenchmarkRecord;
+  /** Threaded from `validateRuntimeAndArms`, which every caller runs first. */
+  readonly parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"];
 }): Pick<BinaryInstrumentParameters, "candidateClasses" | "strata" | "truthAdmission" | "promptedScreeningProfile"> & {
   readonly screeningInstrumentSha256?: `sha256:${string}`;
 } {
@@ -326,6 +361,7 @@ function deriveAdmissionProfile(input: {
     benchmark: input.benchmark,
     contextsByItem,
     manifestContexts,
+    parserInvalidPolicy: input.parserInvalidPolicy,
   });
   return {
     candidateClasses: verified.classes,
@@ -394,6 +430,7 @@ function validateRuntimeAndArms(input: {
    * instead of assuming a two-arm roster. Already parsed and reseal-checked in the loop below, so
    * returning them costs nothing and avoids a second parse of the same sealed bytes. */
   readonly armInstruments: readonly BinaryJudgmentInstrument[];
+  readonly parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"];
 } {
   const runtime = input.spec.evaluationRuntime;
   if (
@@ -445,6 +482,7 @@ function validateRuntimeAndArms(input: {
   let declaringArmIndex: number | undefined;
   let declaringArmCount = 0;
   const armInstruments: BinaryJudgmentInstrument[] = [];
+  let invalidOutputDecision: "REJECT" | "INVALID" | undefined;
   for (const [index, arm] of input.spec.arms.entries()) {
     const selected = selection.arms[index]!;
     if (
@@ -476,6 +514,15 @@ function validateRuntimeAndArms(input: {
       refuse("conflict", `spec.arms.${index}.instrument`, "instrument identity, jinn-openai model, or generation settings drifted from the runtime selection");
     }
     armInstruments.push(instrument);
+    if (invalidOutputDecision === undefined) {
+      invalidOutputDecision = instrument.response.invalidOutputDecision;
+    } else if (instrument.response.invalidOutputDecision !== invalidOutputDecision) {
+      refuse(
+        "conflict",
+        `spec.arms.${index}.instrument`,
+        "all binary-judgment arms must share one invalid-output policy",
+      );
+    }
     if (binaryJudgmentInstrumentDeclaresEvidence(instrument)) {
       declaringArmCount += 1;
       if (declaringArmIndex === undefined) declaringArmIndex = index;
@@ -505,7 +552,13 @@ function validateRuntimeAndArms(input: {
     }
   }
 
-  return { judgeModel: firstModel, declaringArmIndex, declaringArmCount, armInstruments };
+  return {
+    judgeModel: firstModel,
+    declaringArmIndex,
+    declaringArmCount,
+    armInstruments,
+    parserInvalidPolicy: invalidOutputDecision === "INVALID" ? "abstain" : "reject",
+  };
 }
 
 export function isBinaryInstrumentSpec(spec: DraftSpec): boolean {
@@ -543,12 +596,12 @@ export function compileBinaryInstrumentProfile(input: {
   if (effectiveVerdictRule !== "sole") {
     refuse("validation", "spec.assurance", "binary-instrument@1 requires resolved verdictRule=sole");
   }
-  const { judgeModel } = validateRuntimeAndArms({
+  const { judgeModel, parserInvalidPolicy } = validateRuntimeAndArms({
     workspaceDir: input.workspaceDir,
     spec,
     benchmark: input.benchmark,
   });
-  const admission = deriveAdmissionProfile(input);
+  const admission = deriveAdmissionProfile({ ...input, parserInvalidPolicy });
   refuseScreeningInstrumentRunReuse(admission.screeningInstrumentSha256, spec);
   const parameters: BinaryInstrumentParameters = {
     verdictRule: "sole",
@@ -557,7 +610,7 @@ export function compileBinaryInstrumentProfile(input: {
     measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
     candidateClasses: admission.candidateClasses,
     strata: admission.strata,
-    parserInvalidPolicy: "reject",
+    parserInvalidPolicy,
     truthAdmission: admission.truthAdmission,
     intervalAlpha: "0.05",
     // DERIVED from the arms' shared model.requested (validateRuntimeAndArms), never declared as
@@ -626,6 +679,7 @@ function deriveBinaryInstrumentFamilyClosure(input: {
   readonly declaringArmIndex: number | undefined;
   readonly declaringArmCount: number;
   readonly armInstruments: readonly BinaryJudgmentInstrument[];
+  readonly parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"];
 } {
   const { analysis, methodLabel } = input;
   const pathPrefix = input.pathPrefix ?? "spec.analysis";
@@ -646,7 +700,12 @@ function deriveBinaryInstrumentFamilyClosure(input: {
     refuse("validation", "spec.assurance", `${methodLabel} requires resolved verdictRule=sole`);
   }
 
-  const { declaringArmIndex, declaringArmCount, armInstruments } = validateRuntimeAndArms({
+  const {
+    declaringArmIndex,
+    declaringArmCount,
+    armInstruments,
+    parserInvalidPolicy,
+  } = validateRuntimeAndArms({
     workspaceDir: input.workspaceDir,
     spec,
     benchmark: input.benchmark,
@@ -655,6 +714,7 @@ function deriveBinaryInstrumentFamilyClosure(input: {
     workspaceDir: input.workspaceDir,
     draft: input.draft,
     benchmark: input.benchmark,
+    parserInvalidPolicy,
   });
   refuseScreeningInstrumentRunReuse(admission.screeningInstrumentSha256, spec);
 
@@ -666,6 +726,7 @@ function deriveBinaryInstrumentFamilyClosure(input: {
     declaringArmIndex,
     declaringArmCount,
     armInstruments,
+    parserInvalidPolicy,
   };
 }
 
@@ -708,7 +769,7 @@ export function compilePairwiseDisagreementProfile(input: {
     measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
     candidateClasses: closure.candidateClasses,
     strata: closure.strata,
-    parserInvalidPolicy: "reject",
+    parserInvalidPolicy: closure.parserInvalidPolicy,
     truthAdmission: closure.truthAdmission,
     intervalAlpha: "0.05",
   };
@@ -878,7 +939,7 @@ export function compilePairedMajorityDeltaProfile(input: {
     measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
     candidateClasses: closure.candidateClasses,
     strata: closure.strata,
-    parserInvalidPolicy: "reject",
+    parserInvalidPolicy: closure.parserInvalidPolicy,
     truthAdmission: closure.truthAdmission,
     baseline,
     candidate,

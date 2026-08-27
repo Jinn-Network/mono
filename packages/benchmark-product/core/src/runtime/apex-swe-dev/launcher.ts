@@ -12,6 +12,7 @@ import {
   type ApexSweDevTaskType,
 } from "./manifest.js";
 import { harnessReportPath, readHarnessReport } from "./reports.js";
+import { inheritedTempEnv } from "../child-temp-env.js";
 
 export function apexSweDevReportRoot(artifactsRoot: string, draftId: string): string {
   return join(artifactsRoot, "apex-swe-dev", draftId);
@@ -32,14 +33,14 @@ function assertSealedHosts(manifest: ApexSweDevSelectionManifest, binding: ApexS
   }
   const apxVersion = execFileSync(apx, ["--version"], {
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "" },
+    env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "" },
   }).trim().replace(/^apx\s+/iu, "");
   if (apxVersion !== manifest.harness.apxVersion) {
     refuse("record-integrity", "apex-swe-dev.apx.version", "apx version drifted from the sealed selection");
   }
   const inspectAiVersion = execFileSync(python, ["-c", "import inspect_ai; print(inspect_ai.__version__)"], {
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "" },
+    env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "" },
   }).trim();
   if (inspectAiVersion !== manifest.harness.inspectAiVersion) {
     refuse("record-integrity", "apex-swe-dev.inspect_ai.version", "inspect_ai version drifted from the sealed selection");
@@ -73,7 +74,7 @@ function launchIntegration(input: {
   const spawned = spawnSync(realpathSync(input.binding.apxExecutable), args, {
     cwd: outputDir,
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "", COLOPHON_APEX_SWE_DEV_REPORT_ROOT: input.reportRoot },
+    env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "", COLOPHON_APEX_SWE_DEV_REPORT_ROOT: input.reportRoot },
   });
   if (spawned.status !== 0) {
     refuse(
@@ -111,7 +112,7 @@ function launchObservability(input: {
   const spawned = spawnSync(realpathSync(input.binding.pythonExecutable), args, {
     cwd: input.binding.observabilityProjectDir,
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "", COLOPHON_APEX_SWE_DEV_REPORT_ROOT: input.reportRoot },
+    env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "", COLOPHON_APEX_SWE_DEV_REPORT_ROOT: input.reportRoot },
   });
   if (spawned.status !== 0) {
     refuse(

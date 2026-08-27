@@ -36,11 +36,27 @@ function processError(kind) {
   return { kind };
 }
 
+/**
+ * The caller's own temp directory, for the `docker` CLI this module drives: it writes build context
+ * and export scratch there, and with no temp variable in the allowlist it falls back to the
+ * platform default and escapes whatever root the caller was confined to. Duplicated from
+ * `child-temp-env.ts` rather than imported because this file is plain JavaScript, spawned as its
+ * own script, and cannot load a TypeScript module.
+ */
+function inheritedTempEnv() {
+  const inherited = {};
+  for (const name of ["TMPDIR", "TMP", "TEMP"]) {
+    const value = process.env[name];
+    if (typeof value === "string" && value.length > 0) inherited[name] = value;
+  }
+  return inherited;
+}
+
 function boundedProcess(executable, args, options = {}) {
   const { input, timeout = 30_000, maxBytes = SANDBOX_POLICY.maxOutputBytes, children } = options;
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
-      env: { LANG: "C.UTF-8" },
+      env: { ...inheritedTempEnv(), LANG: "C.UTF-8" },
       stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     children?.add(child);

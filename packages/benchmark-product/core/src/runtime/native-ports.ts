@@ -233,6 +233,12 @@ export function createProcessNativeLauncher(options: ProcessLauncherOptions): Id
         }
         return;
       }
+      // temp-env: none on purpose. Exactly the sealed invocation's environment and nothing else,
+      // including no `TMPDIR`/`TMP`/`TEMP` unless the invocation names them. A fixed invocation is a record
+      // that has to reproduce byte-for-byte from what it declares; a variable injected here from
+      // the host would make the same record run differently on two machines, which is the one
+      // property this port exists to deny. A caller that needs the child to write somewhere
+      // specific declares it in `invocation.environment`.
       const env: Record<string, string> = {};
       for (const { name, value } of invocation.environment) env[name] = value;
       const result = spawnSync(invocation.executable.path, [...invocation.argv], {

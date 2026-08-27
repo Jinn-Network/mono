@@ -14,6 +14,7 @@ import {
 } from "@jinn-network/task-execution-evaluation-harness";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_YES_NO_PARSER_IDENTITY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
   BINARY_JUDGMENT_EVALUATION_CONTEXT_FORMAT_URI,
@@ -103,6 +104,7 @@ function inline(bytes: Uint8Array) {
 
 function makeInstrument(
   parser: BinaryJudgmentInstrument["response"]["parser"] = BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  invalidOutputDecision: BinaryJudgmentInstrument["response"]["invalidOutputDecision"] = "REJECT",
 ): BinaryJudgmentInstrument {
   const messages = [{
     role: "developer" as const,
@@ -146,7 +148,7 @@ function makeInstrument(
     response: {
       mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
       parser,
-      invalidOutputDecision: "REJECT",
+      invalidOutputDecision,
     },
   };
 }
@@ -166,6 +168,10 @@ function makeFixture(options: {
   readonly taskInstrumentPin?: boolean;
   readonly evidence?: string;
   readonly parser?: BinaryJudgmentInstrument["response"]["parser"];
+  readonly parserInvalidPolicy?: "reject" | "abstain";
+  /** Pulls the EvaluationSpec's policy away from the instrument's, which is otherwise the same
+   * value. Only a deliberately mismatched pair can reach the adapter's own cross-check. */
+  readonly specParserInvalidPolicy?: "reject" | "abstain";
   /** Defaults to "two-human-unanimous", matching every existing call site byte-for-byte (spec
    * §6.7; packet P6 item F). */
   readonly truthAdmission?: "two-human-unanimous" | "screened-operator-sampled";
@@ -182,7 +188,8 @@ function makeFixture(options: {
     sources: [{ digest: { sha256: "4".repeat(64) } }],
   };
   const itemSha256 = recordDigest(canonicalJsonBytes(payload));
-  const instrument = makeInstrument(options.parser);
+  const parserInvalidPolicy = options.parserInvalidPolicy ?? "reject";
+  const instrument = makeInstrument(options.parser, parserInvalidPolicy === "abstain" ? "INVALID" : "REJECT");
   const sealedInstrument = sealBinaryJudgmentInstrument(instrument);
   const truthAdmission = options.truthAdmission ?? "two-human-unanimous";
   const labelResolution = sealBinaryJudgmentLabelResolution(truthAdmission === "screened-operator-sampled"
@@ -222,7 +229,10 @@ function makeFixture(options: {
     candidateClass,
     stratum,
   });
-  const specification = buildBinaryJudgmentEvaluationSpecification(analysisContext.digest);
+  const specification = buildBinaryJudgmentEvaluationSpecification(
+    analysisContext.digest,
+    options.specParserInvalidPolicy ?? parserInvalidPolicy,
+  );
   const sealedSpecification = sealEvaluationSpec(specification);
   const taskBytes = sealTask({
     protocol: "https://spec.jinn.network/profiles/task-execution/v1",
@@ -515,6 +525,62 @@ describe("binary judgment evaluator", () => {
       invalidReason: "unexpected-token",
       agreement: false,
     });
+  });
+
+  test("the neutral parser accepts one exact JSON fence and keeps malformed output inconclusive", async () => {
+    const fenced = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode('```json\n{"reasoning":"The candidate matches.","label":"CORRECT"}\n```'),
+      parser: BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+      parserInvalidPolicy: "abstain",
+    }));
+    expect(fenced).toMatchObject({
+      verdict: "pass",
+      detailedOutcome: { judgeDecision: "ACCEPT", parseValid: true, agreement: true },
+    });
+    expect(() => validateBinaryJudgmentCompletedEvaluation(fenced)).not.toThrow();
+
+    const malformed = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode("explanation before {\"label\":\"CORRECT\"}"),
+      parser: BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+      parserInvalidPolicy: "abstain",
+    }));
+    expect(malformed).toMatchObject({
+      verdict: "inconclusive",
+      detailedOutcome: { judgeDecision: "INVALID", parseValid: false, agreement: false },
+    });
+    expect(() => validateBinaryJudgmentCompletedEvaluation(malformed)).not.toThrow();
+  });
+
+  test.each([
+    {
+      name: "a v1 instrument under a neutral EvaluationSpec",
+      parserInvalidPolicy: "reject" as const,
+      specParserInvalidPolicy: "abstain" as const,
+      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      response: "ACCEPT",
+    },
+    {
+      name: "a neutral instrument under a v1 EvaluationSpec",
+      parserInvalidPolicy: "abstain" as const,
+      specParserInvalidPolicy: "reject" as const,
+      parser: BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+      response: '{"label":"CORRECT"}',
+    },
+  ])("refuses $name rather than scoring under two invalid-output policies", async (scenario) => {
+    const error = await evaluate(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode(scenario.response),
+      parser: scenario.parser,
+      parserInvalidPolicy: scenario.parserInvalidPolicy,
+      specParserInvalidPolicy: scenario.specParserInvalidPolicy,
+    })).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(EvaluationOperationalError);
+    expect((error as EvaluationOperationalError).reason).toBe("subject-digest-mismatch");
+    expect((error as EvaluationOperationalError).safeDetail).toBe(
+      "binary judgment instrument invalid-output policy differs from its EvaluationSpec",
+    );
   });
 
   test("a delivered malformed response is completed and scored, not operational", async () => {

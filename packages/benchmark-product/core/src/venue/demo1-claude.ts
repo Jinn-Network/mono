@@ -30,6 +30,7 @@ import {
   type Demo1RuntimePolicyDecision,
   type Demo1RuntimeSelection,
 } from "../method/demo1-runtime-policy.js";
+import { inheritedTempEnv } from "../runtime/child-temp-env.js";
 
 export const DEMO1_CLAUDE_MODEL_ID = "claude-haiku-4-5-20251001";
 export const DEMO1_CLAUDE_EFFORT = "high";
@@ -302,11 +303,13 @@ function readinessEnvironment(tokenFilePath: string, configDir: string): Record<
     CLAUDE_CONFIG_DIR: configDir,
     CLAUDE_FORCE_OAUTH: "1",
   };
-  for (const key of ["HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "SHELL"] as const) {
+  for (const key of ["HOME", "PATH", "LANG", "LC_ALL", "SHELL"] as const) {
     const value = process.env[key];
     if (value !== undefined) environment[key] = value;
   }
-  return environment;
+  // All three temp names rather than `TMPDIR` alone: the readiness probe runs the agent binary,
+  // which is free to consult whichever its own runtime reads.
+  return { ...environment, ...inheritedTempEnv() };
 }
 
 /** Product-owned, binary/auth/version readiness binding. No ambient executable-path discovery. */
