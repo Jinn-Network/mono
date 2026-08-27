@@ -2,6 +2,7 @@
 
 import {
   defineEvaluatorRegistration,
+  EvaluationOperationalError,
   type EvaluatorRegistration,
   type ResourceDescriptor,
 } from "@jinn-network/task-execution-evaluation-harness";
@@ -95,6 +96,38 @@ export function createPredictionEvaluatorRegistration(
   });
 }
 
+/**
+ * Derives the disclosed method from the EvaluationSpec's own sealed evaluation-parser identity.
+ *
+ * An unrecognized identity REFUSES rather than falling back to a default. It is unreachable
+ * today — `selectRegistration` has already run `isBinaryJudgmentEvaluationSpecification` — but a
+ * default here is the #3050 defect waiting to recur: add a v3 parser to the specification builder
+ * and the compatibility predicate without teaching `evaluationPolicyFromSpecification` about it,
+ * and every v3 run would silently seal v1 semantics, surfacing only as an aggregate-time binding
+ * mismatch after the inference is already paid for. Refusing costs one unreachable branch and
+ * turns that whole class into a loud, named, pre-signature failure.
+ */
+export function binaryJudgmentMethodForSpecification(
+  specification: EvaluationSpec,
+): ResourceDescriptor {
+  const parserInvalidPolicy = evaluationPolicyFromSpecification(specification);
+  if (parserInvalidPolicy === undefined) {
+    const parser = specification.family === "deterministic-process"
+      ? (specification.familyBlock as DeterministicProcessBlock).parser
+      : undefined;
+    throw new EvaluationOperationalError({
+      canonicalCode: "FAILED_PRECONDITION",
+      reason: "unsupported-specification",
+      recoveryAdvice: "do-not-retry",
+      safeDetail: "binary judgment cannot disclose an evaluation method for unrecognized parser "
+        + (parser === undefined
+          ? "(EvaluationSpec is not deterministic-process)"
+          : parserAllowlistKey(parser)),
+    });
+  }
+  return binaryJudgmentEvaluationMethodDescriptor(parserInvalidPolicy);
+}
+
 export function createBinaryJudgmentEvaluatorRegistration(
   options: Pick<EvaluatorRegistrationOptions, "evaluatorId" | "signerHandle"> & {
     readonly materialSource?: BinaryJudgmentMaterialSource;
@@ -110,10 +143,7 @@ export function createBinaryJudgmentEvaluatorRegistration(
     // registration serves both sealed policies, so the disclosed method is derived per
     // EvaluationSpec — the same reading the adapter does when it scores — rather than pinned to
     // the reject default, which used to disclose v1 semantics for an abstain-policy run.
-    evaluationMethod: (specification) =>
-      binaryJudgmentEvaluationMethodDescriptor(
-        evaluationPolicyFromSpecification(specification) ?? "reject",
-      ),
+    evaluationMethod: binaryJudgmentMethodForSpecification,
     specificationCompatibility: isBinaryJudgmentEvaluationSpecification,
     evaluatorIdentity: { id: options.evaluatorId },
     signer: { handle: options.signerHandle },
