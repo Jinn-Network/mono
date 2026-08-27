@@ -36,6 +36,8 @@ import {
   type Transport,
 } from 'viem';
 
+import { walkStructured } from '../util/structured-walk.js';
+
 /**
  * Hard cap on the number of providers in a single fallback chain. Six covers
  * the "5 vetted free defaults + 1 operator-prepended paid primary" shape: a
@@ -276,19 +278,44 @@ export function sanitizePersistedText(value: string | null | undefined): string 
   return maskUrlsInMessage(value);
 }
 
-export function sanitizeStructuredValue(value: unknown, depth = 0): unknown {
-  if (depth > 6) return '[truncated]';
+/**
+ * Container nesting depth beyond which `sanitizeStructuredValue` truncates.
+ * `emitStructured` accepts a caller-built `details` payload, so the walk needs
+ * a bound; six levels covers every real payload with room to spare.
+ */
+const MAX_STRUCTURED_DEPTH = 6;
+
+/** Marker for a value with no JSON-shaped representation to sanitize. */
+const UNSERIALIZABLE_MARKER = '[unserializable]';
+
+/**
+ * Leaf policy for {@link sanitizeStructuredValue} — the host-only dialect.
+ * `maskRpcHost` (via {@link maskUrlsInMessage} / {@link sanitizeErrorText})
+ * remains the single masking vocabulary; the other arms are structural.
+ */
+function sanitizeStructuredLeaf(value: unknown): unknown {
   if (typeof value === 'string') return maskUrlsInMessage(value);
   if (value instanceof Error) return sanitizeErrorText(value);
-  if (Array.isArray(value)) return value.map((entry) => sanitizeStructuredValue(entry, depth + 1));
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      out[key] = sanitizeStructuredValue(entry, depth + 1);
-    }
-    return out;
-  }
+  // A Date is not a plain record, so it reaches this leaf. Its ISO form is
+  // exactly what JSON.stringify would have produced downstream.
+  if (value instanceof Date) return value.toISOString();
+  // Maps, Sets, class instances, functions, symbols: nothing JSON-shaped to
+  // walk. Say so rather than emitting a misleading `{}`.
+  if (typeof value === 'object' && value !== null) return UNSERIALIZABLE_MARKER;
+  if (typeof value === 'function' || typeof value === 'symbol') return UNSERIALIZABLE_MARKER;
   return value;
+}
+
+/**
+ * Sanitize a structured `details` payload for the event ring buffer (#642).
+ * Traversal is the shared {@link walkStructured} walker (#3038); only the
+ * substitution vocabulary is local.
+ */
+export function sanitizeStructuredValue(value: unknown): unknown {
+  return walkStructured(value, {
+    leaf: sanitizeStructuredLeaf,
+    maxDepth: MAX_STRUCTURED_DEPTH,
+  });
 }
 
 export interface BuildFallbackTransportOptions {

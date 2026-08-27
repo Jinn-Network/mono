@@ -861,6 +861,40 @@ describe('sanitizeErrorText (#642)', () => {
     expect(sanitizePersistedText(url)).toBe('rpc.example');
     expect(sanitizeStructuredValue({ error: url })).toEqual({ error: 'rpc.example' });
   });
+
+  it('truncates only the container past the depth cap, keeping deep primitives typed (#3038)', () => {
+    // Depth 0 is the top-level record; `g`'s value is the first container at
+    // depth 7 and is the only thing replaced.
+    const deep = { a: { b: { c: { d: { e: { f: { g: { h: 'too deep' } } } } } } } };
+    expect(sanitizeStructuredValue(deep)).toEqual({
+      a: { b: { c: { d: { e: { f: { g: '[truncated]' } } } } } },
+    });
+
+    // Primitives at the same depth are not recursive, so the cap leaves them
+    // alone — previously they came back as the string '[truncated]'.
+    const deepPrimitives = { a: { b: { c: { d: { e: { f: { count: 3, ok: false } } } } } } };
+    expect(sanitizeStructuredValue(deepPrimitives)).toEqual(deepPrimitives);
+  });
+
+  it('represents non-plain values honestly instead of collapsing them to {} (#3038)', () => {
+    const iso = '2026-08-27T00:00:00.000Z';
+    expect(sanitizeStructuredValue({ at: new Date(iso) })).toEqual({ at: iso });
+    expect(sanitizeStructuredValue({ m: new Map([['k', 'v']]) })).toEqual({
+      m: '[unserializable]',
+    });
+    expect(sanitizeStructuredValue({ s: new Set([1]) })).toEqual({ s: '[unserializable]' });
+    expect(sanitizeStructuredValue({ fn: () => 1 })).toEqual({ fn: '[unserializable]' });
+  });
+
+  it('masks a nested Error and keeps ordinary primitives verbatim (#3038)', () => {
+    const err = new Error('failed https://user:SECRETKEY123@rpc.example/v2/SECRETKEY123');
+    expect(sanitizeStructuredValue({ err, tries: 2, done: false, missing: null })).toEqual({
+      err: 'failed rpc.example',
+      tries: 2,
+      done: false,
+      missing: null,
+    });
+  });
 });
 
 // ── helpers ────────────────────────────────────────────────────────────────

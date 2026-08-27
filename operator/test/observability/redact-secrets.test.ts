@@ -201,6 +201,26 @@ describe('redactValue — recursion into nested structures and arrays', () => {
     expect(redactValue(null)).toBe(null);
     expect(redactValue('a plain string')).toBe('a plain string');
   });
+
+  it('represents non-plain values honestly instead of collapsing them to {} (#3038)', () => {
+    const iso = '2026-08-27T00:00:00.000Z';
+    const out = redactValue({
+      at: new Date(iso),
+      m: new Map([['k', 'v']]),
+      s: new Set([1]),
+    }) as Record<string, unknown>;
+    expect(out.at).toBe(iso);
+    expect(String(out.m)).toMatch(/redacted:unserializable/);
+    expect(String(out.s)).toMatch(/redacted:unserializable/);
+  });
+
+  it('recurses without a depth cap so a deeply nested secret is still stripped (#3038)', () => {
+    let node: Record<string, unknown> = { privateKey: '0x' + '33'.repeat(32) };
+    for (let i = 0; i < 20; i++) node = { nested: node };
+    let cursor = redactValue(node) as Record<string, unknown>;
+    for (let i = 0; i < 20; i++) cursor = cursor.nested as Record<string, unknown>;
+    expect(String(cursor.privateKey)).toMatch(/redacted/i);
+  });
 });
 
 describe('redactRpcUrl — keep host, strip embedded credentials', () => {
