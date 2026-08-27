@@ -43,9 +43,15 @@ function withoutComments(text: string): string {
  * and the only way to satisfy it would be to inline the literal at every call — which is what
  * produced the gap in the first place.
  */
-function delegatedNames(expression: string): string[] {
+function delegatedNames(expression: string, calls: boolean): string[] {
   const names = new Set<string>();
-  for (const pattern of [/env:\s*([A-Za-z_$][\w$]*)/gu, /\.\.\.([A-Za-z_$][\w$]*)/gu, /([A-Za-z_$][\w$]*)\s*\(/gu]) {
+  const patterns = [/env:\s*([A-Za-z_$][\w$]*)/gu, /\.\.\.([A-Za-z_$][\w$]*)/gu];
+  // Calls only once inside a delegate's own body, never at the site. At the site every call in the
+  // literal would count, so an unrelated `KEY: tokenFor(k)` next to an allowlist naming no temp
+  // directory would supply the proof; inside a body the call IS how the delegation continues
+  // (`loginEnvironment` reaches `scopedTempEnv` no other way).
+  if (calls) patterns.push(/([A-Za-z_$][\w$]*)\s*\(/gu);
+  for (const pattern of patterns) {
     for (const match of expression.matchAll(pattern)) names.add(match[1]!);
   }
   return [...names];
@@ -58,10 +64,15 @@ function delegatedNames(expression: string): string[] {
  */
 function definitionWindow(source: string, name: string): string | undefined {
   const definition = new RegExp(`(?:const|let|function)\\s+${name}\\b`, "u").exec(source);
-  // 1200 and not 600: `readinessEnvironment` in `venue/demo1-claude.ts` carries its temp variables
-  // on its last line, past the shorter cut — which left it green on the word `TMPDIR` in its own
-  // doc comment rather than on the `inheritedTempEnv()` call it actually makes.
-  return definition === null ? undefined : source.slice(definition.index, definition.index + 1_200);
+  if (definition === null) return undefined;
+  // Bounded at the next top-level declaration rather than by a byte count alone. A fixed window
+  // spills into whatever is defined next, so a helper that pins nothing reads as carrying because
+  // one that does sits below it. The declaration must start the line: a nested `const` is part of
+  // this definition, and a brace walk would have to understand template literals, which two of
+  // these definitions are written inside. The byte cap remains for the last definition in a file.
+  const body = source.slice(definition.index, definition.index + 2_000);
+  const next = /\n(?:export\s+)?(?:async\s+)?(?:const|let|function)\s/u.exec(body.slice(1));
+  return next === null ? body : body.slice(0, next.index + 1);
 }
 
 /**
@@ -76,7 +87,7 @@ function carriesTemp(source: string, expression: string, seen: Set<string>): boo
   // the words in its own doc comment. The deliberate-omission marker is not read here; it is
   // checked against the site itself, comments and all, before this function is ever called.
   if (CARRIES_TEMP.test(withoutComments(expression))) return true;
-  for (const name of delegatedNames(expression)) {
+  for (const name of delegatedNames(expression, seen.size > 0)) {
     if (seen.has(name)) continue;
     seen.add(name);
     const definition = definitionWindow(source, name);
@@ -172,6 +183,16 @@ describe("child temp-directory environment", () => {
     const site = 'const built = build();\nspawn(exe, args, { env: { ...built, HOME: home } });\n';
     expect(unhandledSites('// Sets TMPDIR.\nfunction build() { return { PATH: "" }; }\n' + site)).toHaveLength(1);
     expect(unhandledSites('/** Sets TMPDIR. */\nfunction build() { return { PATH: "" }; }\n' + site)).toHaveLength(1);
+  });
+
+  // Two ways a site could once borrow proof it did not earn: a neighbouring helper that does pin a
+  // temp directory, and an unrelated call sitting in the same object literal. Neither is evidence
+  // about the allowlist actually being handed to a child.
+  it("does not let a site borrow proof it did not earn", () => {
+    const site = 'const built = build();\nspawn(exe, args, { env: { ...built, HOME: home } });\n';
+    const neighbour = 'function build() { return { PATH: "" }; }\nfunction other() { return scopedTempEnv(d); }\n';
+    expect(unhandledSites(neighbour + site)).toHaveLength(1);
+    expect(unhandledSites('spawn(exe, args, { env: { HOME: home, KEY: tokenFor(k) } });\n')).toHaveLength(1);
   });
 
   it("names the temp variables at every spawn site, or says why not", () => {
