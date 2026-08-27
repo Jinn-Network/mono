@@ -470,6 +470,38 @@ describe('runDeploymentReadinessChecks', () => {
     expect(validity?.detail).toMatch(/hermes: error \(ENOENT\)/);
   });
 
+  it('REGRESSION GUARD: a hermes CLI that exits non-zero is advisory, not boot-fatal', async () => {
+    // The guard above covers a binary that never spawned. This is the other
+    // half: the binary is there, it runs, and it fails — no errno, empty
+    // stdout, non-zero exit. The credential (`OPENROUTER_API_KEY`) is fine,
+    // so refusing the boot would blame the operator for the wrong thing.
+    const report = await runDeploymentReadinessChecks(
+      {
+        stateDir: tmp,
+        earningDir: join(tmp, 'earning'),
+        runtimeMode: undefined,
+        executionWiring: [{ harness: 'hermes-agent' }],
+      },
+      baseDeps({
+        env: { JINN_STATE_DIR: tmp, OPENROUTER_API_KEY: 'or-xxxx' },
+        getuid: () => 1000,
+        detectAuthContext: () => 'container',
+        probeHermesAuthStatus: async () => ({
+          provider: 'openrouter',
+          authed: false,
+          raw: '',
+          exitCode: 1,
+        }),
+      }),
+    );
+    expect(report.deployment).toBe(true);
+    expect(report.bootFatal).toBe(false);
+    const validity = report.checks.find((c) => c.name === 'credentials_valid');
+    expect(validity?.ok).toBe(true);
+    expect(validity?.detail).toMatch(/hermes: error \(hermes CLI probe failed\)/);
+    expect(JSON.stringify(report)).not.toContain('or-xxxx');
+  });
+
   it('REGRESSION GUARD: bare-local invalid auth stays advisory, not boot-fatal', async () => {
     const report = await runDeploymentReadinessChecks(
       {

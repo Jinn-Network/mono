@@ -375,6 +375,27 @@ describe('probeHermesAuthStatus', () => {
     expect(result.errorCode).toBeUndefined();
   });
 
+  it('surfaces the exit status when hermes runs and exits non-zero', async () => {
+    // A CLI that spawns and then fails carries a numeric `code`, not an
+    // errno, so `errorCode` stays unset. The exit status is the only signal
+    // that separates "hermes broke" from "hermes said no", and credential
+    // classification needs that split — the second is boot-fatal for a
+    // required runtime, the first must not be.
+    mockNext({ type: 'error', code: 2, stdout: '', stderr: 'no such command: list', message: 'exit 2' });
+
+    const result = await probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(false);
+    expect(result.errorCode).toBeUndefined();
+    expect(result.exitCode).toBe(2);
+  });
+
+  it('reports exitCode 0 when hermes runs cleanly', async () => {
+    mockNext({ type: 'ok', stdout: '', stderr: '' });
+
+    const result = await probeHermesAuthStatus('openrouter');
+    expect(result.exitCode).toBe(0);
+  });
+
   it('reports not-authed when execFile errors (e.g. timeout) regardless of stdout', async () => {
     mockNext({
       type: 'error',

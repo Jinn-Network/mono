@@ -213,6 +213,32 @@ describe('checkCredentialsValid', () => {
     ]);
   });
 
+  it('REGRESSION: a hermes CLI that exits non-zero is an advisory error, not an invalid credential', async () => {
+    // A hermes that spawns and then fails (version skew that renamed `auth
+    // list`, a corrupt `~/.hermes`, a Python traceback) carries no errno at
+    // all — `errorCode` is undefined and stdout is empty. Classified on
+    // `authed` alone that reads as a rejected credential, which is
+    // boot-fatal for a required runtime in a hosted deployment, with a
+    // remedy pointing at a key that is not the problem.
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['hermes'],
+        env: { OPENROUTER_API_KEY: 'or-secret' },
+        authContext: AUTH_CTX,
+      },
+      validityDeps({
+        probeHermesAuthStatus: async () =>
+          hermesProbe({ authed: false, raw: '', exitCode: 2 }),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([
+      { runtime: 'hermes', validity: 'error', note: 'hermes CLI probe failed' },
+    ]);
+    expect(result.remedy).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain('or-secret');
+  });
+
   it('still reports invalid when hermes runs and rejects a present credential', async () => {
     // The complement of the two cases above: hermes answered, so `authed:
     // false` with a key present really is an invalid credential.
@@ -226,6 +252,7 @@ describe('checkCredentialsValid', () => {
         probeHermesAuthStatus: async () =>
           hermesProbe({
             authed: false,
+            exitCode: 0,
             raw: 'openrouter (1 credentials):\n  #1 api_key auth failed (re-auth may be required)',
           }),
       }),

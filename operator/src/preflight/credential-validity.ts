@@ -232,6 +232,14 @@ async function runProbe(
       if (probe.errorCode !== undefined) {
         return { validity: 'error', note: probe.errorCode };
       }
+      // A hermes that spawned and then exited non-zero carries no errno, so
+      // the branch above cannot see it — but it is the same infrastructure
+      // fault: the CLI broke, it did not reject a credential. Claude
+      // (`claude-auth.ts`) and Codex (below) both classify on exit status;
+      // this keeps hermes at parity.
+      if (probe.exitCode != null && probe.exitCode !== 0) {
+        return { validity: 'error', note: 'hermes CLI probe failed' };
+      }
       if (probe.authed) return { validity: 'valid' };
       return { validity: envPresent(input.env, HERMES_ENV_KEYS) ? 'invalid' : 'absent' };
     }

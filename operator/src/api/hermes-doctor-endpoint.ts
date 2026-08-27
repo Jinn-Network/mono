@@ -167,6 +167,22 @@ export interface HermesAuthStatus {
    * deployment.
    */
   errorCode?: string;
+  /**
+   * Process exit status of the `hermes auth list <provider>` shell-out: `0`
+   * when hermes ran and answered, non-zero when it ran and failed, `null`
+   * when it never produced a status (spawn error or kill-by-timeout — see
+   * `errorCode`).
+   *
+   * `errorCode` alone cannot separate "hermes ran and rejected the
+   * credential" from "hermes ran and broke" — a CLI that spawns and then
+   * exits non-zero (version skew that renamed the subcommand, a corrupt
+   * `~/.hermes`, a Python traceback) carries no errno at all. Without the
+   * exit status a caller classifying credentials
+   * (`preflight/credential-validity.ts`) reads that broken CLI as an invalid
+   * credential, which is boot-fatal in a hosted deployment. Claude and Codex
+   * both classify on exit status already.
+   */
+  exitCode?: number | null;
 }
 
 /**
@@ -232,12 +248,12 @@ export async function probeHermesAuthStatus(
   // the errno rides along so callers can tell an unrunnable probe apart from
   // a negative verdict.
   if (errorCode != null) {
-    return { provider, authed: false, raw, errorCode };
+    return { provider, authed: false, raw, errorCode, exitCode: result.status };
   }
   // No output → not authed. Empty stdout means `auth_list_command` skipped
   // the provider section because the credential pool has zero entries for it.
   if (raw.length === 0) {
-    return { provider, authed: false, raw };
+    return { provider, authed: false, raw, exitCode: result.status };
   }
 
   // Credential lines are the `  #<idx> ...` rows under the provider header.
@@ -249,12 +265,12 @@ export async function probeHermesAuthStatus(
   if (credentialLines.length === 0) {
     // Header present but no credential rows parsed — treat as not authed
     // rather than guess.
-    return { provider, authed: false, raw };
+    return { provider, authed: false, raw, exitCode: result.status };
   }
   const hasUsableCredential = credentialLines.some(
     (line) => !isCredentialLineUnusable(line),
   );
-  return { provider, authed: hasUsableCredential, raw };
+  return { provider, authed: hasUsableCredential, raw, exitCode: result.status };
 }
 
 export function addHermesDoctorRoutes(app: Hono, config: HermesDoctorConfig = {}): void {
