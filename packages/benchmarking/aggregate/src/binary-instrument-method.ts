@@ -50,6 +50,9 @@ const INSPECT_LOG_MEDIA_TYPE = "application/vnd.inspect-ai.eval-log+json";
 const ANALYSIS_CONTEXT_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.analysis-context.v1+json";
 const LABEL_RESOLUTION_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.label-resolution.v1+json";
 const LABEL_RESOLUTION_NAME = "label-resolution.json";
+/** The abstain policy's `recorded-inconclusive` class, mirrored from the sealed EvaluationSpec
+ * this oracle re-derives (`task-execution-evaluator-adapters`'s binary-judgment spec builder). */
+const UNPARSEABLE_JUDGE_RESPONSE_CLASS = "unparseable-judge-response";
 
 // Mirrored from packages/task-execution/profiles/src/binary-judgment/contracts.ts, which is the
 // source of truth. `packages/benchmarking/aggregate` deliberately does not depend on
@@ -1020,7 +1023,11 @@ function requireEmptyObject(value: unknown, digest: string, label: string): void
   }
 }
 
-function validateEvaluationSpecShape(spec: Record<string, unknown>, digest: `sha256:${string}`): void {
+function validateEvaluationSpecShape(
+  spec: Record<string, unknown>,
+  digest: `sha256:${string}`,
+  parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"],
+): void {
   requireExactKeys(
     spec,
     ["protocol", "semanticsVersion", "family", "grader", "familyBlock", "measurements", "verdictRule", "unscorable", "evidenceConventions"],
@@ -1034,8 +1041,23 @@ function validateEvaluationSpecShape(spec: Record<string, unknown>, digest: `sha
   ) {
     throw new MethodInputError("binary-binding-mismatch", digest, "EvaluationSpec identity is not the frozen deterministic binary profile");
   }
-  if (!Array.isArray(spec["unscorable"]) || spec["unscorable"].length !== 0) {
-    throw new MethodInputError("binary-binding-mismatch", digest, "EvaluationSpec.unscorable must be empty");
+  // Reject scores every response and declares no class. Abstain declares exactly one
+  // recorded-inconclusive class — without it the sealed spec cannot express the neutral outcome
+  // its own parser semantics promise, and the harness refuses the evaluator's delivery.
+  const expectedUnscorable = parserInvalidPolicy === "abstain"
+    ? [{ name: UNPARSEABLE_JUDGE_RESPONSE_CLASS, disposition: "recorded-inconclusive" }]
+    : [];
+  if (
+    !Array.isArray(spec["unscorable"])
+    || !bytesEqual(canonicalJsonBytes(spec["unscorable"]), canonicalJsonBytes(expectedUnscorable))
+  ) {
+    throw new MethodInputError(
+      "binary-binding-mismatch",
+      digest,
+      parserInvalidPolicy === "abstain"
+        ? `EvaluationSpec.unscorable must declare exactly ${UNPARSEABLE_JUDGE_RESPONSE_CLASS}`
+        : "EvaluationSpec.unscorable must be empty",
+    );
   }
   const evidence = spec["evidenceConventions"];
   if (!isObject(evidence)) {
@@ -1117,17 +1139,46 @@ function resolveTaskBinding(
   );
   const specWire = `sha256:${evaluationSpecSha256}` as const;
   const spec = resolveExactJson(specWire, input.resolveRecordBytes, "EvaluationSpec");
-  validateEvaluationSpecShape(spec, specWire);
+  validateEvaluationSpecShape(spec, specWire, parserInvalidPolicy);
   measurementDeclarations(spec, specWire);
+  // Reject: the bare agreement threshold. Abstain: the same threshold, guarded by the
+  // inconclusiveWhen node that records an unparseable response instead of scoring it.
   const verdictRule = spec["verdictRule"];
+  const scoringThreshold = parserInvalidPolicy === "abstain"
+    ? (Array.isArray((verdictRule as Record<string, unknown> | undefined)?.["all"])
+      ? ((verdictRule as Record<string, unknown>)["all"] as unknown[])[1]
+      : undefined)
+    : verdictRule;
+  const abstainGuard = parserInvalidPolicy === "abstain"
+    ? (Array.isArray((verdictRule as Record<string, unknown> | undefined)?.["all"])
+      ? ((verdictRule as Record<string, unknown>)["all"] as unknown[])[0]
+      : undefined)
+    : undefined;
   if (
-    !isObject(verdictRule)
-    || !isObject(verdictRule["threshold"])
-    || verdictRule["threshold"]["measurement"] !== BINARY_INSTRUMENT_MEASUREMENTS.agreement
-    || verdictRule["threshold"]["op"] !== "eq"
-    || verdictRule["threshold"]["value"] !== true
+    !isObject(scoringThreshold)
+    || !isObject(scoringThreshold["threshold"])
+    || scoringThreshold["threshold"]["measurement"] !== BINARY_INSTRUMENT_MEASUREMENTS.agreement
+    || scoringThreshold["threshold"]["op"] !== "eq"
+    || scoringThreshold["threshold"]["value"] !== true
   ) {
     throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec verdictRule must pass exactly on agreement=true");
+  }
+  if (parserInvalidPolicy === "abstain") {
+    const guard = isObject(abstainGuard) ? abstainGuard : undefined;
+    const predicate = isObject(guard?.["inconclusiveWhen"]) ? guard["inconclusiveWhen"] : undefined;
+    const threshold = isObject(predicate?.["threshold"]) ? predicate["threshold"] : undefined;
+    if (
+      guard?.["class"] !== UNPARSEABLE_JUDGE_RESPONSE_CLASS
+      || threshold?.["measurement"] !== BINARY_INSTRUMENT_MEASUREMENTS.parseValid
+      || threshold["op"] !== "eq"
+      || threshold["value"] !== false
+    ) {
+      throw new MethodInputError(
+        "binary-binding-mismatch",
+        specWire,
+        `EvaluationSpec verdictRule must record ${UNPARSEABLE_JUDGE_RESPONSE_CLASS} exactly on parseValid=false`,
+      );
+    }
   }
   const grader = spec["grader"];
   if (!isObject(grader)) {
@@ -1243,8 +1294,27 @@ function resolveTaskBinding(
       { name: BINARY_INSTRUMENT_MEASUREMENTS.labelResolutionSha256, type: "string", required: true },
       { name: BINARY_INSTRUMENT_MEASUREMENTS.instrumentSha256, type: "string", required: true },
     ],
-    verdictRule: { threshold: { measurement: BINARY_INSTRUMENT_MEASUREMENTS.agreement, op: "eq", value: true } },
-    unscorable: [],
+    // The abstain policy declares, in the closed verdict-rule vocabulary, the one situation in
+    // which there is nothing to score. Without it `evaluateVerdictRule` recomputes `fail` for an
+    // unparseable response and the harness refuses the evaluator's `inconclusive` delivery
+    // outright — the shape this oracle already expects at `verdict === "inconclusive"` for
+    // `judgeDecision === "INVALID"` could never have been produced. Reject is unchanged.
+    verdictRule: parserInvalidPolicy === "abstain"
+      ? {
+        all: [
+          {
+            class: UNPARSEABLE_JUDGE_RESPONSE_CLASS,
+            inconclusiveWhen: {
+              threshold: { measurement: BINARY_INSTRUMENT_MEASUREMENTS.parseValid, op: "eq", value: false },
+            },
+          },
+          { threshold: { measurement: BINARY_INSTRUMENT_MEASUREMENTS.agreement, op: "eq", value: true } },
+        ],
+      }
+      : { threshold: { measurement: BINARY_INSTRUMENT_MEASUREMENTS.agreement, op: "eq", value: true } },
+    unscorable: parserInvalidPolicy === "abstain"
+      ? [{ name: UNPARSEABLE_JUDGE_RESPONSE_CLASS, disposition: "recorded-inconclusive" }]
+      : [],
     evidenceConventions: { requiredRefs: [LABEL_RESOLUTION_NAME] },
   };
   if (!bytesEqual(canonicalJsonBytes(spec), canonicalJsonBytes(expectedSpec))) {

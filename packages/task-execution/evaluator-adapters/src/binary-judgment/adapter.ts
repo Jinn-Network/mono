@@ -122,14 +122,65 @@ export function binaryJudgmentEvaluationSpecMeasurements(): EvaluationSpec["meas
   ];
 }
 
-export function binaryJudgmentEvaluationSpecVerdictRule(): EvaluationSpec["verdictRule"] {
-  return {
+/**
+ * The abstain policy's recorded-inconclusive class (§7.4). A judge response the sealed grammar
+ * refuses carries no decision at all, so the cell is recorded inconclusive rather than scored —
+ * that is the whole point of the neutral-invalid policy, and `EvaluationSpec.unscorable` is the
+ * only place the platform lets a spec say so.
+ */
+export const BINARY_JUDGMENT_UNPARSEABLE_RESPONSE_CLASS = "unparseable-judge-response" as const;
+
+/**
+ * The reject policy scores every response, so its rule stays the bare agreement threshold —
+ * byte-identical to what it has always been.
+ *
+ * The abstain policy additionally declares, in the closed verdict-rule vocabulary, the one
+ * situation in which there is nothing to score: `parseValid=false`. Without this node
+ * `evaluateVerdictRule` recomputes `fail` for an unparseable response, and the harness's own
+ * verdict-consistency check (§7.3/§7.4) refuses the adapter's `inconclusive` delivery — which is
+ * exactly how the official run lost cell 535. The shape follows the prediction evaluator's
+ * `market-unresolved` precedent: an `inconclusiveWhen` node naming a class declared in
+ * `unscorable`.
+ */
+export function binaryJudgmentEvaluationSpecVerdictRule(
+  parserInvalidPolicy: BinaryJudgmentParserInvalidPolicy = "reject",
+): EvaluationSpec["verdictRule"] {
+  const agreementThreshold = {
     threshold: {
       measurement: BINARY_JUDGMENT_MEASUREMENTS.agreement,
-      op: "eq",
+      op: "eq" as const,
       value: true,
     },
   };
+  if (parserInvalidPolicy !== "abstain") return agreementThreshold;
+  return {
+    all: [
+      {
+        class: BINARY_JUDGMENT_UNPARSEABLE_RESPONSE_CLASS,
+        inconclusiveWhen: {
+          threshold: {
+            measurement: BINARY_JUDGMENT_MEASUREMENTS.parseValid,
+            op: "eq" as const,
+            value: false,
+          },
+        },
+      },
+      agreementThreshold,
+    ],
+  };
+}
+
+/** The reject policy declares none; the abstain policy declares its one recorded-inconclusive
+ * class, which is what makes an `inconclusive` delivery legal at all (§7.4). */
+export function binaryJudgmentEvaluationSpecUnscorable(
+  parserInvalidPolicy: BinaryJudgmentParserInvalidPolicy = "reject",
+): EvaluationSpec["unscorable"] {
+  return parserInvalidPolicy === "abstain"
+    ? [{
+      name: BINARY_JUDGMENT_UNPARSEABLE_RESPONSE_CLASS,
+      disposition: "recorded-inconclusive" as const,
+    }]
+    : [];
 }
 
 function bareSha256(digest: `sha256:${string}`, label: string): string {
@@ -186,8 +237,8 @@ export function buildBinaryJudgmentEvaluationSpecification(
       timeout: 60,
     },
     measurements: binaryJudgmentEvaluationSpecMeasurements(),
-    verdictRule: binaryJudgmentEvaluationSpecVerdictRule(),
-    unscorable: [],
+    verdictRule: binaryJudgmentEvaluationSpecVerdictRule(parserInvalidPolicy),
+    unscorable: binaryJudgmentEvaluationSpecUnscorable(parserInvalidPolicy),
     evidenceConventions: { requiredRefs: [BINARY_JUDGMENT_LABEL_RESOLUTION_NAME] },
   };
 }

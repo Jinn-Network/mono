@@ -56,6 +56,7 @@ import {
   BINARY_JUDGMENT_LABEL_RESOLUTION_NAME,
   BINARY_JUDGMENT_MEASUREMENTS,
   binaryJudgmentEvaluationMethodDescriptor,
+  binaryJudgmentEvaluationSpecUnscorable,
   binaryJudgmentEvaluationSpecVerdictRule,
   buildBinaryJudgmentEvaluationSpecification,
   contextBinaryJudgmentMaterialSource,
@@ -748,12 +749,50 @@ describe("binary judgment evaluator", () => {
       .toThrow("binary judgment analysis context must be a canonical sha256 digest");
   });
 
-  test("declares no unscorable classes and no inconclusiveWhen predicate", () => {
-    // spec §5.1: EvaluationSpec.unscorable stays [], byte-unchanged; binary judgment declares
-    // no inconclusiveWhen and never delivers "inconclusive".
+  test("the reject policy declares no unscorable classes and no inconclusiveWhen predicate", () => {
+    // spec §5.1: under REJECT every response is scored, so EvaluationSpec.unscorable stays [],
+    // byte-unchanged, and the rule is the bare agreement threshold. (Under ABSTAIN both differ —
+    // see the next test; the reject bytes below are pinned by digest.)
     const fixture = makeFixture({ truthLabel: "CORRECT", response: encoder.encode("ACCEPT") });
     expect(fixture.specification.unscorable).toEqual([]);
     expect(containsInconclusiveWhen(binaryJudgmentEvaluationSpecVerdictRule())).toBe(false);
+    expect(containsInconclusiveWhen(binaryJudgmentEvaluationSpecVerdictRule("reject"))).toBe(false);
+  });
+
+  test("the abstain policy declares its recorded-inconclusive class and predicate", () => {
+    // Without these an unparseable response recomputes `fail`, the harness refuses the
+    // evaluator's `inconclusive` delivery, and the cell is lost — the live cell-535 defect.
+    const rule = binaryJudgmentEvaluationSpecVerdictRule("abstain");
+    expect(containsInconclusiveWhen(rule)).toBe(true);
+    expect(rule).toEqual({
+      all: [
+        {
+          class: "unparseable-judge-response",
+          inconclusiveWhen: { threshold: { measurement: "parseValid", op: "eq", value: false } },
+        },
+        { threshold: { measurement: "agreement", op: "eq", value: true } },
+      ],
+    });
+    expect(binaryJudgmentEvaluationSpecUnscorable("abstain")).toEqual([
+      { name: "unparseable-judge-response", disposition: "recorded-inconclusive" },
+    ]);
+    expect(binaryJudgmentEvaluationSpecUnscorable("reject")).toEqual([]);
+  });
+
+  test("the sealed spec digests are pinned per policy", () => {
+    // The REJECT digest is the byte-identity proof: 533 live verdicts were sealed against it and
+    // this change must not move it by a single byte. The ABSTAIN digest is the new sealed spec.
+    const context = `sha256:${"2".repeat(64)}` as const;
+    expect(sealEvaluationSpec(buildBinaryJudgmentEvaluationSpecification(context, "reject")).digest)
+      .toBe("sha256:e03bcfb63742a8bd0ae3d3e7d9721ec31fe3999c0a334229a502c2aca79becbd");
+    expect(sealEvaluationSpec(buildBinaryJudgmentEvaluationSpecification(context, "abstain")).digest)
+      .toBe("sha256:f96f51964402a83fae6f38c878fe86355aabdfeb8c102ff448eb82cf0e597051");
+    // Neither sealed parser-semantics document moved: the defect was that the SPEC never encoded
+    // what the v2 semantics document already promised (`inconclusiveWhen: "parseValid=false"`).
+    expect(BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest)
+      .toBe("sha256:3568ee132ece234c15b7f9b6b4a7a954aefc2c417e17f2fde91729a7240bb343");
+    expect(BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY.digest)
+      .toBe("sha256:838a8e4d21893524cba10e5a282397b334a67fe9bc516d53ae20fd4f2b915038");
   });
 
   test.each([
