@@ -16,26 +16,60 @@ const sourceRoot = resolve(import.meta.dirname, "..");
  */
 const JUSTIFICATION = /\btemp-env:/u;
 
-/** Accepted ways an `env:` allowlist can carry the caller's, or a pinned, temp directory. */
-const CARRIES_TEMP = /inheritedTempEnv\(|scopedTempEnv\(|TMPDIR|\.\.\./u;
+/**
+ * Accepted ways an `env:` allowlist can carry the caller's, or a pinned, temp directory.
+ *
+ * A spread counts only when it is `...process.env` — the one spread expression whose contents the
+ * scan can read off the text itself. A bare `\.\.\.` used to be accepted here, which made every
+ * spread proof of carriage whatever it spread: `env: { ...process.env }` does carry the temp
+ * variables, `env: { ...env }` carries only what its own allowlist named, and the scan could not
+ * tell them apart. Any other spread is resolved through `delegatedDefinitions` instead.
+ */
+const CARRIES_TEMP = /inheritedTempEnv\(|scopedTempEnv\(|TMPDIR|\.\.\.process\.env\b/u;
 
 /** Declarations and schemas that name a field called `env`; they spawn nothing. */
 const NOT_A_SPAWN_SITE = /env:\s*(?:z\.|Readonly<|NodeJS\.ProcessEnv|dict\[|invocation\.env\b)/u;
 
 /**
- * The definition of the environment a site delegates to, when it passes a name rather than a
- * literal (`env: closedHarborEnv(paths)`, `env: dockerEnvironment`). Without this, a site that
- * builds its allowlist in one well-documented place reads to the scan as an omission, and the only
- * way to satisfy it would be to inline the literal at every call — which is what produced the gap
- * in the first place.
+ * The names an environment expression delegates to: what it passes instead of a literal
+ * (`env: closedHarborEnv(paths)`, `env: dockerEnvironment`), what it spreads (`...env`), and what
+ * a delegate's own body then calls (`loginEnvironment` calls `scopedTempEnv`). Without this, a
+ * site that builds its allowlist in one well-documented place reads to the scan as an omission,
+ * and the only way to satisfy it would be to inline the literal at every call — which is what
+ * produced the gap in the first place.
  */
-function delegatedDefinition(source: string, site: string): string | undefined {
-  const name = /env:\s*([A-Za-z_$][\w$]*)/u.exec(site)?.[1];
-  if (name === undefined) return undefined;
+function delegatedNames(expression: string): string[] {
+  const names = new Set<string>();
+  for (const pattern of [/env:\s*([A-Za-z_$][\w$]*)/gu, /\.\.\.([A-Za-z_$][\w$]*)/gu, /([A-Za-z_$][\w$]*)\s*\(/gu]) {
+    for (const match of expression.matchAll(pattern)) names.add(match[1]!);
+  }
+  return [...names];
+}
+
+/**
+ * The definition of a delegated name, as text. A fixed window rather than a brace walk: these
+ * definitions are a handful of lines, and a walk would have to understand template literals, which
+ * two of them are written inside.
+ */
+function definitionWindow(source: string, name: string): string | undefined {
   const definition = new RegExp(`(?:const|let|function)\\s+${name}\\b`, "u").exec(source);
-  // A fixed window rather than a brace walk: these definitions are a handful of lines, and a walk
-  // would have to understand template literals, which two of them are written inside.
   return definition === null ? undefined : source.slice(definition.index, definition.index + 600);
+}
+
+/**
+ * Whether an environment expression carries a temp directory, following delegation as far as the
+ * file itself can show it. Bounded by `seen`, which both terminates cycles and keeps a name that
+ * several expressions reach from being walked twice.
+ */
+function carriesTemp(source: string, expression: string, seen: Set<string>): boolean {
+  if (CARRIES_TEMP.test(expression) || JUSTIFICATION.test(expression)) return true;
+  for (const name of delegatedNames(expression)) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const definition = definitionWindow(source, name);
+    if (definition !== undefined && carriesTemp(source, definition, seen)) return true;
+  }
+  return false;
 }
 
 function sourceFiles(directory: string): string[] {
@@ -71,6 +105,20 @@ function envSite(source: string, index: number): string {
   return `${comments}\n${source.slice(index, end === -1 ? undefined : end)}`;
 }
 
+/** The `env:` sites in one file's source text that the scan cannot account for. */
+function unhandledSites(source: string): string[] {
+  const unhandled: string[] = [];
+  // `(?<![\w-])` and not `\b`: the justification marker is spelled `temp-env:`, and a word
+  // boundary matches after its hyphen — so every marker would be scanned as a site of its own.
+  for (const match of source.matchAll(/(?<![\w-])env:/gu)) {
+    const site = envSite(source, match.index);
+    if (NOT_A_SPAWN_SITE.test(site)) continue;
+    if (carriesTemp(source, site, new Set())) continue;
+    unhandled.push(site.split("\n").pop()?.trim() ?? "");
+  }
+  return unhandled;
+}
+
 describe("child temp-directory environment", () => {
   it("passes through only the caller's non-empty temp variables", () => {
     expect(inheritedTempEnv({ TMPDIR: "/a", TMP: "/b", TEMP: "/c", PATH: "/bin" })).toEqual({
@@ -91,21 +139,20 @@ describe("child temp-directory environment", () => {
   // package hands the child an explicit allowlist, and a child that inherits no temp variable falls
   // back to the platform default and writes outside the root its parent was confined to. Scanned
   // rather than asserted per call site, so a NEW spawn site cannot arrive without one or the other.
+  // The scan's own regression coverage: a spread used to satisfy it whatever it spread, so an
+  // allowlist that named no temp directory passed as long as it was built somewhere else and
+  // spread in. These two sources differ only in what the spread resolves to.
+  it("reads what a spread resolves to rather than accepting the spread itself", () => {
+    const carrier = 'function build() { return { ...scopedTempEnv(root), PATH: "" }; }\n';
+    const bare = 'function build() { return { PATH: "" }; }\n';
+    const site = 'const built = build();\nspawn(exe, args, { env: { ...built, HOME: home } });\n';
+    expect(unhandledSites(carrier + site)).toEqual([]);
+    expect(unhandledSites(bare + site)).toHaveLength(1);
+  });
+
   it("names the temp variables at every spawn site, or says why not", () => {
-    const unhandled: string[] = [];
-    for (const file of sourceFiles(sourceRoot)) {
-      const source = readFileSync(file, "utf8");
-      // `(?<![\w-])` and not `\b`: the justification marker is spelled `temp-env:`, and a word
-      // boundary matches after its hyphen — so every marker would be scanned as a site of its own.
-      for (const match of source.matchAll(/(?<![\w-])env:/gu)) {
-        const site = envSite(source, match.index);
-        if (NOT_A_SPAWN_SITE.test(site)) continue;
-        if (CARRIES_TEMP.test(site) || JUSTIFICATION.test(site)) continue;
-        const delegated = delegatedDefinition(source, site);
-        if (delegated !== undefined && (CARRIES_TEMP.test(delegated) || JUSTIFICATION.test(delegated))) continue;
-        unhandled.push(`${relative(sourceRoot, file)}: ${site.split("\n").pop()?.trim()}`);
-      }
-    }
+    const unhandled = sourceFiles(sourceRoot).flatMap((file) =>
+      unhandledSites(readFileSync(file, "utf8")).map((site) => `${relative(sourceRoot, file)}: ${site}`));
     expect(
       unhandled,
       "spawn sites whose env allowlist names no temp directory and gives no reason:\n" +

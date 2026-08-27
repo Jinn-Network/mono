@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { AgentProfile } from "./profile.js";
+import { scopedTempEnv } from "../runtime/child-temp-env.js";
 import { readRegularFileNoFollow } from "./safe-file.js";
 import { observeAgentVersion } from "./version.js";
 import {
@@ -50,11 +51,14 @@ function loginEnvironment(root: string): Record<string, string> {
   const home = join(root, "home");
   privateDirectory(home);
   return {
+    // All three temp names, not the POSIX one alone: the children spawned with this allowlist are
+    // Node CLIs today, but a child that consults the Windows names instead would fall back to the
+    // platform default and write outside the root this function owns and its caller removes.
+    ...scopedTempEnv(root),
     HOME: home,
     LANG: "C",
     LC_ALL: "C",
     PATH: process.env.PATH ?? "",
-    TMPDIR: root,
   };
 }
 

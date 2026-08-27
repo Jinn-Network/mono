@@ -191,6 +191,9 @@ function defaultCommand(
   return execFileAsync(executablePath, [...args], {
     encoding: "utf8",
     maxBuffer: 1024 * 1024,
+    // temp-env: delegated to the caller. This helper builds no allowlist of its own — it forwards
+    // whichever one the caller passed (`readinessEnvironment`, which names all three), and absent
+    // an `env` it hands the child nothing, so `execFile` gives it the parent's environment whole.
     ...(options?.env === undefined ? {} : { env: { ...options.env } }),
   });
 }
@@ -518,6 +521,8 @@ export function makeDemo1ClaudeLauncher(runtime: Demo1ClaudeRuntimeBinding): Lau
       return {
         ...planned,
         argv,
+        // temp-env: delegated to the wrapped launcher. `planned.env` is the plan that launcher
+        // produced, scanned at its own site; this adds one credential name and changes nothing else.
         env: {
           ...planned.env,
           [DEMO1_CLAUDE_OAUTH_FILE_ENV]: `secrets/${runtime.credential.secretForward.target}`,
