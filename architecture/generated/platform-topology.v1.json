@@ -12940,6 +12940,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "operator/test/harnesses/impls/hermes-agent/resolved-model-guard.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "operator/test/harnesses/impls/hermes-agent/swe-rebench-v2-roundtrip.test.ts"
       },
       {
