@@ -72,13 +72,63 @@ export function findVitestConfigs(directory, base = root) {
 }
 
 /**
+ * `source` with line and block comments replaced by whitespace, preserving offsets and line
+ * structure so the readers below can keep matching over a plain string.
+ *
+ * Every reader here matches the raw source, so without this a commented-out entry reads exactly
+ * like a live one: prefixing `// ` to a config's `setupFiles` line left the wiring gate green while
+ * the suite resumed leaking (issue #3027). Quoted text is skipped, so a `//` inside a path or URL
+ * is not mistaken for a comment.
+ */
+export function stripComments(source) {
+  let out = '';
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index];
+    if (char === "'" || char === '"' || char === '`') {
+      const start = index;
+      index += 1;
+      // A `'`/`"` string cannot hold an unescaped newline, so ending the span at one bounds any
+      // mis-read to a single line. Without that an odd quote count outside a string — a regex like
+      // `/['"]/u`, since regex literals are not tokenized — would swallow the rest of the file and
+      // hand every later comment back as live source, which is the failure this whole change removes.
+      while (index < source.length && source[index] !== char) {
+        if (char !== '`' && source[index] === '\n') break;
+        index += source[index] === '\\' ? 2 : 1;
+      }
+      index += 1;
+      out += source.slice(start, Math.min(index, source.length));
+      continue;
+    }
+    if (char === '/' && source[index + 1] === '/') {
+      const newline = source.indexOf('\n', index);
+      const stop = newline === -1 ? source.length : newline;
+      out += ' '.repeat(stop - index);
+      index = stop;
+      continue;
+    }
+    if (char === '/' && source[index + 1] === '*') {
+      const end = source.indexOf('*/', index + 2);
+      const stop = end === -1 ? source.length : end + 2;
+      out += source.slice(index, stop).replace(/[^\n]/gu, ' ');
+      index = stop;
+      continue;
+    }
+    out += char;
+    index += 1;
+  }
+  return out;
+}
+
+/**
  * The paths a config's `setupFiles`/`globalSetup` entries resolve to, as repo-relative strings.
  *
  * Deliberately a scan of the quoted paths in the source rather than an import of the config: these
  * configs import `vitest/config` and per-package plugins, and this gate runs on a checkout with no
  * dependencies installed anywhere.
  */
-export function wiredPaths(source, configPath, base = root) {
+export function wiredPaths(rawSource, configPath, base = root) {
+  const source = stripComments(rawSource);
   const configDir = dirname(resolve(base, configPath));
   const paths = [];
   for (const key of ['setupFiles', 'globalSetup']) {
@@ -124,9 +174,9 @@ for (const seam of SEAMS) {
  * Same quoted-path scan as `wiredPaths`, and for the same reason: this gate runs on a checkout
  * with no dependencies installed, so it cannot import a config to ask.
  */
-export function fsAllowPaths(source, configPath, base = root) {
+export function fsAllowPaths(rawSource, configPath, base = root) {
   const configDir = dirname(resolve(base, configPath));
-  const match = source.match(/allow:\s*\[([^\]]*)\]/u);
+  const match = stripComments(rawSource).match(/allow:\s*\[([^\]]*)\]/u);
   if (match === null) return [];
   return [...match[1].matchAll(/['"]([^'"]+)['"]/gu)].map((quoted) =>
     relative(base, resolve(configDir, quoted[1])).split('\\').join('/'),
@@ -134,8 +184,8 @@ export function fsAllowPaths(source, configPath, base = root) {
 }
 
 /** A config's declared `test.environment`, or `'node'` when it declares none (Vitest's default). */
-export function declaredEnvironment(source) {
-  const match = source.match(/environment:\s*['"]([^'"]+)['"]/u);
+export function declaredEnvironment(rawSource) {
+  const match = stripComments(rawSource).match(/environment:\s*['"]([^'"]+)['"]/u);
   return match === null ? 'node' : match[1];
 }
 
@@ -182,4 +232,65 @@ test('the seam files every config points at exist', () => {
       assert.ok(existsSync(absolute) && statSync(absolute).isFile(), `missing seam file ${file}`);
     }
   }
+});
+
+// Commenting a wiring line out while chasing a slow or flaky suite is an ordinary edit, and the one
+// most likely to be committed by accident. Every reader above matches over the raw source, so
+// without `stripComments` a commented-out entry reads exactly like a live one and the gate above
+// stays green while the suite leaks (issue #3027). These prove the readers red on that edit, the
+// same way the gate is already red on a deleted one.
+test('commented-out wiring does not read as live wiring', () => {
+  const config = 'packages/layer/vitest.config.ts';
+  const live = [
+    'export default defineConfig({',
+    "  test: { setupFiles: ['../../test-support/tmp-isolation/isolate-tmp.ts'],",
+    "    globalSetup: ['../../test-support/tmp-isolation/global-tmp-root.ts'] },",
+    '});',
+  ].join('\n');
+  assert.equal(wiredPaths(live, config).length, 2);
+
+  const lineCommented = live
+    .split('\n')
+    .map((line) => (line.includes('tmp-isolation') ? `// ${line}` : line))
+    .join('\n');
+  assert.deepEqual(wiredPaths(lineCommented, config), []);
+
+  const blockCommented = live.replace("  test: {", '  /* test: {').replace('});', '} */\n});');
+  assert.deepEqual(wiredPaths(blockCommented, config), []);
+});
+
+test('commented-out server.fs.allow does not read as a live allowance', () => {
+  const config = 'packages/indexer/explorer/vitest.config.ts';
+  const live = "server: { fs: { allow: ['../../..', '.'] } },";
+  assert.equal(fsAllowPaths(live, config).length, 2);
+  assert.deepEqual(fsAllowPaths(`// ${live}`, config), []);
+  assert.deepEqual(fsAllowPaths(`/* ${live} */`, config), []);
+});
+
+test('an environment named in a comment does not shadow the declared one', () => {
+  assert.equal(declaredEnvironment("environment: 'jsdom',"), 'jsdom');
+  assert.equal(
+    declaredEnvironment("// unlike the environment: 'node' suites\nenvironment: 'jsdom',"),
+    'jsdom',
+  );
+  assert.equal(
+    declaredEnvironment("/* contrast with environment: 'node' */\nenvironment: 'jsdom',"),
+    'jsdom',
+  );
+  assert.equal(declaredEnvironment("// environment: 'jsdom'"), 'node');
+});
+
+test('stripComments leaves comment markers inside strings alone', () => {
+  const source = "url: 'https://example.test/a', pattern: '/* not a comment */', real: 1 /* gone */";
+  const stripped = stripComments(source);
+  assert.ok(stripped.includes("'https://example.test/a'"));
+  assert.ok(stripped.includes("'/* not a comment */'"));
+  assert.ok(!stripped.includes('gone'));
+  assert.equal(stripped.length, source.length);
+  assert.equal(stripComments("a: '\\'', b: 2 // x").trimEnd(), "a: '\\'', b: 2");
+  assert.equal(stripComments("a: 'unterminated // x"), "a: 'unterminated // x");
+
+  // A quote the scanner cannot pair off must not leak the next line's comments back as live source.
+  const afterOddQuote = stripComments("const RE = /['\"]/u;\n// setupFiles: ['isolate-tmp.ts']");
+  assert.ok(!afterOddQuote.includes('isolate-tmp'));
 });
