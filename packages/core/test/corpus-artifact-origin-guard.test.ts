@@ -10,6 +10,7 @@ import {
 } from '../src/corpus-read/origin-guard.js';
 import { pinnedFetch } from '../src/corpus-read/pinned-fetch.js';
 import { createServer } from 'node:http';
+import { createServer as createNetServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { fetchArtifactContent, buildArtifactUrl } from '../src/corpus-read/fetch-artifact.js';
 import { acquireArtifactContent } from '../src/corpus-read/acquire.js';
@@ -77,13 +78,25 @@ describe('resolvePublicHttpDestination (#1901)', () => {
   it('accepts a credential-free public https destination and returns the address to pin', async () => {
     await expect(resolvePublicHttpDestination(
       new URL('https://op.example.com/v1'), { resolveHostname: publicResolver },
-    )).resolves.toEqual({ address: '93.184.216.34', family: 4 });
+    )).resolves.toEqual({ addresses: [{ address: '93.184.216.34', family: 4 }] });
   });
 
   it('pins a literal-IP host to itself', async () => {
     await expect(resolvePublicHttpDestination(
       new URL('https://93.184.216.34/v1'), { resolveHostname: publicResolver },
-    )).resolves.toEqual({ address: '93.184.216.34', family: 4 });
+    )).resolves.toEqual({ addresses: [{ address: '93.184.216.34', family: 4 }] });
+  });
+
+  it('keeps every validated address so the transport can still fail over', async () => {
+    await expect(resolvePublicHttpDestination(
+      new URL('https://dual.example.com/v1'),
+      { resolveHostname: async () => ['2606:2800:220:1:248:1893:25c8:1946', '93.184.216.34'] },
+    )).resolves.toEqual({
+      addresses: [
+        { address: '2606:2800:220:1:248:1893:25c8:1946', family: 6 },
+        { address: '93.184.216.34', family: 4 },
+      ],
+    });
   });
 
   it.each(['file:///etc/passwd', 'ftp://example.com/x', 'gopher://example.com/'])(
@@ -380,7 +393,7 @@ describe('address pinning defeats DNS rebinding (#1901)', () => {
       await expect(pinnedFetch(new URL(`http://rebind.example.invalid:${port}/x`)))
         .rejects.toThrow();
       const response = await pinnedFetch(new URL(`http://rebind.example.invalid:${port}/x`), {
-        pinnedAddress: '127.0.0.1', pinnedFamily: 4,
+        pinnedAddresses: [{ address: '127.0.0.1', family: 4 }],
       });
       expect(response.status).toBe(200);
       expect(await response.text()).toBe('pinned-body');
@@ -391,8 +404,8 @@ describe('address pinning defeats DNS rebinding (#1901)', () => {
 
   it('hands the guard-approved address to the transport on every hop', async () => {
     const seen: Array<string | undefined> = [];
-    const fetchImpl = vi.fn(async (_url: URL, init?: { pinnedAddress?: string }) => {
-      seen.push(init?.pinnedAddress);
+    const fetchImpl = vi.fn(async (_url: URL, init?: { pinnedAddresses?: readonly { address: string }[] }) => {
+      seen.push(init?.pinnedAddresses?.[0]?.address);
       return seen.length === 1
         ? new Response(null, { status: 302, headers: { location: 'https://cdn.example.com/b' } })
         : new Response(Buffer.from('ok', 'utf-8'), { status: 200 });
@@ -462,5 +475,50 @@ describe('obfuscated and credential-bearing destinations (#1901)', () => {
     });
     expect(result).toMatchObject({ ok: false, reason: 'blocked', message: expect.stringMatching(/credentials/u) });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a hostile response cannot kill the process (#1901)', () => {
+  /** Serve a hand-written response so we control bytes the HTTP layer sees. */
+  const rawServer = async (raw: string) => {
+    // Reply only once the request has actually arrived — writing first and
+    // half-closing races the client's own write and never gets parsed.
+    const server = createNetServer((socket) => {
+      socket.once('data', () => { socket.end(raw); });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    return { server, port: (server.address() as AddressInfo).port };
+  };
+
+  it.each([
+    ['205 Reset Content', 'HTTP/1.1 205 Reset Content\r\nContent-Length: 5\r\n\r\nhello'],
+    ['204 No Content', 'HTTP/1.1 204 No Content\r\n\r\n'],
+    ['304 Not Modified', 'HTTP/1.1 304 Not Modified\r\n\r\n'],
+  ])('handles a bodyless %s without throwing out of the response callback', async (_label, raw) => {
+    // A throw inside http.request's response callback is an uncaught
+    // exception — unreachable by the caller's try/catch and fatal to the
+    // daemon. These statuses reject a body in the Response constructor.
+    const { server, port } = await rawServer(raw);
+    try {
+      const response = await pinnedFetch(new URL(`http://origin.example.invalid:${port}/x`), {
+        pinnedAddresses: [{ address: '127.0.0.1', family: 4 }],
+      });
+      expect(response.body).toBeNull();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('surfaces a 205 origin as an ordinary failed acquisition, not a crash', async () => {
+    const { server, port } = await rawServer(
+      'HTTP/1.1 205 Reset Content\r\nContent-Length: 5\r\n\r\nhello');
+    try {
+      const result = await fetchArtifactContent(`http://origin.example.invalid:${port}`, SHA, {
+        allowPrivateDestinations: true, timeoutMs: 4000,
+      });
+      expect(result).toMatchObject({ ok: false, reason: 'network_error' });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

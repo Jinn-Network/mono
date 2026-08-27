@@ -210,11 +210,14 @@ function unbracket(hostname: string): string {
   return hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
 }
 
-/** The exact destination the guard approved, for the transport to pin to. */
+/** The exact destinations the guard approved, for the transport to pin to. */
 export interface PinnedDestination {
-  /** Numeric address the connection must use. */
-  readonly address: string;
-  readonly family: 4 | 6;
+  /**
+   * Every address the connection may use, in resolver order. All of them
+   * passed the policy, so the transport is free to fail over between them —
+   * pinning to just the first would break dual-stack and multi-A origins.
+   */
+  readonly addresses: ReadonlyArray<{ readonly address: string; readonly family: 4 | 6 }>;
 }
 
 /**
@@ -255,7 +258,7 @@ export async function resolvePublicHttpDestination(
       throw new ProhibitedDestinationError(
         `artifact origin address ${host} is ${verdict}, not a public destination`, verdict);
     }
-    return { address: host, family: isIPv4(host) ? 4 : 6 };
+    return { addresses: [{ address: host, family: isIPv4(host) ? 4 : 6 }] };
   }
 
   let addresses: string[];
@@ -282,6 +285,10 @@ export async function resolvePublicHttpDestination(
       );
     }
   }
-  const chosen = addresses[0];
-  return { address: chosen, family: isIPv4(chosen) ? 4 : 6 };
+  return {
+    addresses: addresses.map((address) => ({
+      address,
+      family: isIPv4(address) ? 4 as const : 6 as const,
+    })),
+  };
 }

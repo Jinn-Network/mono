@@ -23,10 +23,21 @@ import { request as httpsRequest } from 'node:https';
 import { Readable } from 'node:stream';
 import type { LookupAddress } from 'node:dns';
 
+/** Statuses the `Response` constructor refuses to pair with a body. */
+const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
+
+export interface PinnedAddress {
+  readonly address: string;
+  readonly family: 4 | 6;
+}
+
 export interface PinnedFetchInit {
-  /** Numeric address the socket must connect to. Omit to use ordinary DNS. */
-  readonly pinnedAddress?: string;
-  readonly pinnedFamily?: 4 | 6;
+  /**
+   * Addresses the socket may connect to, in preference order. Every one has
+   * already passed the destination policy, so Node is free to fail over
+   * between them. Omit to use ordinary DNS.
+   */
+  readonly pinnedAddresses?: readonly PinnedAddress[];
   readonly signal?: AbortSignal;
   /** Always `'manual'` here — redirects are the caller's to revalidate. */
   readonly redirect?: 'manual' | 'follow' | 'error';
@@ -47,11 +58,16 @@ export const pinnedFetch: PinnedFetch = (url, init = {}) =>
     }
 
     const send = url.protocol === 'https:' ? httpsRequest : httpRequest;
-    const pinned = init.pinnedAddress;
+    const pinned = init.pinnedAddresses;
     const outgoing = send(url, {
       method: 'GET',
+      // A pooled keep-alive socket is keyed on host:port and ignores `lookup`,
+      // so a reused connection would skip the pin entirely. Opting out of the
+      // shared agent keeps "we connect to the address we validated" literally
+      // true, at the cost of a handshake per artifact fetch.
+      ...(pinned === undefined ? {} : { agent: false as const }),
       // Redirects are never followed here; the caller revalidates each hop.
-      ...(pinned === undefined ? {} : {
+      ...(pinned === undefined || pinned.length === 0 ? {} : {
         // Node calls `lookup` with `{ all: true }` from some connect paths
         // and expects the array shape back there; answering the wrong shape
         // throws "Invalid IP address: undefined".
@@ -64,26 +80,33 @@ export const pinnedFetch: PinnedFetch = (url, init = {}) =>
             family?: number,
           ) => void,
         ) => {
-          const family = init.pinnedFamily ?? 4;
-          if (options?.all === true) callback(null, [{ address: pinned, family }]);
-          else callback(null, pinned, family);
+          if (options?.all === true) callback(null, pinned.map((entry) => ({ ...entry })));
+          else callback(null, pinned[0].address, pinned[0].family);
         },
       }),
     }, (incoming) => {
-      const headers = new Headers();
-      for (const [name, value] of Object.entries(incoming.headers)) {
-        if (value === undefined) continue;
-        headers.set(name, Array.isArray(value) ? value.join(', ') : value);
+      // Everything here runs inside http.request's response callback, where a
+      // throw is an UNCAUGHT EXCEPTION — no promise rejection, nothing the
+      // caller's try/catch can see, process dead. The response is
+      // attacker-shaped, so the whole callback is guarded and every failure
+      // is converted into a rejection this function's caller can handle.
+      try {
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(incoming.headers)) {
+          if (value === undefined) continue;
+          headers.set(name, Array.isArray(value) ? value.join(', ') : value);
+        }
+        const status = incoming.statusCode ?? 502;
+        const bodyless = NULL_BODY_STATUSES.has(status) || status < 200;
+        if (bodyless) incoming.resume();
+        resolve(new Response(
+          bodyless ? null : (Readable.toWeb(incoming) as ReadableStream<Uint8Array>),
+          { status, headers },
+        ));
+      } catch (err) {
+        incoming.resume();
+        reject(err instanceof Error ? err : new Error(String(err)));
       }
-      const status = incoming.statusCode ?? 502;
-      // 204/304 and the 1xx range must not carry a body per the Response
-      // constructor; everything else streams through untouched.
-      const bodyless = status === 204 || status === 304 || status < 200;
-      if (bodyless) incoming.resume();
-      resolve(new Response(
-        bodyless ? null : (Readable.toWeb(incoming) as ReadableStream<Uint8Array>),
-        { status, headers },
-      ));
     });
 
     outgoing.on('error', reject);

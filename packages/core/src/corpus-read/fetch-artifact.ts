@@ -186,7 +186,7 @@ export async function fetchArtifactContent(
       const response = await bounded(fetchImpl(target, {
         redirect: 'manual',
         signal: controller.signal,
-        ...(pin === null ? {} : { pinnedAddress: pin.address, pinnedFamily: pin.family }),
+        ...(pin === null ? {} : { pinnedAddresses: pin.addresses }),
       }));
 
       if (REDIRECT_STATUSES.has(response.status)) {
