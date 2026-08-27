@@ -348,4 +348,209 @@ describe('createTaskLifecycleReader.getTaskLifecycleEvidence (#2044)', () => {
     await expect(reader.getTaskLifecycleEvidence({ taskIds: ['7'] }))
       .rejects.toThrow(/indexer not ready/u);
   });
+
+  it('queries no leg when every requested task id is blank', async () => {
+    // `.filter(Boolean)` empties the requested set, and an empty `id_in` would
+    // match the WHOLE task table. The `/ready` probe still runs — the zero-I/O
+    // short-circuit is the `taskIds.length === 0` case above, and this one
+    // lands after it.
+    const fetchImpl = scriptedFetch([]);
+    await expect(readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['', ''] }))
+      .resolves.toEqual(new Map());
+    expect(fetchImpl.mock.calls.filter(([u]) => !isReadyProbe(String(u)))).toHaveLength(0);
+  });
+
+  it('withdraws the read when a verdict names an attempt the spine never saw', async () => {
+    // Reachable in production: five separate unpinned reads, so the indexer can
+    // index an attempt after the attempts leg ran and still answer with its
+    // verdict. The result carries no asOfBlock marker, so the caller could
+    // never detect the missing verdict.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20' },
+      ]),
+      page('verdicts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 1, verdictIndex: 0, requestId: hex32('d1'),
+          evaluator: addr('e0'), verdictCode: 1, createdAtBlock: '31' },
+      ]),
+      page('attemptEnvelopeMetas', []),
+      page('verdictEnvelopeMetas', []),
+    ]);
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('unusable verdicts row (taskId=7 attemptIndex=1'),
+    );
+    warn.mockRestore();
+  });
+
+  it('preserves deliveryRate as an exact wei string', async () => {
+    // Wei past Number.MAX_SAFE_INTEGER: anything that routed this through a
+    // number would round it.
+    const wei = '123456789012345678901';
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'),
+          deliveryRate: wei, createdAtBlock: '20' },
+      ]),
+      page('verdicts', []),
+      page('attemptEnvelopeMetas', []),
+    ]);
+    const ev = (await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).get('7')!;
+    expect(ev.authoritative.attempts[0]!.deliveryRate).toBe(wei);
+  });
+
+  it('withdraws the read when deliveryRate is not a string or number', async () => {
+    // `String(null)` would put the literal "null" into the spine.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'),
+          deliveryRate: null, createdAtBlock: '20' },
+      ]),
+    ]);
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unusable attempts row'));
+    warn.mockRestore();
+  });
+
+  it('withdraws the read when createdAtTx is malformed rather than omitting the field', async () => {
+    // The identity a consumer re-derives the task against an RPC with. Failing
+    // OPEN here would drop it silently on the same row where a bad `creator`
+    // withdraws the read.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([page('tasks', [{ ...TASK_ROW, createdAtTx: '0xnope' }])]);
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unusable tasks row (taskId=7)'));
+    warn.mockRestore();
+  });
+
+  it('withdraws the read when verdictCode is outside the documented 0..4 enum', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20' },
+      ]),
+      page('verdicts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, verdictIndex: 0, requestId: hex32('d0'),
+          evaluator: addr('e0'), verdictCode: 999, createdAtBlock: '30' },
+      ]),
+    ]);
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unusable verdicts row'));
+    warn.mockRestore();
+  });
+
+  it("keeps a candidate whose manifestHash is the schema default '0x'", async () => {
+    // `t.hex().notNull().default('0x')` — the loose hex check exists to ADMIT
+    // these rows. A `+` quantifier rejected every one of them.
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20' },
+      ]),
+      page('verdicts', []),
+      page('attemptEnvelopeMetas', [
+        { requestId: hex32('b0'), chainId: 84532, manifestCid: 'bafy1', publisherAgentId: '1',
+          manifestHash: '0x', enrichedAtBlock: '25' },
+      ]),
+    ]);
+    const ev = (await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).get('7')!;
+    const candidates = ev.authoritative.attempts[0]!.attemptEnvelopeCandidates;
+    expect(candidates.map((c) => c.manifestHash)).toEqual(['0x']);
+  });
+
+  it('withdraws a leg whose connection root field is missing', async () => {
+    // `200 {"data":{}}` used to read as an empty leg, indistinguishable from a
+    // leg that genuinely holds nothing.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (isReadyProbe(String(url))) return new Response('ok', { status: 200 });
+      return new Response(JSON.stringify({ data: {} }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    });
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('missing or malformed connection on tasks'),
+    );
+    warn.mockRestore();
+  });
+
+  it('withdraws a leg whose items is not an array, instead of throwing', async () => {
+    // The raw spread threw a TypeError that escaped the documented
+    // DiscoveryUnavailableError contract.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (isReadyProbe(String(url))) return new Response('ok', { status: 200 });
+      return new Response(JSON.stringify({ data: { tasks: { items: 'nope' } } }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    });
+    await expect(readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] }))
+      .resolves.toEqual(new Map());
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('missing or malformed connection on tasks'),
+    );
+    warn.mockRestore();
+  });
+
+  it('withdraws a full page that carries no pageInfo (absence > partial lie)', async () => {
+    // A FULL page with no pageInfo is not "the last page" — the page cap can
+    // never engage, so a truncated leg is presented as the whole answer.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (isReadyProbe(String(url))) return new Response('ok', { status: 200 });
+      return new Response(JSON.stringify({ data: { tasks: { items: [TASK_ROW] } } }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    });
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('missing or malformed pageInfo on tasks'),
+    );
+    warn.mockRestore();
+  });
+
+  it('batches an oversized taskIds filter instead of sending one giant variable', async () => {
+    const taskIds = Array.from({ length: 600 }, (_, i) => String(i));
+    const fetchImpl = scriptedFetch([page('tasks', []), page('tasks', [])]);
+    await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds });
+    const bodies = fetchImpl.mock.calls
+      .filter(([u]) => !isReadyProbe(String(u)))
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+    expect(bodies.map((b) => b.variables.taskIds.length)).toEqual([500, 100]);
+  });
+
+  it('batches an oversized requestId_in filter on the candidate legs', async () => {
+    // 501 attempts on one task means 501 distinct 66-char SOLVE requestIds —
+    // ~34 KB of ids per 500, and unbatched the whole set rode in one variable.
+    const attemptRows = Array.from({ length: 501 }, (_, i) => ({
+      taskId: '7', chainId: 84532, attemptIndex: i,
+      requestId: `0x${String(i).padStart(64, '0')}`,
+      operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20',
+    }));
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', attemptRows),
+      page('verdicts', []),
+      page('attemptEnvelopeMetas', []),
+      page('attemptEnvelopeMetas', []),
+    ]);
+    await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] });
+    const metaBodies = fetchImpl.mock.calls
+      .filter(([u]) => !isReadyProbe(String(u)))
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)))
+      .filter((b) => b.query.includes('attemptEnvelopeMetas('));
+    expect(metaBodies.map((b) => b.variables.requestIds.length)).toEqual([500, 1]);
+  });
 });

@@ -10,6 +10,25 @@
  * typo'd or renamed column fails here instead of at runtime against a live
  * indexer. `where:` and `orderBy` are covered alongside the selection set —
  * a bad name in either is equally fatal at runtime.
+ *
+ * WHAT THIS DOES NOT COVER, stated so nobody reads it as a full contract test:
+ *
+ * 1. Column NAMES only, never TYPES. A column renamed from `t.integer()` to
+ *    `t.bigint()` passes here and breaks at runtime; the reader's own parse
+ *    guards (`parseExactBlock`, `isCount`, `isBytes32`) are what catch that.
+ * 2. `ROOT_FIELD_TO_TABLE` is hand-maintained. Ponder's pluralization is not
+ *    derived here, so a table whose root field pluralizes unexpectedly is only
+ *    caught by the "unmapped root field" assertion below — which fails loudly,
+ *    but needs a human to supply the right mapping.
+ * 3. The PAGINATION ARGUMENT SURFACE — `limit` / `after` / `orderDirection` and
+ *    the `items` + `pageInfo { hasNextPage endCursor }` connection shape — is
+ *    not checked against anything, because it is Ponder's GraphQL API rather
+ *    than the project's schema file. It is independently corroborated by a
+ *    working client against a live Ponder mount:
+ *    `legacy/jinn-cli-agents-reference/frontend/explorer/src/lib/subgraph.ts`
+ *    (~L190-240) queries with exactly `limit` / `after` / `before` / `orderBy` /
+ *    `orderDirection` and reads back `items` + `pageInfo { hasNextPage,
+ *    endCursor }`.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

@@ -5,6 +5,17 @@
  * four-method narrowness of `./types.ts` is a design invariant, every consumer
  * narrows with `Pick<DiscoveryClient, 'x'>`, and this read has no consumer today.
  *
+ * STAGED, NOT EXPORTED. #2044's governing ruling
+ * (`docs/superpowers/specs/2026-07-28-benchmarking-application-design.md` §17.2)
+ * keeps the issue alive because the read "improves the live product now and its
+ * shape informs projector #1". Nothing imports it yet, and it is deliberately
+ * absent from `operator/src/index.ts`: no module under `discovery-client/`
+ * appears there — the four shipped `DiscoveryClient` methods included — and
+ * `@jinn-network/operator` is published to npm, so an entry-point export is a
+ * public-API commitment for a surface with no consumer. Until the projector
+ * arrives, `test/discovery-client/task-lifecycle-schema-conformance.test.ts` is
+ * what keeps the query documents from rotting against the indexer schema.
+ *
  * Transport is REUSED, never re-implemented: `createDiscoveryHttpTransport` is
  * already exported from `./http.js` for exactly this, so the read inherits the
  * `/ready` gate, the 15s per-request timeout, and the 502/503 retry schedule.
@@ -39,6 +50,25 @@ import {
 const LIFECYCLE_PAGE_LIMIT = 1000;
 /** Hard page cap per leg. 50 x 1000 = 50k rows before the honesty guard fires. */
 const MAX_LIFECYCLE_PAGES = 50;
+/**
+ * Values per `*_in` filter argument. The attempts leg can drain 50k rows, and
+ * every distinct 66-char requestId then feeds ONE `requestId_in` variable —
+ * a ~3.4 MB request body, past most default GraphQL/proxy body caps. `taskIds`
+ * is caller-supplied and equally uncapped. Both are batched at this width and
+ * the batches merged; the page walk inside each batch is unchanged.
+ */
+const LIFECYCLE_IN_BATCH = 500;
+/**
+ * Highest on-chain VerdictCode: 0=None, 1=Pass, 2=Fail, 3=Invalid,
+ * 4=Unresolved (the enum in `contracts/src/tasks/TaskCoordinator.sol`).
+ */
+const MAX_VERDICT_CODE = 4;
+
+// `orderBy` on every leg below is a PAGINATION-STABILITY concern only — the
+// assembler sorts attempts by attemptIndex and verdicts by verdictIndex itself.
+// Ponder appends the primary key to the cursor, so a repeated sort value is
+// already tie-broken; each leg still names the most-unique column available so
+// the walk does not depend on that.
 
 const LIFECYCLE_TASKS_QUERY = `
 query LifecycleTasks($taskIds: [String!]!, $limit: Int!, $after: String) {
@@ -76,7 +106,7 @@ query LifecycleAttempts($taskIds: [String!]!, $chainId: Int!, $limit: Int!, $aft
     where: { taskId_in: $taskIds, chainId: $chainId },
     limit: $limit,
     after: $after,
-    orderBy: "attemptIndex",
+    orderBy: "requestId",
     orderDirection: "asc"
   ) {
     items {
@@ -103,7 +133,7 @@ query LifecycleVerdicts($taskIds: [String!]!, $chainId: Int!, $limit: Int!, $aft
     where: { taskId_in: $taskIds, chainId: $chainId },
     limit: $limit,
     after: $after,
-    orderBy: "verdictIndex",
+    orderBy: "requestId",
     orderDirection: "asc"
   ) {
     items {
@@ -130,7 +160,7 @@ query LifecycleAttemptMetas($requestIds: [String!]!, $limit: Int!, $after: Strin
     where: { requestId_in: $requestIds },
     limit: $limit,
     after: $after,
-    orderBy: "enrichedAtBlock",
+    orderBy: "manifestCid",
     orderDirection: "asc"
   ) {
     items {
@@ -165,7 +195,7 @@ query LifecycleVerdictMetas($requestIds: [String!]!, $limit: Int!, $after: Strin
     where: { requestId_in: $requestIds },
     limit: $limit,
     after: $after,
-    orderBy: "enrichedAtBlock",
+    orderBy: "manifestCid",
     orderDirection: "asc"
   ) {
     items {
@@ -201,14 +231,20 @@ query LifecycleVerdictMetas($requestIds: [String!]!, $limit: Int!, $after: Strin
 // The wire shapes, before validation. Block heights arrive as `string | number`
 // depending on column width, so every one is funnelled through parseExactBlock.
 
-/** One cursor-paged connection. Every lifecycle leg answers in this shape. */
+/**
+ * One cursor-paged connection. Every lifecycle leg answers in this shape — but
+ * every part of it is declared OPTIONAL, because this is the wire shape a
+ * stranger sent, not a contract. `drainLifecycleLeg` checks each piece before
+ * trusting it; a `200 {"data":{}}` and a page with no `pageInfo` are both real
+ * responses that must not read as "leg complete".
+ */
 interface LifecyclePage<Row> {
-  items: Row[];
-  pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  items?: Row[];
+  pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null;
 }
 
 /** A leg's response, keyed by its GraphQL root field. */
-type LifecycleLegResponse<Row> = Record<string, LifecyclePage<Row>>;
+type LifecycleLegResponse<Row> = Record<string, LifecyclePage<Row> | undefined>;
 
 interface LifecycleTaskGql {
   id: string;
@@ -231,7 +267,8 @@ interface LifecycleAttemptGql {
   requestId: string;
   operator: string;
   priorityMech: string;
-  deliveryRate: string | number;
+  /** `t.bigint().notNull()` — arrives as a decimal string, but see the guard. */
+  deliveryRate?: string | number | null;
   createdAtBlock: string | number;
 }
 
@@ -323,9 +360,13 @@ function isAddress(value: string | undefined | null): value is `0x${string}` {
  * declares `t.hex().notNull().default('0x')`. A strict check there would drop
  * real indexed candidate rows whose publisher committed no hash. Every
  * authoritative-spine hex uses isBytes32 / isAddress instead.
+ *
+ * The digit quantifier is `*`, not `+`, precisely so the bare `'0x'` default
+ * PASSES. With `+` this check rejected every row carrying the column default —
+ * the exact rows it exists to admit.
  */
 function isHex(value: string | undefined | null): value is `0x${string}` {
-  return typeof value === 'string' && /^0x[0-9a-fA-F]+$/.test(value);
+  return typeof value === 'string' && /^0x[0-9a-fA-F]*$/.test(value);
 }
 
 /**
@@ -341,12 +382,37 @@ function isCount(value: unknown): value is number {
 // ── Paging ───────────────────────────────────────────────────────────────────
 
 /**
- * Drain one cursor-paged lifecycle leg, or report that the hard page cap bound.
+ * The one honest answer to a leg that cannot be drained WHOLE: withdraw it, and
+ * say why. A spine assembled from a capped page walk — or from a response whose
+ * connection never arrived — would silently omit attempts or verdicts, so the
+ * read is withdrawn rather than answered in part. Returns `undefined` so the
+ * caller can `return warnLifecycleLegWithdrawn(...)` in one statement.
+ */
+function warnLifecycleLegWithdrawn(leg: string, reason: string): undefined {
+  console.warn(
+    `[discovery-client] getTaskLifecycleEvidence: ${reason} on ${leg}; `
+      + 'omitting results (absence > partial lie)',
+  );
+  return undefined;
+}
+
+/**
+ * Drain one cursor-paged lifecycle leg, or `undefined` if it cannot be drained
+ * whole (having warned exactly once with the reason).
  *
- * `leg` is both the GraphQL root field and the label the truncation warning
- * names, so the two can never disagree. Rows come back raw: each caller keeps
- * its own validation and projection, which is where the per-leg field lists
- * stay visible.
+ * `leg` is both the GraphQL root field and the label the warning names, so the
+ * two can never disagree. Rows come back raw: each caller keeps its own
+ * validation and projection, which is where the per-leg field lists stay
+ * visible.
+ *
+ * Every part of the connection is validated before it is believed. The failure
+ * this guards is not a malformed row but a malformed ENVELOPE: a `200
+ * {"data":{}}` and a full 1000-row page carrying no `pageInfo` both used to
+ * read as "leg complete", the first yielding zero rows and the second
+ * presenting a truncated page as the whole answer with the page cap never
+ * engaging. A non-array `items` additionally threw a raw `TypeError` out of the
+ * spread, escaping this module's documented `DiscoveryUnavailableError`
+ * contract.
  */
 async function drainLifecycleLeg<Row>(
   gqlUrl: string,
@@ -368,41 +434,70 @@ async function drainLifecycleLeg<Row>(
       { ...variables, limit: LIFECYCLE_PAGE_LIMIT, after: cursor },
     );
     const connection = data[leg];
-    rows.push(...(connection?.items ?? []));
-    const pageInfo = connection?.pageInfo;
-    if (!pageInfo?.hasNextPage || !pageInfo.endCursor) return rows;
-    if (page + 1 >= MAX_LIFECYCLE_PAGES) return undefined;
+    if (!connection || !Array.isArray(connection.items)) {
+      return warnLifecycleLegWithdrawn(leg, 'missing or malformed connection');
+    }
+    const items = connection.items;
+    rows.push(...items);
+
+    const pageInfo = connection.pageInfo;
+    if (!pageInfo || typeof pageInfo.hasNextPage !== 'boolean') {
+      // Nothing arrived, so nothing can be missing; anything else is a page
+      // whose completeness this read cannot establish.
+      if (items.length === 0) return rows;
+      return warnLifecycleLegWithdrawn(leg, 'missing or malformed pageInfo');
+    }
+    if (!pageInfo.hasNextPage) return rows;
+    if (typeof pageInfo.endCursor !== 'string' || pageInfo.endCursor.length === 0) {
+      return warnLifecycleLegWithdrawn(leg, 'another page announced with no cursor');
+    }
+    if (page + 1 >= MAX_LIFECYCLE_PAGES) return warnLifecycleLegWithdrawn(leg, 'page cap hit');
     cursor = pageInfo.endCursor;
   }
 }
 
 /**
- * The one honest answer to a truncated leg. A spine assembled from a capped
- * page walk would silently omit attempts or verdicts, so the whole read is
- * withdrawn rather than answered in part — absence beats a partial lie.
+ * Drain one leg across a batched `*_in` filter, merging the batches. Each batch
+ * runs its own page walk; one undrainable batch withdraws the leg.
  */
-function emptyOnLifecycleTruncate(leg: string): Map<string, TaskLifecycleEvidence> {
-  console.warn(
-    `[discovery-client] getTaskLifecycleEvidence: page cap hit on ${leg}; `
-      + 'omitting results (absence > partial lie)',
-  );
-  return new Map();
+async function drainLifecycleLegBatched<Row>(
+  gqlUrl: string,
+  fetchImpl: typeof fetch,
+  leg: string,
+  query: string,
+  variables: Record<string, unknown>,
+  inArg: string,
+  inValues: string[],
+): Promise<Row[] | undefined> {
+  const rows: Row[] = [];
+  for (let i = 0; i < inValues.length; i += LIFECYCLE_IN_BATCH) {
+    const batch = await drainLifecycleLeg<Row>(gqlUrl, fetchImpl, leg, query, {
+      ...variables,
+      [inArg]: inValues.slice(i, i + LIFECYCLE_IN_BATCH),
+    });
+    if (!batch) return undefined;
+    rows.push(...batch);
+  }
+  return rows;
 }
 
 /**
- * The same answer for an authoritative row the reader cannot parse. A spine
- * handed back with one task, attempt or verdict quietly missing is exactly the
- * partial lie the truncation guard exists to prevent, so a malformed
- * task/attempt/verdict row withdraws the whole read too.
+ * An authoritative row the reader cannot parse gets the same answer as an
+ * undrainable leg. A spine handed back with one task, attempt or verdict
+ * quietly missing is exactly the partial lie the leg guards exist to prevent.
  */
-function emptyOnLifecycleRowReject(
-  leg: string,
-  identity: string,
-): Map<string, TaskLifecycleEvidence> {
+function warnLifecycleRowReject(leg: string, identity: string): void {
   console.warn(
     `[discovery-client] getTaskLifecycleEvidence: unusable ${leg} row (${identity}); `
       + 'omitting results (absence > partial lie)',
   );
+}
+
+function emptyOnLifecycleRowReject(
+  leg: string,
+  identity: string,
+): Map<string, TaskLifecycleEvidence> {
+  warnLifecycleRowReject(leg, identity);
   return new Map();
 }
 
@@ -432,10 +527,18 @@ export interface TaskLifecycleReader {
    * an empty `taskIds` short-circuits with zero I/O. Throws
    * `DiscoveryUnavailableError` when the indexer is unreachable or unready.
    *
-   * Returns an EMPTY Map — never a partial spine — when any leg hits the page
-   * cap or any task/attempt/verdict row cannot be parsed. Only two drops are
-   * survivable, and both warn: a row outside the scope its leg queried, and a
-   * malformed row on an untrusted `*EnvelopeMeta` candidate leg.
+   * Returns an EMPTY Map — never a partial spine — whenever an authoritative
+   * fact would otherwise go missing without the caller being able to tell. That
+   * is: a leg that cannot be drained whole (page cap, missing connection,
+   * missing/unusable `pageInfo` on a non-empty page), a task/attempt/verdict row
+   * that cannot be parsed, and an attempt or verdict row that has no place on
+   * the spine (no task row, a chainId contradicting its task's, or — the live
+   * case, since the legs are separate unpinned reads — a verdict for an attempt
+   * indexed after the attempts leg ran). Every one of them warns.
+   *
+   * That list is exhaustive. Exactly TWO drops are survivable, and both warn
+   * once per leg: a row outside the scope its leg queried (a leaky indexer
+   * filter), and a malformed row on an untrusted `*EnvelopeMeta` candidate leg.
    */
   getTaskLifecycleEvidence(args: { taskIds: string[] }): Promise<Map<string, TaskLifecycleEvidence>>;
 }
@@ -455,11 +558,11 @@ export function createTaskLifecycleReader(
     const requestedIds = new Set(args.taskIds.filter(Boolean));
     if (requestedIds.size === 0) return new Map();
 
-    const taskRows = await drainLifecycleLeg<LifecycleTaskGql>(
-      gqlUrl, fetchImpl, 'tasks', LIFECYCLE_TASKS_QUERY,
-      { taskIds: Array.from(requestedIds) },
+    const taskRows = await drainLifecycleLegBatched<LifecycleTaskGql>(
+      gqlUrl, fetchImpl, 'tasks', LIFECYCLE_TASKS_QUERY, {},
+      'taskIds', Array.from(requestedIds),
     );
-    if (!taskRows) return emptyOnLifecycleTruncate('tasks');
+    if (!taskRows) return new Map();
 
     const tasks: RawTaskRow[] = [];
     const warnTaskSkip = skipWarner('tasks');
@@ -472,10 +575,15 @@ export function createTaskLifecycleReader(
         continue;
       }
       const createdAtBlock = parseExactBlock(row.createdAtBlock);
+      // `createdAtTx` is checked here, not treated as optional-if-malformed:
+      // the schema declares it `t.hex().notNull()`, and this module names it as
+      // one of the identity fields a consumer needs to re-derive the row against
+      // an RPC. Omitting it on a bad value would fail OPEN on the same row where
+      // a bad `creator` withdraws the read.
       if (createdAtBlock === undefined
         || !isCount(row.chainId) || !isCount(row.maxClaims) || !isCount(row.requiredVerdicts)
         || !isBytes32(row.manifestDigest) || !isBytes32(row.taskCidDigest)
-        || !isAddress(row.creator)) {
+        || !isAddress(row.creator) || !isBytes32(row.createdAtTx)) {
         return emptyOnLifecycleRowReject('tasks', `taskId=${row.id}`);
       }
       const task: RawTaskRow = {
@@ -491,12 +599,10 @@ export function createTaskLifecycleReader(
         // under `authoritative` — every other field is the raw chain value.
         requiredVerdicts: row.requiredVerdicts > 0 ? row.requiredVerdicts : 1,
         createdAtBlock,
+        createdAtTx: row.createdAtTx.toLowerCase() as `0x${string}`,
         finalized: row.finalized === true,
         refunded: row.refunded === true,
       };
-      if (isBytes32(row.createdAtTx)) {
-        task.createdAtTx = row.createdAtTx.toLowerCase() as `0x${string}`;
-      }
       tasks.push(task);
     }
 
@@ -514,21 +620,31 @@ export function createTaskLifecycleReader(
     const attempts: RawAttemptRow[] = [];
     const warnAttemptSkip = skipWarner('attempts');
     for (const [chainId, taskIds] of taskIdsByChain) {
-      const rows = await drainLifecycleLeg<LifecycleAttemptGql>(
-        gqlUrl, fetchImpl, 'attempts', LIFECYCLE_ATTEMPTS_QUERY, { taskIds, chainId },
+      const scoped = new Set(taskIds);
+      const rows = await drainLifecycleLegBatched<LifecycleAttemptGql>(
+        gqlUrl, fetchImpl, 'attempts', LIFECYCLE_ATTEMPTS_QUERY, { chainId },
+        'taskIds', taskIds,
       );
-      if (!rows) return emptyOnLifecycleTruncate('attempts');
+      if (!rows) return new Map();
       for (const row of rows) {
-        // Defense in depth against an indexer that ignores the chainId filter.
-        // The assembler keys `out` by taskId alone, so a chain-B attempt row
-        // for a chain-A task would otherwise attach to the spine.
-        if (row.chainId !== chainId) {
-          warnAttemptSkip('chainId outside the scoped chain');
+        // Defense in depth against an indexer that ignores either filter. The
+        // assembler keys `out` by taskId alone (task's primary key is `id`
+        // alone), so a row leaked from OUTSIDE this pass's scope is exactly the
+        // row that would attach to a task on another chain: task A on 8453 and
+        // task B on 84532, a B row leaking into the 8453 pass, and the result
+        // claims an 8453 attempt under an 84532 task.
+        if (row.chainId !== chainId || !scoped.has(row.taskId)) {
+          warnAttemptSkip('taskId or chainId outside the scope this pass queried');
           continue;
         }
         const createdAtBlock = parseExactBlock(row.createdAtBlock);
+        // `deliveryRate` is the one field that reaches the spine as a raw
+        // `String(...)`: without this guard `String(null)` enters it as the
+        // literal "null". It stays a string — the column is wei, and Number
+        // would round it.
         if (createdAtBlock === undefined
           || !isCount(row.attemptIndex)
+          || (typeof row.deliveryRate !== 'string' && typeof row.deliveryRate !== 'number')
           || !isBytes32(row.requestId) || !isAddress(row.operator)
           || !isAddress(row.priorityMech)) {
           return emptyOnLifecycleRowReject(
@@ -551,23 +667,29 @@ export function createTaskLifecycleReader(
     const verdicts: RawVerdictRow[] = [];
     const warnVerdictSkip = skipWarner('verdicts');
     for (const [chainId, taskIds] of taskIdsByChain) {
-      const rows = await drainLifecycleLeg<LifecycleVerdictGql>(
-        gqlUrl, fetchImpl, 'verdicts', LIFECYCLE_VERDICTS_QUERY, { taskIds, chainId },
+      const scoped = new Set(taskIds);
+      const rows = await drainLifecycleLegBatched<LifecycleVerdictGql>(
+        gqlUrl, fetchImpl, 'verdicts', LIFECYCLE_VERDICTS_QUERY, { chainId },
+        'taskIds', taskIds,
       );
-      if (!rows) return emptyOnLifecycleTruncate('verdicts');
+      if (!rows) return new Map();
       for (const row of rows) {
-        // Same chainId guard the attempts leg carries: with more than one chain
-        // in play, a leaked chain-B verdict row would attach on the chain-A pass
+        // Same scope guard the attempts leg carries: with more than one chain
+        // in play, a leaked chain-B verdict row would arrive on the chain-A pass
         // and AGAIN on the chain-B pass, duplicating it inside a list this
         // module documents as sorted by verdictIndex.
-        if (row.chainId !== chainId) {
-          warnVerdictSkip('chainId outside the scoped chain');
+        if (row.chainId !== chainId || !scoped.has(row.taskId)) {
+          warnVerdictSkip('taskId or chainId outside the scope this pass queried');
           continue;
         }
         const createdAtBlock = parseExactBlock(row.createdAtBlock);
+        // `verdictCode` is range-checked, not merely shape-checked: the type
+        // documents it as the on-chain VerdictCode enum, 0..4. A 999 that only
+        // had to be a non-negative integer would reach a consumer under that
+        // promise.
         if (createdAtBlock === undefined
           || !isCount(row.attemptIndex) || !isCount(row.verdictIndex)
-          || !isCount(row.verdictCode)
+          || !isCount(row.verdictCode) || row.verdictCode > MAX_VERDICT_CODE
           || !isBytes32(row.requestId) || !isAddress(row.evaluator)) {
           return emptyOnLifecycleRowReject(
             'verdicts',
@@ -593,11 +715,11 @@ export function createTaskLifecycleReader(
 
     const attemptCandidates: AttemptEnvelopeCandidate[] = [];
     if (solveRequestIds.length > 0) {
-      const rows = await drainLifecycleLeg<LifecycleAttemptMetaGql>(
-        gqlUrl, fetchImpl, 'attemptEnvelopeMetas', LIFECYCLE_ATTEMPT_METAS_QUERY,
-        { requestIds: solveRequestIds },
+      const rows = await drainLifecycleLegBatched<LifecycleAttemptMetaGql>(
+        gqlUrl, fetchImpl, 'attemptEnvelopeMetas', LIFECYCLE_ATTEMPT_METAS_QUERY, {},
+        'requestIds', solveRequestIds,
       );
-      if (!rows) return emptyOnLifecycleTruncate('attemptEnvelopeMetas');
+      if (!rows) return new Map();
       const warnSkip = skipWarner('attemptEnvelopeMetas');
       for (const row of rows) {
         // Candidates are untrusted hints, so a malformed one is skipped rather
@@ -632,11 +754,11 @@ export function createTaskLifecycleReader(
 
     const verdictCandidates: VerdictEnvelopeCandidate[] = [];
     if (evalRequestIds.length > 0) {
-      const rows = await drainLifecycleLeg<LifecycleVerdictMetaGql>(
-        gqlUrl, fetchImpl, 'verdictEnvelopeMetas', LIFECYCLE_VERDICT_METAS_QUERY,
-        { requestIds: evalRequestIds },
+      const rows = await drainLifecycleLegBatched<LifecycleVerdictMetaGql>(
+        gqlUrl, fetchImpl, 'verdictEnvelopeMetas', LIFECYCLE_VERDICT_METAS_QUERY, {},
+        'requestIds', evalRequestIds,
       );
-      if (!rows) return emptyOnLifecycleTruncate('verdictEnvelopeMetas');
+      if (!rows) return new Map();
       const warnSkip = skipWarner('verdictEnvelopeMetas');
       for (const row of rows) {
         const enrichedAtBlock = parseExactBlock(row.enrichedAtBlock);
@@ -664,6 +786,15 @@ export function createTaskLifecycleReader(
         if (row.enrichmentStatus) cand.enrichmentStatus = row.enrichmentStatus;
         // Projected hints only — never used as spine keys (AC3).
         if (row.taskId) cand.projectedTaskId = row.taskId;
+        // NOTE the asymmetry, and do not "fix" it: `taskId` and `evaluator`
+        // filter out their schema defaults (`''`, `'0x'`) because those values
+        // are not legal column contents, so a present value means the envelope
+        // really carried one. `attemptIndex` is `t.integer().notNull()
+        // .default(0)` and `isCount(0)` is true, so an envelope that omitted it
+        // is INDISTINGUISHABLE here from one that said attempt 0. There is no
+        // sentinel to filter on; the limitation is documented on
+        // `VerdictEnvelopeCandidate.projectedAttemptIndex` and is why the field
+        // is a hint, never evidence.
         if (isCount(row.attemptIndex)) cand.projectedAttemptIndex = row.attemptIndex;
         if (isCount(row.verdictIndex)) cand.projectedVerdictIndex = row.verdictIndex;
         if (isAddress(row.evaluator)) {
@@ -679,6 +810,9 @@ export function createTaskLifecycleReader(
       verdicts,
       attemptCandidates,
       verdictCandidates,
+      // The assembler stays `console`-free; withdrawal there gets the same
+      // warning a row this reader could not parse gets.
+      onUnplaceableRow: warnLifecycleRowReject,
     });
   }
 

@@ -5,7 +5,7 @@
  * task/attempt/verdict rows. Envelope candidates attach last, joined by
  * (requestId, chainId), and can never create or rewrite a spine row.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   assembleTaskLifecycleEvidence,
   type RawAttemptRow,
@@ -32,6 +32,7 @@ function task(overrides: Partial<RawTaskRow> = {}): RawTaskRow {
     maxClaims: 1,
     requiredVerdicts: 1,
     createdAtBlock: 10,
+    createdAtTx: hex32('77'),
     finalized: false,
     refunded: false,
     ...overrides,
@@ -91,14 +92,99 @@ describe('assembleTaskLifecycleEvidence (#2044)', () => {
     expect(ev.authoritative.attempts[0]!.verdicts[1]!.verdictCode).toBe(2);
   });
 
-  it('drops a verdict whose (taskId, attemptIndex, chainId) has no attempt row (AC2)', () => {
+  it('withdraws the read when a verdict has no attempt row (absence > partial lie)', () => {
+    // The live case: the five legs are separate unpinned reads, so the indexer
+    // can index an attempt AFTER the attempts leg ran and still return its
+    // verdict on the verdicts leg. Keeping the spine would hand the caller a
+    // task that looks complete and is missing a real verdict, with nothing in
+    // the result saying so.
+    const onUnplaceableRow = vi.fn();
     const map = assembleTaskLifecycleEvidence({
       tasks: [task()],
       attempts: [attempt({ attemptIndex: 0 })],
       // No attempt 9 exists on the spine.
       verdicts: [verdict({ attemptIndex: 9, requestId: hex32('d9') })],
+      onUnplaceableRow,
     });
-    expect(map.get('7')!.authoritative.attempts[0]!.verdicts).toEqual([]);
+    expect(map.size).toBe(0);
+    expect(onUnplaceableRow).toHaveBeenCalledWith(
+      'verdicts',
+      expect.stringContaining('attemptIndex=9'),
+    );
+  });
+
+  it('withdraws the read when an attempt has no task row', () => {
+    const onUnplaceableRow = vi.fn();
+    const map = assembleTaskLifecycleEvidence({
+      tasks: [task({ taskId: '7' })],
+      attempts: [attempt({ taskId: '8' })],
+      verdicts: [],
+      onUnplaceableRow,
+    });
+    expect(map.size).toBe(0);
+    expect(onUnplaceableRow).toHaveBeenCalledWith(
+      'attempts',
+      expect.stringContaining('taskId=8'),
+    );
+  });
+
+  it('withdraws the read when an attempt contradicts its task on chainId', () => {
+    // `out` is keyed by taskId ALONE, so without this check a chain-8453
+    // attempt attaches to an 84532 task and the spine claims a cross-chain
+    // lifecycle that does not exist.
+    const onUnplaceableRow = vi.fn();
+    const map = assembleTaskLifecycleEvidence({
+      tasks: [task({ chainId: 84532 })],
+      attempts: [attempt({ chainId: 8453 })],
+      verdicts: [],
+      onUnplaceableRow,
+    });
+    expect(map.size).toBe(0);
+    expect(onUnplaceableRow).toHaveBeenCalledWith(
+      'attempts',
+      expect.stringContaining('chainId=8453'),
+    );
+  });
+
+  it('leaves every non-identity authoritative field byte-identical after a contradictory candidate attaches (AC3)', () => {
+    // The half no type can catch: the AC3 type block only forbids a candidate
+    // from DECLARING a spine identity column. An assignment that copies a
+    // differently-named candidate field over an authoritative one
+    // (`v.verdictCode = c.projectedVerdictIndex`) compiles clean, so the
+    // guarantee has to be asserted behaviorally.
+    const taskRow = task({ creator: addr('aa'), createdAtBlock: 10 });
+    const attemptRow = attempt({ deliveryRate: '123456789012345678', requestId: hex32('b0') });
+    const verdictRow = verdict({ verdictCode: 3, requestId: hex32('d0') });
+    const map = assembleTaskLifecycleEvidence({
+      tasks: [taskRow],
+      attempts: [attemptRow],
+      verdicts: [verdictRow],
+      attemptCandidates: [{
+        requestId: hex32('b0'), chainId: CHAIN, manifestCid: 'bafyA',
+        publisherAgentId: '1', manifestHash: hex32('99'), enrichedAtBlock: 25,
+      }],
+      verdictCandidates: [{
+        requestId: hex32('d0'), chainId: CHAIN, manifestCid: 'bafyV',
+        publisherAgentId: '2', manifestHash: hex32('88'), enrichedAtBlock: 35,
+        projectedTaskId: '999', projectedAttemptIndex: 99, projectedVerdictIndex: 99,
+        projectedEvaluator: addr('ff'), actualPassed: true, actualScore: '0.0',
+      }],
+    });
+    const ev = map.get('7')!;
+    expect(ev.authoritative.task.creator).toBe(taskRow.creator);
+    expect(ev.authoritative.task.createdAtBlock).toBe(taskRow.createdAtBlock);
+    expect(ev.authoritative.task.createdAtTx).toBe(taskRow.createdAtTx);
+    const a = ev.authoritative.attempts[0]!;
+    expect(a.deliveryRate).toBe(attemptRow.deliveryRate);
+    expect(a.createdAtBlock).toBe(attemptRow.createdAtBlock);
+    expect(a.priorityMech).toBe(attemptRow.priorityMech);
+    const v = a.verdicts[0]!;
+    expect(v.verdictCode).toBe(verdictRow.verdictCode);
+    expect(v.createdAtBlock).toBe(verdictRow.createdAtBlock);
+    // …and the candidates really did attach, so the assertions above are not
+    // passing vacuously.
+    expect(a.attemptEnvelopeCandidates).toHaveLength(1);
+    expect(v.verdictEnvelopeCandidates).toHaveLength(1);
   });
 
   it('attaches candidates by requestId+chainId without rewriting spine fields (AC3)', () => {

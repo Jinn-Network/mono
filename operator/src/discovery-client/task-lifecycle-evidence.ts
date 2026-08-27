@@ -41,7 +41,7 @@ export interface AuthoritativeTaskRow {
   maxClaims: number;
   requiredVerdicts: number;
   createdAtBlock: number;
-  createdAtTx?: `0x${string}`;
+  createdAtTx: `0x${string}`;
   finalized: boolean;
   refunded: boolean;
 }
@@ -111,6 +111,14 @@ export interface VerdictEnvelopeCandidate {
   solverNetManifestCid?: string;
   enrichmentStatus?: string;
   projectedTaskId?: string;
+  /**
+   * The indexer's `attemptIndex` projection. Unlike `projectedTaskId` and
+   * `projectedEvaluator` — whose schema defaults (`''` / `'0x'`) are filtered
+   * out on ingest — this column defaults to `0` (`t.integer().notNull()
+   * .default(0)`), and `0` is a legitimate attempt index. A present `0` here
+   * therefore means "the envelope said attempt 0" OR "the envelope said
+   * nothing"; the two are indistinguishable. Never treat it as evidence.
+   */
   projectedAttemptIndex?: number;
   projectedVerdictIndex?: number;
   projectedEvaluator?: `0x${string}`;
@@ -135,13 +143,37 @@ function pushInto<K, V>(map: Map<K, V[]>, key: K, value: V): void {
   else map.set(key, [value]);
 }
 
+/** The leg an unplaceable authoritative row arrived on. */
+export type UnplaceableLifecycleLeg = 'attempts' | 'verdicts';
+
 export function assembleTaskLifecycleEvidence(input: {
   tasks: RawTaskRow[];
   attempts: RawAttemptRow[];
   verdicts: RawVerdictRow[];
   attemptCandidates?: AttemptEnvelopeCandidate[];
   verdictCandidates?: VerdictEnvelopeCandidate[];
+  /**
+   * Called with the leg and identity of the first authoritative row that has
+   * no place on the spine, immediately before the whole result is withdrawn.
+   * Kept as a callback so this module stays `console`-free; the reader wires
+   * it to the same warning its own row rejections emit.
+   */
+  onUnplaceableRow?: (leg: UnplaceableLifecycleLeg, identity: string) => void;
 }): Map<string, TaskLifecycleEvidence> {
+  /**
+   * Absence beats a partial lie. An attempt or verdict row the read cannot
+   * place is an AUTHORITATIVE row going missing — the caller would be handed a
+   * spine that looks complete and is not, with no marker saying otherwise — so
+   * the whole result is withdrawn rather than answered in part.
+   */
+  function withdraw(
+    leg: UnplaceableLifecycleLeg,
+    identity: string,
+  ): Map<string, TaskLifecycleEvidence> {
+    input.onUnplaceableRow?.(leg, identity);
+    return new Map();
+  }
+
   const out = new Map<string, TaskLifecycleEvidence>();
   for (const task of input.tasks) {
     out.set(task.taskId, {
@@ -150,11 +182,19 @@ export function assembleTaskLifecycleEvidence(input: {
     });
   }
 
-  // Attempts land straight on the task they belong to; an attempt whose task
-  // is not in the spine has nothing to attach to and is dropped.
+  // Attempts land straight on the task they belong to. Two rows have no place:
+  // one whose task is absent from the spine, and one whose chainId contradicts
+  // its own task's — `out` is keyed by taskId ALONE (task's primary key is `id`
+  // alone), so without the second check a chain-B attempt would attach to a
+  // chain-A task and the result would claim a cross-chain lifecycle.
   for (const a of input.attempts) {
     const evidence = out.get(a.taskId);
-    if (!evidence) continue;
+    if (!evidence || evidence.authoritative.task.chainId !== a.chainId) {
+      return withdraw(
+        'attempts',
+        `taskId=${a.taskId} attemptIndex=${a.attemptIndex} chainId=${a.chainId}`,
+      );
+    }
     evidence.authoritative.attempts.push({
       ...a,
       requestId: a.requestId.toLowerCase() as `0x${string}`,
@@ -177,10 +217,21 @@ export function assembleTaskLifecycleEvidence(input: {
     }
   }
 
+  // A verdict whose (taskId, attemptIndex, chainId) has no attempt row is the
+  // same kind of loss. It is not hypothetical: the legs are separate HTTP reads
+  // with no block-height pin, so an indexer that advances between the attempts
+  // read and the verdicts read returns a verdict for an attempt this spine
+  // never saw.
   const verdictsByAttempt = new Map<string, AuthoritativeVerdictRow[]>();
   for (const v of input.verdicts) {
     const key = attemptKey(v.taskId, v.attemptIndex, v.chainId);
-    if (!attemptIndex.has(key)) continue;
+    if (!attemptIndex.has(key)) {
+      return withdraw(
+        'verdicts',
+        `taskId=${v.taskId} attemptIndex=${v.attemptIndex} `
+          + `verdictIndex=${v.verdictIndex} chainId=${v.chainId}`,
+      );
+    }
     pushInto(verdictsByAttempt, key, {
       ...v,
       requestId: v.requestId.toLowerCase() as `0x${string}`,
@@ -211,21 +262,38 @@ export function assembleTaskLifecycleEvidence(input: {
   return out;
 }
 
-// ── Provenance separation, enforced by the compiler (AC3) ────────────────
-// `verdictEnvelopeMeta` carries taskId / attemptIndex / verdictIndex / evaluator
-// — the columns most likely to be mistaken for spine identity. They are renamed
-// to projected* on ingest, so `spine.evaluator = candidate.evaluator` does not
-// compile: the field does not exist on the candidate type.
+// ── Provenance separation (AC3) ──────────────────────────────────────────
+// The guarantee is carried by the ASSEMBLER'S STRUCTURE, not by the compiler: a
+// candidate is only ever PUSHED onto a `*EnvelopeCandidates` array hanging off a
+// spine row that already exists, so no projection can create a spine row or
+// rewrite a field on one. Every assertion about AC3 rests on that.
 //
-// The check is stated once, over BOTH candidate types, as "this type declares
-// none of the spine's identity columns". That subsumes the earlier per-field
-// `keyof` aliases and, unlike an assignability check, it actually bites: adding
-// any one of these names to either candidate fails `yarn typecheck`.
+// The type block below adds a guard against exactly ONE class of naming
+// mistake on top of that structure: re-declaring an authoritative column on a
+// candidate type, which is the shape that makes `spine.x = candidate.x` a
+// plausible thing to write at all. `verdictEnvelopeMeta` does carry taskId /
+// attemptIndex / verdictIndex / evaluator on the wire; they are renamed to
+// `projected*` on ingest, so those names are absent here and the assignment
+// does not compile.
+//
+// What it deliberately does NOT catch, because no type can: an assignment that
+// copies a DIFFERENTLY-named candidate field over an authoritative one
+// (`v.verdictCode = c.projectedVerdictIndex`). The behavioral test in
+// `operator/test/discovery-client/task-lifecycle-evidence.test.ts` — spine
+// fields byte-identical to their input rows after a contradictory candidate
+// attaches — is what covers that half.
 type Assert<T extends true> = T;
 
-/** Identity columns only the authoritative spine may carry. */
-type SpineIdentityColumn =
-  'taskId' | 'attemptIndex' | 'verdictIndex' | 'evaluator' | 'operator';
+/**
+ * Every authoritative column, minus the ones a candidate legitimately carries:
+ * `requestId` + `chainId` ARE the candidate join key, and the three array
+ * fields are spine containers, not columns. Derived rather than hand-listed so
+ * a new authoritative column is protected the moment it is declared.
+ */
+type SpineIdentityColumn = Exclude<
+  keyof AuthoritativeTaskRow | keyof AuthoritativeAttemptRow | keyof AuthoritativeVerdictRow,
+  'requestId' | 'chainId' | 'verdicts' | 'attemptEnvelopeCandidates' | 'verdictEnvelopeCandidates'
+>;
 
 type CarriesNoSpineIdentity<C> =
   [Extract<keyof C, SpineIdentityColumn>] extends [never] ? true : false;
