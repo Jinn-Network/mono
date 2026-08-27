@@ -28,7 +28,12 @@ const JUSTIFICATION = /\btemp-env:/u;
 const CARRIES_TEMP = /inheritedTempEnv\(|scopedTempEnv\(|TMPDIR|\.\.\.process\.env\b/u;
 
 /** Declarations and schemas that name a field called `env`; they spawn nothing. */
-const NOT_A_SPAWN_SITE = /env:\s*(?:z\.|Readonly<|NodeJS\.ProcessEnv|dict\[|invocation\.env\b)/u;
+const NOT_A_SPAWN_SITE = /env:\s*(?:z\.|Readonly<|NodeJS\.ProcessEnv|dict\[)/u;
+
+/** Source text with its comments removed, so prose about a temp variable is not read as one. */
+function withoutComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, " ");
+}
 
 /**
  * The names an environment expression delegates to: what it passes instead of a literal
@@ -53,7 +58,10 @@ function delegatedNames(expression: string): string[] {
  */
 function definitionWindow(source: string, name: string): string | undefined {
   const definition = new RegExp(`(?:const|let|function)\\s+${name}\\b`, "u").exec(source);
-  return definition === null ? undefined : source.slice(definition.index, definition.index + 600);
+  // 1200 and not 600: `readinessEnvironment` in `venue/demo1-claude.ts` carries its temp variables
+  // on its last line, past the shorter cut — which left it green on the word `TMPDIR` in its own
+  // doc comment rather than on the `inheritedTempEnv()` call it actually makes.
+  return definition === null ? undefined : source.slice(definition.index, definition.index + 1_200);
 }
 
 /**
@@ -62,7 +70,12 @@ function definitionWindow(source: string, name: string): string | undefined {
  * several expressions reach from being walked twice.
  */
 function carriesTemp(source: string, expression: string, seen: Set<string>): boolean {
-  if (CARRIES_TEMP.test(expression) || JUSTIFICATION.test(expression)) return true;
+  // Comments stripped first: carriage is a property of the code, and every one of these helpers is
+  // documented in prose that names the variables it pins. Reading the prose as proof made the check
+  // survive deleting the call — `readinessEnvironment` in `venue/demo1-claude.ts` stayed green on
+  // the words in its own doc comment. The deliberate-omission marker is not read here; it is
+  // checked against the site itself, comments and all, before this function is ever called.
+  if (CARRIES_TEMP.test(withoutComments(expression))) return true;
   for (const name of delegatedNames(expression)) {
     if (seen.has(name)) continue;
     seen.add(name);
@@ -113,8 +126,11 @@ function unhandledSites(source: string): string[] {
   for (const match of source.matchAll(/(?<![\w-])env:/gu)) {
     const site = envSite(source, match.index);
     if (NOT_A_SPAWN_SITE.test(site)) continue;
-    if (carriesTemp(source, site, new Set())) continue;
-    unhandled.push(site.split("\n").pop()?.trim() ?? "");
+    // The marker is checked here and nowhere deeper: it exempts the site whose author wrote it,
+    // not every site that happens to mention a name defined near one.
+    if (JUSTIFICATION.test(site) || carriesTemp(source, site, new Set())) continue;
+    const line = source.slice(0, match.index).split("\n").length;
+    unhandled.push(`${line}: ${site.slice(site.indexOf("env:")).split("\n")[0]!.trim()}`);
   }
   return unhandled;
 }
@@ -148,6 +164,14 @@ describe("child temp-directory environment", () => {
     const site = 'const built = build();\nspawn(exe, args, { env: { ...built, HOME: home } });\n';
     expect(unhandledSites(carrier + site)).toEqual([]);
     expect(unhandledSites(bare + site)).toHaveLength(1);
+  });
+
+  // Every helper here is documented in prose that names the variables it pins, so reading a comment
+  // as carriage let the check survive deleting the call it was documenting.
+  it("does not read prose about a temp variable as proof one is set", () => {
+    const site = 'const built = build();\nspawn(exe, args, { env: { ...built, HOME: home } });\n';
+    expect(unhandledSites('// Sets TMPDIR.\nfunction build() { return { PATH: "" }; }\n' + site)).toHaveLength(1);
+    expect(unhandledSites('/** Sets TMPDIR. */\nfunction build() { return { PATH: "" }; }\n' + site)).toHaveLength(1);
   });
 
   it("names the temp variables at every spawn site, or says why not", () => {

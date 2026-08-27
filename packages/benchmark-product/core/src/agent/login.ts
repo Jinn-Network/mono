@@ -29,6 +29,8 @@ export type SubscriptionLoginRunner = (invocation: SubscriptionLoginInvocation) 
 
 const defaultRunner: SubscriptionLoginRunner = (invocation) => {
   const result = spawnSync(invocation.executable, [...invocation.args], {
+    // temp-env: delegated to the caller. This runner builds no allowlist — it spawns exactly the
+    // invocation it was handed, and `loginEnvironment` is where the temp names are pinned.
     env: invocation.env,
     encoding: "utf8",
     timeout: 10 * 60_000,

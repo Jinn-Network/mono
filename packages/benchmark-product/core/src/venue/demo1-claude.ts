@@ -521,8 +521,10 @@ export function makeDemo1ClaudeLauncher(runtime: Demo1ClaudeRuntimeBinding): Lau
       return {
         ...planned,
         argv,
-        // temp-env: delegated to the wrapped launcher. `planned.env` is the plan that launcher
-        // produced, scanned at its own site; this adds one credential name and changes nothing else.
+        // temp-env: delegated to the wrapped launcher. `planned.env` is the plan `makeClaudeCodeLauncher`
+        // produced, whose `baseEnv` pins all three names at `paths.tmp`; this adds one credential name
+        // and changes nothing else. That launcher lives in another package, so this scan — rooted at
+        // this package's `src` — cannot see it; the claim above is by reading, not by the scan.
         env: {
           ...planned.env,
           [DEMO1_CLAUDE_OAUTH_FILE_ENV]: `secrets/${runtime.credential.secretForward.target}`,

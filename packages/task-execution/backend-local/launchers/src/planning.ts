@@ -112,7 +112,13 @@ export function baseEnv(paths: WorkspacePaths, attempt: AttemptIdentity): Record
     JINN_ATTEMPT_OUT: paths.out,
     JINN_ATTEMPT_LOGS: paths.logs,
     JINN_ATTEMPT_META: paths.meta,
+    // All three temp names, not the POSIX one alone. `os.tmpdir()` reads TMPDIR on POSIX and
+    // TEMP/TMP on Windows, and Python's `tempfile` consults all three on every platform — so a
+    // harness child, or anything it shells out to, that reads one of the other two would write
+    // outside `paths.tmp` and outside what the attempt collects and sweeps.
     TMPDIR: paths.tmp,
+    TMP: paths.tmp,
+    TEMP: paths.tmp,
   };
 }
 
