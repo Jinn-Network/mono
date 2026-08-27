@@ -10,13 +10,13 @@
  * The policy is deny-by-default: a destination is public only if we can
  * positively classify every address behind it as public.
  *
- * Residual gap, stated plainly: we validate the addresses that `dns.lookup`
- * returns, then hand the URL to `fetch`, which resolves the name again on
- * connect. A DNS entry that flips between those two lookups (rebinding) is
- * not caught here. Closing it needs a socket-level `connect.lookup` hook,
- * which means either dropping to `node:http` or taking an `undici`
- * dependency in a published package; #1901's acceptance criteria permit
- * per-hop revalidation instead, which is what this does.
+ * Validation alone is not enough. Revalidating a hostname and then handing
+ * the *name* to the transport lets an attacker who controls its DNS answer
+ * one address to us and a different one to the socket (rebinding), which
+ * bypasses the check entirely. So this module does not merely approve a
+ * destination — it returns the exact address it approved, and the transport
+ * pins the connection to that address. The value we classify is the value we
+ * connect to.
  */
 
 import { isIPv4, isIPv6 } from 'node:net';
@@ -148,16 +148,33 @@ export function classifyIpv6(ip: string): AddressClass {
     const embedded = classifyIpv4(dotted(2));
     return embedded === 'public' ? 'reserved' : embedded;
   }
+  // 64:ff9b:1::/48 — RFC 8215 local-use NAT64, any embedding.
+  if (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b
+    && bytes[4] === 0x00 && bytes[5] === 0x01) {
+    return 'reserved';
+  }
+  // ::/8 — everything else in the all-zero high byte, which is where the
+  // IPv4-compatible (`::127.0.0.1`) and IPv4-translated (`::ffff:0:7f00:1`)
+  // forms live. The genuinely useful embeddings are unwrapped above; the
+  // rest is refused rather than left to fall through as public.
+  if (bytes[0] === 0x00) return 'reserved';
   // 100::/64 — discard-only.
   if (bytes[0] === 0x01 && bytes[1] === 0x00 && bytes.slice(2, 8).every((byte) => byte === 0)) {
     return 'reserved';
   }
   if ((bytes[0] & 0xfe) === 0xfc) return 'unique-local';                    // fc00::/7
   if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return 'link-local'; // fe80::/10
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0xc0) return 'private';    // fec0::/10 site-local
   if (bytes[0] === 0xff) return 'multicast';                                // ff00::/8
   if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8) {
     return 'documentation';                                                 // 2001:db8::/32
   }
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x00 && bytes[3] === 0x00) {
+    return 'reserved';                                                      // 2001::/32 Teredo
+  }
+  // Deny-by-default: only global unicast (2000::/3) can be public, and only
+  // after the special-purpose prefixes carved out of it above.
+  if ((bytes[0] & 0xe0) !== 0x20) return 'reserved';
   return 'public';
 }
 
@@ -180,9 +197,10 @@ export interface OriginGuardOptions {
   /** Injection seam for tests; defaults to `dns.lookup(..., { all: true })`. */
   resolveHostname?: HostnameResolver;
   /**
-   * Escape hatch for local development and e2e, where an operator's
+   * Escape hatch for an operator pointing at a local origin, where
    * `publicEndpoint` legitimately defaults to `http://localhost:<apiPort>`.
-   * Off unless explicitly enabled — the default is fail-closed.
+   * Off unless explicitly enabled — the default is fail-closed. It waives
+   * only the address policy; scheme and credential checks still run.
    */
   allowPrivateDestinations?: boolean;
 }
@@ -192,31 +210,39 @@ function unbracket(hostname: string): string {
   return hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
 }
 
+/** The exact destination the guard approved, for the transport to pin to. */
+export interface PinnedDestination {
+  /** Numeric address the connection must use. */
+  readonly address: string;
+  readonly family: 4 | 6;
+}
+
 /**
- * Validate one destination. Throws `ProhibitedDestinationError` unless the
- * URL is a credential-free public `http:`/`https:` destination whose every
- * resolved address classifies as public.
+ * Validate one destination and return the address it is allowed to reach.
+ *
+ * Throws `ProhibitedDestinationError` unless the URL is a credential-free
+ * public `http:`/`https:` destination. On success the caller MUST connect to
+ * the returned address rather than re-resolving the hostname — re-resolving
+ * reopens the rebinding window this function exists to close.
+ *
+ * Returns `null` only when `allowPrivateDestinations` is set, where there is
+ * no policy to pin to.
  */
-export async function assertPublicHttpDestination(
+export async function resolvePublicHttpDestination(
   url: URL,
   options: OriginGuardOptions = {},
-): Promise<void> {
-  if (options.allowPrivateDestinations === true) {
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      throw new ProhibitedDestinationError(
-        `artifact origin scheme ${url.protocol} is not http(s): ${url.href}`, 'scheme');
-    }
-    return;
-  }
-
+): Promise<PinnedDestination | null> {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new ProhibitedDestinationError(
       `artifact origin scheme ${url.protocol} is not http(s): ${url.href}`, 'scheme');
   }
+  // Credentials are refused regardless of the private-destination hatch:
+  // leaking them to a peer is orthogonal to whether the peer is public.
   if (url.username !== '' || url.password !== '') {
     throw new ProhibitedDestinationError(
       `artifact origin must not carry credentials: ${url.host}`, 'credentials');
   }
+  if (options.allowPrivateDestinations === true) return null;
 
   const host = unbracket(url.hostname);
   if (host === '') {
@@ -229,7 +255,7 @@ export async function assertPublicHttpDestination(
       throw new ProhibitedDestinationError(
         `artifact origin address ${host} is ${verdict}, not a public destination`, verdict);
     }
-    return;
+    return { address: host, family: isIPv4(host) ? 4 : 6 };
   }
 
   let addresses: string[];
@@ -245,6 +271,8 @@ export async function assertPublicHttpDestination(
     throw new ProhibitedDestinationError(
       `artifact origin ${host} resolved to no addresses`, 'unparsable');
   }
+  // Every answer must be public — a name that mixes a public address with a
+  // private one is refused outright rather than cherry-picked.
   for (const address of addresses) {
     const verdict = classifyIpAddress(address);
     if (verdict !== 'public') {
@@ -254,4 +282,6 @@ export async function assertPublicHttpDestination(
       );
     }
   }
+  const chosen = addresses[0];
+  return { address: chosen, family: isIPv4(chosen) ? 4 : 6 };
 }

@@ -14,7 +14,9 @@
  * the hash check in `acquire.ts` ever runs:
  *
  * - every destination — the origin and each redirect hop — must pass
- *   `assertPublicHttpDestination` (see `origin-guard.ts`);
+ *   `resolvePublicHttpDestination` (see `origin-guard.ts`), and the socket is
+ *   pinned to the exact address that check approved, so a name whose DNS
+ *   answer flips between validation and connect cannot escape the policy;
  * - redirects are followed manually and capped;
  * - one deadline bounds the whole chain, including the body read, so a
  *   stalled peer cannot hold a worker;
@@ -23,10 +25,11 @@
  */
 
 import {
-  assertPublicHttpDestination,
+  resolvePublicHttpDestination,
   ProhibitedDestinationError,
   type HostnameResolver,
 } from './origin-guard.js';
+import { pinnedFetch, type PinnedFetch } from './pinned-fetch.js';
 
 export type AcquireResult =
   | { ok: true; content: Buffer }
@@ -49,14 +52,20 @@ const DEFAULT_MAX_REDIRECTS = 3;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 export interface FetchArtifactOptions {
-  /** Injection seam for tests; defaults to the global `fetch`. */
-  fetchImpl?: (input: string | URL, init?: RequestInit) => Promise<Response>;
+  /**
+   * Injection seam for tests. The default connects over `node:http(s)` with
+   * the socket pinned to the guard-approved address; a plain `fetch` fake is
+   * accepted here but does not pin, so production must not supply one.
+   */
+  fetchImpl?: PinnedFetch;
   /** Injection seam for tests; defaults to `dns.lookup(..., { all: true })`. */
   resolveHostname?: HostnameResolver;
   /**
-   * Permit loopback/private destinations. Off by default; exists because an
-   * operator's `publicEndpoint` falls back to `http://localhost:<apiPort>`
-   * in local development and e2e. Env: `JINN_CORPUS_ALLOW_PRIVATE_ORIGINS`.
+   * Permit loopback/private destinations, and skip address pinning with them.
+   * Off by default and set nowhere in-repo; it exists for an operator running
+   * against a local origin, because `operator.publicEndpoint` falls back to
+   * `http://localhost:<apiPort>` when unset. Scheme and credential checks
+   * still apply. Env: `JINN_CORPUS_ALLOW_PRIVATE_ORIGINS`.
    */
   allowPrivateDestinations?: boolean;
   /** Byte cap. Env: `JINN_CORPUS_ARTIFACT_MAX_BYTES`. */
@@ -94,14 +103,10 @@ async function readBounded(response: Response, maxBytes: number): Promise<Buffer
     await response.body?.cancel().catch(() => {});
     throw new TooLargeError(`content-length ${declared} exceeds the ${maxBytes}-byte cap`);
   }
-  if (!response.body) {
-    // A stub or a bodyless response: fall back to buffering, still capped.
-    const buf = Buffer.from(await response.arrayBuffer());
-    if (buf.byteLength > maxBytes) {
-      throw new TooLargeError(`response exceeds the ${maxBytes}-byte cap`);
-    }
-    return buf;
-  }
+  // A null body carries no bytes. We deliberately do not fall back to
+  // `arrayBuffer()` here: that materializes the whole response before any
+  // size check, which is the exact behavior the byte cap exists to prevent.
+  if (!response.body) return Buffer.alloc(0);
 
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -129,7 +134,7 @@ export async function fetchArtifactContent(
   sha256: string,
   options: FetchArtifactOptions = {},
 ): Promise<AcquireResult> {
-  const fetchImpl = options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
+  const fetchImpl = options.fetchImpl ?? pinnedFetch;
   const maxBytes = options.maxBytes ?? envInteger('JINN_CORPUS_ARTIFACT_MAX_BYTES', DEFAULT_MAX_BYTES);
   const timeoutMs = options.timeoutMs
     ?? envInteger('JINN_CORPUS_ARTIFACT_FETCH_TIMEOUT_MS', DEFAULT_TIMEOUT_MS);
@@ -163,17 +168,25 @@ export async function fetchArtifactContent(
         }, timeoutMs);
       })
     : undefined;
+  // Attach a sink so the rejection is never unhandled — under Node's default
+  // `--unhandled-rejections=throw`, a timer firing before the first `bounded()`
+  // call would otherwise kill the process outright.
+  expiry?.catch(() => {});
 
   const bounded = <T>(work: Promise<T>): Promise<T> =>
     expiry === undefined ? work : Promise.race([work, expiry]);
 
   const chain = async (): Promise<AcquireResult> => {
     for (let hop = 0; ; hop += 1) {
-      await assertPublicHttpDestination(target, guard);
+      // Bounded like every other await: the guard resolves DNS for an
+      // attacker-supplied name, so a nameserver that simply never answers
+      // must not be able to hold the caller past the deadline.
+      const pin = await bounded(resolvePublicHttpDestination(target, guard));
 
       const response = await bounded(fetchImpl(target, {
         redirect: 'manual',
         signal: controller.signal,
+        ...(pin === null ? {} : { pinnedAddress: pin.address, pinnedFamily: pin.family }),
       }));
 
       if (REDIRECT_STATUSES.has(response.status)) {

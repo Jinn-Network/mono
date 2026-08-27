@@ -5,9 +5,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   classifyIpAddress,
-  assertPublicHttpDestination,
+  resolvePublicHttpDestination,
   ProhibitedDestinationError,
 } from '../src/corpus-read/origin-guard.js';
+import { pinnedFetch } from '../src/corpus-read/pinned-fetch.js';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { fetchArtifactContent, buildArtifactUrl } from '../src/corpus-read/fetch-artifact.js';
 import { acquireArtifactContent } from '../src/corpus-read/acquire.js';
 import type { CorpusStorePort, SaveNetworkArtifactInput } from '../src/corpus-read/types.js';
@@ -70,67 +73,76 @@ describe('classifyIpAddress (#1901)', () => {
   });
 });
 
-describe('assertPublicHttpDestination (#1901)', () => {
-  it('accepts a credential-free public https destination', async () => {
-    await expect(assertPublicHttpDestination(
+describe('resolvePublicHttpDestination (#1901)', () => {
+  it('accepts a credential-free public https destination and returns the address to pin', async () => {
+    await expect(resolvePublicHttpDestination(
       new URL('https://op.example.com/v1'), { resolveHostname: publicResolver },
-    )).resolves.toBeUndefined();
+    )).resolves.toEqual({ address: '93.184.216.34', family: 4 });
+  });
+
+  it('pins a literal-IP host to itself', async () => {
+    await expect(resolvePublicHttpDestination(
+      new URL('https://93.184.216.34/v1'), { resolveHostname: publicResolver },
+    )).resolves.toEqual({ address: '93.184.216.34', family: 4 });
   });
 
   it.each(['file:///etc/passwd', 'ftp://example.com/x', 'gopher://example.com/'])(
     'refuses the %s scheme', async (raw) => {
-      await expect(assertPublicHttpDestination(
+      await expect(resolvePublicHttpDestination(
         new URL(raw), { resolveHostname: publicResolver },
       )).rejects.toThrow(ProhibitedDestinationError);
     });
 
   it('refuses credential-bearing URLs', async () => {
-    await expect(assertPublicHttpDestination(
+    await expect(resolvePublicHttpDestination(
       new URL('https://user:secret@op.example.com/'), { resolveHostname: publicResolver },
     )).rejects.toThrow(/credentials/u);
   });
 
   it('refuses literal loopback and metadata hosts without consulting DNS', async () => {
     const resolveHostname = vi.fn(publicResolver);
-    await expect(assertPublicHttpDestination(
+    await expect(resolvePublicHttpDestination(
       new URL('http://127.0.0.1:7331/'), { resolveHostname },
     )).rejects.toThrow(/loopback/u);
-    await expect(assertPublicHttpDestination(
+    await expect(resolvePublicHttpDestination(
       new URL('http://169.254.169.254/latest/meta-data/'), { resolveHostname },
     )).rejects.toThrow(/link-local/u);
-    await expect(assertPublicHttpDestination(
+    await expect(resolvePublicHttpDestination(
       new URL('http://[::1]:7331/'), { resolveHostname },
     )).rejects.toThrow(/loopback/u);
     expect(resolveHostname).not.toHaveBeenCalled();
   });
 
   it('refuses a public-looking name that resolves into private space', async () => {
-    await expect(assertPublicHttpDestination(
+    await expect(resolvePublicHttpDestination(
       new URL('https://rebind.example.com/'),
       { resolveHostname: async () => ['10.1.2.3'] },
     )).rejects.toThrow(/private/u);
   });
 
   it('refuses when any one of several resolved addresses is prohibited', async () => {
-    await expect(assertPublicHttpDestination(
+    await expect(resolvePublicHttpDestination(
       new URL('https://mixed.example.com/'),
       { resolveHostname: async () => ['93.184.216.34', '127.0.0.1'] },
     )).rejects.toThrow(/loopback/u);
   });
 
   it('refuses a host that resolves to nothing', async () => {
-    await expect(assertPublicHttpDestination(
+    await expect(resolvePublicHttpDestination(
       new URL('https://void.example.com/'), { resolveHostname: async () => [] },
     )).rejects.toThrow(ProhibitedDestinationError);
   });
 
-  it('still refuses non-http schemes when private destinations are allowed', async () => {
-    await expect(assertPublicHttpDestination(
+  it('still refuses non-http schemes and credentials when private destinations are allowed', async () => {
+    await expect(resolvePublicHttpDestination(
       new URL('file:///etc/passwd'), { allowPrivateDestinations: true },
     )).rejects.toThrow(/http/u);
-    await expect(assertPublicHttpDestination(
+    await expect(resolvePublicHttpDestination(
+      new URL('http://user:secret@127.0.0.1:7331/'), { allowPrivateDestinations: true },
+    )).rejects.toThrow(/credentials/u);
+    await expect(resolvePublicHttpDestination(
       new URL('http://127.0.0.1:7331/'), { allowPrivateDestinations: true },
-    )).resolves.toBeUndefined();
+    )).resolves.toBeNull();
   });
 });
 
@@ -341,5 +353,114 @@ describe('acquireArtifactContent over the guarded fetch (#1901)', () => {
     })).rejects.toThrow(/blocked/u);
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(saved).toEqual([]);
+  });
+});
+
+describe('address pinning defeats DNS rebinding (#1901)', () => {
+  it('refuses the IPv6 forms that are not globally routable', () => {
+    // Deny-by-default: anything outside global unicast (2000::/3), and the
+    // zero-prefix space where IPv4-compatible / IPv4-translated forms live.
+    expect(classifyIpAddress('fec0::1')).toBe('private');          // site-local
+    expect(classifyIpAddress('::127.0.0.1')).toBe('reserved');     // IPv4-compatible
+    expect(classifyIpAddress('::ffff:0:127.0.0.1')).toBe('reserved'); // IPv4-translated
+    expect(classifyIpAddress('2001::7f00:1')).toBe('reserved');    // Teredo
+    expect(classifyIpAddress('64:ff9b:1::a9fe:a9fe')).toBe('reserved'); // local-use NAT64
+    expect(classifyIpAddress('5f00::1')).toBe('reserved');
+    expect(classifyIpAddress('2606:2800:220:1:248:1893:25c8:1946')).toBe('public');
+  });
+
+  it('connects to the pinned address, not to whatever the hostname resolves to', async () => {
+    // `.invalid` is guaranteed never to resolve (RFC 6761), so a successful
+    // request proves the socket used the pinned address and never consulted
+    // DNS — which is exactly what makes a rebinding answer unreachable.
+    const server = createServer((_req, res) => { res.writeHead(200); res.end('pinned-body'); });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    try {
+      await expect(pinnedFetch(new URL(`http://rebind.example.invalid:${port}/x`)))
+        .rejects.toThrow();
+      const response = await pinnedFetch(new URL(`http://rebind.example.invalid:${port}/x`), {
+        pinnedAddress: '127.0.0.1', pinnedFamily: 4,
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('pinned-body');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('hands the guard-approved address to the transport on every hop', async () => {
+    const seen: Array<string | undefined> = [];
+    const fetchImpl = vi.fn(async (_url: URL, init?: { pinnedAddress?: string }) => {
+      seen.push(init?.pinnedAddress);
+      return seen.length === 1
+        ? new Response(null, { status: 302, headers: { location: 'https://cdn.example.com/b' } })
+        : new Response(Buffer.from('ok', 'utf-8'), { status: 200 });
+    });
+    const result = await fetchArtifactContent('https://op.example.com', SHA, {
+      fetchImpl,
+      resolveHostname: async (host) =>
+        host === 'op.example.com' ? ['93.184.216.34'] : ['151.101.1.1'],
+    });
+    expect(result).toMatchObject({ ok: true });
+    expect(seen).toEqual(['93.184.216.34', '151.101.1.1']);
+  });
+
+  it('refuses a name whose answers mix public and private, rather than pinning the public one', async () => {
+    const fetchImpl = vi.fn();
+    const result = await fetchArtifactContent('https://mixed.example.com', SHA, {
+      fetchImpl, resolveHostname: async () => ['93.184.216.34', '169.254.169.254'],
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'blocked' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('the deadline covers the destination guard (#1901)', () => {
+  it('returns a timeout instead of hanging when DNS never answers', async () => {
+    const result = await fetchArtifactContent('https://slow.example.com', SHA, {
+      fetchImpl: async () => new Response(Buffer.from('x', 'utf-8'), { status: 200 }),
+      resolveHostname: () => new Promise<string[]>(() => { /* never answers */ }),
+      timeoutMs: 30,
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'timeout' });
+  });
+
+  it('returns a timeout when a later hop stalls in DNS', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(null, { status: 302, headers: { location: 'https://stall.example.com/b' } }));
+    const result = await fetchArtifactContent('https://op.example.com', SHA, {
+      fetchImpl,
+      resolveHostname: async (host) => host === 'op.example.com'
+        ? ['93.184.216.34']
+        : new Promise<string[]>(() => { /* never answers */ }),
+      timeoutMs: 30,
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'timeout' });
+  });
+});
+
+describe('obfuscated and credential-bearing destinations (#1901)', () => {
+  it.each([
+    'http://0177.0.0.1',
+    'http://2130706433',
+    'http://0x7f.1',
+    'http://[::ffff:127.0.0.1]',
+  ])('refuses the loopback spelling %s end to end', async (endpoint) => {
+    const fetchImpl = vi.fn();
+    const result = await fetchArtifactContent(endpoint, SHA, { fetchImpl });
+    expect(result).toMatchObject({ ok: false, reason: 'blocked' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('refuses a redirect whose Location carries credentials', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, {
+      status: 302, headers: { location: 'https://user:secret@cdn.example.com/b' },
+    }));
+    const result = await fetchArtifactContent('https://op.example.com', SHA, {
+      fetchImpl, resolveHostname: publicResolver,
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'blocked', message: expect.stringMatching(/credentials/u) });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
