@@ -410,6 +410,11 @@ describe('runDeploymentReadinessChecks', () => {
   });
 
   it('hosted probe timeout for a required runtime is advisory, not boot-fatal', async () => {
+    // Scope note: the stubbed hang exercises the OUTER `withTimeout` race in
+    // `probeRuntime`, not the hermes probe's own timeout. The real
+    // `probeHermesAuthStatus` resolves rather than hanging, so this test does
+    // not cover a missing or wedged hermes binary — the test below does.
+
     const report = await runDeploymentReadinessChecks(
       {
         stateDir: tmp,
