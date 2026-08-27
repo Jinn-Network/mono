@@ -8,7 +8,7 @@ import {
 } from "@jinn-network/task-execution-profiles";
 import type { DraftDocument } from "../domain/draft.js";
 import {
-  BINARY_ITEM_BANK_EVALUATOR_SEMANTICS,
+  binaryItemBankEvaluatorSemantics,
   convertBinaryItemBank,
 } from "../intake/binary-item-bank.js";
 import { buildBinaryJudgmentAdmissionClosureWorkspacePorts } from "../human-review/verification-workspace.js";
@@ -33,6 +33,7 @@ export interface ImportBinaryItemBankInput {
   readonly name?: string;
   readonly description?: string;
   readonly version?: string;
+  readonly parserInvalidPolicy?: "reject" | "abstain";
 }
 
 export interface ImportBinaryItemBankResult {
@@ -96,6 +97,9 @@ export function importBinaryItemBank(
         description: input.description ?? draft.spec.description ?? "",
         version: input.version ?? "1.0.0",
         author,
+        ...(input.parserInvalidPolicy === undefined
+          ? {}
+          : { parserInvalidPolicy: input.parserInvalidPolicy }),
         admissionVerificationPorts: buildBinaryJudgmentAdmissionClosureWorkspacePorts(
           clocked.workspaceDir,
         ),
@@ -103,7 +107,10 @@ export function importBinaryItemBank(
 
       // Retain protocol/profile/evaluator semantics as exact offline dependencies, not copied code.
       putSealedBytes(clocked.workspaceDir, sealTaskProfile(buildBinaryJudgmentProfile()).bytes);
-      putSealedBytes(clocked.workspaceDir, BINARY_ITEM_BANK_EVALUATOR_SEMANTICS.bytes);
+      putSealedBytes(
+        clocked.workspaceDir,
+        binaryItemBankEvaluatorSemantics(input.parserInvalidPolicy ?? "reject").bytes,
+      );
       storeExact(clocked.workspaceDir, converted.itemBank.bytes, converted.itemBank.digest, "item bank");
       storeExact(
         clocked.workspaceDir,

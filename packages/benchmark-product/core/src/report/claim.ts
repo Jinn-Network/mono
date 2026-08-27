@@ -68,6 +68,9 @@ export const BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
   "npx @colophon-claims/verify@0.1 <bundle-dir>" as const;
 /** Prompted-screening v2 claims require the verifier release that carries that admission surface. */
 export const PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND =
+  "npx @colophon-claims/verify@0.2.1 <bundle-dir>" as const;
+/** Previously materialized prompted bundles remain valid under their immutable 0.2.0 claim. */
+export const LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND =
   "npx @colophon-claims/verify@0.2.0 <bundle-dir>" as const;
 export const PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
   "npx @colophon-claims/verify@0.2 <bundle-dir>" as const;
@@ -434,8 +437,16 @@ const ClaimPackageWireSchema = z.object({
   const compatibleCommand = prompted
     ? PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
     : BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND;
-  if (claim.verification.command !== command || claim.verification.compatibleCommand !== compatibleCommand) {
-    ctx.addIssue({ code: "custom", message: `binary claim package must pin verifier ${prompted ? "0.2.0/@0.2" : "0.1.0/@0.1"}`, path: ["verification"] });
+  const promptedCommandAccepted = prompted
+    && (
+      claim.verification.command === PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND
+      || claim.verification.command === LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND
+    );
+  if (
+    (prompted ? !promptedCommandAccepted : claim.verification.command !== command)
+    || claim.verification.compatibleCommand !== compatibleCommand
+  ) {
+    ctx.addIssue({ code: "custom", message: `binary claim package must pin verifier ${prompted ? "0.2.1 (or historical 0.2.0)/@0.2" : "0.1.0/@0.1"}`, path: ["verification"] });
   }
   if (
     claim.verification.checks.length !== READER_VERIFICATION_CHECKS.length

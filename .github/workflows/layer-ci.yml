@@ -34,6 +34,11 @@ jobs:
     name: layer-ci-changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # checks: read feeds the push-lane dedup probe below (#2996). Job-level
+    # permissions replace the workflow grant, so contents: read is restated.
+    permissions:
+      contents: read
+      checks: read
     outputs:
       run: ${{ steps.select.outputs.run }}
     steps:
@@ -55,6 +60,7 @@ jobs:
           MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
           PUSH_HEAD_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           case "${EVENT_NAME}" in
@@ -67,6 +73,33 @@ jobs:
               diff_head="${MG_HEAD_SHA}"
               ;;
             push)
+              # Dedup a queue landing: a completed successful WORKER check-run on
+              # this exact SHA (from its merge_group build) proves the lane already
+              # ran against this tree. Worker names, never the gate context - the
+              # gate is green even when selection skipped the workers. Rationale
+              # and fail-open rules: hermetic-gate.yml push arm (#2996). Both
+              # layer workers must have genuinely run and passed.
+              if [ "${GITHUB_REF:-}" = 'refs/heads/next' ] && [ "${GITHUB_RUN_ATTEMPT:-1}" = '1' ]; then
+                verified=0
+                for worker in 'Typecheck, Test, Build & Pack Smoke' 'Client Compatibility'; do
+                  count="$(gh api -X GET "repos/${GITHUB_REPOSITORY:-}/commits/${GITHUB_SHA:-}/check-runs" \
+                    -f check_name="${worker}" -f status=completed -f per_page=100 \
+                    --jq '[.check_runs[] | select(.conclusion == "success")] | length' \
+                    2>/dev/null || echo 0)"
+                  case "${count}" in
+                    *[!0-9]*|'') count=0 ;;
+                  esac
+                  if [ "${count}" -gt 0 ]; then
+                    verified=$((verified + 1))
+                  fi
+                done
+                if [ "${verified}" -eq 2 ]; then
+                  echo "::notice::both layer workers already ran and passed on this SHA in its merge_group build; deduplicating the push-lane run (#2996)"
+                  echo 'run=false' >> "${GITHUB_OUTPUT}"
+                  exit 0
+                fi
+                echo "::notice::merge-group worker verdicts incomplete on this SHA (${verified}/2); falling through to the diff"
+              fi
               diff_base="${PUSH_BEFORE_SHA}"
               diff_head="${PUSH_HEAD_SHA}"
               ;;

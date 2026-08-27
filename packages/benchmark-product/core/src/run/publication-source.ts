@@ -12,6 +12,7 @@ import { dirname, resolve, sep } from "node:path";
 import {
   DISCOVERY_SIGNING_SCOPE,
   MEDIA_HEAD,
+  archivePagePath,
   dssePreAuthEncoding,
   formatOrigin,
   headPath,
@@ -152,6 +153,10 @@ export interface WorkspacePublicationSource {
   readonly recordStore: {
     getExact(digest: `sha256:${string}`): Promise<Uint8Array | undefined>;
   };
+  /** Exact signed archive pages, used to reconstruct a capture journal fact after a crash. */
+  readonly archiveStore: {
+    getExact(page: string): Promise<Uint8Array | undefined>;
+  };
   /** Exact signed source head, used to allocate a strictly later frozen append timestamp. */
   readonly head: {
     getExact(): Promise<SourceHead | undefined>;
@@ -199,6 +204,12 @@ export function createWorkspacePublicationSource(workspaceDir: string, sourceNam
         if (stored === undefined) return undefined;
         if (publicationSha256(stored.bytes) !== digest) throw new Error(`source record ${digest} fails its recordPath digest`);
         return stored.bytes;
+      },
+    },
+    archiveStore: {
+      async getExact(page) {
+        const stored = await blobs.get(archivePagePath(source.name, page));
+        return stored === undefined ? undefined : stored.bytes;
       },
     },
     head: {

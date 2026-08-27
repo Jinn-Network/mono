@@ -68,7 +68,7 @@ Routing is governed by three Project (v2) single-select fields set at Friday tri
 
 1. **Worktree-for-multi-agent.** Multi-agent or speculative subagent work uses a separate git worktree (current convention: `git worktree add ../jinn-mono_worktrees/<name>`), not the primary checkout.
 2. **Issues frame problems, not solutions.** GitHub Issue body = context + impact + acceptance criteria. Solutions go in design sessions or implementation plans, not the Issue body.
-3. **GitHub Issues are the single SoR for engineering work.** Per DR-2026-05-18, `bd` retires; all new engineering work originates as a GitHub Issue on `Jinn-Network/mono`. Per DR-2026-05-20-b, each axis has one canonical surface: shape is the native **Issue Type**; parent/child and epic are native **sub-issues**; Sprint and Status live on the "Jinn engineering" Project (v2); **Blocked on / Effort / Priority** are Project single-select fields. The `epic:*`, `sprint:*`, `agent:*`, `priority:*`, and redundant GitHub default labels are retired. The `.beads/` checkout stays in-tree as read-only archive of historical `jinn-mono-<id>` references.
+3. **GitHub Issues are the single SoR for engineering work.** All new engineering work originates as a GitHub Issue on `Jinn-Network/mono`. Per DR-2026-05-20-b, each axis has one canonical surface: shape is the native **Issue Type**; parent/child and epic are native **sub-issues**; Sprint and Status live on the "Jinn engineering" Project (v2); **Blocked on / Effort / Priority** are Project single-select fields. The `epic:*`, `sprint:*`, `agent:*`, `priority:*`, and redundant GitHub default labels are retired.
 4. **Reviewed, then queued.** Review is a pipeline stage, not an identity ritual. The merge queue plus required CI is the quality gate for every PR into `next`. Generic approving-review count on `next` is 0: write users enqueue with Merge when ready when checks are green. CODEOWNER Approve is required only on the human-surface set in `.github/CODEOWNERS` (DR-2026-08-20; DR-2026-06-03's mechanism retained on that shrunk set, its "agent never satisfies CODEOWNERS" doctrine still superseded by DR-2026-08-18-b). Platform architecture ownership lives in `.github/architecture-owners`, not GitHub CODEOWNERS. GitHub refuses to record the authoring account's own CODEOWNER approval, so human-surface PRs are authored under a non-owner operator credential. Self-enqueue is permitted once required checks are green (and CODEOWNER Approve exists when the diff hits the set); the merge queue on `next` is the only merger of ordinary PRs (#1735 lineage). Autopilot is out of this gate's enforcement and never bypasses or weakens the queue or branch protection. Mechanical merge preparation must make the PR draft before mutation and the resulting head re-enters every merge gate. Exceptions: `fix(incident)` reviewer relaxation with documented justification; mechanical conflict resolution via the children ladder.
 5. _(Deferred — supervised-diff for the self-modifying learner. Mechanism open.)_
 6. **Integration tests > mocks for migration / contract surfaces.**
@@ -88,8 +88,6 @@ Routing is governed by three Project (v2) single-select fields set at Friday tri
 ### Daily entry point
 
 `eng-day` skill (in `.claude/skills/eng-day/`) is the canonical daily brief; it reads the Issue Type and the Blocked on / Effort / Priority Project fields. Fallback: `gh issue list --search 'is:open no:assignee'` + `gh pr list --search 'is:open draft:false'` (the fallback does not see the Project-layer routing fields).
-
-**Operator-local cleanup (one-time, per DR-2026-05-18):** if your `.claude/settings.json` has a `bd prime` SessionStart or PreCompact hook (the legacy beads workflow primer), remove it. `.claude/settings.json` is gitignored, so this cleanup is per-operator. The hook is no longer recommended; CLAUDE.md auto-load covers session start.
 
 ## Repository Structure
 
@@ -160,7 +158,7 @@ spec/            Dated specification proposals
 docs/            Design specs and implementation plans
 ```
 
-## jinn-cli-agents Reference
+## jinn-cli-agents-reference
 
 **Always check `legacy/jinn-cli-agents-reference/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context. It is retained deliberately as reference material — the `-reference` suffix marks it consulted-but-never-built: it carries no `package.json`, is in no workspace, and nothing in the repository imports from it. Paths below are relative to that directory:
 

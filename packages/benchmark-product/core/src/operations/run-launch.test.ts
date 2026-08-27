@@ -17,9 +17,9 @@ import { writeCancelMarker } from "../run/cancel-marker.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readRunState, writeRunState } from "../run/state.js";
-import { createWorkspacePublicationHttpHandler } from "../run/publication-source.js";
+import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource } from "../run/publication-source.js";
 import { runJournalPath } from "../workspace/layout.js";
-import { sha256Hex } from "../workspace/sealed-store.js";
+import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import type { LocalVenue } from "../venue/venue.js";
 import { armAdd } from "./arms.js";
 import { authorityGrant } from "./authority-ops.js";
@@ -102,12 +102,17 @@ function utf8(json: unknown): Uint8Array {
  * `waitForAttemptTerminal`, which this fake never reaches because `observe()` already reports
  * `terminal: true` on the very first call).
  */
-function makeStatefulFakeBackend(): { backend: ProxiedBackend; submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] } {
+function makeStatefulFakeBackend(): {
+  backend: ProxiedBackend;
+  submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[];
+  recoveries: string[];
+} {
   const byUri = new Map<string, FakeAttempt>();
   const byIdempotencyKey = new Map<string, { bytesHash: string; ack: SubmissionAck }>();
   const bytesByHex = new Map<string, Uint8Array>();
   let counter = 0;
   const submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] = [];
+  const recoveries: string[] = [];
 
   function store(bytes: Uint8Array): string {
     const hex = sha256Hex(bytes);
@@ -161,8 +166,9 @@ function makeStatefulFakeBackend(): { backend: ProxiedBackend; submits: { taskBy
       };
       return snapshot;
     },
-    async recover() {
-      throw new Error("not used by these tests");
+    async recover(ref) {
+      recoveries.push(ref);
+      return { classification: "absent" };
     },
     async deliveries(attempt) {
       const found = byUri.get(attempt as string);
@@ -181,7 +187,7 @@ function makeStatefulFakeBackend(): { backend: ProxiedBackend; submits: { taskBy
     },
     async drain() {},
   };
-  return { backend, submits };
+  return { backend, submits, recoveries };
 }
 
 function fakeVenue(backend: ProxiedBackend, evaluatorCount = 1): LocalVenue {
@@ -206,6 +212,27 @@ function fakeVenue(backend: ProxiedBackend, evaluatorCount = 1): LocalVenue {
 }
 
 describe("runLaunch — lifecycle guard", () => {
+  test("refuses concurrency outside the public 1-32 bound before changing run state", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    let venueCalls = 0;
+    const outcome = await runLaunch(contextFor(clock), {
+      draftId: "draft-1",
+      maxConcurrentCells: 33,
+    }, {
+      createVenue: () => {
+        venueCalls += 1;
+        throw new Error("must not construct venue");
+      },
+    });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: { code: "validation", issues: [{ path: "maxConcurrentCells" }] },
+    });
+    expect(venueCalls).toBe(0);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+  });
+
   test("refuses illegal-transition when the draft is not locked", async () => {
     const clock = makeClock();
     initWorkspace(contextFor(clock));
@@ -344,9 +371,127 @@ describe("runLaunch — prospective mounted publication", () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   }, 30_000);
+
+  test("resume reconstructs a public Submission committed before its local capture journal fact", async () => {
+    const clock = makeClock();
+    const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+    const server = createServer(async (request, response) => {
+      const externalPath = request.url ?? "/";
+      if (!externalPath.startsWith("/publication/")) { response.writeHead(404).end(); return; }
+      const result = await handler(new Request(`http://127.0.0.1${externalPath.slice("/publication".length)}`, { method: request.method }));
+      response.writeHead(result.status, Object.fromEntries(result.headers));
+      response.end(Buffer.from(await result.arrayBuffer()));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("test server address unavailable");
+      const base = `http://127.0.0.1:${address.port}/publication`;
+      await setUpLockedDraft(clock, "prior-run");
+      expect((await publicationConfigure(contextFor(clock), { draftId: "prior-run", publicBaseUrl: base })).ok).toBe(true);
+      expect((await publicationRegister(contextFor(clock), { draftId: "prior-run" })).ok).toBe(true);
+      const { backend: priorBackend } = makeStatefulFakeBackend();
+      expect((await runLaunch(contextFor(clock), { draftId: "prior-run" }, { createVenue: () => fakeVenue(priorBackend) })).ok).toBe(true);
+
+      await setUpLockedDraft(clock);
+      expect((await publicationConfigure(contextFor(clock), { draftId: "draft-1", publicBaseUrl: base })).ok).toBe(true);
+      expect((await publicationRegister(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+      expect(readRunState(workspaceDir, "prior-run")?.runSha256).not.toBe(readRunState(workspaceDir, "draft-1")?.runSha256);
+      const { backend: launchBackend } = makeStatefulFakeBackend();
+      expect((await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(launchBackend) })).ok).toBe(true);
+
+      const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+      const captured = fullEntries.find(
+        (entry) => entry.kind === "submission-captured" && entry.publicationSourceSequence !== undefined,
+      );
+      if (captured?.kind !== "submission-captured") throw new Error("fixture produced no prospective Submission capture");
+      const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+      const sourceBefore = await source.writer.readState();
+      if (sourceBefore === undefined) throw new Error("fixture produced no public source state");
+      const announcementCount = Object.keys(sourceBefore.announcements).length;
+
+      // The public append and sealed record remain, but every local fact for this coordinate is
+      // absent: the exact crash boundary between source.writer.append and the journal append.
+      overwriteRunJournal("draft-1", fullEntries.filter((entry) => {
+        if (entry.kind === "cell-event") return entry.event.cellKey !== captured.cellKey;
+        if (
+          entry.kind === "submission-captured"
+          || entry.kind === "submission-pinning-evidence"
+          || entry.kind === "submission-accepted"
+          || entry.kind === "observation-accepted"
+          || entry.kind === "delivery"
+          || entry.kind === "evaluation"
+        ) return entry.cellKey !== captured.cellKey;
+        return true;
+      }));
+
+      const { backend: resumeBackend } = makeStatefulFakeBackend();
+      const resumed = await runResume(contextFor(clock), { draftId: "draft-1" }, {
+        createVenue: () => fakeVenue(resumeBackend),
+      });
+      expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
+      const after = readRunJournalEntries(workspaceDir, "draft-1");
+      expect(after.filter(
+        (entry) => entry.kind === "submission-captured" && entry.cellKey === captured.cellKey,
+      )).toEqual([expect.objectContaining({
+        submissionSha256: captured.submissionSha256,
+        publicationSourceSequence: captured.publicationSourceSequence,
+        publicationEntrySha256: captured.publicationEntrySha256,
+      })]);
+      const sourceAfter = await source.writer.readState();
+      expect(Object.keys(sourceAfter?.announcements ?? {})).toHaveLength(announcementCount);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 30_000);
 });
 
 describe("runLaunch — drives a full 2-arm run to completion (fake backend)", () => {
+  test("threads the selected cell concurrency into venue capacity and the durable journal", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const capacities: Array<number | undefined> = [];
+    const outcome = await runLaunch(contextFor(clock), {
+      draftId: "draft-1",
+      maxConcurrentCells: 8,
+    }, {
+      createVenue: (options) => {
+        capacities.push(options.maxConcurrentAttempts);
+        return fakeVenue(backend);
+      },
+      driverGenerationForTesting: () => "concurrency-eight-generation",
+    });
+    expect(outcome.ok).toBe(true);
+    expect(capacities).toEqual([8]);
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toContainEqual(
+      expect.objectContaining({
+        kind: "driver-started",
+        operation: "launch",
+        generation: "concurrency-eight-generation",
+        maxConcurrentCells: 8,
+      }),
+    );
+  }, 30_000);
+
+  test("records the historical serial default explicitly", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const outcome = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(backend),
+      driverGenerationForTesting: () => "serial-default-generation",
+    });
+    expect(outcome.ok).toBe(true);
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toContainEqual(
+      expect.objectContaining({
+        kind: "driver-started",
+        generation: "serial-default-generation",
+        maxConcurrentCells: 1,
+      }),
+    );
+  }, 30_000);
+
   test("a shutdown rejection is the generation's single durable failed terminal", async () => {
     const clock = makeClock();
     await setUpLockedDraft(clock);
@@ -810,6 +955,111 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     expect(status.ok).toBe(true);
     if (!status.ok) return;
     expect(status.result.driver?.status).toBe("succeeded");
+  }, 30_000);
+
+  test("reconciles a captured in-flight Submission before resuming its exact dispatch", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend: launchBackend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(launchBackend),
+    });
+    expect(launched.ok).toBe(true);
+
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const delivered = fullEntries.find(
+      (entry) => entry.kind === "cell-event" && entry.event.kind === "delivered",
+    );
+    if (delivered?.kind !== "cell-event") throw new Error("fixture produced no delivered cell");
+    const cellKey = delivered.event.cellKey;
+    const captured = fullEntries.find(
+      (entry) => entry.kind === "submission-captured" && entry.cellKey === cellKey,
+    );
+    if (captured?.kind !== "submission-captured") throw new Error("fixture produced no captured Submission");
+
+    // Retain the pre-submit capture and dispatch event, but remove everything that says this
+    // cell reached a terminal. This is the product-journal shape of the real crash boundary:
+    // backend outcome durable, product delivery/terminal not yet observed.
+    overwriteRunJournal("draft-1", fullEntries.filter((entry) => {
+      if (entry.kind === "cell-event" && entry.event.cellKey === cellKey) {
+        return entry.event.kind === "dispatch";
+      }
+      if (
+        (entry.kind === "observation-accepted"
+          || entry.kind === "delivery"
+          || entry.kind === "evaluation")
+        && entry.cellKey === cellKey
+      ) return false;
+      return true;
+    }));
+
+    const { backend: resumeBackend, recoveries, submits } = makeStatefulFakeBackend();
+    const outcome = await runResume(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(resumeBackend),
+    });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    expect(recoveries).toHaveLength(1);
+    const capturedDocument = JSON.parse(new TextDecoder().decode(
+      getSealedBytes(workspaceDir, captured.submissionSha256),
+    )) as { readonly submission: string };
+    expect(recoveries).toEqual([capturedDocument.submission]);
+    expect(submits).toHaveLength(2);
+    const afterEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(afterEntries.filter(
+      (entry) => entry.kind === "submission-captured" && entry.cellKey === cellKey,
+    )).toHaveLength(1);
+    expect(afterEntries.filter(
+      (entry) => entry.kind === "submission-accepted" && entry.leg !== "evaluation" && entry.cellKey === cellKey,
+    )).toHaveLength(1);
+    expect(afterEntries.filter(
+      (entry) => entry.kind === "observation-accepted" && entry.cellKey === cellKey,
+    )).toHaveLength(1);
+  }, 30_000);
+
+  test("fails closed when backend recovery contradicts a captured Submission", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend: launchBackend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(launchBackend),
+    });
+    expect(launched.ok).toBe(true);
+
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const delivered = fullEntries.find(
+      (entry) => entry.kind === "cell-event" && entry.event.kind === "delivered",
+    );
+    if (delivered?.kind !== "cell-event") throw new Error("fixture produced no delivered cell");
+    const cellKey = delivered.event.cellKey;
+    overwriteRunJournal("draft-1", fullEntries.filter((entry) => {
+      if (entry.kind === "cell-event" && entry.event.cellKey === cellKey) {
+        return entry.event.kind === "dispatch";
+      }
+      if (
+        (entry.kind === "observation-accepted"
+          || entry.kind === "delivery"
+          || entry.kind === "evaluation")
+        && entry.cellKey === cellKey
+      ) return false;
+      return true;
+    }));
+
+    const { backend: resumeBackend, submits } = makeStatefulFakeBackend();
+    resumeBackend.recover = async () => ({
+      classification: "contradictory",
+      detail: "durable attempt differs from captured bytes",
+    });
+    const outcome = await runResume(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(resumeBackend),
+    });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: {
+        code: "record-integrity",
+        detail: expect.stringContaining("backend recovery contradicted"),
+      },
+    });
+    expect(submits).toHaveLength(0);
   }, 30_000);
 
   test("a cell whose journal entries are entirely missing (crash before it was ever dispatched) is picked up; already-complete cells are untouched", async () => {

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import type { AgentAdapter, AgentProfile } from "./profile.js";
+import { inheritedTempEnv } from "../runtime/child-temp-env.js";
 
 const VERSION_TIMEOUT_MS = 5_000;
 const VERSION_MAX_BUFFER = 16 * 1024;
@@ -20,7 +21,7 @@ const defaultVersionCommand: AgentVersionCommand = (executable, args) => execFil
     timeout: VERSION_TIMEOUT_MS,
     maxBuffer: VERSION_MAX_BUFFER,
     windowsHide: true,
-    env: { PATH: process.env.PATH ?? "" },
+    env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "" },
   },
 );
 

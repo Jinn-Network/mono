@@ -7,7 +7,22 @@ import { join } from "node:path";
 import { createSandboxController } from "./sandbox-controller.mjs";
 
 const SAFE_NAME = /^[a-z0-9][a-z0-9_.-]{0,127}$/u;
-const dockerEnvironment = { LANG: "C.UTF-8" };
+/**
+ * The `docker` CLI runs on the HOST and writes build context and export scratch into its temp
+ * directory, so the caller's temp variables have to reach it — an allowlist that names none leaves
+ * it on the platform default, outside whatever root the caller was confined to. Duplicated from
+ * `child-temp-env.ts` rather than imported: this file is plain JavaScript spawned as its own
+ * script and cannot load a TypeScript module. Nothing here reaches the container's own environment,
+ * which `docker run` builds from the image and the flags below.
+ */
+const dockerEnvironment = (() => {
+  const environment = { LANG: "C.UTF-8" };
+  for (const name of ["TMPDIR", "TMP", "TEMP"]) {
+    const value = process.env[name];
+    if (typeof value === "string" && value.length > 0) environment[name] = value;
+  }
+  return environment;
+})();
 
 function docker(dockerPath, args, timeout = 15_000) {
   return spawnSync(dockerPath, args, {

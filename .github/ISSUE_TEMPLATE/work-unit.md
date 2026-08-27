@@ -73,5 +73,4 @@ discipline (handbook §The shapes of work):
 <!--
 - Related Issues / PRs / DRs / specs
 - Parent epic (if any) — open the Issue, then attach via the GitHub Sub-issues UI
-- Archived bd lookups: `bd show <jinn-mono-id>` (pre-DR-2026-05-18 history; gitignored .beads/)
 -->

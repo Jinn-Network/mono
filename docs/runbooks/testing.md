@@ -200,6 +200,27 @@ Use **Node 22** where possible (`engines` in `operator/package.json`). CI should
 - Nightly / release: all `yarn e2e*` scenarios serially.
 - E2E tests use `allocateAnvilPort()` so parallelism is safe when we add it.
 
+## Temp directories and `$HOME`
+
+No test reaches the real `~`, and no test leaves a directory behind in the user
+temp directory. Both come from wiring, not from per-call-site cleanup — which a
+failing test skips anyway:
+
+- **Suites under `packages/`** wire the shared seam in
+  [`test-support/tmp-isolation/`](../../test-support/tmp-isolation/README.md):
+  `setupFiles` points `$TMPDIR` at a managed root per test file, `globalSetup`
+  sweeps every root once the workers are gone. Two lines per `vitest.config.ts`.
+- **The operator's five configs** wire `operator/test/_support/isolate-home.ts`
+  and `global-tmp-root.ts`, which do the same and isolate `$HOME` as well.
+
+`.github/scripts/vitest-tmp-isolation.test.mjs` runs on every PR and fails if a
+config is missing either hook — including a config that has just been added.
+
+A `spawn`ed child inherits only what its `env` allowlist names, so an allowlist
+that omits `TMPDIR`/`TMP`/`TEMP` puts the child's scratch files outside the
+managed root. Name all three, or write `temp-env: <reason>` inline where the
+child must not inherit them.
+
 ## Adding a new helper to `test/_support/`
 
 1. Write the helper's own unit test under `test/_support/<name>.test.ts`.

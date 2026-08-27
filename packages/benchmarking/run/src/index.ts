@@ -44,6 +44,7 @@ export {
   computeCellDeadline,
   defaultClassifyTerminal,
   launchAndWatch,
+  MAX_CONCURRENT_CELLS,
   resumeRun,
   systemClock,
   CellCorrespondenceError,

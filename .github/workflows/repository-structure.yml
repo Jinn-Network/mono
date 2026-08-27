@@ -14,8 +14,58 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    # Push-lane dedup probe (#2996): a queue landing is the byte-identical
+    # commit its merge_group build verified, so a completed successful
+    # `repo-structure-gate` check-run on this exact SHA proves all four
+    # structure jobs already executed against this tree. Probing the GATE name
+    # is sound HERE because this workflow has no merge-group selection: the
+    # gate only reports success after every worker ran (if selection is ever
+    # added to the merge_group lane, switch this probe to the worker names -
+    # see hermetic-gate.yml). This job is IDENTITY-ONLY: every event other
+    # than a push to next selects the full run, and it must never grow a diff
+    # arm - this required context carries no path filtering.
+    name: repo-structure-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+    steps:
+      - name: Probe for a same-SHA merge-group verdict
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" != push ]; then
+            echo 'run=true' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [ "${GITHUB_REF:-}" = 'refs/heads/next' ] && [ "${GITHUB_RUN_ATTEMPT:-1}" = '1' ]; then
+            verified="$(gh api -X GET "repos/${GITHUB_REPOSITORY:-}/commits/${GITHUB_SHA:-}/check-runs" \
+              -f check_name='repo-structure-gate' -f status=completed -f per_page=100 \
+              --jq '[.check_runs[] | select(.conclusion == "success")] | length' \
+              2>/dev/null || echo 0)"
+            case "${verified}" in
+              *[!0-9]*|'') verified=0 ;;
+            esac
+            if [ "${verified}" -gt 0 ]; then
+              echo "::notice::repo-structure-gate already passed on this SHA in its merge_group build; deduplicating the push-lane run (#2996)"
+              echo 'run=false' >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            echo "::notice::no completed successful repo-structure-gate check-run found on this SHA; running in full"
+          fi
+          echo 'run=true' >> "${GITHUB_OUTPUT}"
+
   gitlinks:
     name: Gitlink metadata
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -35,8 +85,12 @@ jobs:
         run: node --test .github/scripts/workflow-script-tests.test.mjs
       - name: Published-artifacts-smoke workflow shape
         run: node --test .github/scripts/published-artifacts-smoke-workflow.test.mjs
+      - name: Vitest temp-directory sweep seam is wired everywhere
+        run: node --test .github/scripts/vitest-tmp-isolation.test.mjs
   identifier-origin:
     name: Identifier origin tripwire
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     # DR-2026-08-04 moved the protocol identifier origin to spec.jinn.network. The re-seal
     # was lawful only because nothing had ever been published; once a document is served the
@@ -53,6 +107,8 @@ jobs:
         run: node .github/scripts/origin-tripwire.mjs
   evidence-architecture:
     name: Evidence package architecture
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -67,10 +123,17 @@ jobs:
             .github/scripts/evidence-source-boundaries.test.mjs
   workflow-selection:
     name: Workflow selection shell
-    # This test executes the `changes` job scripts of four *other* workflows
-    # (DR-2026-08-18-b D3/D6), so it cannot sit behind any of their selection
-    # gates: an edit to one lane's script would then go unexercised on exactly the
-    # diffs that leave that lane unselected. This workflow runs on every event.
+    # This test executes the `changes` job scripts of other workflows
+    # (DR-2026-08-18-b D3/D6), so it cannot sit behind any of their *diff-based*
+    # selection gates: an edit to one lane's script would then go unexercised on
+    # exactly the diffs that leave that lane unselected. It runs on every
+    # pull_request and merge_group event. The one gate it does sit behind is
+    # this workflow's own push-lane dedup probe (#2996), which is SHA-identity,
+    # never path selection: it skips only when a completed successful
+    # repo-structure-gate - which includes this job - already covers the
+    # byte-identical landed commit.
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -86,21 +149,38 @@ jobs:
     # string is the required-status-check context registered on the `next` ruleset
     # (DR-2026-08-18-b D3) — keep them in sync.
     name: repo-structure-gate
-    needs: [gitlinks, identifier-origin, evidence-architecture, workflow-selection]
+    needs: [changes, gitlinks, identifier-origin, evidence-architecture, workflow-selection]
     if: always()
     runs-on: ubuntu-latest
-    # Three `test`s against upstream results. The bound keeps a wedged runner from
-    # holding the required context open for the 360-minute default.
+    # The bound keeps a wedged runner from holding the required context open for
+    # the 360-minute default.
     timeout-minutes: 5
     steps:
-      - name: Require exact success from every structure job
+      - name: Require exact success from every structure job unless dedup unselected them
         env:
+          SELECTED: ${{ needs.changes.outputs.run }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
           GITLINKS_RESULT: ${{ needs.gitlinks.result }}
           IDENTIFIER_ORIGIN_RESULT: ${{ needs.identifier-origin.result }}
           EVIDENCE_ARCHITECTURE_RESULT: ${{ needs.evidence-architecture.result }}
           WORKFLOW_SELECTION_RESULT: ${{ needs.workflow-selection.result }}
         run: |
-          test "${GITLINKS_RESULT}" = success
-          test "${IDENTIFIER_ORIGIN_RESULT}" = success
-          test "${EVIDENCE_ARCHITECTURE_RESULT}" = success
-          test "${WORKFLOW_SELECTION_RESULT}" = success
+          set -euo pipefail
+          test "${CHANGES_RESULT}" = success
+          # Empty must never be read as "unselected": a broken probe step would
+          # otherwise turn into a green gate over four skipped workers.
+          case "${SELECTED}" in
+            true|false) ;;
+            *)
+              echo "::error::unparseable selection output: '${SELECTED}'"
+              exit 1
+              ;;
+          esac
+          expected=success
+          if [ "${SELECTED}" != true ]; then
+            expected=skipped
+          fi
+          test "${GITLINKS_RESULT}" = "${expected}"
+          test "${IDENTIFIER_ORIGIN_RESULT}" = "${expected}"
+          test "${EVIDENCE_ARCHITECTURE_RESULT}" = "${expected}"
+          test "${WORKFLOW_SELECTION_RESULT}" = "${expected}"

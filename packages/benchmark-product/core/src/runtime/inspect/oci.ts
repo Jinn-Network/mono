@@ -256,6 +256,9 @@ async function runBoundedProcess(
     const child = spawn(executable, args, {
       stdio: ["pipe", "pipe", "pipe"],
       signal,
+      // temp-env: delegated to the caller. It owns this allowlist, and omitting it deliberately
+      // lets the child inherit the whole ambient environment, temp variables included — so both
+      // branches reach the caller's temp directory without this function naming it.
       ...(environment === undefined ? {} : { env: environment }),
     });
     const stdout: Buffer[] = [];

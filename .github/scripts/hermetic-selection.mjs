@@ -18,7 +18,6 @@ export const IGNORABLE_PREFIXES = Object.freeze([
   'growth/',
   'legacy/',
   '.agents/',
-  '.beads/',
   '.claude/',
   '.codex/',
   '.cursor/',
