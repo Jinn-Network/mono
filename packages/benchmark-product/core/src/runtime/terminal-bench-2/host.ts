@@ -19,6 +19,7 @@ import {
   type TerminalBenchMaterial,
   type TerminalBenchMigrationManifest,
 } from "./manifest.js";
+import { inheritedTempEnv } from "../child-temp-env.js";
 
 export interface TerminalBench2SelectionRequest {
   readonly executable: string;
@@ -187,7 +188,7 @@ export interface TerminalBenchMigrationResolution {
 
 async function execute(executable: string, argv: readonly string[], cwd?: string): Promise<{ stdout: Uint8Array; stderr: Uint8Array }> {
   return await new Promise((resolve, reject) => execFile(executable, [...argv], {
-    cwd, encoding: "buffer", env: { PATH: process.env.PATH ?? "", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1" }, maxBuffer: 16 * 1024 * 1024,
+    cwd, encoding: "buffer", env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1" }, maxBuffer: 16 * 1024 * 1024,
   }, (error, stdout, stderr) => error === null
     ? resolve({ stdout: new Uint8Array(stdout), stderr: new Uint8Array(stderr) })
     : reject(new Error(`Harbor command failed: ${argv.join(" ")}`, { cause: error }))));

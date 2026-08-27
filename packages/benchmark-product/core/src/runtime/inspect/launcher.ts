@@ -7,6 +7,7 @@ import { INSPECT_TASK_PROFILE_URI, INSPECT_NATIVE_LOG_MEDIA_TYPE, INSPECT_SUMMAR
 import { INSPECT_ARM_REQUIREMENT_KEY, type InspectSelectionManifest } from "./manifest.js";
 import { inspectWorkerPath, type InspectHostBinding } from "./host.js";
 import { buildInspectOciRunArgs, inspectOciRunnerPath } from "./oci.js";
+import { inheritedTempEnv, scopedTempEnv } from "../child-temp-env.js";
 
 export const INSPECT_LAUNCHER_ID = "inspect-ai";
 
@@ -80,6 +81,7 @@ export function makeInspectLauncher(options: InspectLauncherOptions): LauncherCo
             ],
           cwd: paths.work,
           env: {
+            ...inheritedTempEnv(),
             LANG: "C.UTF-8",
             ...(options.hostConnectionDescriptor === undefined
               ? {}
@@ -98,7 +100,7 @@ export function makeInspectLauncher(options: InspectLauncherOptions): LauncherCo
           PYTHONNOUSERSITE: "1",
           PYTHONUTF8: "1",
           LANG: "C.UTF-8",
-          TMPDIR: paths.tmp,
+          ...scopedTempEnv(paths.tmp),
         },
         validExitCodes: [0],
         resultContract: { envelopeFormat: "inspect-worker-v1" },

@@ -99,7 +99,7 @@ If a PR doesn't fit one of these shapes, it's mis-scoped. Split it.
 
 - **Title**: `<shape>: <one-line summary>` per Conventional Commits (e.g. `fix: SWE typed payload fallback validation`, `feat(uy6v): live verdict-success on Base Sepolia`).
 - **Body**: problem-not-solution framing (what's wrong / what gap / what need triggered this), test plan, agent identity if AI-authored.
-- **Linked bd issue**: `Closes jinn-mono-<id>` in the body so merge auto-closes the mirror.
+- **Linked GitHub Issue**: `Closes #<N>` in the body so merge auto-closes the Issue.
 - **Co-Authored-By trailer** for AI commits, e.g.:
   ```
   Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
@@ -131,7 +131,7 @@ Full text in [`docs/engineering/handbook.md`](docs/engineering/handbook.md#ai-wo
 
 1. Worktree-for-multi-agent — multi-agent or speculative subagent work uses a separate git worktree (current convention: `git worktree add ../jinn-mono_worktrees/<name>`).
 2. Issues frame problems, not solutions — GitHub Issue body = context + impact + acceptance criteria; solutions live in design sessions or implementation plans.
-3. GitHub Issues are the single SoR for engineering work — per DR-2026-05-18, `bd` retires; all new engineering work originates as a GitHub Issue on `Jinn-Network/mono`.
+3. GitHub Issues are the single SoR for engineering work — all new engineering work originates as a GitHub Issue on `Jinn-Network/mono`.
 4. Reviewed, then queued — queue + required CI is the quality gate; generic approving-review count on `next` is 0; CODEOWNER Approve is required only on the human-surface set in `.github/CODEOWNERS`; self-enqueue is permitted once required checks are green; the merge queue on `next` is the only merger of ordinary PRs. Exceptions: `fix(incident)` reviewer relaxation with documented justification; mechanical conflict resolution via the children ladder.
 5. _(Deferred — see [`jinn-mono-8qbc`](https://github.com/Jinn-Network/mono/issues?q=jinn-mono-8qbc))_
 6. Integration tests > mocks for migration / contract surfaces.
@@ -142,9 +142,9 @@ Full text in [`docs/engineering/handbook.md`](docs/engineering/handbook.md#ai-wo
 
 ## Issue tracker
 
-The internal SoR is **bd (beads)** — see [`CLAUDE.md`](CLAUDE.md) §Beads Issue Tracker for the workflow. External contributors interact via:
+All new engineering work originates as a GitHub Issue on `Jinn-Network/mono`.
 
-- **Public GitHub Issues** — the sprint-scoped subset of bd, mirrored by the Friday triage automation. The Issue body ends with `Internal tracking: jinn-mono-<bd-id>`.
+- **Public GitHub Issues** — the single source of truth for engineering work.
 - **GitHub Project (v2) "Jinn engineering"** — the public sprint board.
 - **GitHub Discussions** — RFCs / Q&A / governance prep.
 

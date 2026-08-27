@@ -2017,14 +2017,14 @@
       "authorityDocuments": 32,
       "boundaryPolicies": 25,
       "catalogManifests": 96,
-      "catalogPublicSurfaces": 1368,
+      "catalogPublicSurfaces": 1383,
       "catalogSchema": 2,
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 6,
-      "discoveredFirstPartySurfaces": 4063,
-      "generatedOutputSources": 1430,
-      "generatorSources": 678,
+      "discoveredFirstPartySurfaces": 4078,
+      "generatedOutputSources": 1445,
+      "generatorSources": 680,
       "marketplaceControl": 2,
       "requiredGates": 24,
       "staticControl": 7
@@ -2805,6 +2805,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": ".github/scripts/plugin-tree-ci-workflow.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": ".github/scripts/plugin-tree-guard-common.mjs"
       },
       {
@@ -3534,6 +3544,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/verify-local-profile-host.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/vitest-tmp-isolation.test.mjs"
       },
       {
         "categories": [
@@ -49823,6 +49843,42 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-complete-json-label/2.0.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-complete-json-label/2.0.0/semantics.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-complete-json-label/2.0.0/semantics.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-correct-wrong"
       },
       {
@@ -49908,6 +49964,42 @@
           "@ritsukai"
         ],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-evermem-json-label/1.0.0/semantics.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-evermem-json-label/2.0.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-evermem-json-label/2.0.0/semantics.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-evermem-json-label/2.0.0/semantics.sha256"
       },
       {
         "categories": [
@@ -50015,6 +50107,42 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/2.0.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/2.0.0/semantics.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/2.0.0/semantics.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-label-in-prose"
       },
       {
@@ -50111,6 +50239,42 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-mem0-json-label/2.0.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-mem0-json-label/2.0.0/semantics.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-mem0-json-label/2.0.0/semantics.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-strict-json-label"
       },
       {
@@ -50148,6 +50312,42 @@
           "@ritsukai"
         ],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-strict-json-label/1.0.0/semantics.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-strict-json-label/2.0.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-strict-json-label/2.0.0/semantics.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-strict-json-label/2.0.0/semantics.sha256"
       },
       {
         "categories": [
@@ -54497,7 +54697,7 @@
       "supersedes": [],
       "tier": 4,
       "transition": null,
-      "version": "0.2.0"
+      "version": "0.2.1"
     },
     {
       "boundaryPolicy": {
@@ -65378,6 +65578,24 @@
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
         "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-complete-json-label/2.0.0/semantics.json",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-complete-json-label/2.0.0/semantics.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-complete-json-label/2.0.0/semantics.sha256",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-complete-json-label/2.0.0/semantics.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/semantics.json",
         "relativeSource": "profiles/binary-judgment/parsers/binary-correct-wrong/1.0.0/semantics.json"
       },
@@ -65407,6 +65625,24 @@
         "packedTargets": [],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-evermem-json-label/1.0.0/semantics.sha256",
         "relativeSource": "profiles/binary-judgment/parsers/binary-evermem-json-label/1.0.0/semantics.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-evermem-json-label/2.0.0/semantics.json",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-evermem-json-label/2.0.0/semantics.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-evermem-json-label/2.0.0/semantics.sha256",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-evermem-json-label/2.0.0/semantics.sha256"
       },
       {
         "claim": null,
@@ -65450,6 +65686,24 @@
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
         "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/2.0.0/semantics.json",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-judgment-evaluation/2.0.0/semantics.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/2.0.0/semantics.sha256",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-judgment-evaluation/2.0.0/semantics.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0/semantics.json",
         "relativeSource": "profiles/binary-judgment/parsers/binary-label-in-prose/1.0.0/semantics.json"
       },
@@ -65486,6 +65740,24 @@
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
         "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-mem0-json-label/2.0.0/semantics.json",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-mem0-json-label/2.0.0/semantics.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-mem0-json-label/2.0.0/semantics.sha256",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-mem0-json-label/2.0.0/semantics.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-strict-json-label/1.0.0/semantics.json",
         "relativeSource": "profiles/binary-judgment/parsers/binary-strict-json-label/1.0.0/semantics.json"
       },
@@ -65497,6 +65769,24 @@
         "packedTargets": [],
         "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-strict-json-label/1.0.0/semantics.sha256",
         "relativeSource": "profiles/binary-judgment/parsers/binary-strict-json-label/1.0.0/semantics.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-strict-json-label/2.0.0/semantics.json",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-strict-json-label/2.0.0/semantics.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-strict-json-label/2.0.0/semantics.sha256",
+        "relativeSource": "profiles/binary-judgment/parsers/binary-strict-json-label/2.0.0/semantics.sha256"
       },
       {
         "claim": null,

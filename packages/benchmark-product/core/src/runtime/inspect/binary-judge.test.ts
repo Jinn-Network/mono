@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { inheritedTempEnv } from "../child-temp-env.js";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import {
@@ -260,7 +261,12 @@ describe("Inspect binary-judge selection", () => {
     expect(plan.argv).toContain("type=bind,src=/attempt/output,dst=/jinn/output");
     expect(plan.argv).toContain("/opt/jinn/binary_judge_worker.py");
     expect(plan.argv.at(-1)).toBe(INSPECT_BINARY_JUDGE_OCI_CONFIG_PATH);
+    // Exhaustive on purpose: this is the proof that no credential crosses the boundary, so an
+    // extra key has to fail here. The temp variables are part of the closed set rather than an
+    // exception to it — a path is not a credential, and without them the `docker` CLI this plan
+    // drives writes its build context outside the root the caller was confined to.
     expect(plan.env).toEqual({
+      ...inheritedTempEnv(),
       LANG: "C.UTF-8",
       JINN_INSPECT_HOST_CONNECTION_DESCRIPTOR: "/private/connection.json",
     });

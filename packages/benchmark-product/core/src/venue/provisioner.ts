@@ -32,6 +32,7 @@ import {
   type DeclaredOutputSlot,
   type HarvestResult,
   type ProvisionerContract,
+  type TaskView,
   type WorkspaceKind,
   type WorkspacePaths,
 } from "@jinn-network/task-execution-workspace";
@@ -1223,39 +1224,89 @@ function inspectBinaryJudgeProvisionerContract(
   options: InspectBinaryJudgeProvisionerOptions,
 ): ProvisionerContract {
   let expected: InspectBinaryJudgeWorkerInput | undefined;
+
+  const cellBinding = (): {
+    readonly cellKey: string;
+    readonly armId: string;
+    readonly replicate: number;
+    readonly instrumentBytes: Uint8Array;
+  } => {
+    const nonceParts = input.submission.nonce.split(":");
+    const annotatedCellKey = input.submission.annotations?.cellKey;
+    const cellKey = typeof annotatedCellKey === "string" ? annotatedCellKey : nonceParts.at(-2);
+    if (cellKey === undefined) throw new Error("binary-judgment Submission carries no cell key");
+    const coordinate = parseCellKey(cellKey);
+    const requirement = input.submission.requirements?.[
+      BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY
+    ];
+    if (typeof requirement !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(requirement)) {
+      throw new Error("binary-judgment Submission carries no exact instrument requirement");
+    }
+    return {
+      cellKey,
+      armId: coordinate.armId,
+      replicate: coordinate.replicate,
+      instrumentBytes: getSealedBytes(
+        options.workspaceDir,
+        requirement.slice("sha256:".length),
+      ),
+    };
+  };
+
+  const buildExpected = (view: TaskView): InspectBinaryJudgeWorkerInput => {
+    const binding = cellBinding();
+    return buildInspectBinaryJudgeWorkerInput({
+      view,
+      sealedTaskBytes: input.sealedTaskBytes,
+      manifest: options.manifest,
+      selectionManifestSha256: options.selectionManifestSha256,
+      instrumentBytes: binding.instrumentBytes,
+      cellKey: binding.cellKey,
+      armId: binding.armId,
+      replicate: binding.replicate,
+      outputDir: INSPECT_BINARY_JUDGE_OCI_OUTPUT_DIR,
+    });
+  };
+
+  const recoverExpected = async (paths: WorkspacePaths): Promise<InspectBinaryJudgeWorkerInput> => {
+    // setup normally owns this process-local value. After a host restart, reconstruct it from
+    // the signed Task and Submission, then require every durable staged byte to match exactly.
+    const recoveredView = {
+      task: input.task,
+      effectiveRequirements: {
+        ...(input.task.requirements ?? {}),
+        ...(input.submission.requirements ?? {}),
+      },
+    } as TaskView;
+    const recovered = buildExpected(recoveredView);
+    const binding = cellBinding();
+    const staged = await Promise.all([
+      readFile(join(paths.input, STAGED_SEALED_TASK_FILENAME)),
+      readFile(join(paths.input, INSPECT_BINARY_JUDGE_INSTRUMENT_FILENAME)),
+      readFile(join(paths.input, INSPECT_BINARY_JUDGE_SELECTION_FILENAME)),
+      readFile(join(paths.input, INSPECT_BINARY_JUDGE_CONFIG_FILENAME)),
+    ]);
+    const exact = [
+      input.sealedTaskBytes,
+      binding.instrumentBytes,
+      canonicalJsonBytes(options.manifest),
+      canonicalJsonBytes(recovered as never),
+    ];
+    if (staged.some((bytes, index) => !Buffer.from(bytes).equals(Buffer.from(exact[index]!)))) {
+      throw new Error("Inspect binary-judge recovery inputs differ from exact staging");
+    }
+    return recovered;
+  };
+
   return {
     workspaceKind: (): WorkspaceKind => "dir",
     async setup(view, paths) {
       await ensureWorkspaceDirectories(paths);
-      const nonceParts = input.submission.nonce.split(":");
-      const annotatedCellKey = input.submission.annotations?.cellKey;
-      const cellKey = typeof annotatedCellKey === "string" ? annotatedCellKey : nonceParts.at(-2);
-      if (cellKey === undefined) throw new Error("binary-judgment Submission carries no cell key");
-      const coordinate = parseCellKey(cellKey);
-      const requirement = (view.effectiveRequirements as Record<string, unknown>)[
-        BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY
-      ];
-      if (typeof requirement !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(requirement)) {
-        throw new Error("binary-judgment Submission carries no exact instrument requirement");
-      }
-      const instrumentBytes = getSealedBytes(
-        options.workspaceDir,
-        requirement.slice("sha256:".length),
-      );
-      expected = buildInspectBinaryJudgeWorkerInput({
-        view,
-        sealedTaskBytes: input.sealedTaskBytes,
-        manifest: options.manifest,
-        selectionManifestSha256: options.selectionManifestSha256,
-        instrumentBytes,
-        cellKey,
-        armId: coordinate.armId,
-        replicate: coordinate.replicate,
-        outputDir: INSPECT_BINARY_JUDGE_OCI_OUTPUT_DIR,
-      });
+      const binding = cellBinding();
+      expected = buildExpected(view);
       await Promise.all([
         writeFile(join(paths.input, STAGED_SEALED_TASK_FILENAME), input.sealedTaskBytes, { mode: 0o400 }),
-        writeFile(join(paths.input, INSPECT_BINARY_JUDGE_INSTRUMENT_FILENAME), instrumentBytes, { mode: 0o400 }),
+        writeFile(join(paths.input, INSPECT_BINARY_JUDGE_INSTRUMENT_FILENAME), binding.instrumentBytes, { mode: 0o400 }),
         writeFile(
           join(paths.input, INSPECT_BINARY_JUDGE_SELECTION_FILENAME),
           canonicalJsonBytes(options.manifest),
@@ -1270,9 +1321,7 @@ function inspectBinaryJudgeProvisionerContract(
     },
     executionEnv: ({ env }) => ({ ...env }),
     async harvest(paths, declaredOutputs): Promise<HarvestResult> {
-      if (expected === undefined) {
-        throw new Error("Inspect binary-judge harvest ran before exact input staging");
-      }
+      const exactExpected = expected ?? await recoverExpected(paths);
       const responseBytes = new Uint8Array(await readFile(
         join(paths.out, INSPECT_BINARY_JUDGE_OUTPUT_FILES.response),
       ));
@@ -1286,11 +1335,11 @@ function inspectBinaryJudgeProvisionerContract(
         throw new Error("binary-judgment observation is not canonical JSON");
       }
       if (
-        observation.taskDigest !== expected.taskDigest
-        || observation.armId !== expected.armId
-        || observation.replicate !== expected.replicate
-        || observation.instrumentSha256 !== expected.instrumentSha256
-        || observation.requestSha256 !== expected.requestSha256
+        observation.taskDigest !== exactExpected.taskDigest
+        || observation.armId !== exactExpected.armId
+        || observation.replicate !== exactExpected.replicate
+        || observation.instrumentSha256 !== exactExpected.instrumentSha256
+        || observation.requestSha256 !== exactExpected.requestSha256
         || observation.response.digest !== recordDigest(responseBytes)
       ) {
         throw new Error("binary-judgment outputs differ from the exact staged cell binding");

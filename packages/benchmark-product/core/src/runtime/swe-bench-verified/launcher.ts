@@ -6,6 +6,7 @@ import { refuse } from "../../errors.js";
 import { SWE_BENCH_VERIFIED_DATASET_ID, SWE_BENCH_VERIFIED_DEFAULT_TIMEOUT_SECONDS, type SwebenchVerifiedSelectionManifest } from "./manifest.js";
 import { harnessReportPath, readHarnessReport } from "./reports.js";
 import { readSwebenchModuleVersion, type SwebenchVerifiedHostBinding } from "./host.js";
+import { inheritedTempEnv } from "../child-temp-env.js";
 
 export interface SwebenchPredictionRow {
   readonly instance_id: string;
@@ -107,7 +108,7 @@ export function launchSwebenchHarness(input: {
   const spawned = spawnSync(executable, args, {
     cwd: input.reportRoot,
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "", COLOPHON_SWEBENCH_REPORT_ROOT: input.reportRoot },
+    env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "", COLOPHON_SWEBENCH_REPORT_ROOT: input.reportRoot },
   });
   if (spawned.status !== 0) {
     refuse(

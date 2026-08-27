@@ -11,9 +11,21 @@ export const PRODUCT_RELEASE_PLATFORM_PINS_PATH = 'packages/benchmark-product/pr
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
 const EXACT_CANARY_PIN = /^0\.1\.0-canary\.sha\.[0-9a-f]{40}$/u;
-const VERIFY_020_PLATFORM_SHA = 'e00b2fc47fc5635b007eb349fb1e41aa81bb3c50';
-const VERIFY_020_PLATFORM_VERSION = `0.1.0-canary.sha.${VERIFY_020_PLATFORM_SHA}`;
-const VERIFY_020_RECEIPT_SHA256 = '8c6749c2e6c303b17ceccbc12712e1210e275dcdbcb37fd495a14a15cbb4474e';
+const VERIFY_RELEASES = {
+  '0.2.0': {
+    decision: 'DR-2026-08-22-a',
+    platformSourceSha: 'e00b2fc47fc5635b007eb349fb1e41aa81bb3c50',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/32544891098/attempts/2',
+    receiptSha256: '8c6749c2e6c303b17ceccbc12712e1210e275dcdbcb37fd495a14a15cbb4474e',
+  },
+  '0.2.1': {
+    decision: 'operator-authorization-2026-08-26',
+    platformSourceSha: '7a138d2c104d09243e306952d0ce77caa64e4707',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/32976208098',
+    receiptSha256: 'fdd1ecf49eb6c0cec4b05e5c0d201dfcacbbeaf8164f766b9ca5e27b646b6dad',
+  },
+};
+const VERIFY_RELEASE_VERSIONS = Object.keys(VERIFY_RELEASES);
 const PRODUCT_RELEASE_PINS_KEYS = ['schemaVersion', 'receipts'];
 const VERIFY_020_RECEIPT_KEYS = [
   'decision',
@@ -123,30 +135,31 @@ export function validateProductReleasePlatformPin(pin, manifest) {
   if (!hasExactKeys(pin, VERIFY_020_RECEIPT_KEYS) || !hasExactKeys(pin.product, VERIFY_020_PRODUCT_KEYS)) {
     throw new Error('product-release pin must retain the immutable verifier 0.2 receipt shape');
   }
+  const release = VERIFY_RELEASES[pin.product.version];
   if (
-    pin?.decision !== 'DR-2026-08-22-a'
+    release === undefined
+    || pin?.decision !== release.decision
     || pin?.product?.packageName !== '@colophon-claims/verify'
-    || pin.product.version !== '0.2.0'
-    || pin.platformSourceSha !== VERIFY_020_PLATFORM_SHA
-    || pin.platformVersion !== VERIFY_020_PLATFORM_VERSION
+    || pin.platformSourceSha !== release.platformSourceSha
+    || pin.platformVersion !== `0.1.0-canary.sha.${release.platformSourceSha}`
     || manifest.name !== pin.product.packageName
     || manifest.version !== pin.product.version
   ) {
-    throw new Error('only @colophon-claims/verify@0.2.0 may use the DR-2026-08-22-a canary exception');
+    throw new Error('only a registered @colophon-claims/verify 0.2 patch release may use its exact canary receipt');
   }
   refuseFloatingCanary(pin.platformVersion, 'product-release pin platformVersion');
   if (!COMMIT_SHA.test(String(pin.platformSourceSha))) {
     throw new Error('product-release pin platformSourceSha must be a 40-character commit sha');
   }
   if (!EXACT_CANARY_PIN.test(pin.platformVersion)) {
-    throw new Error(`product-release pin platformVersion must be ${VERIFY_020_PLATFORM_VERSION}`);
+    throw new Error(`product-release pin platformVersion must be 0.1.0-canary.sha.${release.platformSourceSha}`);
   }
   if (
     pin.platformDistTag !== 'canary'
     || pin.platformLatestVersion !== '0.0.0'
-    || pin.stackPublishRunUrl !== 'https://github.com/Jinn-Network/mono/actions/runs/32544891098/attempts/2'
+    || pin.stackPublishRunUrl !== release.stackPublishRunUrl
   ) {
-    throw new Error('product-release pin must retain the recorded e00 stack-canary receipt');
+    throw new Error('product-release pin must retain its recorded stack-canary receipt');
   }
   const directNames = Object.keys(manifest.dependencies ?? {})
     .filter((name) => name.startsWith('@jinn-network/'));
@@ -175,17 +188,33 @@ export function validateProductReleasePlatformPin(pin, manifest) {
       throw new Error(`product-release pin must record registry integrity and provenance for ${pkg.name}`);
     }
   }
-  if (sha256CanonicalJson(pin) !== VERIFY_020_RECEIPT_SHA256) {
-    throw new Error('product-release pin must retain the immutable DR-2026-08-22-a receipt values');
+  if (sha256CanonicalJson(pin) !== release.receiptSha256) {
+    throw new Error(`product-release pin must retain the immutable verifier ${pin.product.version} receipt values`);
   }
   return pin;
 }
 
 export function validateProductReleasePlatformPins(pins, manifest) {
-  if (!hasExactKeys(pins, PRODUCT_RELEASE_PINS_KEYS) || pins.schemaVersion !== 1 || !Array.isArray(pins.receipts) || pins.receipts.length !== 1) {
-    throw new Error('product-release platform pins must contain exactly one immutable verifier 0.2 receipt');
+  if (
+    !hasExactKeys(pins, PRODUCT_RELEASE_PINS_KEYS)
+    || pins.schemaVersion !== 1
+    || !Array.isArray(pins.receipts)
+    || JSON.stringify(pins.receipts.map((pin) => pin?.product?.version)) !== JSON.stringify(VERIFY_RELEASE_VERSIONS)
+  ) {
+    throw new Error('product-release platform pins must contain the exact ordered immutable verifier 0.2 receipts');
   }
-  return validateProductReleasePlatformPin(pins.receipts[0], manifest);
+  for (const pin of pins.receipts) {
+    validateProductReleasePlatformPin(pin, {
+      ...manifest,
+      name: '@colophon-claims/verify',
+      version: pin.product.version,
+    });
+  }
+  const selected = pins.receipts.find((pin) => pin.product.version === manifest.version);
+  if (selected === undefined) {
+    throw new Error(`no immutable platform receipt is registered for ${manifest.name}@${manifest.version}`);
+  }
+  return validateProductReleasePlatformPin(selected, manifest);
 }
 
 export function loadProductReleasePlatformPin(repoRoot, manifest) {
