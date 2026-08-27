@@ -183,6 +183,29 @@ describe('packed client workflow coverage', () => {
     expect(smoke).not.toContain("'jinn-layer',");
   });
 
+  it('proves the public no-install invocation without letting its guard pass on detection', () => {
+    const smoke = workflow('operator/scripts/smoke-test-pack.mjs');
+
+    expect(smoke).toContain("['--no-install', '@jinn-network/operator', 'doctor']");
+    expect(smoke).toContain("publicOutput.includes('could not determine executable')");
+    // `?? 1` lets a zero status through, so the guard would exit 0 on the exact
+    // ambiguity it detects and skip every remaining check.
+    expect(smoke).toContain('process.exit(publicNpx.status || 1);');
+    expect(smoke).not.toContain('process.exit(publicNpx.status ?? 1);');
+  });
+
+  it('asserts the packed jinn-stop-hook bin link without executing the daemon client', () => {
+    const smoke = workflow('operator/scripts/smoke-test-pack.mjs');
+
+    expect(smoke).toContain('function assertPackedStopHookBinIsLinked()');
+    expect(smoke).toContain('assertPackedStopHookBinIsLinked();');
+    expect(smoke).toContain("join(smokeDir, 'node_modules', '.bin', 'jinn-stop-hook')");
+    // jinn-stop-hook has no --help branch: every argument shape exits non-zero
+    // (no daemon API token, empty stdin, no daemon listening), so executing it
+    // here would make the merge-queue and publish smoke permanently red.
+    expect(smoke).not.toContain("'jinn-stop-hook', '--help'");
+  });
+
   it('executes the packed CLI from a Yarn 4 node-modules consumer', () => {
     const smoke = workflow('operator/scripts/smoke-test-pack.mjs');
 

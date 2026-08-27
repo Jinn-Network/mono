@@ -7,6 +7,9 @@
  * 3) local bin execution via `npm exec jinn ...`
  * 4) no-install package execution (`npm exec --package <tarball> -- jinn ...`)
  * 5) legacy `npx -p <tarball> jinn ...`
+ * 6) public no-install execution (`npx @jinn-network/operator <verb>`) resolves
+ *    one executable rather than reporting an ambiguous bin set
+ * 7) the packed `jinn-stop-hook` bin stays linked by name in the install tree
  * Expects cwd to be operator/ (see package.json pack:smoke).
  */
 import { spawnSync } from 'node:child_process';
@@ -16,6 +19,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -148,6 +152,31 @@ function assertTarballCleanAndComplete() {
       console.error(`smoke-test-pack: tarball is missing bundled runtime ${required}`);
       process.exit(1);
     }
+  }
+}
+
+// The `operator` bin alias must not displace `jinn-stop-hook`: npm installs one bin
+// link per declared name, so a lost alias shows up as a missing or misdirected link.
+// Assert the link, never execute it — `jinn-stop-hook` is a daemon client with no
+// `--help` branch, so every argument shape exits non-zero (missing daemon API token,
+// empty stdin, or an unreachable daemon), which would make this a permanently red gate.
+function assertPackedStopHookBinIsLinked() {
+  const binLink = join(smokeDir, 'node_modules', '.bin', 'jinn-stop-hook');
+  const binTarget = join(installedPackageRoot, 'dist', 'bin', 'jinn-stop-hook.js');
+  if (!existsSync(binLink)) {
+    console.error(`smoke-test-pack: packed jinn-stop-hook bin link is missing at ${binLink}`);
+    process.exit(1);
+  }
+  if (!existsSync(binTarget)) {
+    console.error(`smoke-test-pack: packed jinn-stop-hook entry point is missing at ${binTarget}`);
+    process.exit(1);
+  }
+  // POSIX installs a symlink; Windows installs a shim script that names the target.
+  const resolved = realpathSync(binLink);
+  if (resolved !== realpathSync(binTarget) && !readFileSync(binLink, 'utf8').includes('jinn-stop-hook.js')) {
+    console.error('smoke-test-pack: packed jinn-stop-hook bin link does not point at the packed entry point');
+    console.error(`${binLink} -> ${resolved}`);
+    process.exit(1);
   }
 }
 
@@ -305,7 +334,7 @@ try {
     if (publicNpx.error || publicOutput.includes('could not determine executable')) {
       console.error('smoke-test-pack: public npx @jinn-network/operator doctor is ambiguous or failed');
       console.error(publicNpx.error ?? publicOutput);
-      process.exit(publicNpx.status ?? 1);
+      process.exit(publicNpx.status || 1);
     }
     if (publicNpx.status === 50) {
       console.error('smoke-test-pack: public npx doctor crashed');
@@ -314,11 +343,7 @@ try {
     }
     parseJsonOrExit(publicNpx.stdout, 'public npx doctor');
 
-    runOrExit(
-      'npx',
-      ['--no-install', '-p', '@jinn-network/operator', 'jinn-stop-hook', '--help'],
-      'packed jinn-stop-hook remains named',
-    );
+    assertPackedStopHookBinIsLinked();
 
     console.log('smoke-test-pack: ok', payload.client.version);
   }
