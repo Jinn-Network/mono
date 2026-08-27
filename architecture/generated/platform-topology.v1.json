@@ -2024,7 +2024,7 @@
       "decisionRecords": 6,
       "discoveredFirstPartySurfaces": 4061,
       "generatedOutputSources": 1430,
-      "generatorSources": 680,
+      "generatorSources": 681,
       "marketplaceControl": 2,
       "requiredGates": 24,
       "staticControl": 7
@@ -2857,6 +2857,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/plugin-tree-symbol-authority.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/policy-ci-workflow.test.mjs"
       },
       {
         "categories": [

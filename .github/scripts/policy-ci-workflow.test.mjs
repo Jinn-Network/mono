@@ -38,21 +38,30 @@ function uploadedArtifactNames(source) {
   return names;
 }
 
-function restoredArtifactNames(source) {
-  const names = [];
+// Returns one `{ name, path }` per download step. Reading both from inside the
+// step is what makes the placement assertion below mean anything: a bare
+// `name: x` / `path: y` search over the whole file also matches the *upload*
+// steps, so it would pass while the restores land somewhere else entirely.
+function restoredArtifacts(source) {
+  const restored = [];
   const lines = source.split('\n');
   for (let index = 0; index < lines.length; index += 1) {
     if (!lines[index].includes('uses: actions/download-artifact')) continue;
+    const step = { name: undefined, path: undefined };
     for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      const name = lines[cursor].match(/^\s+name: (\S+)$/);
-      if (name) {
-        names.push(name[1]);
-        break;
-      }
       if (/^\s+- /.test(lines[cursor])) break;
+      const name = lines[cursor].match(/^\s+name: (\S+)$/);
+      if (name) step.name = name[1];
+      const path = lines[cursor].match(/^\s+path: (\S+)$/);
+      if (path) step.path = path[1];
     }
+    if (step.name) restored.push(step);
   }
-  return names;
+  return restored;
+}
+
+function restoredArtifactNames(source) {
+  return restoredArtifacts(source).map((step) => step.name);
 }
 
 test('every uploaded distribution is restored by name, never by pattern', () => {
@@ -78,11 +87,14 @@ test('every uploaded distribution is restored by name, never by pattern', () => 
 });
 
 test('each package distribution is restored straight into its package', () => {
+  const restored = restoredArtifacts(workflow);
   for (const pkg of ['identity', 'outcomes']) {
-    assert.match(
-      workflow,
-      new RegExp(`name: policy-${pkg}-dist\\n\\s+path: packages/policy/${pkg}/dist\\n`),
-      `policy-${pkg}-dist must land directly in packages/policy/${pkg}/dist`,
+    const step = restored.find((entry) => entry.name === `policy-${pkg}-dist`);
+    assert.ok(step, `policy-${pkg}-dist must be restored by a download step`);
+    assert.equal(
+      step.path,
+      `packages/policy/${pkg}/dist`,
+      `policy-${pkg}-dist must land directly in packages/policy/${pkg}/dist, not ${step.path}`,
     );
   }
   assert.equal(
