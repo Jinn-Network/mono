@@ -23,7 +23,7 @@ const JUSTIFICATION = /\btemp-env:/u;
  * scan can read off the text itself. A bare `\.\.\.` used to be accepted here, which made every
  * spread proof of carriage whatever it spread: `env: { ...process.env }` does carry the temp
  * variables, `env: { ...env }` carries only what its own allowlist named, and the scan could not
- * tell them apart. Any other spread is resolved through `delegatedDefinitions` instead.
+ * tell them apart. Any other spread is resolved through `carriesTemp` instead.
  */
 const CARRIES_TEMP = /inheritedTempEnv\(|scopedTempEnv\(|TMPDIR|\.\.\.process\.env\b/u;
 
@@ -58,18 +58,16 @@ function delegatedNames(expression: string, calls: boolean): string[] {
 }
 
 /**
- * The definition of a delegated name, as text. A fixed window rather than a brace walk: these
- * definitions are a handful of lines, and a walk would have to understand template literals, which
- * two of them are written inside.
+ * The definition of a delegated name, as text — bounded at the next top-level declaration, with a
+ * byte cap for the last definition in a file. Not a brace walk: a walk would have to understand
+ * template literals, which two of these definitions are written inside. Not a fixed window either,
+ * which was the first attempt here — it spills into whatever is defined next, so a helper that
+ * pins no temp directory reads as carrying one because a helper that does sits below it.
  */
 function definitionWindow(source: string, name: string): string | undefined {
   const definition = new RegExp(`(?:const|let|function)\\s+${name}\\b`, "u").exec(source);
   if (definition === null) return undefined;
-  // Bounded at the next top-level declaration rather than by a byte count alone. A fixed window
-  // spills into whatever is defined next, so a helper that pins nothing reads as carrying because
-  // one that does sits below it. The declaration must start the line: a nested `const` is part of
-  // this definition, and a brace walk would have to understand template literals, which two of
-  // these definitions are written inside. The byte cap remains for the last definition in a file.
+  // The declaration must start the line: a nested `const` is part of this definition, not the next.
   const body = source.slice(definition.index, definition.index + 2_000);
   const next = /\n(?:export\s+)?(?:async\s+)?(?:const|let|function)\s/u.exec(body.slice(1));
   return next === null ? body : body.slice(0, next.index + 1);
@@ -86,8 +84,11 @@ function carriesTemp(source: string, expression: string, seen: Set<string>): boo
   // survive deleting the call — `readinessEnvironment` in `venue/demo1-claude.ts` stayed green on
   // the words in its own doc comment. The deliberate-omission marker is not read here; it is
   // checked against the site itself, comments and all, before this function is ever called.
-  if (CARRIES_TEMP.test(withoutComments(expression))) return true;
-  for (const name of delegatedNames(expression, seen.size > 0)) {
+  const code = withoutComments(expression);
+  if (CARRIES_TEMP.test(code)) return true;
+  // A non-empty `seen` means this expression is a delegate's body rather than the site itself,
+  // which is the only place a bare call counts as delegation.
+  for (const name of delegatedNames(code, seen.size > 0)) {
     if (seen.has(name)) continue;
     seen.add(name);
     const definition = definitionWindow(source, name);
