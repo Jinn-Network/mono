@@ -72,6 +72,48 @@ export function findVitestConfigs(directory, base = root) {
 }
 
 /**
+ * The array literal that follows each `key:` in `source`, as raw inner text.
+ *
+ * A bracket scan rather than `key:\s*\[([^\]]*)\]`, and global rather than first-match: configs
+ * declare these keys more than once (a root list plus one per `projects` entry), nest arrays inside
+ * them, and quote entries that contain a `]`. Every one of those shapes makes a first-match
+ * non-greedy regex read a prefix of one list and call it the whole config.
+ */
+function arrayLiterals(source, key) {
+  const literals = [];
+  for (const opener of source.matchAll(new RegExp(`\\b${key}\\s*:\\s*\\[`, 'gu'))) {
+    const start = opener.index + opener[0].length;
+    let depth = 1;
+    let quote = null;
+    for (let i = start; i < source.length; i += 1) {
+      const character = source[i];
+      if (quote !== null) {
+        if (character === '\\') i += 1;
+        else if (character === quote) quote = null;
+        continue;
+      }
+      if (character === "'" || character === '"' || character === '`') quote = character;
+      else if (character === '[') depth += 1;
+      else if (character === ']') {
+        depth -= 1;
+        if (depth === 0) {
+          literals.push(source.slice(start, i));
+          break;
+        }
+      }
+    }
+  }
+  return literals;
+}
+
+/** The quoted entries of `literal`, resolved against `configDir` and made repo-relative. */
+function resolveQuoted(literal, configDir, base) {
+  return [...literal.matchAll(/['"]([^'"]+)['"]/gu)].map((quoted) =>
+    relative(base, resolve(configDir, quoted[1])).split('\\').join('/'),
+  );
+}
+
+/**
  * The paths a config's `setupFiles`/`globalSetup` entries resolve to, as repo-relative strings.
  *
  * Deliberately a scan of the quoted paths in the source rather than an import of the config: these
@@ -82,10 +124,8 @@ export function wiredPaths(source, configPath, base = root) {
   const configDir = dirname(resolve(base, configPath));
   const paths = [];
   for (const key of ['setupFiles', 'globalSetup']) {
-    const match = source.match(new RegExp(`${key}:\\s*\\[([^\\]]*)\\]`, 'u'));
-    if (match === null) continue;
-    for (const quoted of match[1].matchAll(/['"]([^'"]+)['"]/gu)) {
-      paths.push({ key, resolved: relative(base, resolve(configDir, quoted[1])).split('\\').join('/') });
+    for (const literal of arrayLiterals(source, key)) {
+      for (const resolved of resolveQuoted(literal, configDir, base)) paths.push({ key, resolved });
     }
   }
   return paths;
@@ -122,21 +162,30 @@ for (const seam of SEAMS) {
  * The paths a config's `server.fs.allow` entries resolve to, as repo-relative strings.
  *
  * Same quoted-path scan as `wiredPaths`, and for the same reason: this gate runs on a checkout
- * with no dependencies installed, so it cannot import a config to ask.
+ * with no dependencies installed, so it cannot import a config to ask. Every `allow:` list counts —
+ * missing a later one reads a covered seam as unreachable.
  */
 export function fsAllowPaths(source, configPath, base = root) {
   const configDir = dirname(resolve(base, configPath));
-  const match = source.match(/allow:\s*\[([^\]]*)\]/u);
-  if (match === null) return [];
-  return [...match[1].matchAll(/['"]([^'"]+)['"]/gu)].map((quoted) =>
-    relative(base, resolve(configDir, quoted[1])).split('\\').join('/'),
+  return arrayLiterals(source, 'allow').flatMap((literal) =>
+    resolveQuoted(literal, configDir, base),
   );
 }
 
-/** A config's declared `test.environment`, or `'node'` when it declares none (Vitest's default). */
-export function declaredEnvironment(source) {
-  const match = source.match(/environment:\s*['"]([^'"]+)['"]/u);
-  return match === null ? 'node' : match[1];
+/**
+ * Every `environment:` a config declares, in source order. Empty when it declares none, which is
+ * Vitest's `node` default.
+ *
+ * A computed value (`environment: process.env.X`) reads as `'<computed>'` rather than being
+ * skipped: the reachability check below turns OFF for `node` alone, so an unreadable environment
+ * has to fail closed — the caller checks the config rather than trusting a value it cannot see.
+ */
+export function declaredEnvironments(source) {
+  const found = [];
+  for (const match of source.matchAll(/\benvironment\s*:\s*(?:(['"])([^'"]*)\1|([^,\s}]+))/gu)) {
+    found.push(match[1] === undefined ? '<computed>' : match[2]);
+  }
+  return found;
 }
 
 /** True when repo-relative `path` is `ancestor` or lives inside it. */
@@ -152,7 +201,9 @@ test('configs that cannot reach the seam they name', () => {
       const source = readFileSync(resolve(root, config), 'utf8');
       // Node-environment suites load setup files through the SSR pipeline, which has no `/@fs/`
       // restriction. Only a browser-shaped environment can be blocked by `server.fs.allow`.
-      if (declaredEnvironment(source) === 'node') continue;
+      // A config declaring several environments is checked unless every one of them is `node`.
+      const environments = declaredEnvironments(source);
+      if (environments.every((environment) => environment === 'node')) continue;
       const configDir = relative(root, dirname(resolve(root, config))).split('\\').join('/');
       const allowed = fsAllowPaths(source, config);
       for (const entry of wiredPaths(source, config)) {
@@ -182,4 +233,55 @@ test('the seam files every config points at exist', () => {
       assert.ok(existsSync(absolute) && statSync(absolute).isFile(), `missing seam file ${file}`);
     }
   }
+});
+
+// --- reader unit tests -------------------------------------------------------------------------
+//
+// The three readers above are text scanners over config sources, and the shapes they have to
+// survive are not all present in the tree at any one moment. These pin the shapes that a
+// first-match regex reads wrongly: a computed environment, a second `environment:` under
+// `projects`, a second `allow:` key, a nested array, and a `]` inside a quoted entry.
+
+test('declaredEnvironments reads every declaration, not the first', () => {
+  assert.deepEqual(declaredEnvironments('export default { test: { globals: true } }'), []);
+  assert.deepEqual(declaredEnvironments(`test: { environment: 'jsdom' }`), ['jsdom']);
+  // A computed environment is unreadable as text; it must not read as the default.
+  assert.deepEqual(declaredEnvironments('test: { environment: process.env.VITEST_ENV }'), [
+    '<computed>',
+  ]);
+  // A `node` match ahead of a `projects` entry must not hide the browser-shaped one behind it.
+  assert.deepEqual(
+    declaredEnvironments(`test: { environment: 'node', projects: [{ test: { environment: 'jsdom' } }] }`),
+    ['node', 'jsdom'],
+  );
+});
+
+test('fsAllowPaths reads every allow list, nested arrays, and bracketed entries', () => {
+  const at = (source) => fsAllowPaths(source, 'packages/x/vitest.config.ts');
+  assert.deepEqual(at('export default {}'), []);
+  assert.deepEqual(at(`server: { fs: { allow: ['..'] } }`), ['packages']);
+  // A second `allow:` key elsewhere in the config is coverage too.
+  assert.deepEqual(
+    at(`server: { fs: { allow: ['.'] } }, test: { server: { deps: {} } }, other: { allow: ['../..'] }`),
+    ['packages/x', ''],
+  );
+  // A nested array inside the list must not truncate it at the inner `]`.
+  assert.deepEqual(at(`allow: [['..'], '../..']`), ['packages', '']);
+  // A `]` inside a quoted entry must not end the list either.
+  assert.deepEqual(at(`allow: ['../a]b', '../..']`), ['packages/a]b', '']);
+});
+
+test('wiredPaths reads every setupFiles and globalSetup list', () => {
+  const at = (source) => wiredPaths(source, 'packages/x/vitest.config.ts');
+  assert.deepEqual(
+    at(`test: { setupFiles: ['./a.ts'], projects: [{ test: { setupFiles: ['./b.ts'] } }] }`),
+    [
+      { key: 'setupFiles', resolved: 'packages/x/a.ts' },
+      { key: 'setupFiles', resolved: 'packages/x/b.ts' },
+    ],
+  );
+  assert.deepEqual(at(`globalSetup: [['./g.ts'], './h.ts']`), [
+    { key: 'globalSetup', resolved: 'packages/x/g.ts' },
+    { key: 'globalSetup', resolved: 'packages/x/h.ts' },
+  ]);
 });
