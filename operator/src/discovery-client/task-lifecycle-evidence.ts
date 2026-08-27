@@ -4,8 +4,8 @@
  * The authoritative spine is built ONLY from task/attempt/verdict rows.
  * Envelope-meta rows never enter the spine: they attach last, joined by
  * (requestId, chainId), into the `*EnvelopeCandidates` arrays, and a candidate
- * can never create a row (`if (!out.has(a.taskId)) continue` /
- * `if (!attemptIndex.has(key)) continue`).
+ * can never create a row — each attach loop walks only the spine rows that
+ * already exist under that key, so an unmatched candidate is dropped.
  *
  * That separation is what issue #2044's AC3 asks for now that Wave-4 D4 deleted
  * the on-chain floor and its `withFallback` precedence: the indexer is the only
@@ -128,6 +128,13 @@ function reqKey(requestId: string, chainId: number): string {
   return `${requestId.toLowerCase()}|${chainId}`;
 }
 
+/** Append to a map-of-lists, creating the list on first use. */
+function pushInto<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  const list = map.get(key);
+  if (list) list.push(value);
+  else map.set(key, [value]);
+}
+
 export function assembleTaskLifecycleEvidence(input: {
   tasks: RawTaskRow[];
   attempts: RawAttemptRow[];
@@ -143,76 +150,62 @@ export function assembleTaskLifecycleEvidence(input: {
     });
   }
 
-  const attemptsByTask = new Map<string, AuthoritativeAttemptRow[]>();
+  // Attempts land straight on the task they belong to; an attempt whose task
+  // is not in the spine has nothing to attach to and is dropped.
   for (const a of input.attempts) {
-    if (!out.has(a.taskId)) continue;
-    const row: AuthoritativeAttemptRow = {
+    const evidence = out.get(a.taskId);
+    if (!evidence) continue;
+    evidence.authoritative.attempts.push({
       ...a,
       requestId: a.requestId.toLowerCase() as `0x${string}`,
       operator: a.operator.toLowerCase() as `0x${string}`,
       priorityMech: a.priorityMech.toLowerCase() as `0x${string}`,
       verdicts: [],
       attemptEnvelopeCandidates: [],
-    };
-    const list = attemptsByTask.get(a.taskId) ?? [];
-    list.push(row);
-    attemptsByTask.set(a.taskId, list);
+    });
   }
 
+  // One pass to order each task's attempts and to build the two lookups the
+  // verdict and candidate joins need.
   const attemptIndex = new Map<string, AuthoritativeAttemptRow>();
-  for (const [taskId, list] of attemptsByTask) {
-    list.sort((x, y) => x.attemptIndex - y.attemptIndex);
-    for (const row of list) {
+  const attemptsByReq = new Map<string, AuthoritativeAttemptRow[]>();
+  for (const evidence of out.values()) {
+    evidence.authoritative.attempts.sort((x, y) => x.attemptIndex - y.attemptIndex);
+    for (const row of evidence.authoritative.attempts) {
       attemptIndex.set(attemptKey(row.taskId, row.attemptIndex, row.chainId), row);
+      pushInto(attemptsByReq, reqKey(row.requestId, row.chainId), row);
     }
-    out.get(taskId)!.authoritative.attempts = list;
   }
 
   const verdictsByAttempt = new Map<string, AuthoritativeVerdictRow[]>();
   for (const v of input.verdicts) {
     const key = attemptKey(v.taskId, v.attemptIndex, v.chainId);
     if (!attemptIndex.has(key)) continue;
-    const row: AuthoritativeVerdictRow = {
+    pushInto(verdictsByAttempt, key, {
       ...v,
       requestId: v.requestId.toLowerCase() as `0x${string}`,
       evaluator: v.evaluator.toLowerCase() as `0x${string}`,
       verdictEnvelopeCandidates: [],
-    };
-    const list = verdictsByAttempt.get(key) ?? [];
-    list.push(row);
-    verdictsByAttempt.set(key, list);
-  }
-  for (const [key, list] of verdictsByAttempt) {
-    list.sort((x, y) => x.verdictIndex - y.verdictIndex);
-    attemptIndex.get(key)!.verdicts = list;
-  }
-
-  const attemptsByReq = new Map<string, AuthoritativeAttemptRow[]>();
-  for (const row of attemptIndex.values()) {
-    const k = reqKey(row.requestId, row.chainId);
-    const list = attemptsByReq.get(k) ?? [];
-    list.push(row);
-    attemptsByReq.set(k, list);
-  }
-  for (const c of input.attemptCandidates ?? []) {
-    const list = attemptsByReq.get(reqKey(c.requestId, c.chainId));
-    if (!list) continue;
-    for (const a of list) a.attemptEnvelopeCandidates.push({ ...c });
+    });
   }
 
   const verdictsByReq = new Map<string, AuthoritativeVerdictRow[]>();
-  for (const a of attemptIndex.values()) {
-    for (const v of a.verdicts) {
-      const k = reqKey(v.requestId, v.chainId);
-      const list = verdictsByReq.get(k) ?? [];
-      list.push(v);
-      verdictsByReq.set(k, list);
+  for (const [key, list] of verdictsByAttempt) {
+    list.sort((x, y) => x.verdictIndex - y.verdictIndex);
+    attemptIndex.get(key)!.verdicts = list;
+    for (const v of list) pushInto(verdictsByReq, reqKey(v.requestId, v.chainId), v);
+  }
+
+  // Candidates attach last, and only ever onto a spine row that already exists.
+  for (const c of input.attemptCandidates ?? []) {
+    for (const a of attemptsByReq.get(reqKey(c.requestId, c.chainId)) ?? []) {
+      a.attemptEnvelopeCandidates.push({ ...c });
     }
   }
   for (const c of input.verdictCandidates ?? []) {
-    const list = verdictsByReq.get(reqKey(c.requestId, c.chainId));
-    if (!list) continue;
-    for (const v of list) v.verdictEnvelopeCandidates.push({ ...c });
+    for (const v of verdictsByReq.get(reqKey(c.requestId, c.chainId)) ?? []) {
+      v.verdictEnvelopeCandidates.push({ ...c });
+    }
   }
 
   return out;

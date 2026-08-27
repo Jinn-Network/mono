@@ -6,32 +6,79 @@
  * (requestId, chainId), and can never create or rewrite a spine row.
  */
 import { describe, expect, it } from 'vitest';
-import { assembleTaskLifecycleEvidence } from '../../src/discovery-client/task-lifecycle-evidence.js';
+import {
+  assembleTaskLifecycleEvidence,
+  type RawAttemptRow,
+  type RawTaskRow,
+  type RawVerdictRow,
+} from '../../src/discovery-client/task-lifecycle-evidence.js';
 
 const hex32 = (n: string) => `0x${n.repeat(32)}` as `0x${string}`;
 const addr = (n: string) => `0x${n.repeat(20)}` as `0x${string}`;
 
+const CHAIN = 84532;
+
+// Row builders. Anything a test asserts on or varies is passed as an override
+// at the call site, so a failure still points at the value that caused it;
+// only inert identity fields live in the defaults.
+
+function task(overrides: Partial<RawTaskRow> = {}): RawTaskRow {
+  return {
+    taskId: '7',
+    chainId: CHAIN,
+    manifestDigest: hex32('11'),
+    taskCidDigest: hex32('22'),
+    creator: addr('aa'),
+    maxClaims: 1,
+    requiredVerdicts: 1,
+    createdAtBlock: 10,
+    finalized: false,
+    refunded: false,
+    ...overrides,
+  };
+}
+
+function attempt(overrides: Partial<RawAttemptRow> = {}): RawAttemptRow {
+  return {
+    taskId: '7',
+    chainId: CHAIN,
+    attemptIndex: 0,
+    requestId: hex32('b0'),
+    operator: addr('b0'),
+    priorityMech: addr('c0'),
+    deliveryRate: '1',
+    createdAtBlock: 20,
+    ...overrides,
+  };
+}
+
+function verdict(overrides: Partial<RawVerdictRow> = {}): RawVerdictRow {
+  return {
+    taskId: '7',
+    chainId: CHAIN,
+    attemptIndex: 0,
+    verdictIndex: 0,
+    requestId: hex32('d0'),
+    evaluator: addr('e0'),
+    verdictCode: 1,
+    createdAtBlock: 30,
+    ...overrides,
+  };
+}
+
 describe('assembleTaskLifecycleEvidence (#2044)', () => {
   it('nests and sorts multiple attempts and verdicts losslessly (AC2)', () => {
     const map = assembleTaskLifecycleEvidence({
-      tasks: [{
-        taskId: '7', chainId: 84532, manifestDigest: hex32('11'),
-        taskCidDigest: hex32('22'), creator: addr('aa'), maxClaims: 2,
-        requiredVerdicts: 1, createdAtBlock: 10, finalized: false, refunded: false,
-      }],
+      tasks: [task({ maxClaims: 2 })],
+      // Both lists are deliberately out of index order.
       attempts: [
-        { taskId: '7', chainId: 84532, attemptIndex: 1, requestId: hex32('b1'),
-          operator: addr('b1'), priorityMech: addr('c1'), deliveryRate: '2', createdAtBlock: 21 },
-        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
-          operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: 20 },
+        attempt({ attemptIndex: 1, requestId: hex32('b1'), createdAtBlock: 21 }),
+        attempt({ attemptIndex: 0, requestId: hex32('b0'), createdAtBlock: 20 }),
       ],
       verdicts: [
-        { taskId: '7', chainId: 84532, attemptIndex: 0, verdictIndex: 1,
-          requestId: hex32('d1'), evaluator: addr('e1'), verdictCode: 2, createdAtBlock: 31 },
-        { taskId: '7', chainId: 84532, attemptIndex: 0, verdictIndex: 0,
-          requestId: hex32('d0'), evaluator: addr('e0'), verdictCode: 1, createdAtBlock: 30 },
-        { taskId: '7', chainId: 84532, attemptIndex: 1, verdictIndex: 0,
-          requestId: hex32('d2'), evaluator: addr('e2'), verdictCode: 1, createdAtBlock: 32 },
+        verdict({ attemptIndex: 0, verdictIndex: 1, requestId: hex32('d1'), verdictCode: 2 }),
+        verdict({ attemptIndex: 0, verdictIndex: 0, requestId: hex32('d0'), verdictCode: 1 }),
+        verdict({ attemptIndex: 1, verdictIndex: 0, requestId: hex32('d2'), verdictCode: 1 }),
       ],
     });
     const ev = map.get('7')!;
@@ -46,78 +93,53 @@ describe('assembleTaskLifecycleEvidence (#2044)', () => {
 
   it('drops a verdict whose (taskId, attemptIndex, chainId) has no attempt row (AC2)', () => {
     const map = assembleTaskLifecycleEvidence({
-      tasks: [{
-        taskId: '7', chainId: 84532, manifestDigest: hex32('11'),
-        taskCidDigest: hex32('22'), creator: addr('aa'), maxClaims: 1,
-        requiredVerdicts: 1, createdAtBlock: 10, finalized: false, refunded: false,
-      }],
-      attempts: [{
-        taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
-        operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: 20,
-      }],
-      verdicts: [{
-        taskId: '7', chainId: 84532, attemptIndex: 9, verdictIndex: 0,
-        requestId: hex32('d9'), evaluator: addr('e9'), verdictCode: 1, createdAtBlock: 30,
-      }],
+      tasks: [task()],
+      attempts: [attempt({ attemptIndex: 0 })],
+      // No attempt 9 exists on the spine.
+      verdicts: [verdict({ attemptIndex: 9, requestId: hex32('d9') })],
     });
     expect(map.get('7')!.authoritative.attempts[0]!.verdicts).toEqual([]);
   });
 
   it('attaches candidates by requestId+chainId without rewriting spine fields (AC3)', () => {
     const map = assembleTaskLifecycleEvidence({
-      tasks: [{
-        taskId: '7', chainId: 84532, manifestDigest: hex32('11'),
-        taskCidDigest: hex32('22'), creator: addr('aa'), maxClaims: 1,
-        requiredVerdicts: 1, createdAtBlock: 10, finalized: false, refunded: false,
-      }],
-      attempts: [{
-        taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
-        operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: 20,
-      }],
-      verdicts: [{
-        taskId: '7', chainId: 84532, attemptIndex: 0, verdictIndex: 0,
-        requestId: hex32('d0'), evaluator: addr('e0'), verdictCode: 1, createdAtBlock: 30,
-      }],
+      tasks: [task()],
+      attempts: [attempt({ requestId: hex32('b0'), operator: addr('b0') })],
+      verdicts: [verdict({ requestId: hex32('d0'), evaluator: addr('e0') })],
       attemptCandidates: [{
-        requestId: hex32('b0'), chainId: 84532, manifestCid: 'bafyA',
+        requestId: hex32('b0'), chainId: CHAIN, manifestCid: 'bafyA',
         publisherAgentId: '1', manifestHash: hex32('99'), enrichedAtBlock: 25,
       }],
       verdictCandidates: [{
-        requestId: hex32('d0'), chainId: 84532, manifestCid: 'bafyV',
+        requestId: hex32('d0'), chainId: CHAIN, manifestCid: 'bafyV',
         publisherAgentId: '2', manifestHash: hex32('88'), enrichedAtBlock: 35,
         projectedTaskId: '999', projectedAttemptIndex: 99, projectedVerdictIndex: 99,
         projectedEvaluator: addr('ff'), solutionRequestId: 'hint-only',
       }],
     });
-    const attempt = map.get('7')!.authoritative.attempts[0]!;
+    const spineAttempt = map.get('7')!.authoritative.attempts[0]!;
     // Spine identity survives a contradictory candidate verbatim.
-    expect(attempt.taskId).toBe('7');
-    expect(attempt.attemptIndex).toBe(0);
-    expect(attempt.operator).toBe(addr('b0'));
-    expect(attempt.attemptEnvelopeCandidates).toHaveLength(1);
-    const verdict = attempt.verdicts[0]!;
-    expect(verdict.taskId).toBe('7');
-    expect(verdict.attemptIndex).toBe(0);
-    expect(verdict.verdictIndex).toBe(0);
-    expect(verdict.evaluator).toBe(addr('e0'));
+    expect(spineAttempt.taskId).toBe('7');
+    expect(spineAttempt.attemptIndex).toBe(0);
+    expect(spineAttempt.operator).toBe(addr('b0'));
+    expect(spineAttempt.attemptEnvelopeCandidates).toHaveLength(1);
+    const spineVerdict = spineAttempt.verdicts[0]!;
+    expect(spineVerdict.taskId).toBe('7');
+    expect(spineVerdict.attemptIndex).toBe(0);
+    expect(spineVerdict.verdictIndex).toBe(0);
+    expect(spineVerdict.evaluator).toBe(addr('e0'));
     // The contradictory values are readable, but only under projected* names.
-    expect(verdict.verdictEnvelopeCandidates[0]!.projectedTaskId).toBe('999');
-    expect(verdict.verdictEnvelopeCandidates[0]!.projectedEvaluator).toBe(addr('ff'));
+    expect(spineVerdict.verdictEnvelopeCandidates[0]!.projectedTaskId).toBe('999');
+    expect(spineVerdict.verdictEnvelopeCandidates[0]!.projectedEvaluator).toBe(addr('ff'));
   });
 
   it('does not attach a candidate whose chainId differs from the spine row (AC3)', () => {
     const map = assembleTaskLifecycleEvidence({
-      tasks: [{
-        taskId: '7', chainId: 84532, manifestDigest: hex32('11'),
-        taskCidDigest: hex32('22'), creator: addr('aa'), maxClaims: 1,
-        requiredVerdicts: 1, createdAtBlock: 10, finalized: false, refunded: false,
-      }],
-      attempts: [{
-        taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
-        operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: 20,
-      }],
+      tasks: [task()],
+      attempts: [attempt({ requestId: hex32('b0') })],
       verdicts: [],
       attemptCandidates: [{
+        // Same requestId, different chain.
         requestId: hex32('b0'), chainId: 8453, manifestCid: 'bafyOtherChain',
         publisherAgentId: '1', manifestHash: hex32('99'), enrichedAtBlock: 25,
       }],
@@ -131,13 +153,13 @@ describe('assembleTaskLifecycleEvidence (#2044)', () => {
       attempts: [],
       verdicts: [],
       attemptCandidates: [
-        { requestId: hex32('b0'), chainId: 84532, manifestCid: 'bafy1',
+        { requestId: hex32('b0'), chainId: CHAIN, manifestCid: 'bafy1',
           publisherAgentId: '1', manifestHash: hex32('01'), enrichedAtBlock: 1 },
-        { requestId: hex32('b0'), chainId: 84532, manifestCid: 'bafy2',
+        { requestId: hex32('b0'), chainId: CHAIN, manifestCid: 'bafy2',
           publisherAgentId: '2', manifestHash: hex32('02'), enrichedAtBlock: 2 },
       ],
       verdictCandidates: [
-        { requestId: hex32('d0'), chainId: 84532, manifestCid: 'bafyV',
+        { requestId: hex32('d0'), chainId: CHAIN, manifestCid: 'bafyV',
           publisherAgentId: '3', manifestHash: hex32('03'), enrichedAtBlock: 3,
           projectedTaskId: '7', projectedAttemptIndex: 0, projectedVerdictIndex: 0 },
       ],
@@ -147,20 +169,13 @@ describe('assembleTaskLifecycleEvidence (#2044)', () => {
 
   it('retains every candidate publisher for one request (AC1)', () => {
     const map = assembleTaskLifecycleEvidence({
-      tasks: [{
-        taskId: '7', chainId: 84532, manifestDigest: hex32('11'),
-        taskCidDigest: hex32('22'), creator: addr('aa'), maxClaims: 1,
-        requiredVerdicts: 1, createdAtBlock: 10, finalized: false, refunded: false,
-      }],
-      attempts: [{
-        taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
-        operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: 20,
-      }],
+      tasks: [task()],
+      attempts: [attempt({ requestId: hex32('b0') })],
       verdicts: [],
       attemptCandidates: [
-        { requestId: hex32('b0'), chainId: 84532, manifestCid: 'bafy1',
+        { requestId: hex32('b0'), chainId: CHAIN, manifestCid: 'bafy1',
           publisherAgentId: '1', manifestHash: hex32('01'), enrichedAtBlock: 1 },
-        { requestId: hex32('b0'), chainId: 84532, manifestCid: 'bafy2',
+        { requestId: hex32('b0'), chainId: CHAIN, manifestCid: 'bafy2',
           publisherAgentId: '2', manifestHash: hex32('02'), enrichedAtBlock: 2 },
       ],
     });
