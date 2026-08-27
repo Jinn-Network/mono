@@ -211,19 +211,26 @@ export function assembleTaskLifecycleEvidence(input: {
   return out;
 }
 
-// ── Provenance separation, enforced by the compiler (AC3) ────────────────────
+// ── Provenance separation, enforced by the compiler (AC3) ────────────────
 // `verdictEnvelopeMeta` carries taskId / attemptIndex / verdictIndex / evaluator
-// — the four columns most likely to be mistaken for spine identity. They are
-// renamed to projected* on ingest, so `spine.evaluator = candidate.evaluator`
-// does not compile: the field does not exist on the candidate type. These
-// aliases fail `yarn typecheck` if that ever stops being true.
+// — the columns most likely to be mistaken for spine identity. They are renamed
+// to projected* on ingest, so `spine.evaluator = candidate.evaluator` does not
+// compile: the field does not exist on the candidate type.
+//
+// The check is stated once, over BOTH candidate types, as "this type declares
+// none of the spine's identity columns". That subsumes the earlier per-field
+// `keyof` aliases and, unlike an assignability check, it actually bites: adding
+// any one of these names to either candidate fails `yarn typecheck`.
 type Assert<T extends true> = T;
-type NotAssignable<A, B> = [A] extends [B] ? false : true;
 
-type _CandidateIsNotSpine = Assert<NotAssignable<AttemptEnvelopeCandidate, AuthoritativeAttemptRow>>;
-type _VerdictCandidateIsNotSpine =
-  Assert<NotAssignable<VerdictEnvelopeCandidate, AuthoritativeVerdictRow>>;
-type _VerdictCandidateHasNoSpineTaskId =
-  Assert<'taskId' extends keyof VerdictEnvelopeCandidate ? false : true>;
-type _VerdictCandidateHasNoSpineEvaluator =
-  Assert<'evaluator' extends keyof VerdictEnvelopeCandidate ? false : true>;
+/** Identity columns only the authoritative spine may carry. */
+type SpineIdentityColumn =
+  'taskId' | 'attemptIndex' | 'verdictIndex' | 'evaluator' | 'operator';
+
+type CarriesNoSpineIdentity<C> =
+  [Extract<keyof C, SpineIdentityColumn>] extends [never] ? true : false;
+
+type _AttemptCandidateCarriesNoSpineIdentity =
+  Assert<CarriesNoSpineIdentity<AttemptEnvelopeCandidate>>;
+type _VerdictCandidateCarriesNoSpineIdentity =
+  Assert<CarriesNoSpineIdentity<VerdictEnvelopeCandidate>>;

@@ -173,6 +173,7 @@ describe('createTaskLifecycleReader.getTaskLifecycleEvidence (#2044)', () => {
   });
 
   it('does not attach an attempt row from a different chain to the spine (AC3)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fetchImpl = scriptedFetch([
       TASK_PAGE, // task 7 lives on chain 84532
       // An indexer that ignored the chainId filter returns a chain-8453 row.
@@ -184,6 +185,131 @@ describe('createTaskLifecycleReader.getTaskLifecycleEvidence (#2044)', () => {
     ]);
     const ev = (await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).get('7')!;
     expect(ev.authoritative.attempts).toEqual([]);
+    // Out of scope, but never silent.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('skipped attempts row(s)'));
+    warn.mockRestore();
+  });
+
+  it('withdraws the whole read when a task row is unparseable (absence > partial lie)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([
+      page('tasks', [{ ...TASK_ROW, creator: '0xnope' }]),
+    ]);
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unusable tasks row (taskId=7)'));
+    // The malformed row aborts before any downstream leg is queried.
+    expect(fetchImpl.mock.calls.filter(([u]) => !isReadyProbe(String(u)))).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('withdraws the whole read when an attempt index is not a safe integer', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        // A fractional index would key and sort the spine on garbage.
+        { taskId: '7', chainId: 84532, attemptIndex: 1.5, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20' },
+      ]),
+    ]);
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('unusable attempts row (taskId=7 attemptIndex=1.5)'),
+    );
+    warn.mockRestore();
+  });
+
+  it('withdraws the whole read when a verdict row is unparseable', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20' },
+      ]),
+      page('verdicts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, verdictIndex: -1, requestId: hex32('d0'),
+          evaluator: addr('e0'), verdictCode: 1, createdAtBlock: '30' },
+      ]),
+    ]);
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unusable verdicts row'));
+    warn.mockRestore();
+  });
+
+  it('omits a task the caller never asked for', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([
+      // A leaky `id_in` also returns task 8.
+      page('tasks', [TASK_ROW, { ...TASK_ROW, id: '8' }]),
+      page('attempts', []),
+      page('verdicts', []),
+    ]);
+    const map = await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] });
+    expect([...map.keys()]).toEqual(['7']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('skipped tasks row(s)'));
+    warn.mockRestore();
+  });
+
+  it('attaches a leaked cross-chain verdict once, not once per chain pass', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const chainBVerdict = {
+      taskId: '8', chainId: 8453, attemptIndex: 0, verdictIndex: 0, requestId: hex32('d8'),
+      evaluator: addr('e8'), verdictCode: 1, createdAtBlock: '40',
+    };
+    const fetchImpl = scriptedFetch([
+      page('tasks', [TASK_ROW, { ...TASK_ROW, id: '8', chainId: 8453 }]),
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20' },
+      ]),
+      page('attempts', [
+        { taskId: '8', chainId: 8453, attemptIndex: 0, requestId: hex32('b8'),
+          operator: addr('b8'), priorityMech: addr('c8'), deliveryRate: '1', createdAtBlock: '30' },
+      ]),
+      // The chain-84532 pass leaks the chain-8453 row; the chain-8453 pass
+      // returns it legitimately.
+      page('verdicts', [chainBVerdict]),
+      page('verdicts', [chainBVerdict]),
+      page('attemptEnvelopeMetas', []),
+      page('verdictEnvelopeMetas', []),
+    ]);
+    const map = await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7', '8'] });
+    expect(map.get('8')!.authoritative.attempts[0]!.verdicts.map((v) => v.verdictIndex))
+      .toEqual([0]);
+    expect(map.get('7')!.authoritative.attempts[0]!.verdicts).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('skipped verdicts row(s)'));
+    warn.mockRestore();
+  });
+
+  it('skips an unparseable candidate row without withdrawing the spine', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20' },
+      ]),
+      page('verdicts', []),
+      page('attemptEnvelopeMetas', [
+        // Two unusable candidate rows: one bad chainId, one bad hash. The leg
+        // warns once, not twice.
+        { requestId: hex32('b0'), chainId: 1.5, manifestCid: 'bafy1', publisherAgentId: '1',
+          manifestHash: hex32('01'), enrichedAtBlock: '25' },
+        { requestId: hex32('b0'), chainId: 84532, manifestCid: 'bafy2', publisherAgentId: '2',
+          manifestHash: 'not-hex', enrichedAtBlock: '26' },
+        { requestId: hex32('b0'), chainId: 84532, manifestCid: 'bafy3', publisherAgentId: '3',
+          manifestHash: hex32('03'), enrichedAtBlock: '27' },
+      ]),
+    ]);
+    const attempt = (await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] }))
+      .get('7')!.authoritative.attempts[0]!;
+    // The spine survives; only the good candidate attaches.
+    expect(attempt.attemptEnvelopeCandidates.map((c) => c.publisherAgentId)).toEqual(['3']);
+    const skips = warn.mock.calls
+      .filter(([m]) => String(m).includes('skipped attemptEnvelopeMetas row(s)'));
+    expect(skips).toHaveLength(1);
+    warn.mockRestore();
   });
 
   it('scopes the attempt and verdict legs by the chainId of the task row', async () => {

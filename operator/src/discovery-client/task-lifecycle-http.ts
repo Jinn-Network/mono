@@ -328,6 +328,16 @@ function isHex(value: string | undefined | null): value is `0x${string}` {
   return typeof value === 'string' && /^0x[0-9a-fA-F]+$/.test(value);
 }
 
+/**
+ * A non-negative safe integer — the shape of every index, count and chain-id
+ * column on these tables. Matches the `Number.isSafeInteger(x) && x >= 0` guard
+ * `http.ts` applies to its own equivalents; without it a NaN attemptIndex
+ * becomes a garbage spine key and a garbage sort comparator.
+ */
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
 // ── Paging ───────────────────────────────────────────────────────────────────
 
 /**
@@ -379,6 +389,40 @@ function emptyOnLifecycleTruncate(leg: string): Map<string, TaskLifecycleEvidenc
   return new Map();
 }
 
+/**
+ * The same answer for an authoritative row the reader cannot parse. A spine
+ * handed back with one task, attempt or verdict quietly missing is exactly the
+ * partial lie the truncation guard exists to prevent, so a malformed
+ * task/attempt/verdict row withdraws the whole read too.
+ */
+function emptyOnLifecycleRowReject(
+  leg: string,
+  identity: string,
+): Map<string, TaskLifecycleEvidence> {
+  console.warn(
+    `[discovery-client] getTaskLifecycleEvidence: unusable ${leg} row (${identity}); `
+      + 'omitting results (absence > partial lie)',
+  );
+  return new Map();
+}
+
+/**
+ * Two drops are legitimate and lose nothing the caller asked for: a row outside
+ * the scope its leg queried (a leaky indexer filter), and a malformed row on an
+ * untrusted candidate leg. Neither may be SILENT, so each leg warns once for
+ * the whole page walk.
+ */
+function skipWarner(leg: string): (reason: string) => void {
+  let warned = false;
+  return (reason: string) => {
+    if (warned) return;
+    warned = true;
+    console.warn(
+      `[discovery-client] getTaskLifecycleEvidence: skipped ${leg} row(s) — ${reason}`,
+    );
+  };
+}
+
 // ── Reader ───────────────────────────────────────────────────────────────────
 
 export interface TaskLifecycleReader {
@@ -387,6 +431,11 @@ export interface TaskLifecycleReader {
    * untrusted envelope candidates. Unknown task ids are omitted from the Map;
    * an empty `taskIds` short-circuits with zero I/O. Throws
    * `DiscoveryUnavailableError` when the indexer is unreachable or unready.
+   *
+   * Returns an EMPTY Map — never a partial spine — when any leg hits the page
+   * cap or any task/attempt/verdict row cannot be parsed. Only two drops are
+   * survivable, and both warn: a row outside the scope its leg queried, and a
+   * malformed row on an untrusted `*EnvelopeMeta` candidate leg.
    */
   getTaskLifecycleEvidence(args: { taskIds: string[] }): Promise<Map<string, TaskLifecycleEvidence>>;
 }
@@ -403,20 +452,32 @@ export function createTaskLifecycleReader(
     if (args.taskIds.length === 0) return new Map();
     await ensureReady();
 
-    const requestedIds = Array.from(new Set(args.taskIds.filter(Boolean)));
-    if (requestedIds.length === 0) return new Map();
+    const requestedIds = new Set(args.taskIds.filter(Boolean));
+    if (requestedIds.size === 0) return new Map();
 
     const taskRows = await drainLifecycleLeg<LifecycleTaskGql>(
-      gqlUrl, fetchImpl, 'tasks', LIFECYCLE_TASKS_QUERY, { taskIds: requestedIds },
+      gqlUrl, fetchImpl, 'tasks', LIFECYCLE_TASKS_QUERY,
+      { taskIds: Array.from(requestedIds) },
     );
     if (!taskRows) return emptyOnLifecycleTruncate('tasks');
 
     const tasks: RawTaskRow[] = [];
+    const warnTaskSkip = skipWarner('tasks');
     for (const row of taskRows) {
+      // Out of scope rather than malformed: an indexer that widened `id_in`
+      // would otherwise seed the Map with a task the caller never asked for,
+      // against this interface's own "unknown task ids are omitted" contract.
+      if (!requestedIds.has(row.id)) {
+        warnTaskSkip('id outside the requested set');
+        continue;
+      }
       const createdAtBlock = parseExactBlock(row.createdAtBlock);
-      if (createdAtBlock === undefined) continue;
-      if (!isBytes32(row.manifestDigest) || !isBytes32(row.taskCidDigest)
-        || !isAddress(row.creator)) continue;
+      if (createdAtBlock === undefined
+        || !isCount(row.chainId) || !isCount(row.maxClaims) || !isCount(row.requiredVerdicts)
+        || !isBytes32(row.manifestDigest) || !isBytes32(row.taskCidDigest)
+        || !isAddress(row.creator)) {
+        return emptyOnLifecycleRowReject('tasks', `taskId=${row.id}`);
+      }
       const task: RawTaskRow = {
         taskId: row.id,
         chainId: row.chainId,
@@ -451,6 +512,7 @@ export function createTaskLifecycleReader(
     }
 
     const attempts: RawAttemptRow[] = [];
+    const warnAttemptSkip = skipWarner('attempts');
     for (const [chainId, taskIds] of taskIdsByChain) {
       const rows = await drainLifecycleLeg<LifecycleAttemptGql>(
         gqlUrl, fetchImpl, 'attempts', LIFECYCLE_ATTEMPTS_QUERY, { taskIds, chainId },
@@ -460,11 +522,19 @@ export function createTaskLifecycleReader(
         // Defense in depth against an indexer that ignores the chainId filter.
         // The assembler keys `out` by taskId alone, so a chain-B attempt row
         // for a chain-A task would otherwise attach to the spine.
-        if (row.chainId !== chainId) continue;
+        if (row.chainId !== chainId) {
+          warnAttemptSkip('chainId outside the scoped chain');
+          continue;
+        }
         const createdAtBlock = parseExactBlock(row.createdAtBlock);
-        if (createdAtBlock === undefined) continue;
-        if (!isBytes32(row.requestId) || !isAddress(row.operator)
-          || !isAddress(row.priorityMech)) continue;
+        if (createdAtBlock === undefined
+          || !isCount(row.attemptIndex)
+          || !isBytes32(row.requestId) || !isAddress(row.operator)
+          || !isAddress(row.priorityMech)) {
+          return emptyOnLifecycleRowReject(
+            'attempts', `taskId=${row.taskId} attemptIndex=${row.attemptIndex}`,
+          );
+        }
         attempts.push({
           taskId: row.taskId,
           chainId: row.chainId,
@@ -479,15 +549,32 @@ export function createTaskLifecycleReader(
     }
 
     const verdicts: RawVerdictRow[] = [];
+    const warnVerdictSkip = skipWarner('verdicts');
     for (const [chainId, taskIds] of taskIdsByChain) {
       const rows = await drainLifecycleLeg<LifecycleVerdictGql>(
         gqlUrl, fetchImpl, 'verdicts', LIFECYCLE_VERDICTS_QUERY, { taskIds, chainId },
       );
       if (!rows) return emptyOnLifecycleTruncate('verdicts');
       for (const row of rows) {
+        // Same chainId guard the attempts leg carries: with more than one chain
+        // in play, a leaked chain-B verdict row would attach on the chain-A pass
+        // and AGAIN on the chain-B pass, duplicating it inside a list this
+        // module documents as sorted by verdictIndex.
+        if (row.chainId !== chainId) {
+          warnVerdictSkip('chainId outside the scoped chain');
+          continue;
+        }
         const createdAtBlock = parseExactBlock(row.createdAtBlock);
-        if (createdAtBlock === undefined) continue;
-        if (!isBytes32(row.requestId) || !isAddress(row.evaluator)) continue;
+        if (createdAtBlock === undefined
+          || !isCount(row.attemptIndex) || !isCount(row.verdictIndex)
+          || !isCount(row.verdictCode)
+          || !isBytes32(row.requestId) || !isAddress(row.evaluator)) {
+          return emptyOnLifecycleRowReject(
+            'verdicts',
+            `taskId=${row.taskId} attemptIndex=${row.attemptIndex} `
+              + `verdictIndex=${row.verdictIndex}`,
+          );
+        }
         verdicts.push({
           taskId: row.taskId,
           chainId: row.chainId,
@@ -511,10 +598,16 @@ export function createTaskLifecycleReader(
         { requestIds: solveRequestIds },
       );
       if (!rows) return emptyOnLifecycleTruncate('attemptEnvelopeMetas');
+      const warnSkip = skipWarner('attemptEnvelopeMetas');
       for (const row of rows) {
+        // Candidates are untrusted hints, so a malformed one is skipped rather
+        // than fatal — but never silently.
         const enrichedAtBlock = parseExactBlock(row.enrichedAtBlock);
-        if (enrichedAtBlock === undefined) continue;
-        if (!isBytes32(row.requestId) || !isHex(row.manifestHash)) continue;
+        if (enrichedAtBlock === undefined || !isCount(row.chainId)
+          || !isBytes32(row.requestId) || !isHex(row.manifestHash)) {
+          warnSkip('unparseable candidate row');
+          continue;
+        }
         const cand: AttemptEnvelopeCandidate = {
           requestId: row.requestId.toLowerCase() as `0x${string}`,
           chainId: row.chainId,
@@ -544,10 +637,14 @@ export function createTaskLifecycleReader(
         { requestIds: evalRequestIds },
       );
       if (!rows) return emptyOnLifecycleTruncate('verdictEnvelopeMetas');
+      const warnSkip = skipWarner('verdictEnvelopeMetas');
       for (const row of rows) {
         const enrichedAtBlock = parseExactBlock(row.enrichedAtBlock);
-        if (enrichedAtBlock === undefined) continue;
-        if (!isBytes32(row.requestId) || !isHex(row.manifestHash)) continue;
+        if (enrichedAtBlock === undefined || !isCount(row.chainId)
+          || !isBytes32(row.requestId) || !isHex(row.manifestHash)) {
+          warnSkip('unparseable candidate row');
+          continue;
+        }
         const cand: VerdictEnvelopeCandidate = {
           requestId: row.requestId.toLowerCase() as `0x${string}`,
           chainId: row.chainId,
@@ -567,8 +664,8 @@ export function createTaskLifecycleReader(
         if (row.enrichmentStatus) cand.enrichmentStatus = row.enrichmentStatus;
         // Projected hints only — never used as spine keys (AC3).
         if (row.taskId) cand.projectedTaskId = row.taskId;
-        if (typeof row.attemptIndex === 'number') cand.projectedAttemptIndex = row.attemptIndex;
-        if (typeof row.verdictIndex === 'number') cand.projectedVerdictIndex = row.verdictIndex;
+        if (isCount(row.attemptIndex)) cand.projectedAttemptIndex = row.attemptIndex;
+        if (isCount(row.verdictIndex)) cand.projectedVerdictIndex = row.verdictIndex;
         if (isAddress(row.evaluator)) {
           cand.projectedEvaluator = row.evaluator.toLowerCase() as `0x${string}`;
         }
