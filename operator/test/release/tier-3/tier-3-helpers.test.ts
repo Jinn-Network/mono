@@ -42,6 +42,10 @@ async function listenOnFreePort(): Promise<{ port: number; close: () => Promise<
   const net = await import('node:net');
   const srv = net.createServer();
   const port = await new Promise<number>((resolve, reject) => {
+    // This handler stays attached after a successful bind, on purpose. A later
+    // server-level error then calls `reject` on an already-settled promise,
+    // which is a no-op — and that no-op is what keeps an unhandled `'error'`
+    // event from taking the whole worker down mid-test.
     srv.once('error', reject);
     srv.listen(0, '127.0.0.1', () => {
       const addr = srv.address();

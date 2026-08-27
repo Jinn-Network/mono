@@ -6,8 +6,57 @@ import { runScenario, type ScenarioVerdict, type ScenarioOptions } from '../../.
 
 const KNOWN_HARNESSES = ['claude-code-learner', 'codex-code-learner', 'hermes-agent'] as const;
 
-// Port chosen to avoid collision with conventional 7331 (default daemon),
-// 17332 (multi-op helper tests), and 7732/7733/7734 (multi-op-daemon.test.ts).
+// ── Fixed below-band port registry ──────────────────────────────────────────
+//
+// Vitest runs ~850 test files across 3 forked workers, and those workers share
+// one kernel-global 127.0.0.1 port space. A fixed port is therefore only safe
+// BELOW the ephemeral band (32768-65535 -- the union of the Linux
+// `ip_local_port_range` default 32768-60999 and the macOS range 49152-65535):
+// under the band, no sibling worker's `listen(0)` can ever be handed it.
+//
+// Below the band, a fixed reservation BEATS `allocateAnvilPort()` for a
+// child-process bind, because it has no allocate-then-rebind window at all.
+// The price is that the number must be unique repo-wide, so every one of them
+// is recorded here. `yarn lint:no-fixed-test-port` enforces the band, not this
+// list -- the list is maintained by hand. Verified against the tree
+// 2026-08-27.
+//
+//   7331          default daemon apiPort -- the conventional one, referenced by
+//                 ~26 call sites (config fixtures, doctor, harness URLs)
+//   7732 / 7733   test/helpers/multi-op-daemon.test.ts -- op-a / op-b dummies
+//   7734          test/helpers/multi-op-daemon.test.ts -- 'teardown is idempotent'
+//   7740 / 7741   test/release/tier-2/tier-2-helpers.test.ts -- portBase 7740
+//                 (op-b takes portBase + 1)
+//   7742 / 7743   test/release/tier-2/tier-2-helpers.test.ts -- portBase 7742
+//   9331 / 9332   test/release/tier-3/tier-3-helpers.test.ts -- the "nothing is
+//                 listening here" probe; deliberately bound by nothing
+//   27331         THIS file -- the real daemon this scenario spawns
+//
+// Other below-band literals occur in the tree (7332, 7333, 7340, 7342, 7360,
+// 7400, 7450, 7451, 7777, 18533) but nothing binds them: they are inert config
+// values or URLs behind a stubbed `fetch`. The full census lives in the doc
+// block of operator/scripts/check-no-fixed-test-port.mjs.
+//
+// ── Which form to use ───────────────────────────────────────────────────────
+//
+//   1. The TEST ITSELF binds it -> `listen(0, '127.0.0.1')`, then read
+//      `server.address().port`. Atomic; no window. Always preferred when
+//      available.
+//   2. A CHILD PROCESS binds it -> either a fixed port below 32768 reserved in
+//      the registry above (best: no window at all, but the number must be
+//      unique repo-wide), or `allocateAnvilPort()` when a fixed reservation is
+//      impractical -- many ports, or several instances inside one file. The
+//      allocator has a narrow allocate-then-rebind window; the reservation has
+//      none.
+//   3. The assertion IS "nothing is listening here" -> a fixed port below
+//      32768, with a comment saying why.
+//
+// The invariant under all three: never a literal inside 32768-65535 at a bind
+// or probe site.
+//
+// This scenario is case 2 with a fixed reservation: it spawns one real daemon,
+// one port, for the lifetime of the file. See issue #1627 and
+// docs/runbooks/testing.md, "Worker parallelism and ports".
 const API_PORT = 27331;
 
 // A known UI token pre-written to the HOME before spawning the daemon.

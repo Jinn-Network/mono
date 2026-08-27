@@ -8,6 +8,7 @@ import {
   sealDelivery,
   sealSubmission,
   sealTask,
+  type AttemptState,
 } from '@jinn-network/task-execution-protocol';
 import { makeLocalTaskExecutionBackend } from '@jinn-network/task-execution-backend-local';
 import type { LauncherContract } from '@jinn-network/task-execution-launchers';
@@ -221,8 +222,13 @@ async function produceBridgedDelivery(): Promise<Uint8Array> {
   // through SILENTLY, so a starved poll surfaced as "expected exactly one
   // delivery, got 0" and pointed the reader at the bridge instead of at the
   // runner. Issue #1627.
-  const deadline = Date.now() + 15_000;
-  let lastState: string | undefined;
+  //
+  // 10s, deliberately a third of the 30s `testTimeout` rather than half of it.
+  // If setup is itself starved the generic vitest timeout wins the race and the
+  // diagnostic below never prints -- which is the exact case it was written
+  // for -- so the deadline needs real headroom under it, not a tie.
+  const deadline = Date.now() + 10_000;
+  let lastState: AttemptState | undefined;
   let terminal = false;
   while (Date.now() < deadline) {
     const snapshot = await instance.observe(ack.submission);
@@ -238,7 +244,7 @@ async function produceBridgedDelivery(): Promise<Uint8Array> {
   }
   if (!terminal) {
     throw new Error(
-      `attempt never reached a terminal state within 15000ms (last observed state: ${lastState ?? 'none'}). ` +
+      `attempt never reached a terminal state within 10000ms (last observed state: ${lastState ?? 'none'}). ` +
         'This is a starved poll on a contended runner, not a lost delivery -- see issue #1627.',
     );
   }

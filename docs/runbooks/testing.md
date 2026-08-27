@@ -196,13 +196,14 @@ Use **Node 22** where possible (`engines` in `operator/package.json`). CI should
 
 ## CI gates
 
-- Every PR: `yarn typecheck` + `yarn lint:no-late-mount` + `yarn lint:no-error-leak`
+- Every PR that touches the operator lane (the `changes` job in `ci.yml` gates
+  this): `yarn typecheck` + `yarn lint:no-late-mount` + `yarn lint:no-error-leak`
   + `yarn lint:no-fixed-test-port` + `yarn test`.
 - Nightly / release: all `yarn e2e*` scenarios serially.
 - The default suite already runs in parallel on CI — three forked workers over
   ~850 files. See [Worker parallelism and ports](#worker-parallelism-and-ports)
-  for what that shares and the rules that follow from it. `allocateAnvilPort()`
-  is one of the three sanctioned ways to get a port.
+  for what that shares and the rules that follow from it, including the three
+  sanctioned ways to get a port.
 
 ## Worker parallelism and ports
 
@@ -223,23 +224,38 @@ port space, filesystem paths outside the isolated home, the repository checkout
 itself, and the machine's CPU and memory. Every flake measured under #1627 came
 from the last two.
 
-### Never hard-code a port in 32768–60999
+### Never hard-code a port in 32768–65535
 
-That band is the Linux `ip_local_port_range` default; the macOS range
-(49152–65535) sits inside it. A sibling worker's `listen(0)` can be handed any
-port in it, so a test that hard-codes one can have it taken mid-run. Three
-sanctioned forms:
+That band is the **union** of the two OS defaults this suite runs on: the Linux
+`ip_local_port_range` default (32768–60999, the CI runners) and the macOS
+ephemeral range (49152–65535, the laptops). Neither contains the other —
+32768–49151 is Linux-only and 61000–65535 is macOS-only — so guarding either
+one alone leaves a live hole on the other platform. A sibling worker's
+`listen(0)` can be handed any port in the band, so a test that hard-codes one
+can have it taken mid-run. Three sanctioned forms, in preference order:
 
 | The port is bound by | Use |
 |---|---|
-| a child process (Anvil, Ponder, a spawned daemon) | `await allocateAnvilPort()` from `@test/chain/port-allocator.js` |
-| the test itself | `listen(0, '127.0.0.1')`, then read `server.address().port` — the kernel assigns and holds atomically, so there is no allocate-then-rebind window |
+| the test itself | `listen(0, '127.0.0.1')`, then read `server.address().port` — the kernel assigns and holds atomically, so there is no allocate-then-rebind window. Always preferred where it is available. |
+| a child process (Anvil, Ponder, a spawned daemon) | either a **fixed port below 32768** reserved in the port registry, or `await allocateAnvilPort()` from `@test/chain/port-allocator.js` when a fixed reservation is impractical (many ports, or several instances inside one file). The tradeoff: the allocator has a narrow allocate-then-rebind window, the fixed reservation has none but must be unique repo-wide. |
 | nothing — the assertion *is* "nothing is listening here" | a fixed port **below 32768**, with a comment saying why |
 
+The invariant under all three: **never a literal inside 32768–65535 at a bind
+or probe site.** The registry of fixed below-band ports currently in use lives
+in the header of
+[`operator/test/release/tier-1/T1.2-harness-readiness-contract.ts`](../../operator/test/release/tier-1/T1.2-harness-readiness-contract.ts) —
+add to it when you reserve one.
+
 `yarn lint:no-fixed-test-port` enforces this. It also fails if
-`operator/vitest.config.ts` acquires `fileParallelism: false`, `maxWorkers: 1`,
-or a `pool:` override — switching parallelism off would make every cross-worker
-collision vanish locally and silently retire the reason these rules exist.
+`operator/vitest.config.ts` acquires a parallelism pin or an isolation
+opt-out: `isolate: false`, `singleFork` / `singleThread: true`,
+`fileParallelism: false`, `maxWorkers` / `maxForks` / `minForks` /
+`maxThreads` / `minThreads` pinned to 1, `maxConcurrency: 1`, or a `pool:`
+override. Switching parallelism off would make every cross-worker collision
+vanish locally and silently retire the reason these rules exist. `isolate:
+false` is the worst of the set: it also retires the fresh-process-per-file
+property that [the measurement](#the-measurement-1627-2026-08-27) rests on,
+and it does so while leaving the suite green.
 
 ### Beware fixed time and iteration budgets
 
@@ -254,11 +270,20 @@ Two rules:
 
 ### The measurement (#1627, 2026-08-27)
 
-Two instruments. Every past `Typecheck & Test` job is itself a CI-equivalent
-sample, so the CI history was mined: **1176 executed `check` jobs across 70
-days** (2026-06-18 to 2026-08-27; runs where the `changes` gate skipped `check`
-are excluded). Locally, the full suite was run at the CI worker count on a
-12-core macOS host:
+Two instruments, and only one of them is CI-equivalent.
+
+**The mined CI history is.** Every past `Typecheck & Test` job ran the suite on
+the real runner under the real topology, so each is a genuine sample of the
+thing under diagnosis: **1176 executed `check` jobs across 70 days**
+(2026-06-18 to 2026-08-27; runs where the `changes` gate skipped `check` are
+excluded).
+
+**The local runs are a lower-contention approximation.** The full suite was run
+at the CI *worker count* — three — but on a 12-core macOS host, so the
+contention ratio is 3 workers over 12 cores, not CI's 3 over 4 vCPU. Contention
+is the exact variable the diagnosis blames, so a bare local run at
+`--maxWorkers=3` is not a CI stand-in — the 3-of-20 single-file reproduction
+below needed a separately applied 8-way CPU load on top of it:
 
 ```bash
 cd operator
@@ -285,12 +310,13 @@ Results:
   comparing two ISO millisecond timestamps, in a block that needs
   `shouldAdvanceTime: true` — so it required two consecutive awaited writes to
   land in the same millisecond; 1 of 5 local full-suite runs, and 3 of 20
-  single-file runs under load, went red before the fix and 0 of 20 after) and
+  single-file runs under the added 8-way CPU load, went red before the fix and
+  0 of 20 after) and
   `converged-delivery-legacy-evaluator.test.ts` (the 200x10ms poll above,
   independently confirmed by a CI run that failed on attempt 1 and passed on
   attempt 2 of the *same* run — a same-tree flip, which is the only
   pass/fail evidence that proves a flake rather than a moving base).
-- **No broad serialisation was added**, and none is warranted: nothing measured
+- **No broad serialization was added**, and none is warranted: nothing measured
   was cross-worker *state* leakage, so `isolate: true` is doing its job.
 
 Named but not fixed here, both load-sensitive budgets with CI evidence and no

@@ -62,19 +62,11 @@ describe('spawnMultiOpDaemons', () => {
   let dummyBinPath: string;
   let opAHome: string;
   let opBHome: string;
-  // Kernel-allocated, not hard-coded: these ports are bound for real by
-  // spawned daemons, and vitest runs ~850 files across 3 forked workers that
-  // share one 127.0.0.1 port space. Allocated in `beforeAll` because the same
-  // values go into the seeded config files AND the `ops:` argument. Issue #1627.
-  let opAPort: number;
-  let opBPort: number;
 
   beforeAll(async () => {
     tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'multi-op-helper-'));
     dummyBinPath = path.join(tmpRoot, 'dummy-daemon.cjs');
     await fs.writeFile(dummyBinPath, DUMMY_DAEMON_SOURCE);
-    opAPort = await allocateAnvilPort();
-    opBPort = await allocateAnvilPort();
     opAHome = path.join(tmpRoot, 'op-a');
     opBHome = path.join(tmpRoot, 'op-b');
     await fs.mkdir(path.join(opAHome, '.jinn-client'), { recursive: true });
@@ -87,8 +79,20 @@ describe('spawnMultiOpDaemons', () => {
       rpcUrl: 'https://base-sepolia.example/dummy',
       pollIntervalMs: 5000,
     });
-    await fs.writeFile(path.join(opAHome, '.jinn-client', 'config.json'), minimalCfg(opAPort));
-    await fs.writeFile(path.join(opBHome, '.jinn-client', 'config.json'), minimalCfg(opBPort));
+    // Fixed on purpose, and deliberately BELOW 32768. These ports are bound by
+    // a spawned child, not by the test, so `listen(0)` is not available here —
+    // and the two remaining options are not equivalent. A port under the
+    // ephemeral band (32768-65535) is one no sibling vitest worker's `listen(0)`
+    // can ever be handed, so a fixed reservation has NO window at all;
+    // `allocateAnvilPort()` would move these into the band and open an
+    // allocate-then-rebind window between `beforeAll` and the child's bind
+    // (two file writes, the hook-to-test transition, then node spawn +
+    // startup), which the dummy daemon — no `'error'` handler — would lose as a
+    // child crash surfacing as a 30s readiness timeout. Registered in the port
+    // registry in test/release/tier-1/T1.2-harness-readiness-contract.ts.
+    // See issue #1627 and docs/runbooks/testing.md, "Worker parallelism and ports".
+    await fs.writeFile(path.join(opAHome, '.jinn-client', 'config.json'), minimalCfg(7732));
+    await fs.writeFile(path.join(opBHome, '.jinn-client', 'config.json'), minimalCfg(7733));
   });
 
   afterAll(async () => {
@@ -100,21 +104,17 @@ describe('spawnMultiOpDaemons', () => {
     try {
       handle = await spawnMultiOpDaemons({
         ops: [
-          { name: 'op-a', home: opAHome, apiPort: opAPort },
-          { name: 'op-b', home: opBHome, apiPort: opBPort },
+          { name: 'op-a', home: opAHome, apiPort: 7732 },
+          { name: 'op-b', home: opBHome, apiPort: 7733 },
         ],
         readyTimeoutMs: 30000,
         jinnBinPath: dummyBinPath,
       });
       expect(Object.keys(handle.daemons).sort()).toEqual(['op-a', 'op-b']);
-      // The "distinct ports" half of this test's name, now actually asserted
-      // rather than left implicit in two different literals.
-      expect(opAPort).not.toBe(opBPort);
       // handshakeUrl may be present only if the daemon emits it; bootstrap-incomplete daemons may not.
-      // The contract: each daemon has a pid and an apiPort — the helper propagates
-      // each op's requested port onto its handle.
-      expect(handle.daemons['op-a'].apiPort).toBe(opAPort);
-      expect(handle.daemons['op-b'].apiPort).toBe(opBPort);
+      // The contract: each daemon has a pid and an apiPort.
+      expect(handle.daemons['op-a'].apiPort).toBe(7732);
+      expect(handle.daemons['op-b'].apiPort).toBe(7733);
       expect(handle.daemons['op-a'].pid).toBeGreaterThan(0);
       expect(handle.daemons['op-b'].pid).toBeGreaterThan(0);
     } finally {
@@ -124,7 +124,7 @@ describe('spawnMultiOpDaemons', () => {
 
   it('teardown is idempotent', async () => {
     const handle = await spawnMultiOpDaemons({
-      ops: [{ name: 'op-a', home: opAHome, apiPort: await allocateAnvilPort() }],
+      ops: [{ name: 'op-a', home: opAHome, apiPort: 7734 }],
       readyTimeoutMs: 30000,
       jinnBinPath: dummyBinPath,
     });
