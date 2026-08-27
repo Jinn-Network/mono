@@ -33,10 +33,18 @@
 // could not detect the wiring being removed. The path is published as an environment variable
 // instead — see `tmp-isolation.test.ts` next to this file.
 //
-// This file is duplicated verbatim in `packages/task-execution/evaluator-adapters`, alongside the
-// other two files of this seam (`global-tmp-root.ts` and `sweep-tree.ts`). Three small copies are
-// deliberately cheaper than a shared workspace package with its own build, portal resolutions and
-// publish surface. Graduate the set to one at a third consumer.
+// This is the ONE copy of the seam. It began as two verbatim copies inside
+// `packages/benchmark-product/core` and `packages/task-execution/evaluator-adapters`, whose comments
+// recorded the graduation trigger: extract at a third consumer. Every Vitest config under
+// `packages/` now wires it, so the copies are gone and this directory is what they all point at.
+//
+// It lives here rather than in a workspace package on purpose. This repository has no root
+// workspace — each package installs on its own with `portal:` resolutions — so a package would cost
+// a manifest, a build, a publish surface, a catalog entry and roughly fifty dependency edges to
+// deliver three files that are never imported by product code and never published. The Vitest
+// `setupFiles`/`globalSetup` entries are plain path strings, so a relative path reaches this
+// directory with none of that. `.github/scripts/vitest-tmp-isolation.test.mjs` is what keeps every
+// config pointing at it.
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";

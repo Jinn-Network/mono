@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, lstatSync, mkdtempSync, readdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -28,9 +28,16 @@ afterEach(() => {
 
 function unseal(directory: string): void {
   try {
+    // Symlinks are skipped throughout: `chmod` FOLLOWS them, so descending into one would reach
+    // outside the tree this walk owns and repermission whatever it points at. `rmSync` unlinks a
+    // symlink without needing the target's permission, so skipping costs nothing. The root gets
+    // its own `lstat` because nothing above this has checked it; `readdirSync(withFileTypes)` is
+    // already `lstat`-based, which is what makes the loop's check meaningful.
+    if (lstatSync(directory).isSymbolicLink()) return;
     chmodSync(directory, 0o700);
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const child = join(directory, entry.name);
+      if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) unseal(child);
       else chmodSync(child, 0o600);
     }

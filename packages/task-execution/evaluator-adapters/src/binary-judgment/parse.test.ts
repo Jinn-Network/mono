@@ -7,15 +7,19 @@ import { fileURLToPath } from "node:url";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
   BINARY_COMPLETE_JSON_LABEL_PARSER_ID,
+  BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_CORRECT_WRONG_PARSER_IDENTITY,
   BINARY_CORRECT_WRONG_PARSER_ID,
   BINARY_EVERMEM_JSON_LABEL_PARSER_ID,
+  BINARY_EVERMEM_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_JSON_VERDICT_PARSER_IDENTITY,
   BINARY_JSON_VERDICT_PARSER_ID,
   BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
   BINARY_LABEL_IN_PROSE_PARSER_ID,
   BINARY_MEM0_JSON_LABEL_PARSER_ID,
+  BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_STRICT_JSON_LABEL_PARSER_ID,
+  BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_YES_NO_PARSER_IDENTITY,
   type BinaryJudgmentResponseParserId,
 } from "@jinn-network/task-execution-profiles";
@@ -332,4 +336,114 @@ describe("LoCoMo JSON-label parser contracts", () => {
     expect(parse(encoder.encode('{"label":"CORRECT","label":"WRONG","reasoning":"dup"}')))
       .toEqual(invalid);
   });
+});
+
+describe("neutral-invalid optional-fence JSON-label parser contracts", () => {
+  const fenced = '```json\n{"reasoning":"ok","label":"CORRECT"}\n```';
+  const invalid = {
+    decision: "INVALID",
+    parseValid: false,
+    invalidReason: "unexpected-token",
+  } as const;
+  const V2_IDENTITIES = [
+    BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_EVERMEM_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY,
+  ];
+
+  test.each([
+    BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_EVERMEM_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY,
+  ])("$id@$version accepts the exact paid-canary fence", (identity) => {
+    const parse = selectBinaryJudgmentResponseParser(identity.id, identity.version);
+    expect(parse(encoder.encode(fenced))).toEqual({ decision: "ACCEPT", parseValid: true });
+  });
+
+  test.each([
+    BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_EVERMEM_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
+    BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY,
+  ])("$id@$version refuses prose and malformed output without manufacturing REJECT", (identity) => {
+    const parse = selectBinaryJudgmentResponseParser(identity.id, identity.version);
+    expect(parse(encoder.encode(`prefix ${fenced}`))).toEqual(invalid);
+    expect(parse(encoder.encode('{"label":'))).toEqual(invalid);
+  });
+
+  test("strict v2 still refuses extra members after removing the exact outer fence", () => {
+    const parse = selectBinaryJudgmentResponseParser(
+      BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY.id,
+      BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY.version,
+    );
+    expect(parse(encoder.encode('```\n{"label":"CORRECT","reasoning":"ok","extra":true}\n```')))
+      .toEqual(invalid);
+  });
+
+  // The fence is OPTIONAL, not required: the v2 parsers must still accept the bare JSON their v1
+  // predecessors accepted, or the fix would trade one whole class of valid answers for another.
+  test.each(V2_IDENTITIES)("$id@$version still accepts the bare unfenced JSON body", (identity) => {
+    const parse = selectBinaryJudgmentResponseParser(identity.id, identity.version);
+    expect(parse(encoder.encode('{"reasoning":"ok","label":"CORRECT"}')))
+      .toEqual({ decision: "ACCEPT", parseValid: true });
+  });
+
+  // The load-bearing half of the neutral policy: `neutralInvalid` only rewrites a parse that
+  // already failed. A judge that genuinely says WRONG must still reach the matrix as a
+  // substantive REJECT, bare or fenced, or the fix would silently erase real disagreement.
+  test.each(V2_IDENTITIES)("$id@$version keeps a genuine WRONG label a substantive REJECT", (identity) => {
+    const parse = selectBinaryJudgmentResponseParser(identity.id, identity.version);
+    const body = '{"reasoning":"contradicted","label":"WRONG"}';
+    expect(parse(encoder.encode(body))).toEqual({ decision: "REJECT", parseValid: true });
+    expect(parse(encoder.encode(`\`\`\`json\n${body}\n\`\`\``)))
+      .toEqual({ decision: "REJECT", parseValid: true });
+  });
+
+  test("the bare minimal WRONG label is a substantive REJECT for the three lenient families", () => {
+    for (const identity of [
+      BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+      BINARY_EVERMEM_JSON_LABEL_PARSER_V2_IDENTITY,
+      BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
+    ]) {
+      const parse = selectBinaryJudgmentResponseParser(identity.id, identity.version);
+      expect(parse(encoder.encode('{"label":"WRONG"}')))
+        .toEqual({ decision: "REJECT", parseValid: true });
+    }
+  });
+
+  // The sealed fence grammar, stated once as a table: exactly one outer fence, untyped or
+  // lowercase `json`, on its own opening and closing lines, and nothing else in the response.
+  // Every other shape is INVALID -- never a manufactured REJECT.
+  const FENCE_GRAMMAR: readonly {
+    readonly name: string;
+    readonly response: string;
+    readonly expect: "ACCEPT" | "INVALID";
+  }[] = [
+    { name: "trailing prose after the closing fence", response: '```json\n{"label":"CORRECT"}\n```\nThat is my verdict.', expect: "INVALID" },
+    { name: "prose before the opening fence", response: 'Here is my verdict:\n```json\n{"label":"CORRECT"}\n```', expect: "INVALID" },
+    { name: "two outer fences", response: '```json\n{"label":"CORRECT"}\n```\n```json\n{"label":"CORRECT"}\n```', expect: "INVALID" },
+    { name: "uppercase JSON info string", response: '```JSON\n{"label":"CORRECT"}\n```', expect: "INVALID" },
+    { name: "missing closing fence", response: '```json\n{"label":"CORRECT"}', expect: "INVALID" },
+    { name: "four-backtick fence", response: '````json\n{"label":"CORRECT"}\n````', expect: "INVALID" },
+    { name: "fence-only body", response: "```\n```", expect: "INVALID" },
+    { name: "empty fenced body", response: "```json\n\n```", expect: "INVALID" },
+    // CRLF parses: the closing `\r?\n` consumes only the `\n`, so the extracted body keeps a
+    // trailing `\r`, which `JSON.parse` tolerates as whitespace outside a string.
+    { name: "CRLF line endings inside the fence", response: '```json\r\n{"label":"CORRECT"}\r\n```', expect: "ACCEPT" },
+  ];
+
+  test.each(FENCE_GRAMMAR)(
+    "the complete-json-label v2 fence grammar treats $name as $expect",
+    ({ response, expect: expected }) => {
+      const parse = selectBinaryJudgmentResponseParser(
+        BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY.id,
+        BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY.version,
+      );
+      expect(parse(encoder.encode(response))).toEqual(
+        expected === "ACCEPT" ? { decision: "ACCEPT", parseValid: true } : invalid,
+      );
+    },
+  );
 });

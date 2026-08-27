@@ -4,16 +4,16 @@ export default defineConfig({
   test: {
     // Point `$TMPDIR` at a managed root before any test module loads, so the workspace roots this
     // suite creates with `mkdtemp(join(tmpdir(), …))` are swept on teardown instead of
-    // accumulating in the user temp directory. See src/test-support/isolate-tmp.ts.
+    // accumulating in the user temp directory. See ../../../test-support/tmp-isolation/README.md.
     //
     // Deliberately no `include`: `yarn test` relied on Vitest's default glob before this file
     // existed, and narrowing it here would silently drop test files from the run.
-    setupFiles: ["./src/test-support/isolate-tmp.ts"],
+    setupFiles: ["../../../test-support/tmp-isolation/isolate-tmp.ts"],
     // Create one per-run registry in the main process: each test file records its root there, and
     // the teardown removes every recorded root once every worker is gone. A fully-skipped test file
     // runs no suite, so the per-file `afterAll` sweep above never fires for it; this is what keeps
     // those files — and a hard-killed worker, and Ctrl-C — from leaving empty roots behind. See
-    // src/test-support/global-tmp-root.ts.
-    globalSetup: ["./src/test-support/global-tmp-root.ts"],
+    // ../../../test-support/tmp-isolation/README.md.
+    globalSetup: ["../../../test-support/tmp-isolation/global-tmp-root.ts"],
   },
 });
