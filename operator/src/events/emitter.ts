@@ -6,6 +6,7 @@
  * CloudEvents tail (activity_events), not this ring.
  */
 import { randomUUID } from 'node:crypto';
+import { sanitizeErrorText, sanitizeStructuredValue } from '../rpc/transport.js';
 import { EventRingBuffer } from './ring-buffer.js';
 import type { StructuredEvent, StructuredEventKind } from './types.js';
 
@@ -30,6 +31,10 @@ export function emitStructured(input: EmitInput): void {
     id: randomUUID(),
     ts: new Date().toISOString(),
     ...input,
+    message: sanitizeErrorText(input.message),
+    details: input.details === undefined
+      ? undefined
+      : sanitizeStructuredValue(input.details) as Record<string, unknown>,
   };
   RING.push(event);
 }
