@@ -340,10 +340,16 @@ describe("production prediction-market deployment module — evidence writer and
     expect(registration!.signer.handle).toBe(SIGNER_HANDLE);
     // Proves the sidecar's whitespace-padded agent (see beforeAll) was trimmed, not used verbatim.
     expect(registration!.evaluatorIdentity.id).toBe(AGENT);
-    expect(registration!.evaluationMethod.uri).toBe(
+    // The host pins this registration's method digest at composition time, so it must declare a
+    // concrete descriptor rather than deriving one per EvaluationSpec.
+    const method = registration!.evaluationMethod;
+    if (typeof method === "function") {
+      throw new Error("prediction registration must declare a concrete evaluation method descriptor");
+    }
+    expect(method.uri).toBe(
       "https://spec.jinn.network/evaluation-methods/prediction-market/v1",
     );
-    expect(registration!.evaluationMethod.digest.sha256).toBe(
+    expect(method.digest.sha256).toBe(
       (await predictionEvaluatorMethodDigest()).slice("sha256:".length),
     );
   });
