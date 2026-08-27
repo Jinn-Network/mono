@@ -94,6 +94,7 @@ describe("colophon import item-bank", () => {
       "--items", itemsPath,
       "--sources", sourcesPath,
       "--admissions", admissionsPath,
+      "--parser-invalid-policy", "abstain",
       "--json",
     ], { cwd: root, clock: () => "2026-08-15T11:01:00.000Z" });
     expect(invoked.exitCode, invoked.stderr).toBe(0);
