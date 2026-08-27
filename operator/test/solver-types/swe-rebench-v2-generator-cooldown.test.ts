@@ -526,7 +526,7 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
     expect(gen.getState().poolPublicationUpdatedAt).toBeTypeOf('string');
   });
 
-  it('does not re-publish when validated-pool.json mtime is unchanged across ticks', async () => {
+  it('does not re-publish when the validated pool is no newer than the existing publication', async () => {
     const artifact: SweRebenchV2VettedPoolArtifact = {
       schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
       evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
