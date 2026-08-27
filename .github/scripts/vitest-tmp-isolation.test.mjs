@@ -72,16 +72,60 @@ export function findVitestConfigs(directory, base = root) {
 }
 
 /**
- * The array literal that follows each `key:` in `source`, as raw inner text.
+ * `source` with line and block comments removed.
  *
- * A bracket scan rather than `key:\s*\[([^\]]*)\]`, and global rather than first-match: configs
+ * The scanners below are quote-aware but not comment-aware, and these configs are prose-heavy: an
+ * apostrophe in a comment inside a multi-line array opens a phantom string that swallows the
+ * closing bracket, and a stray `]` in a comment closes the array early. Either one drops a real
+ * seam entry and reds a correctly wired config. Stripping first costs one pass and removes the
+ * whole class. Quote state is tracked here too, so a `//` inside a path string survives.
+ */
+function stripComments(source) {
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < source.length; i += 1) {
+    const character = source[i];
+    if (quote !== null) {
+      out += character;
+      if (character === '\\') {
+        out += source[i + 1] ?? '';
+        i += 1;
+      } else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "'" || character === '"' || character === '`') {
+      quote = character;
+      out += character;
+      continue;
+    }
+    if (character === '/' && source[i + 1] === '/') {
+      const end = source.indexOf('\n', i);
+      if (end === -1) break;
+      i = end - 1;
+      continue;
+    }
+    if (character === '/' && source[i + 1] === '*') {
+      const end = source.indexOf('*/', i + 2);
+      i = (end === -1 ? source.length : end + 1);
+      continue;
+    }
+    out += character;
+  }
+  return out;
+}
+
+/**
+ * The `open`…`close` literal that follows each `key:` in `source`, as raw inner text.
+ *
+ * A balanced scan rather than `key:\s*\[([^\]]*)\]`, and global rather than first-match: configs
  * declare these keys more than once (a root list plus one per `projects` entry), nest arrays inside
  * them, and quote entries that contain a `]`. Every one of those shapes makes a first-match
- * non-greedy regex read a prefix of one list and call it the whole config.
+ * non-greedy regex read a prefix of one list and call it the whole config. An unterminated literal
+ * yields nothing rather than a truncated guess.
  */
-function arrayLiterals(source, key) {
+function enclosedLiterals(source, key, open, close) {
   const literals = [];
-  for (const opener of source.matchAll(new RegExp(`\\b${key}\\s*:\\s*\\[`, 'gu'))) {
+  for (const opener of source.matchAll(new RegExp(`\\b${key}\\s*:\\s*\\${open}`, 'gu'))) {
     const start = opener.index + opener[0].length;
     let depth = 1;
     let quote = null;
@@ -93,8 +137,8 @@ function arrayLiterals(source, key) {
         continue;
       }
       if (character === "'" || character === '"' || character === '`') quote = character;
-      else if (character === '[') depth += 1;
-      else if (character === ']') {
+      else if (character === open) depth += 1;
+      else if (character === close) {
         depth -= 1;
         if (depth === 0) {
           literals.push(source.slice(start, i));
@@ -104,6 +148,11 @@ function arrayLiterals(source, key) {
     }
   }
   return literals;
+}
+
+/** The array literal that follows each `key:` in `source`, as raw inner text. */
+function arrayLiterals(source, key) {
+  return enclosedLiterals(source, key, '[', ']');
 }
 
 /** The quoted entries of `literal`, resolved against `configDir` and made repo-relative. */
@@ -122,9 +171,10 @@ function resolveQuoted(literal, configDir, base) {
  */
 export function wiredPaths(source, configPath, base = root) {
   const configDir = dirname(resolve(base, configPath));
+  const stripped = stripComments(source);
   const paths = [];
   for (const key of ['setupFiles', 'globalSetup']) {
-    for (const literal of arrayLiterals(source, key)) {
+    for (const literal of arrayLiterals(stripped, key)) {
       for (const resolved of resolveQuoted(literal, configDir, base)) paths.push({ key, resolved });
     }
   }
@@ -162,14 +212,18 @@ for (const seam of SEAMS) {
  * The paths a config's `server.fs.allow` entries resolve to, as repo-relative strings.
  *
  * Same quoted-path scan as `wiredPaths`, and for the same reason: this gate runs on a checkout
- * with no dependencies installed, so it cannot import a config to ask. Every `allow:` list counts —
- * missing a later one reads a covered seam as unreachable.
+ * with no dependencies installed, so it cannot import a config to ask. Every `fs.allow` list counts
+ * — missing a later one reads a covered seam as unreachable.
+ *
+ * Anchored to an enclosing `fs:` block rather than scanning for a bare `allow:` key. Coverage is
+ * what turns the reachability finding OFF, so crediting an unrelated plugin's `allow:` option would
+ * reopen exactly the fail-open this reader exists to close.
  */
 export function fsAllowPaths(source, configPath, base = root) {
   const configDir = dirname(resolve(base, configPath));
-  return arrayLiterals(source, 'allow').flatMap((literal) =>
-    resolveQuoted(literal, configDir, base),
-  );
+  return enclosedLiterals(stripComments(source), 'fs', '{', '}')
+    .flatMap((block) => arrayLiterals(block, 'allow'))
+    .flatMap((literal) => resolveQuoted(literal, configDir, base));
 }
 
 /**
@@ -182,7 +236,7 @@ export function fsAllowPaths(source, configPath, base = root) {
  */
 export function declaredEnvironments(source) {
   const found = [];
-  for (const match of source.matchAll(/\benvironment\s*:\s*(?:(['"])([^'"]*)\1|([^,\s}]+))/gu)) {
+  for (const match of stripComments(source).matchAll(/\benvironment\s*:\s*(?:(['"])([^'"]*)\1|([^,\s}]+))/gu)) {
     found.push(match[1] === undefined ? '<computed>' : match[2]);
   }
   return found;
@@ -256,19 +310,28 @@ test('declaredEnvironments reads every declaration, not the first', () => {
   );
 });
 
-test('fsAllowPaths reads every allow list, nested arrays, and bracketed entries', () => {
+test('fsAllowPaths reads every fs.allow list, and only those', () => {
   const at = (source) => fsAllowPaths(source, 'packages/x/vitest.config.ts');
   assert.deepEqual(at('export default {}'), []);
   assert.deepEqual(at(`server: { fs: { allow: ['..'] } }`), ['packages']);
-  // A second `allow:` key elsewhere in the config is coverage too.
+  // A second fs block — a root one plus a `projects` entry — is coverage too.
   assert.deepEqual(
-    at(`server: { fs: { allow: ['.'] } }, test: { server: { deps: {} } }, other: { allow: ['../..'] }`),
+    at(`server: { fs: { allow: ['.'] } }, projects: [{ server: { fs: { allow: ['../..'] } } }]`),
     ['packages/x', ''],
   );
+  // An `allow:` outside any fs block is some other option, and must not count as coverage.
+  assert.deepEqual(at(`somePlugin({ allow: ['../..'] })`), []);
   // A nested array inside the list must not truncate it at the inner `]`.
-  assert.deepEqual(at(`allow: [['..'], '../..']`), ['packages', '']);
+  assert.deepEqual(at(`fs: { allow: [['..'], '../..'] }`), ['packages', '']);
   // A `]` inside a quoted entry must not end the list either.
-  assert.deepEqual(at(`allow: ['../a]b', '../..']`), ['packages/a]b', '']);
+  assert.deepEqual(at(`fs: { allow: ['../a]b', '../..'] }`), ['packages/a]b', '']);
+  // An apostrophe or a stray `]` in a comment inside the list must not derail the scan.
+  assert.deepEqual(
+    at(`fs: {\n  allow: [\n    // the seam's root, not this package's]\n    '../..',\n  ],\n}`),
+    [''],
+  );
+  // An unterminated list yields nothing rather than a truncated guess.
+  assert.deepEqual(at(`fs: { allow: ['..'`), []);
 });
 
 test('wiredPaths reads every setupFiles and globalSetup list', () => {
