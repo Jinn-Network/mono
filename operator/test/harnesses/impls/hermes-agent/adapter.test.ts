@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse as yamlParse } from 'yaml';
 import { HermesHarnessAdapter } from '../../../../src/harnesses/impls/hermes-agent/adapter.js';
 import { ResolvedHermesModelMismatchError } from '../../../../src/harnesses/impls/hermes-agent/resolved-model-guard.js';
@@ -827,17 +827,19 @@ describe('HermesHarnessAdapter T3.1 resolved-model guard', () => {
   ] as const;
   const saved: Partial<Record<(typeof T31_ENV_KEYS)[number], string | undefined>> = {};
 
+  beforeEach(() => {
+    for (const key of T31_ENV_KEYS) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
   afterEach(() => {
     for (const key of T31_ENV_KEYS) {
       if (saved[key] === undefined) delete process.env[key];
       else process.env[key] = saved[key];
     }
   });
-
-  for (const key of T31_ENV_KEYS) {
-    saved[key] = process.env[key];
-    delete process.env[key];
-  }
 
   it('does not spawn Hermes when an unapproved env override writes a different model', async () => {
     process.env['JINN_T31_EXPECTED_HERMES_MODEL'] = 'deepseek/deepseek-v4-flash';
