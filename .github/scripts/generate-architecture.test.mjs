@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  cpSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -11,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
-import { validateArchitectureControl } from './architecture-control.mjs';
+import { committedOwnershipView, validateArchitectureControl } from './architecture-control.mjs';
 import { loadCatalogPackages, loadPlatformCatalog } from './platform-catalog.mjs';
 import { fixtureCatalog, fixtureRepo } from './platform-catalog-test-fixture.mjs';
 
@@ -183,7 +184,11 @@ test('release, public-surface, ownership, and transition views reuse their canon
       relativeSource: 'src/testing.ts',
     },
   );
-  assert.deepEqual(report.ownership, validateArchitectureControl({ repoRoot }));
+  // The committed report carries only the stable ownership projection (#3076);
+  // the census (paths/counts) stays out of the artifact but the validator still
+  // produces it for the CLI coverage report.
+  assert.deepEqual(report.ownership, committedOwnershipView(validateArchitectureControl({ repoRoot })));
+  assert.deepEqual(Object.keys(report.ownership).sort(), ['requiredOwners', 'version']);
   assert.equal(report.transitions.length, loadPlatformCatalog(repoRoot).packages.filter(({ transition }) => transition).length);
   assert.ok(report.transitions.every(({ transition }) => (
     transition.reason && transition.status && transition.sunsetCondition
@@ -351,4 +356,41 @@ test('live documentation converges on generated truth while dated records remain
   );
   assert.match(marketplace, /Historical snapshot \(2026-07-30\)/u);
   assert.match(marketplace, /architecture\/generated\/platform-topology\.md/u);
+});
+
+test('independent branches that each add controlled files stay consistent under merge (#3076)', async () => {
+  // The regression this file exists to prevent from returning. Two branches
+  // each add a file under a controlled scope and each regenerate correctly.
+  // Before #3076 the committed artifact carried a file census, so the merged
+  // tree's committed counts disagreed with a regeneration of that tree and the
+  // queue ejected the entry. The committed projection must now be IDENTICAL
+  // across both branches and their merge, so no census-driven drift exists.
+  const { buildArchitectureReport } = await implementation;
+
+  const ownershipOf = (extraFiles) => {
+    const scratch = mkdtempSync(join(tmpdir(), 'topology-census-'));
+    try {
+      cpSync(repoRoot, scratch, {
+        recursive: true,
+        filter: (source) => !/(?:^|[\\/])(?:node_modules|\.git|dist|\.yarn)(?:[\\/]|$)/u.test(source),
+      });
+      for (const name of extraFiles) {
+        writeFileSync(join(scratch, '.github', 'scripts', name), '// scratch fixture\n', 'utf8');
+      }
+      return buildArchitectureReport(scratch).ownership;
+    } finally { rmSync(scratch, { recursive: true, force: true }); }
+  };
+
+  const base = ownershipOf([]);
+  const branchA = ownershipOf(['zz-census-fixture-a.mjs']);
+  const branchB = ownershipOf(['zz-census-fixture-b.mjs']);
+  const merged = ownershipOf(['zz-census-fixture-a.mjs', 'zz-census-fixture-b.mjs']);
+
+  assert.deepEqual(branchA, base, 'adding a controlled file must not change the committed ownership view');
+  assert.deepEqual(branchB, base, 'adding a controlled file must not change the committed ownership view');
+  assert.deepEqual(
+    merged,
+    base,
+    'the union of two branches must equal each branch: any difference here is exactly the merge-queue ejection this change removes',
+  );
 });

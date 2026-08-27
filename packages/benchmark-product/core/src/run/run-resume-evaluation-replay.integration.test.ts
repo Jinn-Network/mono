@@ -35,11 +35,16 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { parseBenchmark, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
 import { launchAndWatch } from "@jinn-network/benchmarking-run";
+import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { armAdd } from "../operations/arms.js";
 import type { OperationContext } from "../operations/context.js";
 import { createDraft, readDraftDocument } from "../operations/drafts.js";
 import { initWorkspace } from "../operations/init.js";
+import { runPublish } from "../operations/publish.js";
 import { runCollect } from "../operations/run-collect.js";
+import { runReport } from "../operations/report.js";
+import { runResults } from "../operations/run-results.js";
+import { runVerify } from "../operations/verify.js";
 import { runLock } from "../operations/run-lock.js";
 import { runQuote } from "../operations/run-quote.js";
 import { runResume } from "../operations/run-launch.js";
@@ -52,7 +57,7 @@ import {
 } from "../venue/venue.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { draftPath } from "../workspace/layout.js";
-import { getSealedBytes } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { transition } from "../domain/lifecycle.js";
 import { createRecordingProxy, driveCellEvents, type DriveDeps, type ProxiedBackend } from "./drive.js";
 import {
@@ -311,6 +316,104 @@ describe("resume replays an accepted evaluation Submission byte-exactly", () => 
       );
       expect(replayed.every((entry) => entry.submissionSha256 === accepted.submissionSha256)).toBe(true);
       expect(submissionDoc(accepted.submissionSha256).deadline).toBeDefined();
+    },
+    240_000,
+  );
+  test(
+    "a recovered run publishes: the replayed acceptance collapses to one submission edge",
+    async () => {
+      const clock = makeClock();
+      const draftId = "draft-publish";
+      await setUpLockedDraft(clock, draftId);
+
+      await driveUntilEvaluationDelivered(clock, draftId);
+      const resumed = await runResume(contextFor(clock), { draftId, maxConcurrentCells: 4 });
+      expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
+
+      // The replay journals a SECOND submission-accepted entry for the same evaluation leg,
+      // carrying the IDENTICAL submissionSha256 — append-only, and correct as a record of what
+      // happened. Assembly must collapse the pair into one graph edge.
+      const final = readRunJournalEntries(workspaceDir, draftId);
+      const acceptedEvaluations = final.filter(
+        (entry): entry is Extract<RunJournalEntry, { kind: "submission-accepted" }> =>
+          entry.kind === "submission-accepted" && entry.leg === "evaluation",
+      );
+      const byCoordinate = new Map<string, string[]>();
+      for (const entry of acceptedEvaluations) {
+        const coordinate = `${entry.cellKey}:${entry.evalIndex ?? 1}:${entry.evaluationAttempt ?? 1}`;
+        byCoordinate.set(coordinate, [...(byCoordinate.get(coordinate) ?? []), entry.submissionSha256]);
+      }
+      const replayedCoordinates = [...byCoordinate].filter(([, digests]) => digests.length > 1);
+      expect(
+        replayedCoordinates.length,
+        "no evaluation coordinate was replayed — the interruption did not reproduce the defect",
+      ).toBeGreaterThan(0);
+      for (const [coordinate, digests] of replayedCoordinates) {
+        // Same coordinate, byte-identical Submission: a replay, never a conflict.
+        expect(new Set(digests).size, coordinate).toBe(1);
+      }
+
+      // ── collect -> results -> report -> verify -> publish, all required to succeed ───────
+      const collected = await runCollect(contextFor(clock), { draftId });
+      expect(collected.ok, JSON.stringify(collected)).toBe(true);
+      expect(runResults(contextFor(clock), { draftId }).ok).toBe(true);
+      const reported = await runReport(contextFor(clock), { draftId });
+      expect(reported.ok, JSON.stringify(reported)).toBe(true);
+      const verified = await runVerify(contextFor(clock), { draftId });
+      expect(verified.ok, JSON.stringify(verified)).toBe(true);
+      // Before the fix this refuses:
+      //   record-integrity: verification.graph.evaluationSubmissions.coordinates contains
+      //   duplicate identities
+      const published = await runPublish(contextFor(clock), { draftId });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+    },
+    240_000,
+  );
+
+  test(
+    "two DIFFERENT Submissions on one evaluation coordinate still fail closed",
+    async () => {
+      const clock = makeClock();
+      const draftId = "draft-conflict";
+      await setUpLockedDraft(clock, draftId);
+
+      await driveUntilEvaluationDelivered(clock, draftId);
+      expect((await runResume(contextFor(clock), { draftId, maxConcurrentCells: 4 })).ok).toBe(true);
+
+      const accepted = readRunJournalEntries(workspaceDir, draftId).find(
+        (entry): entry is Extract<RunJournalEntry, { kind: "submission-accepted" }> =>
+          entry.kind === "submission-accepted" && entry.leg === "evaluation",
+      );
+      expect(accepted).toBeDefined();
+      if (accepted === undefined) throw new Error("unreachable");
+
+      // A SECOND, genuinely different Submission for the same evaluator leg — the exact shape the
+      // pre-fix re-mint produced: every binding (nonce, evalIndex, evaluator, task) identical,
+      // only the wall-clock deadline moved. It passes every per-entry binding check, so it
+      // reaches the coordinate collapse and must be refused there rather than collapsed.
+      const original = JSON.parse(
+        new TextDecoder("utf-8", { fatal: true }).decode(getSealedBytes(workspaceDir, accepted.submissionSha256)),
+      ) as Record<string, unknown>;
+      const drifted = {
+        ...original,
+        deadline: new Date(Date.parse(String(original["deadline"])) + 60_000).toISOString(),
+      };
+      const driftedSha256 = putSealedBytes(workspaceDir, canonicalJsonBytes(drifted));
+      expect(driftedSha256).not.toBe(accepted.submissionSha256);
+      appendRunJournalEntry(workspaceDir, draftId, {
+        ...accepted,
+        at: clock(),
+        submissionSha256: driftedSha256,
+      });
+
+      expect((await runCollect(contextFor(clock), { draftId })).ok).toBe(true);
+      expect(runResults(contextFor(clock), { draftId }).ok).toBe(true);
+      expect((await runReport(contextFor(clock), { draftId })).ok).toBe(true);
+      const published = await runPublish(contextFor(clock), { draftId });
+      expect(published.ok).toBe(false);
+      if (published.ok) throw new Error("unreachable");
+      expect(published.error.code).toBe("record-integrity");
+      expect(published.error.detail).toContain("names two different Submissions");
     },
     240_000,
   );

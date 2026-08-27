@@ -622,6 +622,20 @@ function recordClosure(input: MaterializeBundleInput): {
     evalAttempt?: string;
     evalIndex: number;
   }>();
+  /**
+   * One graph edge per evaluation coordinate (`cellKey:evalIndex:evaluationAttempt` — exactly the
+   * identity `verify.ts` requires to be unique).
+   *
+   * The journal is append-only and correctly records every backend acceptance, including the
+   * REPLAY a resume performs for a leg the backend had already accepted before the process died
+   * (see `../run/drive.ts`'s `acceptedEvaluationSubmissionBytes`). That replay is byte-exact, so
+   * the second entry carries the IDENTICAL `submissionSha256` and describes the same single
+   * Submission — it collapses to one edge here rather than making a recovered run unpublishable.
+   *
+   * Two DIFFERENT digests on one coordinate is the opposite situation: two distinct Submissions
+   * claiming one evaluator leg, which is real corruption and still fails closed.
+   */
+  const evaluationSubmissionByCoordinate = new Map<string, string>();
   const pinningBySubmission = new Map<string, string>();
   for (const entry of journal) {
     if (entry.kind !== "submission-pinning-evidence") continue;
@@ -675,6 +689,18 @@ function recordClosure(input: MaterializeBundleInput): {
         ) {
           refuse("record-integrity", "evidence-closure", `evaluation Submission ${entry.submissionSha256} lacks its exact journal/evaluator/task binding`);
         }
+        const coordinate = `${entry.cellKey}:${evalIndex}:${evaluationAttempt}`;
+        const priorSha256 = evaluationSubmissionByCoordinate.get(coordinate);
+        if (priorSha256 === entry.submissionSha256) continue;
+        if (priorSha256 !== undefined) {
+          refuse(
+            "record-integrity",
+            "evidence-closure",
+            `evaluation coordinate ${coordinate} names two different Submissions `
+            + `(${priorSha256} and ${entry.submissionSha256})`,
+          );
+        }
+        evaluationSubmissionByCoordinate.set(coordinate, entry.submissionSha256);
         graph.evaluationSubmissions.push({
           cellKey: entry.cellKey,
           dispatch: entry.dispatch,
