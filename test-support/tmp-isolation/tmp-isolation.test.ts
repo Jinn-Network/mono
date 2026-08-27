@@ -25,12 +25,14 @@ import {
   sweepManagedTree,
 } from "./sweep-tree.js";
 
-// The suite's `jinn-container-grader-*` roots were created straight in the user temp directory and
-// survived any failing run. `src/test-support/isolate-tmp.ts` now redirects `$TMPDIR` at one
-// managed root per test file and sweeps it on teardown, so every `mkdtemp(join(tmpdir(), …))` is
-// removed with it. `src/test-support/global-tmp-root.ts` records that root in a per-run registry
-// and sweeps every recorded root after the workers exit, so a file whose tests are all skipped —
-// which never fires an `afterAll` — leaves nothing behind either.
+// Behavioural coverage for the shared seam itself. It runs under whichever suite includes this
+// file — see the `include` entry in `packages/benchmark-product/core/vitest.config.ts` — so the
+// wiring assertions below double as that suite's own regression test. Every OTHER suite's wiring
+// is held by `.github/scripts/vitest-tmp-isolation.test.mjs`, which reads the configs directly.
+//
+// The roots this seam owns were created straight in the user temp directory and survived any
+// failing run. `isolate-tmp.ts` now redirects `$TMPDIR` at one managed root per test file and
+// sweeps it on teardown, so every `mkdtemp(join(tmpdir(), …))` is removed with it.
 //
 // This file deliberately does NOT import the shim — importing it would perform the redirect, and
 // the test would then pass even with the `setupFiles` wiring deleted. It reads the path the shim
@@ -70,13 +72,13 @@ function withGlobalSetup(run: (setup: () => () => void) => void): void {
 
 describe("test tmpdir isolation", () => {
   it("is wired as a suite-wide setup file", () => {
-    expect(managedTmp, "src/test-support/isolate-tmp.ts is not in vitest setupFiles").toBeTypeOf("string");
+    expect(managedTmp, "test-support/tmp-isolation/isolate-tmp.ts is not in vitest setupFiles").toBeTypeOf("string");
   });
 
   it("is wired as a global setup file", () => {
     // Only `global-tmp-root.ts` publishes these, and only Vitest's `globalSetup` hook runs it, so
     // an absent value means the `globalSetup` entry is gone from vitest.config.ts.
-    expect(runRegistry, "src/test-support/global-tmp-root.ts is not in vitest globalSetup").toBeTypeOf(
+    expect(runRegistry, "test-support/tmp-isolation/global-tmp-root.ts is not in vitest globalSetup").toBeTypeOf(
       "string",
     );
     expect(hostTmpdir).toBeTypeOf("string");
@@ -282,7 +284,7 @@ describe("test tmpdir isolation", () => {
     //
     // Re-asserted as a precondition so an unwired run fails here rather than sealing a directory
     // relative to the package root.
-    expect(managedTmp, "src/test-support/isolate-tmp.ts is not in vitest setupFiles").toBeTypeOf("string");
+    expect(managedTmp, "test-support/tmp-isolation/isolate-tmp.ts is not in vitest setupFiles").toBeTypeOf("string");
     const root = String(managedTmp);
     const sealed = join(root, "attempt-probe", "input");
     mkdirSync(sealed, { recursive: true });

@@ -22,6 +22,7 @@ import {
   assertSupportedArchipelagoCommit,
   type ApexAgentsSelectionManifest,
 } from "./manifest.js";
+import { inheritedTempEnv } from "../child-temp-env.js";
 
 export interface ApexAgentsSelectionRequest {
   readonly executable: string;
@@ -47,7 +48,7 @@ export type ApexAgentsHostBinding = z.infer<typeof ApexAgentsHostBindingSchema>;
 function probeArchipelagoCommit(executable: string): string {
   const stdout = execFileSync(realpathSync(executable), ["--version"], {
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "" },
+    env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "" },
   }).trim();
   const commit = stdout.replace(/^archipelago\s+/iu, "");
   return assertSupportedArchipelagoCommit(commit);

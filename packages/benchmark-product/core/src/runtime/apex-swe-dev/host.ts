@@ -20,6 +20,7 @@ import {
   type ApexSweDevSelectionManifest,
   type ApexSweDevTaskType,
 } from "./manifest.js";
+import { inheritedTempEnv } from "../child-temp-env.js";
 
 export interface ApexSweDevSelectionRequest {
   readonly apxExecutable: string;
@@ -62,7 +63,7 @@ function fileSha256(path: string): string {
 function probeApxVersion(executable: string): string {
   const stdout = execFileSync(realpathSync(executable), ["--version"], {
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "" },
+    env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "" },
   }).trim();
   if (/^harbor\b/iu.test(stdout) || /\bswebench\b/iu.test(stdout) || /^inspect(?:-ai)?\b/iu.test(stdout)) {
     throw new TypeError("APEX-SWE-dev refuses Harbor, swebench, or Inspect executables as apx");
@@ -88,7 +89,7 @@ function probeInspectAiVersion(python: string, observabilityProjectDir: string):
   }
   const stdout = execFileSync(python, ["-c", "import inspect_ai; print(inspect_ai.__version__)"], {
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "" },
+    env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "" },
   }).trim();
   if (stdout.length === 0) throw new TypeError("APEX-SWE-dev observability python must import inspect_ai");
   return stdout;

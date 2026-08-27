@@ -716,6 +716,16 @@ test('IPFS boundary checks catch foreign packages and /cid reader escapes', () =
 });
 
 test('IPFS production boundary configuration catches application and legacy escapes', () => {
+  // In-tree ON PURPOSE, unlike every sibling fixture: the specifiers this test
+  // writes are RELATIVE paths to the forbidden roots, and only an intra-repo
+  // fixture keeps them free of the workspace's absolute path (a workspace path
+  // containing a quote character would truncate in the specifier extraction).
+  // The LEADING DOT is what makes this safe: evidence-package-inventory's
+  // manifest walk runs in the same `node --test` invocation
+  // (repository-structure.yml) and skips dot-prefixed entries, so this
+  // transient directory is invisible to it however briefly it exists
+  // (regression: run 32982011618 failed that walk with ENOENT when the walk
+  // still descended into it).
   const fixture = mkdtempSync(join(
     packages,
     'repository-ipfs',
@@ -1836,6 +1846,24 @@ test('Evidence production source never orders or formats with the host locale', 
       [],
       `${directory} production source must not depend on the host locale or ICU data; `
         + 'canonical Evidence bytes would differ between hosts. Use src/order.ts.',
+    );
+  }
+});
+
+test('every in-tree boundary fixture is dot-prefixed so the inventory walk never sees it', () => {
+  // Regression pin for the inventory/boundary race (run 32982011618): a
+  // fixture created inside packages/ races the concurrently running
+  // evidence-package-inventory manifest walk. That walk skips dot-prefixed
+  // entries, so an in-tree fixture is only safe while its mkdtemp prefix
+  // starts with a dot. Scan this file's own source: any mkdtemp rooted at
+  // `packages` must use a dot-prefixed leaf.
+  const self = readFileSync(new URL(import.meta.url), 'utf8');
+  const inTree = [...self.matchAll(/mkdtempSync\(join\(\s*packages,\s*'[^']+',\s*'([^']+)'/gu)];
+  assert.ok(inTree.length >= 1, 'expected to find the in-tree IPFS production-boundary fixture');
+  for (const [, prefix] of inTree) {
+    assert.ok(
+      prefix.startsWith('.'),
+      `in-tree fixture prefix ${prefix} must start with '.' or the inventory walk will descend into it mid-vanish`,
     );
   }
 });

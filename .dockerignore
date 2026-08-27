@@ -2,10 +2,7 @@
 .git
 .github
 .cursor
-.beads
-.beads.pre-helm-*/
 .claude
-.dolt
 .local
 .pytest_cache
 .superpowers

@@ -55,7 +55,7 @@ export interface PairwiseDisagreementParameters {
   readonly measurementProfile: typeof BINARY_INSTRUMENT_MEASUREMENT_PROFILE;
   readonly candidateClasses: readonly string[];
   readonly strata: readonly string[];
-  readonly parserInvalidPolicy: "reject";
+  readonly parserInvalidPolicy: "reject" | "abstain";
   readonly truthAdmission: BinaryInstrumentParameters["truthAdmission"];
   readonly intervalAlpha: "0.05";
 }
@@ -121,8 +121,11 @@ export function validatePairwiseDisagreementParameters(
       issues.push('parameter "strata" must be unique and code-unit sorted');
     }
   }
-  if (parameters["parserInvalidPolicy"] !== "reject") {
-    issues.push('parameter "parserInvalidPolicy" must be "reject"');
+  if (
+    parameters["parserInvalidPolicy"] !== "reject"
+    && parameters["parserInvalidPolicy"] !== "abstain"
+  ) {
+    issues.push('parameter "parserInvalidPolicy" must be "reject" or "abstain"');
   }
   if (
     parameters["truthAdmission"] !== "two-human-unanimous"
@@ -206,6 +209,7 @@ export function computePairwiseDisagreement(
     candidateClasses: parameters.candidateClasses,
     strata: parameters.strata,
     truthAdmission: parameters.truthAdmission,
+    parserInvalidPolicy: parameters.parserInvalidPolicy,
   });
 
   const armIds = instruments.map((instrument) => instrument.armId).sort(compareCodeUnitStrings);

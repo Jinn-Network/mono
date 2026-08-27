@@ -392,6 +392,47 @@ export const BINARY_COMPLETE_JSON_LABEL_PARSER_IDENTITY = {
   digest: BINARY_COMPLETE_JSON_LABEL_PARSER_SEALED.digest,
 } as const;
 
+export const BINARY_COMPLETE_JSON_LABEL_PARSER_V2_VERSION = "2.0.0" as const;
+
+/** Complete-JSON behavior with one exact optional Markdown JSON fence and neutral invalids. */
+export function buildBinaryCompleteJsonLabelParserV2Semantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_COMPLETE_JSON_LABEL_PARSER_ID,
+      version: BINARY_COMPLETE_JSON_LABEL_PARSER_V2_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+      normalization: "none",
+    },
+    envelope: {
+      accepted: ["bare-json", "one-lowercase-json-or-untyped-markdown-fence"],
+      surroundingProse: "refused",
+      multipleFences: "refused",
+    },
+    rule: {
+      ...buildBinaryCompleteJsonLabelParserSemantics().rule,
+      json: {
+        ...buildBinaryCompleteJsonLabelParserSemantics().rule.json,
+        text: "one complete JSON object, bare or inside the one admitted outer code fence",
+      },
+    },
+    invalidOutputDecision: "INVALID",
+  } as const;
+}
+
+export const BINARY_COMPLETE_JSON_LABEL_PARSER_V2_SEALED = sealDocument(
+  buildBinaryCompleteJsonLabelParserV2Semantics(),
+);
+export const BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY = {
+  id: BINARY_COMPLETE_JSON_LABEL_PARSER_ID,
+  version: BINARY_COMPLETE_JSON_LABEL_PARSER_V2_VERSION,
+  digest: BINARY_COMPLETE_JSON_LABEL_PARSER_V2_SEALED.digest,
+} as const;
+
 export const BINARY_EVERMEM_JSON_LABEL_PARSER_ID =
   "network.jinn.parser.binary-evermem-json-label" as const;
 export const BINARY_EVERMEM_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
@@ -440,6 +481,46 @@ export const BINARY_EVERMEM_JSON_LABEL_PARSER_IDENTITY = {
   digest: BINARY_EVERMEM_JSON_LABEL_PARSER_SEALED.digest,
 } as const;
 
+export const BINARY_EVERMEM_JSON_LABEL_PARSER_V2_VERSION = "2.0.0" as const;
+
+/** EverMem label comparison with a closed outer-envelope rule and neutral invalids. */
+export function buildBinaryEvermemJsonLabelParserV2Semantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_EVERMEM_JSON_LABEL_PARSER_ID,
+      version: BINARY_EVERMEM_JSON_LABEL_PARSER_V2_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+      normalization: "none",
+    },
+    envelope: {
+      accepted: ["bare-json", "one-lowercase-json-or-untyped-markdown-fence"],
+      surroundingProse: "refused",
+      multipleFences: "refused",
+    },
+    rule: {
+      kind: "evermem-json-label",
+      json: buildBinaryEvermemJsonLabelParserSemantics().rule.json,
+      comparison: "ECMAScript String.trim then String.toUpperCase",
+      tokens: { ACCEPT: "CORRECT", REJECT: "every other non-empty string" },
+    },
+    invalidOutputDecision: "INVALID",
+  } as const;
+}
+
+export const BINARY_EVERMEM_JSON_LABEL_PARSER_V2_SEALED = sealDocument(
+  buildBinaryEvermemJsonLabelParserV2Semantics(),
+);
+export const BINARY_EVERMEM_JSON_LABEL_PARSER_V2_IDENTITY = {
+  id: BINARY_EVERMEM_JSON_LABEL_PARSER_ID,
+  version: BINARY_EVERMEM_JSON_LABEL_PARSER_V2_VERSION,
+  digest: BINARY_EVERMEM_JSON_LABEL_PARSER_V2_SEALED.digest,
+} as const;
+
 export const BINARY_MEM0_JSON_LABEL_PARSER_ID =
   "network.jinn.parser.binary-mem0-json-label" as const;
 export const BINARY_MEM0_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
@@ -484,6 +565,46 @@ export const BINARY_MEM0_JSON_LABEL_PARSER_IDENTITY = {
   digest: BINARY_MEM0_JSON_LABEL_PARSER_SEALED.digest,
 } as const;
 
+export const BINARY_MEM0_JSON_LABEL_PARSER_V2_VERSION = "2.0.0" as const;
+
+/** Mem0 label comparison with one exact optional outer fence and neutral invalids. */
+export function buildBinaryMem0JsonLabelParserV2Semantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_MEM0_JSON_LABEL_PARSER_ID,
+      version: BINARY_MEM0_JSON_LABEL_PARSER_V2_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+      normalization: "none",
+    },
+    envelope: {
+      accepted: ["bare-json", "one-lowercase-json-or-untyped-markdown-fence"],
+      surroundingProse: "refused",
+      multipleFences: "refused",
+    },
+    rule: {
+      kind: "mem0-json-label",
+      json: buildBinaryMem0JsonLabelParserSemantics().rule.json,
+      comparison: "case-sensitive strict equality without member trimming or coercion",
+      tokens: { ACCEPT: "CORRECT", REJECT: "every other present member value" },
+    },
+    invalidOutputDecision: "INVALID",
+  } as const;
+}
+
+export const BINARY_MEM0_JSON_LABEL_PARSER_V2_SEALED = sealDocument(
+  buildBinaryMem0JsonLabelParserV2Semantics(),
+);
+export const BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY = {
+  id: BINARY_MEM0_JSON_LABEL_PARSER_ID,
+  version: BINARY_MEM0_JSON_LABEL_PARSER_V2_VERSION,
+  digest: BINARY_MEM0_JSON_LABEL_PARSER_V2_SEALED.digest,
+} as const;
+
 export const BINARY_STRICT_JSON_LABEL_PARSER_ID =
   "network.jinn.parser.binary-strict-json-label" as const;
 export const BINARY_STRICT_JSON_LABEL_PARSER_VERSION = "1.0.0" as const;
@@ -526,6 +647,47 @@ export const BINARY_STRICT_JSON_LABEL_PARSER_IDENTITY = {
   id: BINARY_STRICT_JSON_LABEL_PARSER_ID,
   version: BINARY_STRICT_JSON_LABEL_PARSER_VERSION,
   digest: BINARY_STRICT_JSON_LABEL_PARSER_SEALED.digest,
+} as const;
+
+export const BINARY_STRICT_JSON_LABEL_PARSER_V2_VERSION = "2.0.0" as const;
+
+/** Strict two-member JSON behavior with one optional outer fence and neutral invalids. */
+export function buildBinaryStrictJsonLabelParserV2Semantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_STRICT_JSON_LABEL_PARSER_ID,
+      version: BINARY_STRICT_JSON_LABEL_PARSER_V2_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+      normalization: "none",
+    },
+    envelope: {
+      accepted: ["bare-json", "one-lowercase-json-or-untyped-markdown-fence"],
+      surroundingProse: "refused",
+      multipleFences: "refused",
+    },
+    rule: {
+      ...buildBinaryStrictJsonLabelParserSemantics().rule,
+      json: {
+        ...buildBinaryStrictJsonLabelParserSemantics().rule.json,
+        text: "one complete JSON object, bare or inside the one admitted outer code fence",
+      },
+    },
+    invalidOutputDecision: "INVALID",
+  } as const;
+}
+
+export const BINARY_STRICT_JSON_LABEL_PARSER_V2_SEALED = sealDocument(
+  buildBinaryStrictJsonLabelParserV2Semantics(),
+);
+export const BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY = {
+  id: BINARY_STRICT_JSON_LABEL_PARSER_ID,
+  version: BINARY_STRICT_JSON_LABEL_PARSER_V2_VERSION,
+  digest: BINARY_STRICT_JSON_LABEL_PARSER_V2_SEALED.digest,
 } as const;
 
 export const BINARY_JSON_VERDICT_PARSER_ID =
@@ -641,8 +803,40 @@ export const BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY = [
   BINARY_STRICT_JSON_LABEL_PARSER_IDENTITY,
   BINARY_YES_NO_PARSER_IDENTITY,
 ] as const;
+
+/**
+ * Additive parser identities for neutral-invalid execution. The four JSON families retain their
+ * declared label-comparison behavior while accepting exactly one optional outer Markdown fence.
+ * The legacy registry above is intentionally unchanged so its sealed v1 umbrella stays byte
+ * identical for already-published runs.
+ */
+export const BINARY_JUDGMENT_NEUTRAL_RESPONSE_PARSER_REGISTRY = [
+  BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+  BINARY_EVERMEM_JSON_LABEL_PARSER_V2_IDENTITY,
+  BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
+  BINARY_STRICT_JSON_LABEL_PARSER_V2_IDENTITY,
+] as const;
+
+export const BINARY_JUDGMENT_SUPPORTED_RESPONSE_PARSER_REGISTRY = [
+  ...BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY,
+  ...BINARY_JUDGMENT_NEUTRAL_RESPONSE_PARSER_REGISTRY,
+] as const;
 export type BinaryJudgmentResponseParserId =
-  (typeof BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY)[number]["id"];
+  (typeof BINARY_JUDGMENT_SUPPORTED_RESPONSE_PARSER_REGISTRY)[number]["id"];
+export type BinaryJudgmentInvalidOutputDecision = "REJECT" | "INVALID";
+
+export function binaryJudgmentParserInvalidOutputDecision(identity: {
+  readonly id: string;
+  readonly version: string;
+}): BinaryJudgmentInvalidOutputDecision | undefined {
+  const supported = BINARY_JUDGMENT_SUPPORTED_RESPONSE_PARSER_REGISTRY.some(
+    (parser) => parser.id === identity.id && parser.version === identity.version,
+  );
+  if (!supported) return undefined;
+  return BINARY_JUDGMENT_NEUTRAL_RESPONSE_PARSER_REGISTRY.some(
+    (parser) => parser.id === identity.id && parser.version === identity.version,
+  ) ? "INVALID" : "REJECT";
+}
 
 /**
  * The umbrella parser commits the complete v1 response-parser registry and the comparison map.
@@ -673,15 +867,46 @@ export const BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY = {
   digest: BINARY_JUDGMENT_EVALUATION_PARSER_SEALED.digest,
 } as const;
 
+export const BINARY_JUDGMENT_EVALUATION_PARSER_V2_VERSION = "2.0.0" as const;
+
+/** Evaluation semantics that make parser-invalid output non-substantive and inconclusive. */
+export function buildBinaryJudgmentEvaluationParserV2Semantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_JUDGMENT_EVALUATION_PARSER_ID,
+      version: BINARY_JUDGMENT_EVALUATION_PARSER_V2_VERSION,
+    },
+    responseParsers: [...BINARY_JUDGMENT_NEUTRAL_RESPONSE_PARSER_REGISTRY],
+    comparison: {
+      ACCEPT: "CORRECT",
+      REJECT: "WRONG",
+      INVALID: "no substantive decision",
+      passWhen: "parseValid=true and agreement=true",
+      failWhen: "parseValid=true and agreement=false",
+      inconclusiveWhen: "parseValid=false",
+    },
+  } as const;
+}
+
+export const BINARY_JUDGMENT_EVALUATION_PARSER_V2_SEALED = sealDocument(
+  buildBinaryJudgmentEvaluationParserV2Semantics(),
+);
+export const BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY = {
+  id: BINARY_JUDGMENT_EVALUATION_PARSER_ID,
+  version: BINARY_JUDGMENT_EVALUATION_PARSER_V2_VERSION,
+  digest: BINARY_JUDGMENT_EVALUATION_PARSER_V2_SEALED.digest,
+} as const;
+
 export function binaryJudgmentPromptTemplateDigest(
   messages: readonly BinaryJudgmentMessageTemplate[],
 ): `sha256:${string}` {
   return recordDigest(canonicalJsonBytes(messages));
 }
 
-const REGISTERED_PARSER_IDS = BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY.map(
-  (parser) => parser.id,
-) as [BinaryJudgmentResponseParserId, ...BinaryJudgmentResponseParserId[]];
+const REGISTERED_PARSER_IDS = [...new Set(
+  BINARY_JUDGMENT_SUPPORTED_RESPONSE_PARSER_REGISTRY.map((parser) => parser.id),
+)] as [BinaryJudgmentResponseParserId, ...BinaryJudgmentResponseParserId[]];
 
 /**
  * Closed-registry membership (§4.1 rule 3): `id` must be registered, and
@@ -693,15 +918,15 @@ const ParserIdentitySchema = z.strictObject({
   version: NonEmptyStringSchema,
   digest: Sha256DigestSchema,
 }).superRefine((identity, ctx) => {
-  const registered = BINARY_JUDGMENT_RESPONSE_PARSER_REGISTRY
-    .find((parser) => parser.id === identity.id);
-  if (registered === undefined) return; // the enum member check already refused this id
-  if (identity.version !== registered.version) {
+  const registered = BINARY_JUDGMENT_SUPPORTED_RESPONSE_PARSER_REGISTRY
+    .find((parser) => parser.id === identity.id && parser.version === identity.version);
+  if (registered === undefined) {
     ctx.addIssue({
       code: "custom",
       path: ["version"],
-      message: `version does not match the registered ${identity.id} pair (${registered.version})`,
+      message: `version does not match a registered ${identity.id} pair`,
     });
+    return;
   }
   if (identity.digest !== registered.digest) {
     ctx.addIssue({
@@ -729,7 +954,7 @@ export const BinaryJudgmentInstrumentSchema = z
     response: z.strictObject({
       mediaType: z.literal(BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE),
       parser: ParserIdentitySchema,
-      invalidOutputDecision: z.literal("REJECT"),
+      invalidOutputDecision: z.enum(["REJECT", "INVALID"]),
     }),
   })
   .superRefine((instrument, ctx) => {
@@ -765,6 +990,17 @@ export const BinaryJudgmentInstrumentSchema = z
         message:
           `model.generation must match the ${modelProfile} profile for model.requested `
           + instrument.model.requested,
+      });
+    }
+    const expectedInvalidDecision = binaryJudgmentParserInvalidOutputDecision(
+      instrument.response.parser,
+    );
+    if (instrument.response.invalidOutputDecision !== expectedInvalidDecision) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["response", "invalidOutputDecision"],
+        message:
+          `invalidOutputDecision must match the registered parser pair (${String(expectedInvalidDecision)})`,
       });
     }
   });

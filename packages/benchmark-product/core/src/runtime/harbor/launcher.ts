@@ -9,6 +9,7 @@ import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-work
 import { DEEP_SWE_V11_TRIAL_TIMEOUT_SECONDS } from "../deep-swe-v1.1/manifest.js";
 import { PIER_ADAPTER_ID, type HarborSelectionManifest } from "./manifest.js";
 import type { HarborHostBinding } from "./host.js";
+import { inheritedTempEnv, scopedTempEnv } from "../child-temp-env.js";
 
 export const HARBOR_LAUNCHER_ID = "harbor";
 export const PIER_LAUNCHER_ID = "pier";
@@ -31,7 +32,7 @@ export function harborJobScopedTempDir(jobsDir: string, jobName: string): string
 }
 
 export function harborPlannedJobChildEnv(env: NodeJS.ProcessEnv, tempDir: string): NodeJS.ProcessEnv {
-  return { ...env, TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir };
+  return { ...env, ...scopedTempEnv(tempDir) };
 }
 
 /** Planned Harbor jobs run k sequential trials; each may take the 900s task-agent timeout. */
@@ -98,7 +99,7 @@ function requirePinnedHarbor(view: TaskView, manifest: HarborSelectionManifest):
 }
 
 function closedHarborEnv(paths: WorkspacePaths): Record<string, string> {
-  return { PATH: process.env.PATH ?? "/usr/bin:/bin", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1", TMPDIR: paths.tmp };
+  return { PATH: process.env.PATH ?? "/usr/bin:/bin", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1", ...scopedTempEnv(paths.tmp) };
 }
 
 function harborInvocationPlan(argv: readonly string[], paths: WorkspacePaths): LaunchPlan {
@@ -238,7 +239,7 @@ export function makeHarborLauncher(input: { readonly manifest: HarborSelectionMa
       const actual = createHash("sha256").update(readFileSync(executable)).digest("hex");
       if (actual !== input.manifest.harbor.executableSha256) return { ready: false, detail: "Harbor executable bytes drifted from selection" };
       let version: string;
-      try { version = execFileSync(executable, ["--version"], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1" } }).trim().replace(/^(?:harbor|pier)\s+/iu, ""); }
+      try { version = execFileSync(executable, ["--version"], { encoding: "utf8", env: { ...inheritedTempEnv(), PATH: process.env.PATH ?? "", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1" } }).trim().replace(/^(?:harbor|pier)\s+/iu, ""); }
       catch { return { ready: false, detail: `${launcherId} version probe failed` }; }
       return version === input.manifest.harbor.version
         ? { ready: true }
