@@ -141,7 +141,15 @@ function hangBeforeFirstVerdict(
     deliveries: (attempt) => backend.deliveries(attempt),
     fetchDelivery: async (ref) => {
       if (!armed.value) return backend.fetchDelivery(ref);
-      // The evaluation attempt has delivered durably; the verdict has not been journaled.
+      // Let the real read complete first. That proves the evaluation attempt's Delivery is
+      // durably readable THROUGH the backend before the drive is abandoned and the venue is shut
+      // down, so the resumed backend rehydrates a settled `delivered` attempt rather than
+      // whatever state a mid-finalize shutdown happened to leave. Without this the crash point
+      // is "somewhere around the delivery write", which under load resolves differently and the
+      // resumed leg terminals could-not-grade on attempt state instead of replaying.
+      // The crash point itself is unchanged: still after acceptance and delivery, still before
+      // any verdict reaches the journal.
+      await backend.fetchDelivery(ref);
       armed.resolveArmed?.();
       return new Promise<Uint8Array>(() => {});
     },
@@ -246,6 +254,12 @@ describe("resume replays an accepted evaluation Submission byte-exactly", () => 
       // No terminal was journaled for that leg — neither a verdict nor a could-not-grade (both
       // are `kind: "evaluation"`, discriminated by `evaluationTerminal`).
       expect(interrupted.some((entry) => entry.kind === "evaluation")).toBe(false);
+      // A retryable failure is a DIFFERENT crash shape (the leg failed rather than being
+      // abandoned mid-flight). Catch it here, where the message is unambiguous.
+      expect(
+        interrupted.filter((entry) => entry.kind === "evaluation-retryable-failure"),
+        "the interruption landed on a failed evaluation leg, not an abandoned one",
+      ).toEqual([]);
 
       // ── resume through the PUBLIC operation, on a fresh venue ───────────────────────────
       // Capacity above 1 so the cells that were never dispatched before the crash are not
@@ -266,7 +280,8 @@ describe("resume replays an accepted evaluation Submission byte-exactly", () => 
       );
       expect(
         couldNotGrade.map((entry) => entry.detail ?? ""),
-        "an accepted evaluation Submission was re-minted with different bytes on resume",
+        "the recovered evaluation leg terminaled could-not-grade instead of replaying its "
+        + `accepted Submission byte-exactly: ${JSON.stringify(couldNotGrade.map((entry) => entry.detail))}`,
       ).toEqual([]);
 
       // ── zero missing verdicts ───────────────────────────────────────────────────────────
