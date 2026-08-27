@@ -8,6 +8,12 @@
  * Invalid / malformed authentication is a failing check. The boot gate in
  * `deployment-readiness.ts` makes that fail-loud only for a required runtime
  * in a hosted deployment. Timeout / probe errors stay advisory (fail-safe).
+ *
+ * That fail-safe split is why every runtime branch must be able to tell a
+ * probe that could not run from a probe that ran and said no. A missing or
+ * wedged CLI is an infrastructure fault (`error`, advisory); only a credential
+ * the runtime actually rejected is `invalid` (blocking, and boot-fatal when
+ * hosted).
  */
 
 import {
@@ -40,6 +46,12 @@ export type CredentialValidity = 'valid' | 'absent' | 'invalid' | 'malformed' | 
 export interface RuntimeCredentialFact {
   runtime: CredentialRuntime;
   validity: CredentialValidity;
+  /**
+   * Why an `error` verdict happened, when we know: `timed out`, or the spawn
+   * errno (`ENOENT`, `EACCES`, `ETIMEDOUT`). Diagnostic only, never secret
+   * material — it names the tool that failed, not the credential.
+   */
+  note?: string;
 }
 
 export interface CredentialValidityCheckResult {
@@ -122,19 +134,21 @@ export async function checkCredentialsValid(
 
   const timeoutMs = deps.validityTimeoutMs ?? DEFAULT_CREDENTIAL_VALIDITY_TIMEOUT_MS;
   const facts: RuntimeCredentialFact[] = [];
-  const timedOut = new Set<CredentialRuntime>();
 
   for (const runtime of input.requiredRuntimes) {
     const probed = await probeRuntime(runtime, input, deps, timeoutMs);
-    if (probed.timedOut) timedOut.add(runtime);
-    facts.push({ runtime, validity: probed.validity });
+    facts.push({
+      runtime,
+      validity: probed.validity,
+      ...(probed.note !== undefined ? { note: probed.note } : {}),
+    });
   }
 
   const blocking = facts.filter((fact) => fact.validity === 'invalid' || fact.validity === 'malformed');
   const detail = facts
     .map((fact) =>
-      fact.validity === 'error' && timedOut.has(fact.runtime)
-        ? `${fact.runtime}: error (timed out)`
+      fact.note !== undefined
+        ? `${fact.runtime}: ${fact.validity} (${fact.note})`
         : `${fact.runtime}: ${fact.validity}`,
     )
     .join('; ');
@@ -171,21 +185,26 @@ async function probeRuntime(
   input: CheckCredentialsValidInput,
   deps: CheckCredentialsValidDeps,
   timeoutMs: number,
-): Promise<{ validity: CredentialValidity; timedOut: boolean }> {
+): Promise<ProbeOutcome> {
   try {
     const raced = await withTimeout(runProbe(runtime, input, deps), timeoutMs);
-    if (!raced.ok) return { validity: 'error', timedOut: true };
-    return { validity: raced.value, timedOut: false };
+    if (!raced.ok) return { validity: 'error', note: 'timed out' };
+    return raced.value;
   } catch {
-    return { validity: 'error', timedOut: false };
+    return { validity: 'error' };
   }
+}
+
+interface ProbeOutcome {
+  validity: CredentialValidity;
+  note?: string;
 }
 
 async function runProbe(
   runtime: CredentialRuntime,
   input: CheckCredentialsValidInput,
   deps: CheckCredentialsValidDeps,
-): Promise<CredentialValidity> {
+): Promise<ProbeOutcome> {
   switch (runtime) {
     case 'claude': {
       const probe = await deps.probeClaudeAuth({
@@ -195,26 +214,36 @@ async function runProbe(
       });
       const classified = classifyClaudeAuthValidity(probe);
       if (classified === 'valid' || classified === 'malformed' || classified === 'error') {
-        return classified;
+        return { validity: classified };
       }
-      return envPresent(input.env, CLAUDE_ENV_KEYS) ? 'invalid' : 'absent';
+      return { validity: envPresent(input.env, CLAUDE_ENV_KEYS) ? 'invalid' : 'absent' };
     }
     case 'hermes': {
       const provider = input.hermesProvider?.trim() || 'openrouter';
       const config: HermesDoctorConfig = {};
       if (input.hermesPath !== undefined) config.hermesPath = input.hermesPath;
       const probe = await deps.probeHermesAuthStatus(provider, config);
-      if (probe.authed) return 'valid';
-      return envPresent(input.env, HERMES_ENV_KEYS) ? 'invalid' : 'absent';
+      // A probe that could not run at all is an infrastructure fault, not a
+      // credential verdict. `probeHermesAuthStatus` resolves normally for a
+      // missing / wedged binary, so without this branch a hermes that is
+      // absent from the image reads as `invalid` — which is boot-fatal for a
+      // required runtime in a hosted deployment, taking the operator console
+      // down with it. Claude and Codex both carve this case out already.
+      if (probe.errorCode !== undefined) {
+        return { validity: 'error', note: probe.errorCode };
+      }
+      if (probe.authed) return { validity: 'valid' };
+      return { validity: envPresent(input.env, HERMES_ENV_KEYS) ? 'invalid' : 'absent' };
     }
     case 'codex': {
       const config: CodexDoctorConfig = { env: input.env };
       if (input.codexPath !== undefined) config.codexPath = input.codexPath;
       const probe = await deps.probeCodexDoctor(config);
-      if (!probe.installed || probe.exitCode !== 0) return 'error';
-      if (probe.authStatus === 'ok') return 'valid';
-      if (probe.authStatus === 'not_configured') return 'absent';
-      return 'invalid';
+      if (!probe.installed) return { validity: 'error', note: 'codex CLI not installed' };
+      if (probe.exitCode !== 0) return { validity: 'error', note: 'codex CLI probe failed' };
+      if (probe.authStatus === 'ok') return { validity: 'valid' };
+      if (probe.authStatus === 'not_configured') return { validity: 'absent' };
+      return { validity: 'invalid' };
     }
   }
 }

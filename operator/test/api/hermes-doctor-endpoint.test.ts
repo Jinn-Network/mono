@@ -349,6 +349,30 @@ describe('probeHermesAuthStatus', () => {
     const result = await probeHermesAuthStatus('openrouter');
     expect(result.authed).toBe(false);
     expect(result.raw).toBe('');
+    // The errno rides along so credential classification can tell "hermes
+    // never answered" apart from "hermes answered: no usable credential".
+    // Without it a missing binary reads as an invalid credential, which is
+    // boot-fatal for a required runtime in a hosted deployment.
+    expect(result.errorCode).toBe('ENOENT');
+  });
+
+  it('surfaces a kill-by-timeout as ETIMEDOUT rather than a silent not-authed', async () => {
+    // `execFile`'s timeout kill carries no errno and no exit code — just
+    // `killed: true` with a signal — so it must be synthesised, or a wedged
+    // binary is indistinguishable from a clean negative verdict.
+    mockNext({ type: 'error', signal: 'SIGTERM', message: 'timed out' });
+
+    const result = await probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(false);
+    expect(result.errorCode).toBe('ETIMEDOUT');
+  });
+
+  it('leaves errorCode unset when hermes runs cleanly and reports no credential', async () => {
+    mockNext({ type: 'ok', stdout: '', stderr: '' });
+
+    const result = await probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(false);
+    expect(result.errorCode).toBeUndefined();
   });
 
   it('reports not-authed when execFile errors (e.g. timeout) regardless of stdout', async () => {

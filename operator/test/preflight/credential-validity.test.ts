@@ -147,7 +147,9 @@ describe('checkCredentialsValid', () => {
       }),
     );
     expect(result.ok).toBe(true);
-    expect(result.runtimes).toEqual([{ runtime: 'claude', validity: 'error' }]);
+    expect(result.runtimes).toEqual([
+      { runtime: 'claude', validity: 'error', note: 'timed out' },
+    ]);
     expect(result.detail).toMatch(/claude: error/i);
     expect(result.detail).toMatch(/timed out/i);
   });
@@ -163,6 +165,74 @@ describe('checkCredentialsValid', () => {
     );
     expect(result.ok).toBe(true);
     expect(result.runtimes).toEqual([{ runtime: 'hermes', validity: 'error' }]);
+    expect(JSON.stringify(result)).not.toContain('or-secret');
+  });
+
+  it('REGRESSION: a missing hermes binary is an advisory error, not an invalid credential', async () => {
+    // The real `probeHermesAuthStatus` resolves — it never throws — for
+    // ENOENT / EACCES / its own timeout, so the outer `withTimeout` race in
+    // `probeRuntime` never fires. Drive the real return shape (not a stubbed
+    // hang or throw) or the classifier's missing-binary branch goes untested.
+    // Classifying this as `invalid` would make `credentials_valid` fail, and
+    // that check is boot-fatal for a required runtime in a hosted deployment.
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['hermes'],
+        env: { OPENROUTER_API_KEY: 'or-secret' },
+        authContext: AUTH_CTX,
+      },
+      validityDeps({
+        probeHermesAuthStatus: async () =>
+          hermesProbe({ authed: false, raw: '', errorCode: 'ENOENT' }),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([
+      { runtime: 'hermes', validity: 'error', note: 'ENOENT' },
+    ]);
+    expect(result.detail).toMatch(/hermes: error \(ENOENT\)/);
+    expect(result.remedy).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain('or-secret');
+  });
+
+  it('REGRESSION: a wedged hermes binary that times out is an advisory error', async () => {
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['hermes'],
+        env: { OPENROUTER_API_KEY: 'or-secret' },
+        authContext: AUTH_CTX,
+      },
+      validityDeps({
+        probeHermesAuthStatus: async () =>
+          hermesProbe({ authed: false, raw: '', errorCode: 'ETIMEDOUT' }),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([
+      { runtime: 'hermes', validity: 'error', note: 'ETIMEDOUT' },
+    ]);
+  });
+
+  it('still reports invalid when hermes runs and rejects a present credential', async () => {
+    // The complement of the two cases above: hermes answered, so `authed:
+    // false` with a key present really is an invalid credential.
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['hermes'],
+        env: { OPENROUTER_API_KEY: 'or-secret' },
+        authContext: AUTH_CTX,
+      },
+      validityDeps({
+        probeHermesAuthStatus: async () =>
+          hermesProbe({
+            authed: false,
+            raw: 'openrouter (1 credentials):\n  #1 api_key auth failed (re-auth may be required)',
+          }),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.runtimes).toEqual([{ runtime: 'hermes', validity: 'invalid' }]);
+    expect(result.remedy).toMatch(/hermes/i);
     expect(JSON.stringify(result)).not.toContain('or-secret');
   });
 

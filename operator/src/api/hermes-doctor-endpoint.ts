@@ -93,9 +93,17 @@ async function runHermes(
     // OR a string errno like `ENOENT` (spawn failed entirely). Disambiguate
     // so the classification logic in probeHermesDoctor matches the sync
     // semantics it always had.
+    // A kill-by-timeout (or maxBuffer overrun) carries no errno string and no
+    // numeric exit code — just `killed: true` with a signal. That is an
+    // infrastructure fault exactly like ENOENT, so synthesise `ETIMEDOUT`
+    // rather than letting it read as a clean "ran, said nothing" result.
     const codeIsString = typeof errno.code === 'string';
     const numericStatus = !codeIsString && typeof errno.code === 'number' ? errno.code : null;
-    const errorCode = codeIsString ? (errno.code as string) : undefined;
+    const errorCode = codeIsString
+      ? (errno.code as string)
+      : errno.killed === true
+        ? 'ETIMEDOUT'
+        : undefined;
     const stdout = typeof errno.stdout === 'string' ? errno.stdout : errno.stdout?.toString() ?? '';
     const stderr = typeof errno.stderr === 'string' ? errno.stderr : errno.stderr?.toString() ?? '';
     return {
@@ -147,6 +155,18 @@ export interface HermesAuthStatus {
   authed: boolean;
   /** Raw `hermes auth list <provider>` stdout (trimmed, truncated). */
   raw: string;
+  /**
+   * Spawn / timeout errno when the probe could not be run at all (`ENOENT`
+   * for a missing binary, `EACCES`, `ETIMEDOUT` for a wedged one). Absent
+   * when hermes ran and produced a verdict.
+   *
+   * Without this, `authed: false` conflates "hermes says no usable
+   * credential" with "hermes never answered" — and a caller classifying
+   * credentials (`preflight/credential-validity.ts`) would report a missing
+   * binary as an invalid credential, which is boot-fatal in a hosted
+   * deployment.
+   */
+  errorCode?: string;
 }
 
 /**
@@ -208,10 +228,15 @@ export async function probeHermesAuthStatus(
   const { result, errorCode } = await runHermes(['auth', 'list', provider], config);
   const raw = (result.stdout ?? '').trim().slice(0, 4000);
 
-  // Binary not found, or any other spawn error, or no output → not authed.
-  // Empty stdout means `auth_list_command` skipped the provider section
-  // because the credential pool has zero entries for it.
-  if (errorCode != null || raw.length === 0) {
+  // Binary not found, or any other spawn error / timeout → not authed, and
+  // the errno rides along so callers can tell an unrunnable probe apart from
+  // a negative verdict.
+  if (errorCode != null) {
+    return { provider, authed: false, raw, errorCode };
+  }
+  // No output → not authed. Empty stdout means `auth_list_command` skipped
+  // the provider section because the credential pool has zero entries for it.
+  if (raw.length === 0) {
     return { provider, authed: false, raw };
   }
 

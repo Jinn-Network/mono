@@ -432,6 +432,39 @@ describe('runDeploymentReadinessChecks', () => {
     expect(validity?.detail).toMatch(/hermes: error/i);
   });
 
+  it('REGRESSION GUARD: a missing hermes binary is advisory, not boot-fatal', async () => {
+    // The test above stubs a hang, so it exercises the outer `withTimeout`
+    // race. The real `probeHermesAuthStatus` RESOLVES for a missing or wedged
+    // binary, so that race never fires in production — this drives the real
+    // return shape instead. Classifying it `invalid` would refuse the boot in
+    // a hosted deployment and take the operator console (served by this same
+    // daemon) down with it, turning a missing binary into a restart loop.
+    const report = await runDeploymentReadinessChecks(
+      {
+        stateDir: tmp,
+        earningDir: join(tmp, 'earning'),
+        runtimeMode: undefined,
+        executionWiring: [{ harness: 'hermes-agent' }],
+      },
+      baseDeps({
+        env: { JINN_STATE_DIR: tmp, OPENROUTER_API_KEY: 'or-xxxx' },
+        getuid: () => 1000,
+        detectAuthContext: () => 'container',
+        probeHermesAuthStatus: async () => ({
+          provider: 'openrouter',
+          authed: false,
+          raw: '',
+          errorCode: 'ENOENT',
+        }),
+      }),
+    );
+    expect(report.deployment).toBe(true);
+    expect(report.bootFatal).toBe(false);
+    const validity = report.checks.find((c) => c.name === 'credentials_valid');
+    expect(validity?.ok).toBe(true);
+    expect(validity?.detail).toMatch(/hermes: error \(ENOENT\)/);
+  });
+
   it('REGRESSION GUARD: bare-local invalid auth stays advisory, not boot-fatal', async () => {
     const report = await runDeploymentReadinessChecks(
       {

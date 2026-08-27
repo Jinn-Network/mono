@@ -1009,8 +1009,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // set or a container/compose auth context) this fails loud and exits when a
   // hard check fails (writable-volume, state-on-volume, agent-cli-non-root,
   // credentials_valid for a required runtime). Outside a deployment context it
-  // `jinn run` is NEVER newly gated here. Runs before the pidfile gate so an
-  // unfit environment refuses before we touch the pidfile.
+  // only logs advisories — a plain local `jinn run` is NEVER newly gated
+  // here. Runs before the pidfile gate so an unfit environment refuses before
+  // we touch the pidfile.
   //
   // #2407 B1: this and the pidfile block below used to run much later, right
   // before Daemon construction — AFTER the entire bootstrap retry loop and
