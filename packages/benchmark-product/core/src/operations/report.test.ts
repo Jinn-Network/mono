@@ -989,6 +989,28 @@ describe("portable public bundle", () => {
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
   }, 30_000);
 
+  test("a throw between the rename and the return removes the bundle directory it renamed into place", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    expect((await runReport(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    // Throws while `materializePublicBundle` is still on the stack, after `renameSync` has put the
+    // digest-addressed directory in place. The caller never sees the return value, so before issue
+    // #3195 its cleanup list was empty and the directory survived a publication that never
+    // advanced — the same visible outcome issue #3074 removed, reached through an I/O failure.
+    const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
+      afterRename: () => { throw new Error("fault between rename and return"); },
+    });
+    expect(refused.ok).toBe(false);
+    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
+      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
+      : []).toHaveLength(0);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
+    expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
+    const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
+    expect(retry.ok, JSON.stringify(retry)).toBe(true);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
+  }, 30_000);
+
   test("a fault before rename leaves no final bundle and no state advancement", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);
