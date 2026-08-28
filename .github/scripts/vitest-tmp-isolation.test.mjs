@@ -181,6 +181,22 @@ function enclosedLiterals(source, key, open, close) {
  * one scope and restores the cross-entry crediting this closes. That is the same fallback the other
  * scanners take on an unterminated literal, and it is bounded the same way: a config that does not
  * parse cannot load, so its own package job is red before this gate has an opinion.
+ *
+ * The closure is literal-shaped, and that is the larger hole. A range exists only where the reader
+ * can see a `{` as a direct element of the array, so an entry held in a variable — `projects:
+ * [allowProject, seamProject]` — produces no ranges at all and every allowance and seam path falls
+ * back to root scope, reading green on the very shape #3123 closes. The same holds for an `fs.allow`
+ * living in a module-scope object spread into one entry. This is inherent to a text scanner over a
+ * checkout with no dependencies installed, which is this file's stated posture, and it is no worse
+ * than the pre-#3123 behavior; it is just wider than the unterminated-literal fallback above.
+ *
+ * The `projects:` key match is unanchored. `arrayLiterals(source, 'projects')` matches any
+ * `projects:` key, not only Vitest's — an asymmetry with `fsAllowPaths`, which is deliberately
+ * anchored to an enclosing `fs:` block so an unrelated `allow:` cannot be credited. A foreign
+ * `projects: [{ ... }]` whose braces enclose an `fs.allow` but not the seam path would scope the
+ * allowance away and red a config that loads fine. Narrowing a scope can only remove coverage, so
+ * this direction fails closed — a false red, never a false green — and nothing in the tree carries
+ * a stray `projects:` key today.
  */
 export function projectEntryRanges(source) {
   const ranges = [];
