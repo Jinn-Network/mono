@@ -332,6 +332,25 @@ describe("hosted model service identity", () => {
     }
   });
 
+  test("refuses a provider IRI that is already the executor or producer identity", () => {
+    for (const providerIri of [
+      "https://spec.jinn.network/software/agent-host/hermes",
+      "https://spec.jinn.network/software/plugin-runtime",
+    ]) {
+      expect(() =>
+        parseSessionFeed(
+          encode([
+            {
+              ...open,
+              model: { ...open.model, service: { iri: "https://x.test/svc", providerIri } },
+            },
+            close,
+          ]),
+        ),
+      ).toThrow(/identity/u);
+    }
+  });
+
   test("refuses a service that names itself as its own provider", () => {
     const iri = "https://spec.jinn.network/services/anthropic/claude-opus-5";
     expect(() =>

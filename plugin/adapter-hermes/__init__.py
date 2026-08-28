@@ -156,13 +156,22 @@ def _git(*args: str) -> str:
 
 
 def _repository_iri(remote: str) -> str:
-    """Normalize a Git remote to an absolute IRI, which is what the record requires."""
+    """Normalize a Git remote to a network IRI, which is what the record requires.
+
+    A local remote is dropped rather than normalized. A `file:///Users/<name>/…` URL passes an
+    absolute-IRI check but names a filesystem path, and the record it would land in is durable,
+    never deleted, and publicly projectable.
+    """
     if not remote:
         return ""
     match = _SSH_REMOTE.match(remote)
     if match:
         return f"https://{match.group('host')}/{match.group('path')}"
-    return remote[:-4] if remote.endswith(".git") else remote
+    normalized = remote[:-4] if remote.endswith(".git") else remote
+    if not normalized.startswith(("https://", "http://", "git://")):
+        logger.debug("jinn: remote %r is not a network repository", remote)
+        return ""
+    return normalized
 
 
 def _observe_repository_state() -> Optional[Dict[str, str]]:

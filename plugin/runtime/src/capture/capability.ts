@@ -372,6 +372,16 @@ export function createCaptureCapability(
             });
           }
           return recovered.sealed;
+        } catch (error) {
+          // A feed the parser refuses throws rather than returning diagnostics. The sweep treats
+          // a failed recovery as "not yet sealed" either way, so without this the reason is
+          // discarded and the session is eventually deleted with no record of why it could not
+          // be sealed — and the doctor's backlog advice does not apply to a feed that never can.
+          state.log.warn("capture recovery failed", {
+            sessionId,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          return false;
         } finally {
           sealing.delete(sessionId);
         }

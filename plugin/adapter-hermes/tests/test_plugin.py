@@ -289,6 +289,11 @@ def test_an_unreadable_repository_costs_the_base_state_and_nothing_else(
         ("https://github.com/Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
         ("https://github.com/Jinn-Network/mono", "https://github.com/Jinn-Network/mono"),
         ("", ""),
+        # A local remote names a filesystem path, often carrying a username. The record is
+        # durable and publicly projectable, so it is dropped rather than normalized.
+        ("file:///Users/someone/src/mono", ""),
+        ("/Users/someone/src/mono", ""),
+        ("C:\\Users\\someone\\mono", ""),
     ],
 )
 def test_a_git_remote_becomes_an_absolute_iri(remote, expected):

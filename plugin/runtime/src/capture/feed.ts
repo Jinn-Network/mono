@@ -374,8 +374,16 @@ export function parseSessionFeed(bytes: Uint8Array): ParsedSessionFeed {
       [executorIri(open.host.name), "executor"],
       [PRODUCER_IRI, "producer"],
     ] as const) {
-      if (service.iri === taken) {
-        invalid(`The model service IRI ${service.iri} is already the ${whose} identity.`);
+      // Both fields, not just `iri`: the record builder merges a provider reference onto an
+      // existing agent node rather than conflicting, so an unguarded providerIri would seal the
+      // claim that the producer or the executor provides some other party's model service.
+      for (const [field, value] of [
+        ["iri", service.iri],
+        ["providerIri", service.providerIri],
+      ] as const) {
+        if (value === taken) {
+          invalid(`The model service ${field} ${value} is already the ${whose} identity.`);
+        }
       }
     }
     if (service.providerIri === service.iri) {

@@ -417,3 +417,30 @@ def test_the_writer_still_produces_the_shape_the_runtime_fixture_pins(feed_path)
             if key in ("atUnixNano", "startedAt"):
                 continue
             assert actual[key] == value, key
+
+
+@pytest.mark.parametrize("content", ["not bytes", None, 7])
+def test_controlled_input_never_raises_into_a_host_hook(feed_path, content):
+    """A caller that hands over text instead of bytes costs one input, not the session."""
+    writer = feed.SessionFeed(feed_path)
+    writer.controlled_input(
+        role="prompt", name="p.md", media_type="text/markdown", content=content
+    )
+    assert feed_path.read_text(encoding="utf-8") == ""
+    # The budget is not spent by a dropped input.
+    writer.controlled_input(role="prompt", name="p.md", media_type="text/markdown", content=b"x")
+    assert len(read_lines(feed_path)) == 1
+
+
+@pytest.mark.parametrize("service", ["a string", 7, ["iri"]])
+def test_open_session_never_raises_on_a_malformed_service(feed_path, service):
+    writer = feed.SessionFeed(feed_path)
+    writer.open_session(
+        session_id="s-1",
+        host_name="hermes-agent",
+        host_version="1.2.3",
+        model_provider="anthropic",
+        model_name="claude-opus-5",
+        model_service=service,
+    )
+    assert "service" not in read_lines(feed_path)[0]["model"]

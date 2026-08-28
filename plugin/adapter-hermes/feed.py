@@ -118,7 +118,7 @@ class SessionFeed:
         model_service: Optional[Mapping[str, str]] = None,
     ) -> None:
         model: dict = {"provider": model_provider, "name": model_name}
-        if model_service:
+        if isinstance(model_service, Mapping) and model_service:
             # The hosted model's deployment identity, which the record carries as an opaque
             # runtime component. A producer cannot content-address a hosted service, so this
             # identity is what stands in for one.
@@ -212,6 +212,13 @@ class SessionFeed:
         if _blank(name) or _blank(media_type):
             logger.debug("jinn: controlled input %r has a blank name or media type", name)
             return
+        # Encode before the budget is spent, and before anything is written: a caller that hands
+        # us text instead of bytes must cost one dropped input, never an exception in a host hook.
+        try:
+            encoded = base64.b64encode(content).decode("ascii")
+        except (TypeError, ValueError) as exc:
+            logger.debug("jinn: controlled input %r is not bindable bytes: %s", name, exc)
+            return
         if not content or len(content) > CONTROLLED_INPUT_MAX_BYTES:
             logger.debug("jinn: controlled input %r has an unbindable size", name)
             return
@@ -226,7 +233,7 @@ class SessionFeed:
                 "role": role,
                 "name": name,
                 "mediaType": media_type,
-                "contentBase64": base64.b64encode(content).decode("ascii"),
+                "contentBase64": encoded,
             }
         )
 
