@@ -311,7 +311,7 @@ All action verbs support `--dry-run` and `--yes`.
 - Add `--human` for readable terminal output.
 - `stderr` is reserved for progress, warnings, and runtime logs.
 - Non-zero exits emit a structured error envelope on stdout with `schemaVersion`, `code`, `exitCode`, `message`, `hint`, and `exampleCli`.
-- Without a global install, use `npx -p @jinn-network/operator@latest jinn <verb> ...`.
+- Without a global install, use `npx @jinn-network/operator@latest <verb> ...`.
 
 See the [client surface spec](https://github.com/Jinn-Network/mono/blob/main/spec/2026-04-14-client-surface.md) for the full CLI reference.
 

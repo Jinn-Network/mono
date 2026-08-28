@@ -12,6 +12,7 @@ import type { WalletClient } from 'viem';
 import { FleetStateStore } from '../earning/store.js';
 import type { Store } from '../store/store.js';
 import { emitEvent } from '../observability/emit-event.js';
+import { sanitizeErrorText } from '../rpc/transport.js';
 import { claimRewardsIntent } from '../intents/claim-rewards.js';
 import { runLoop } from './loop-heartbeat.js';
 
@@ -85,7 +86,7 @@ export class RewardClaimLoop {
         emitEvent(jinnStore, {
           kind: 'tick_error',
           outcome: 'failed',
-          detail: err instanceof Error ? err.message : String(err),
+          detail: sanitizeErrorText(err),
         }, 'reward-claim');
       },
       afterTick: () => jinnStore.setConfigValue('last_reward_claim_tick_at', new Date().toISOString()),

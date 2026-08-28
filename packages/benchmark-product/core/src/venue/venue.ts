@@ -71,6 +71,7 @@ import {
   BINARY_JUDGMENT_CONTEXT_KEY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_NAME,
   BINARY_JUDGMENT_PARSER,
+  BINARY_JUDGMENT_PARSER_V2,
   contextResolutionSnapshotSource,
   createBinaryJudgmentEvaluatorRegistration,
   createPredictionEvaluatorRegistration,
@@ -165,6 +166,17 @@ import {
 /** The Submission requirement key naming the evaluator IRI for an evaluation attempt (BP-21).
  * Homed in `./provisioner.ts` to avoid a module cycle; this is its public re-export. */
 export { EVALUATOR_REQUIREMENT_KEY } from "./provisioner.js";
+
+/**
+ * Both sealed binary-judgment evaluation-parser identities dispatch to the one binary-judgment
+ * evaluator: v1 is the reject-policy seal, v2 the abstain-policy seal. The registration's
+ * compatibility predicate and `evaluatorAdaptersParserAllowlist()` already admit both, so a
+ * v1-only selection here refuses an abstain-policy run that every other layer accepts.
+ */
+const BINARY_JUDGMENT_PARSER_KEYS: ReadonlySet<string> = new Set([
+  parserAllowlistKey(BINARY_JUDGMENT_PARSER),
+  parserAllowlistKey(BINARY_JUDGMENT_PARSER_V2),
+]);
 
 export interface LocalVenueOptions {
   readonly workspaceDir: string;
@@ -1324,7 +1336,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
                 : "SWE-bench Verified official suite refuses the swe-rebench evaluator",
           )
           : "swe-rebench"
-        : parserKey === parserAllowlistKey(BINARY_JUDGMENT_PARSER)
+        : BINARY_JUDGMENT_PARSER_KEYS.has(parserKey)
           ? "binary-judgment"
           : inspectVerifier !== undefined && parserKey === inspectVerifier.parserAllowlistKey
             ? "inspect-log-verifier"

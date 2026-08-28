@@ -15,10 +15,12 @@ import {
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
   BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+  BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_YES_NO_PARSER_IDENTITY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
   BINARY_JUDGMENT_EVALUATION_CONTEXT_FORMAT_URI,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
+  BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY,
   BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
   BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
   BINARY_JUDGMENT_OBSERVATION_FORMAT_URI,
@@ -54,6 +56,7 @@ import {
   BINARY_JUDGMENT_LABEL_RESOLUTION_NAME,
   BINARY_JUDGMENT_MEASUREMENTS,
   binaryJudgmentEvaluationMethodDescriptor,
+  binaryJudgmentEvaluationSpecUnscorable,
   binaryJudgmentEvaluationSpecVerdictRule,
   buildBinaryJudgmentEvaluationSpecification,
   contextBinaryJudgmentMaterialSource,
@@ -449,6 +452,11 @@ async function runHarnessFixture(
       predicate: {
         verdict: string;
         measurements: readonly { name: string; value: unknown }[];
+        evaluationMethod?: {
+          name?: string;
+          mediaType?: string;
+          digest: { sha256: string };
+        };
       };
     }
     : undefined;
@@ -741,12 +749,50 @@ describe("binary judgment evaluator", () => {
       .toThrow("binary judgment analysis context must be a canonical sha256 digest");
   });
 
-  test("declares no unscorable classes and no inconclusiveWhen predicate", () => {
-    // spec §5.1: EvaluationSpec.unscorable stays [], byte-unchanged; binary judgment declares
-    // no inconclusiveWhen and never delivers "inconclusive".
+  test("the reject policy declares no unscorable classes and no inconclusiveWhen predicate", () => {
+    // spec §5.1: under REJECT every response is scored, so EvaluationSpec.unscorable stays [],
+    // byte-unchanged, and the rule is the bare agreement threshold. (Under ABSTAIN both differ —
+    // see the next test; the reject bytes below are pinned by digest.)
     const fixture = makeFixture({ truthLabel: "CORRECT", response: encoder.encode("ACCEPT") });
     expect(fixture.specification.unscorable).toEqual([]);
     expect(containsInconclusiveWhen(binaryJudgmentEvaluationSpecVerdictRule())).toBe(false);
+    expect(containsInconclusiveWhen(binaryJudgmentEvaluationSpecVerdictRule("reject"))).toBe(false);
+  });
+
+  test("the abstain policy declares its recorded-inconclusive class and predicate", () => {
+    // Without these an unparseable response recomputes `fail`, the harness refuses the
+    // evaluator's `inconclusive` delivery, and the cell is lost — the live cell-535 defect.
+    const rule = binaryJudgmentEvaluationSpecVerdictRule("abstain");
+    expect(containsInconclusiveWhen(rule)).toBe(true);
+    expect(rule).toEqual({
+      all: [
+        {
+          class: "unparseable-judge-response",
+          inconclusiveWhen: { threshold: { measurement: "parseValid", op: "eq", value: false } },
+        },
+        { threshold: { measurement: "agreement", op: "eq", value: true } },
+      ],
+    });
+    expect(binaryJudgmentEvaluationSpecUnscorable("abstain")).toEqual([
+      { name: "unparseable-judge-response", disposition: "recorded-inconclusive" },
+    ]);
+    expect(binaryJudgmentEvaluationSpecUnscorable("reject")).toEqual([]);
+  });
+
+  test("the sealed spec digests are pinned per policy", () => {
+    // The REJECT digest is the byte-identity proof: 533 live verdicts were sealed against it and
+    // this change must not move it by a single byte. The ABSTAIN digest is the new sealed spec.
+    const context = `sha256:${"2".repeat(64)}` as const;
+    expect(sealEvaluationSpec(buildBinaryJudgmentEvaluationSpecification(context, "reject")).digest)
+      .toBe("sha256:e03bcfb63742a8bd0ae3d3e7d9721ec31fe3999c0a334229a502c2aca79becbd");
+    expect(sealEvaluationSpec(buildBinaryJudgmentEvaluationSpecification(context, "abstain")).digest)
+      .toBe("sha256:f96f51964402a83fae6f38c878fe86355aabdfeb8c102ff448eb82cf0e597051");
+    // Neither sealed parser-semantics document moved: the defect was that the SPEC never encoded
+    // what the v2 semantics document already promised (`inconclusiveWhen: "parseValid=false"`).
+    expect(BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest)
+      .toBe("sha256:3568ee132ece234c15b7f9b6b4a7a954aefc2c417e17f2fde91729a7240bb343");
+    expect(BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY.digest)
+      .toBe("sha256:838a8e4d21893524cba10e5a282397b334a67fe9bc516d53ae20fd4f2b915038");
   });
 
   test.each([
@@ -917,6 +963,39 @@ describe("binary judgment evaluator through the real evaluation harness", () => 
     },
   );
 
+  /**
+   * #3050: the sealed verdict's method disclosure must name the parser semantics the run
+   * actually scored under. An abstain-policy run used to disclose the v1 (reject) method bytes,
+   * whose text maps an invalid parse to REJECT — semantics that run does not use.
+   */
+  test.each([
+    {
+      policy: "reject" as const,
+      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      response: "ACCEPT",
+      expected: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest,
+    },
+    {
+      policy: "abstain" as const,
+      parser: BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
+      response: '{"label":"CORRECT"}',
+      expected: BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY.digest,
+    },
+  ])("discloses the $policy-policy evaluation method digest", async (scenario) => {
+    const run = await runHarnessFixture(makeFixture({
+      truthLabel: "CORRECT",
+      response: encoder.encode(scenario.response),
+      parser: scenario.parser,
+      parserInvalidPolicy: scenario.policy,
+    }));
+    expect(run.exitCode).toBe(0);
+    expect(run.statement?.predicate.evaluationMethod).toEqual({
+      name: "binary-judgment-evaluation-parser-semantics.json",
+      mediaType: "application/json",
+      digest: { sha256: scenario.expected.slice("sha256:".length) },
+    });
+  });
+
   test("seals malformed delivered output as a completed invalid parse", async () => {
     const run = await runHarnessFixture(makeFixture({
       truthLabel: "WRONG",
@@ -976,5 +1055,57 @@ describe("binary judgment evaluator through the real evaluation harness", () => 
     });
     expect(run.exitCode).toBe(EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE);
     await expect(readFile(join(run.paths.out, "verdict"))).rejects.toThrow();
+  });
+  /**
+   * Live-run regression (official run, cell 535 of 4,320; attempt
+   * 218889b0-9913-47f8-a0b3-fe09e054909e). The judge answered with prose followed by a fenced
+   * JSON label. The v2 fence grammar correctly refuses prose-before-fence, so under the abstain
+   * policy that must become a COUNTED neutral INVALID. Instead the delivered CompletedEvaluation
+   * was refused by the harness's own verdict-consistency check:
+   *
+   *   evaluation-harness: refused (evaluation-operational-failure): CompletedEvaluation verdict
+   *   is inconsistent: delivered inconclusive verdict has no recomputed inconclusive predicate
+   *   and no declared unscorable class
+   *
+   * and the attempt terminaled failed -> could-not-grade, permanently losing the cell. Every
+   * unparseable response lost its cell on live traffic. No canary caught it: all 54 canary
+   * responses parsed valid, so the INVALID path never reached the harness through the real
+   * adapter delivery.
+   */
+  const LIVE_PROSE_THEN_FENCE =
+    "The generated answer refers to a car-related event in San Francisco, but it does not match "
+    + "the specific activity of attending a car modification workshop mentioned in the gold "
+    + 'answer, making it incorrect. \n\n```json\n{"label": "WRONG"}\n```';
+
+  test.each([
+    ["the live cell-535 prose-then-fence response", LIVE_PROSE_THEN_FENCE],
+    ["bare garbage", "I cannot determine this."],
+    ["a double fence", '```json\n{"label":"WRONG"}\n```\n```json\n{"label":"CORRECT"}\n```'],
+    ["an empty response", ""],
+  ])("delivers a counted INVALID verdict for %s", async (_label, response) => {
+    const run = await runHarnessFixture(makeFixture({
+      truthLabel: "WRONG",
+      response: encoder.encode(response),
+      parser: BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY,
+      parserInvalidPolicy: "abstain",
+    }));
+    // A refusal here is the defect: the cell is lost instead of abstaining.
+    expect(run.exitCode, "the harness refused the delivery instead of sealing a verdict").toBe(0);
+    expect(run.statement?.predicate.measurements).toContainEqual({
+      name: BINARY_JUDGMENT_MEASUREMENTS.judgeDecision,
+      value: "INVALID",
+    });
+    expect(run.statement?.predicate.measurements).toContainEqual({
+      name: BINARY_JUDGMENT_MEASUREMENTS.parseValid,
+      value: false,
+    });
+    expect(run.statement?.predicate.measurements).toContainEqual({
+      name: BINARY_JUDGMENT_MEASUREMENTS.agreement,
+      value: false,
+    });
+    // The neutral-invalid outcome the abstain policy exists to record. `binary-instrument.ts`'s
+    // admission requires exactly this verdict for an abstained call (it counts a call only when
+    // `verdict === "inconclusive" && policy === "abstain" && !parseValid`).
+    expect(run.statement?.predicate.verdict).toBe("inconclusive");
   });
 });
