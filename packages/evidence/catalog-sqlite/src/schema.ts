@@ -9,7 +9,7 @@ import {
 
 import { catalogIoError } from "./errors.js";
 
-export const SQLITE_EVIDENCE_CATALOG_SCHEMA_VERSION = 2 as const;
+export const SQLITE_EVIDENCE_CATALOG_SCHEMA_VERSION = 3 as const;
 
 const SCHEMA_SQL = `
 CREATE TABLE catalog_metadata (
@@ -138,6 +138,20 @@ CREATE TABLE location_withdrawals (
     REFERENCES announcement_keys(source_id, announcement_id)
 );
 
+-- The announcement edge index (record-discovery design §12, amendment 2026-08-28). Unlike every
+-- table above it is fed from announcement facts cards, never from a fetched record: a card
+-- declares its kind's outbound references, and those edges are what lets an index answer join
+-- -- "this environment, its attempts, their verdicts" -- without fetching anything. It is keyed
+-- by record-kind URI rather than by evidence family, because the feed carries every kind.
+CREATE TABLE announcement_edges (
+  record_kind TEXT NOT NULL,
+  record_digest TEXT NOT NULL,
+  field TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+  target_digest TEXT NOT NULL,
+  PRIMARY KEY (record_kind, record_digest, field, ordinal)
+);
+
 CREATE INDEX records_family_digest_idx
   ON records(family, digest);
 CREATE INDEX entity_keys_entity_family_digest_idx
@@ -192,6 +206,11 @@ CREATE INDEX location_withdrawals_target_idx
   ON location_withdrawals(source_id, retracts_announcement_id);
 CREATE INDEX announcement_keys_kind_idx
   ON announcement_keys(event_kind, source_id, announcement_id);
+CREATE INDEX announcement_edges_source_idx
+  ON announcement_edges(record_digest, field, ordinal);
+-- The referrers inversion (design section 8): which records point at this digest.
+CREATE INDEX announcement_edges_target_idx
+  ON announcement_edges(target_digest, record_kind, record_digest);
 `;
 
 interface MetadataRow {

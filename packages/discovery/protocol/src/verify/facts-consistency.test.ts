@@ -146,3 +146,81 @@ describe("factsConsistency RecordFactValue (program §7.129)", () => {
     expect(outcome).toBe("inconsistent");
   });
 });
+
+// Join edges are ordinary record facts: the completeness rule (design §12, amendment
+// 2026-08-28) grows what a profile declares, and facts-consistency covers the added fields the
+// same way it covers every other one. These pin that, including the one path the cases above
+// never take — an edge whose recompute must reach for another record's bytes.
+
+const edgeProfile = parseFactsProfile({
+  protocol: RECORD_DISCOVERY_VERSION,
+  kind: KIND,
+  profile: "https://spec.jinn.network/facts/benchmark-report/v2",
+  fields: [
+    { name: "scalarField", class: "record" },
+    { name: "matrixDigests", class: "record", referenceBearing: true },
+    { name: "supersedesDigest", class: "record", referenceBearing: true },
+  ],
+});
+
+describe("factsConsistency over join edges (design §12 amendment)", () => {
+  it("flags a scalar edge that disagrees with the record", async () => {
+    const outcome = await factsConsistency({
+      item: itemWithFacts({ supersedesDigest: `sha256:${"1".repeat(64)}` }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({ supersedesDigest: `sha256:${"2".repeat(64)}` }),
+      records: unusedRecords,
+    });
+    expect(outcome).toBe("inconsistent");
+  });
+
+  it("accepts a scalar edge that agrees with the record", async () => {
+    const outcome = await factsConsistency({
+      item: itemWithFacts({ supersedesDigest: `sha256:${"1".repeat(64)}` }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({ supersedesDigest: `sha256:${"1".repeat(64)}` }),
+      records: unusedRecords,
+    });
+    expect(outcome).toBe("consistent");
+  });
+
+  it("is indeterminate — never consistent — when the referenced bytes an edge needs are unavailable", async () => {
+    const referenceBearing: FactsRecompute = {
+      get() {
+        return async (_bytes, refs) => {
+          const referenced = await refs.fetch(`sha256:${"1".repeat(64)}`);
+          return { supersedesDigest: referenced === undefined ? undefined : `sha256:${"1".repeat(64)}` };
+        };
+      },
+    };
+    const gated: RecordFetcher = {
+      async "fetch"() {
+        throw new Error("capability-gated to this consumer");
+      },
+    };
+    const outcome = await factsConsistency({
+      item: itemWithFacts({ supersedesDigest: `sha256:${"1".repeat(64)}` }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: referenceBearing,
+      records: gated,
+    });
+    expect(outcome).toBe("indeterminate");
+  });
+
+  it("leaves an edge the card does not announce unchecked, as §15's skip requires", async () => {
+    const outcome = await factsConsistency({
+      item: itemWithFacts({ scalarField: "owner-iri" }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({
+        scalarField: "owner-iri",
+        supersedesDigest: `sha256:${"1".repeat(64)}`,
+      }),
+      records: unusedRecords,
+    });
+    expect(outcome).toBe("consistent");
+  });
+});

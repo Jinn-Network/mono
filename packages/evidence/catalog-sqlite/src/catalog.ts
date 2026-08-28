@@ -23,6 +23,7 @@ import {
 } from "@jinn-network/evidence-discovery";
 import type Database from "better-sqlite3";
 
+import { SqliteAnnouncementEdgeIndex } from "./announcement-edges.js";
 import { openCatalogDatabase } from "./database.js";
 import { catalogIoError, closedCatalogError } from "./errors.js";
 import { SqliteCatalogReader } from "./reader.js";
@@ -32,6 +33,10 @@ import {
   readGeneration,
 } from "./schema.js";
 import type {
+  AnnouncementEdge,
+  AnnouncementEdgeIndexInput,
+  AnnouncementEdgeIndexReceipt,
+  AnnouncementEdgeQuery,
   CreateSqliteEvidenceCatalogOptions,
   OpenSqliteEvidenceCatalogOptions,
   SqliteCatalogIntegrityReport,
@@ -43,6 +48,7 @@ class SqliteEvidenceCatalogHandle implements SqliteEvidenceCatalog {
   #closed = false;
   readonly #reader: SqliteCatalogReader;
   readonly #writer: SqliteCatalogWriter;
+  readonly #edges: SqliteAnnouncementEdgeIndex;
 
   constructor(
     readonly databasePath: string,
@@ -54,6 +60,10 @@ class SqliteEvidenceCatalogHandle implements SqliteEvidenceCatalog {
       (options) => this.#active(options),
     );
     this.#writer = new SqliteCatalogWriter(
+      database,
+      (options) => this.#active(options),
+    );
+    this.#edges = new SqliteAnnouncementEdgeIndex(
       database,
       (options) => this.#active(options),
     );
@@ -77,6 +87,20 @@ class SqliteEvidenceCatalogHandle implements SqliteEvidenceCatalog {
     options?: CatalogOperationOptions,
   ): Promise<CatalogLocationReceipt> {
     return this.#writer.observeRecordLocation(reference, observation, options);
+  }
+
+  async indexAnnouncementEdges(
+    input: AnnouncementEdgeIndexInput,
+    options?: CatalogOperationOptions,
+  ): Promise<AnnouncementEdgeIndexReceipt> {
+    return this.#edges.index(input, options);
+  }
+
+  async queryAnnouncementEdges(
+    query: AnnouncementEdgeQuery,
+    options?: CatalogOperationOptions,
+  ): Promise<readonly AnnouncementEdge[]> {
+    return this.#edges.query(query, options);
   }
 
   async withdrawRecordLocationObservation(
