@@ -39,6 +39,30 @@ export const environmentRecompute: RecordFactRecompute = async (bytes) => {
 };
 
 /**
+ * The v2 card: v1's fields plus `parser.digest`, the parser artifact the record pins in its own
+ * bytes. Same fail-closed posture as v1 — the parser is a digest-pinned artifact rather than an
+ * announceable record, so there are no referenced bytes to retrieve and re-hash, and the field is
+ * emitted directly from the record's own statement.
+ */
+export const environmentRecomputeV2: RecordFactRecompute = async (bytes) => {
+  try {
+    const record = parseEnvironmentRecord(bytes);
+    const facts: Record<string, RecordFactValue> = {
+      environmentRecordDigest: recordDigest(bytes),
+      "source.repo": record.source.repo,
+      "source.commit": record.source.commit,
+      "image.manifestDigest": record.image.manifestDigest,
+      "image.platform": record.image.platform,
+      "parser.digest": record.parser.digest,
+      "build.reproducibilityTier": record.build.reproducibilityTier,
+    };
+    return facts;
+  } catch {
+    return {};
+  }
+};
+
+/**
  * The leaf's `FactsRecompute` registry entry: the host assembles the tree-wide registry by
  * merging each leaf's export. Unknown kinds return `undefined`, preserving discovery's
  * unknown-kind skip behavior.
@@ -46,5 +70,12 @@ export const environmentRecompute: RecordFactRecompute = async (bytes) => {
 export const ENVIRONMENTS_FACTS_RECOMPUTE: FactsRecompute = {
   get(kind: string): RecordFactRecompute | undefined {
     return kind === ENVIRONMENT_RECORD_KIND ? environmentRecompute : undefined;
+  },
+};
+
+/** Explicit registry for the coexisting environment facts v2 profile. */
+export const ENVIRONMENTS_FACTS_RECOMPUTE_V2: FactsRecompute = {
+  get(kind: string): RecordFactRecompute | undefined {
+    return kind === ENVIRONMENT_RECORD_KIND ? environmentRecomputeV2 : undefined;
   },
 };

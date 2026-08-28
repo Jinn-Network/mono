@@ -15,6 +15,25 @@ Its only Jinn dependency is `@jinn-network/trust-core` (types and the key-bindin
 surface consulted by the verification-procedure ports); it never imports a record-defining
 package (TEP, Evidence, or profiles).
 
+## Facts profiles must carry their kind's join edges
+
+A facts profile labels every field record-fact or substrate-fact, names its reference-bearing
+fields so `referrers` inverts them, and declares the CloudEvents lifting for the filterable
+ones. One rule constrains what that field set may leave out (design §12, amendment
+2026-08-28): the reference-bearing set MUST be **complete** — every field of the record's own
+sealed bytes that pins another sealed record or content-addressed artifact by digest is
+declared, and marked `referenceBearing`.
+
+An index serves join from announcement cards alone. "This environment, its attempts, their
+verdicts" is a graph walk over card edges; for a paid record, fetching-to-join is not even
+possible. An omitted edge makes that walk unanswerable from the feed. A descriptor that pins
+nothing by digest is not an edge and is not covered.
+
+Cards remain holder-authored summaries. `facts-consistency` re-checks an edge against the
+fetched record exactly as it re-checks any other record fact, and decision-grade use fails
+closed on anything but `consistent`. Adding an edge to a published profile is a profile
+revision — new profile URI version, previous version retained.
+
 ## Development
 
 Use Node 22 and Yarn 4.13.0:

@@ -2,7 +2,7 @@ import { assertRecordKindUri, referenceBearingFields, cloudEventsFields } from "
 import { describe, expect, it } from "vitest";
 
 import { ENVIRONMENT_RECORD_KIND } from "./identifiers.js";
-import { environmentFactsProfile } from "./profiles.js";
+import { environmentFactsProfile, environmentFactsProfileV2 } from "./profiles.js";
 
 describe("environment facts profile (design §4.4)", () => {
   it("binds the record kind discovery's own grammar accepts", () => {
@@ -40,5 +40,35 @@ describe("environment facts profile (design §4.4)", () => {
       ["image.platform", "platform"],
       ["build.reproducibilityTier", "tier"],
     ]);
+  });
+});
+
+describe("environment facts profile v2 (join-edge completeness, design §12 amendment)", () => {
+  it("binds the same record kind under the next profile version", () => {
+    expect(environmentFactsProfileV2.kind).toBe(ENVIRONMENT_RECORD_KIND);
+    expect(environmentFactsProfileV2.profile).toBe("https://spec.jinn.network/facts/environment/v2");
+  });
+
+  it("adds parser.digest to v1's field set and changes nothing else", () => {
+    expect(environmentFactsProfileV2.fields.map((field) => field.name).sort()).toEqual([
+      "build.reproducibilityTier",
+      "environmentRecordDigest",
+      "image.manifestDigest",
+      "image.platform",
+      "parser.digest",
+      "source.commit",
+      "source.repo",
+    ]);
+  });
+
+  it("declares the complete outbound-reference set: the image and the parser artifact", () => {
+    expect(referenceBearingFields(environmentFactsProfileV2)).toEqual([
+      "image.manifestDigest",
+      "parser.digest",
+    ]);
+  });
+
+  it("leaves v1 untouched", () => {
+    expect(referenceBearingFields(environmentFactsProfile)).toEqual(["image.manifestDigest"]);
   });
 });

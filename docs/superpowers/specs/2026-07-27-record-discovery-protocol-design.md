@@ -836,6 +836,23 @@ reference-bearing fields (the relation `referrers` inverts, §8), and, for each 
 into CloudEvents extension attributes (§9.1), declares the attribute name (conforming to
 CloudEvents attribute-naming rules) and a permitted scalar type.
 
+**Amendment 2026-08-28 (join edges).** Naming the reference-bearing fields is not enough:
+the set MUST be **complete**. Every facts profile MUST declare, as reference-bearing fields,
+every *outbound record reference* its record kind can carry — every field of the record's own
+sealed bytes that pins another sealed record or content-addressed artifact by digest. The
+reason is the join verb: an index serves discover, join, judge and fetch from announcement
+cards alone, never by fetching records, and for access-classified records fetching-to-join is
+not possible at all. A profile that omits an edge makes that join unanswerable from the feed.
+An identity or labeling descriptor that pins nothing by digest is not an outbound reference
+and is not covered by this rule. Adding an edge to a published profile is a **profile
+revision** under §15 — a new profile URI version, the previous version retained and still
+registered — never an in-place edit.
+
+The §5.4 caveat is unchanged and is the reason this rule is safe: a card is a holder-authored
+summary. Edges are for assembling a graph cheaply and for `referrers` inversion; anything
+load-bearing is re-checked against the fetched record through `facts-consistency`, which
+covers edge fields exactly as it covers every other record fact.
+
 Unknown kinds are not errors: a consumer skips announcements for kinds it has no profile
 for. This is what lets new record kinds deploy without touching the protocol.
 
