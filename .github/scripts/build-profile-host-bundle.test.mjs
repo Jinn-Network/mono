@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 
 import { buildProfileRoot } from './build-profile-root.mjs';
@@ -27,6 +27,7 @@ import {
   entityTag,
   hostConfig,
   hostConfigBytes,
+  parseArgs,
   routeWarnings,
 } from './build-profile-host-bundle.mjs';
 
@@ -45,6 +46,9 @@ after(() => {
 
 const sourceSha = execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 
+const SEALED_GROUP = 'sealed-platform-v1';
+const IMPLEMENTATIONS_GROUP = 'implementations-v1';
+
 let cachedProfileRoot;
 /** A real attested profile root, built once and reused. */
 function realProfileRoot() {
@@ -54,10 +58,51 @@ function realProfileRoot() {
       repoRoot,
       outDir: cachedProfileRoot,
       commit: sourceSha,
-      releaseGroup: 'sealed-platform-v1',
+      releaseGroup: SEALED_GROUP,
     });
   }
   return cachedProfileRoot;
+}
+
+let cachedImplementationsRoot;
+/** The other stack-published release group, so the merge cases are two real roots. */
+function implementationsProfileRoot() {
+  if (!cachedImplementationsRoot) {
+    cachedImplementationsRoot = temporaryDirectory('jinn-host-bundle-impl-source-');
+    buildProfileRoot({
+      repoRoot,
+      outDir: cachedImplementationsRoot,
+      commit: sourceSha,
+      releaseGroup: IMPLEMENTATIONS_GROUP,
+    });
+  }
+  return cachedImplementationsRoot;
+}
+
+/** Where a profile root's file lands in the bundle: root files move under their group. */
+const bundlePathFor = (path, group = SEALED_GROUP) => (
+  path === MANIFEST_FILE_NAME || path === SIGNATURE_FILE_NAME ? `${group}/${path}` : path
+);
+
+/** A hand-written two-document root, so a collision case needs no real release group. */
+function syntheticRoot(releaseGroup, documents) {
+  const root = temporaryDirectory(`jinn-host-bundle-${releaseGroup}-`);
+  const declared = documents.map(([path, body]) => {
+    const absolute = join(root, ...path.split('/'));
+    mkdirSync(dirname(absolute), { recursive: true });
+    writeFileSync(absolute, body, 'utf8');
+    return {
+      path,
+      sha256: createHash('sha256').update(Buffer.from(body, 'utf8')).digest('hex'),
+      mediaType: 'application/json',
+    };
+  });
+  writeFileSync(
+    join(root, MANIFEST_FILE_NAME),
+    `${JSON.stringify({ version: 1, releaseGroup, documents: declared }, null, 2)}\n`,
+    'utf8',
+  );
+  return root;
 }
 
 function walk(directory, prefix = '') {
@@ -171,12 +216,12 @@ test('the bundle is the exact attested bytes plus one generated configuration fi
 
   const sourceFiles = walk(source);
   const bundleFiles = walk(out);
-  assert.deepEqual(bundleFiles, [...sourceFiles, HOST_CONFIG_FILE_NAME].sort());
+  assert.deepEqual(bundleFiles, [...sourceFiles.map((path) => bundlePathFor(path)), HOST_CONFIG_FILE_NAME].sort());
   assert.equal(result.documentCount + 1, sourceFiles.length);
 
   for (const path of sourceFiles) {
     const before = readFileSync(join(source, ...path.split('/')));
-    const after = readFileSync(join(out, ...path.split('/')));
+    const after = readFileSync(join(out, ...bundlePathFor(path).split('/')));
     assert.equal(Buffer.compare(before, after), 0, `bundle rewrote ${path}`);
   }
 });
@@ -190,7 +235,7 @@ test('the generated configuration covers every manifest document with its declar
   const bySource = new Map(config.headers.map((entry) => [entry.source, entry.headers]));
 
   assert.equal(config.headers.length, manifest.documents.length + 1);
-  assert.ok(bySource.has(`/${MANIFEST_FILE_NAME}`));
+  assert.ok(bySource.has(`/${SEALED_GROUP}/${MANIFEST_FILE_NAME}`));
   for (const { path, sha256, mediaType } of manifest.documents) {
     const headers = bySource.get(`/${path}`);
     assert.ok(headers, `no host configuration entry for ${path}`);
@@ -231,18 +276,19 @@ test('a signature sidecar is carried into the bundle and given a revalidating en
     repoRoot,
     outDir: source,
     commit: sourceSha,
-    releaseGroup: 'sealed-platform-v1',
+    releaseGroup: SEALED_GROUP,
   });
   const envelope = `${JSON.stringify({ payload: 'e30=', payloadType: 'x', signatures: [] }, null, 2)}\n`;
   writeFileSync(join(source, SIGNATURE_FILE_NAME), envelope, 'utf8');
   const out = temporaryDirectory('jinn-host-bundle-signed-out-');
   const result = buildProfileHostBundle({ profileRoot: source, outDir: out });
 
-  assert.ok(existsSync(join(out, SIGNATURE_FILE_NAME)));
-  assert.equal(readFileSync(join(out, SIGNATURE_FILE_NAME), 'utf8'), envelope);
+  const sidecarPath = `${SEALED_GROUP}/${SIGNATURE_FILE_NAME}`;
+  assert.ok(existsSync(join(out, ...sidecarPath.split('/'))));
+  assert.equal(readFileSync(join(out, ...sidecarPath.split('/')), 'utf8'), envelope);
   assert.equal(result.routeCount, manifest.documents.length + 2);
   const config = JSON.parse(readFileSync(join(out, HOST_CONFIG_FILE_NAME), 'utf8'));
-  const sidecar = config.headers.find(({ source: path }) => path === `/${SIGNATURE_FILE_NAME}`);
+  const sidecar = config.headers.find(({ source: path }) => path === `/${sidecarPath}`);
   assert.deepEqual(sidecar.headers, [
     { key: 'Content-Type', value: MANIFEST_MEDIA_TYPE },
     { key: 'ETag', value: `"sha256-${createHash('sha256').update(envelope).digest('hex')}"` },
@@ -294,4 +340,128 @@ test('a profile root without a manifest is refused', () => {
     }),
     /has no manifest\.json/u,
   );
+});
+
+// --- one origin, one bundle, one namespace per release group ----------------
+//
+// Two stack-published groups deploy to the same origin and their documents are disjoint,
+// but each group's own inventory is called `manifest.json`. Left at the bundle root the
+// second write would clobber the first, so the root files -- and only the root files --
+// live under the group that authored them.
+
+test('the bundle namespaces the root manifest under its release group', () => {
+  const source = realProfileRoot();
+  const out = temporaryDirectory('jinn-host-bundle-namespace-');
+  buildProfileHostBundle({ profileRoot: source, outDir: out });
+
+  assert.ok(existsSync(join(out, SEALED_GROUP, MANIFEST_FILE_NAME)));
+  assert.ok(!existsSync(join(out, MANIFEST_FILE_NAME)), 'the bundle root must not carry a manifest');
+
+  const config = JSON.parse(readFileSync(join(out, HOST_CONFIG_FILE_NAME), 'utf8'));
+  const entry = config.headers.find(({ source: path }) => path === `/${SEALED_GROUP}/${MANIFEST_FILE_NAME}`);
+  assert.ok(entry, 'the group-namespaced manifest needs its own headers entry');
+  assert.equal(
+    entry.headers.find(({ key }) => key === 'Cache-Control').value,
+    REVALIDATE_CACHE_CONTROL,
+    'the group manifest is still the mutable pointer to an immutable set',
+  );
+  assert.ok(
+    !config.headers.some(({ source: path }) => path === `/${MANIFEST_FILE_NAME}`),
+    'a root manifest route would be the collision this namespacing removes',
+  );
+});
+
+test('a profile root whose manifest names no release group is refused', () => {
+  const root = temporaryDirectory('jinn-host-bundle-groupless-');
+  writeFileSync(join(root, MANIFEST_FILE_NAME), `${JSON.stringify({
+    version: 1,
+    documents: [document('profiles/sample/v1', digestA)],
+  }, null, 2)}\n`, 'utf8');
+  assert.throws(
+    () => buildProfileHostBundle({
+      profileRoot: root,
+      outDir: temporaryDirectory('jinn-host-bundle-groupless-out-'),
+    }),
+    /release group/u,
+  );
+  for (const bad of ['a/b', 'a*', '..', '']) {
+    const rejected = temporaryDirectory('jinn-host-bundle-badgroup-');
+    writeFileSync(join(rejected, MANIFEST_FILE_NAME), `${JSON.stringify({
+      version: 1,
+      releaseGroup: bad,
+      documents: [document('profiles/sample/v1', digestA)],
+    }, null, 2)}\n`, 'utf8');
+    assert.throws(
+      () => buildProfileHostBundle({
+        profileRoot: rejected,
+        outDir: temporaryDirectory('jinn-host-bundle-badgroup-out-'),
+      }),
+      /release group/u,
+      `expected release group ${JSON.stringify(bad)} to be refused`,
+    );
+  }
+});
+
+test('parseArgs accumulates repeated --root and requires one --out', () => {
+  assert.deepEqual(parseArgs(['--root', 'a', '--out', 'd']), { profileRoots: ['a'], outDir: 'd' });
+  assert.deepEqual(parseArgs(['--root', 'a', '--root', 'b', '--out', 'd']), { profileRoots: ['a', 'b'], outDir: 'd' });
+  assert.throws(() => parseArgs(['--out', 'd']), /--root/u);
+  assert.throws(() => parseArgs(['--root', 'a']), /--out/u);
+  assert.throws(() => parseArgs(['--root', 'a', '--out', 'd', '--out', 'e']), /--out/u);
+  assert.throws(() => parseArgs(['--nope', 'x']), /unknown argument/u);
+  assert.throws(() => parseArgs(['--root']), /requires a value/u);
+});
+
+test('two profile roots merge into one bundle, each manifest under its own group', () => {
+  const sealed = realProfileRoot();
+  const implementations = implementationsProfileRoot();
+  const out = temporaryDirectory('jinn-host-bundle-merged-');
+  const result = buildProfileHostBundle({ profileRoots: [sealed, implementations], outDir: out });
+
+  const groups = [[sealed, SEALED_GROUP], [implementations, IMPLEMENTATIONS_GROUP]];
+  let documentCount = 0;
+  for (const [root, group] of groups) {
+    assert.ok(existsSync(join(out, group, MANIFEST_FILE_NAME)), `${group} manifest is missing`);
+    const manifest = JSON.parse(readFileSync(join(root, MANIFEST_FILE_NAME), 'utf8'));
+    documentCount += manifest.documents.length;
+    for (const { path } of manifest.documents) {
+      assert.equal(
+        Buffer.compare(
+          readFileSync(join(root, ...path.split('/'))),
+          readFileSync(join(out, ...path.split('/'))),
+        ),
+        0,
+        `${group} document ${path} is not the attested bytes`,
+      );
+    }
+  }
+  assert.ok(!existsSync(join(out, MANIFEST_FILE_NAME)), 'a merged bundle has no root manifest to collide on');
+  assert.ok(documentCount > 700, `expected both real surfaces, saw ${documentCount} documents`);
+
+  const config = JSON.parse(readFileSync(join(out, HOST_CONFIG_FILE_NAME), 'utf8'));
+  // Two unsigned roots: every document, plus one manifest route per group.
+  assert.equal(config.headers.length, documentCount + 2);
+  assert.equal(result.routeCount, config.headers.length);
+  assert.equal(result.documentCount, documentCount);
+  assert.deepEqual(result.groups, [IMPLEMENTATIONS_GROUP, SEALED_GROUP]);
+  const sources = config.headers.map(({ source: path }) => path);
+  assert.equal(new Set(sources).size, sources.length, 'a repeated source is an ambiguous route');
+  assert.deepEqual(routeWarnings(config.headers.length), [], 'the merged route count is still well under the cap');
+  assert.deepEqual(result.warnings, []);
+});
+
+test('a document path claimed by two release groups is refused, naming both', () => {
+  const shared = 'profiles/shared/v1';
+  const first = syntheticRoot('group-alpha', [[shared, '{\n  "a": 1\n}\n']]);
+  const second = syntheticRoot('group-beta', [[shared, '{\n  "b": 2\n}\n']]);
+  const out = temporaryDirectory('jinn-host-bundle-collision-out-');
+  assert.throws(
+    () => buildProfileHostBundle({ profileRoots: [first, second], outDir: out }),
+    (error) => (
+      error.message.includes('group-alpha')
+      && error.message.includes('group-beta')
+      && error.message.includes(shared)
+    ),
+  );
+  assert.deepEqual(readdirSync(out), [], 'a refused merge must write nothing at all');
 });

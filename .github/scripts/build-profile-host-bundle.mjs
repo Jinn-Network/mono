@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Turn an attested profile root into a deploy directory: the exact attested bytes
+// Turn the attested profile roots into one deploy directory: the exact attested bytes
 // plus one generated static-host configuration file.
 //
 // The runbook's hard rule is "deploy one exact attested profile-root artifact; never
@@ -8,12 +8,18 @@
 // against manifest.json on the way out, so a bundle that differs from the attested
 // root cannot be produced silently.
 //
+// `--root` repeats because an origin holds every stack-published release group, not one.
+// Their documents are disjoint and keep their identifier paths, but each group authors a
+// `manifest.json` of its own, so the per-group root files are namespaced under the group
+// that wrote them (`sealed-platform-v1/manifest.json`). Nothing is served at the bundle
+// root: a root manifest would be one group's inventory answering for both.
+//
 // The one generated file pins what a static host would otherwise guess: the media
 // type of each document (extensionless task and facts profiles have no extension for
 // a host to infer from), a digest-derived strong ETag, and cache lifetime. Documents
-// are immutable by the identifier law, so they carry `immutable`; the root manifest
+// are immutable by the identifier law, so they carry `immutable`; each group manifest
 // and its signature sidecar are the mutable pointer to an immutable set, so they
-// carry `must-revalidate` -- an immutably cached root manifest would make every
+// carry `must-revalidate` -- an immutably cached group manifest would make every
 // later live-host verification compare stale bytes.
 //
 // Pure logic (route-path validation, entity tags, the configuration object and its
@@ -191,7 +197,31 @@ function prepareOutputRoot(outDir) {
   return outputRoot;
 }
 
-export function buildProfileHostBundle({ profileRoot, outDir }) {
+/**
+ * The one path segment a release group's root files live under in the deploy bundle.
+ *
+ * Two stack-published groups deploy to the same origin with disjoint documents but each
+ * authors its own `manifest.json`; at the bundle root the second write would clobber the
+ * first, and the live-host gate would byte-compare one group's inventory against the
+ * other's. Namespacing the root files -- and only the root files -- is what makes one
+ * origin hold both. Documents keep their identifier paths, which is the identifier law.
+ */
+function releaseGroupNamespace(manifest, label) {
+  const namespace = manifest.releaseGroup;
+  if (typeof namespace !== 'string' || namespace === '') {
+    throw new Error(`profile root ${MANIFEST_FILE_NAME} names no release group: ${label}`);
+  }
+  assertLiteralRoutePath(namespace, 'release group');
+  // `assertLiteralRoutePath` accepts `a/b`; a namespace that is two segments would put one
+  // group's manifest inside another group's directory shape.
+  if (namespace.includes('/')) {
+    throw new Error(`release group must be a single path segment: ${namespace}`);
+  }
+  return namespace;
+}
+
+/** Read and validate one attested profile root into its bundle contribution. */
+function readProfileRoot(profileRoot, claimedBy) {
   const root = resolve(profileRoot);
   const manifestPath = join(root, MANIFEST_FILE_NAME);
   if (!existsSync(manifestPath)) throw new Error(`profile root has no ${MANIFEST_FILE_NAME}: ${profileRoot}`);
@@ -202,9 +232,11 @@ export function buildProfileHostBundle({ profileRoot, outDir }) {
     throw new Error(`profile root ${MANIFEST_FILE_NAME} is not valid JSON: ${error?.message ?? String(error)}`);
   }
   if (!Array.isArray(manifest.documents)) throw new Error('profile manifest documents must be an array');
+  const namespace = releaseGroupNamespace(manifest, profileRoot);
 
   const rootDocuments = [{
-    path: MANIFEST_FILE_NAME,
+    sourcePath: MANIFEST_FILE_NAME,
+    path: `${namespace}/${MANIFEST_FILE_NAME}`,
     mediaType: MANIFEST_MEDIA_TYPE,
     sha256: sha256Of(readFileSync(manifestPath)),
     cacheControl: REVALIDATE_CACHE_CONTROL,
@@ -212,7 +244,8 @@ export function buildProfileHostBundle({ profileRoot, outDir }) {
   const signaturePath = join(root, SIGNATURE_FILE_NAME);
   if (existsSync(signaturePath)) {
     rootDocuments.push({
-      path: SIGNATURE_FILE_NAME,
+      sourcePath: SIGNATURE_FILE_NAME,
+      path: `${namespace}/${SIGNATURE_FILE_NAME}`,
       mediaType: MANIFEST_MEDIA_TYPE,
       sha256: sha256Of(readFileSync(signaturePath)),
       cacheControl: REVALIDATE_CACHE_CONTROL,
@@ -220,34 +253,91 @@ export function buildProfileHostBundle({ profileRoot, outDir }) {
   }
 
   // Exactly the attested set: no undeclared file rides along, no declared file is missing.
+  // The walk is over the attested root, so it compares against source names.
   const declared = new Set([
-    ...rootDocuments.map(({ path }) => path),
+    ...rootDocuments.map(({ sourcePath }) => sourcePath),
     ...manifest.documents.map(({ path }) => path),
   ]);
   for (const path of walkFiles(root)) {
     if (!declared.has(path)) throw new Error(`profile root contains undeclared file ${path}`);
   }
 
-  const config = hostConfig({ documents: manifest.documents, rootDocuments });
+  // Groups sharing an origin must not also share a document path: the two bytes would be
+  // one route, and whichever copy landed last would silently be the published one.
+  for (const { path } of manifest.documents) {
+    const owner = claimedBy.get(path);
+    if (owner !== undefined) {
+      throw new Error(`document path ${path} is claimed by both release groups ${owner} and ${namespace}`);
+    }
+    claimedBy.set(path, namespace);
+  }
+
+  return {
+    namespace,
+    rootDocuments,
+    documents: manifest.documents,
+    copies: [
+      ...rootDocuments.map(({ sourcePath, path }) => ({
+        sourceRoot: root,
+        sourcePath,
+        targetPath: path,
+        sha256: null,
+      })),
+      ...manifest.documents.map(({ path, sha256 }) => ({
+        sourceRoot: root,
+        sourcePath: path,
+        targetPath: path,
+        sha256,
+      })),
+    ],
+  };
+}
+
+export function buildProfileHostBundle({
+  profileRoot,
+  profileRoots = profileRoot ? [profileRoot] : [],
+  outDir,
+}) {
+  if (!Array.isArray(profileRoots) || profileRoots.length === 0) {
+    throw new Error('at least one attested profile root is required');
+  }
+  const namespaces = new Set();
+  const claimedBy = new Map();
+  const rootDocuments = [];
+  const documents = [];
+  const copies = [];
+  for (const each of profileRoots) {
+    const parsed = readProfileRoot(each, claimedBy);
+    if (namespaces.has(parsed.namespace)) {
+      throw new Error(`release group ${parsed.namespace} is bundled twice`);
+    }
+    namespaces.add(parsed.namespace);
+    rootDocuments.push(...parsed.rootDocuments);
+    documents.push(...parsed.documents);
+    copies.push(...parsed.copies);
+  }
+  // Sorted so the bundle does not depend on the order the roots were named in.
+  rootDocuments.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+
+  const config = hostConfig({ documents, rootDocuments });
   const outputRoot = prepareOutputRoot(outDir);
 
-  const copies = [
-    ...rootDocuments.map(({ path }) => ({ path, sha256: null })),
-    ...manifest.documents.map(({ path, sha256 }) => ({ path, sha256 })),
-  ];
-  for (const { path, sha256 } of copies) {
-    assertLiteralRoutePath(path);
-    const source = resolve(root, ...path.split('/'));
-    const target = resolve(outputRoot, ...path.split('/'));
-    if (!insideRoot(source, root) || !insideRoot(target, outputRoot)) {
-      throw new Error(`served path escapes its root: ${path}`);
+  for (const { sourceRoot, sourcePath, targetPath, sha256 } of copies) {
+    assertLiteralRoutePath(sourcePath);
+    assertLiteralRoutePath(targetPath);
+    const source = resolve(sourceRoot, ...sourcePath.split('/'));
+    const target = resolve(outputRoot, ...targetPath.split('/'));
+    if (!insideRoot(source, sourceRoot) || !insideRoot(target, outputRoot)) {
+      throw new Error(`served path escapes its root: ${targetPath}`);
     }
     if (!existsSync(source) || !lstatSync(source).isFile()) {
-      throw new Error(`profile root is missing declared document ${path}`);
+      throw new Error(`profile root is missing declared document ${sourcePath}`);
     }
     if (sha256 !== null) {
       const actual = sha256Of(readFileSync(source));
-      if (actual !== sha256) throw new Error(`profile root document digest does not match the manifest for ${path}`);
+      if (actual !== sha256) {
+        throw new Error(`profile root document digest does not match the manifest for ${sourcePath}`);
+      }
     }
     mkdirSync(dirname(target), { recursive: true });
     copyFileSync(source, target);
@@ -255,38 +345,44 @@ export function buildProfileHostBundle({ profileRoot, outDir }) {
   writeFileSync(join(outputRoot, HOST_CONFIG_FILE_NAME), hostConfigBytes(config), 'utf8');
 
   return {
-    documentCount: manifest.documents.length,
+    documentCount: documents.length,
     fileCount: copies.length,
     routeCount: config.headers.length,
     warnings: routeWarnings(config.headers.length),
+    groups: [...namespaces].sort(),
   };
 }
 
 // --- CLI entry (guarded so `import` is side-effect-free) ---------------------
 
-function parseArgs(argv) {
-  const fields = new Map([['--root', 'profileRoot'], ['--out', 'outDir']]);
-  const parsed = {};
+// `--root` repeats: every release group that shares an origin is merged into one deploy
+// directory, because one deploy is what a host serves.
+export function parseArgs(argv) {
+  const parsed = { profileRoots: [] };
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index];
     const value = argv[index + 1];
-    const field = fields.get(flag);
-    if (!field) throw new Error(`unknown argument: ${flag}`);
+    if (flag !== '--root' && flag !== '--out') throw new Error(`unknown argument: ${flag}`);
     if (value === undefined) throw new Error(`${flag} requires a value`);
-    parsed[field] = value;
+    if (flag === '--root') {
+      parsed.profileRoots.push(value);
+    } else {
+      if (parsed.outDir !== undefined) throw new Error('--out <deploy directory> may only be given once');
+      parsed.outDir = value;
+    }
   }
-  if (!parsed.profileRoot) throw new Error('--root <attested profile root> is required');
+  if (parsed.profileRoots.length === 0) throw new Error('--root <attested profile root> is required');
   if (!parsed.outDir) throw new Error('--out <deploy directory> is required');
   return parsed;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const { profileRoot, outDir } = parseArgs(process.argv.slice(2));
-    const result = buildProfileHostBundle({ profileRoot, outDir });
+    const { profileRoots, outDir } = parseArgs(process.argv.slice(2));
+    const result = buildProfileHostBundle({ profileRoots, outDir });
     for (const warning of result.warnings) console.warn(`warning: ${warning}`);
     console.log(
-      `wrote ${result.fileCount} attested files and ${HOST_CONFIG_FILE_NAME} (${result.routeCount} routes) to ${outDir}`,
+      `wrote ${result.fileCount} attested files for ${result.groups.join(', ')} and ${HOST_CONFIG_FILE_NAME} (${result.routeCount} routes) to ${outDir}`,
     );
   } catch (error) {
     console.error(error?.message ?? String(error));
