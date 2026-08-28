@@ -184,6 +184,10 @@ export interface MaterializedBundle {
   readonly bundleDir: string;
   readonly identity: string;
   readonly files: readonly string[];
+  /** True when the digest-addressed target already held these exact bytes and was adopted rather
+   * than created by this call. A caller that cleans up after a refused publication must remove only
+   * what it created — an adopted directory belongs to whoever published it first. */
+  readonly adopted: boolean;
 }
 
 function addRole(
@@ -1088,10 +1092,10 @@ export function materializePublicBundle(
         refuse("conflict", "bundle.target", "the digest-addressed publication target is occupied by different bytes; refusing to overwrite it");
       }
       deps.afterRename?.();
-      return { bundleDir: target, identity: existing.identity, files: existing.manifest.files.map((file) => file.path) };
+      return { bundleDir: target, identity: existing.identity, files: existing.manifest.files.map((file) => file.path), adopted: true };
     }
     deps.afterRename?.();
-    return { bundleDir: target, identity: built.identity, files: built.manifest.files.map((file) => file.path) };
+    return { bundleDir: target, identity: built.identity, files: built.manifest.files.map((file) => file.path), adopted: false };
   } finally {
     if (!renamed && existsSync(stage)) rmSync(stage, { recursive: true, force: true });
   }
