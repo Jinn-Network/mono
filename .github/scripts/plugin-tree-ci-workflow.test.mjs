@@ -13,6 +13,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
+import { citedPrecedents } from './workflow-precedent-citations.test.mjs';
+
 const root = resolve(import.meta.dirname, '../..');
 const workflow = readFileSync(
   resolve(root, '.github/workflows/plugin-tree-ci.yml'),
@@ -91,22 +93,19 @@ test('the runtime distribution is restored straight into its package', () => {
 // The restore step's comment is where the by-name shape is explained and its
 // precedent cited. The repository-wide gate in
 // `workflow-precedent-citations.test.mjs` checks that every cited workflow
-// still restores by name; this keeps the citation itself from simply
-// disappearing from this workflow.
+// still restores by name; this keeps the `# Precedent:` marker line it reads
+// from simply disappearing from this workflow. The guard calls that gate's own
+// `citedPrecedents` rather than re-deriving the citation shape, so the two
+// halves of the invariant cannot drift apart: a marker deleted, misspelled, or
+// moved out of the attached comment block fails here instead of silently
+// leaving the repository-wide gate with nothing to enforce.
 test('the restore step carries a comment citing a precedent workflow', () => {
   const lines = workflow.split('\n');
   const restoreStep = lines.findIndex((line) => line.includes('- name: Restore Plugin Runtime distribution'));
   assert.ok(restoreStep > 0, 'the runtime restore step must exist');
 
-  const comment = [];
-  for (let cursor = restoreStep - 1; cursor >= 0; cursor -= 1) {
-    if (!/^\s*#/.test(lines[cursor])) break;
-    comment.unshift(lines[cursor]);
-  }
-  assert.ok(comment.length > 0, 'the restore step must carry its explanatory comment');
-
-  const cited = [...new Set(comment.join('\n').match(/[\w-]+\.ya?ml/g) ?? [])].filter(
-    (name) => name !== 'plugin-tree-ci.yml',
+  assert.ok(
+    citedPrecedents(workflow, 'plugin-tree-ci.yml').length > 0,
+    'the restore step must carry a `# Precedent: <workflow>.yml` marker in its attached comment',
   );
-  assert.ok(cited.length > 0, 'the comment must cite at least one precedent workflow');
 });

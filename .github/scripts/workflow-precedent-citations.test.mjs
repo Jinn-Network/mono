@@ -123,7 +123,7 @@ test('every workflow cited as by-name precedent actually restores by name', () =
 
 test('a citation is only read from the comment attached to a restore step', () => {
   const source = [
-    '      # Unrelated prose mentioning marketplace-ci.yml.',
+    '      # Precedent: marketplace-ci.yml.',
     '      - name: Something else',
     '        run: echo hi',
     '      # Precedent: plugin-tree-ci.yml.',
@@ -137,6 +137,20 @@ test('a citation is only read from the comment attached to a restore step', () =
 
   assert.deepEqual(citedPrecedents(source, 'self-ci.yml'), ['plugin-tree-ci.yml']);
   assert.deepEqual(restoredArtifactNames(source), ['some-dist']);
+});
+
+test('a marker separated from the step opener by a blank line is not read', () => {
+  const source = [
+    '      # Precedent: marketplace-ci.yml.',
+    '',
+    '      - name: Restore a distribution',
+    '        uses: actions/download-artifact@v8',
+    '        with:',
+    '          name: some-dist',
+    '',
+  ].join('\n');
+
+  assert.deepEqual(citedPrecedents(source, 'self-ci.yml'), []);
 });
 
 test('a citation pointing at a workflow that restores nothing is reported', () => {
