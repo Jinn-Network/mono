@@ -283,6 +283,24 @@ def test_controlled_input_bounds_match_the_runtime_that_enforces_them():
     assert tuple(re.findall(r'"([^"]+)"', roles.group(1))) == feed.CONTROLLED_INPUT_ROLES
 
 
+def test_field_length_bounds_match_the_runtime_that_enforces_them():
+    """An over-long field refuses the whole feed there, so drift here loses whole sessions."""
+    source = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "runtime"
+        / "src"
+        / "capture"
+        / "feed.ts"
+    ).read_text(encoding="utf-8")
+
+    for schema, expected in feed.FIELD_MAX_LENGTHS.items():
+        block = re.search(rf"const {schema} = z\.strictObject\(\{{(.*?)\n\}}\)", source, re.S)
+        assert block, schema
+        # Both directions: a bounded field added on either side and not the other is drift.
+        found = dict(re.findall(r"(\w+): nonBlank\((\d+)\)", block.group(1)))
+        assert {name: int(value) for name, value in found.items()} == expected, schema
+
+
 def test_derive_model_service_names_a_deployment_rather_than_a_label():
     assert feed.derive_model_service("anthropic", "claude-opus-5") == {
         "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
@@ -457,3 +475,68 @@ def test_repository_state_drops_an_iri_the_runtime_would_refuse_whole(feed_path,
         repository=repository, base_commit="a" * 40, base_tree="b" * 40
     )
     assert feed_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize(
+    "repository",
+    [
+        # Both match the IRI shape and both throw in the runtime's `new URL()`, which then
+        # refuses every event in the session rather than this one.
+        "https://github.com:99999999/Jinn-Network/mono",
+        "https://ex[ample.com/Jinn-Network/mono",
+        "https:///Jinn-Network/mono",
+    ],
+)
+def test_repository_state_drops_an_iri_the_runtime_cannot_parse(feed_path, repository):
+    writer = feed.SessionFeed(feed_path)
+    writer.repository_state(repository=repository, base_commit="a" * 40, base_tree="b" * 40)
+    assert feed_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize("field", ["branch", "target_base"])
+def test_repository_state_keeps_the_binding_when_context_is_over_long(feed_path, field):
+    """A branch name longer than the bound is reachable; it must not cost the commit and tree."""
+    writer = feed.SessionFeed(feed_path)
+    writer.repository_state(
+        repository="https://github.com/Jinn-Network/mono",
+        base_commit="a" * 40,
+        base_tree="b" * 40,
+        **{field: "x" * 257},
+    )
+    event = read_lines(feed_path)[0]
+    assert event["baseCommit"] == "a" * 40
+    assert "branch" not in event and "targetBase" not in event
+
+
+@pytest.mark.parametrize(
+    "over",
+    [{"name": "n" * 257}, {"media_type": "text/" + "x" * 124}],
+)
+def test_controlled_input_drops_an_over_long_required_field(feed_path, over):
+    writer = feed.SessionFeed(feed_path)
+    writer.controlled_input(
+        **{"role": "skill", "name": "s.md", "media_type": "text/markdown", **over},
+        content=b"x",
+    )
+    assert feed_path.read_text(encoding="utf-8") == ""
+
+
+def test_open_session_keeps_the_service_identity_when_a_label_is_over_long(feed_path):
+    """The descriptive fields are optional there, so an over-long one costs only itself."""
+    writer = feed.SessionFeed(feed_path)
+    writer.open_session(
+        session_id="s-1",
+        host_name="hermes-agent",
+        host_version="1.2.3",
+        model_provider="anthropic",
+        model_name="claude-opus-5",
+        model_service={
+            "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+            "name": "n" * 257,
+            "version": "v" * 129,
+            "deployment": "d" * 257,
+        },
+    )
+    assert read_lines(feed_path)[0]["model"]["service"] == {
+        "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+    }

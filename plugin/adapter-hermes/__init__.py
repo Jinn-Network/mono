@@ -53,6 +53,10 @@ _URL_REMOTE = re.compile(
     r"(?P<path>/.*?)(?:\.git)?\Z"
 )
 _NETWORK_SCHEMES = ("https", "http", "git", "ssh")
+#: `_URL_REMOTE`'s userinfo group backtracks to the last `@`, which is quadratic on a remote with
+#: many of them. No real remote approaches this, and the read happens at session start rather than
+#: under `_GIT_BUDGET_S`, so the shape is refused by length before the matcher ever sees it.
+_MAX_REMOTE_LENGTH = 2048
 
 _lock = threading.Lock()
 _sessions: Dict[str, "_SessionState"] = {}
@@ -191,11 +195,16 @@ def _repository_iri(remote: str) -> str:
       from it, so it is stripped here — at the source, which is the discipline this capture
       path is supposed to hold rather than leave to a later scrub.
     * **Local remotes.** `file:///Users/<name>/…` is a well-formed IRI naming a filesystem path,
-      usually with a username in it, and it resolves for nobody.
+      usually with a username in it, and it resolves for nobody. An `ssh_config` `Host` alias —
+      `git@myhost:owner/repo.git` — is the same case wearing a plausible hostname: it names a
+      repository only on the machine holding that alias, and it does not join with the identity
+      every other operator seals for the same repository. `_is_repository_host` refuses both.
+
+    An absent field is what the record accepts gracefully; a confident wrong one is not.
     """
     remote = (remote or "").strip()
     # Whitespace anywhere makes it not an IRI, and the runtime refuses the whole feed for one.
-    if not remote or re.search(r"\s", remote):
+    if not remote or len(remote) > _MAX_REMOTE_LENGTH or re.search(r"\s", remote):
         return ""
 
     url = _URL_REMOTE.match(remote)
@@ -210,14 +219,52 @@ def _repository_iri(remote: str) -> str:
         # not the web endpoint. Keep a port only where the scheme it belongs to is kept.
         observed = url.group("scheme").lower()
         scheme = "https" if observed == "ssh" else observed
+        host = _is_repository_host(url.group("host"))
+        if not host:
+            return ""
         port = f":{url.group('port')}" if url.group("port") and scheme == observed else ""
-        return f"{scheme}://{url.group('host')}{port}{url.group('path')}"
+        return _network_iri(f"{scheme}://{host}{port}{url.group('path')}")
 
     scp = _SCP_REMOTE.match(remote)
     if scp is not None:
-        return f"https://{scp.group('host')}/{scp.group('path')}"
+        host = _is_repository_host(scp.group("host"))
+        # `host` binds after the first `@` and `path` admits one, so a hand-written
+        # `git@x-access-token:ghs_…@github.com/o/r` would otherwise carry its token through this
+        # branch. The URL branch drops userinfo at the last `@`; this one has no userinfo to drop,
+        # so a surviving `@` means the remote is not the shape this branch claims to read.
+        if not host or "@" in scp.group("path"):
+            logger.debug("jinn: remote %r is not a network repository", remote)
+            return ""
+        return _network_iri(f"https://{host}/{scp.group('path')}")
 
     logger.debug("jinn: remote %r is not a network repository", remote)
+    return ""
+
+
+def _is_repository_host(host: str) -> str:
+    """The lowercased host when it can name a repository for anyone, "" when it names one for us.
+
+    Two rules, one reason. A host without a dot is a local alias — an `ssh_config` `Host` entry,
+    or `localhost` — and resolves for nobody else. A host is also case-insensitive, so
+    `GitHub.com` and `github.com` must not seal as two identities for one repository.
+    """
+    host = (host or "").lower()
+    if "." not in host or "@" in host:
+        logger.debug("jinn: remote host %r names no repository outside this machine", host)
+        return ""
+    return host
+
+
+def _network_iri(candidate: str) -> str:
+    """*candidate* when the runtime would accept it as an absolute IRI, "" otherwise.
+
+    The host and port groups above are permissive — `ex[ample.com`, or a port of any length — and
+    the runtime refuses the whole feed for one malformed IRI. This is the last gate before a
+    value assembled here reaches the writer.
+    """
+    if feed_module.absolute_iri(candidate):
+        return candidate
+    logger.debug("jinn: remote normalized to %r, which is not an absolute IRI", candidate)
     return ""
 
 
@@ -364,8 +411,6 @@ def _on_post_tool_call(
         return
     started = None
     if duration_ms:
-        import time
-
         started = time.time_ns() - int(duration_ms) * 1_000_000
     state.feed.tool_call(
         tool_name=tool_name,

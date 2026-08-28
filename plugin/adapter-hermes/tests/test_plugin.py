@@ -316,6 +316,21 @@ def test_an_unreadable_repository_costs_the_base_state_and_nothing_else(
         ("git://github.com/Jinn-Network/mono.git", "git://github.com/Jinn-Network/mono"),
         # A remote the runtime would refuse whole; the adapter must not write it.
         ("https://exa mple.com/x", ""),
+        # An ssh_config `Host` alias resolves only on the machine holding the alias, and would
+        # not join with the identity every other operator seals for the same repository.
+        ("git@ritsuJinn:Jinn-Network/mono.git", ""),
+        ("ssh://git@ritsuJinn/Jinn-Network/mono.git", ""),
+        ("https://localhost:8080/team/repo.git", ""),
+        # One repository must not seal as two identities because a host was spelled in caps.
+        ("HTTPS://GitHub.com/Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
+        ("git@GitHub.com:Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
+        # The scp branch has no userinfo to drop, so a surviving "@" is a credential, not a
+        # username: `user` binds to the first "@" while `path` happily admits the rest.
+        ("git@x-access-token:ghs_LIVETOKEN0123456789@github.com/example/repo", ""),
+        # Permissive host and port groups feed the writer; the runtime refuses the whole feed
+        # for either, so neither may leave this function.
+        ("https://ex[ample.com/example/repo", ""),
+        ("https://github.com:99999999/example/repo", ""),
     ],
 )
 def test_a_git_remote_becomes_an_absolute_iri(remote, expected):
@@ -323,12 +338,41 @@ def test_a_git_remote_becomes_an_absolute_iri(remote, expected):
     assert jinn._repository_iri(remote) == expected
 
 
-def test_observing_the_repository_reads_the_commit_and_tree_this_session_started_from():
-    observed = jinn._observe_repository_state(str(pathlib.Path(__file__).resolve().parent))
+def test_observing_the_repository_reads_the_commit_and_tree_this_session_started_from(tmp_path):
+    """A repository with a known remote, not this checkout's: an operator may hold an alias."""
+    run = lambda *args: subprocess.run(
+        ("git", "-C", str(tmp_path), *args), check=True, capture_output=True
+    )
+    run("init", "-q", "-b", "work")
+    run("config", "user.email", "t@example.com")
+    run("config", "user.name", "t")
+    run("config", "remote.origin.url", "git@github.com:Jinn-Network/mono.git")
+    (tmp_path / "f.txt").write_text("x", encoding="utf-8")
+    run("add", "f.txt")
+    run("commit", "-qm", "seed")
+
+    observed = jinn._observe_repository_state(str(tmp_path))
     assert observed is not None
     assert re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", observed["base_commit"])
     assert re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", observed["base_tree"])
-    assert observed["repository"].startswith("http")
+    assert observed["repository"] == "https://github.com/Jinn-Network/mono"
+    assert observed["branch"] == "work"
+
+
+def test_observing_a_repository_whose_remote_names_no_public_identity_reports_nothing(tmp_path):
+    """An alias-only remote costs the record; a confident wrong identity would cost more."""
+    run = lambda *args: subprocess.run(
+        ("git", "-C", str(tmp_path), *args), check=True, capture_output=True
+    )
+    run("init", "-q")
+    run("config", "user.email", "t@example.com")
+    run("config", "user.name", "t")
+    run("config", "remote.origin.url", "git@ritsuJinn:Jinn-Network/mono.git")
+    (tmp_path / "f.txt").write_text("x", encoding="utf-8")
+    run("add", "f.txt")
+    run("commit", "-qm", "seed")
+
+    assert jinn._observe_repository_state(str(tmp_path)) is None
 
 
 def test_observing_a_directory_that_is_not_a_repository_reports_nothing(tmp_path):

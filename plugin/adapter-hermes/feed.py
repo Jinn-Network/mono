@@ -25,6 +25,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
+from urllib.parse import urlsplit
 
 FEED_VERSION = 1
 
@@ -35,15 +36,53 @@ CONTROLLED_INPUT_MAX_COUNT = 32
 
 CONTROLLED_INPUT_ROLES = ("workflow", "skill", "prompt", "config")
 
+#: Per-field length maxima the runtime enforces, keyed by the schema in `feed.ts` that holds
+#: them. Held here for the same reason as the byte bounds above: the runtime refuses a malformed
+#: feed whole, so an over-long value written here would cost every event in the session rather
+#: than the one field that carries it. `test_field_length_bounds_match_the_runtime` reads the
+#: schemas and fails on drift in either direction.
+FIELD_MAX_LENGTHS = {
+    "RepositoryStateSchema": {"branch": 256, "targetBase": 256},
+    "ControlledInputSchema": {"name": 256, "mediaType": 128},
+    "ModelServiceSchema": {"name": 256, "version": 128, "deployment": 256},
+}
+
 #: The service IRI namespace the runtime's fixture already fixed. Deriving one here is what lets
 #: a hosted model be recorded as a deployment identity rather than a bare label.
 MODEL_SERVICE_IRI_PREFIX = "https://spec.jinn.network/services"
 
 _GIT_OBJECT_NAME = re.compile(r"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
-#: Matches the runtime's `isAbsoluteIri`, which rejects whitespace anywhere — not merely
-#: immediately after the scheme. A laxer check here writes a feed the runtime refuses whole.
+#: The shape half of the runtime's `isAbsoluteIri`: a scheme, and no whitespace anywhere — not
+#: merely immediately after the scheme. Shape alone is not the whole check; see `absolute_iri`.
 _ABSOLUTE_IRI = re.compile(r"\A[A-Za-z][A-Za-z0-9+.\-]*:\S+\Z")
+#: The schemes for which the WHATWG parser the runtime uses demands a host, so `https:///x`
+#: throws there while `urlsplit` accepts it. `file` is deliberately absent: it permits none.
+_HOST_REQUIRED_SCHEMES = ("http", "https", "ws", "wss", "ftp")
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
+
+
+def absolute_iri(value: Any) -> bool:
+    """Mirror the runtime's `isAbsoluteIri`, whose third condition is that `new URL()` succeeds.
+
+    Shape alone diverges: `https://github.com:99999999/o/r` and `https://ex[ample.com/o/r` both
+    match the regex and both throw in the runtime, which then refuses the whole feed. `urlsplit`
+    raises on the same two — an out-of-range port and an unclosed bracket — so parsing here is
+    what keeps a session from being lost to an event this writer could have dropped.
+    """
+    if not isinstance(value, str) or not _ABSOLUTE_IRI.match(value):
+        return False
+    try:
+        parts = urlsplit(value)
+        # Touch the port: it is parsed lazily, and an out-of-range one raises only on access.
+        parts.port
+    except ValueError:
+        return False
+    return not (parts.scheme.lower() in _HOST_REQUIRED_SCHEMES and not parts.hostname)
+
+
+def _too_long(value: str, schema: str, field: str) -> bool:
+    """True when *value* exceeds the maximum the runtime's *schema* enforces for *field*."""
+    return len(value) > FIELD_MAX_LENGTHS[schema][field]
 
 
 def _slug(value: str) -> str:
@@ -130,9 +169,15 @@ class SessionFeed:
                 if key in ("iri", "name", "version", "deployment", "providerIri")
                 and not _blank(value)
             }
+            # The descriptive fields are bounded and optional, so an over-long one costs itself
+            # rather than the identity it describes — and never the whole feed.
+            for field in ("name", "version", "deployment"):
+                if field in service and _too_long(service[field], "ModelServiceSchema", field):
+                    logger.debug("jinn: model service %s is longer than the runtime accepts", field)
+                    del service[field]
             # Without a well-formed IRI the runtime refuses the whole feed, so drop the identity
             # rather than the session. Same for a service that names itself as its own provider.
-            if _ABSOLUTE_IRI.match(service.get("iri", "")) and service.get(
+            if absolute_iri(service.get("iri", "")) and service.get(
                 "providerIri"
             ) != service.get("iri"):
                 model["service"] = service
@@ -167,7 +212,7 @@ class SessionFeed:
         Validated and skipped rather than written when it would be refused: the runtime rejects
         a malformed feed whole, so one bad event here would cost every event in the session.
         """
-        if not _ABSOLUTE_IRI.match(repository or ""):
+        if not absolute_iri(repository or ""):
             logger.debug("jinn: repository %r is not an absolute IRI", repository)
             return
         for name, value in (("baseCommit", base_commit), ("baseTree", base_tree)):
@@ -186,10 +231,16 @@ class SessionFeed:
             "baseTree": base_tree,
         }
         # A detached head reports the branch as "HEAD", which names nothing; omit it instead.
-        if not _blank(branch) and branch.strip() != "HEAD":
-            event["branch"] = branch.strip()
-        if not _blank(target_base):
-            event["targetBase"] = target_base.strip()
+        # Both are context, and both are bounded by the runtime: a branch name longer than the
+        # bound is reachable (Git accepts one), so an unbounded write here would refuse the feed
+        # and lose the commit and tree this event exists to carry. Omit the field, keep the event.
+        for key, value in (("branch", branch), ("targetBase", target_base)):
+            if _blank(value) or (key == "branch" and value.strip() == "HEAD"):
+                continue
+            if _too_long(value.strip(), "RepositoryStateSchema", key):
+                logger.debug("jinn: %s is longer than the runtime accepts; omitting it", key)
+                continue
+            event[key] = value.strip()
         self._append(event)
 
     def controlled_input(
@@ -214,15 +265,24 @@ class SessionFeed:
         if _blank(name) or _blank(media_type):
             logger.debug("jinn: controlled input %r has a blank name or media type", name)
             return
-        # Encode before the budget is spent, and before anything is written: a caller that hands
-        # us text instead of bytes must cost one dropped input, never an exception in a host hook.
+        # Both are required by the runtime and both are bounded there, so an over-long one costs
+        # this input rather than every event in the session.
+        if _too_long(name, "ControlledInputSchema", "name") or _too_long(
+            media_type, "ControlledInputSchema", "mediaType"
+        ):
+            logger.debug("jinn: controlled input %r has an over-long name or media type", name)
+            return
+        # Size first, so an oversized input is refused for the length it has rather than after
+        # allocating a third again as much to encode it.
         try:
+            if not content or len(content) > CONTROLLED_INPUT_MAX_BYTES:
+                logger.debug("jinn: controlled input %r has an unbindable size", name)
+                return
+            # A caller that hands us text instead of bytes must cost one dropped input, never an
+            # exception in a host hook.
             encoded = base64.b64encode(content).decode("ascii")
         except (TypeError, ValueError) as exc:
             logger.debug("jinn: controlled input %r is not bindable bytes: %s", name, exc)
-            return
-        if not content or len(content) > CONTROLLED_INPUT_MAX_BYTES:
-            logger.debug("jinn: controlled input %r has an unbindable size", name)
             return
         with self._lock:
             if self._controlled_inputs >= CONTROLLED_INPUT_MAX_COUNT:
