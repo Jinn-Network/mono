@@ -1004,6 +1004,27 @@ describe("portable public bundle", () => {
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
   }, 30_000);
 
+  test("a refusal after the bundle is materialized removes the bundle directory it staged", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    expect((await runReport(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    // Refuses after `materializePublicBundle` has already renamed the digest-addressed directory
+    // into place and before RunState names it — the window that used to strand a shippable-looking
+    // bundle directory from a publication the lifecycle never advanced (issue #3074).
+    const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
+      beforeRunState: () => { throw new Error("refused after materialization"); },
+    });
+    expect(refused.ok).toBe(false);
+    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
+      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
+      : []).toHaveLength(0);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
+    expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
+    const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
+    expect(retry.ok, JSON.stringify(retry)).toBe(true);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
+  }, 30_000);
+
   test("workspace tampering refuses before staging and leaves the reported draft unchanged", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);

@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
@@ -70,6 +71,7 @@ async function materializeAndVerifyBundle(
   benchmarkSha256: string,
   reportSelector: { readonly method: string; readonly version: string } | undefined,
   deps: RunPublishDeps,
+  created: string[],
 ): Promise<{ readonly identity: string; readonly relativePath: string; readonly checks: readonly PublicBundleVerificationCheck[] }> {
   const materialized = materializePublicBundle({
     workspaceDir: clockedContext.workspaceDir,
@@ -78,6 +80,9 @@ async function materializeAndVerifyBundle(
     runState,
     ...(reportSelector === undefined ? {} : { reportSelector }),
   }, deps);
+  // Recorded BEFORE verification, because a refusal from the verifier is exactly the case that used
+  // to strand a shippable-looking directory an operator could collect by path (issue #3074).
+  if (!materialized.adopted) created.push(materialized.bundleDir);
   const verified = await verifyPublicBundle(materialized.bundleDir);
   if (verified.format === "benchmark-product-public-bundle/5") {
     refuse("conflict", "bundle.json", "managed publication must materialize its frozen legacy bundle profile");
@@ -86,6 +91,21 @@ async function materializeAndVerifyBundle(
     refuse("record-integrity", "bundle.json", "materialized bundle identity changed before publication completed");
   }
   return { identity: materialized.identity, relativePath: relativeBundlePath(input.draftId, materialized.identity), checks: verified.checks };
+}
+
+/** Removes the bundle directories this invocation renamed into place, after it refused to publish
+ * them. A refused publication never advances the lifecycle, so leaving the directory behind hands an
+ * operator collecting bundles by path something that looks shippable and is not (issue #3074).
+ * Adopted directories are never removed — they belong to the publication that created them. Cleanup
+ * failure is swallowed: it must not replace the refusal the caller needs to see. */
+function removeRefusedBundles(bundleDirs: readonly string[]): void {
+  for (const bundleDir of bundleDirs) {
+    try {
+      rmSync(bundleDir, { recursive: true, force: true });
+    } catch {
+      // Best effort.
+    }
+  }
 }
 
 /** Gated local immutable publication. The lifecycle transition is deliberately the final write. */
@@ -193,81 +213,92 @@ export function runPublish(
       // independently; the bundle FORMAT is derived per Report from its own method
       // (`bundle/materialize.ts`), so a real multi-method publish can legitimately emit bundles of
       // different formats from the one Run/Matrix.
-      const canonical = await materializeAndVerifyBundle(clockedContext, input, runState, document.spec.taskSet.benchmarkSha256, undefined, deps);
-      const additional: AdditionalRunPublishResult[] = [];
-      for (const entry of runState.additionalReports ?? []) {
-        const selector = { method: entry.method, version: entry.version };
-        const materializedEntry = await materializeAndVerifyBundle(clockedContext, input, runState, document.spec.taskSet.benchmarkSha256, selector, deps);
-        additional.push({
-          method: entry.method,
-          version: entry.version,
-          bundleIdentity: materializedEntry.identity,
-          bundleRelativePath: materializedEntry.relativePath,
-          checks: materializedEntry.checks,
-        });
-      }
-
-      const publication = await acquirePublicationLock(clockedContext.workspaceDir, input.draftId);
+      //
+      // Every directory below is unreferenced until `writeRunState` names it. Any refusal before
+      // that point removes them again (issue #3074).
+      const created: string[] = [];
+      let durable = false;
       try {
-        const latestDocument = readDraftDocument(clockedContext.workspaceDir, input.draftId);
-        const latestState = requireRunState(clockedContext.workspaceDir, input.draftId);
-        if (latestDocument.state !== "reported" && latestDocument.state !== "published-bundle") {
-          refuse("illegal-transition", `drafts.${input.draftId}.state`, `draft changed to ${latestDocument.state} during publication`);
+        const canonical = await materializeAndVerifyBundle(clockedContext, input, runState, document.spec.taskSet.benchmarkSha256, undefined, deps, created);
+        const additional: AdditionalRunPublishResult[] = [];
+        for (const entry of runState.additionalReports ?? []) {
+          const selector = { method: entry.method, version: entry.version };
+          const materializedEntry = await materializeAndVerifyBundle(clockedContext, input, runState, document.spec.taskSet.benchmarkSha256, selector, deps, created);
+          additional.push({
+            method: entry.method,
+            version: entry.version,
+            bundleIdentity: materializedEntry.identity,
+            bundleRelativePath: materializedEntry.relativePath,
+            checks: materializedEntry.checks,
+          });
         }
-        if (
-          latestState.bundleIdentity !== undefined
-          && (latestState.bundleIdentity !== canonical.identity || latestState.bundleRelativePath !== canonical.relativePath)
-        ) {
-          refuse("conflict", "bundle.target", "RunState already names a different immutable public bundle");
-        }
-        for (const entry of additional) {
-          const existing = (latestState.additionalBundles ?? []).find((candidate) => candidate.method === entry.method && candidate.version === entry.version);
-          if (existing !== undefined && (existing.bundleIdentity !== entry.bundleIdentity || existing.bundleRelativePath !== entry.bundleRelativePath)) {
-            refuse("conflict", "bundle.target", `RunState already names a different immutable public bundle for "${entry.method}@${entry.version}"`);
+
+        const publication = await acquirePublicationLock(clockedContext.workspaceDir, input.draftId);
+        try {
+          const latestDocument = readDraftDocument(clockedContext.workspaceDir, input.draftId);
+          const latestState = requireRunState(clockedContext.workspaceDir, input.draftId);
+          if (latestDocument.state !== "reported" && latestDocument.state !== "published-bundle") {
+            refuse("illegal-transition", `drafts.${input.draftId}.state`, `draft changed to ${latestDocument.state} during publication`);
           }
+          if (
+            latestState.bundleIdentity !== undefined
+            && (latestState.bundleIdentity !== canonical.identity || latestState.bundleRelativePath !== canonical.relativePath)
+          ) {
+            refuse("conflict", "bundle.target", "RunState already names a different immutable public bundle");
+          }
+          for (const entry of additional) {
+            const existing = (latestState.additionalBundles ?? []).find((candidate) => candidate.method === entry.method && candidate.version === entry.version);
+            if (existing !== undefined && (existing.bundleIdentity !== entry.bundleIdentity || existing.bundleRelativePath !== entry.bundleRelativePath)) {
+              refuse("conflict", "bundle.target", `RunState already names a different immutable public bundle for "${entry.method}@${entry.version}"`);
+            }
+          }
+          const publishedAt = latestDocument.state === "published-bundle"
+            ? latestDocument.updatedAt
+            : (latestState.publishedAt ?? at);
+          await deps.beforeRunState?.();
+          writeRunState(clockedContext.workspaceDir, input.draftId, {
+            ...latestState,
+            bundleIdentity: canonical.identity,
+            bundleRelativePath: canonical.relativePath,
+            bundleChecks: [...canonical.checks],
+            publishedAt,
+            ...(additional.length === 0
+              ? {}
+              : {
+                  additionalBundles: additional.map((entry) => ({
+                    method: entry.method,
+                    version: entry.version,
+                    bundleIdentity: entry.bundleIdentity,
+                    bundleRelativePath: entry.bundleRelativePath,
+                    bundleChecks: [...entry.checks],
+                  })),
+                }),
+          });
+          durable = true;
+          await deps.afterRunState?.();
+          await deps.beforeTransition?.();
+          let draft: DraftDocument;
+          if (latestDocument.state === "reported") {
+            const transitioned = transition("reported", "publish");
+            if (!transitioned.ok) refuse("illegal-transition", `drafts.${input.draftId}.state`, transitioned.error.detail);
+            draft = { ...latestDocument, state: transitioned.state, updatedAt: publishedAt };
+            atomicWriteFileSync(draftPath(clockedContext.workspaceDir, input.draftId), JSON.stringify(draft, null, 2));
+          } else {
+            draft = latestDocument;
+          }
+          return {
+            draft,
+            bundleIdentity: canonical.identity,
+            bundleRelativePath: canonical.relativePath,
+            checks: canonical.checks,
+            ...(additional.length === 0 ? {} : { additionalBundles: additional }),
+          };
+        } finally {
+          publication.release();
         }
-        const publishedAt = latestDocument.state === "published-bundle"
-          ? latestDocument.updatedAt
-          : (latestState.publishedAt ?? at);
-        await deps.beforeRunState?.();
-        writeRunState(clockedContext.workspaceDir, input.draftId, {
-          ...latestState,
-          bundleIdentity: canonical.identity,
-          bundleRelativePath: canonical.relativePath,
-          bundleChecks: [...canonical.checks],
-          publishedAt,
-          ...(additional.length === 0
-            ? {}
-            : {
-                additionalBundles: additional.map((entry) => ({
-                  method: entry.method,
-                  version: entry.version,
-                  bundleIdentity: entry.bundleIdentity,
-                  bundleRelativePath: entry.bundleRelativePath,
-                  bundleChecks: [...entry.checks],
-                })),
-              }),
-        });
-        await deps.afterRunState?.();
-        await deps.beforeTransition?.();
-        let draft: DraftDocument;
-        if (latestDocument.state === "reported") {
-          const transitioned = transition("reported", "publish");
-          if (!transitioned.ok) refuse("illegal-transition", `drafts.${input.draftId}.state`, transitioned.error.detail);
-          draft = { ...latestDocument, state: transitioned.state, updatedAt: publishedAt };
-          atomicWriteFileSync(draftPath(clockedContext.workspaceDir, input.draftId), JSON.stringify(draft, null, 2));
-        } else {
-          draft = latestDocument;
-        }
-        return {
-          draft,
-          bundleIdentity: canonical.identity,
-          bundleRelativePath: canonical.relativePath,
-          checks: canonical.checks,
-          ...(additional.length === 0 ? {} : { additionalBundles: additional }),
-        };
-      } finally {
-        publication.release();
+      } catch (cause) {
+        if (!durable) removeRefusedBundles(created);
+        throw cause;
       }
     },
   });
