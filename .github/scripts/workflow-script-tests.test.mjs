@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -52,6 +53,109 @@ export function collectReferencedScriptTests(workflowsRoot = workflowsDir) {
 // with one of these reads manifests mid-rewrite and fails on truncated or
 // canary-versioned JSON. Each must own its invocation.
 const LIVE_TREE_MUTATING_TESTS = new Set(['build-prepublication-bundle.test.mjs']);
+
+// Fixture directories a suite creates *inside the checked-out tree* rather than in the OS
+// tmpdir. `node --test` runs a batch in parallel, so while one of these exists a sibling suite
+// walking the checkout sees a path that `git ls-files --cached --others --exclude-standard`
+// can never return. That race has fired twice: run 32982011618 (evidence-package-inventory)
+// and issue #3148 (fixed by PR #3175). Both were repaired reader-side, and both repairs only
+// worked because the transient directory happened to be dot-prefixed and gitignored.
+//
+// The invariant is therefore enforced here rather than left to luck. A suite that creates a
+// directory under the repo root must declare it below, and every declared prefix must be both
+// dot-prefixed (so dot-skipping walkers never descend into it) and matched by .gitignore (so
+// the git-inventory comparison never sees it). A suite that cannot satisfy both must instead
+// own its `node --test` invocation via LIVE_TREE_MUTATING_TESTS above.
+//
+// Paths are repo-root-relative prefixes; mkdtemp's random suffix is appended by the sample.
+/** @type {Record<string, string[]>} */
+const LIVE_TREE_FIXTURES = {
+  'observation-reader-gate-boundary.test.mjs': ['.github/scripts/.tmp-observation-reader-guard-'],
+};
+
+const FIXTURE_CREATING_CALLS = ['mkdtempSync', 'mkdirSync'];
+
+/**
+ * A copy of `source` with the interior of every string literal, and every comment, replaced by a
+ * neutral filler of the same length. Offsets are preserved, so a match found here indexes the
+ * original text. Scanning the raw source instead makes `\broot\b` fire inside unrelated content
+ * such as `'jinn-information-world-root-closure-'` or a synthetic fixture source in this file.
+ */
+export function maskLiterals(source) {
+  const out = [...source];
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (char === '/' && (next === '/' || next === '*')) {
+      const end = next === '/'
+        ? (source.indexOf('\n', index) === -1 ? source.length : source.indexOf('\n', index))
+        : (source.indexOf('*/', index + 2) === -1 ? source.length : source.indexOf('*/', index + 2) + 2);
+      for (let cursor = index; cursor < end; cursor += 1) if (out[cursor] !== '\n') out[cursor] = ' ';
+      index = end - 1;
+      continue;
+    }
+    if (char !== "'" && char !== '"' && char !== '`') continue;
+    let cursor = index + 1;
+    for (; cursor < source.length; cursor += 1) {
+      if (source[cursor] === '\\') { cursor += 1; continue; }
+      if (source[cursor] === char) break;
+      if (out[cursor] !== '\n') out[cursor] = 'x';
+    }
+    index = cursor;
+  }
+  return out.join('');
+}
+
+/** Reads the balanced-parenthesis argument text of the call opening at `open`. */
+function callArgumentText(source, open) {
+  let depth = 0;
+  for (let index = open; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '(') depth += 1;
+    else if (char === ')') {
+      depth -= 1;
+      if (depth === 0) return source.slice(open + 1, index);
+    }
+  }
+  return source.slice(open + 1);
+}
+
+/**
+ * Identifiers bound at module scope to the repository root. A `root` bound inside a helper is
+ * almost always a tmpdir fixture root; only the module-level `resolve(import.meta.dirname, ...)`
+ * form reaches into the live checkout.
+ */
+export function findRepoRootBindings(source) {
+  return [...maskLiterals(source).matchAll(/^const\s+([A-Za-z_$][\w$]*)\s*=\s*resolve\(\s*import\.meta\.dirname/gmu)]
+    .map((match) => match[1]);
+}
+
+/** Calls that create a directory under the repository root, with their literal path segments. */
+export function findInCheckoutFixtureCalls(source) {
+  const bindings = findRepoRootBindings(source);
+  if (bindings.length === 0) return [];
+  const rootReference = new RegExp(`\\b(?:${bindings.join('|')})\\b`, 'u');
+  const masked = maskLiterals(source);
+  const calls = [];
+  for (const name of FIXTURE_CREATING_CALLS) {
+    for (const match of masked.matchAll(new RegExp(`\\b${name}\\(`, 'gu'))) {
+      const open = match.index + name.length;
+      if (!rootReference.test(callArgumentText(masked, open))) continue;
+      const args = callArgumentText(source, open);
+      calls.push({
+        call: name,
+        segments: [...args.matchAll(/'([^']*)'|"([^"]*)"/gu)].map((literal) => literal[1] ?? literal[2]),
+      });
+    }
+  }
+  return calls;
+}
+
+/** Suites that create at least one directory under the repository root. */
+export function findLiveTreeFixtureSuites(scriptsRoot = scriptsDir) {
+  return listScriptTests(scriptsRoot)
+    .filter((name) => findInCheckoutFixtureCalls(readFileSync(join(scriptsRoot, name), 'utf8')).length > 0);
+}
 
 export function collectTestInvocations(workflowsRoot = workflowsDir) {
   const invocations = [];
@@ -120,4 +224,82 @@ test('collectTestInvocations reads the platform-release-surface lists', () => {
     lists.some((files) => files.length === 1 && LIVE_TREE_MUTATING_TESTS.has(files[0])),
     'expected the live-tree-mutating suite to own an invocation',
   );
+});
+
+test('every suite creating a fixture inside the checkout declares it', () => {
+  const declared = new Set(Object.keys(LIVE_TREE_FIXTURES));
+  const found = findLiveTreeFixtureSuites();
+  const undeclared = found.filter((name) => !declared.has(name) && !LIVE_TREE_MUTATING_TESTS.has(name));
+  assert.deepEqual(
+    undeclared,
+    [],
+    `${undeclared.join(', ')} create a directory under the repository root while running. A `
+    + 'sibling suite scheduled in the same `node --test` batch sees a path git cannot return, so '
+    + 'declare the fixture prefix in LIVE_TREE_FIXTURES (dot-prefixed and gitignored), or add the '
+    + 'suite to LIVE_TREE_MUTATING_TESTS so it owns its invocation.',
+  );
+  const stale = [...declared].filter((name) => !found.includes(name));
+  assert.deepEqual(stale, [], `LIVE_TREE_FIXTURES lists ${stale.join(', ')}, which no longer creates one.`);
+});
+
+test('every declared in-checkout fixture prefix is dot-prefixed', () => {
+  for (const [suite, prefixes] of Object.entries(LIVE_TREE_FIXTURES)) {
+    for (const prefix of prefixes) {
+      const basename = prefix.split('/').filter(Boolean).at(-1);
+      assert.ok(
+        basename?.startsWith('.'),
+        `${suite} creates ${prefix} inside the checkout. Its final segment must be dot-prefixed so `
+        + 'dot-skipping tree walks never descend into it mid-scan.',
+      );
+    }
+  }
+});
+
+test('every declared in-checkout fixture prefix is gitignored', () => {
+  for (const [suite, prefixes] of Object.entries(LIVE_TREE_FIXTURES)) {
+    for (const prefix of prefixes) {
+      const sample = `${prefix}0a1b2c`;
+      let ignored = true;
+      try {
+        execFileSync('git', ['check-ignore', '--quiet', '--no-index', '--', sample], {
+          cwd: root,
+          stdio: 'ignore',
+        });
+      } catch {
+        ignored = false;
+      }
+      assert.ok(
+        ignored,
+        `${suite} creates ${sample} inside the checkout, but .gitignore does not match it, so a `
+        + 'sibling suite comparing the tree against `git ls-files` sees an untracked path.',
+      );
+    }
+  }
+});
+
+test('the in-checkout fixture detector reads repo-root bindings, not tmpdir ones', () => {
+  const inCheckout = [
+    "const root = resolve(import.meta.dirname, '../..');",
+    "const dir = mkdtempSync(join(root, '.github', 'scripts', '.tmp-guard-'));",
+  ].join('\n');
+  assert.deepEqual(findRepoRootBindings(inCheckout), ['root']);
+  assert.deepEqual(findInCheckoutFixtureCalls(inCheckout), [
+    { call: 'mkdtempSync', segments: ['.github', 'scripts', '.tmp-guard-'] },
+  ]);
+
+  const tmpdirFixture = [
+    "const root = resolve(import.meta.dirname, '../..');",
+    'function fixture() {',
+    "  const root = mkdtempSync(join(tmpdir(), 'jinn-'));",
+    "  mkdirSync(join(root, 'nested'));",
+    '}',
+  ].join('\n');
+  assert.deepEqual(
+    findInCheckoutFixtureCalls(tmpdirFixture).map(({ segments }) => segments),
+    [['nested']],
+    'a shadowed local `root` is indistinguishable without a scope analysis, so the detector '
+    + 'deliberately over-reports rather than missing a real in-checkout fixture',
+  );
+
+  assert.deepEqual(findInCheckoutFixtureCalls("mkdirSync(join(tmpdir(), 'x'));"), []);
 });
