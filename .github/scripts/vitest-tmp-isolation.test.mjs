@@ -187,7 +187,9 @@ function enclosedLiterals(source, key, open, close) {
  * An unterminated `projects: [` yields no ranges, which puts every allowance and seam path back in
  * one scope and restores the cross-entry crediting this closes. That is the same fallback the other
  * scanners take on an unterminated literal, and it is bounded the same way: a config that does not
- * parse cannot load, so its own package job is red before this gate has an opinion.
+ * parse cannot load, so its own package job is red before this gate has an opinion. The quote walk
+ * below is what keeps that bound honest — an unpaired `'` inside a regex literal parses and loads
+ * fine, so without the newline bound the collapse would happen under a green package job.
  *
  * The closure is literal-shaped, and that is the larger hole. A range exists only where the reader
  * can see a `{` as a direct element of the array, so an entry held in a variable — `projects:
@@ -213,11 +215,10 @@ export function projectEntryRanges(source) {
       const character = inner[i];
       if (quote !== null) {
         if (character === '\\') i += 1;
-        // Same newline bound as `stripComments`, for the same reason and with the same backtick
-        // exemption: a `'`/`"` span that cannot be paired off must not swallow the rest of the
-        // scan. Comments are already stripped when this runs, so the exposure is an odd quote in
-        // live code inside the block — but there the unbounded scan runs past the intended close
-        // and the literal comes back truncated or missing.
+        // The same newline bound `balancedEnd` takes, for the reason documented there. The
+        // consequence differs at this site: an unpaired `'`/`"` here swallows the entry braces,
+        // so `projects` yields no ranges and every allowance and seam path collapses into root
+        // scope rather than a literal coming back truncated.
         else if (character === quote || (quote !== '`' && character === '\n')) quote = null;
         continue;
       }
@@ -605,6 +606,22 @@ test('projectEntryRanges finds one range per object entry, ordered per projects 
   assert.ok(outer[0] < inner[0] && inner[1] < outer[1], 'inner range must sit inside the outer one');
   const [wired] = wiredPaths(nested, 'packages/x/vitest.config.ts');
   assert.equal(wired.scope, `projects@${inner[0]}`);
+
+  // The newline bound in the quote walk above is the fail-open half of this reader, and nothing
+  // else in this suite reaches it. A regex literal carrying an unpaired `'` is valid JavaScript,
+  // so the config parses and its own package job stays green; unbounded, that quote span swallows
+  // the entry braces, `projects` yields no ranges, and every allowance and seam path collapses
+  // into `root` scope — restoring the cross-entry crediting #3123 closed.
+  const regexQuote = [
+    "export default { test: { environment: 'jsdom', projects: [",
+    "    /\\d'/u,",
+    "    { server: { fs: { allow: ['../..'] } } },",
+    "    { test: { setupFiles: ['../../test-support/tmp-isolation/isolate-tmp.ts'] } },",
+    '] } }',
+  ].join('\n');
+  assert.deepEqual(unreachableWirings(regexQuote, 'packages/x/vitest.config.ts'), [
+    { key: 'setupFiles', resolved: 'test-support/tmp-isolation/isolate-tmp.ts' },
+  ]);
 });
 
 // Commenting a wiring line out while chasing a slow or flaky suite is an ordinary edit, and the one
