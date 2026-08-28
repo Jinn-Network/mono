@@ -38,7 +38,7 @@
     "prepack": "yarn build"
   },
   "dependencies": {
-    "@jinn-network/contract-abis": "portal:../../contract-abis",
+    "@jinn-network/contract-abis": "0.1.0",
     "@jinn-network/task-execution-backend": "0.1.0",
     "@jinn-network/task-execution-profiles": "0.1.0",
     "@jinn-network/task-execution-protocol": "0.1.0",

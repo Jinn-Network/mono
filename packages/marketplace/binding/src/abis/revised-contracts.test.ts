@@ -1,9 +1,22 @@
 // SPDX-License-Identifier: MIT
 
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { expect, test } from "vitest";
 import { JINN_ROUTER_V4_ABI } from "./revised-contracts.js";
 import { pickAbiItems } from "@jinn-network/contract-abis/pick";
-import jinnRouterV4Full from "@jinn-network/contract-abis/generated/full/JinnRouterV4.json" with { type: "json" };
+
+// Read the JSON through the package's exports map rather than importing it with
+// an import attribute: this tsconfig sets `module: ES2022`, under which
+// `with { type: "json" }` is a TS2823 typecheck error (#3121).
+const jinnRouterV4Full: readonly unknown[] = JSON.parse(
+  readFileSync(
+    createRequire(import.meta.url).resolve(
+      "@jinn-network/contract-abis/generated/full/JinnRouterV4.json",
+    ),
+    "utf8",
+  ),
+);
 
 test("revised binding router functions exactly match the compiled V4 artifact", () => {
   const names = JINN_ROUTER_V4_ABI

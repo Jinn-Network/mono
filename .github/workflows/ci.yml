@@ -114,6 +114,7 @@ jobs:
             '^packages/sdk/'
             '^packages/core/'
             '^packages/plugin/'
+            '^packages/contract-abis/'
             '^\.github/workflows/ci\.yml$'
             '^\.github/workflows/npm-publish\.yml$'
             '^\.github/scripts/npm-publish-workflow\.test\.mjs$'

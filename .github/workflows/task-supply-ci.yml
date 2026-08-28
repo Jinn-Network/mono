@@ -119,6 +119,11 @@ jobs:
         run: |
           yarn install --immutable
           yarn build
+      - name: Build cross-tree portal dependency from source (contract-abis, §7.8)
+        working-directory: packages/contract-abis
+        run: |
+          yarn install --immutable
+          yarn build:dist
       - name: Build cross-tree portal dependency from source (marketplace-binding, §7.8)
         working-directory: packages/marketplace/binding
         run: |

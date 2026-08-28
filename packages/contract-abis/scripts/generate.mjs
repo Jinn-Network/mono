@@ -12,7 +12,14 @@ import {
 } from "./lib.mjs";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const outputRoot = process.argv[2] ?? join(packageRoot, "generated");
+const requestedOutputRoot = process.argv[2];
+const outputRoot = requestedOutputRoot ?? join(packageRoot, "generated");
+// The TypeScript slices are part of the generated output, so they must honour
+// `outputRoot` too. Writing them into the tracked tree unconditionally let
+// `check-drift` silently heal a tampered slice before the tests read it (#3121).
+const tsSliceRoot = requestedOutputRoot === undefined
+  ? join(packageRoot, "src", "generated", "slices")
+  : join(requestedOutputRoot, "ts-slices");
 
 const manifest = loadManifest();
 const slicesManifest = loadSlicesManifest();
@@ -20,7 +27,6 @@ const contractsArtifactsDir = resolveContractsArtifactsDir(manifest, packageRoot
 
 mkdirSync(join(outputRoot, "full"), { recursive: true });
 mkdirSync(join(outputRoot, "slices"), { recursive: true });
-const tsSliceRoot = join(packageRoot, "src", "generated", "slices");
 mkdirSync(tsSliceRoot, { recursive: true });
 
 /** @type {Record<string, readonly unknown[]>} */

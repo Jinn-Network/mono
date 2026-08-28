@@ -1,6 +1,11 @@
 name: Contracts CI
 
 on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
   pull_request:
     paths:
       - 'contracts/**'
@@ -12,7 +17,7 @@ on:
       - 'packages/contract-abis/**'
 
 concurrency:
-  group: contracts-ci-${{ github.ref }}
+  group: contracts-ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.source_sha }}
   cancel-in-progress: true
 
 defaults:
@@ -25,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22

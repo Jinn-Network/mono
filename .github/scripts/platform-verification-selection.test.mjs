@@ -39,10 +39,26 @@ test('a changed package selects lanes through its dependents, not its own domain
   assert.ok(result.selectedDomains.includes('evidence'));
 });
 
-test('a leaf protocol package reaches every verified lane', () => {
+// `contracts` is excluded: `@jinn-network/contract-abis` is a source-of-truth
+// leaf that depends on nothing, so no other package's change can reach its lane
+// through the dependency closure. It is selected by its own path (below).
+test('a leaf protocol package reaches every verified lane it can reach', () => {
   const result = select(['packages/evidence/protocol/src/index.ts']);
   assert.equal(result.run, true);
-  assert.deepEqual(result.selectedDomains, [...new Set(GATE_DOMAINS.values())].sort());
+  assert.deepEqual(
+    result.selectedDomains,
+    [...new Set(GATE_DOMAINS.values())].filter((domain) => domain !== 'contracts').sort(),
+  );
+});
+
+test('a contract-abis change selects the contracts lane and its consumers', () => {
+  const result = select(['packages/contract-abis/src/generated/slices/jinn-router-v3.ts']);
+  assert.equal(result.run, true);
+  assert.ok(
+    result.selectedDomains.includes('contracts'),
+    `expected the contracts lane, got ${result.selectedDomains.join(', ')}`,
+  );
+  assert.ok(result.selectedDomains.includes('marketplace'));
 });
 
 test('an unmatched path defaults to full verification', () => {
