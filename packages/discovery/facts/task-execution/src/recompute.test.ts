@@ -328,7 +328,9 @@ describe("v2 recompute: the join edges v1 left out", () => {
           value: "1",
         }],
       },
-    } as never)).toThrow();
+      // Bound to the actual refusal, so a golden that drifts cannot keep this green by
+      // failing for some other reason.
+    } as never)).toThrow(/safetyConstraints are bounded to log- and transaction-observable kinds/);
   });
 
   it("emits no facts for bytes that are not an evaluation spec", async () => {
