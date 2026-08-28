@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { ARCHITECTURE_OWNERS_PATH, validateArchitectureControl } from './architecture-control.mjs';
+import { ARCHITECTURE_OWNERS_PATH, committedOwnershipView, validateArchitectureControl } from './architecture-control.mjs';
 import { canonicalJsonBytes } from './build-prepublication-bundle.mjs';
 import {
   PLATFORM_CATALOG_PATH,
@@ -212,7 +212,9 @@ export function buildArchitectureReport(repoRoot) {
         path: asset.path,
       })).sort((left, right) => left.identifier.localeCompare(right.identifier)),
     },
-    ownership: validateArchitectureControl({ repoRoot: root }),
+    // Census fields are deliberately not committed (#3076); the validator
+    // still runs here and still throws on an ownership violation.
+    ownership: committedOwnershipView(validateArchitectureControl({ repoRoot: root })),
     transitions: packageRecords.filter((pkg) => (
       ['deprecated', 'transitional'].includes(pkg.stability)
         || pkg.supersedes.length > 0
@@ -338,12 +340,8 @@ export function renderArchitectureMarkdown(report) {
     '',
     '## Architecture-control ownership',
     '',
-    `Task 6's validator reports ${report.ownership.paths.length} controlled paths. Required effective owners: ${report.ownership.requiredOwners.map((owner) => `\`${owner}\``).join(' ')}.`,
-    'The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.',
-    '',
-    '| Category | Controlled paths |',
-    '| --- | ---: |',
-    ...Object.entries(report.ownership.counts).map(([category, count]) => `| ${category} | ${count} |`),
+    `Task 6's validator enforces that every architecture-controlled path resolves to exactly these effective owners: ${report.ownership.requiredOwners.map((owner) => `\`${owner}\``).join(' ')}. A path that does not reds \`platform-architecture-control\`.`,
+    'The exhaustive path list and its per-category counts are a file census, not architecture: they move whenever any file is added, renamed, or deleted in scope, which made independent branches mutually inconsistent under merge (#3076). They are no longer committed. Run `node .github/scripts/architecture-control.mjs` for the full report, or read the coverage artifact that `platform-architecture-control` uploads on every run.',
     '',
     '## Transitional and deprecated entries',
     '',

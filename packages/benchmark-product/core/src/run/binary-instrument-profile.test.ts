@@ -19,8 +19,10 @@ import {
 } from "@jinn-network/benchmarking-aggregate";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
+  BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY,
   BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE,
   BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
@@ -36,6 +38,10 @@ import {
   sealEvaluationSpec,
   type AcceptedJudgeModelId,
 } from "@jinn-network/task-execution-profiles";
+import {
+  buildBinaryJudgmentEvaluationSpecification,
+  isBinaryJudgmentEvaluationSpecification,
+} from "@jinn-network/task-execution-evaluator-adapters";
 import {
   TASK_EXECUTION_PROTOCOL_URI,
   documentDigest,
@@ -166,7 +172,13 @@ function store(bytes: Uint8Array): `sha256:${string}` {
   return `sha256:${putSealedBytes(workspaceDir, bytes)}`;
 }
 
-function evaluationSpec(analysisContextSha256: `sha256:${string}`) {
+function evaluationSpec(
+  analysisContextSha256: `sha256:${string}`,
+  parserInvalidPolicy: "reject" | "abstain" = "reject",
+) {
+  if (parserInvalidPolicy === "abstain") {
+    return sealEvaluationSpec(buildBinaryJudgmentEvaluationSpecification(analysisContextSha256, "abstain"));
+  }
   return sealEvaluationSpec({
     protocol: EVALUATION_SPEC_FORMAT_URI,
     semanticsVersion: EVAL_SEMANTICS_VERSION,
@@ -216,6 +228,7 @@ function instrument(
     readonly generation?: typeof generation | typeof samplingGeneration;
     readonly declaresEvidence?: boolean;
     readonly preamble?: string;
+    readonly parserInvalidPolicy?: "reject" | "abstain";
   } = {},
 ) {
   const model = options.model ?? "gpt-5.6-luna";
@@ -248,8 +261,10 @@ function instrument(
     model: { adapter: "jinn-openai", requested: model, generation: instrumentGeneration },
     response: {
       mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
-      parser: BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
-      invalidOutputDecision: "REJECT",
+      parser: options.parserInvalidPolicy === "abstain"
+        ? BINARY_COMPLETE_JSON_LABEL_PARSER_V2_IDENTITY
+        : BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+      invalidOutputDecision: options.parserInvalidPolicy === "abstain" ? "INVALID" : "REJECT",
     },
   } as never);
 }
@@ -318,6 +333,12 @@ function setUpFixture(options: {
   readonly items?: readonly AdmissionItemConfig[];
   /** Test-only screened admission whose instrument deliberately reuses this run arm. */
   readonly screeningInstrumentArmId?: string;
+  readonly parserInvalidPolicy?: "reject" | "abstain";
+  /** Pulls the sealed Tasks' EvaluationSpec policy away from the arms', which otherwise share one
+   * value. Only a mismatched pair can reach the lock-time cross-check. */
+  readonly taskParserInvalidPolicy?: "reject" | "abstain";
+  /** Per-arm instrument policy, indexed by arm position, for the mixed-roster refusal. */
+  readonly armParserInvalidPolicies?: readonly ("reject" | "abstain")[];
 } = {}): Fixture {
   const withItemEvidence = options.withItemEvidence ?? false;
   const declaringArmIds = new Set(options.declaringArmIds ?? []);
@@ -330,12 +351,13 @@ function setUpFixture(options: {
   if (!initial.ok) throw new Error(initial.error.detail);
 
   const armConfigs = options.arms ?? DEFAULT_ARM_CONFIGS;
-  const instruments = armConfigs.map((armConfig) => {
+  const instruments = armConfigs.map((armConfig, index) => {
     const sealed = instrument(armConfig.armId, {
       model: armConfig.model,
       generation: armConfig.generation,
       declaresEvidence: declaringArmIds.has(armConfig.armId),
       preamble: armConfig.preamble,
+      parserInvalidPolicy: options.armParserInvalidPolicies?.[index] ?? options.parserInvalidPolicy,
     });
     store(sealed.bytes);
     return sealed;
@@ -400,7 +422,10 @@ function setUpFixture(options: {
   const admitted = candidates.map(({ payload, itemSha256 }) => {
     const resolution = admittedByItem.get(itemSha256);
     if (resolution === undefined) throw new Error(`missing admitted resolution for ${itemSha256}`);
-    const evaluation = evaluationSpec(resolution.analysisContextSha256 as `sha256:${string}`);
+    const evaluation = evaluationSpec(
+      resolution.analysisContextSha256 as `sha256:${string}`,
+      options.taskParserInvalidPolicy ?? options.parserInvalidPolicy,
+    );
     store(evaluation.bytes);
     const taskBytes = sealTask({
       protocol: TASK_EXECUTION_PROTOCOL_URI,
@@ -569,6 +594,82 @@ describe("binary-instrument@1 lock-time composition", () => {
       { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: { verdictRule: "sole" } },
       { method: BENCHMARKING_METHOD_IDS.binaryInstrument, version: BENCHMARKING_METHOD_VERSION, parameters },
     ]);
+  });
+
+  test("derives neutral parser-invalid handling only when the sealed tasks and every arm select it", () => {
+    const fixture = setUpFixture({ parserInvalidPolicy: "abstain" });
+    const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+    const parameters = compileBinaryInstrumentProfile({ workspaceDir, draft: fixture.draft, benchmark });
+
+    expect(parameters.parserInvalidPolicy).toBe("abstain");
+    const compiled = compileDraft({
+      workspaceDir,
+      draft: fixture.draft,
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-16T09:00:00.000Z",
+    });
+    const binaryInstrument = compiled.plannedRun.record.analysisPlan?.find(
+      (entry) => entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument,
+    );
+    expect(binaryInstrument?.parameters).toMatchObject({ parserInvalidPolicy: "abstain" });
+
+    // The tasks half of "the sealed tasks AND every arm": every Task's own EvaluationSpec names
+    // the neutral evaluation-parser semantics, so the paired refusals below are not vacuous.
+    for (const taskSha256 of fixture.taskSha256s) {
+      const task = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, taskSha256))) as {
+        readonly evaluation: { readonly digest: { readonly sha256: string } };
+      };
+      const spec = JSON.parse(new TextDecoder().decode(
+        getSealedBytes(workspaceDir, task.evaluation.digest.sha256),
+      )) as { readonly grader: { readonly digest: { readonly sha256: string } } };
+      expect(spec.grader.digest.sha256).toBe(
+        BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY.digest.slice("sha256:".length),
+      );
+    }
+  });
+
+  // Fail closed at lock. Both directions, because either half can be the stale one: a bank
+  // imported without `--parser-invalid-policy abstain` under v2 arms, or v2 tasks under a frozen
+  // v1 arm roster. Before this check both compiled and locked, then broke during paid execution.
+  test.each([
+    { name: "v1 sealed tasks under neutral arms", parserInvalidPolicy: "abstain" as const, taskParserInvalidPolicy: "reject" as const },
+    { name: "neutral sealed tasks under v1 arms", parserInvalidPolicy: "reject" as const, taskParserInvalidPolicy: "abstain" as const },
+  ])("refuses $name at lock rather than during paid execution", (scenario) => {
+    const fixture = setUpFixture({
+      parserInvalidPolicy: scenario.parserInvalidPolicy,
+      taskParserInvalidPolicy: scenario.taskParserInvalidPolicy,
+    });
+    const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+    expect(() => compileBinaryInstrumentProfile({ workspaceDir, draft: fixture.draft, benchmark }))
+      .toThrow(/EvaluationSpec parser-invalid policy differs from the run arms' instruments/u);
+  });
+
+  // The abstain spec gained its recorded-inconclusive class and inconclusiveWhen node (the live
+  // cell-535 fix). Lock-time policy derivation reads the GRADER digest, which did not move, so
+  // every abstain fixture above still round-trips. The gate the lock leans on for anything else
+  // is the exact-contract admission: a future v3 identity nobody taught the derivation about is
+  // not admitted at all, so it can never reach paid execution.
+  test("does not admit a v3-style evaluation parser identity", () => {
+    const abstain = buildBinaryJudgmentEvaluationSpecification(`sha256:${"2".repeat(64)}`, "abstain");
+    expect(isBinaryJudgmentEvaluationSpecification(abstain)).toBe(true);
+    expect(isBinaryJudgmentEvaluationSpecification({
+      ...abstain,
+      grader: {
+        name: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.id,
+        digest: { sha256: "c".repeat(64) },
+        accessClass: "public",
+      },
+    } as never)).toBe(false);
+  });
+
+  test("refuses a roster that mixes v1 and neutral arm instruments", () => {
+    const fixture = setUpFixture({
+      parserInvalidPolicy: "abstain",
+      armParserInvalidPolicies: ["reject", "abstain", "abstain", "abstain"],
+    });
+    const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
+    expect(() => compileBinaryInstrumentProfile({ workspaceDir, draft: fixture.draft, benchmark }))
+      .toThrow(/all binary-judgment arms must share one invalid-output policy/u);
   });
 
   // Spec §3.1 site 12, the packet's headline: `deriveAdmissionProfile` used to derive

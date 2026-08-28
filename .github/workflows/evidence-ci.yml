@@ -42,9 +42,24 @@ permissions:
 env:
   EVIDENCE_ROOT: packages/evidence
 
+# Consolidated per #2997 (pattern proven by the trust-ci pilot, PR #3001): the
+# previous shape ran 17 runner jobs (11 + a 6-leg components matrix) chained
+# through artifact dist round-trips. The packages job below builds the fifteen
+# pure-node packages with their VERBATIM per-package command sets in dependency
+# order in ONE workspace. The two infrastructure-backed components
+# (repository-oci needs a Distribution registry + ORAS; repository-ipfs needs
+# the Kubo compatibility suite) keep their own fail-fast:false matrix job so an
+# infrastructure flake ejects only itself, never the whole lane. The packages
+# job still BUILDS those two (install + build, no infra tests) so the
+# packed-types tail can pack every package from in-workspace dists.
+#
+# The per-job isolation this retires was a de-facto undeclared-dependency
+# guard; that invariant is owned by evidence-source-boundaries.test.mjs (wired
+# in repository-structure.yml) and the inventory/boundary checks below.
 jobs:
   architecture:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -59,8 +74,12 @@ jobs:
       - name: Verify source boundaries and canaries
         run: node --test .github/scripts/evidence-source-boundaries.test.mjs
 
-  foundation:
+  packages:
+    name: Evidence packages
     runs-on: ubuntu-latest
+    # A hung step must not hold a runner slot for the 360-minute default nor
+    # burn the queue's 180-minute check-response budget.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
@@ -68,10 +87,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22.23.1
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
       - name: Install npm 11.19.0 for pack-smoke
         run: |
           npm install -g npm@11.19.0
@@ -80,6 +95,10 @@ jobs:
           test "$(npm --version)" = "11.19.0"
           command -v npm
           npm --version
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
       - name: Verify Evidence Protocol
         working-directory: packages/evidence/protocol
         run: |
@@ -89,13 +108,6 @@ jobs:
           yarn test
           yarn build
           yarn pack:smoke
-      - name: Upload Evidence Protocol distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-protocol-dist
-          path: packages/evidence/protocol/dist
-          if-no-files-found: error
-          retention-days: 1
       - name: Verify Execution Evidence Builder
         working-directory: packages/evidence/execution-evidence-builder
         run: |
@@ -104,13 +116,6 @@ jobs:
           yarn test
           yarn build
           yarn pack:smoke
-      - name: Upload Execution Evidence Builder distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-execution-evidence-builder-dist
-          path: packages/evidence/execution-evidence-builder/dist
-          if-no-files-found: error
-          retention-days: 1
       - name: Verify Evidence Repository
         working-directory: packages/evidence/repository
         run: |
@@ -119,17 +124,140 @@ jobs:
           yarn test
           yarn build
           yarn pack:smoke
-      - name: Upload Evidence Repository distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-repository-dist
-          path: packages/evidence/repository/dist
-          if-no-files-found: error
-          retention-days: 1
+      - name: Build cross-tree portal dependency from source (trust-core, §7.8)
+        working-directory: packages/trust/core
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (record-discovery-protocol, §7.8)
+        working-directory: packages/discovery/protocol
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (record-discovery-serve, §7.8)
+        working-directory: packages/discovery/serve
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (record-discovery-publication, §7.8)
+        working-directory: packages/discovery/publication
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Verify Evidence Discovery
+        working-directory: packages/evidence/discovery
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Verify Execution Recorder
+        working-directory: packages/evidence/execution-recorder
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Verify Attestation Issuer
+        working-directory: packages/evidence/attestation-issuer
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Verify Evidence Publication
+        working-directory: packages/evidence/publication
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Build the infrastructure-backed components for packed-types (verified in the components job)
+        run: |
+          (cd packages/evidence/repository-oci && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository-ipfs && yarn install --immutable && yarn build)
+      - name: Verify complete Derivation package
+        working-directory: packages/evidence/derivation
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Verify Execution Recorder Bridge
+        working-directory: packages/evidence/execution-recorder-bridge
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Verify Evidence Retrieval
+        working-directory: packages/evidence/retrieval
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Verify Evidence Trace
+        working-directory: packages/evidence/trace
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn check:fixtures
+          yarn check:schemas
+          yarn pack:smoke
+      - name: Verify Evidence Trace Decode
+        working-directory: packages/evidence/trace-decode
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn check:fixtures
+          yarn pack:smoke
+      - name: Verify Evidence Contribution
+        working-directory: packages/evidence/contribution
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Verify SQLite Evidence Catalog
+        working-directory: packages/evidence/catalog-sqlite
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Build cross-tree portal dependency from source (record-discovery-source-evidence-journal, §7.8)
+        working-directory: packages/discovery/sources/evidence-journal
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Verify Local Evidence Runtime
+        working-directory: packages/evidence/local-runtime
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Compile packed public entrypoint consumers
+        run: node .github/scripts/evidence-packed-types.test.mjs
 
   components:
     name: component (${{ matrix.component }})
-    needs: foundation
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -137,10 +265,6 @@ jobs:
         component:
           - repository-oci
           - repository-ipfs
-          - discovery
-          - execution-recorder
-          - attestation-issuer
-          - publication
     steps:
       - uses: actions/checkout@v7
         with:
@@ -160,33 +284,11 @@ jobs:
           test "$(npm --version)" = "11.19.0"
           command -v npm
           npm --version
-      - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-protocol-dist
-          path: packages/evidence/protocol/dist
-      - name: Restore Evidence Repository distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-repository-dist
-          path: packages/evidence/repository/dist
-      - name: Restore Execution Evidence Builder distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-execution-evidence-builder-dist
-          path: packages/evidence/execution-evidence-builder/dist
-      - name: Install packed-smoke dependency toolchains
+      - name: Build in-domain dependencies from source (protocol, repository, builder)
         run: |
-          (cd packages/evidence/protocol && yarn install --immutable)
-          (cd packages/evidence/repository && yarn install --immutable)
-          (cd packages/evidence/execution-evidence-builder && yarn install --immutable)
-      - name: Build neutral publication dependencies from source
-        if: matrix.component == 'publication'
-        run: |
-          (cd packages/trust/core && yarn install --immutable && yarn build)
-          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
-          (cd packages/discovery/serve && yarn install --immutable && yarn build)
-          (cd packages/discovery/publication && yarn install --immutable && yarn build)
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
       - name: Install ORAS 1.3.2
         if: matrix.component == 'repository-oci'
         uses: oras-project/setup-oras@v2
@@ -256,552 +358,3 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  derivation:
-    name: Derivation
-    needs: foundation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.23.1
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Install npm 11.19.0 for pack-smoke
-        run: |
-          npm install -g npm@11.19.0
-          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
-          hash -r || true
-          test "$(npm --version)" = "11.19.0"
-          command -v npm
-          npm --version
-      - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-protocol-dist
-          path: packages/evidence/protocol/dist
-      - name: Install packed-smoke dependency toolchain
-        working-directory: packages/evidence/protocol
-        run: yarn install --immutable
-      - name: Verify complete Derivation package
-        working-directory: packages/evidence/derivation
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-      - name: Upload Derivation distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-derivation-dist
-          path: packages/evidence/derivation/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  execution-recorder-bridge:
-    needs: [foundation, components]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.23.1
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Install npm 11.19.0 for pack-smoke
-        run: |
-          npm install -g npm@11.19.0
-          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
-          hash -r || true
-          test "$(npm --version)" = "11.19.0"
-          command -v npm
-          npm --version
-      - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-protocol-dist
-          path: packages/evidence/protocol/dist
-      - name: Restore Evidence Repository distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-repository-dist
-          path: packages/evidence/repository/dist
-      - name: Restore Execution Recorder distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-execution-recorder-dist
-          path: packages/evidence/execution-recorder/dist
-      - name: Restore Execution Evidence Builder distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-execution-evidence-builder-dist
-          path: packages/evidence/execution-evidence-builder/dist
-      - name: Install packed-smoke dependency toolchains
-        run: |
-          (cd packages/evidence/protocol && yarn install --immutable)
-          (cd packages/evidence/repository && yarn install --immutable)
-          (cd packages/evidence/execution-evidence-builder && yarn install --immutable)
-          (cd packages/evidence/execution-recorder && yarn install --immutable)
-      - name: Verify Execution Recorder Bridge
-        working-directory: packages/evidence/execution-recorder-bridge
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-      - name: Upload Execution Recorder Bridge distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-execution-recorder-bridge-dist
-          path: packages/evidence/execution-recorder-bridge/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  retrieval:
-    name: Evidence Retrieval
-    needs: [foundation, components]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.23.1
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Install npm 11.19.0 for pack-smoke
-        run: |
-          npm install -g npm@11.19.0
-          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
-          hash -r || true
-          test "$(npm --version)" = "11.19.0"
-          command -v npm
-          npm --version
-      - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-protocol-dist
-          path: packages/evidence/protocol/dist
-      - name: Restore Evidence Repository distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-repository-dist
-          path: packages/evidence/repository/dist
-      - name: Restore Evidence Discovery distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-discovery-dist
-          path: packages/evidence/discovery/dist
-      - name: Install packed-smoke dependency toolchains
-        run: |
-          (cd packages/evidence/protocol && yarn install --immutable)
-          (cd packages/evidence/repository && yarn install --immutable)
-          (cd packages/evidence/discovery && yarn install --immutable)
-      - name: Verify Evidence Retrieval
-        working-directory: packages/evidence/retrieval
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-      - name: Upload Evidence Retrieval distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-retrieval-dist
-          path: packages/evidence/retrieval/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  trace:
-    name: Evidence Trace
-    needs: [foundation]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.23.1
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Install npm 11.19.0 for pack-smoke
-        run: |
-          npm install -g npm@11.19.0
-          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
-          hash -r || true
-          test "$(npm --version)" = "11.19.0"
-          command -v npm
-          npm --version
-      - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-protocol-dist
-          path: packages/evidence/protocol/dist
-      - name: Build Trust Core distribution
-        working-directory: packages/trust/core
-        run: |
-          yarn install --immutable
-          yarn build
-      - name: Install packed-smoke dependency toolchains
-        run: (cd packages/evidence/protocol && yarn install --immutable)
-      - name: Verify Evidence Trace
-        working-directory: packages/evidence/trace
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn check:fixtures
-          yarn check:schemas
-          yarn pack:smoke
-      - name: Upload Evidence Trace distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-trace-dist
-          path: packages/evidence/trace/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  trace-decode:
-    name: Evidence Trace Decode
-    needs: [foundation, trace]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.23.1
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Install npm 11.19.0 for pack-smoke
-        run: |
-          npm install -g npm@11.19.0
-          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
-          hash -r || true
-          test "$(npm --version)" = "11.19.0"
-          command -v npm
-          npm --version
-      - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-protocol-dist
-          path: packages/evidence/protocol/dist
-      - name: Restore Evidence Trace distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-trace-dist
-          path: packages/evidence/trace/dist
-      - name: Build Trust Core distribution
-        working-directory: packages/trust/core
-        run: |
-          yarn install --immutable
-          yarn build
-      - name: Install packed-smoke dependency toolchains
-        run: |
-          (cd packages/evidence/protocol && yarn install --immutable)
-          (cd packages/evidence/trace && yarn install --immutable)
-      - name: Verify Evidence Trace Decode
-        working-directory: packages/evidence/trace-decode
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn check:fixtures
-          yarn pack:smoke
-      - name: Upload Evidence Trace Decode distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-trace-decode-dist
-          path: packages/evidence/trace-decode/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  contribution:
-    name: Evidence Contribution
-    needs: [foundation, components, derivation]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.23.1
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Install npm 11.19.0 for pack-smoke
-        run: |
-          npm install -g npm@11.19.0
-          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
-          hash -r || true
-          test "$(npm --version)" = "11.19.0"
-          command -v npm
-          npm --version
-      - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-protocol-dist
-          path: packages/evidence/protocol/dist
-      - name: Restore Evidence Repository distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-repository-dist
-          path: packages/evidence/repository/dist
-      - name: Restore Evidence Derivation distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-derivation-dist
-          path: packages/evidence/derivation/dist
-      - name: Restore Evidence Publication distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-publication-dist
-          path: packages/evidence/publication/dist
-      - name: Build neutral publication dependencies from source
-        run: |
-          (cd packages/trust/core && yarn install --immutable && yarn build)
-          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
-          (cd packages/discovery/serve && yarn install --immutable && yarn build)
-          (cd packages/discovery/publication && yarn install --immutable && yarn build)
-      - name: Install packed-smoke dependency toolchains
-        run: |
-          (cd packages/evidence/protocol && yarn install --immutable)
-          (cd packages/evidence/repository && yarn install --immutable)
-          (cd packages/evidence/derivation && yarn install --immutable)
-          (cd packages/evidence/publication && yarn install --immutable)
-      - name: Verify Evidence Contribution
-        working-directory: packages/evidence/contribution
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-      - name: Upload Evidence Contribution distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-contribution-dist
-          path: packages/evidence/contribution/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  catalog-sqlite:
-    needs: [foundation, components]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.23.1
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Install npm 11.19.0 for pack-smoke
-        run: |
-          npm install -g npm@11.19.0
-          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
-          hash -r || true
-          test "$(npm --version)" = "11.19.0"
-          command -v npm
-          npm --version
-      - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-protocol-dist
-          path: packages/evidence/protocol/dist
-      - name: Restore Evidence Repository distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-repository-dist
-          path: packages/evidence/repository/dist
-      - name: Restore Evidence Discovery distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-discovery-dist
-          path: packages/evidence/discovery/dist
-      - name: Install packed-smoke dependency toolchains
-        run: |
-          (cd packages/evidence/protocol && yarn install --immutable)
-          (cd packages/evidence/repository && yarn install --immutable)
-          (cd packages/evidence/discovery && yarn install --immutable)
-      - name: Verify SQLite Evidence Catalog
-        working-directory: packages/evidence/catalog-sqlite
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-      - name: Upload SQLite Evidence Catalog distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-catalog-sqlite-dist
-          path: packages/evidence/catalog-sqlite/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  local-runtime:
-    needs: [foundation, components, catalog-sqlite]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.23.1
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Install npm 11.19.0 for pack-smoke
-        run: |
-          npm install -g npm@11.19.0
-          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
-          hash -r || true
-          test "$(npm --version)" = "11.19.0"
-          command -v npm
-          npm --version
-      - name: Restore Evidence Protocol distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-protocol-dist
-          path: packages/evidence/protocol/dist
-      - name: Restore Evidence Repository distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-repository-dist
-          path: packages/evidence/repository/dist
-      - name: Restore Evidence Discovery distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-discovery-dist
-          path: packages/evidence/discovery/dist
-      - name: Restore Execution Recorder distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-execution-recorder-dist
-          path: packages/evidence/execution-recorder/dist
-      - name: Restore Execution Evidence Builder distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-execution-evidence-builder-dist
-          path: packages/evidence/execution-evidence-builder/dist
-      - name: Restore SQLite Evidence Catalog distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: evidence-catalog-sqlite-dist
-          path: packages/evidence/catalog-sqlite/dist
-      - name: Build Record Discovery bridge dependencies from source
-        run: |
-          (cd packages/trust/core && yarn install --immutable && yarn build)
-          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
-          (cd packages/discovery/serve && yarn install --immutable && yarn build)
-          (cd packages/discovery/sources/evidence-journal && yarn install --immutable && yarn build)
-      - name: Install packed-smoke dependency toolchains
-        run: |
-          (cd packages/evidence/protocol && yarn install --immutable)
-          (cd packages/evidence/repository && yarn install --immutable)
-          (cd packages/evidence/discovery && yarn install --immutable)
-          (cd packages/evidence/catalog-sqlite && yarn install --immutable)
-          (cd packages/evidence/execution-evidence-builder && yarn install --immutable)
-          (cd packages/evidence/execution-recorder && yarn install --immutable)
-      - name: Verify Local Evidence Runtime
-        working-directory: packages/evidence/local-runtime
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-      - name: Upload Local Evidence Runtime distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-local-runtime-dist
-          path: packages/evidence/local-runtime/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  verify:
-    needs: [architecture, foundation, components, derivation, execution-recorder-bridge, retrieval, contribution, catalog-sqlite, local-runtime, trace, trace-decode]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require every Evidence CI stage to succeed
-        env:
-          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
-          FOUNDATION_RESULT: ${{ needs.foundation.result }}
-          COMPONENTS_RESULT: ${{ needs.components.result }}
-          DERIVATION_RESULT: ${{ needs.derivation.result }}
-          EXECUTION_RECORDER_BRIDGE_RESULT: ${{ needs['execution-recorder-bridge'].result }}
-          RETRIEVAL_RESULT: ${{ needs.retrieval.result }}
-          CONTRIBUTION_RESULT: ${{ needs.contribution.result }}
-          CATALOG_SQLITE_RESULT: ${{ needs['catalog-sqlite'].result }}
-          LOCAL_RUNTIME_RESULT: ${{ needs['local-runtime'].result }}
-          TRACE_RESULT: ${{ needs.trace.result }}
-          TRACE_DECODE_RESULT: ${{ needs['trace-decode'].result }}
-        run: |
-          for result in \
-            "$ARCHITECTURE_RESULT" \
-            "$FOUNDATION_RESULT" \
-            "$COMPONENTS_RESULT" \
-            "$DERIVATION_RESULT" \
-            "$EXECUTION_RECORDER_BRIDGE_RESULT" \
-            "$RETRIEVAL_RESULT" \
-            "$CONTRIBUTION_RESULT" \
-            "$CATALOG_SQLITE_RESULT" \
-            "$LOCAL_RUNTIME_RESULT" \
-            "$TRACE_RESULT" \
-            "$TRACE_DECODE_RESULT"; do
-            test "$result" = "success"
-          done
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.23.1
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Restore all package distributions
-        uses: actions/download-artifact@v8
-        with:
-          pattern: evidence-*-dist
-          path: .evidence-dist
-      - name: Place package distributions
-        run: |
-          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-evidence-builder execution-recorder attestation-issuer derivation publication local-runtime execution-recorder-bridge retrieval contribution trace trace-decode; do
-            mkdir -p "packages/evidence/${package}/dist"
-            cp -R ".evidence-dist/evidence-${package}-dist/." "packages/evidence/${package}/dist/"
-          done
-      - name: Compile packed public entrypoint consumers
-        run: node .github/scripts/evidence-packed-types.test.mjs

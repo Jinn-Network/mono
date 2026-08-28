@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  isEvaluationOperationalError,
+  resolveEvaluationMethod,
   validateEvaluatorRegistrationSet,
   type EvaluationHarnessDeployment,
+  type EvaluationOperationalError,
 } from "@jinn-network/task-execution-evaluation-harness";
 import {
+  BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
   EVALUATION_SPEC_FORMAT_URI,
   EVAL_SEMANTICS_VERSION,
   parserAllowlistKey,
@@ -20,9 +24,13 @@ import {
 } from "./parser-identity.js";
 import { contextGraderReportSource } from "./swe-rebench/adapter.js";
 import { contextResolutionSnapshotSource } from "./prediction/adapter.js";
-import { buildBinaryJudgmentEvaluationSpecification } from "./binary-judgment/adapter.js";
+import {
+  buildBinaryJudgmentEvaluationSpecification,
+  evaluationPolicyFromSpecification,
+} from "./binary-judgment/adapter.js";
 import {
   BINARY_JUDGMENT_REGISTRATION_ID,
+  binaryJudgmentMethodForSpecification,
   createBinaryJudgmentEvaluatorRegistration,
   createPredictionEvaluatorRegistration,
   createSweRebenchEvaluatorRegistration,
@@ -166,6 +174,62 @@ describe("deployment registrations", () => {
     expect(() => resolve(deployment, specFor(drifted)))
       .toThrow("no host evaluator registration supports the EvaluationSpec");
     expect(deployment.parserAllowlist.has(parserAllowlistKey(drifted))).toBe(false);
+  });
+
+  /**
+   * Hardening for the #3050 defect class: a future v3 evaluation parser added to the builder and
+   * the compatibility predicate, but not to the policy derivation, must refuse loudly instead of
+   * silently disclosing v1 semantics for a v3 run.
+   */
+  describe("binary judgment method disclosure for an unrecognized parser", () => {
+    const v3: ParserIdentity = {
+      id: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.id,
+      version: "3.0.0",
+      digest: `sha256:${"c".repeat(64)}`,
+    };
+
+    function specWithParser(parser: ParserIdentity): EvaluationSpec {
+      const spec = binaryJudgmentSpec();
+      return {
+        ...spec,
+        familyBlock: { ...(spec.familyBlock as DeterministicProcessBlock), parser },
+      } as EvaluationSpec;
+    }
+
+    test("the policy derivation reports no policy rather than guessing one", () => {
+      expect(evaluationPolicyFromSpecification(specWithParser(v3))).toBeUndefined();
+      // Contract control: the two sealed identities still derive.
+      expect(evaluationPolicyFromSpecification(
+        buildBinaryJudgmentEvaluationSpecification(`sha256:${"2".repeat(64)}`, "reject"),
+      )).toBe("reject");
+      expect(evaluationPolicyFromSpecification(
+        buildBinaryJudgmentEvaluationSpecification(`sha256:${"2".repeat(64)}`, "abstain"),
+      )).toBe("abstain");
+    });
+
+    test("resolving the registration's method refuses and names the parser", () => {
+      const registration = createBinaryJudgmentEvaluatorRegistration({
+        evaluatorId: "did:key:z6MkhzYwRj8TvZEp41ApnVVDN5a5hBCk8tQYp4w7vGkVn5F8",
+        signerHandle: "evaluator-agent-key.pem",
+      });
+      let thrown: unknown;
+      try {
+        resolveEvaluationMethod(registration, specWithParser(v3));
+      } catch (cause) {
+        thrown = cause;
+      }
+      expect(isEvaluationOperationalError(thrown)).toBe(true);
+      const error = thrown as EvaluationOperationalError;
+      expect(error.reason).toBe("unsupported-specification");
+      expect(error.recoveryAdvice).toBe("do-not-retry");
+      expect(error.safeDetail).toContain(parserAllowlistKey(v3));
+    });
+
+    test("a non-deterministic-process specification refuses without reading a family block", () => {
+      expect(() => binaryJudgmentMethodForSpecification(
+        { ...binaryJudgmentSpec(), family: "human-review" } as unknown as EvaluationSpec,
+      )).toThrow(/not deterministic-process/u);
+    });
   });
 
   test("the two registrations never both claim one specification", () => {

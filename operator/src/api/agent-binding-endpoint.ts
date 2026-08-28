@@ -11,6 +11,7 @@
  * against fresh 1/1 Safes on Base Sepolia (`bd jinn-mono-h74p`).
  */
 import type { Hono } from 'hono';
+import { sanitizeErrorText } from '../rpc/transport.js';
 
 export interface BindAttemptResult {
   serviceIndex: number;
@@ -46,7 +47,15 @@ export function addAgentBindingRoutes(app: Hono, config: AgentBindingRoutesConfi
     const attempts: BindAttemptResult[] = [];
     for (const target of targets) {
       const result = await config.retryBind(target.serviceIndex);
-      attempts.push(result);
+      // #3036: `detail` originates from an on-chain bind failure, so a viem
+      // HttpRequestError can carry the authenticated RPC URL. Mask it here —
+      // the route is the choke point every provider of the interface passes
+      // through, so no caller can reintroduce the leak.
+      attempts.push(
+        result.detail === undefined
+          ? result
+          : { ...result, detail: sanitizeErrorText(result.detail) },
+      );
     }
     return c.json({ ok: true, attempts });
   });
