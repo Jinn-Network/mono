@@ -21,15 +21,27 @@ const workflow = readFileSync(
   'utf8',
 );
 
+// A `name:` value is a whole YAML scalar, not a single unquoted token. Reading
+// it as `(\S+)` skipped any name carrying a `${{ }}` expression, because the
+// spaces inside the expression defeat `\S+` — and a skipped uploader is one the
+// count assertion below never sees, which is exactly the regression this file
+// exists to catch. It also kept the surrounding quotes of a quoted name, so
+// quoting an artifact consistently on both sides read as a missing restore.
+function artifactValue(line, key) {
+  const match = line.match(new RegExp(`^\\s+${key}:\\s+(.+?)\\s*$`));
+  if (!match) return undefined;
+  return match[1].replace(/^(['"])(.*)\1$/, '$2');
+}
+
 function uploadedArtifactNames(source) {
   const names = [];
   const lines = source.split('\n');
   for (let index = 0; index < lines.length; index += 1) {
     if (!lines[index].includes('uses: actions/upload-artifact')) continue;
     for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      const name = lines[cursor].match(/^\s+name: (\S+)$/);
+      const name = artifactValue(lines[cursor], 'name');
       if (name) {
-        names.push(name[1]);
+        names.push(name);
         break;
       }
       if (/^\s+- /.test(lines[cursor])) break;
@@ -50,10 +62,10 @@ function restoredArtifacts(source) {
     const step = { name: undefined, path: undefined };
     for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
       if (/^\s+- /.test(lines[cursor])) break;
-      const name = lines[cursor].match(/^\s+name: (\S+)$/);
-      if (name) step.name = name[1];
-      const path = lines[cursor].match(/^\s+path: (\S+)$/);
-      if (path) step.path = path[1];
+      const name = artifactValue(lines[cursor], 'name');
+      if (name) step.name = name;
+      const path = artifactValue(lines[cursor], 'path');
+      if (path) step.path = path;
     }
     if (step.name) restored.push(step);
   }
@@ -67,6 +79,18 @@ function restoredArtifactNames(source) {
 test('every uploaded distribution is restored by name, never by pattern', () => {
   const uploaded = uploadedArtifactNames(workflow);
   assert.ok(uploaded.length > 0, 'the workflow must upload at least one distribution');
+
+  // An expression-derived name cannot be matched against a literal restore, so
+  // it would silently pass the loop below. Fail on it instead: an unparseable
+  // uploader is the shape that hid a count change from this gate.
+  for (const artifact of uploaded) {
+    assert.equal(
+      artifact.includes('${{'),
+      false,
+      `${artifact} names its artifact with an expression; this gate can only ` +
+        'match literal names, so keep the artifact name literal',
+    );
+  }
 
   const restored = restoredArtifactNames(workflow);
   for (const artifact of uploaded) {
