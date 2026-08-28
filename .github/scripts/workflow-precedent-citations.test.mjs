@@ -63,11 +63,15 @@ function stepOpenerIndent(lines, index) {
   return 0;
 }
 
-// Returns every workflow file name cited in a comment attached to a
-// download-artifact step, self-citations excluded. The comment block is the run
-// of `#` lines immediately above the step's `- ` opener; a citation written
-// inside the step body, or separated from the opener by a blank line, is not
-// read. Keep precedent citations in the attached block so this gate sees them.
+// Returns every workflow file name cited as precedent in a comment attached to
+// a download-artifact step, self-citations excluded. A citation is a line of
+// the form `# Precedent: <workflow>.yml` — only names on such a line count, so
+// a workflow named anywhere else in the block (a contrast, an aside, a pointer
+// to a workflow that deliberately does something else) is prose, not a claim
+// this gate will enforce. The comment block is the run of `#` lines immediately
+// above the step's `- ` opener; a marker written inside the step body, or
+// separated from the opener by a blank line, is not read. Keep precedent
+// markers in the attached block so this gate sees them.
 export function citedPrecedents(source, selfName) {
   const lines = source.split('\n');
   const cited = new Set();
@@ -84,8 +88,12 @@ export function citedPrecedents(source, selfName) {
       comment.unshift(lines[cursor]);
     }
 
-    for (const match of comment.join('\n').match(/[\w-]+\.ya?ml/g) ?? []) {
-      if (match !== selfName) cited.add(match);
+    for (const line of comment) {
+      const marker = line.match(/^\s*#\s*Precedent:\s*(.*)$/);
+      if (!marker) continue;
+      for (const match of marker[1].match(/[\w-]+\.ya?ml/g) ?? []) {
+        if (match !== selfName) cited.add(match);
+      }
     }
   }
   return [...cited];
@@ -118,7 +126,7 @@ test('a citation is only read from the comment attached to a restore step', () =
     '      # Unrelated prose mentioning marketplace-ci.yml.',
     '      - name: Something else',
     '        run: echo hi',
-    '      # Same shape as plugin-tree-ci.yml.',
+    '      # Precedent: plugin-tree-ci.yml.',
     '      - name: Restore a distribution',
     '        uses: actions/download-artifact@v8',
     '        with:',
@@ -133,7 +141,7 @@ test('a citation is only read from the comment attached to a restore step', () =
 
 test('a citation pointing at a workflow that restores nothing is reported', () => {
   const citing = [
-    '      # Same shape as consolidated-ci.yml.',
+    '      # Precedent: consolidated-ci.yml.',
     '      - name: Restore a distribution',
     '        uses: actions/download-artifact@v8',
     '        with:',
@@ -160,4 +168,18 @@ test('a restore step at the end of a job does not read the next job\'s name', ()
   ].join('\n');
 
   assert.deepEqual(restoredArtifactNames(source), []);
+});
+
+test('a workflow named outside a Precedent line is prose, not a citation', () => {
+  const source = [
+    '      # Unlike marketplace-ci.yml, we restore by name. See also policy-ci.yml.',
+    '      # Precedent: plugin-tree-ci.yml.',
+    '      - name: Restore a distribution',
+    '        uses: actions/download-artifact@v8',
+    '        with:',
+    '          name: some-dist',
+    '',
+  ].join('\n');
+
+  assert.deepEqual(citedPrecedents(source, 'self-ci.yml'), ['plugin-tree-ci.yml']);
 });

@@ -165,6 +165,7 @@ jobs:
       # the artifact count. `runtime` is this workflow's only uploader, so it
       # always matched alone. Restoring by name has no such dependency. Add one
       # named step per package when C4-C7 land further `plugin-*-dist` uploads.
+      # Precedent: lifecycle-notifications-ci.yml.
       - name: Restore Plugin Runtime distribution
         uses: actions/download-artifact@v8
         with:
