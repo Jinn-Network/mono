@@ -1063,6 +1063,26 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
   assert.equal(projectEntryRanges(stripComments(`projects: [ /'/u, { a: 1 }, { b: 2 } ]`)).length, 2);
 });
 
+// The newline bound above is deliberately not applied to a template literal, and that exemption is
+// the one span rule the fixtures around it do not reach: a `'`/`"` span is bounded at the line, and
+// every backtick a config writes today closes on the line it opens. A template that genuinely spans
+// lines is what separates the two rules, and without the exemption `quotedSpanEnd` stops at the
+// first newline inside it — after which the scanner reads the template's own prose as structure.
+// The fixtures below spend that prose on a `}`, a `]` and an unpaired `'`, so the mis-read is not
+// merely a shorter span: the entry's braces close early, the array closes early, and the surviving
+// quote swallows what follows. That is zero ranges, every allowance and seam path back in root
+// scope, and the cross-entry crediting fail-open of #3154 returning.
+test('a template literal spanning lines does not lose its projects entries', () => {
+  for (const source of [
+    "projects: [ { a: `it's\nfine`, b: 1 }, { c: 2 } ]",
+    'projects: [ { a: `line one\n} // not a comment\n`, b: 1 }, { c: 2 } ]',
+    'projects: [ { a: `close\n] ] ]\n`, b: 1 }, { c: 2 } ]',
+    "projects: [ { a: `brace }\nbracket ]\napostrophe it's\n`, b: 1 }, { c: 2 } ]",
+  ]) {
+    assert.equal(projectEntryRanges(stripComments(source)).length, 2, source);
+  }
+});
+
 // `stripComments` passes regex literals through verbatim, and that branch is not redundant with the
 // comment checks that precede it. What reaches those checks is an *unescaped* `/` inside the
 // literal followed by `/` or `*` — which is why a character class is the shape that gets there, and
