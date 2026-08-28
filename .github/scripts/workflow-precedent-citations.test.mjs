@@ -176,6 +176,9 @@ test('a citation pointing at a workflow that restores nothing is reported', () =
 });
 
 test('a citation pointing at a workflow that does not exist is reported', () => {
+  // consolidated-ci.yml is deliberately absent: that absence is the branch under
+  // test. Adding it here would fall through to the restores-nothing arm and make
+  // this a duplicate of the test above.
   const fixtureRoot = fixtureWorkflows({ 'citing-ci.yml': citingConsolidated });
 
   try {
