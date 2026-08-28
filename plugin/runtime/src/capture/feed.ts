@@ -1,9 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Buffer } from "node:buffer";
+
 import { z } from "zod";
 
 import { PluginRuntimeError } from "../errors.js";
 import { SESSION_FEED_VERSION } from "./identity.js";
+
+/**
+ * Bounds on the producer-controlled inputs one session may bind. Enforced at parse time so an
+ * oversized feed is a refused capture rather than a partial one — the same strictness the rest
+ * of this parser holds. Workflow text, skill text, prompts, and effective configuration are
+ * kilobyte-scale; anything past these bounds is a host bug, not a capture the runtime should
+ * quietly truncate.
+ */
+export const CONTROLLED_INPUT_MAX_BYTES = 256 * 1024;
+export const CONTROLLED_INPUT_MAX_COUNT = 32;
+
+/** The producer-controlled input classes the protocol needs bound rather than labelled. */
+export const CONTROLLED_INPUT_ROLES = ["workflow", "skill", "prompt", "config"] as const;
+export type ControlledInputRole = (typeof CONTROLLED_INPUT_ROLES)[number];
 
 /** Unsigned decimal, no leading zeros — the OTLP nanosecond encoding the spans reuse. */
 const UnixNano = z.string().regex(/^(0|[1-9]\d*)$/u, "must be an unsigned decimal string");
@@ -16,6 +32,57 @@ const Rfc3339 = z
   )
   .refine((value) => Number.isFinite(Date.parse(value)), "must be a real instant");
 
+/** Canonical base64 with correct padding. `Buffer.from` is lenient, so the shape is checked here. */
+const Base64 = z
+  .string()
+  .regex(
+    /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u,
+    "must be canonical base64",
+  );
+
+/**
+ * The recorder rejects a non-absolute IRI at capture time; catching it here instead turns a
+ * late `InvalidCaptureInput` into a named feed error naming the offending line.
+ * Mirrors `isAbsoluteIri` in `@jinn-network/execution-recorder`, which is not public API.
+ */
+function isAbsoluteIri(value: string): boolean {
+  if (!/^[A-Za-z][A-Za-z0-9+.-]*:/u.test(value) || /\s/u.test(value)) return false;
+  try {
+    return new URL(value).protocol.length > 1;
+  } catch {
+    return false;
+  }
+}
+
+/** Matches the recorder's `AbsoluteIri`, so a parsed feed needs no cast at the assembly seam. */
+export type AbsoluteIriString = `${string}:${string}`;
+
+const AbsoluteIri = z.custom<AbsoluteIriString>(
+  (value) => typeof value === "string" && isAbsoluteIri(value),
+  { message: "must be an absolute IRI" },
+);
+
+/**
+ * A Git object name, SHA-1 or SHA-256. Lowercase hex only: the object name is the content
+ * binding, and two spellings of one commit would be two identifiers for one fact.
+ */
+const GitObjectName = z
+  .string()
+  .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u, "must be a lowercase hex Git object name");
+
+/**
+ * The hosted model's full service identity. The fixture's second capture gap is a model known
+ * only by its label; this is the deployment identity the protocol wants recorded instead, and
+ * it maps onto the recorder's `opaque` runtime component.
+ */
+const ModelServiceSchema = z.strictObject({
+  iri: AbsoluteIri,
+  name: z.string().min(1).optional(),
+  version: z.string().min(1).optional(),
+  deployment: z.string().min(1).optional(),
+  providerIri: AbsoluteIri.optional(),
+});
+
 const SessionOpenSchema = z.strictObject({
   type: z.literal("session-open"),
   v: z.literal(SESSION_FEED_VERSION),
@@ -23,8 +90,42 @@ const SessionOpenSchema = z.strictObject({
   startedAt: Rfc3339,
   atUnixNano: UnixNano,
   host: z.strictObject({ name: z.string().min(1), version: z.string().min(1) }),
-  model: z.strictObject({ provider: z.string().min(1), name: z.string().min(1) }),
+  model: z.strictObject({
+    provider: z.string().min(1),
+    name: z.string().min(1),
+    service: ModelServiceSchema.optional(),
+  }),
   conversationId: z.string().min(1).optional(),
+});
+
+/**
+ * The base repository state this execution started from — the fixture's first capture gap.
+ * Emitted at most once, by the host adapter, at session start.
+ */
+const RepositoryStateSchema = z.strictObject({
+  type: z.literal("repository-state"),
+  atUnixNano: UnixNano,
+  repository: AbsoluteIri,
+  branch: z.string().min(1),
+  targetBase: z.string().min(1),
+  baseCommit: GitObjectName,
+  baseTree: GitObjectName,
+});
+
+/**
+ * One producer-controlled input, carried by value.
+ *
+ * Bytes travel inline rather than by path deliberately: a feed-supplied filesystem path would
+ * turn this parser into an arbitrary-file-read primitive driven by host-written data, and the
+ * only path the capture layer reads today is one it computed itself.
+ */
+const ControlledInputSchema = z.strictObject({
+  type: z.literal("controlled-input"),
+  atUnixNano: UnixNano,
+  role: z.enum(CONTROLLED_INPUT_ROLES),
+  name: z.string().min(1).max(256),
+  mediaType: z.string().min(1).max(128),
+  contentBase64: Base64,
 });
 
 const EnvironmentSchema = z.strictObject({
@@ -76,6 +177,8 @@ const SessionCloseSchema = z.strictObject({
 
 const SessionFeedEventSchema = z.discriminatedUnion("type", [
   SessionOpenSchema,
+  RepositoryStateSchema,
+  ControlledInputSchema,
   EnvironmentSchema,
   UserTurnSchema,
   AssistantTurnSchema,
@@ -85,11 +188,22 @@ const SessionFeedEventSchema = z.discriminatedUnion("type", [
 ]);
 
 export type SessionOpenEvent = z.infer<typeof SessionOpenSchema>;
+export type RepositoryStateEvent = z.infer<typeof RepositoryStateSchema>;
+export type ControlledInputEvent = z.infer<typeof ControlledInputSchema>;
 export type SessionCloseEvent = z.infer<typeof SessionCloseSchema>;
 export type UserTurnEvent = z.infer<typeof UserTurnSchema>;
 export type AssistantTurnEvent = z.infer<typeof AssistantTurnSchema>;
 export type ToolCallEvent = z.infer<typeof ToolCallSchema>;
 export type SessionFeedEvent = z.infer<typeof SessionFeedEventSchema>;
+
+/** One producer-controlled input, decoded once at parse time. */
+export interface ControlledInput {
+  readonly ordinal: number;
+  readonly role: ControlledInputRole;
+  readonly name: string;
+  readonly mediaType: string;
+  readonly bytes: Uint8Array;
+}
 
 export interface FeedLine {
   readonly ordinal: number;
@@ -106,6 +220,8 @@ export interface ParsedSessionFeed {
     readonly tools: readonly string[];
     readonly skills: readonly string[];
   };
+  readonly repositoryState?: RepositoryStateEvent;
+  readonly controlledInputs: readonly ControlledInput[];
 }
 
 function invalid(message: string, cause?: unknown): never {
@@ -137,6 +253,8 @@ export function parseSessionFeed(bytes: Uint8Array): ParsedSessionFeed {
   let close: SessionCloseEvent | undefined;
   let tokens: ParsedSessionFeed["tokens"];
   let environment: ParsedSessionFeed["environment"];
+  let repositoryState: RepositoryStateEvent | undefined;
+  const controlledInputs: ControlledInput[] = [];
   let previousNano = -1n;
 
   for (const [ordinal, raw] of rawLines.entries()) {
@@ -186,6 +304,36 @@ export function parseSessionFeed(bytes: Uint8Array): ParsedSessionFeed {
     if (event.type === "environment") {
       environment = { tools: event.tools, skills: event.skills };
     }
+    if (event.type === "repository-state") {
+      if (repositoryState !== undefined) {
+        invalid(
+          `A session feed must carry at most one repository-state event (line ${String(ordinal)}).`,
+        );
+      }
+      repositoryState = event;
+    }
+    if (event.type === "controlled-input") {
+      if (controlledInputs.length === CONTROLLED_INPUT_MAX_COUNT) {
+        invalid(
+          `A session feed must carry at most ${String(CONTROLLED_INPUT_MAX_COUNT)} ` +
+            `controlled-input events (line ${String(ordinal)}).`,
+        );
+      }
+      const bytes = new Uint8Array(Buffer.from(event.contentBase64, "base64"));
+      if (bytes.byteLength > CONTROLLED_INPUT_MAX_BYTES) {
+        invalid(
+          `A controlled input must not exceed ${String(CONTROLLED_INPUT_MAX_BYTES)} bytes ` +
+            `(line ${String(ordinal)} carries ${String(bytes.byteLength)} bytes).`,
+        );
+      }
+      controlledInputs.push({
+        ordinal,
+        role: event.role,
+        name: event.name,
+        mediaType: event.mediaType,
+        bytes,
+      });
+    }
 
     lines.push({ ordinal, event });
   }
@@ -204,5 +352,7 @@ export function parseSessionFeed(bytes: Uint8Array): ParsedSessionFeed {
     lines,
     ...(tokens === undefined ? {} : { tokens }),
     ...(environment === undefined ? {} : { environment }),
+    ...(repositoryState === undefined ? {} : { repositoryState }),
+    controlledInputs,
   };
 }

@@ -3,19 +3,31 @@
 import type {
   CaptureOrigin,
   FinalizeExecutionInput,
+  InputCapture,
+  RepositoryStateCapture,
+  RuntimeComponentCapture,
   StartExecutionRecordingInput,
 } from "@jinn-network/execution-recorder";
 
 import { PluginRuntimeError } from "../errors.js";
 import type { ParsedSessionFeed } from "./feed.js";
 import {
+  BASE_COMMIT_PROPERTY,
+  BASE_TREE_PROPERTY,
+  BRANCH_PROPERTY,
   CAPTURE_LICENSE,
+  CONTROLLED_INPUT_ROLE_PROPERTY,
+  MODEL_SERVICE_ENTITY_ID,
   PRODUCER_IRI,
   PRODUCER_NAME,
+  REPOSITORY_BASE_STATE_ENTITY_ID,
+  REPOSITORY_STATE_ENTITY_ID,
   SESSION_FEED_FORMAT_IRI,
   SESSION_FEED_MEDIA_TYPE,
   SESSION_ID_PROPERTY,
+  TARGET_BASE_PROPERTY,
   TRACE_RECORD_IDENTIFIER_PROPERTY,
+  controlledInputEntityId,
   executorIri,
 } from "./identity.js";
 
@@ -112,10 +124,130 @@ function environmentBytes(feed: ParsedSessionFeed): Uint8Array {
   });
 }
 
+/**
+ * Binds the base repository state as a content-bound input — the first capture gap the
+ * `autopilot-issue-1697` fixture records ("the original repository base commit/tree was never
+ * captured").
+ *
+ * A dataset, because the subject is the repository tree rather than one file, and the recorder
+ * requires a non-empty member list: the single member carries the Git object names, which are
+ * the binding a verifier actually resolves.
+ */
+function repositoryState(
+  feed: ParsedSessionFeed,
+  captureOrigin: CaptureOrigin,
+): RepositoryStateCapture | undefined {
+  const observed = feed.repositoryState;
+  if (observed === undefined) return undefined;
+
+  const state = {
+    repository: observed.repository,
+    branch: observed.branch,
+    targetBase: observed.targetBase,
+    baseCommit: observed.baseCommit,
+    baseTree: observed.baseTree,
+  };
+
+  return {
+    artifact: {
+      kind: "dataset",
+      entityId: REPOSITORY_STATE_ENTITY_ID,
+      manifest: {
+        bytes: encodeJson(state),
+        mediaType: JSON_MEDIA_TYPE,
+        name: "repository.json",
+      },
+      members: [
+        {
+          kind: "file",
+          entityId: REPOSITORY_BASE_STATE_ENTITY_ID,
+          source: {
+            bytes: encodeJson({ baseCommit: observed.baseCommit, baseTree: observed.baseTree }),
+            mediaType: JSON_MEDIA_TYPE,
+            name: "base-state.json",
+          },
+          origin: captureOrigin,
+        },
+      ],
+      origin: captureOrigin,
+    },
+    identifiers: [
+      { propertyId: BASE_COMMIT_PROPERTY, value: observed.baseCommit },
+      { propertyId: BASE_TREE_PROPERTY, value: observed.baseTree },
+      { propertyId: BRANCH_PROPERTY, value: observed.branch },
+      { propertyId: TARGET_BASE_PROPERTY, value: observed.targetBase },
+    ],
+    repository: observed.repository,
+  };
+}
+
+/**
+ * Binds each producer-controlled input's exact bytes — the second capture gap ("producer-
+ * controlled workflow, skill, prompt, and effective child configuration bytes are not bound to
+ * immutable artifacts"). The recorder digests the bytes; the role identifier says which class
+ * of controlled input each one is.
+ */
+function controlledInputs(
+  feed: ParsedSessionFeed,
+  captureOrigin: CaptureOrigin,
+): readonly InputCapture[] {
+  return feed.controlledInputs.map((controlled, index) => ({
+    kind: "file",
+    entityId: controlledInputEntityId(index, controlled.name),
+    source: {
+      bytes: controlled.bytes,
+      mediaType: controlled.mediaType,
+      name: controlled.name,
+    },
+    identifiers: [{ propertyId: CONTROLLED_INPUT_ROLE_PROPERTY, value: controlled.role }],
+    origin: captureOrigin,
+  }));
+}
+
+/**
+ * Records the hosted model as an `opaque` runtime component when the host reports a full
+ * service identity — the rest of the second gap ("the opaque hosted model has a service label
+ * but no more precise deployment identity"). A producer cannot content-address a hosted
+ * service, so the protocol asks for precise provider and deployment identification instead.
+ */
+function modelServiceComponent(
+  feed: ParsedSessionFeed,
+  captureOrigin: CaptureOrigin,
+): RuntimeComponentCapture | undefined {
+  const service = feed.open.model.service;
+  if (service === undefined) return undefined;
+
+  return {
+    kind: "opaque",
+    descriptor: {
+      kind: "file",
+      entityId: MODEL_SERVICE_ENTITY_ID,
+      source: {
+        bytes: encodeJson({
+          provider: feed.open.model.provider,
+          model: feed.open.model.name,
+          service,
+        }),
+        mediaType: JSON_MEDIA_TYPE,
+        name: "model-service.json",
+      },
+      origin: captureOrigin,
+    },
+    component: {
+      entityId: service.iri,
+      name: service.name ?? `${feed.open.model.provider} ${feed.open.model.name}`,
+      ...(service.version === undefined ? {} : { softwareVersion: service.version }),
+      ...(service.providerIri === undefined ? {} : { provider: service.providerIri }),
+    },
+  };
+}
+
 export function buildStartInput(input: CaptureAssemblyInput): StartExecutionRecordingInput {
   const { feed } = input;
   const captureOrigin = origin(feed);
   const environment = environmentBytes(feed);
+  const baseState = repositoryState(feed, captureOrigin);
+  const modelService = modelServiceComponent(feed, captureOrigin);
 
   return {
     workspaceDir: input.workspaceDir,
@@ -141,6 +273,8 @@ export function buildStartInput(input: CaptureAssemblyInput): StartExecutionReco
       },
       origin: captureOrigin,
     },
+    initialInputs: controlledInputs(feed, captureOrigin),
+    ...(baseState === undefined ? {} : { repositoryState: baseState }),
     executor: {
       entityId: executorIri(feed.open.host.name),
       kind: "software",
@@ -172,6 +306,7 @@ export function buildStartInput(input: CaptureAssemblyInput): StartExecutionReco
             origin: captureOrigin,
           },
         },
+        ...(modelService === undefined ? [] : [modelService]),
       ],
     },
     producer: {

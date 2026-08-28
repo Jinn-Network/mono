@@ -160,3 +160,130 @@ describe("parseSessionFeed", () => {
     expect(feed.tokens).toEqual({ inputTokens: 10, outputTokens: 20 });
   });
 });
+
+describe("repository-state", () => {
+  const repositoryState = {
+    type: "repository-state",
+    atUnixNano: "1500",
+    repository: "https://github.com/Jinn-Network/mono",
+    branch: "autopilot/3223",
+    targetBase: "next",
+    baseCommit: "a".repeat(40),
+    baseTree: "b".repeat(40),
+  };
+
+  test("carries the base commit and tree the fixture found missing", () => {
+    const feed = parseSessionFeed(encode([open, repositoryState, close]));
+    expect(feed.repositoryState).toEqual(repositoryState);
+  });
+
+  test("is optional — a feed without one parses unchanged", () => {
+    expect(parseSessionFeed(encode([open, close])).repositoryState).toBeUndefined();
+  });
+
+  test("refuses a second repository-state rather than silently keeping one", () => {
+    expect(() =>
+      parseSessionFeed(encode([open, repositoryState, repositoryState, close])),
+    ).toThrow(/repository-state/u);
+  });
+
+  test("requires full-length lowercase hex object names", () => {
+    for (const bad of ["a".repeat(39), "A".repeat(40), "g".repeat(40)]) {
+      expect(() =>
+        parseSessionFeed(encode([open, { ...repositoryState, baseCommit: bad }, close])),
+      ).toThrow(PluginRuntimeError);
+    }
+  });
+
+  test("accepts a SHA-256 object name for a repository that uses one", () => {
+    const feed = parseSessionFeed(
+      encode([
+        open,
+        { ...repositoryState, baseCommit: "c".repeat(64), baseTree: "d".repeat(64) },
+        close,
+      ]),
+    );
+    expect(feed.repositoryState?.baseCommit).toBe("c".repeat(64));
+  });
+});
+
+describe("controlled-input", () => {
+  const controlled = (over: Record<string, unknown> = {}) => ({
+    type: "controlled-input",
+    atUnixNano: "1600",
+    role: "workflow",
+    name: "implement-issue/SKILL.md",
+    mediaType: "text/markdown",
+    contentBase64: Buffer.from("# implement-issue\n").toString("base64"),
+    ...over,
+  });
+
+  test("collects every controlled input in feed order", () => {
+    const feed = parseSessionFeed(
+      encode([
+        open,
+        controlled(),
+        controlled({ role: "config", name: "effective-config.json", mediaType: "application/json" }),
+        close,
+      ]),
+    );
+    expect(feed.controlledInputs.map((entry) => entry.role)).toEqual(["workflow", "config"]);
+    expect(new TextDecoder().decode(feed.controlledInputs[0]!.bytes)).toBe("# implement-issue\n");
+  });
+
+  test("is optional — a feed without any yields an empty list", () => {
+    expect(parseSessionFeed(encode([open, close])).controlledInputs).toEqual([]);
+  });
+
+  test("rejects an unknown role rather than recording an uninterpretable input", () => {
+    expect(() => parseSessionFeed(encode([open, controlled({ role: "secrets" }), close]))).toThrow(
+      PluginRuntimeError,
+    );
+  });
+
+  test("rejects content that is not base64", () => {
+    expect(() =>
+      parseSessionFeed(encode([open, controlled({ contentBase64: "not base64!" }), close])),
+    ).toThrow(PluginRuntimeError);
+  });
+
+  test("refuses an input larger than the per-input bound", () => {
+    const oversized = Buffer.alloc(256 * 1024 + 1, 0x61).toString("base64");
+    expect(() =>
+      parseSessionFeed(encode([open, controlled({ contentBase64: oversized }), close])),
+    ).toThrow(/bytes/u);
+  });
+
+  test("refuses more controlled inputs than the per-session bound", () => {
+    const many = Array.from({ length: 33 }, (_, index) => controlled({ name: `skill-${index}.md` }));
+    expect(() => parseSessionFeed(encode([open, ...many, close]))).toThrow(/controlled-input/u);
+  });
+});
+
+describe("hosted model service identity", () => {
+  test("records the full service identity when the host reports one", () => {
+    const service = {
+      iri: "https://spec.jinn.network/services/anthropic/claude-opus-5",
+      name: "Anthropic Messages API",
+      version: "claude-opus-5-20260514",
+      deployment: "api.anthropic.com",
+      providerIri: "https://spec.jinn.network/organizations/anthropic",
+    };
+    const feed = parseSessionFeed(
+      encode([{ ...open, model: { ...open.model, service } }, close]),
+    );
+    expect(feed.open.model.service).toEqual(service);
+  });
+
+  test("is optional — an unreported service leaves the bare label alone", () => {
+    expect(parseSessionFeed(encode([open, close])).open.model.service).toBeUndefined();
+  });
+
+  test("rejects a service identity that is not an absolute IRI", () => {
+    expect(() =>
+      parseSessionFeed(
+        encode([{ ...open, model: { ...open.model, service: { iri: "claude-opus-5" } } }, close]),
+      ),
+    ).toThrow(PluginRuntimeError);
+  });
+});

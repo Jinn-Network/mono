@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 
 import { describe, expect, test } from "vitest";
@@ -5,11 +6,16 @@ import { describe, expect, test } from "vitest";
 import { PluginRuntimeError } from "../errors.js";
 import { parseSessionFeed } from "./feed.js";
 import {
+  BASE_COMMIT_PROPERTY,
+  BASE_TREE_PROPERTY,
+  BRANCH_PROPERTY,
   CAPTURE_LICENSE,
+  CONTROLLED_INPUT_ROLE_PROPERTY,
   PRODUCER_IRI,
   SESSION_FEED_FORMAT_IRI,
   SESSION_FEED_MEDIA_TYPE,
   SESSION_ID_PROPERTY,
+  TARGET_BASE_PROPERTY,
   TRACE_RECORD_IDENTIFIER_PROPERTY,
 } from "./identity.js";
 import {
@@ -238,5 +244,158 @@ describe("buildFinalizeInput", () => {
     expect(finalize.nativeTrace?.artifact.identifiers).toEqual([
       { propertyId: TRACE_RECORD_IDENTIFIER_PROPERTY, value: TRACE_DIGEST },
     ]);
+  });
+});
+
+const gapClosingFeed = (over: { readonly service?: unknown } = {}) =>
+  parseSessionFeed(
+    new TextEncoder().encode(
+      [
+        JSON.stringify({
+          type: "session-open",
+          v: 1,
+          sessionId: "s-3223",
+          startedAt: "2026-07-30T09:00:00Z",
+          atUnixNano: "1000",
+          host: { name: "Claude Code", version: "2.1.197" },
+          model: {
+            provider: "anthropic",
+            name: "claude-opus-5",
+            ...(over.service === undefined ? {} : { service: over.service }),
+          },
+        }),
+        JSON.stringify({
+          type: "repository-state",
+          atUnixNano: "1100",
+          repository: "https://github.com/Jinn-Network/mono",
+          branch: "autopilot/3223",
+          targetBase: "next",
+          baseCommit: "a".repeat(40),
+          baseTree: "b".repeat(40),
+        }),
+        JSON.stringify({
+          type: "controlled-input",
+          atUnixNano: "1200",
+          role: "workflow",
+          name: ".claude/skills/implement-issue/SKILL.md",
+          mediaType: "text/markdown",
+          contentBase64: Buffer.from("# implement-issue\n").toString("base64"),
+        }),
+        JSON.stringify({
+          type: "controlled-input",
+          atUnixNano: "1300",
+          role: "config",
+          name: "effective-config.json",
+          mediaType: "application/json",
+          contentBase64: Buffer.from('{"runtime":"claude"}').toString("base64"),
+        }),
+        JSON.stringify({
+          type: "session-close",
+          atUnixNano: "9000",
+          endedAt: "2026-07-30T09:10:00Z",
+          outcome: "completed",
+          summary: "Close both capture gaps",
+        }),
+      ].join("\n") + "\n",
+    ),
+  );
+
+const gapClosingAssembly = (over?: { readonly service?: unknown }) => {
+  const feed = gapClosingFeed(over);
+  return {
+    feed,
+    feedPath: "/home/op/capture/sessions/s-3223/feed.ndjson",
+    workspaceDir: "/home/op/capture/workspaces/s-3223",
+    producerVersion: "0.1.0",
+    outcome: resolveSessionOutcome(feed),
+    traceDigest: TRACE_DIGEST,
+  };
+};
+
+describe("buildStartInput — base repository state (capture gap 1)", () => {
+  test("binds the base commit and tree as a content-bound repository input", () => {
+    const start = buildStartInput(gapClosingAssembly());
+    const state = start.repositoryState!;
+
+    expect(state.repository).toBe("https://github.com/Jinn-Network/mono");
+    expect(state.artifact.kind).toBe("dataset");
+    expect(state.artifact.members).toHaveLength(1);
+    expect(state.identifiers).toEqual([
+      { propertyId: BASE_COMMIT_PROPERTY, value: "a".repeat(40) },
+      { propertyId: BASE_TREE_PROPERTY, value: "b".repeat(40) },
+      { propertyId: BRANCH_PROPERTY, value: "autopilot/3223" },
+      { propertyId: TARGET_BASE_PROPERTY, value: "next" },
+    ]);
+    expect(JSON.parse(new TextDecoder().decode(state.artifact.manifest.bytes!))).toEqual({
+      repository: "https://github.com/Jinn-Network/mono",
+      branch: "autopilot/3223",
+      targetBase: "next",
+      baseCommit: "a".repeat(40),
+      baseTree: "b".repeat(40),
+    });
+  });
+
+  test("omits the repository input when the host reported no base state", async () => {
+    expect(buildStartInput(await assembly()).repositoryState).toBeUndefined();
+  });
+});
+
+describe("buildStartInput — producer-controlled inputs (capture gap 2)", () => {
+  test("binds each controlled input's exact bytes under a distinct entity id", () => {
+    const start = buildStartInput(gapClosingAssembly());
+    const inputs = start.initialInputs!;
+
+    expect(inputs).toHaveLength(2);
+    expect(new Set(inputs.map((input) => input.entityId)).size).toBe(2);
+    for (const input of inputs) {
+      expect(input.entityId.startsWith("inputs/controlled/")).toBe(true);
+      expect(input.kind).toBe("file");
+    }
+    expect(inputs.map((input) => input.identifiers)).toEqual([
+      [{ propertyId: CONTROLLED_INPUT_ROLE_PROPERTY, value: "workflow" }],
+      [{ propertyId: CONTROLLED_INPUT_ROLE_PROPERTY, value: "config" }],
+    ]);
+    const first = inputs[0]!;
+    expect(first.kind === "file" ? new TextDecoder().decode(first.source.bytes!) : "").toBe(
+      "# implement-issue\n",
+    );
+  });
+
+  test("carries no initial inputs when the host reported none", async () => {
+    expect(buildStartInput(await assembly()).initialInputs).toEqual([]);
+  });
+});
+
+describe("buildStartInput — hosted model service identity (capture gap 2)", () => {
+  const service = {
+    iri: "https://spec.jinn.network/services/anthropic/claude-opus-5",
+    name: "Anthropic Messages API",
+    version: "claude-opus-5-20260514",
+    deployment: "api.anthropic.com",
+    providerIri: "https://spec.jinn.network/organizations/anthropic",
+  };
+
+  test("records the hosted model as an opaque runtime component, not a bare label", () => {
+    const start = buildStartInput(gapClosingAssembly({ service }));
+    const opaque = start.runtime.components.find((component) => component.kind === "opaque");
+
+    expect(opaque).toBeDefined();
+    if (opaque?.kind !== "opaque") throw new Error("expected an opaque component");
+    expect(opaque.component).toEqual({
+      entityId: service.iri,
+      name: service.name,
+      softwareVersion: service.version,
+      provider: service.providerIri,
+    });
+    expect(JSON.parse(new TextDecoder().decode(opaque.descriptor.source.bytes!))).toEqual({
+      provider: "anthropic",
+      model: "claude-opus-5",
+      service,
+    });
+  });
+
+  test("adds no opaque component when the host reported no service identity", () => {
+    const start = buildStartInput(gapClosingAssembly());
+    expect(start.runtime.components.every((component) => component.kind === "controlled")).toBe(true);
   });
 });
