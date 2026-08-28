@@ -193,6 +193,13 @@ describe("repository-state", () => {
     ).toThrow(/repository-state/u);
   });
 
+  test("keeps the commit and tree when the branch and target base are unknown", () => {
+    const { branch, targetBase, ...withoutContext } = repositoryState;
+    const feed = parseSessionFeed(encode([open, withoutContext, close]));
+    expect(feed.repositoryState?.baseCommit).toBe("a".repeat(40));
+    expect(feed.repositoryState?.branch).toBeUndefined();
+  });
+
   test("refuses a blank branch or target base", () => {
     for (const over of [{ branch: " " }, { targetBase: "  " }]) {
       expect(() =>
@@ -323,6 +330,15 @@ describe("hosted model service identity", () => {
         parseSessionFeed(encode([{ ...open, model: { ...open.model, service: { iri } } }, close])),
       ).toThrow(/identity/u);
     }
+  });
+
+  test("refuses a service that names itself as its own provider", () => {
+    const iri = "https://spec.jinn.network/services/anthropic/claude-opus-5";
+    expect(() =>
+      parseSessionFeed(
+        encode([{ ...open, model: { ...open.model, service: { iri, providerIri: iri } } }, close]),
+      ),
+    ).toThrow(/provider/u);
   });
 
   test("rejects a service identity that is not an absolute IRI", () => {

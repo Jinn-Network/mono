@@ -6,6 +6,7 @@ import base64
 import importlib
 import json
 import pathlib
+import re
 import threading
 
 import pytest
@@ -267,12 +268,102 @@ def test_controlled_input_bounds_match_the_runtime_that_enforces_them():
         / "capture"
         / "feed.ts"
     ).read_text(encoding="utf-8")
-    assert (
-        f"CONTROLLED_INPUT_MAX_BYTES = {feed.CONTROLLED_INPUT_MAX_BYTES // 1024} * 1024" in source
+
+    def constant(name):
+        match = re.search(rf"{name}\s*=\s*([^;]+);", source)
+        assert match, name
+        return eval(match.group(1).strip(), {"__builtins__": {}})  # noqa: S307 - literal arithmetic
+
+    assert constant("CONTROLLED_INPUT_MAX_BYTES") == feed.CONTROLLED_INPUT_MAX_BYTES
+    assert constant("CONTROLLED_INPUT_MAX_COUNT") == feed.CONTROLLED_INPUT_MAX_COUNT
+
+    # Both directions: a role added on either side and not the other is drift either way.
+    roles = re.search(r"CONTROLLED_INPUT_ROLES = \[([^\]]+)\]", source)
+    assert roles
+    assert tuple(re.findall(r'"([^"]+)"', roles.group(1))) == feed.CONTROLLED_INPUT_ROLES
+
+
+def test_derive_model_service_names_a_deployment_rather_than_a_label():
+    assert feed.derive_model_service("anthropic", "claude-opus-5") == {
+        "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+        "name": "anthropic claude-opus-5",
+    }
+    assert feed.derive_model_service("anthropic", "claude-opus-5", "2026-05-14")["version"] == (
+        "2026-05-14"
     )
-    assert f"CONTROLLED_INPUT_MAX_COUNT = {feed.CONTROLLED_INPUT_MAX_COUNT}" in source
-    for role in feed.CONTROLLED_INPUT_ROLES:
-        assert f'"{role}"' in source
+
+
+@pytest.mark.parametrize("args", [("", "claude"), ("anthropic", ""), ("...", "claude")])
+def test_derive_model_service_returns_nothing_it_cannot_name(args):
+    assert feed.derive_model_service(*args) is None
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"repository": "Jinn-Network/mono"},
+        {"base_commit": "4f0e2b7"},
+        {"base_commit": "a" * 40 + "\n"},
+        {"base_tree": ""},
+    ],
+)
+def test_repository_state_drops_what_the_runtime_would_refuse(feed_path, over):
+    writer = feed.SessionFeed(feed_path)
+    writer.repository_state(
+        **{
+            "repository": "https://github.com/Jinn-Network/mono",
+            "base_commit": "a" * 40,
+            "base_tree": "b" * 40,
+            **over,
+        }
+    )
+    assert feed_path.read_text(encoding="utf-8") == ""
+
+
+def test_repository_state_is_written_once(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    for _ in range(3):
+        writer.repository_state(
+            repository="https://github.com/Jinn-Network/mono",
+            base_commit="a" * 40,
+            base_tree="b" * 40,
+        )
+    assert len(read_lines(feed_path)) == 1
+
+
+def test_repository_state_omits_context_it_cannot_name(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    writer.repository_state(
+        repository="https://github.com/Jinn-Network/mono",
+        base_commit="a" * 40,
+        base_tree="b" * 40,
+        branch="HEAD",
+        target_base="  ",
+    )
+    event = read_lines(feed_path)[0]
+    assert "branch" not in event and "targetBase" not in event
+    assert event["baseCommit"] == "a" * 40
+
+
+@pytest.mark.parametrize(
+    "service",
+    [
+        {"iri": "claude-opus-5"},
+        {"name": "Anthropic"},
+        {"iri": "https://x.test/s", "providerIri": "https://x.test/s"},
+    ],
+)
+def test_open_session_drops_a_service_identity_the_runtime_would_refuse(feed_path, service):
+    writer = feed.SessionFeed(feed_path)
+    writer.open_session(
+        session_id="s-1",
+        host_name="hermes-agent",
+        host_version="1.2.3",
+        model_provider="anthropic",
+        model_name="claude-opus-5",
+        model_service=service,
+    )
+    assert "service" not in read_lines(feed_path)[0]["model"]
 
 
 def _fixture_events():

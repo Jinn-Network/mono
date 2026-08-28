@@ -131,10 +131,12 @@ const RepositoryStateSchema = z.strictObject({
   type: z.literal("repository-state"),
   atUnixNano: UnixNano,
   repository: AbsoluteIri,
-  branch: nonBlank(256),
-  targetBase: nonBlank(256),
   baseCommit: GitObjectName,
   baseTree: GitObjectName,
+  // Context rather than binding: a detached head has no branch, and the target base is a policy
+  // the host may not know. Their absence must not cost the commit and tree.
+  branch: nonBlank(256).optional(),
+  targetBase: nonBlank(256).optional(),
 });
 
 /**
@@ -375,6 +377,9 @@ export function parseSessionFeed(bytes: Uint8Array): ParsedSessionFeed {
       if (service.iri === taken) {
         invalid(`The model service IRI ${service.iri} is already the ${whose} identity.`);
       }
+    }
+    if (service.providerIri === service.iri) {
+      invalid(`The model service IRI ${service.iri} must not also be its own provider.`);
     }
   }
   if (close !== undefined && Date.parse(close.endedAt) < Date.parse(open.startedAt)) {

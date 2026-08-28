@@ -335,6 +335,26 @@ describe("buildStartInput — base repository state (capture gap 1)", () => {
     });
   });
 
+  test("records the commit and tree even when branch and target base are unknown", () => {
+    const assembly = gapClosingAssembly();
+    const { branch, targetBase, ...withoutContext } = assembly.feed.repositoryState!;
+    const start = buildStartInput({
+      ...assembly,
+      feed: { ...assembly.feed, repositoryState: withoutContext },
+    });
+    expect(start.repositoryState?.identifiers).toEqual([
+      { propertyId: BASE_COMMIT_PROPERTY, value: "a".repeat(40) },
+      { propertyId: BASE_TREE_PROPERTY, value: "b".repeat(40) },
+    ]);
+    expect(
+      JSON.parse(new TextDecoder().decode(start.repositoryState!.artifact.manifest.bytes!)),
+    ).toEqual({
+      repository: "https://github.com/Jinn-Network/mono",
+      baseCommit: "a".repeat(40),
+      baseTree: "b".repeat(40),
+    });
+  });
+
   test("omits the repository input when the host reported no base state", async () => {
     expect(buildStartInput(await assembly()).repositoryState).toBeUndefined();
   });

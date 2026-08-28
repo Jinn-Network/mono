@@ -142,10 +142,10 @@ function repositoryState(
 
   const state = {
     repository: observed.repository,
-    branch: observed.branch,
-    targetBase: observed.targetBase,
     baseCommit: observed.baseCommit,
     baseTree: observed.baseTree,
+    ...(observed.branch === undefined ? {} : { branch: observed.branch }),
+    ...(observed.targetBase === undefined ? {} : { targetBase: observed.targetBase }),
   };
 
   return {
@@ -174,8 +174,12 @@ function repositoryState(
     identifiers: [
       { propertyId: BASE_COMMIT_PROPERTY, value: observed.baseCommit },
       { propertyId: BASE_TREE_PROPERTY, value: observed.baseTree },
-      { propertyId: BRANCH_PROPERTY, value: observed.branch },
-      { propertyId: TARGET_BASE_PROPERTY, value: observed.targetBase },
+      ...(observed.branch === undefined
+        ? []
+        : [{ propertyId: BRANCH_PROPERTY, value: observed.branch }]),
+      ...(observed.targetBase === undefined
+        ? []
+        : [{ propertyId: TARGET_BASE_PROPERTY, value: observed.targetBase }]),
     ],
     repository: observed.repository,
   };

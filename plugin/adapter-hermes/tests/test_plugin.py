@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -179,7 +180,9 @@ def test_the_hooks_write_the_feed_the_runtime_will_seal(monkeypatch, tmp_path, l
     jinn._on_session_end(session_id="s", completed=True, interrupted=False, input_tokens=10, output_tokens=5)
 
     events = [json.loads(line) for line in (tmp_path / "capture" / "sessions" / "cap-1" / "feed.ndjson").read_text(encoding="utf-8").splitlines()]
-    assert [event["type"] for event in events] == [
+    # repository-state is an observation of the working directory, so it is present only when
+    # one is readable; the turn sequence around it is what this test pins.
+    assert [event["type"] for event in events if event["type"] != "repository-state"] == [
         "session-open", "environment", "user-turn", "tool-call", "assistant-turn", "tokens", "session-close",
     ]
     assert events[-1]["outcome"] == "completed"
@@ -220,3 +223,87 @@ def _pinned():
 
 def _raise_start_failed():
     raise importlib.import_module("jinn_plugin.mcp_client").McpClientError("start-failed", "runtime exited")
+
+
+def test_session_start_reports_the_model_service_and_the_base_repository_state(
+    monkeypatch, tmp_path, lines
+):
+    """The two facts this tree can observe are actually emitted, not merely emittable."""
+    install_client(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        jinn,
+        "_observe_repository_state",
+        lambda: {
+            "repository": "https://github.com/Jinn-Network/mono",
+            "base_commit": "4f0e2b7c1a9d8e3f5b6a7c8d9e0f1a2b3c4d5e6f",
+            "base_tree": "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567",
+            "branch": "autopilot/3223",
+            "target_base": "next",
+        },
+    )
+    jinn._on_session_start(session_id="s", platform="cli", cwd=str(tmp_path))
+    jinn._on_pre_llm_call(
+        session_id="s", user_message="x", is_first_turn=True, model="anthropic/claude-opus-5"
+    )
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "capture" / "sessions" / "cap-1" / "feed.ndjson")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert events[0]["model"]["service"] == {
+        "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+        "name": "anthropic claude-opus-5",
+    }
+    state = next(event for event in events if event["type"] == "repository-state")
+    assert state["baseCommit"] == "4f0e2b7c1a9d8e3f5b6a7c8d9e0f1a2b3c4d5e6f"
+    assert state["baseTree"] == "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567"
+    assert state["targetBase"] == "next"
+
+
+def test_an_unreadable_repository_costs_the_base_state_and_nothing_else(
+    monkeypatch, tmp_path, lines
+):
+    install_client(monkeypatch, tmp_path)
+    monkeypatch.setattr(jinn, "_observe_repository_state", lambda: None)
+    jinn._on_session_start(session_id="s", platform="cli", cwd=str(tmp_path))
+    assert (
+        jinn._on_pre_llm_call(session_id="s", user_message="x", is_first_turn=True, model="m")
+        is None
+    )
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "capture" / "sessions" / "cap-1" / "feed.ndjson")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [event["type"] for event in events] == ["session-open", "environment", "user-turn"]
+
+
+@pytest.mark.parametrize(
+    "remote,expected",
+    [
+        ("git@github.com:Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
+        ("ssh://git@github.com/Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
+        ("https://github.com/Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
+        ("https://github.com/Jinn-Network/mono", "https://github.com/Jinn-Network/mono"),
+        ("", ""),
+    ],
+)
+def test_a_git_remote_becomes_an_absolute_iri(remote, expected):
+    """The record requires an absolute IRI; an SSH remote is not one."""
+    assert jinn._repository_iri(remote) == expected
+
+
+def test_observing_the_repository_reads_the_commit_and_tree_this_session_started_from():
+    observed = jinn._observe_repository_state()
+    assert observed is not None
+    assert re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", observed["base_commit"])
+    assert re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", observed["base_tree"])
+    assert observed["repository"].startswith("http")
+
+
+def test_observing_a_directory_that_is_not_a_repository_reports_nothing(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    assert jinn._observe_repository_state() is None

@@ -89,7 +89,7 @@ capture gaps the `autopilot-issue-1697` protocol fixture recorded
 
 | Feed fact | What it binds | Where it lands in the record |
 | --- | --- | --- |
-| `repository-state` event, at most once | repository IRI, branch, target base, base commit, base tree | the `inputs/repository.json` dataset, with the commit and tree as identifiers |
+| `repository-state` event, at most once | repository IRI, base commit, base tree, and optionally branch and target base | the `inputs/repository.json` dataset, with the commit and tree as identifiers |
 | `controlled-input` event, repeatable | the exact bytes of one producer-controlled input — `workflow`, `skill`, `prompt`, or `config` | one digest-bound `inputs/controlled/…` artifact carrying its role |
 | `model.service` on `session-open` | the hosted model's service IRI, version, deployment, and provider | an `opaque` runtime component, the protocol's shape for a service no producer can content-address |
 
@@ -106,12 +106,16 @@ given and does not scrub (below), so a prompt or effective configuration must be
 without credentials rather than cleaned afterwards. The derivation and scrub pipeline is the
 safety net for the public projection, not the plan.
 
-The Hermes adapter writes all three through `SessionFeed.repository_state`,
-`SessionFeed.controlled_input`, and `open_session(model_service=…)`
-(`plugin/adapter-hermes/feed.py`). It bounds and drops what the runtime would refuse rather than
-losing the session to a rejected feed. **Which** facts a given host reports — where the base
-commit comes from, which workflow and configuration bytes count as controlled — is the host's
-decision, not this runtime's.
+The Hermes adapter emits two of the three on its own, at session start
+(`plugin/adapter-hermes/__init__.py`): it derives the model service identity from the provider
+and model it already knows, and reads the base commit, tree, remote, branch, and upstream from
+the working directory's repository. The third — **which** workflow, skill, prompt, and
+configuration bytes count as controlled — is a host decision, written through
+`SessionFeed.controlled_input`.
+
+Every writer validates what the runtime would refuse and drops that one event instead. This
+matters because a malformed feed is refused *whole*: one bad base commit would otherwise cost
+every event in the session.
 
 **Declare a media type the operator's derivation policy has a rule for.** A public projection
 withholds an artifact whose `encodingFormat` matches no `artifactRules` entry, and a policy set

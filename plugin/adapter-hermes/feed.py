@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -33,6 +34,40 @@ CONTROLLED_INPUT_MAX_BYTES = 256 * 1024
 CONTROLLED_INPUT_MAX_COUNT = 32
 
 CONTROLLED_INPUT_ROLES = ("workflow", "skill", "prompt", "config")
+
+#: The service IRI namespace the runtime's fixture already fixed. Deriving one here is what lets
+#: a hosted model be recorded as a deployment identity rather than a bare label.
+MODEL_SERVICE_IRI_PREFIX = "https://spec.jinn.network/services"
+
+_GIT_OBJECT_NAME = re.compile(r"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+_ABSOLUTE_IRI = re.compile(r"\A[A-Za-z][A-Za-z0-9+.\-]*:\S")
+_SLUG_STRIP = re.compile(r"[^a-z0-9]+")
+
+
+def _slug(value: str) -> str:
+    return _SLUG_STRIP.sub("-", value.lower()).strip("-")
+
+
+def derive_model_service(provider: str, model_name: str, version: str = "") -> Optional[dict]:
+    """Build the hosted model's service identity from what the host already knows.
+
+    Returns ``None`` when neither part slugs to anything, because an identity that says nothing
+    is worse than an absent one — the record would assert a deployment it cannot name.
+    """
+    provider_slug, model_slug = _slug(provider), _slug(model_name)
+    if not provider_slug or not model_slug:
+        return None
+    service = {
+        "iri": f"{MODEL_SERVICE_IRI_PREFIX}/{provider_slug}/{model_slug}",
+        "name": f"{provider} {model_name}",
+    }
+    if version:
+        service["version"] = version
+    return service
+
+
+def _blank(value: Any) -> bool:
+    return not isinstance(value, str) or not value.strip()
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +99,7 @@ class SessionFeed:
         self._last_ns = 0
         self.line_count = 0
         self._controlled_inputs = 0
+        self._repository_state_written = False
 
     @property
     def path(self) -> Path:
@@ -86,11 +122,20 @@ class SessionFeed:
             # The hosted model's deployment identity, which the record carries as an opaque
             # runtime component. A producer cannot content-address a hosted service, so this
             # identity is what stands in for one.
-            model["service"] = {
-                key: value
+            service = {
+                key: value.strip()
                 for key, value in model_service.items()
-                if key in ("iri", "name", "version", "deployment", "providerIri") and value
+                if key in ("iri", "name", "version", "deployment", "providerIri")
+                and not _blank(value)
             }
+            # Without a well-formed IRI the runtime refuses the whole feed, so drop the identity
+            # rather than the session. Same for a service that names itself as its own provider.
+            if _ABSOLUTE_IRI.match(service.get("iri", "")) and service.get(
+                "providerIri"
+            ) != service.get("iri"):
+                model["service"] = service
+            else:
+                logger.debug("jinn: unusable model service identity %r", model_service)
         event = {
             "type": "session-open",
             "v": FEED_VERSION,
@@ -106,27 +151,44 @@ class SessionFeed:
     def repository_state(
         self,
         repository: str,
-        branch: str,
-        target_base: str,
         base_commit: str,
         base_tree: str,
+        branch: str = "",
+        target_base: str = "",
     ) -> None:
         """Report the base repository state this session starts from.
 
         Emitted once, before the first turn. The commit and tree object names are the content
         binding a verifier resolves; without them the sealed record cannot say what the work
-        started from.
+        started from. Branch and target base are context and may be unknown.
+
+        Validated and skipped rather than written when it would be refused: the runtime rejects
+        a malformed feed whole, so one bad event here would cost every event in the session.
         """
-        self._append(
-            {
-                "type": "repository-state",
-                "repository": repository,
-                "branch": branch,
-                "targetBase": target_base,
-                "baseCommit": base_commit,
-                "baseTree": base_tree,
-            }
-        )
+        if not _ABSOLUTE_IRI.match(repository or ""):
+            logger.debug("jinn: repository %r is not an absolute IRI", repository)
+            return
+        for name, value in (("baseCommit", base_commit), ("baseTree", base_tree)):
+            if not _GIT_OBJECT_NAME.match(value or ""):
+                logger.debug("jinn: %s %r is not a Git object name", name, value)
+                return
+        with self._lock:
+            if self._repository_state_written:
+                logger.debug("jinn: repository state already reported")
+                return
+            self._repository_state_written = True
+        event = {
+            "type": "repository-state",
+            "repository": repository,
+            "baseCommit": base_commit,
+            "baseTree": base_tree,
+        }
+        # A detached head reports the branch as "HEAD", which names nothing; omit it instead.
+        if not _blank(branch) and branch.strip() != "HEAD":
+            event["branch"] = branch.strip()
+        if not _blank(target_base):
+            event["targetBase"] = target_base.strip()
+        self._append(event)
 
     def controlled_input(
         self,
@@ -146,6 +208,9 @@ class SessionFeed:
         """
         if role not in CONTROLLED_INPUT_ROLES:
             logger.debug("jinn: unknown controlled-input role %r", role)
+            return
+        if _blank(name) or _blank(media_type):
+            logger.debug("jinn: controlled input %r has a blank name or media type", name)
             return
         if not content or len(content) > CONTROLLED_INPUT_MAX_BYTES:
             logger.debug("jinn: controlled input %r has an unbindable size", name)

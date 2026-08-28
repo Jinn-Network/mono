@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import subprocess
 import sys
 import threading
 from dataclasses import dataclass, field
@@ -32,6 +34,11 @@ logger = logging.getLogger(__name__)
 
 _FIRST_SESSION_MARKER = "first-session-done"
 _SEAL_TIMEOUT_S = 60.0
+
+#: A session start must not feel like a hang, and an unreachable repository is not worth waiting
+#: for: the capture proceeds without the base state rather than late.
+_GIT_TIMEOUT_S = 2.0
+_SSH_REMOTE = re.compile(r"\A(?:ssh://)?git@(?P<host>[^:/]+)[:/](?P<path>.+?)(?:\.git)?\Z")
 
 _lock = threading.Lock()
 _sessions: Dict[str, "_SessionState"] = {}
@@ -124,8 +131,60 @@ def _ensure_capture(state: "_SessionState", model: str) -> None:
         host_version=host_version,
         model_provider=provider,
         model_name=model_name,
+        model_service=feed_module.derive_model_service(provider, model_name),
     )
+    observed = _observe_repository_state()
+    if observed is not None:
+        state.feed.repository_state(**observed)
     state.feed.environment(tools=[], skills=[])
+
+
+def _git(*args: str) -> str:
+    """One short read from the working directory's repository, or "" if anything goes wrong."""
+    try:
+        done = subprocess.run(
+            ("git", *args),
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            check=False,
+        )
+    except Exception as exc:
+        logger.debug("jinn: git %s failed: %s", args[0], exc)
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def _repository_iri(remote: str) -> str:
+    """Normalize a Git remote to an absolute IRI, which is what the record requires."""
+    if not remote:
+        return ""
+    match = _SSH_REMOTE.match(remote)
+    if match:
+        return f"https://{match.group('host')}/{match.group('path')}"
+    return remote[:-4] if remote.endswith(".git") else remote
+
+
+def _observe_repository_state() -> Optional[Dict[str, str]]:
+    """Read the base commit and tree the session starts from.
+
+    The commit and tree are the content binding; branch and target base are context this may
+    legitimately fail to find (a detached head, a repository with no upstream).
+    """
+    commit = _git("rev-parse", "HEAD")
+    tree = _git("rev-parse", "HEAD^{tree}")
+    repository = _repository_iri(_git("config", "--get", "remote.origin.url"))
+    if not commit or not tree or not repository:
+        return None
+    upstream = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+    return {
+        "repository": repository,
+        "base_commit": commit,
+        "base_tree": tree,
+        "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
+        # "origin/next" names the same base as "next"; the remote prefix is local bookkeeping.
+        "target_base": upstream.split("/", 1)[1] if "/" in upstream else upstream,
+    }
 
 
 def _host_identity() -> tuple[str, str]:

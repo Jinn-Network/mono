@@ -81,7 +81,6 @@ function slug(value: string): string {
   return value.toLowerCase().replace(SLUG_STRIP, "-").replace(/^-+|-+$/gu, "");
 }
 
-
 /** A stable absolute IRI for the observed host, which the protocol requires of the Executor. */
 export function executorIri(hostName: string): `${string}:${string}` {
   const slugged = slug(hostName);
