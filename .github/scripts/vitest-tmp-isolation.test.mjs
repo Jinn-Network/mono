@@ -606,12 +606,14 @@ test('projectEntryRanges finds one range per object entry, ordered per projects 
   assert.ok(outer[0] < inner[0] && inner[1] < outer[1], 'inner range must sit inside the outer one');
   const [wired] = wiredPaths(nested, 'packages/x/vitest.config.ts');
   assert.equal(wired.scope, `projects@${inner[0]}`);
+});
 
-  // The newline bound in the quote walk above is the fail-open half of this reader, and nothing
-  // else in this suite reaches it. A regex literal carrying an unpaired `'` is valid JavaScript,
-  // so the config parses and its own package job stays green; unbounded, that quote span swallows
-  // the entry braces, `projects` yields no ranges, and every allowance and seam path collapses
-  // into `root` scope — restoring the cross-entry crediting #3123 closed.
+// The newline bound in the quote walk of `projectEntryRanges` is the fail-open half of that reader,
+// and nothing else in this suite reaches it. A regex literal carrying an unpaired `'` is valid
+// JavaScript, so the config parses and its own package job stays green; unbounded, that quote span
+// swallows the entry braces, `projects` yields no ranges, and every allowance and seam path
+// collapses into `root` scope — restoring the cross-entry crediting #3123 closed.
+test('an unpaired quote in a regex literal does not collapse projects scope', () => {
   const regexQuote = [
     "export default { test: { environment: 'jsdom', projects: [",
     "    /\\d'/u,",
