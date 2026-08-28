@@ -79,10 +79,15 @@ async function materializeAndVerifyBundle(
     benchmarkSha256,
     runState,
     ...(reportSelector === undefined ? {} : { reportSelector }),
-  }, deps);
-  // Recorded BEFORE verification, because a refusal from the verifier is exactly the case that used
-  // to strand a shippable-looking directory an operator could collect by path (issue #3074).
-  if (!materialized.adopted) created.push(materialized.bundleDir);
+  }, {
+    ...deps,
+    // Recorded the moment the rename lands — not after `materializePublicBundle` returns, and so
+    // before verification too. A refusal from the verifier used to strand a shippable-looking
+    // directory an operator could collect by path (issue #3074); a throw between the rename and the
+    // return (the parent fsync, the `afterRename` seam) stranded it the same way with `created`
+    // still empty (issue #3195). An adopted target never reaches this callback.
+    onRenamed: (bundleDir) => { created.push(bundleDir); },
+  });
   const verified = await verifyPublicBundle(materialized.bundleDir);
   if (verified.format === "benchmark-product-public-bundle/5") {
     refuse("conflict", "bundle.json", "managed publication must materialize its frozen legacy bundle profile");
