@@ -289,6 +289,9 @@ describe("resume reconciles an evaluation attempt killed mid-execution", () => {
       // holds its capacity slot until that leg's own reconciliation settles it. Without the
       // headroom an unrelated cell loses its dispatch to "local backend capacity exhausted" and
       // expires — collateral of the crash, not the verdict-recovery question under test.
+      // That slot-holding is tracked as its own defect (issue #3192): reconciliation cannot
+      // move earlier than the evaluation cell's own preparation, so the slot is only
+      // released once this leg reaches `dispatchEvaluation`.
       const resumed = await runResume(contextFor(clock), { draftId, maxConcurrentCells: 9 });
       expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
 
