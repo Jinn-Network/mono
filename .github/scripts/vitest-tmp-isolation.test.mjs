@@ -93,19 +93,51 @@ function regexLiteralEnd(source, start) {
   return source.length;
 }
 
+/** Keywords a regex literal may directly follow, longest first so `typeof` is not read as `of`. */
+const REGEX_PRECEDING_KEYWORDS = [
+  'typeof',
+  'return',
+  'delete',
+  'yield',
+  'await',
+  'void',
+  'case',
+  'else',
+  'new',
+  'in',
+  'of',
+  'do',
+];
+
 /**
  * Whether the `/` at `index` opens a regex literal rather than a division.
  *
- * Decided from the previous significant character, the usual heuristic for a scanner with no
- * expression parser: a value may begin after an operator, a separator, or an opening bracket, and
- * not after something that can end an operand. Closing brackets are read as operands, so
- * `f(x) / 2` is division; a regex directly after one — `(a + b) /re/.test(c)` is not valid code
- * anyway — would fall back to the pre-#3154 read, bounded to its own line by the scanners below.
+ * Decided from the previous significant token, the usual heuristic for a scanner with no
+ * expression parser: a value may begin after an operator, a separator, an opening bracket, or one
+ * of the keywords above, and not after something that can end an operand. Closing brackets are
+ * read as operands, so `f(x) / 2` is division; a regex directly after one — `(a + b) /re/.test(c)`
+ * is not valid code anyway.
+ *
+ * `--`/`++` are the one shape where the character test alone reads the wrong way round: the
+ * trailing `-` of `x-- / 2` looks like an operator, and consuming that division as a regex takes
+ * the rest of its line — including any structure and, where the line ends in a comment, the first
+ * `/` of its `//` — which hands the comment's prose back as live source in miniature (#3027). So a
+ * `+`/`-` doubled with the character before it counts as an operand end.
+ *
+ * Whatever this still misreads is bounded to one line by `regexLiteralEnd` and `quotedSpanEnd`.
  */
 function regexStartsAt(source, index) {
   let back = index - 1;
   while (back >= 0 && /\s/u.test(source[back])) back -= 1;
-  return back < 0 || '(,=:[!&|?{;+-*%~^<>'.includes(source[back]);
+  if (back < 0) return true;
+  const character = source[back];
+  if ((character === '+' || character === '-') && source[back - 1] === character) return false;
+  if ('(,=:[!&|?{;+-*%~^<>'.includes(character)) return true;
+  return REGEX_PRECEDING_KEYWORDS.some(
+    (keyword) =>
+      source.slice(back - keyword.length + 1, back + 1) === keyword &&
+      !/[\w$]/u.test(source[back - keyword.length] ?? ''),
+  );
 }
 
 /**
@@ -838,8 +870,19 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
     );
   }
 
-  // A division is not a regex: reading `/ 2` as one would swallow the rest of its line.
-  assert.equal(projectEntryRanges(withProperty('x: total / 2, ')).length, 2);
+  // A division is not a regex: reading `/ 2` as one would swallow the rest of its line. The
+  // trailing `-` of a postfix `--` is the shape that looks most like an operator and is not one.
+  for (const property of ['x: total / 2, ', 'x: total-- / 2, ', 'x: total++ / 2, ']) {
+    assert.equal(projectEntryRanges(withProperty(property)).length, 2, property);
+  }
+
+  // A regex may directly follow a keyword, where a bare character test sees an identifier.
+  for (const property of [`x: (s) => typeof /['"]/u.exec(s), `, `x: (s) => { return /['"]/u; }, `]) {
+    assert.equal(projectEntryRanges(withProperty(property)).length, 2, property);
+  }
+
+  // The same postfix shape must not hand a trailing comment's prose back as live source (#3027).
+  assert.ok(!stripComments('x: total-- / 2, // setupFiles: isolate-tmp.ts').includes('isolate-tmp'));
 
   // An unterminated literal is bounded at its own line rather than the file, but it still takes
   // that line's braces with it, so the entry is dropped. That is the same fail-open the doc block
