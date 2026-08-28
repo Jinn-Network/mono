@@ -521,6 +521,22 @@ describe('createTaskLifecycleReader.getTaskLifecycleEvidence (#2044)', () => {
     warn.mockRestore();
   });
 
+  it('withdraws an announced next page that comes back empty and pageInfo-less', async () => {
+    // The empty-page twin of the case above. Page 0 announces another page, so
+    // absence on page 1 is not evidence the leg is complete — without the
+    // first-page gate the reader handed back page 0 as the whole answer.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([
+      { data: { tasks: { items: [TASK_ROW], pageInfo: { hasNextPage: true, endCursor: 'c1' } } } },
+      { data: { tasks: { items: [] } } },
+    ]);
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('missing or malformed pageInfo on tasks'),
+    );
+    warn.mockRestore();
+  });
+
   it('batches an oversized taskIds filter instead of sending one giant variable', async () => {
     const taskIds = Array.from({ length: 600 }, (_, i) => String(i));
     const fetchImpl = scriptedFetch([page('tasks', []), page('tasks', [])]);

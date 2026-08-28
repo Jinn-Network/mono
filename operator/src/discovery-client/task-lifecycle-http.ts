@@ -442,9 +442,11 @@ async function drainLifecycleLeg<Row>(
 
     const pageInfo = connection.pageInfo;
     if (!pageInfo || typeof pageInfo.hasNextPage !== 'boolean') {
-      // Nothing arrived, so nothing can be missing; anything else is a page
-      // whose completeness this read cannot establish.
-      if (items.length === 0) return rows;
+      // On the first page nothing arrived, so nothing can be missing. After a
+      // page announced `hasNextPage: true` that reasoning no longer holds: an
+      // empty successor is a page whose completeness this read cannot
+      // establish, exactly like a full one.
+      if (page === 0 && items.length === 0) return rows;
       return warnLifecycleLegWithdrawn(leg, 'missing or malformed pageInfo');
     }
     if (!pageInfo.hasNextPage) return rows;
@@ -530,11 +532,12 @@ export interface TaskLifecycleReader {
    * Returns an EMPTY Map — never a partial spine — whenever an authoritative
    * fact would otherwise go missing without the caller being able to tell. That
    * is: a leg that cannot be drained whole (page cap, missing connection,
-   * missing/unusable `pageInfo` on a non-empty page), a task/attempt/verdict row
-   * that cannot be parsed, and an attempt or verdict row that has no place on
-   * the spine (no task row, a chainId contradicting its task's, or — the live
-   * case, since the legs are separate unpinned reads — a verdict for an attempt
-   * indexed after the attempts leg ran). Every one of them warns.
+   * missing/unusable `pageInfo` on any page other than a first page that is
+   * itself empty), a task/attempt/verdict row that cannot be parsed, and an
+   * attempt or verdict row that has no place on the spine (no task row, a
+   * chainId contradicting its task's, or — the live case, since the legs are
+   * separate unpinned reads — a verdict for an attempt indexed after the
+   * attempts leg ran). Every one of them warns.
    *
    * That list is exhaustive. Exactly TWO drops are survivable, and both warn
    * once per leg: a row outside the scope its leg queried (a leaky indexer
