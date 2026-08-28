@@ -526,11 +526,12 @@ test('fsAllowPaths reads every fs.allow list, and only those', () => {
 });
 
 // The newline bound in `balancedEnd`'s quote walk, under its own name. `projectEntryRanges` calls
-// `balancedEnd` too, so the test below it is a second witness — but that one is named for the
-// consequence at ITS site, a collapsed `projects` scope, and the consequence here is a different
-// one: the enclosing literal comes back truncated, or missing entirely when the unbounded span runs
-// past its close. A regex literal carrying an unpaired `'` is valid JavaScript, so the config
-// parses and its own package job stays green while the literal quietly goes unread.
+// `balancedEnd` too, so `an unpaired quote in a regex literal does not collapse projects scope`
+// further down is a second witness — but that one is named for the consequence at ITS site, a
+// collapsed `projects` scope, and the consequence here is a different one: the enclosing literal
+// comes back truncated, or missing entirely when the unbounded span runs past its close. A regex
+// literal carrying an unpaired `'` is valid JavaScript, so the config parses and its own package
+// job stays green while the literal quietly goes unread.
 test('an unpaired quote in a regex literal does not truncate the literal around it', () => {
   // At the reader: the `}` that ends the fs block sits after the unpaired quote, so unbounded the
   // scan never balances it and `enclosedLiterals` yields nothing rather than the block.
