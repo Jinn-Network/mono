@@ -87,6 +87,11 @@ jobs:
         run: node --test .github/scripts/published-artifacts-smoke-workflow.test.mjs
       - name: Vitest temp-directory sweep seam is wired everywhere
         run: node --test .github/scripts/vitest-tmp-isolation.test.mjs
+      # Repository-wide, so it must not sit behind any one workflow's `paths:`
+      # filter: the pull request that removes a cited workflow's restores has to
+      # be the one that goes red (#3126).
+      - name: Every by-name-restore precedent citation is still true
+        run: node --test .github/scripts/workflow-precedent-citations.test.mjs
   identifier-origin:
     name: Identifier origin tripwire
     needs: changes
