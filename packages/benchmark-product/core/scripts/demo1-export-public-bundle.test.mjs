@@ -47,4 +47,11 @@ test("exports the sealed comparison as a deterministic evidence-native public bu
   assert.doesNotMatch(readme.split("\n", 1)[0], /Demo-1/u);
   assert.match(readme, /public npm reader/u);
   assert.doesNotMatch(readme, /not been released/u);
+  assert.doesNotMatch(readme, /spec\.jinn\.network/u);
+  assert.doesNotMatch(readme, /https:\/\/product\.jinn\.network/u);
+  assert.doesNotMatch(readme, /urn:/u);
+  assert.ok(readme.includes(first.presentation.verification.command));
+  for (const concept of ["claim", "method", "run", "evidence", "check"]) {
+    assert.match(readme, new RegExp(concept, "iu"));
+  }
 });
