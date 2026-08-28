@@ -16,9 +16,11 @@ on:
       - 'contracts/**'
       - 'packages/contract-abis/**'
 
-concurrency:
-  group: contracts-ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.source_sha }}
-  cancel-in-progress: true
+# No `concurrency:` block. A cancel-in-progress group shared with the
+# pull_request trigger would cancel platform-verification's workflow_call of
+# this same lane (platform-verification-workflow.test.mjs pins this).
+permissions:
+  contents: read
 
 defaults:
   run:
@@ -31,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22
