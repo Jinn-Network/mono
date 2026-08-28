@@ -21,6 +21,10 @@
 //     resulting served path is then fetched at the origin under verification. That is
 //     what makes verifying a preview deployment possible at all: the same attested
 //     artifact served anywhere still claims spec.jinn.network.
+//   * One origin holds every stack-published release group. Their documents are disjoint
+//     and keep their identifier paths, but each group serves its own inventory at
+//     `<origin>/<release-group>/manifest.json`, with the sidecar beside it. Nothing is
+//     served at the origin root, and `/manifest.json` is probed as a must-404.
 //   * Anti-fallback probes run last and are load-bearing: a single-page-application
 //     catch-all that answers 200 with the same bytes for every path would otherwise
 //     make every other check pass vacuously.
@@ -344,6 +348,16 @@ export async function verifyLiveProfileHost({
   if (typeof publicKeyUrl !== 'string' || !publicKeyUrl.startsWith('https://')) {
     return fail('--public-key-url must be an https URL');
   }
+  // The release group is a literal path segment in every URL below, because one origin
+  // holds every stack-published group and each serves its own inventory. Guarding it here
+  // -- before the receipt is even read -- is what makes a malformed group a named refusal
+  // rather than an incidental receipt mismatch three checks later.
+  try {
+    assertLiteralRoutePath(releaseGroup, 'release group');
+  } catch (error) {
+    return fail(error?.message ?? String(error));
+  }
+  if (releaseGroup.includes('/')) return fail(`release group must be a single path segment: ${releaseGroup}`);
   const resolvedOrigin = originForLane(requestedOrigin, lane);
   if (resolvedOrigin.error) return fail(resolvedOrigin.error);
   const origin = resolvedOrigin.origin;
@@ -370,6 +384,13 @@ export async function verifyLiveProfileHost({
   } catch {
     return fail(`local ${MANIFEST_FILE_NAME} is not valid JSON`);
   }
+  // The group under verification names where the hosted manifest is fetched from, so an
+  // attested root belonging to a different group would be compared at the wrong address.
+  if (localManifest.releaseGroup !== releaseGroup) {
+    return fail(
+      `local profile manifest names release group ${String(localManifest.releaseGroup)}, expected ${releaseGroup}`,
+    );
+  }
   if (canonicalJsonBytes(localManifest.documents) !== canonicalJsonBytes(profileSurface.documents)) {
     return fail('local profile manifest documents differ from the verification receipt inventory');
   }
@@ -384,7 +405,7 @@ export async function verifyLiveProfileHost({
   }
 
   // --- 3. the hosted manifest ----------------------------------------------
-  const manifestUrl = `${origin}/${MANIFEST_FILE_NAME}`;
+  const manifestUrl = `${origin}/${releaseGroup}/${MANIFEST_FILE_NAME}`;
   const hostedManifest = await getExact(manifestUrl, options);
   const manifestFailure = checkServedResponse(hostedManifest, manifestUrl, {
     mediaType: MANIFEST_MEDIA_TYPE,
@@ -393,7 +414,7 @@ export async function verifyLiveProfileHost({
   if (manifestFailure) return fail(manifestFailure);
 
   // --- 4. the hosted signature and the published key ------------------------
-  const signatureUrl = `${origin}/${SIGNATURE_FILE_NAME}`;
+  const signatureUrl = `${origin}/${releaseGroup}/${SIGNATURE_FILE_NAME}`;
   const hostedSignature = await getExact(signatureUrl, options);
   const signatureFailure = checkServedResponse(hostedSignature, signatureUrl, {
     mediaType: MANIFEST_MEDIA_TYPE,
@@ -518,18 +539,24 @@ export async function verifyLiveProfileHost({
   }
 
   // --- 8. anti-fallback probes ---------------------------------------------
-  // A catch-all that answers 200 for everything makes every check above vacuous.
+  // A catch-all that answers 200 for everything makes every check above vacuous. The last
+  // probe is not about catch-alls: the origin root carries no manifest because it would be
+  // one release group's inventory answering for every group, so a 200 there is a stale
+  // single-group deployment rather than a guessing host.
+  const catchAll = 'the host has a catch-all that makes byte verification vacuous';
   const probes = [
-    `${origin}/${randomUUID()}`,
-    `${origin}/${MANIFEST_FILE_NAME}.sha256`,
-    `${origin}/@jinn-network/not-a-published-package-${randomUUID()}/package.json`,
+    { url: `${origin}/${randomUUID()}`, reason: catchAll },
+    { url: `${manifestUrl}.sha256`, reason: catchAll },
+    { url: `${origin}/@jinn-network/not-a-published-package-${randomUUID()}/package.json`, reason: catchAll },
+    {
+      url: `${origin}/${MANIFEST_FILE_NAME}`,
+      reason: 'the origin root must serve no manifest; each release group serves its own',
+    },
   ];
-  for (const probe of probes) {
-    const response = await getExact(probe, once);
+  for (const { url, reason } of probes) {
+    const response = await getExact(url, once);
     if (response.error) return fail(`anti-fallback probe could not be completed: ${response.error}`);
-    if (response.status === 200) {
-      return fail(`${probe} answers 200; the host has a catch-all that makes byte verification vacuous`);
-    }
+    if (response.status === 200) return fail(`${url} answers 200; ${reason}`);
   }
 
   // --- 9. the live-host receipt --------------------------------------------
@@ -592,7 +619,6 @@ export function parseArgs(argv) {
     ['catalogDigest', '--catalog-digest'],
     ['releaseGroup', '--release-group'],
     ['lane', '--lane'],
-    ['releaseGroup', '--release-group'],
     ['publicKeyUrl', '--public-key-url'],
     ['expectPublicKeySha256', '--expect-public-key-sha256'],
     ['outputPath', '--out'],
