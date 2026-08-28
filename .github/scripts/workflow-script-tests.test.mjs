@@ -70,38 +70,88 @@ const LIVE_TREE_MUTATING_TESTS = new Set(['build-prepublication-bundle.test.mjs'
 // Paths are repo-root-relative prefixes; mkdtemp's random suffix is appended by the sample.
 /** @type {Record<string, string[]>} */
 const LIVE_TREE_FIXTURES = {
+  'evidence-source-boundaries.test.mjs': ['packages/evidence/repository-ipfs/.jinn-ipfs-production-boundary-'],
   'observation-reader-gate-boundary.test.mjs': ['.github/scripts/.tmp-observation-reader-guard-'],
 };
+// Calls that materialise a path on disk. `writeFileSync` counts: a single in-checkout *file* is
+// just as invisible to `git ls-files --cached --others --exclude-standard` as a directory is.
+// Mapped to the index of the argument naming the path being *created*: `cpSync(from, to)` reads
+// its first argument, so only the second says where anything lands.
+const FIXTURE_CREATING_CALLS = new Map([
+  ['mkdtempSync', 0], ['mkdtemp', 0], ['mkdirSync', 0], ['mkdir', 0], ['writeFileSync', 0], ['cpSync', 1],
+]);
 
-const FIXTURE_CREATING_CALLS = ['mkdtempSync', 'mkdirSync'];
+/** Splits a call's argument text on its top-level commas. */
+function callArguments(text) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '(' || char === '[' || char === '{') depth += 1;
+    else if (char === ')' || char === ']' || char === '}') depth -= 1;
+    else if (char === ',' && depth === 0) {
+      parts.push(text.slice(start, index));
+      start = index + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
 
 /**
- * A copy of `source` with the interior of every string literal, and every comment, replaced by a
- * neutral filler of the same length. Offsets are preserved, so a match found here indexes the
- * original text. Scanning the raw source instead makes `\broot\b` fire inside unrelated content
- * such as `'jinn-information-world-root-closure-'` or a synthetic fixture source in this file.
+ * A copy of `source` with the interior of every string literal, regex literal, and comment
+ * replaced by a neutral filler of the same length. Offsets are preserved, so a match found here
+ * indexes the original text. Scanning the raw source instead makes `\broot\b` fire inside
+ * unrelated content such as `'jinn-information-world-root-closure-'`, and leaving regex literals
+ * unmasked lets a quote inside a character class (this file has one) open a phantom string that
+ * silently blanks every later call — a false negative in a gate.
  */
 export function maskLiterals(source) {
   const out = [...source];
+  const blank = (from, to, filler) => {
+    for (let cursor = from; cursor < to; cursor += 1) if (out[cursor] !== '\n') out[cursor] = filler;
+  };
+  // The character before a `/` decides regex-vs-division. After a value (identifier, literal,
+  // closing bracket) a slash divides; after an operator, keyword, or nothing, it opens a regex.
+  let previous = '';
   for (let index = 0; index < source.length; index += 1) {
     const char = source[index];
     const next = source[index + 1];
     if (char === '/' && (next === '/' || next === '*')) {
-      const end = next === '/'
-        ? (source.indexOf('\n', index) === -1 ? source.length : source.indexOf('\n', index))
-        : (source.indexOf('*/', index + 2) === -1 ? source.length : source.indexOf('*/', index + 2) + 2);
-      for (let cursor = index; cursor < end; cursor += 1) if (out[cursor] !== '\n') out[cursor] = ' ';
+      const terminator = next === '/' ? '\n' : '*/';
+      const found = source.indexOf(terminator, index + 2);
+      const end = found === -1 ? source.length : found + (next === '/' ? 0 : 2);
+      blank(index, end, ' ');
       index = end - 1;
       continue;
     }
-    if (char !== "'" && char !== '"' && char !== '`') continue;
-    let cursor = index + 1;
-    for (; cursor < source.length; cursor += 1) {
-      if (source[cursor] === '\\') { cursor += 1; continue; }
-      if (source[cursor] === char) break;
-      if (out[cursor] !== '\n') out[cursor] = 'x';
+    if (char === '/' && !/[A-Za-z0-9_$)\]]/u.test(previous)) {
+      let cursor = index + 1;
+      let inClass = false;
+      for (; cursor < source.length && source[cursor] !== '\n'; cursor += 1) {
+        if (source[cursor] === '\\') { cursor += 1; continue; }
+        if (source[cursor] === '[') inClass = true;
+        else if (source[cursor] === ']') inClass = false;
+        else if (source[cursor] === '/' && !inClass) break;
+      }
+      blank(index + 1, cursor, 'x');
+      index = cursor;
+      previous = '/';
+      continue;
     }
-    index = cursor;
+    if (char === "'" || char === '"' || char === '`') {
+      let cursor = index + 1;
+      for (; cursor < source.length; cursor += 1) {
+        if (source[cursor] === '\\') { cursor += 1; continue; }
+        if (source[cursor] === char) break;
+      }
+      blank(index + 1, cursor, 'x');
+      index = cursor;
+      previous = char;
+      continue;
+    }
+    if (!/\s/u.test(char)) previous = char;
   }
   return out.join('');
 }
@@ -120,6 +170,9 @@ function callArgumentText(source, open) {
   return source.slice(open + 1);
 }
 
+const stringLiterals = (text) => [...text.matchAll(/'([^']*)'|"([^"]*)"/gu)]
+  .map((literal) => literal[1] ?? literal[2]);
+
 /**
  * Identifiers bound at module scope to the repository root. A `root` bound inside a helper is
  * almost always a tmpdir fixture root; only the module-level `resolve(import.meta.dirname, ...)`
@@ -130,31 +183,63 @@ export function findRepoRootBindings(source) {
     .map((match) => match[1]);
 }
 
-/** Calls that create a directory under the repository root, with their literal path segments. */
+/**
+ * Calls that create a path under the repository root, each with the repo-root-relative prefix it
+ * creates. `segments` is null when the path is not statically resolvable to string literals.
+ *
+ * Known limits, accepted and matching the style of the tree's other regex-based guards: the
+ * scanner resolves one level of `const x = join(root, ...)` indirection but not two, does not
+ * follow a path through a function parameter or a template literal, and reads only the calls in
+ * FIXTURE_CREATING_CALLS. A new in-checkout fixture built in a shape outside those bounds is
+ * invisible to this gate, which is why the rule is documented at the fixture site as well.
+ */
 export function findInCheckoutFixtureCalls(source) {
   const bindings = findRepoRootBindings(source);
   if (bindings.length === 0) return [];
-  const rootReference = new RegExp(`\\b(?:${bindings.join('|')})\\b`, 'u');
   const masked = maskLiterals(source);
+  const rootReference = new RegExp(`\\b(?:${bindings.join('|')})\\b`, 'u');
+
+  // One level of indirection: `const dir = join(root, '.github', 'scripts', '.tmp-x-');` is the
+  // house style in this directory, and reading only the fixture call's own parens would miss it.
+  /** @type {Map<string, string[]>} */
+  const pathBindings = new Map();
+  for (const match of masked.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:join|resolve)\(/gu)) {
+    const open = match.index + match[0].length - 1;
+    if (!rootReference.test(callArgumentText(masked, open))) continue;
+    pathBindings.set(match[1], stringLiterals(callArgumentText(source, open)));
+  }
+  const pathReference = pathBindings.size === 0
+    ? null
+    : new RegExp(`\\b(?:${[...pathBindings.keys()].join('|')})\\b`, 'u');
+
   const calls = [];
-  for (const name of FIXTURE_CREATING_CALLS) {
+  for (const [name, destination] of FIXTURE_CREATING_CALLS) {
     for (const match of masked.matchAll(new RegExp(`\\b${name}\\(`, 'gu'))) {
       const open = match.index + name.length;
-      if (!rootReference.test(callArgumentText(masked, open))) continue;
-      const args = callArgumentText(source, open);
-      calls.push({
-        call: name,
-        segments: [...args.matchAll(/'([^']*)'|"([^"]*)"/gu)].map((literal) => literal[1] ?? literal[2]),
-      });
+      const maskedTarget = callArguments(callArgumentText(masked, open))[destination] ?? '';
+      const viaRoot = rootReference.test(maskedTarget);
+      if (!viaRoot && !(pathReference && pathReference.test(maskedTarget))) continue;
+      const target = callArguments(callArgumentText(source, open))[destination] ?? '';
+      const inherited = viaRoot
+        ? []
+        : pathBindings.get([...pathBindings.keys()].find((key) => new RegExp(`\\b${key}\\b`, 'u').test(maskedTarget))) ?? [];
+      const segments = [...inherited, ...stringLiterals(target)];
+      calls.push({ call: name, segments: segments.length > 0 ? segments : null });
     }
   }
   return calls;
 }
 
-/** Suites that create at least one directory under the repository root. */
-export function findLiveTreeFixtureSuites(scriptsRoot = scriptsDir) {
-  return listScriptTests(scriptsRoot)
-    .filter((name) => findInCheckoutFixtureCalls(readFileSync(join(scriptsRoot, name), 'utf8')).length > 0);
+/** Repo-root-relative prefixes each suite creates inside the checkout, keyed by suite filename. */
+export function collectLiveTreeFixtures(scriptsRoot = scriptsDir) {
+  /** @type {Record<string, (string | null)[]>} */
+  const found = {};
+  for (const name of listScriptTests(scriptsRoot)) {
+    const calls = findInCheckoutFixtureCalls(readFileSync(join(scriptsRoot, name), 'utf8'));
+    if (calls.length === 0) continue;
+    found[name] = calls.map(({ segments }) => (segments === null ? null : segments.join('/')));
+  }
+  return found;
 }
 
 export function collectTestInvocations(workflowsRoot = workflowsDir) {
@@ -226,53 +311,46 @@ test('collectTestInvocations reads the platform-release-surface lists', () => {
   );
 });
 
-test('every suite creating a fixture inside the checkout declares it', () => {
-  const declared = new Set(Object.keys(LIVE_TREE_FIXTURES));
-  const found = findLiveTreeFixtureSuites();
-  const undeclared = found.filter((name) => !declared.has(name) && !LIVE_TREE_MUTATING_TESTS.has(name));
-  assert.deepEqual(
-    undeclared,
-    [],
-    `${undeclared.join(', ')} create a directory under the repository root while running. A `
-    + 'sibling suite scheduled in the same `node --test` batch sees a path git cannot return, so '
-    + 'declare the fixture prefix in LIVE_TREE_FIXTURES (dot-prefixed and gitignored), or add the '
-    + 'suite to LIVE_TREE_MUTATING_TESTS so it owns its invocation.',
-  );
-  const stale = [...declared].filter((name) => !found.includes(name));
-  assert.deepEqual(stale, [], `LIVE_TREE_FIXTURES lists ${stale.join(', ')}, which no longer creates one.`);
-});
+test('every in-checkout fixture is declared, dot-prefixed, and gitignored', () => {
+  for (const [suite, observed] of Object.entries(collectLiveTreeFixtures())) {
+    if (LIVE_TREE_MUTATING_TESTS.has(suite)) continue;
+    const declared = LIVE_TREE_FIXTURES[suite] ?? [];
+    const guidance = 'It creates a path under the repository root while running, so a sibling suite '
+      + 'scheduled in the same `node --test` batch sees a path git cannot return. Declare the '
+      + 'prefix in LIVE_TREE_FIXTURES, keep it dot-prefixed and gitignored, or add the suite to '
+      + 'LIVE_TREE_MUTATING_TESTS so it owns its invocation.';
 
-test('every declared in-checkout fixture prefix is dot-prefixed', () => {
-  for (const [suite, prefixes] of Object.entries(LIVE_TREE_FIXTURES)) {
-    for (const prefix of prefixes) {
+    for (const prefix of observed) {
+      assert.ok(prefix !== null, `${suite} builds an in-checkout path from something other than string literals, so this gate cannot check it. ${guidance}`);
+      assert.ok(declared.includes(prefix), `${suite} creates ${prefix}, which LIVE_TREE_FIXTURES does not declare. ${guidance}`);
+
       const basename = prefix.split('/').filter(Boolean).at(-1);
       assert.ok(
         basename?.startsWith('.'),
-        `${suite} creates ${prefix} inside the checkout. Its final segment must be dot-prefixed so `
-        + 'dot-skipping tree walks never descend into it mid-scan.',
+        `${suite} creates ${prefix}; its final segment must be dot-prefixed so dot-skipping tree walks never descend into it mid-scan.`,
       );
-    }
-  }
-});
 
-test('every declared in-checkout fixture prefix is gitignored', () => {
-  for (const [suite, prefixes] of Object.entries(LIVE_TREE_FIXTURES)) {
-    for (const prefix of prefixes) {
       const sample = `${prefix}0a1b2c`;
       let ignored = true;
       try {
-        execFileSync('git', ['check-ignore', '--quiet', '--no-index', '--', sample], {
-          cwd: root,
-          stdio: 'ignore',
-        });
+        execFileSync('git', ['check-ignore', '--quiet', '--no-index', '--', sample], { cwd: root, stdio: 'ignore' });
       } catch {
         ignored = false;
       }
       assert.ok(
         ignored,
-        `${suite} creates ${sample} inside the checkout, but .gitignore does not match it, so a `
-        + 'sibling suite comparing the tree against `git ls-files` sees an untracked path.',
+        `${suite} creates ${sample}, but .gitignore does not match it, so a sibling suite comparing the tree against \`git ls-files\` sees an untracked path.`,
       );
+    }
+  }
+});
+
+test('LIVE_TREE_FIXTURES declares nothing stale', () => {
+  const observed = collectLiveTreeFixtures();
+  for (const [suite, prefixes] of Object.entries(LIVE_TREE_FIXTURES)) {
+    assert.ok(observed[suite], `LIVE_TREE_FIXTURES lists ${suite}, which no longer creates an in-checkout path.`);
+    for (const prefix of prefixes) {
+      assert.ok(observed[suite].includes(prefix), `LIVE_TREE_FIXTURES lists ${prefix} for ${suite}, which no longer creates it.`);
     }
   }
 });
@@ -287,19 +365,52 @@ test('the in-checkout fixture detector reads repo-root bindings, not tmpdir ones
     { call: 'mkdtempSync', segments: ['.github', 'scripts', '.tmp-guard-'] },
   ]);
 
-  const tmpdirFixture = [
+  const viaBinding = [
     "const root = resolve(import.meta.dirname, '../..');",
-    'function fixture() {',
-    "  const root = mkdtempSync(join(tmpdir(), 'jinn-'));",
-    "  mkdirSync(join(root, 'nested'));",
-    '}',
+    "const dir = join(root, '.github', 'scripts', '.tmp-indirect-');",
+    'mkdirSync(dir);',
   ].join('\n');
   assert.deepEqual(
-    findInCheckoutFixtureCalls(tmpdirFixture).map(({ segments }) => segments),
-    [['nested']],
-    'a shadowed local `root` is indistinguishable without a scope analysis, so the detector '
-    + 'deliberately over-reports rather than missing a real in-checkout fixture',
+    findInCheckoutFixtureCalls(viaBinding).map(({ segments }) => segments),
+    [['.github', 'scripts', '.tmp-indirect-']],
+    'the house style binds the path first, so one level of indirection must resolve',
   );
 
   assert.deepEqual(findInCheckoutFixtureCalls("mkdirSync(join(tmpdir(), 'x'));"), []);
+
+  // `cpSync(repoRoot, scratch)` reads the checkout and writes to a tmpdir; only the destination
+  // argument says where anything is created.
+  const copyOut = [
+    "const repoRoot = resolve(import.meta.dirname, '../..');",
+    "cpSync(repoRoot, scratch, { recursive: true });",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(copyOut), []);
+});
+
+test('the mask survives quotes inside regex literals and comments', () => {
+  // Regression: an odd number of quotes inside a character class used to open a phantom string
+  // that blanked every later call, silently turning this gate green.
+  const source = [
+    "const root = resolve(import.meta.dirname, '../..');",
+    "const quoted = text.match(/'([^']*)'/u);",
+    "// a comment mentioning root and mkdirSync( that must not be scanned",
+    "mkdtempSync(join(root, 'packages', '.tmp-after-regex-'));",
+  ].join('\n');
+  assert.deepEqual(
+    findInCheckoutFixtureCalls(source).map(({ segments }) => segments),
+    [['packages', '.tmp-after-regex-']],
+  );
+
+  const divided = "const half = (a + b) / 2; const other = c / 2;";
+  assert.equal(maskLiterals(divided), divided, 'division must not be read as a regex literal');
+});
+
+test('the gate rejects an in-checkout fixture that is not dot-prefixed', () => {
+  const violating = [
+    "const root = resolve(import.meta.dirname, '../..');",
+    "mkdtempSync(join(root, 'packages', 'tmp-not-dot-prefixed-'));",
+  ].join('\n');
+  const [{ segments }] = findInCheckoutFixtureCalls(violating);
+  assert.deepEqual(segments, ['packages', 'tmp-not-dot-prefixed-']);
+  assert.ok(!segments.at(-1).startsWith('.'), 'the dot-prefix assertion above would fail for this suite');
 });
