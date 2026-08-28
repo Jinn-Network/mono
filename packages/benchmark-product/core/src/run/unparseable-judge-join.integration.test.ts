@@ -32,6 +32,7 @@ import {
   resolveBinaryInstrumentReduction,
   validateBinaryInstrumentParameters,
   validateBinaryInstrumentQualificationProjection,
+  type BinaryInstrumentQualificationComputeInput,
   type MethodComputeInput,
 } from "@jinn-network/benchmarking-aggregate";
 import { localAssemblyPorts } from "@jinn-network/benchmarking-local";
@@ -51,9 +52,11 @@ import {
 import { assembleMatrix, type InScopeCell } from "@jinn-network/benchmarking-run";
 import { runEvaluationHarness } from "@jinn-network/task-execution-evaluation-harness";
 import {
+  BINARY_JUDGMENT_CONTEXT_KEY,
   buildBinaryJudgmentEvaluationSpecification,
   createBinaryJudgmentEvaluatorRegistration,
   evaluatorAdaptersParserAllowlist,
+  selectBinaryJudgmentResponseParser,
 } from "@jinn-network/task-execution-evaluator-adapters";
 import {
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
@@ -88,8 +91,6 @@ import { canonicalJsonBytes, sealDsseEnvelope } from "@jinn-network/trust-core";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 const FIXTURE_DIR = "../../test/fixtures/unparseable-judge-response/";
-/** The evaluation-context key the binary-judgment adapter reads (`adapter.ts`). */
-const BINARY_JUDGMENT_CONTEXT_KEY = "binaryJudgment";
 const INSTRUMENT_KEY = "network.jinn.binary-judgment.instrument";
 const ITEM_COMMITMENT_KEY = "network.jinn.binary-judgment.item-sha256";
 const VERDICT_PAYLOAD_TYPE = "application/vnd.in-toto+json";
@@ -600,12 +601,12 @@ function computeInput(
   return {
     subjects: [{ subjectSha256: subjectDigest.slice("sha256:".length), matrix }],
     parameters: PARAMETERS,
-    verdictRule: "sole",
+    verdictRule: "sole" as const,
     resolveVerdictBytes: resolve,
     resolveRunBytes: resolve,
     resolveTaskBytes: resolve,
     resolveRecordBytes: resolve,
-  } as unknown as MethodComputeInput;
+  } satisfies MethodComputeInput;
 }
 
 /** The registered production method under test. */
@@ -674,6 +675,25 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
     const live = await readFixture("live-prose-then-fence");
     expect(Buffer.from(live).toString("utf8")).toBe(LIVE_PROSE_THEN_FENCE);
     expect(live.byteLength).toBe(Buffer.byteLength(LIVE_PROSE_THEN_FENCE, "utf8"));
+
+    // The verdict asserted at the fixture level, over the very parser the sealed instrument pins
+    // (`BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY`), so `parseable-correct` is a pinned control
+    // rather than something inferred downstream from `excluded.count`.
+    const parse = selectBinaryJudgmentResponseParser(
+      BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY.id,
+      BINARY_MEM0_JSON_LABEL_PARSER_V2_IDENTITY.version,
+    );
+    for (const name of ["live-prose-then-fence", "double-fence", "bare-prose"] as const) {
+      expect(parse(await readFixture(name)), name).toEqual({
+        decision: "INVALID",
+        parseValid: false,
+        invalidReason: "unexpected-token",
+      });
+    }
+    expect(parse(await readFixture("parseable-correct"))).toEqual({
+      decision: "ACCEPT",
+      parseValid: true,
+    });
   });
 
   test("the hand-authored parameters are the registered method's own admitted set", () => {
@@ -710,14 +730,14 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
     const { reduction } = resolveBinaryInstrumentReduction(
       {
         subjectSha256: fixture.input.subjects[0]!.subjectSha256,
-        matrices: [fixture.matrix],
+        matrices: [fixture.matrix] as const,
         parameters: PARAMETERS,
-        verdictRule: "sole",
+        verdictRule: "sole" as const,
         resolveVerdictBytes: fixture.input.resolveVerdictBytes,
         resolveRunBytes: fixture.input.resolveRunBytes,
         resolveTaskBytes: fixture.input.resolveTaskBytes,
         resolveRecordBytes: fixture.input.resolveRecordBytes,
-      } as never,
+      } satisfies BinaryInstrumentQualificationComputeInput,
       {
         k: K,
         candidateClasses: PARAMETERS.candidateClasses,
@@ -780,7 +800,7 @@ describe("consistency-violating verdicts are refused at both boundaries", () => 
   function tamperedInput(bytes: Uint8Array, digest: `sha256:${string}`): MethodComputeInput {
     const target = firstUnparseableCell();
     const mutated = {
-      ...(structuredClone(fixture.matrix) as MatrixRecord),
+      ...fixture.matrix,
       cells: fixture.matrix.cells.map((cell) =>
         cell.cellKey === target.cellKey
           ? { ...cell, verdicts: [digest], validVerdicts: [digest] }
