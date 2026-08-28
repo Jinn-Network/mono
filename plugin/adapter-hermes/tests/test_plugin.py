@@ -303,10 +303,15 @@ def test_an_unreadable_repository_costs_the_base_state_and_nothing_else(
         ),
         ("https://TOKEN@github.com/example/repo", "https://github.com/example/repo"),
         # In an explicit ssh:// URL, ":NNNN" is a port, not the first path segment.
+        # An SSH port names the SSH daemon, so it does not survive the rewrite to https;
+        # a port on a scheme that is kept does survive.
         (
             "ssh://git@gitlab.example.com:29418/team/repo.git",
-            "https://gitlab.example.com:29418/team/repo",
+            "https://gitlab.example.com/team/repo",
         ),
+        ("git://github.com:9418/Jinn-Network/mono.git", "git://github.com:9418/Jinn-Network/mono"),
+        # RFC 3986 puts the userinfo boundary at the last "@" before the host.
+        ("https://user:pa@ss@github.com/example/repo.git", "https://github.com/example/repo"),
         ("ssh://git@github.com/Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
         ("git://github.com/Jinn-Network/mono.git", "git://github.com/Jinn-Network/mono"),
         # A remote the runtime would refuse whole; the adapter must not write it.

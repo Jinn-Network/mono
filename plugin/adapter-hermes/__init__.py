@@ -46,7 +46,9 @@ _SCP_REMOTE = re.compile(r"\A(?P<user>[^@/]+)@(?P<host>[^:/]+):(?P<path>.+?)(?:\
 #: An explicit URL, where `:NNNN` after the host is unambiguously a port, not a path segment.
 _URL_REMOTE = re.compile(
     r"\A(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]*)://"
-    r"(?:(?P<userinfo>[^@/]*)@)?"
+    # `[^/]*` is greedy so the group backtracks to the LAST `@` before the host, which is where
+    # RFC 3986 puts the boundary. Stopping at the first would leave a password fragment behind.
+    r"(?:(?P<userinfo>[^/]*)@)?"
     r"(?P<host>[^/:]+)(?::(?P<port>\d+))?"
     r"(?P<path>/.*?)(?:\.git)?\Z"
 )
@@ -204,8 +206,11 @@ def _repository_iri(remote: str) -> str:
         if url.group("userinfo"):
             logger.debug("jinn: dropped credentials from the origin remote")
         # ssh:// is a transport, not a way to fetch; https names the same repository publicly.
-        scheme = "https" if url.group("scheme").lower() == "ssh" else url.group("scheme").lower()
-        port = f":{url.group('port')}" if url.group("port") else ""
+        # The port does not survive that rewrite: 22 (or Gerrit's 29418) names the SSH daemon,
+        # not the web endpoint. Keep a port only where the scheme it belongs to is kept.
+        observed = url.group("scheme").lower()
+        scheme = "https" if observed == "ssh" else observed
+        port = f":{url.group('port')}" if url.group("port") and scheme == observed else ""
         return f"{scheme}://{url.group('host')}{port}{url.group('path')}"
 
     scp = _SCP_REMOTE.match(remote)
