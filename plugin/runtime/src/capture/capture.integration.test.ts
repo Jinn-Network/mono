@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +12,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { resolveRuntimeConfig } from "../config.js";
 import { createCaptureCapability } from "./capability.js";
 import {
+  BASE_COMMIT_PROPERTY,
+  BASE_TREE_PROPERTY,
+  BRANCH_PROPERTY,
+  CONTROLLED_INPUT_ROLE_PROPERTY,
+  MODEL_SERVICE_ENTITY_ID,
+  REPOSITORY_STATE_ENTITY_ID,
   SESSION_FEED_FORMAT_IRI,
+  TARGET_BASE_PROPERTY,
   TRACE_RECORD_IDENTIFIER_PROPERTY,
 } from "./identity.js";
 import {
@@ -93,6 +101,76 @@ function feedLines(sessionId: string, baseNano: bigint): string {
         endedAt: "2026-07-30T09:00:06Z",
         outcome: "completed",
         summary: "Locate the retry budget",
+      }),
+    ].join("\n") + "\n"
+  );
+}
+
+const BASE_COMMIT = "4f0e2b7c1a9d8e3f5b6a7c8d9e0f1a2b3c4d5e6f";
+const BASE_TREE = "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567";
+const MODEL_SERVICE = {
+  iri: "https://spec.jinn.network/services/anthropic/claude-opus-5",
+  name: "Anthropic Messages API",
+  version: "claude-opus-5-20260514",
+  deployment: "api.anthropic.com",
+  providerIri: "https://spec.jinn.network/organizations/anthropic",
+} as const;
+
+/**
+ * An Autopilot-shaped feed: the same session events as above plus the two fact classes the
+ * `autopilot-issue-1697` protocol fixture found missing.
+ */
+function autopilotFeedLines(sessionId: string, baseNano: bigint): string {
+  const line = (value: unknown): string => JSON.stringify(value);
+  return (
+    [
+      line({
+        type: "session-open",
+        v: 1,
+        sessionId,
+        startedAt: "2026-07-30T09:00:00Z",
+        atUnixNano: String(baseNano),
+        host: { name: "Claude Code", version: "2.1.197" },
+        model: { provider: "anthropic", name: "claude-opus-5", service: MODEL_SERVICE },
+        conversationId: sessionId,
+      }),
+      line({
+        type: "repository-state",
+        atUnixNano: String(baseNano + 1n),
+        repository: "https://github.com/Jinn-Network/mono",
+        branch: "autopilot/3223",
+        targetBase: "next",
+        baseCommit: BASE_COMMIT,
+        baseTree: BASE_TREE,
+      }),
+      line({
+        type: "controlled-input",
+        atUnixNano: String(baseNano + 2n),
+        role: "workflow",
+        name: ".claude/skills/implement-issue/SKILL.md",
+        mediaType: "text/markdown",
+        contentBase64: Buffer.from("# implement-issue\n").toString("base64"),
+      }),
+      line({
+        type: "controlled-input",
+        atUnixNano: String(baseNano + 3n),
+        role: "config",
+        name: "effective-config.json",
+        mediaType: "application/json",
+        contentBase64: Buffer.from('{"runtime":"claude","effort":"high"}').toString("base64"),
+      }),
+      line({ type: "user-turn", atUnixNano: String(baseNano + 4n), text: "Implement issue #3223." }),
+      line({
+        type: "assistant-turn",
+        atUnixNano: String(baseNano + 5n),
+        text: "Done.",
+      }),
+      line({
+        type: "session-close",
+        atUnixNano: String(baseNano + 6n),
+        endedAt: "2026-07-30T09:10:00Z",
+        outcome: "completed",
+        summary: "Implement issue #3223",
       }),
     ].join("\n") + "\n"
   );
@@ -428,4 +506,75 @@ describe("fleet safety (cross-plan contract 5)", () => {
     await capture.openSession({ sessionId: "s-later" });
     expect(await listStrandedSessionIds(paths, ["s-later", "s-next"])).toEqual([]);
   }, 120_000);
+});
+
+describe("Autopilot-driven capture (issue #3223)", () => {
+  test("seals a conformant record that closes both capture gaps and reaches the local journal", async () => {
+    const home = await newHome();
+    const { capture } = await startCapture(home);
+    const { sessionId, feedPath } = await capture.openSession({ sessionId: "s-autopilot" });
+    await writeFile(feedPath, autopilotFeedLines(sessionId, 1_785_488_400_000_000_000n));
+
+    const result = await capture.sealSession({ sessionId });
+    expect(result.sealed, JSON.stringify(result)).toBe(true);
+    if (!result.sealed) return;
+
+    const report = validateExecutionEvidence(result.capture.recordBytes);
+    expect(report.conforms, JSON.stringify(report.diagnostics)).toBe(true);
+
+    const document = JSON.parse(new TextDecoder().decode(result.capture.recordBytes)) as {
+      "@graph": readonly Record<string, unknown>[];
+    };
+    const entity = (id: string) => document["@graph"].find((value) => value["@id"] === id);
+    const identifiersOf = (value: Record<string, unknown> | undefined): unknown[] => {
+      const raw = value?.identifier;
+      return raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+    };
+    const property = (propertyID: string, value: string) => ({
+      "@type": "PropertyValue",
+      propertyID,
+      value,
+    });
+
+    // Gap 1: the base repository state is a content-bound input, not an unrecorded fact.
+    const repository = entity(REPOSITORY_STATE_ENTITY_ID);
+    expect(repository).toBeDefined();
+    expect(repository?.codeRepository).toBe("https://github.com/Jinn-Network/mono");
+    // The recorder canonicalizes identifier order, so membership is the contract, not sequence.
+    expect(identifiersOf(repository)).toHaveLength(4);
+    expect(identifiersOf(repository)).toEqual(
+      expect.arrayContaining([
+        property(BASE_COMMIT_PROPERTY, BASE_COMMIT),
+        property(BASE_TREE_PROPERTY, BASE_TREE),
+        property(BRANCH_PROPERTY, "autopilot/3223"),
+        property(TARGET_BASE_PROPERTY, "next"),
+      ]),
+    );
+
+    // Gap 2a: producer-controlled inputs are digest-bound artifacts, not labels.
+    const controlled = document["@graph"].filter((value) =>
+      String(value["@id"]).startsWith("inputs/controlled/"),
+    );
+    expect(controlled).toHaveLength(2);
+    expect(controlled.map((value) => value.sha256)).toEqual([
+      expect.stringMatching(/^[0-9a-f]{64}$/u),
+      expect.stringMatching(/^[0-9a-f]{64}$/u),
+    ]);
+    expect(controlled.flatMap(identifiersOf)).toEqual(
+      expect.arrayContaining([
+        property(CONTROLLED_INPUT_ROLE_PROPERTY, "workflow"),
+        property(CONTROLLED_INPUT_ROLE_PROPERTY, "config"),
+      ]),
+    );
+
+    // Gap 2b: the hosted model carries a full service identity rather than a bare label.
+    expect(entity(MODEL_SERVICE_ENTITY_ID)).toBeDefined();
+    expect(entity(MODEL_SERVICE.iri)).toMatchObject({
+      name: MODEL_SERVICE.name,
+      softwareVersion: MODEL_SERVICE.version,
+    });
+
+    // The record is in the local journal, which is what makes it retrievable and projectable.
+    expect(result.capture.indexed.status).toBe("indexed");
+  }, 60_000);
 });

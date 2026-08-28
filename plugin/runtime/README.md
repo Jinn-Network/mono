@@ -79,6 +79,33 @@ Everything above is created **owner-only** — directories `0700`, files `0600` 
 same exposure class the host already keeps its own session logs in. Capture adds a copy
 inside that class; it does not open a new one.
 
+### What an adapter reports so the record conforms
+
+A session feed carries the turns and tool calls by default. Three further facts are optional in
+the schema and required for full Execution Evidence v1 conformance; a host adapter that drives a
+repository-changing session — Autopilot's, for instance — reports all three. They close the two
+capture gaps the `autopilot-issue-1697` protocol fixture recorded
+(`packages/evidence/protocol/fixtures/autopilot-issue-1697/`).
+
+| Feed fact | What it binds | Where it lands in the record |
+| --- | --- | --- |
+| `repository-state` event, at most once | repository IRI, branch, target base, base commit, base tree | the `inputs/repository.json` dataset, with the commit and tree as identifiers |
+| `controlled-input` event, repeatable | the exact bytes of one producer-controlled input — `workflow`, `skill`, `prompt`, or `config` | one digest-bound `inputs/controlled/…` artifact carrying its role |
+| `model.service` on `session-open` | the hosted model's service IRI, version, deployment, and provider | an `opaque` runtime component, the protocol's shape for a service no producer can content-address |
+
+Controlled-input bytes travel **inline** (base64), not by path: a feed-supplied filesystem path
+would make the capture layer an arbitrary-file-read primitive driven by host-written data. They
+are bounded at 256 KiB each and 32 per session; a feed past either bound is refused, not
+truncated.
+
+Every one of these facts is optional, so a feed that omits them parses and seals exactly as
+before — the feed version is unchanged.
+
+**Segregating secrets is the adapter's job, at the source.** This runtime binds what it is
+given and does not scrub (below), so a prompt or effective configuration must be assembled
+without credentials rather than cleaned afterwards. The derivation and scrub pipeline is the
+safety net for the public projection, not the plan.
+
 ### This runtime does not scrub at capture time
 
 Sealing binds the feed's exact bytes, so a capture-time scrub would both destroy the material
