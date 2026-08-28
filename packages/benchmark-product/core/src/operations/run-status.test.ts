@@ -187,7 +187,7 @@ describe("runStatus — guards", () => {
     // Every expected cell is "pending" — nothing has been dispatched yet.
     expect(outcome.result.cells).toHaveLength(6);
     expect(outcome.result.cells.every((cell) => cell.status === "pending" && cell.dispatches === 0)).toBe(true);
-    expect(outcome.result.counts).toEqual({ expected: 6, dispatched: 0, delivered: 0, judged: 0, failed: 0 });
+    expect(outcome.result.counts).toEqual({ expected: 6, dispatched: 0, delivered: 0, judged: 0, failed: 0, awaitingEvaluation: 0 });
   });
 });
 
@@ -313,7 +313,7 @@ describe("runStatus — reflects a driven run", () => {
       expect(cell.deliverySha256, cell.cellKey).toMatch(/^[a-f0-9]{64}$/);
       expect(cell.verdictSha256, cell.cellKey).toMatch(/^[a-f0-9]{64}$/);
     }
-    expect(outcome.result.counts).toEqual({ expected: 6, dispatched: 6, delivered: 6, judged: 6, failed: 0 });
+    expect(outcome.result.counts).toEqual({ expected: 6, dispatched: 6, delivered: 6, judged: 6, failed: 0, awaitingEvaluation: 0 });
   }, 30_000);
 
   test("a cell with no journal activity at all reports 'pending' among otherwise-complete cells", async () => {
@@ -343,7 +343,7 @@ describe("runStatus — reflects a driven run", () => {
     const pendingCell = outcome.result.cells.find((cell) => cell.cellKey === droppedCellKey);
     expect(pendingCell).toMatchObject({ status: "pending", dispatches: 0 });
     expect(pendingCell?.attempt).toBeUndefined();
-    expect(outcome.result.counts).toEqual({ expected: 6, dispatched: 5, delivered: 5, judged: 5, failed: 0 });
+    expect(outcome.result.counts).toEqual({ expected: 6, dispatched: 5, delivered: 5, judged: 5, failed: 0, awaitingEvaluation: 0 });
   }, 30_000);
 });
 
@@ -403,5 +403,91 @@ describe("runStatus — cancelRequested flag and blame passthrough (BP-22)", () 
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("journal-integrity");
+  }, 30_000);
+});
+
+describe("runStatus — evaluation gaps resume would act on (#3084)", () => {
+  test("surfaces a cell stranded between its delivered cell-event and its delivery record, before any resume", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+    expect(launched.ok).toBe(true);
+
+    // Reproduce the #3081 crash shape durably: keep the solve-side `delivered` cell-event for
+    // one cell and drop everything the harvest would have written after it (the `delivery`
+    // record, the evaluation leg, and the `judged` cell-event that leg produced).
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const [strandedCellKey] = fullEntries
+      .filter((entry) => entry.kind === "cell-event" && entry.event.kind === "delivered")
+      .map((entry) => (entry.kind === "cell-event" ? entry.event.cellKey : ""));
+    if (strandedCellKey === undefined) throw new Error("unreachable: no delivered cell");
+    const stranded = fullEntries.filter((entry) => {
+      if (entry.kind === "cell-event") {
+        return !(entry.event.cellKey === strandedCellKey && entry.event.kind === "judged");
+      }
+      if (entry.kind === "delivery" || entry.kind === "evaluation") return entry.cellKey !== strandedCellKey;
+      if (entry.kind === "submission-accepted") {
+        return !(entry.cellKey === strandedCellKey && entry.leg === "evaluation");
+      }
+      return true;
+    });
+    atomicWriteFileSync(runJournalPath(workspaceDir, "draft-1"), `${stranded.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+    const outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const cell = outcome.result.cells.find((candidate) => candidate.cellKey === strandedCellKey);
+    expect(cell).toMatchObject({ status: "delivered" });
+    expect(cell?.deliverySha256).toBeUndefined();
+    expect(cell?.evaluationGap).toEqual({ missingEvalIndexes: [1], deliveryJournaled: false });
+    // Distinct from the retryable-failure recovery surface: nothing failed retryably here, and
+    // this run's policy carries no infrastructure retries at all.
+    expect(cell?.evaluationRecovery).toBeUndefined();
+    expect(outcome.result.evaluationRecovery).toBeUndefined();
+    expect(outcome.result.counts.awaitingEvaluation).toBe(1);
+    expect(outcome.result.cells.filter((candidate) => candidate.evaluationGap !== undefined)).toHaveLength(1);
+  }, 30_000);
+
+  test("a delivered cell whose delivery IS journaled but whose evaluation leg is missing reports the gap as delivery-journaled", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+    expect(launched.ok).toBe(true);
+
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const [gapCellKey] = fullEntries
+      .filter((entry) => entry.kind === "delivery")
+      .map((entry) => (entry.kind === "delivery" ? entry.cellKey : ""));
+    if (gapCellKey === undefined) throw new Error("unreachable: no journaled delivery");
+    const truncated = fullEntries.filter((entry) => {
+      if (entry.kind === "cell-event") return !(entry.event.cellKey === gapCellKey && entry.event.kind === "judged");
+      if (entry.kind === "evaluation") return entry.cellKey !== gapCellKey;
+      if (entry.kind === "submission-accepted") return !(entry.cellKey === gapCellKey && entry.leg === "evaluation");
+      return true;
+    });
+    atomicWriteFileSync(runJournalPath(workspaceDir, "draft-1"), `${truncated.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+    const outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const cell = outcome.result.cells.find((candidate) => candidate.cellKey === gapCellKey);
+    expect(cell?.evaluationGap).toEqual({ missingEvalIndexes: [1], deliveryJournaled: true });
+    expect(outcome.result.counts.awaitingEvaluation).toBe(1);
+  }, 30_000);
+
+  test("a fully judged run reports no evaluation gap on any cell", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+    expect(launched.ok).toBe(true);
+
+    const outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.cells.every((cell) => cell.evaluationGap === undefined)).toBe(true);
+    expect(outcome.result.counts.awaitingEvaluation).toBe(0);
   }, 30_000);
 });

@@ -46,6 +46,18 @@ export interface RunStatusCell {
     readonly recovered: boolean;
     readonly exhausted: boolean;
   };
+  /** Present whenever this cell is in the UNFILTERED evaluation-gap set (`../run/journal.ts`'s
+   * `evaluationGaps`) — the same set `run.resume` drives (`./run-launch.ts`) and `run.collect`
+   * reads for terminal accounting (`./run-collect.ts`). Deliberately independent of
+   * `evaluationRecovery`, which reports only infrastructure-retry recovery and disappears
+   * entirely when the run's policy allows no retries: a gap can exist with nothing having
+   * failed at all (issue #3084). `deliveryJournaled: false` is exactly the issue #3081 shape —
+   * a `delivered` cell-event whose `delivery` record never made it to the journal, which
+   * `run.resume` heals from the attempt the cell-event named. */
+  readonly evaluationGap?: {
+    readonly missingEvalIndexes: readonly number[];
+    readonly deliveryJournaled: boolean;
+  };
 }
 
 export interface RunStatusCounts {
@@ -55,6 +67,9 @@ export interface RunStatusCounts {
   /** Cells that reached a solve delivery (status "delivered" or "judged" — judged implies delivered). */
   readonly delivered: number;
   readonly judged: number;
+  /** Cells carrying an `evaluationGap` — delivered, but with an evaluation leg `run.resume`
+   * would still act on. Non-zero while a run is `running` is the operator's cue to resume. */
+  readonly awaitingEvaluation: number;
   /** Cells whose accounted terminal is a non-replaceable failure (excludes "expired"/"cancelled",
    * each visible on the per-cell `status` for callers who want that distinction). */
   readonly failed: number;
@@ -119,12 +134,14 @@ export function runStatus(
       const entries = readRunJournalEntries(context.workspaceDir, input.draftId);
       const fold = foldRunJournal(entries);
       const maxInfrastructureRetries = runRecord.policy.evaluation?.maxInfrastructureRetries ?? 0;
+      const gaps = evaluationGaps(
+        fold,
+        runRecord.policy.evaluation?.minVerdicts ?? 1,
+        maxInfrastructureRetries,
+      );
+      const gapsByCellKey = new Map(gaps.map((gap) => [gap.cell.cellKey, gap]));
       const pendingEvaluationCells = new Set(
-        evaluationGaps(
-          fold,
-          runRecord.policy.evaluation?.minVerdicts ?? 1,
-          maxInfrastructureRetries,
-        ).filter((gap) => document.state === "running"
+        gaps.filter((gap) => document.state === "running"
           && gap.cell.evaluationLegs.some((leg) => leg.retryableFailures > 0))
           .map((gap) => gap.cell.cellKey),
       );
@@ -183,6 +200,7 @@ export function runStatus(
 
       const cells: RunStatusCell[] = expected.map((coord) => {
         const cell = fold.get(coord.cellKey);
+        const gap = gapsByCellKey.get(coord.cellKey);
         const retryableFailures = cell?.evaluationLegs.reduce(
           (total, leg) => total + leg.retryableFailures,
           0,
@@ -204,6 +222,12 @@ export function runStatus(
           ...(cell?.verdictSha256 !== undefined ? { verdictSha256: cell.verdictSha256 } : {}),
           ...(cell?.detail !== undefined ? { detail: cell.detail } : {}),
           ...(cell?.blame !== undefined ? { blame: cell.blame } : {}),
+          ...(gap === undefined ? {} : {
+            evaluationGap: {
+              missingEvalIndexes: gap.missingEvalIndexes,
+              deliveryJournaled: gap.cell.deliverySha256 !== undefined,
+            },
+          }),
           ...(maxInfrastructureRetries === 0 ? {} : {
             evaluationRecovery: {
               retryableFailures,
@@ -220,6 +244,7 @@ export function runStatus(
         dispatched: cells.filter((cell) => cell.dispatches > 0).length,
         delivered: cells.filter((cell) => cell.status === "delivered" || cell.status === "judged").length,
         judged: cells.filter((cell) => cell.status === "judged").length,
+        awaitingEvaluation: cells.filter((cell) => cell.evaluationGap !== undefined).length,
         failed: cells.filter((cell) => cell.status === "failed").length,
       };
 
