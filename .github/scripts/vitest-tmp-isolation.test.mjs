@@ -93,7 +93,7 @@ function regexLiteralEnd(source, start) {
   return source.length;
 }
 
-/** Keywords a regex literal may directly follow, longest first so `typeof` is not read as `of`. */
+/** Keywords a regex literal may directly follow. */
 const REGEX_PRECEDING_KEYWORDS = [
   'typeof',
   'return',
@@ -109,35 +109,74 @@ const REGEX_PRECEDING_KEYWORDS = [
   'do',
 ];
 
-/**
- * Whether the `/` at `index` opens a regex literal rather than a division.
- *
- * Decided from the previous significant token, the usual heuristic for a scanner with no
- * expression parser: a value may begin after an operator, a separator, an opening bracket, or one
- * of the keywords above, and not after something that can end an operand. Closing brackets are
- * read as operands, so `f(x) / 2` is division; a regex directly after one — `(a + b) /re/.test(c)`
- * is not valid code anyway.
- *
- * `--`/`++` are the one shape where the character test alone reads the wrong way round: the
- * trailing `-` of `x-- / 2` looks like an operator, and consuming that division as a regex takes
- * the rest of its line — including any structure and, where the line ends in a comment, the first
- * `/` of its `//` — which hands the comment's prose back as live source in miniature (#3027). So a
- * `+`/`-` doubled with the character before it counts as an operand end.
- *
- * Whatever this still misreads is bounded to one line by `regexLiteralEnd` and `quotedSpanEnd`.
- */
-function regexStartsAt(source, index) {
-  let back = index - 1;
+/** The index of the last non-whitespace character at or before `from`, or `-1`. */
+function previousSignificant(source, from) {
+  let back = from;
   while (back >= 0 && /\s/u.test(source[back])) back -= 1;
+  return back;
+}
+
+/**
+ * Whether the token ending at `back` is one of the keywords above, rather than the tail of a longer
+ * identifier or a property named after one.
+ *
+ * Both sides need a boundary. Without the leading one `typeof` ends in `of`; without rejecting a
+ * preceding `.` — or `?.`, or one written with spaces around it — `opts.in / 2` reads as `in`, and
+ * every one of `in`, `of`, `new`, `delete`, `void`, `case` and `do` is a legal property name.
+ * Reading one as a keyword consumes the division as a regex, which is the fail-open this whole
+ * back-scan exists to prevent.
+ */
+function keywordEndsAt(source, back) {
+  return REGEX_PRECEDING_KEYWORDS.some((keyword) => {
+    if (source.slice(back - keyword.length + 1, back + 1) !== keyword) return false;
+    const before = previousSignificant(source, back - keyword.length);
+    return before < 0 || !/[\w$.]/u.test(source[before]);
+  });
+}
+
+/**
+ * Whether a value may begin at the position just after `back` — where `back` is the index of the
+ * previous significant character, or `-1` at the start of the source.
+ *
+ * This is the usual heuristic for a scanner with no expression parser: a value may begin after an
+ * operator, a separator, an opening bracket, or one of the keywords above, and not after something
+ * that can end an operand. Closing brackets are read as operands, so `f(x) / 2` is division; a
+ * regex directly after one — `(a + b) /re/.test(c)` — is not valid code anyway.
+ *
+ * Two characters are ambiguous on their own and are resolved by looking behind them:
+ *
+ * `--`/`++` read the wrong way round from the character alone: the trailing `-` of `x-- / 2` looks
+ * like an operator. So a `+`/`-` doubled with the character before it counts as an operand end.
+ *
+ * `!` is both the prefix logical not, after which a regex is ordinary (`!/re/.test(x)`), and
+ * TypeScript's postfix non-null assertion, after which `opts.value! / 2` is a division. Neither
+ * reading is right unconditionally, so the same question is asked one token further back: a `!`
+ * that itself sits where a value may begin is the prefix operator, and one that follows an operand
+ * is the assertion.
+ *
+ * Both matter for the same reason: consuming a division as a regex takes the rest of its line —
+ * including any structure and, where the line ends in a comment, the first `/` of its `//` — which
+ * hands the comment's prose back as live source in miniature (#3027).
+ */
+function valueMayBeginAfter(source, back) {
   if (back < 0) return true;
   const character = source[back];
   if ((character === '+' || character === '-') && source[back - 1] === character) return false;
-  if ('(,=:[!&|?{;+-*%~^<>'.includes(character)) return true;
-  return REGEX_PRECEDING_KEYWORDS.some(
-    (keyword) =>
-      source.slice(back - keyword.length + 1, back + 1) === keyword &&
-      !/[\w$]/u.test(source[back - keyword.length] ?? ''),
-  );
+  if (character === '!') return valueMayBeginAfter(source, previousSignificant(source, back - 1));
+  if ('(,=:[&|?{;+-*%~^<>'.includes(character)) return true;
+  return keywordEndsAt(source, back);
+}
+
+/**
+ * Whether the `/` at `index` opens a regex literal rather than a division.
+ *
+ * Whatever this still misreads consumes at most one line, because `regexLiteralEnd` and
+ * `quotedSpanEnd` both stop at a newline. What that line costs is bounded separately by each
+ * caller: `stripComments` can emit the tail of a mis-read line verbatim, and `projectEntryRanges`
+ * drops the one `projects` entry whose braces that line took, not the array.
+ */
+function regexStartsAt(source, index) {
+  return valueMayBeginAfter(source, previousSignificant(source, index - 1));
 }
 
 /**
@@ -277,6 +316,15 @@ function enclosedLiterals(source, key, open, close) {
  * scanners take on an unterminated literal, and it is bounded the same way: a config that does not
  * parse cannot load, so its own package job is red before this gate has an opinion.
  *
+ * An entry whose own `{` never balances is skipped rather than ending the scan, so the entries
+ * after it keep their ranges. `break` here was the amplifier that made a single mis-read line cost
+ * the whole array: `regexStartsAt` bounds its mistakes to one line, but a line holding an entry's
+ * closing brace leaves that entry unbalanced, and abandoning the array on it put every allowance
+ * and seam path back in root scope — fail-open, on exactly the shape #3123 closes. Resuming
+ * instead can only record ranges the balanced scan does find, and an extra or narrower range only
+ * narrows a scope, which withholds crediting rather than granting it: a false red, never a false
+ * green.
+ *
  * The closure is literal-shaped, and that is the larger hole. A range exists only where the reader
  * can see a `{` as a direct element of the array, so an entry held in a variable — `projects:
  * [allowProject, seamProject]` — produces no ranges at all and every allowance and seam path falls
@@ -302,7 +350,7 @@ export function projectEntryRanges(source) {
       else if (character === '/' && regexStartsAt(inner, i)) i = regexLiteralEnd(inner, i);
       else if (character === '{') {
         const end = balancedEnd(inner, i + 1, '{', '}');
-        if (end === -1) break;
+        if (end === -1) continue;
         ranges.push([start + i, start + end]);
         i = end;
       }
@@ -889,8 +937,27 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
     assert.equal(projectEntryRanges(withProperty(property)).length, 2, property);
   }
 
-  // The same postfix shape must not hand a trailing comment's prose back as live source (#3027).
-  assert.ok(!stripComments('x: total-- / 2, // setupFiles: isolate-tmp.ts').includes('isolate-tmp'));
+  // A postfix `!` is TypeScript's non-null assertion, so the `/` after it is a division. Reading it
+  // as a regex is the same fail-open as the `--` case, on a shape that is ordinary in a `.ts`
+  // config; a prefix `!` before a real regex must still read as one.
+  for (const property of ['x: opts.value! / 2, ', 'x: f(a)! / 2, ', `x: (s) => !/['"]/u.test(s), `]) {
+    assert.equal(projectEntryRanges(withProperty(property)).length, 2, property);
+  }
+
+  // A property named after a regex-preceding keyword is not that keyword. Every one of these is a
+  // legal property name, and reading one as a keyword consumed the division and the entry's braces.
+  for (const property of ['x: opts.in / 2, ', 'x: opts.of / 2, ', 'x: opts?.new / 2, ']) {
+    assert.equal(projectEntryRanges(withProperty(property)).length, 2, property);
+  }
+
+  // The same shapes must not hand a trailing comment's prose back as live source (#3027).
+  for (const line of [
+    'x: total-- / 2, // setupFiles: isolate-tmp.ts',
+    'x: opts.value! / 2, // setupFiles: isolate-tmp.ts',
+    'x: opts.in / 2, // setupFiles: isolate-tmp.ts',
+  ]) {
+    assert.ok(!stripComments(line).includes('isolate-tmp'), line);
+  }
 
   // Bounding it at the line is what keeps the damage local: the entries after the bad one still
   // get their ranges, where an unbounded scan runs to the next `/` in the file or off the end.
@@ -900,8 +967,17 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
   );
 
   // An unterminated literal is bounded at its own line rather than the file, but it still takes
-  // that line's braces with it, so the entry is dropped. That is the same fail-open the doc block
-  // records for an unterminated array, and bounded the same way: the construct is not valid
-  // JavaScript, so the config cannot load and its own package job is red first.
-  assert.deepEqual(projectEntryRanges(withProperty(`x: /['"]u, `)), []);
+  // that line's braces with it, so its own entry is unbalanced and dropped. The scan resumes at the
+  // next entry rather than abandoning the array, so the sibling keeps its range — which is what
+  // makes the one-line bound above true of the consequence and not only of the consumed text.
+  assert.equal(projectEntryRanges(withProperty(`x: /['"]u, `)).length, 1);
+});
+
+// `stripComments` passes regex literals through verbatim, and that branch is not redundant with the
+// comment checks that precede it: a regex whose body holds an escaped `\/\/` reaches those checks
+// first without it, and the literal is truncated from there to the end of the line. Nothing in the
+// tree writes that shape today, which is why it is pinned here rather than left to the configs.
+test('stripComments does not read an escaped // inside a regex as a comment', () => {
+  const source = "x: /a\\/\\/b/u, setupFiles: ['isolate-tmp.ts']";
+  assert.equal(stripComments(source), source);
 });
