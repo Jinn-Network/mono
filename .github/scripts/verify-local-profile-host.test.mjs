@@ -158,7 +158,6 @@ function attestedFixture(root, manifest, { bundle: sharedBundle = null, keys = n
     privateKeyPem,
     publicKeyPem,
     publicKeySha256: canonicalPublicKeySha256(publicKeyPem).sha256,
-    keys: { privateKeyPem, publicKeyPem },
     receipt,
     receiptPath,
   };

@@ -42,7 +42,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { assertLiteralRoutePath } from './build-profile-host-bundle.mjs';
+import { assertLiteralRoutePath, assertReleaseGroupSegment } from './build-profile-host-bundle.mjs';
 import { canonicalJsonBytes, catalogSha256 } from './build-prepublication-bundle.mjs';
 import { loadPlatformCatalog } from './platform-catalog.mjs';
 import {
@@ -353,11 +353,10 @@ export async function verifyLiveProfileHost({
   // -- before the receipt is even read -- is what makes a malformed group a named refusal
   // rather than an incidental receipt mismatch three checks later.
   try {
-    assertLiteralRoutePath(releaseGroup, 'release group');
+    assertReleaseGroupSegment(releaseGroup);
   } catch (error) {
     return fail(error?.message ?? String(error));
   }
-  if (releaseGroup.includes('/')) return fail(`release group must be a single path segment: ${releaseGroup}`);
   const resolvedOrigin = originForLane(requestedOrigin, lane);
   if (resolvedOrigin.error) return fail(resolvedOrigin.error);
   const origin = resolvedOrigin.origin;

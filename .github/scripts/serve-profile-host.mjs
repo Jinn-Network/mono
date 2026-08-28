@@ -120,11 +120,12 @@ export function documentHeaders({ mediaType, sha256, cacheControl, bytes }) {
  */
 function discoverGroups(root) {
   const groups = [];
-  for (const entry of readdirSync(root, { withFileTypes: true }).sort((left, right) => (
-    left.name < right.name ? -1 : left.name > right.name ? 1 : 0
-  ))) {
-    if (!entry.isDirectory()) continue;
-    const manifestPath = join(root, entry.name, MANIFEST_FILE_NAME);
+  const names = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  for (const name of names) {
+    const manifestPath = join(root, name, MANIFEST_FILE_NAME);
     if (!existsSync(manifestPath)) continue;
     const bytes = readFileSync(manifestPath);
     let manifest;
@@ -133,9 +134,9 @@ function discoverGroups(root) {
     } catch {
       continue;
     }
-    if (manifest?.releaseGroup !== entry.name) continue;
+    if (manifest?.releaseGroup !== name) continue;
     if (!Array.isArray(manifest.documents)) throw new Error('profile manifest documents must be an array');
-    groups.push({ name: entry.name, manifest, bytes });
+    groups.push({ name, manifest, bytes });
   }
   return groups;
 }
@@ -157,7 +158,6 @@ export function loadBundleRoutes(bundleDir, { publicKey = null } = {}) {
 
   const sha256Of = (bytes) => createHash('sha256').update(bytes).digest('hex');
   const routes = new Map();
-  const manifests = new Map();
   const add = (path, entry) => {
     assertLiteralRoutePath(path, 'bundle served path');
     if (routes.has(path)) throw new Error(`bundle serves ${path} twice`);
@@ -165,8 +165,7 @@ export function loadBundleRoutes(bundleDir, { publicKey = null } = {}) {
   };
 
   // Group inventories first, so a document claiming a group's own path trips `add`.
-  for (const { name, manifest, bytes } of groups) {
-    manifests.set(name, manifest);
+  for (const { name, bytes } of groups) {
     add(`${name}/${MANIFEST_FILE_NAME}`, {
       kind: 'root',
       bytes,
@@ -213,7 +212,7 @@ export function loadBundleRoutes(bundleDir, { publicKey = null } = {}) {
       cacheControl: REVALIDATE_CACHE_CONTROL,
     });
   }
-  return { routes, manifests };
+  return { routes };
 }
 
 const isExtensionless = (path) => !path.split('/').pop().includes('.');

@@ -85,6 +85,21 @@ export function assertLiteralRoutePath(path, label = 'served path') {
   return path;
 }
 
+/**
+ * A release group namespaces one group's root files in a shared bundle, so it must be
+ * exactly one literal path segment: `assertLiteralRoutePath` accepts `a/b`, and a
+ * two-segment namespace would put one group's manifest inside another group's directory
+ * shape. The live-host gate builds the same segment into every URL it fetches, so it
+ * imports this rule rather than restating it.
+ */
+export function assertReleaseGroupSegment(releaseGroup) {
+  assertLiteralRoutePath(releaseGroup, 'release group');
+  if (releaseGroup.includes('/')) {
+    throw new Error(`release group must be a single path segment: ${releaseGroup}`);
+  }
+  return releaseGroup;
+}
+
 /** RFC 9110 strong entity tag derived from the manifest digest. */
 export function entityTag(sha256, label = 'document digest') {
   if (!SHA256.test(String(sha256))) throw new Error(`${label} must be a lowercase SHA-256 digest`);
@@ -211,13 +226,7 @@ function releaseGroupNamespace(manifest, label) {
   if (typeof namespace !== 'string' || namespace === '') {
     throw new Error(`profile root ${MANIFEST_FILE_NAME} names no release group: ${label}`);
   }
-  assertLiteralRoutePath(namespace, 'release group');
-  // `assertLiteralRoutePath` accepts `a/b`; a namespace that is two segments would put one
-  // group's manifest inside another group's directory shape.
-  if (namespace.includes('/')) {
-    throw new Error(`release group must be a single path segment: ${namespace}`);
-  }
-  return namespace;
+  return assertReleaseGroupSegment(namespace);
 }
 
 /** Read and validate one attested profile root into its bundle contribution. */
@@ -306,8 +315,8 @@ export function buildProfileHostBundle({
   const rootDocuments = [];
   const documents = [];
   const copies = [];
-  for (const each of profileRoots) {
-    const parsed = readProfileRoot(each, claimedBy);
+  for (const root of profileRoots) {
+    const parsed = readProfileRoot(root, claimedBy);
     if (namespaces.has(parsed.namespace)) {
       throw new Error(`release group ${parsed.namespace} is bundled twice`);
     }

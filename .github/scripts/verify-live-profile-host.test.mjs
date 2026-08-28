@@ -51,8 +51,8 @@ const KEY_ID = 'jinn-profile-manifest-test';
 // Every stack-published group shares the origin, so each one's manifest and sidecar are
 // fetched under its own name. Nothing is served at the origin root.
 const SEALED_GROUP = 'sealed-platform-v1';
-const groupManifestUrl = (group, origin = ORIGIN) => `${origin}/${group}/${MANIFEST_FILE_NAME}`;
-const groupSignatureUrl = (group, origin = ORIGIN) => `${origin}/${group}/${SIGNATURE_FILE_NAME}`;
+const groupManifestUrl = (group) => `${ORIGIN}/${group}/${MANIFEST_FILE_NAME}`;
+const groupSignatureUrl = (group) => `${ORIGIN}/${group}/${SIGNATURE_FILE_NAME}`;
 
 const temporaries = [];
 after(() => {

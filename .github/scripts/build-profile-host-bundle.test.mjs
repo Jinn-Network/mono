@@ -79,12 +79,12 @@ function implementationsProfileRoot() {
   return cachedImplementationsRoot;
 }
 
-/** Where a profile root's file lands in the bundle: root files move under their group. */
-const bundlePathFor = (path, group = SEALED_GROUP) => (
-  path === MANIFEST_FILE_NAME || path === SIGNATURE_FILE_NAME ? `${group}/${path}` : path
+/** Where a sealed profile root's file lands in the bundle: root files move under the group. */
+const bundlePathFor = (path) => (
+  path === MANIFEST_FILE_NAME || path === SIGNATURE_FILE_NAME ? `${SEALED_GROUP}/${path}` : path
 );
 
-/** A hand-written two-document root, so a collision case needs no real release group. */
+/** A hand-written profile root, so a collision case needs no real release group. */
 function syntheticRoot(releaseGroup, documents) {
   const root = temporaryDirectory(`jinn-host-bundle-${releaseGroup}-`);
   const declared = documents.map(([path, body]) => {
