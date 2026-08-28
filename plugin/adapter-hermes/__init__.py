@@ -198,7 +198,7 @@ def _repository_iri(remote: str) -> str:
       usually with a username in it, and it resolves for nobody. An `ssh_config` `Host` alias —
       `git@myhost:owner/repo.git` — is the same case wearing a plausible hostname: it names a
       repository only on the machine holding that alias, and it does not join with the identity
-      every other operator seals for the same repository. `_is_repository_host` refuses both.
+      every other operator seals for the same repository. `_repository_host` refuses both.
 
     An absent field is what the record accepts gracefully; a confident wrong one is not.
     """
@@ -219,7 +219,7 @@ def _repository_iri(remote: str) -> str:
         # not the web endpoint. Keep a port only where the scheme it belongs to is kept.
         observed = url.group("scheme").lower()
         scheme = "https" if observed == "ssh" else observed
-        host = _is_repository_host(url.group("host"))
+        host = _repository_host(url.group("host"))
         if not host:
             return ""
         port = f":{url.group('port')}" if url.group("port") and scheme == observed else ""
@@ -227,7 +227,7 @@ def _repository_iri(remote: str) -> str:
 
     scp = _SCP_REMOTE.match(remote)
     if scp is not None:
-        host = _is_repository_host(scp.group("host"))
+        host = _repository_host(scp.group("host"))
         # `host` binds after the first `@` and `path` admits one, so a hand-written
         # `git@x-access-token:ghs_…@github.com/o/r` would otherwise carry its token through this
         # branch. The URL branch drops userinfo at the last `@`; this one has no userinfo to drop,
@@ -241,7 +241,7 @@ def _repository_iri(remote: str) -> str:
     return ""
 
 
-def _is_repository_host(host: str) -> str:
+def _repository_host(host: str) -> str:
     """The lowercased host when it can name a repository for anyone, "" when it names one for us.
 
     Two rules, one reason. A host without a dot is a local alias — an `ssh_config` `Host` entry,
