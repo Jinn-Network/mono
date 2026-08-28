@@ -7491,6 +7491,19 @@
       {
         "claim": {
           "field": "profile",
+          "identifier": "https://spec.jinn.network/facts/benchmark-run/v2",
+          "servedPath": "facts/benchmark-run/v2"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/benchmarking/profiles/run.v2.json",
+        "relativeSource": "profiles/run.v2.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
           "identifier": "https://spec.jinn.network/facts/chain-environment/v1",
           "servedPath": "facts/chain-environment/v1"
         },
@@ -7790,6 +7803,19 @@
       {
         "claim": {
           "field": "profile",
+          "identifier": "https://spec.jinn.network/facts/profile-document/v2",
+          "servedPath": "facts/profile-document/v2"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-task-execution",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/task-execution/profiles/profile-document.v2.json",
+        "relativeSource": "profiles/profile-document.v2.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
           "identifier": "https://spec.jinn.network/facts/submission/v1",
           "servedPath": "facts/submission/v1"
         },
@@ -7842,6 +7868,19 @@
       {
         "claim": {
           "field": "profile",
+          "identifier": "https://spec.jinn.network/facts/authorization/v2",
+          "servedPath": "facts/authorization/v2"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-trust",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/trust/profiles/authorization.v2.json",
+        "relativeSource": "profiles/authorization.v2.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
           "identifier": "https://spec.jinn.network/facts/key-binding/v1",
           "servedPath": "facts/key-binding/v1"
         },
@@ -7851,6 +7890,19 @@
         "packedTargets": [],
         "path": "packages/discovery/facts/trust/profiles/key-binding.v1.json",
         "relativeSource": "profiles/key-binding.v1.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
+          "identifier": "https://spec.jinn.network/facts/key-binding/v2",
+          "servedPath": "facts/key-binding/v2"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-trust",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/trust/profiles/key-binding.v2.json",
+        "relativeSource": "profiles/key-binding.v2.json"
       },
       {
         "claim": {
@@ -16213,6 +16265,13 @@
       },
       {
         "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/authorization/v2",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-trust",
+        "path": "packages/discovery/facts/trust/profiles/authorization.v2.json"
+      },
+      {
+        "field": "profile",
         "identifier": "https://spec.jinn.network/facts/benchmark-accounting/v1",
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-benchmarking",
@@ -16259,6 +16318,13 @@
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-benchmarking",
         "path": "packages/discovery/facts/benchmarking/profiles/run.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/benchmark-run/v2",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "path": "packages/discovery/facts/benchmarking/profiles/run.v2.json"
       },
       {
         "field": "profile",
@@ -16409,6 +16475,13 @@
       },
       {
         "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/key-binding/v2",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-trust",
+        "path": "packages/discovery/facts/trust/profiles/key-binding.v2.json"
+      },
+      {
+        "field": "profile",
         "identifier": "https://spec.jinn.network/facts/plugin/v1",
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-task-execution",
@@ -16420,6 +16493,13 @@
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-task-execution",
         "path": "packages/discovery/facts/task-execution/profiles/profile-document.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/profile-document/v2",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-task-execution",
+        "path": "packages/discovery/facts/task-execution/profiles/profile-document.v2.json"
       },
       {
         "field": "profile",

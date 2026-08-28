@@ -856,6 +856,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v1.json | — | — | https://spec.jinn.network/facts/benchmark-report/v1 |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v2.json | — | — | https://spec.jinn.network/facts/benchmark-report/v2 |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.v1.json | — | — | https://spec.jinn.network/facts/benchmark-run/v1 |
+| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.v2.json | — | — | https://spec.jinn.network/facts/benchmark-run/v2 |
 | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.v1.json | — | — | https://spec.jinn.network/facts/chain-environment/v1 |
 | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.v2.json | — | — | https://spec.jinn.network/facts/chain-environment/v2 |
 | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/crypto-environment.v1.json | — | — | https://spec.jinn.network/facts/crypto-environment/v1 |
@@ -879,11 +880,14 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/evaluation-spec.v2.json | — | — | https://spec.jinn.network/facts/evaluation-spec/v2 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/plugin.v1.json | — | — | https://spec.jinn.network/facts/plugin/v1 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/profile-document.v1.json | — | — | https://spec.jinn.network/facts/profile-document/v1 |
+| profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/profile-document.v2.json | — | — | https://spec.jinn.network/facts/profile-document/v2 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/submission.v1.json | — | — | https://spec.jinn.network/facts/submission/v1 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/task.v1.json | — | — | https://spec.jinn.network/facts/task/v1 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/task.v2.json | — | — | https://spec.jinn.network/facts/task/v2 |
 | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/authorization.v1.json | — | — | https://spec.jinn.network/facts/authorization/v1 |
+| profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/authorization.v2.json | — | — | https://spec.jinn.network/facts/authorization/v2 |
 | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/key-binding.v1.json | — | — | https://spec.jinn.network/facts/key-binding/v1 |
+| profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/key-binding.v2.json | — | — | https://spec.jinn.network/facts/key-binding/v2 |
 | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/trust-policy.v1.json | — | — | https://spec.jinn.network/facts/trust-policy/v1 |
 | fixtures | @jinn-network/record-discovery-protocol | packages/discovery/protocol/fixtures/derivation-annotation-tolerance/annotation-with-registered-additions.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-protocol | packages/discovery/protocol/fixtures/equivalence/key-shuffled.json | — | — | — |
@@ -1683,6 +1687,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | Identifier | Field | Kind | Package | Source |
 | --- | --- | --- | --- | --- |
 | https://spec.jinn.network/facts/authorization/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/authorization.v1.json |
+| https://spec.jinn.network/facts/authorization/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/authorization.v2.json |
 | https://spec.jinn.network/facts/benchmark-accounting/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json |
 | https://spec.jinn.network/facts/benchmark-accounting/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v2.json |
 | https://spec.jinn.network/facts/benchmark-matrix/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.v1.json |
@@ -1690,6 +1695,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | https://spec.jinn.network/facts/benchmark-report/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v1.json |
 | https://spec.jinn.network/facts/benchmark-report/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v2.json |
 | https://spec.jinn.network/facts/benchmark-run/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.v1.json |
+| https://spec.jinn.network/facts/benchmark-run/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.v2.json |
 | https://spec.jinn.network/facts/benchmark/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.v1.json |
 | https://spec.jinn.network/facts/benchmark/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.v2.json |
 | https://spec.jinn.network/facts/chain-environment/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.v1.json |
@@ -1711,8 +1717,10 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | https://spec.jinn.network/facts/information-world/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/information-world.v1.json |
 | https://spec.jinn.network/facts/information-world/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/information-world.v2.json |
 | https://spec.jinn.network/facts/key-binding/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/key-binding.v1.json |
+| https://spec.jinn.network/facts/key-binding/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/key-binding.v2.json |
 | https://spec.jinn.network/facts/plugin/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/plugin.v1.json |
 | https://spec.jinn.network/facts/profile-document/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/profile-document.v1.json |
+| https://spec.jinn.network/facts/profile-document/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/profile-document.v2.json |
 | https://spec.jinn.network/facts/result-evaluation/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/result-evaluation.v1.json |
 | https://spec.jinn.network/facts/result-evaluation/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/result-evaluation.v2.json |
 | https://spec.jinn.network/facts/result-evaluation/v3 | `profile` | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/result-evaluation.v3.json |
