@@ -51,7 +51,11 @@ test("exports the sealed comparison as a deterministic evidence-native public bu
   assert.doesNotMatch(readme, /https:\/\/product\.jinn\.network/u);
   assert.doesNotMatch(readme, /urn:/u);
   assert.ok(readme.includes(first.presentation.verification.command));
-  for (const concept of ["claim", "method", "run", "evidence", "check"]) {
-    assert.match(readme, new RegExp(concept, "iu"));
-  }
+  assert.match(readme, /one model and one self-run comparison/u);
+  assert.match(readme, /The check recomputes the numbers from the per-run evidence/u);
+  assert.match(readme, /confirms every file listed in `bundle\.json` still matches its recorded digest/u);
+  assert.match(readme, /the report the claim was signed over are the ones in this bundle/u);
+  assert.doesNotMatch(readme, /every file in the bundle is the file the claim was signed over/u);
+  assert.match(readme, /the same claim, its method, and its evidence in machine-readable form/u);
+  assert.match(readme, /even where they look like web addresses/u);
 });
