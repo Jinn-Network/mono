@@ -121,8 +121,9 @@ function previousSignificant(source, from) {
  * identifier or a property named after one.
  *
  * Both sides need a boundary. Without the leading one `typeof` ends in `of`; without rejecting a
- * preceding `.` — or `?.`, or one written with spaces around it — `opts.in / 2` reads as `in`, and
- * every one of `in`, `of`, `new`, `delete`, `void`, `case` and `do` is a legal property name.
+ * preceding `.` — or `?.`, or the `#` of a private name, or one written with spaces around it —
+ * `opts.in / 2` reads as `in`, and every one of `in`, `of`, `new`, `delete`, `void`, `case` and
+ * `do` is a legal property name, private field name included (`this.#in / 2`).
  * Reading one as a keyword consumes the division as a regex, which is the fail-open this whole
  * back-scan exists to prevent.
  */
@@ -130,7 +131,7 @@ function keywordEndsAt(source, back) {
   return REGEX_PRECEDING_KEYWORDS.some((keyword) => {
     if (source.slice(back - keyword.length + 1, back + 1) !== keyword) return false;
     const before = previousSignificant(source, back - keyword.length);
-    return before < 0 || !/[\w$.]/u.test(source[before]);
+    return before < 0 || !/[\w$.#]/u.test(source[before]);
   });
 }
 
@@ -1029,7 +1030,15 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
 
   // A property named after a regex-preceding keyword is not that keyword. Every one of these is a
   // legal property name, and reading one as a keyword consumed the division and the entry's braces.
-  for (const property of ['x: opts.in / 2, ', 'x: opts.of / 2, ', 'x: opts?.new / 2, ']) {
+  // A private class field named after one is not that keyword either: `#` is a boundary the same
+  // way `.` is, and without it `this.#in / 2` opened a regex that took the entry's braces.
+  for (const property of [
+    'x: opts.in / 2, ',
+    'x: opts.of / 2, ',
+    'x: opts?.new / 2, ',
+    'x: this.#in / 2, ',
+    'x: this.#new / 2, ',
+  ]) {
     assert.equal(projectEntryRanges(withProperty(property)).length, 2, property);
   }
 
@@ -1038,6 +1047,7 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
     'x: total-- / 2, // setupFiles: isolate-tmp.ts',
     'x: opts.value! / 2, // setupFiles: isolate-tmp.ts',
     'x: opts.in / 2, // setupFiles: isolate-tmp.ts',
+    'x: this.#in / 2, // setupFiles: isolate-tmp.ts',
   ]) {
     assert.ok(!stripComments(line).includes('isolate-tmp'), line);
   }
