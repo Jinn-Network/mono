@@ -237,6 +237,20 @@ export function projectEntryRanges(source) {
 /**
  * The scope `offset` sits in: `'root'`, or the innermost `projects` entry containing it, keyed by
  * that entry's offset so two entries never compare equal.
+ *
+ * `ranges` does not arrive sorted — `projectEntryRanges` walks each `projects` literal to
+ * completion before opening the next, so a nested literal's entries land after every entry of the
+ * literal enclosing them, later siblings included. This function must therefore not assume
+ * ascending starts, and the test below pins exactly that with the one non-monotonic fixture in the
+ * repository.
+ *
+ * Given that, the maximum-start comparison is equivalent to a bare `innermost = start;` on every
+ * reachable input, and is kept for readability rather than necessity. Two ranges that contain the
+ * same offset are always nested, never partially overlapping, and a containing range is always
+ * emitted before the ranges nested inside it — the nested `projects:` key sits inside the
+ * containing entry, while the containing literal's key sits before it. So last-assignment already
+ * lands on the innermost range, and no fixture can separate the two rules. The comparison states
+ * the intent, "innermost wins", without making the reader reconstruct that argument.
  */
 function scopeAt(offset, ranges) {
   let innermost = null;
@@ -603,9 +617,11 @@ test('projectEntryRanges finds one range per object entry, ordered per projects 
     '{ x: 1 }',
   ]);
   // And `scopeAt` reads that unordered list correctly: an offset inside `{ x: 1 }` is scoped to it,
-  // not to the enclosing entry emitted first. (Innermost-by-maximum-start and a bare last-match-wins
-  // agree on every reachable input — a range that contains an offset is always emitted before the
-  // ranges nested inside it — so no fixture can separate them; the comparison is defensive.)
+  // not to the enclosing entry emitted first. This is the only non-monotonic ranges array in the
+  // repository, so this assertion is the one thing pinning that `scopeAt` must not assume its input
+  // arrives sorted — a rewrite that breaks on the first range starting past the offset reds here and
+  // nowhere else. (It does not pin the maximum-start comparison itself, which is equivalent to a
+  // bare last-match-wins on every reachable input; see the doc comment above `scopeAt`.)
   const unorderedRanges = projectEntryRanges(unordered);
   const [outerRange, , innerRange] = unorderedRanges;
   assert.ok(outerRange[0] < innerRange[0], 'the enclosing entry starts before the nested one');
