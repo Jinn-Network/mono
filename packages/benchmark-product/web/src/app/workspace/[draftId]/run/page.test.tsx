@@ -39,7 +39,7 @@ function status(state: "running" | "closed" | "reported" | "published-bundle", c
         state,
         cancelRequested,
         cells: [],
-        counts: { expected: 6, dispatched: 6, delivered: 0, judged: 0, failed: 6 },
+        counts: { expected: 6, dispatched: 6, delivered: 0, judged: 0, failed: 6, awaitingEvaluation: 0 },
       },
     },
     publication: { ok: true as const, result: {
@@ -177,7 +177,7 @@ describe("durable run monitor cancellation language", () => {
         error: { code: "execution", detail: sentinel },
       },
       cells: [],
-      counts: { expected: 0, dispatched: 0, delivered: 0, judged: 0, failed: 0 },
+      counts: { expected: 0, dispatched: 0, delivered: 0, judged: 0, failed: 0, awaitingEvaluation: 0 },
     });
     loadRunViewMock.mockReturnValue({
       ok: true,
@@ -191,5 +191,32 @@ describe("durable run monitor cancellation language", () => {
     expect(markup).toContain("server logs");
     expect(markup).not.toContain(sentinel);
     expect(markup).not.toContain("VERY_SECRET");
+  });
+
+  test("marks a cell stranded between its delivered event and its delivery record (#3084)", async () => {
+    loadRunViewMock.mockReturnValue({
+      ok: true,
+      draft: { ok: true, result: {} },
+      status: { ok: true, result: {
+        state: "running",
+        cancelRequested: false,
+        cells: [
+          {
+            cellKey: "cell-stranded", armId: "baseline", replicate: 1, taskSha256: "a".repeat(64),
+            status: "delivered", dispatches: 1,
+            evaluationGap: { missingEvalIndexes: [1], deliveryJournaled: false },
+          },
+          {
+            cellKey: "cell-judged", armId: "baseline", replicate: 2, taskSha256: "b".repeat(64),
+            status: "judged", dispatches: 1,
+          },
+        ],
+        counts: { expected: 2, dispatched: 2, delivered: 1, judged: 1, failed: 0, awaitingEvaluation: 1 },
+      } },
+    });
+    const markup = renderToStaticMarkup(await RunMonitorPage({
+      params: Promise.resolve({ draftId: "draft-1" }),
+    }));
+    expect(markup).toContain("awaiting evaluation (delivery not journaled)");
   });
 });
