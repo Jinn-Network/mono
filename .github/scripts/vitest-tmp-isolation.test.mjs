@@ -510,10 +510,6 @@ test('fsAllowPaths reads every fs.allow list, and only those', () => {
   );
   // An unterminated list yields nothing rather than a truncated guess.
   assert.deepEqual(at(`fs: { allow: ['..'`), []);
-  // A quote the block scan cannot pair off — a regex literal in live code, which is not tokenized —
-  // is bounded at the newline, the same rule `stripComments` uses. Unbounded it runs past the
-  // block's own `}` and the allowance comes back missing.
-  assert.deepEqual(at(`fs: {\n  a: /['"]/u,\n  allow: ['../..'],\n}`), ['']);
 
   // Each allowance is tagged with the block it was declared in: root, or one `projects` entry.
   const scoped = fsAllowPaths(
@@ -527,6 +523,27 @@ test('fsAllowPaths reads every fs.allow list, and only those', () => {
   assert.equal(scoped[0].scope, 'root');
   assert.notEqual(scoped[1].scope, 'root');
   assert.notEqual(scoped[1].scope, scoped[2].scope);
+});
+
+// The newline bound in `balancedEnd`'s quote walk, under its own name. `projectEntryRanges` calls
+// `balancedEnd` too, so the test below it is a second witness — but that one is named for the
+// consequence at ITS site, a collapsed `projects` scope, and the consequence here is a different
+// one: the enclosing literal comes back truncated, or missing entirely when the unbounded span runs
+// past its close. A regex literal carrying an unpaired `'` is valid JavaScript, so the config
+// parses and its own package job stays green while the literal quietly goes unread.
+test('an unpaired quote in a regex literal does not truncate the literal around it', () => {
+  // At the reader: the `}` that ends the fs block sits after the unpaired quote, so unbounded the
+  // scan never balances it and `enclosedLiterals` yields nothing rather than the block.
+  const block = `fs: {\n  a: /['"]/u,\n  allow: ['../..'],\n}`;
+  assert.deepEqual(
+    enclosedLiterals(block, 'fs', '{', '}').map((literal) => literal.inner.trim()),
+    [`a: /['"]/u,\n  allow: ['../..'],`],
+  );
+  // And at the gate: the allowance inside that block is what goes missing.
+  assert.deepEqual(
+    fsAllowPaths(block, 'packages/x/vitest.config.ts').map((entry) => entry.resolved),
+    [''],
+  );
 });
 
 test('wiredPaths reads every setupFiles and globalSetup list', () => {
