@@ -11,16 +11,7 @@ const pinPath = join(root, ".github/autopilot-pin.json");
 const painterPath = join(root, ".github/workflows/autopilot-board-painter.yml");
 
 const SKILL_PATHS = [
-  ".claude/skills/implement-issue/SKILL.md",
-  ".claude/skills/review-pr/SKILL.md",
-  ".claude/skills/fix-child/SKILL.md",
-  ".claude/skills/reconcile/SKILL.md",
-  ".claude/skills/eng-day/SKILL.md",
   ".claude/skills/merge-batch/SKILL.md",
-  ".claude/skills/autopilot-runtime/SKILL.md",
-  ".claude/skills/autopilot-runtime/references/claude.md",
-  ".claude/skills/autopilot-runtime/references/cursor.md",
-  ".claude/skills/autopilot-runtime/references/hermes.md",
   ".claude/skills/merge-batch/references/merge-mechanics.md",
 ];
 

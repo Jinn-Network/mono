@@ -87,7 +87,7 @@ Routing is governed by three Project (v2) single-select fields set at Friday tri
 
 ### Daily entry point
 
-`eng-day` skill (in `.claude/skills/eng-day/`) is the canonical daily brief; it reads the Issue Type and the Blocked on / Effort / Priority Project fields. Fallback: `gh issue list --search 'is:open no:assignee'` + `gh pr list --search 'is:open draft:false'` (the fallback does not see the Project-layer routing fields).
+`gh issue list --search 'is:open no:assignee'` + `gh pr list --search 'is:open draft:false'` is the daily entry point. Note this does not see the Project-layer routing fields (Issue Type, Blocked on / Effort / Priority); read those from the Project board directly when they matter.
 
 ## Repository Structure
 
@@ -583,7 +583,7 @@ Read first:
 - [`GROWTH.md`](GROWTH.md) — product-led distribution; positioning derives from the GTM plan and `BRAND.md`.
 - [`docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md`](docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md) — current product and go-to-market framing.
 
-Operate the workflow through the `create-press-release` skill (`.claude/skills/create-press-release/SKILL.md`) when the artifact is release-shaped; the skill composes `distil-writing` and enforces these rules.
+When the artifact is release-shaped, compose it with `distil-writing` and enforce the rules above by hand.
 
 ### Framing and structure
 
