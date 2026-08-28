@@ -329,6 +329,44 @@ export const BENCHMARKING_FACTS_RECOMPUTE: FactsRecompute = {
   },
 };
 
+/**
+ * v1's card plus every record and artifact the cells' dispatches name. An accounting record is a
+ * closure claim over dispatches -- the same join-table shape as a Matrix -- so leaving those
+ * references off the card left the closure unwalkable from the feed.
+ *
+ * Cross-tree targets again: emitted from the record's own statement, deduplicated in record order.
+ * A native artifact whose availability is not `public` carries no descriptor and contributes no
+ * edge; its absence is the record's own statement, not a gap in the card.
+ */
+export const benchmarkAccountingRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await benchmarkAccountingRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const record = parseBenchmarkAccounting(bytes);
+    const dispatches = record.cells.flatMap((cell) => cell.dispatches);
+    return {
+      ...facts,
+      submissionDigests: distinct(dispatches.map((d) => asPrefixedDigest(d.submission.record.digest.sha256))),
+      deliveryDigests: distinct(dispatches.map((d) => asPrefixedDigest(d.delivery?.record.digest.sha256))),
+      evidenceDigests: distinct(
+        dispatches.flatMap((d) => d.evidence.map((reference) => asPrefixedDigest(reference.record.digest.sha256))),
+      ),
+      evaluationDigests: distinct(
+        dispatches.flatMap((d) => d.evaluations.map((reference) => asPrefixedDigest(reference.record.digest.sha256))),
+      ),
+      observationArchiveDigests: distinct(dispatches.map((d) => asPrefixedDigest(d.observations?.digest.sha256))),
+      correlationArtifactDigests: distinct(
+        dispatches.flatMap((d) => d.correlations.map((correlation) => asPrefixedDigest(correlation.artifact.digest.sha256))),
+      ),
+      nativeArtifactDigests: distinct(
+        dispatches.flatMap((d) => d.nativeArtifacts.map((native) => asPrefixedDigest(native.artifact?.digest.sha256))),
+      ),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
 /** Explicit registry for the coexisting Benchmarking facts v2 profiles. */
 export const BENCHMARKING_FACTS_RECOMPUTE_V2: FactsRecompute = {
   get(kind: string): RecordFactRecompute | undefined {
@@ -337,6 +375,8 @@ export const BENCHMARKING_FACTS_RECOMPUTE_V2: FactsRecompute = {
         return benchmarkRecomputeV2;
       case MATRIX_RECORD_KIND:
         return matrixRecomputeV2;
+      case BENCHMARK_ACCOUNTING_RECORD_KIND:
+        return benchmarkAccountingRecomputeV2;
       default:
         return BENCHMARKING_FACTS_RECOMPUTE.get(kind);
     }

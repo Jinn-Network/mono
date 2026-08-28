@@ -848,6 +848,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/ordering/transcripts.json | — | — | — |
 | conformance | @jinn-network/benchmarking-testing | packages/benchmarking/testing/src/index.ts | . | ./dist/index.d.ts<br>./dist/index.js | — |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json | — | — | https://spec.jinn.network/facts/benchmark-accounting/v1 |
+| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v2.json | — | — | https://spec.jinn.network/facts/benchmark-accounting/v2 |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.v1.json | — | — | https://spec.jinn.network/facts/benchmark/v1 |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.v2.json | — | — | https://spec.jinn.network/facts/benchmark/v2 |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.v1.json | — | — | https://spec.jinn.network/facts/benchmark-matrix/v1 |
@@ -1682,6 +1683,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | --- | --- | --- | --- | --- |
 | https://spec.jinn.network/facts/authorization/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/authorization.v1.json |
 | https://spec.jinn.network/facts/benchmark-accounting/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json |
+| https://spec.jinn.network/facts/benchmark-accounting/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v2.json |
 | https://spec.jinn.network/facts/benchmark-matrix/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.v1.json |
 | https://spec.jinn.network/facts/benchmark-matrix/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.v2.json |
 | https://spec.jinn.network/facts/benchmark-report/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v1.json |

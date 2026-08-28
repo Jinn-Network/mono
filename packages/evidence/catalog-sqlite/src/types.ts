@@ -38,7 +38,10 @@ export interface AnnouncementEdgeIndexReceipt {
   readonly indexed: number;
 }
 
-/** At least one filter is required: the index is not a table scan. */
+/**
+ * At least one filter is required: the index is not a table scan. Results are ordered by record
+ * kind, record digest, field then ordinal, and bounded by `ANNOUNCEMENT_EDGE_QUERY_LIMIT`.
+ */
 export interface AnnouncementEdgeQuery {
   readonly recordKind?: string;
   readonly recordDigest?: Sha256Digest;
@@ -59,9 +62,11 @@ export interface SqliteEvidenceCatalog
     options?: CatalogOperationOptions,
   ): Promise<SqliteCatalogIntegrityReport>;
   /**
-   * Card-driven, SQLite-only surface (like `integrityCheck`): the shared catalog contracts and
-   * the in-memory catalog index fetched records, and neither knows about announcement cards.
-   * Re-indexing one record replaces its edges, so replaying a feed is idempotent.
+   * Card-driven, SQLite-only surface. The shared catalog contracts and the in-memory catalog
+   * index fetched records and know nothing about announcement cards; this is the first backend
+   * to serve join from a feed, and a neutral contract for it belongs in a follow-up once a
+   * second backend needs one. Re-indexing a record digest replaces all of its edges, so
+   * replaying a feed is idempotent.
    */
   indexAnnouncementEdges(
     input: AnnouncementEdgeIndexInput,

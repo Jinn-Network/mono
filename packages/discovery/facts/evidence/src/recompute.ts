@@ -216,7 +216,7 @@ export const EVIDENCE_FACTS_RECOMPUTE_V3: FactsRecompute = {
       case RECORD_KINDS.executionVerification:
         return executionVerificationRecomputeV2;
       default:
-        return undefined;
+        return EVIDENCE_FACTS_RECOMPUTE_V2.get(kind);
     }
   },
 };

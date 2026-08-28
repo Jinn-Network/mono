@@ -7387,6 +7387,19 @@
       {
         "claim": {
           "field": "profile",
+          "identifier": "https://spec.jinn.network/facts/benchmark-accounting/v2",
+          "servedPath": "facts/benchmark-accounting/v2"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v2.json",
+        "relativeSource": "profiles/benchmark-accounting.v2.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
           "identifier": "https://spec.jinn.network/facts/benchmark/v1",
           "servedPath": "facts/benchmark/v1"
         },
@@ -16191,6 +16204,13 @@
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-benchmarking",
         "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/benchmark-accounting/v2",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v2.json"
       },
       {
         "field": "profile",

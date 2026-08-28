@@ -49,10 +49,12 @@ describe("environment facts profile v2 (join-edge completeness, design §12 amen
     expect(environmentFactsProfileV2.profile).toBe("https://spec.jinn.network/facts/environment/v2");
   });
 
-  it("adds parser.digest to v1's field set and changes nothing else", () => {
+  it("adds the record's remaining digest-pinned components to v1's field set", () => {
     expect(environmentFactsProfileV2.fields.map((field) => field.name).sort()).toEqual([
+      "build.recipeDigest",
       "build.reproducibilityTier",
       "environmentRecordDigest",
+      "image.indexDigest",
       "image.manifestDigest",
       "image.platform",
       "parser.digest",
@@ -61,10 +63,12 @@ describe("environment facts profile v2 (join-edge completeness, design §12 amen
     ]);
   });
 
-  it("declares the complete outbound-reference set: the image and the parser artifact", () => {
+  it("declares every component the record pins by digest: image, index, parser, recipe", () => {
     expect(referenceBearingFields(environmentFactsProfileV2)).toEqual([
       "image.manifestDigest",
+      "image.indexDigest",
       "parser.digest",
+      "build.recipeDigest",
     ]);
   });
 

@@ -7,7 +7,11 @@ import { join } from "node:path";
 import { EvidenceCatalogError, type Sha256Digest } from "@jinn-network/evidence-discovery";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
-import { announcementEdgesFromCard, createSqliteEvidenceCatalog } from "./index.js";
+import {
+  ANNOUNCEMENT_EDGE_QUERY_LIMIT,
+  announcementEdgesFromCard,
+  createSqliteEvidenceCatalog,
+} from "./index.js";
 import type { SqliteEvidenceCatalog } from "./types.js";
 
 const generation = {
@@ -95,6 +99,17 @@ describe("announcementEdgesFromCard", () => {
       { recordKind: EXECUTION_KIND, recordDigest: EXECUTION_ONE, field: "resultDigests", ordinal: 0, targetDigest: RESULT_A },
       { recordKind: EXECUTION_KIND, recordDigest: EXECUTION_ONE, field: "resultDigests", ordinal: 1, targetDigest: RESULT_B },
     ]);
+  });
+
+  test("treats an absent optional component as no edge, however the card spells absence", () => {
+    // A recompute states an absent optional component as an own property with no value.
+    const edges = announcementEdgesFromCard({
+      recordKind: EXECUTION_KIND,
+      recordDigest: EXECUTION_ONE,
+      referenceFields: [...EXECUTION_EDGE_FIELDS],
+      facts: { taskDigest: TASK, runtimeDigest: undefined, nativeTraceDigest: null },
+    });
+    expect(edges.map((edge) => edge.field)).toEqual(["taskDigest"]);
   });
 
   test("rejects a reference-bearing field holding something that is not a digest", () => {
@@ -200,5 +215,39 @@ describe("the SQLite announcement-edge index", () => {
       facts: { "source.repo": "example-org/other" },
     });
     expect(receipt.indexed).toBe(0);
+  });
+});
+
+describe("the edge index's bounds", () => {
+  test("re-indexing a digest replaces its edges even when the card claims a different kind", async () => {
+    const digestUnderTwoKinds = digest("7");
+    await catalog.indexAnnouncementEdges({
+      recordKind: EXECUTION_KIND,
+      recordDigest: digestUnderTwoKinds,
+      referenceFields: [...EXECUTION_EDGE_FIELDS],
+      facts: { taskDigest: TASK, resultDigests: [RESULT_A] },
+    });
+    await catalog.indexAnnouncementEdges({
+      recordKind: EVALUATION_KIND,
+      recordDigest: digestUnderTwoKinds,
+      referenceFields: [...EVALUATION_EDGE_FIELDS],
+      facts: { taskDigest: TASK },
+    });
+    const edges = await catalog.queryAnnouncementEdges({ recordDigest: digestUnderTwoKinds });
+    expect(edges.map((edge) => [edge.recordKind, edge.field])).toEqual([[EVALUATION_KIND, "taskDigest"]]);
+  });
+
+  test("bounds a read on a heavily referenced target", async () => {
+    const popular = digest("9");
+    for (let index = 0; index < ANNOUNCEMENT_EDGE_QUERY_LIMIT + 5; index += 1) {
+      await catalog.indexAnnouncementEdges({
+        recordKind: EXECUTION_KIND,
+        recordDigest: digest(index.toString(16).padStart(2, "0").repeat(2)),
+        referenceFields: ["taskDigest"],
+        facts: { taskDigest: popular },
+      });
+    }
+    const referrers = await catalog.queryAnnouncementEdges({ targetDigest: popular });
+    expect(referrers).toHaveLength(ANNOUNCEMENT_EDGE_QUERY_LIMIT);
   });
 });

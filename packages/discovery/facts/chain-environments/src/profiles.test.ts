@@ -111,17 +111,28 @@ describe("v2 profiles (join-edge completeness, design §12 amendment)", () => {
     expect(informationWorldFactsProfileV2.profile).toBe("https://spec.jinn.network/facts/information-world/v2");
   });
 
-  it("declares the chain environment's complete outbound-reference set", () => {
+  it("declares every component a chain world pins by digest", () => {
     expect(referenceBearingFields(chainEnvironmentFactsProfileV2).sort()).toEqual([
+      "capabilityEnvelope.toolInterfaceSchemaDigests",
+      "fixtureModuleDigests",
       "runtime.image.manifestDigest",
+      "sourceAnchor.headerProofDigest",
+      "stateMaterialization.fixtureCoverageManifestDigest",
+      "stateMaterialization.materializerDigest",
+      "stateMaterialization.sourceProofsDigest",
       "stateMaterialization.stateArtifactDigest",
       "supersedesDigest",
+      "verificationContract.baselineObservationDigest",
+      "verificationContract.comparatorDigest",
+      "verificationContract.observationSchemaDigest",
+      "verificationContract.probeSuiteDigest",
     ]);
   });
 
-  it("declares the composite's complete outbound-reference set", () => {
+  it("declares every component the composite pins by digest", () => {
     expect(referenceBearingFields(cryptoEnvironmentFactsProfileV2).sort()).toEqual([
       "chainWorld.digest",
+      "composition.missPolicy.bodyDigest",
       "informationWorldDigests",
       "serviceRuntimeImageDigests",
       "supersedesDigest",

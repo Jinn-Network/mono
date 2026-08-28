@@ -148,11 +148,42 @@ describe("v2 recompute: the join edges v1 left out", () => {
     expect(facts.supersedesDigest).toBe(prefixedDigest(LINEAGE));
   });
 
-  it("omits the lineage edge on a record that supersedes nothing, and matches v1 otherwise", async () => {
+  it("keeps every v1 fact and omits the lineage edge on a record that supersedes nothing", async () => {
     const bytes = sealChainEnvironmentRecord(await goldenJson("chain/closed-local.json"));
     const v1 = await chainEnvironmentRecompute(bytes, noReferences);
     const v2 = await chainEnvironmentRecomputeV2(bytes, noReferences);
-    expect(v2).toEqual(v1);
+    expect(v2).toMatchObject(v1);
+    expect(Object.hasOwn(v2, "supersedesDigest")).toBe(false);
+  });
+
+  it("names every component a chain world pins: probe suite, comparator, materializer, modules", async () => {
+    const document = await goldenJson("chain/closed-local.json");
+    const bytes = sealChainEnvironmentRecord(document);
+    const facts = await chainEnvironmentRecomputeV2(bytes, noReferences);
+    const contract = document.verificationContract as {
+      probeSuite: { descriptor: { digest: { sha256: string } } };
+      observationSchema: { digest: { sha256: string } };
+      baselineObservationDigest: string;
+      comparator: { digest: string };
+    };
+    const state = document.stateMaterialization as { materializer: { digest: string } };
+    const fixtures = document.fixtures as { modules: { module: { digest: { sha256: string } } }[] };
+    const envelope = document.capabilityEnvelope as { toolInterfaces: { schema: { digest: { sha256: string } } }[] };
+    expect(facts["verificationContract.probeSuiteDigest"]).toBe(
+      prefixedDigest(contract.probeSuite.descriptor.digest.sha256),
+    );
+    expect(facts["verificationContract.observationSchemaDigest"]).toBe(
+      prefixedDigest(contract.observationSchema.digest.sha256),
+    );
+    expect(facts["verificationContract.baselineObservationDigest"]).toBe(contract.baselineObservationDigest);
+    expect(facts["verificationContract.comparatorDigest"]).toBe(contract.comparator.digest);
+    expect(facts["stateMaterialization.materializerDigest"]).toBe(state.materializer.digest);
+    expect(facts.fixtureModuleDigests).toEqual(
+      fixtures.modules.map((module) => prefixedDigest(module.module.digest.sha256)),
+    );
+    expect(facts["capabilityEnvelope.toolInterfaceSchemaDigests"]).toEqual(
+      envelope.toolInterfaces.map((tool) => prefixedDigest(tool.schema.digest.sha256)),
+    );
   });
 
   it("names the composed information worlds instead of only counting them", async () => {

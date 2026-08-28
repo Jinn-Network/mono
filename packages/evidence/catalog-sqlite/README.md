@@ -56,7 +56,29 @@ busy timeout, private POSIX permissions, and no-symlink path checks. It includes
 the native `better-sqlite3` addon and therefore requires a supported Node 22+
 runtime and native-addon installation environment.
 
-This package stores projections and location observations only. Repository
-bytes, announcement transport, full-text search, corpus management, ranking,
-trust policy, retention, deletion, and migration orchestration are outside its
-boundary.
+This package stores projections, location observations, and the announcement
+edge index. Repository bytes, announcement transport, full-text search, corpus
+management, ranking, trust policy, retention, deletion, and migration
+orchestration are outside its boundary.
+
+## The announcement edge index
+
+`indexAnnouncementEdges` takes an announcement facts card plus the field names
+its facts profile declares reference-bearing, and stores the outbound references
+it declares — record kind, record digest, field, ordinal, target digest.
+`queryAnnouncementEdges` reads them in either direction: a record's own edges, or
+the records pointing at a target (the `referrers` inversion of record-discovery
+design §8). Every read requires at least one filter and returns at most
+`ANNOUNCEMENT_EDGE_QUERY_LIMIT` rows.
+
+This is the one surface fed from a feed rather than from a fetched record. It is
+what lets an index answer join — "this environment, its attempts, their
+verdicts" — without fetching anything, which for a record behind a payment gate
+is the only way to answer it at all. Cards are holder-authored: an edge is a
+hint, and a decision resting on one re-checks it against the fetched record.
+
+The SQLite schema version moves with any table change and there is no migration
+path: `openSqliteEvidenceCatalog` refuses a database written under an older
+version. A catalog is a derived index, so the answer is to build a new
+generation and reproject, which `@jinn-network/evidence-local-runtime` already
+does.

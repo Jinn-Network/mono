@@ -114,45 +114,70 @@ function descriptorDigest(
   return bare === undefined ? undefined : prefixedDigest(bare);
 }
 
+/** Drops the fields whose component this record does not carry, so nothing is announced empty. */
+function present(
+  fields: Record<string, RecordFactValue | undefined>,
+): Record<string, RecordFactValue> {
+  return Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => value !== undefined),
+  ) as Record<string, RecordFactValue>;
+}
+
 // --- v2 revisions (join-edge completeness, protocol design §12 amendment 2026-08-28) --------
 //
-// Every added field is an outbound reference the record pins in its own bytes, so all three
+// Every added field is a component the record pins by digest in its own bytes, so all three
 // recompute directly, with the same posture v1 documents: reference-bearing labels the indexing
 // relation and does not by itself imply the target is a retrievable announceable record.
+//
+// The non-null assertions below are sound by schema: `DigestPinnedDescriptorSchema` refines every
+// one of these descriptors to carry `digest.sha256`, so `parseChainEnvironmentRecord` has already
+// rejected a record where one is missing. Writing a runtime branch for it would be unreachable.
 
-/** v1's card plus the promotion-lineage edge. */
+/** v1's card plus every remaining component a chain world pins, and its lineage pointer. */
 export const chainEnvironmentRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
   const facts = await chainEnvironmentRecompute(bytes, refs);
   if (Object.keys(facts).length === 0) return {};
   try {
     const record = parseChainEnvironmentRecord(bytes);
-    const supersedes = descriptorDigest(record.supersedes);
-    return supersedes === undefined ? facts : { ...facts, supersedesDigest: supersedes };
+    const state = record.stateMaterialization;
+    const contract = record.verificationContract;
+    return {
+      ...facts,
+      ...present({
+        "sourceAnchor.headerProofDigest": descriptorDigest(record.sourceAnchor?.headerProof),
+        "stateMaterialization.materializerDigest": state.materializer.digest,
+        "stateMaterialization.sourceProofsDigest": descriptorDigest(state.sourceProofManifest?.proofs),
+        "stateMaterialization.fixtureCoverageManifestDigest": descriptorDigest(state.fixtureCoverage?.manifest),
+        supersedesDigest: descriptorDigest(record.supersedes),
+      }),
+      fixtureModuleDigests: record.fixtures.modules.map((module) => descriptorDigest(module.module)!),
+      "capabilityEnvelope.toolInterfaceSchemaDigests": record.capabilityEnvelope.toolInterfaces.map(
+        (tool) => descriptorDigest(tool.schema)!,
+      ),
+      "verificationContract.probeSuiteDigest": descriptorDigest(contract.probeSuite.descriptor)!,
+      "verificationContract.observationSchemaDigest": descriptorDigest(contract.observationSchema)!,
+      "verificationContract.baselineObservationDigest": contract.baselineObservationDigest,
+      "verificationContract.comparatorDigest": contract.comparator.digest,
+    };
   } catch {
     return {};
   }
 };
 
-/** v1's card plus the information worlds, the service-runtime images, and the lineage edge. */
+/** v1's card plus the information worlds, the pinned images and miss body, and the lineage edge. */
 export const cryptoEnvironmentRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
   const facts = await cryptoEnvironmentRecompute(bytes, refs);
   if (Object.keys(facts).length === 0) return {};
   try {
     const record = parseCryptoEnvironmentRecord(bytes);
-    const worldDigests: string[] = [];
-    for (const world of record.informationWorlds) {
-      const digest = descriptorDigest(world.record);
-      // Every component reference is digest-pinned by the schema; a missing one is a record this
-      // recompute cannot describe, so the whole edge list is withheld rather than half-stated.
-      if (digest === undefined) return facts;
-      worldDigests.push(digest);
-    }
-    const supersedes = descriptorDigest(record.supersedes);
     return {
       ...facts,
-      informationWorldDigests: worldDigests,
+      informationWorldDigests: record.informationWorlds.map((world) => descriptorDigest(world.record)!),
       serviceRuntimeImageDigests: record.serviceRuntimes.map((runtime) => runtime.image.manifestDigest),
-      ...(supersedes === undefined ? {} : { supersedesDigest: supersedes }),
+      ...present({
+        "composition.missPolicy.bodyDigest": descriptorDigest(record.composition.missPolicy.body),
+        supersedesDigest: descriptorDigest(record.supersedes),
+      }),
     };
   } catch {
     return {};
@@ -174,10 +199,10 @@ export const informationWorldRecomputeV2: RecordFactRecompute = async (bytes, re
     const record = parseInformationWorldRecord(bytes);
     return {
       ...facts,
-      ...(record.supersedes === undefined ? {} : { supersedesDigest: record.supersedes.digest }),
-      ...(record.capture.capturer === undefined
-        ? {}
-        : { "capture.capturerDigest": record.capture.capturer.digest }),
+      ...present({
+        supersedesDigest: record.supersedes?.digest,
+        "capture.capturerDigest": record.capture.capturer?.digest,
+      }),
     };
   } catch {
     return {};
@@ -205,6 +230,6 @@ export const CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE_V2: FactsRecompute = {
     if (kind === CHAIN_ENVIRONMENT_KIND) return chainEnvironmentRecomputeV2;
     if (kind === CRYPTO_ENVIRONMENT_KIND) return cryptoEnvironmentRecomputeV2;
     if (kind === INFORMATION_WORLD_KIND) return informationWorldRecomputeV2;
-    return undefined;
+    return CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get(kind);
   },
 };

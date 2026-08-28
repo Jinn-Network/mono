@@ -35,3 +35,12 @@ export const benchmarkProfileV2: FactsProfileDocument = loadProfile("benchmark.v
  * attempts, their verdicts" is unanswerable from the card.
  */
 export const matrixProfileV2: FactsProfileDocument = loadProfile("matrix.v2.json");
+
+/**
+ * Adds the dispatch-level references an accounting record already carries in substance: the
+ * Submissions, Deliveries, evidence and evaluation records, observation archives, correlation
+ * artifacts and native artifacts each cell's dispatches name. v1 stated the run and the
+ * publisher's authorization and stopped there.
+ */
+export const benchmarkAccountingProfileV2: FactsProfileDocument =
+  loadProfile("benchmark-accounting.v2.json");

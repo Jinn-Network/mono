@@ -843,19 +843,38 @@ sealed bytes that pins another sealed record or content-addressed artifact by di
 reason is the join verb: an index serves discover, join, judge and fetch from announcement
 cards alone, never by fetching records, and for access-classified records fetching-to-join is
 not possible at all. A profile that omits an edge makes that join unanswerable from the feed.
-An identity or labeling descriptor that pins nothing by digest is not an outbound reference
-and is not covered by this rule. Neither is a record's own enumerated content — the entries of
-a captured corpus, the outputs listed inside a report body — which the record digest already
-covers and which is unbounded in number; putting it on a card would defeat the card's
-filter-before-fetch purpose. What the rule reaches is the record's *dependencies and lineage*:
-the other records it composes, the artifacts it pins, and its supersession pointer. Adding an edge to a published profile is a **profile
-revision** under §15 — a new profile URI version, the previous version retained and still
-registered — never an in-place edit.
 
-The §5.4 caveat is unchanged and is the reason this rule is safe: a card is a holder-authored
-summary. Edges are for assembling a graph cheaply and for `referrers` inversion; anything
-load-bearing is re-checked against the fetched record through `facts-consistency`, which
-covers edge fields exactly as it covers every other record fact.
+Three things the rule does not reach. A descriptor that pins nothing by digest — satisfiable
+by `uri` or inline `content` under §6.4 — names a location, not a reference. A digest of the
+record's *own* bytes or payload, such as a signed report's payload digest, is identity rather
+than an edge; it points nowhere. And a record's own enumerated content — the entries of a
+captured corpus — is covered by the record digest already and is unbounded in number, so
+carrying it would defeat the card's filtering purpose. What the rule reaches is the record's
+*dependencies and lineage*: the other records it composes, the artifacts it pins, and its
+supersession pointer. Adding an edge to a published profile is a **profile revision** — a new
+profile URI version, with the previous version retained and still registered so consumers
+pinned to it keep working (§15's versioning discipline; the retention convention is this
+amendment's) — never an in-place edit.
+
+One limit, stated rather than hidden. Some record kinds carry structurally *open* maps — TEP's
+`requirements` and `preferences`, a run's `pinning` — whose keys are namespaced extensions the
+defining schema does not enumerate. A digest placed under such a key is an outbound reference
+no profile can name, because a profile declares fields and there is no field to declare. Those
+references are outside the completeness rule until the kind closes the shape or names the key.
+
+**What enforces this.** Not `facts-consistency`. That check compares announced fields against
+the record and skips any field the card does not announce, so it catches a *misstated* edge and
+never a *missing* one — a holder who suppresses a dispute edge publishes a card that verifies
+`consistent`. Completeness is a rule on the profile document, checked where profiles are
+authored: each `discovery/facts/*` leaf's tests pin its `referenceBearingFields` to the kind's
+whole outbound set, and that pin is what a reviewer reads. Requiring a card to carry every
+declared edge would be a stronger and different rule; it would make an absent optional
+component indistinguishable from a suppressed one at the card layer, and it is not adopted here.
+
+The §5.4 caveat is unchanged and bounds what an edge is worth: a card is a holder-authored
+summary. Edges are for assembling a graph cheaply and for `referrers` inversion; a decision
+resting on one re-checks it against the fetched record, where `facts-consistency` will catch a
+card that misstates it.
 
 Unknown kinds are not errors: a consumer skips announcements for kinds it has no profile
 for. This is what lets new record kinds deploy without touching the protocol.

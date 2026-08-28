@@ -8,7 +8,9 @@
     { "name": "source.commit", "class": "record", "cloudEvents": { "attribute": "commit", "scalar": "string" } },
     { "name": "image.manifestDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "image", "scalar": "string" } },
     { "name": "image.platform", "class": "record", "cloudEvents": { "attribute": "platform", "scalar": "string" } },
+    { "name": "image.indexDigest", "class": "record", "referenceBearing": true },
     { "name": "parser.digest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "parser", "scalar": "string" } },
+    { "name": "build.recipeDigest", "class": "record", "referenceBearing": true },
     { "name": "build.reproducibilityTier", "class": "record", "cloudEvents": { "attribute": "tier", "scalar": "number" } }
   ]
 }

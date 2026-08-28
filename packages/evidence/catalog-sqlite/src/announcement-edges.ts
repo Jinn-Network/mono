@@ -18,6 +18,9 @@ type ActiveGuard = (options?: CatalogOperationOptions) => void;
 
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u;
 
+/** Every read is filtered and bounded; a `targetDigest` on a popular record is not a scan. */
+export const ANNOUNCEMENT_EDGE_QUERY_LIMIT = 100;
+
 interface EdgeRow {
   readonly record_kind: string;
   readonly record_digest: string;
@@ -38,10 +41,14 @@ function digestOrThrow(value: unknown, where: string): Sha256Digest {
 }
 
 /**
- * Reads the declared outbound references out of one card. A field the card does not announce
- * contributes nothing -- the holder said nothing, and §15's unannounced-field skip is symmetric.
- * A field it does announce must be a digest or an array of digests: a reference-bearing field
- * holding anything else is a malformed card, and saying so is more useful than indexing it.
+ * Reads the declared outbound references out of one card.
+ *
+ * A field the card leaves out contributes nothing, and so does one whose value is `null` or
+ * `undefined`: a recompute states an absent optional component as an own property with no value,
+ * and that is the holder saying the record has no such component, not saying nothing. Anything
+ * else under a reference-bearing name must be a digest, or an array of them in record order; a
+ * card that puts something else there is malformed, and refusing it is more useful than indexing
+ * it.
  */
 export function announcementEdgesFromCard(
   input: AnnouncementEdgeIndexInput,
@@ -52,6 +59,7 @@ export function announcementEdgesFromCard(
   for (const field of input.referenceFields) {
     if (!Object.prototype.hasOwnProperty.call(input.facts, field)) continue;
     const announced = input.facts[field];
+    if (announced === undefined || announced === null) continue;
     const values = Array.isArray(announced) ? announced : [announced];
     values.forEach((value, ordinal) => {
       edges.push({
@@ -69,14 +77,18 @@ export function announcementEdgesFromCard(
 export class SqliteAnnouncementEdgeIndex {
   readonly #deleteEdges;
   readonly #insertEdge;
+  readonly #selectEdges = new Map<string, Database.Statement>();
   readonly #replace;
 
   constructor(
     private readonly database: Database.Database,
     private readonly active: ActiveGuard,
   ) {
+    // Keyed on the digest alone, not on (kind, digest): the kind comes from the announcement and
+    // is holder-authored, so deleting per kind would let two cards claiming different kinds for
+    // one record accumulate two edge sets. One record's edges are one record's edges.
     this.#deleteEdges = database.prepare(`
-      DELETE FROM announcement_edges WHERE record_kind = ? AND record_digest = ?
+      DELETE FROM announcement_edges WHERE record_digest = ?
     `);
     this.#insertEdge = database.prepare(`
       INSERT INTO announcement_edges (
@@ -89,7 +101,7 @@ export class SqliteAnnouncementEdgeIndex {
         recordDigest: Sha256Digest,
         edges: readonly AnnouncementEdge[],
       ): AnnouncementEdgeIndexReceipt => {
-        this.#deleteEdges.run(recordKind, recordDigest);
+        this.#deleteEdges.run(recordDigest);
         for (const edge of edges) {
           this.#insertEdge.run(
             edge.recordKind,
@@ -110,14 +122,32 @@ export class SqliteAnnouncementEdgeIndex {
   ): Promise<AnnouncementEdgeIndexReceipt> {
     this.active(options);
     const edges = announcementEdgesFromCard(input);
-    const recordDigest = digestOrThrow(input.recordDigest, "recordDigest");
     this.active(options);
     try {
-      return this.#replace.immediate(input.recordKind, recordDigest, edges);
+      return this.#replace.immediate(
+        input.recordKind,
+        input.recordDigest as Sha256Digest,
+        edges,
+      );
     } catch (error) {
-      if (error instanceof EvidenceCatalogError) throw error;
       throw catalogIoError(error, "Unable to persist SQLite Catalog announcement edges.");
     }
+  }
+
+  /** One prepared statement per filter shape; there are sixteen at most. */
+  #statementFor(clauses: readonly string[]): Database.Statement {
+    const where = clauses.join(" AND ");
+    const cached = this.#selectEdges.get(where);
+    if (cached !== undefined) return cached;
+    const statement = this.database.prepare(`
+      SELECT record_kind, record_digest, field, ordinal, target_digest
+      FROM announcement_edges
+      WHERE ${where}
+      ORDER BY record_kind ASC, record_digest ASC, field ASC, ordinal ASC
+      LIMIT ${ANNOUNCEMENT_EDGE_QUERY_LIMIT}
+    `);
+    this.#selectEdges.set(where, statement);
+    return statement;
   }
 
   async query(
@@ -147,14 +177,7 @@ export class SqliteAnnouncementEdgeIndex {
       invalid("An announcement-edge query requires at least one filter.");
     }
     try {
-      const rows = this.database
-        .prepare(`
-          SELECT record_kind, record_digest, field, ordinal, target_digest
-          FROM announcement_edges
-          WHERE ${clauses.join(" AND ")}
-          ORDER BY record_kind ASC, record_digest ASC, field ASC, ordinal ASC
-        `)
-        .all(...parameters) as EdgeRow[];
+      const rows = this.#statementFor(clauses).all(...parameters) as EdgeRow[];
       return rows.map((row) => ({
         recordKind: row.record_kind,
         recordDigest: row.record_digest as Sha256Digest,

@@ -210,7 +210,32 @@ describe("factsConsistency over join edges (design §12 amendment)", () => {
     expect(outcome).toBe("indeterminate");
   });
 
-  it("leaves an edge the card does not announce unchecked, as §15's skip requires", async () => {
+  it("checks a multi-valued edge element by element, in record order", async () => {
+    const announced = [`sha256:${"1".repeat(64)}`, `sha256:${"2".repeat(64)}`];
+    await expect(factsConsistency({
+      item: itemWithFacts({ matrixDigests: announced }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({ matrixDigests: [...announced] }),
+      records: unusedRecords,
+    })).resolves.toBe("consistent");
+    await expect(factsConsistency({
+      item: itemWithFacts({ matrixDigests: announced }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({ matrixDigests: [announced[1], announced[0]] }),
+      records: unusedRecords,
+    })).resolves.toBe("inconsistent");
+    await expect(factsConsistency({
+      item: itemWithFacts({ matrixDigests: [announced[0]] }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({ matrixDigests: [...announced] }),
+      records: unusedRecords,
+    })).resolves.toBe("inconsistent");
+  });
+
+  it("leaves an edge the card does not announce unchecked -- the skip completeness cannot close", async () => {
     const outcome = await factsConsistency({
       item: itemWithFacts({ scalarField: "owner-iri" }),
       profile: edgeProfile,

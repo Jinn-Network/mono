@@ -17,25 +17,15 @@ package (TEP, Evidence, or profiles).
 
 ## Facts profiles must carry their kind's join edges
 
-A facts profile labels every field record-fact or substrate-fact, names its reference-bearing
-fields so `referrers` inverts them, and declares the CloudEvents lifting for the filterable
-ones. One rule constrains what that field set may leave out (design §12, amendment
-2026-08-28): the reference-bearing set MUST be **complete** — every field of the record's own
-sealed bytes that pins another sealed record or content-addressed artifact by digest is
-declared, and marked `referenceBearing`.
+A profile's reference-bearing set must be **complete**: every field of the record's own sealed
+bytes that pins another sealed record or content-addressed artifact by digest is declared and
+marked `referenceBearing`. An index serves join from cards alone, so an omitted edge makes that
+join unanswerable from the feed. The rule, what it excludes, its one stated limit, and why
+`facts-consistency` is not its enforcement are in the design's §12 amendment 2026-08-28 — read
+it before authoring or revising a profile.
 
-An index serves join from announcement cards alone. "This environment, its attempts, their
-verdicts" is a graph walk over card edges; for a paid record, fetching-to-join is not even
-possible. An omitted edge makes that walk unanswerable from the feed. A descriptor that pins
-nothing by digest is not an edge, and neither is a record's own enumerated content (a captured
-corpus's entries, say) — unbounded in number and already covered by the record digest. The rule
-reaches the record's dependencies and lineage: the records it composes, the artifacts it pins,
-and its supersession pointer.
-
-Cards remain holder-authored summaries. `facts-consistency` re-checks an edge against the
-fetched record exactly as it re-checks any other record fact, and decision-grade use fails
-closed on anything but `consistent`. Adding an edge to a published profile is a profile
-revision — new profile URI version, previous version retained.
+`referenceBearingFields` reports what a profile declares. Whether that set is complete is a
+question about the record kind, so each `discovery/facts/*` leaf pins its own answer in tests.
 
 ## Development
 

@@ -43,8 +43,10 @@ plan. Shipped-surface record: `docs/superpowers/specs/2026-07-28-benchmarking-im
 Facts profiles must declare their kind's complete outbound-reference set (record-discovery
 design §12, amendment 2026-08-28). `benchmark.v2` adds the Tasks a benchmark is made of and its
 supersession pointer; `matrix.v2` adds the per-cell Task, Submission, Delivery and verdict
-digests that make a matrix the join table it already is in substance. Both coexist with v1,
-whose bytes stay frozen.
+digests that make a matrix the join table it already is in substance;
+`benchmark-accounting.v2` adds the records and artifacts each cell's dispatches name, so the
+closure an accounting record claims is walkable from the feed. Each coexists with v1, whose
+bytes stay frozen.
 
 These digests point into other record-kind trees, which this leaf cannot parse, so they are
 emitted from the record's own statement rather than through the fail-closed referenced-bytes

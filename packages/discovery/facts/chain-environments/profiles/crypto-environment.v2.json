@@ -9,6 +9,7 @@
     { "name": "informationWorldDigests", "class": "record", "referenceBearing": true },
     { "name": "serviceRuntimeImageDigests", "class": "record", "referenceBearing": true },
     { "name": "composition.requestBudget.maxRequests", "class": "record", "cloudEvents": { "attribute": "maxrequests", "scalar": "number" } },
+    { "name": "composition.missPolicy.bodyDigest", "class": "record", "referenceBearing": true },
     { "name": "supersedesDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "supersedes", "scalar": "string" } }
   ]
 }

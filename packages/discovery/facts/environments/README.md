@@ -16,6 +16,7 @@ use requires the fetched, digest-checked record.
 ## Join edges
 
 Facts profiles must declare their kind's complete outbound-reference set (record-discovery
-design §12, amendment 2026-08-28). `environment.v2` adds `parser.digest`: the record pins its
-parser by digest, so "which environments run parser `sha256:X`" is a query the card owes an
-index. v1 stays frozen and registered.
+design §12, amendment 2026-08-28). `environment.v2` adds the three components v1 left out:
+`parser.digest`, `image.indexDigest`, and `build.recipeDigest`. "Which environments run parser
+`sha256:X`" is a query the card owes an index, and v1 could not answer it. A recipe satisfied by
+a uri alone pins nothing and is not carried. v1 stays frozen and registered.
