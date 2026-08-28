@@ -375,7 +375,7 @@ export function fsAllowPaths(rawSource, configPath, base = root) {
  */
 export function declaredEnvironments(source) {
   const found = [];
-  for (const match of stripComments(source).matchAll(/\benvironment\s*:\s*(?:(['"])([^'"]*)\1|([^,\s}]+))/gu)) {
+  for (const match of stripComments(source).matchAll(/\benvironment\s*:\s*(?:(['"])([^'"]*)\1|(?:[^,\s}]+))/gu)) {
     found.push(match[1] === undefined ? '<computed>' : match[2]);
   }
   return found;
