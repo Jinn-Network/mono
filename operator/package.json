@@ -317,7 +317,7 @@
     "viem": "^2.0.0",
     "ws": "^8.20.0",
     "yaml": "^2.8.4",
-    "zod": "^4.4.3",
+    "zod": "4.4.3",
     "zod-to-json-schema": "^3.23.0"
   },
   "optionalDependencies": {
