@@ -77,8 +77,11 @@ export function citedPrecedents(source, selfName) {
 
     let start = index;
     while (start >= 0 && !/^\s*- /.test(lines[start])) start -= 1;
-    if (start < 0) continue;
 
+    // No `if (start < 0) continue` guard: when the scan runs off the top of
+    // the file `start` is -1, the comment walk below starts at -2 and does not
+    // execute, and the empty comment cites nothing. The guard was unkillable
+    // because it was redundant (#3168 D).
     const comment = [];
     for (let cursor = start - 1; cursor >= 0; cursor -= 1) {
       if (!/^\s*#/.test(lines[cursor])) break;
@@ -277,4 +280,60 @@ test('every broken citation is reported, not just the first', () => {
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }
+});
+
+// A `.yaml` neighbor cited as precedent. Every other fixture cites a `.yml`
+// target, so without this one the `ya?ml` arm of the citation regex is latent:
+// narrowing it to `yml` would read no citation at all and pass silently.
+const citingYamlNeighbor = [
+  '      # Same shape as consolidated-ci.yaml.',
+  '      - name: Restore a distribution',
+  '        uses: actions/download-artifact@v8',
+  '        with:',
+  '          name: some-dist',
+  '',
+].join('\n');
+
+test('a citation naming a .yaml workflow is read', () => {
+  const fixtureRoot = fixtureWorkflows({ 'citing-ci.yml': citingYamlNeighbor });
+
+  try {
+    assert.deepEqual(citedPrecedents(citingYamlNeighbor, 'citing-ci.yml'), ['consolidated-ci.yaml']);
+    assert.deepEqual(findBrokenCitations(fixtureRoot), [
+      'citing-ci.yml cites consolidated-ci.yaml, which does not exist',
+    ]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('a restore step whose name follows a blank line inside its body is read', () => {
+  const source = [
+    'jobs:',
+    '  a:',
+    '    steps:',
+    '      - uses: actions/download-artifact@v8',
+    '        with:',
+    '          path: some/dist',
+    '',
+    '        name: some-dist',
+    '',
+  ].join('\n');
+
+  assert.deepEqual(restoredArtifactNames(source), ['some-dist']);
+});
+
+// The two cases below pin `stepOpenerIndent`'s fallback for a restore step with
+// no `- ` opener above it: the first fails if the fallback is raised (the scan
+// leaves the step at once), the second if it is lowered (the scan never leaves).
+test('a restore step with no opener above it reads its own name', () => {
+  const source = ['uses: actions/download-artifact@v8', '  name: some-dist', ''].join('\n');
+
+  assert.deepEqual(restoredArtifactNames(source), ['some-dist']);
+});
+
+test('a restore step with no opener above it stops at the first column-zero line', () => {
+  const source = ['uses: actions/download-artifact@v8', 'jobs:', '  name: build', ''].join('\n');
+
+  assert.deepEqual(restoredArtifactNames(source), []);
 });
