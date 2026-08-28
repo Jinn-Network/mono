@@ -228,15 +228,20 @@ Covers the design spec §4.6 Official-run row.
   cell that reached a delivery but still has an evaluation leg `resume` would
   act on is additionally marked "awaiting evaluation", and "awaiting evaluation
   (delivery not journaled)" for the stranded shape whose `delivery` record
-  never reached the journal.
+  never reached the journal. `counts.awaitingEvaluation`, the aggregate of
+  those cells, is a summary tile alongside the other counts whenever it is
+  non-zero, ungated: `driver.status` is folded from the journal, so a killed
+  driver stays `active` and no journal-derived signal separates that crash from
+  a healthy driver mid-judgment — gating the tile on one would hide the count
+  in exactly the stranded case it exists to surface.
 - **State messages** — infra failures are shown as infra, never as a fail
   (`unscorable` is a named outcome value, not a failure — design spec §4.1,
-  §4.6); cap-approach warning; stall notice; a non-zero
-  `counts.awaitingEvaluation` with no active driver and no pending cancellation
-  surfaces as its own summary tile naming `resume` as the resolving action —
-  gated so, because `resume` is refused under a cancel marker and is not the
-  answer while a driver is still working the leg; "cancellation requested —
-  draining in-flight work" until the operation reaches its terminal
+  §4.6); cap-approach warning; stall notice; the awaiting-evaluation tile is
+  state, not a message, and names no action — the crash-case cue for `resume`
+  is the driver-generation card, which says a restart may have interrupted an
+  `active` generation, together with the per-cell "awaiting evaluation" markers;
+  "cancellation requested — draining in-flight work" until the operation
+  reaches its terminal
   `cancelled` result; a closed run with a valid marker says cancellation is
   finalized, never still draining. Venue/finalization contention retains the
   operation's typed retry guidance rather than being presented as terminal cancellation.

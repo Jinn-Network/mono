@@ -32,15 +32,14 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
     || (reportStage?.state === "complete" && !reportPublished);
   const cancellationPending = status?.cancelRequested === true && state === "running";
   const poll = status?.driver?.status === "active" || cancellationPending;
-  // `counts.awaitingEvaluation` counts every delivered cell without a journaled verdict, which
-  // on a healthy in-flight run is most of them. Resume is the answer only once no driver is
-  // working the leg and no cancellation is pending — `runResume` refuses under a cancel marker,
-  // and the Resume control below is disabled in exactly that state.
-  const strandedEvaluationCount = status !== undefined
-    && status.driver?.status !== "active"
-    && status.cancelRequested !== true
-    ? status.counts.awaitingEvaluation
-    : 0;
+  // A summary tile stating how many delivered cells still have an evaluation leg, alongside the
+  // other count tiles. It carries no action cue: `driver.status` is folded from the journal, so a
+  // killed driver stays `active` forever (`core/src/operations/run-status.ts:99-100`) and no
+  // journal-derived signal separates that crash from a healthy driver mid-judgment. Gating on one
+  // would hide the count in exactly the stranded case it exists to surface. The driver-generation
+  // card below names Resume for the interrupted generation; the Resume control states its own
+  // preconditions.
+  const awaitingEvaluationCount = status?.counts.awaitingEvaluation ?? 0;
 
   return <main id="main-content" tabIndex={-1} className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-10 sm:px-6 outline-none">
     <header className="flex flex-wrap items-center justify-between gap-4">
@@ -56,7 +55,7 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
         <Card><CardHeader><CardTitle>Expected</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{status?.counts.expected}</CardContent></Card>
         <Card><CardHeader><CardTitle>Delivered</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{status?.counts.delivered}</CardContent></Card>
         <Card><CardHeader><CardTitle>Judged / failed</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{status?.counts.judged} / {status?.counts.failed}</CardContent></Card>
-        {strandedEvaluationCount > 0 ? <Card><CardHeader><CardTitle>Awaiting evaluation</CardTitle></CardHeader><CardContent><p className="text-2xl font-semibold">{strandedEvaluationCount}</p><p>Resume heals these cells.</p></CardContent></Card> : null}
+        {awaitingEvaluationCount > 0 ? <Card><CardHeader><CardTitle>Awaiting evaluation</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{awaitingEvaluationCount}</CardContent></Card> : null}
       </section>
       {status?.driver ? <Card><CardHeader><CardTitle>Driver generation</CardTitle></CardHeader><CardContent>
         <dl className="grid gap-2 sm:grid-cols-2"><div><dt className="font-medium">Operation</dt><dd>{status.driver.operation}</dd></div><div><dt className="font-medium">Durable outcome</dt><dd>{status.driver.status}</dd></div></dl>

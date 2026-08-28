@@ -200,6 +200,9 @@ describe("durable run monitor cancellation language", () => {
       status: { ok: true, result: {
         state: "running",
         cancelRequested: false,
+        // The crash shape: the process was killed between the `delivered` cell event and the
+        // `delivery` record, so its generation has no journaled terminal and reads `active`.
+        driver: { operation: "run.launch", generation: "gen-1", startedAt: "2026-01-01T00:00:00.000Z", status: "active" },
         cells: [
           {
             cellKey: "cell-stranded", armId: "baseline", replicate: 1, taskSha256: "a".repeat(64),
@@ -218,10 +221,9 @@ describe("durable run monitor cancellation language", () => {
       params: Promise.resolve({ draftId: "draft-1" }),
     }));
     expect(markup).toContain("awaiting evaluation (delivery not journaled)");
-    // The aggregate cue: an operator scanning the summary row sees the actionable count and the
-    // operation that resolves it without reading every cell row.
+    // The aggregate tile: an operator scanning the summary row sees the count without reading
+    // every cell row.
     expect(markup).toContain("Awaiting evaluation");
-    expect(markup).toContain("Resume heals these cells.");
   });
 
   test("omits the awaiting-evaluation tile when no cell has a gap resume would act on", async () => {
@@ -247,14 +249,14 @@ describe("durable run monitor cancellation language", () => {
     expect(markup).not.toContain("awaiting evaluation");
   });
 
-  // The count is non-zero for most of a healthy run — every delivered cell the live driver has
-  // not judged yet is in it — and `runResume` refuses outright under a cancel marker. The tile
-  // names an action, so it appears only where that action is the answer; the per-cell marker,
-  // which names state, still appears in both.
+  // `runLaunch` journals `driver-started` before the first dispatch, so every `running` run with a
+  // delivered cell carries a driver generation, and a killed process never journals a terminal —
+  // `active` is the shape a crashed run presents. The tile states the count rather than naming an
+  // action, so it reaches that operator instead of being gated out of the one case it exists for.
   test.each([
-    ["a driver is still working the leg", { driver: { operation: "run.launch", generation: "gen-1", startedAt: "2026-01-01T00:00:00.000Z", status: "active" } }],
-    ["a cancellation is pending", { cancelRequested: true }],
-  ])("suppresses the resume cue while %s", async (_name, overrides) => {
+    ["a driver generation is active", { driver: { operation: "run.launch", generation: "gen-1", startedAt: "2026-01-01T00:00:00.000Z", status: "active" } }],
+    ["a cancellation is pending", { driver: { operation: "run.launch", generation: "gen-1", startedAt: "2026-01-01T00:00:00.000Z", status: "active" }, cancelRequested: true }],
+  ])("states the awaiting-evaluation count while %s", async (_name, overrides) => {
     loadRunViewMock.mockReturnValue({
       ok: true,
       draft: { ok: true, result: {} },
@@ -275,7 +277,8 @@ describe("durable run monitor cancellation language", () => {
     const markup = renderToStaticMarkup(await RunMonitorPage({
       params: Promise.resolve({ draftId: "draft-1" }),
     }));
-    expect(markup).not.toContain("Resume heals these cells.");
+    expect(markup).toContain("Awaiting evaluation");
     expect(markup).toContain("awaiting evaluation");
+    expect(markup).not.toContain("Resume heals these cells.");
   });
 });
