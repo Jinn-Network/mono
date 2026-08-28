@@ -41,7 +41,11 @@ carries the worked example.
 
 A config that declares `projects` gets one Vite config per entry, and the gate reads
 `server.fs.allow` the same way: an allowance inside a `projects` entry covers only the
-seam paths named in that entry, while a root-level one covers them all.
+seam paths named in that entry. A root-level one reaches an entry only when that entry
+sets `extends: true`, because Vitest does not fold the root config into an entry that
+does not ask for it. The converse holds too — a seam path named at root scope is loaded
+by every extending entry, so an extending entry's own allowance covers the root-scoped
+path it inherits.
 
 `.github/scripts/vitest-tmp-isolation.test.mjs` runs on every pull request and fails
 if any Vitest config under `packages/` (or the operator's five configs, which use the
