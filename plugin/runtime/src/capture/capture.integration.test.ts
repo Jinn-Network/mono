@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -106,6 +107,8 @@ function feedLines(sessionId: string, baseNano: bigint): string {
   );
 }
 
+const WORKFLOW_BYTES = "# implement-issue\n";
+const CONFIG_BYTES = '{"runtime":"claude","effort":"high"}';
 const BASE_COMMIT = "4f0e2b7c1a9d8e3f5b6a7c8d9e0f1a2b3c4d5e6f";
 const BASE_TREE = "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567";
 const MODEL_SERVICE = {
@@ -149,7 +152,7 @@ function autopilotFeedLines(sessionId: string, baseNano: bigint): string {
         role: "workflow",
         name: ".claude/skills/implement-issue/SKILL.md",
         mediaType: "text/markdown",
-        contentBase64: Buffer.from("# implement-issue\n").toString("base64"),
+        contentBase64: Buffer.from(WORKFLOW_BYTES).toString("base64"),
       }),
       line({
         type: "controlled-input",
@@ -157,7 +160,7 @@ function autopilotFeedLines(sessionId: string, baseNano: bigint): string {
         role: "config",
         name: "effective-config.json",
         mediaType: "application/json",
-        contentBase64: Buffer.from('{"runtime":"claude","effort":"high"}').toString("base64"),
+        contentBase64: Buffer.from(CONFIG_BYTES).toString("base64"),
       }),
       line({ type: "user-turn", atUnixNano: String(baseNano + 4n), text: "Implement issue #3223." }),
       line({
@@ -555,17 +558,15 @@ describe("Autopilot-driven capture (issue #3223)", () => {
     const controlled = document["@graph"].filter((value) =>
       String(value["@id"]).startsWith("inputs/controlled/"),
     );
-    expect(controlled).toHaveLength(2);
-    expect(controlled.map((value) => value.sha256)).toEqual([
-      expect.stringMatching(/^[0-9a-f]{64}$/u),
-      expect.stringMatching(/^[0-9a-f]{64}$/u),
+    // Digest of the known plaintext, so the assertion pins which bytes carry which role rather
+    // than only that some 64 hex characters are present.
+    const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
+    expect(
+      controlled.map((value) => [identifiersOf(value)[0], value.sha256, value.encodingFormat]),
+    ).toEqual([
+      [property(CONTROLLED_INPUT_ROLE_PROPERTY, "workflow"), sha256(WORKFLOW_BYTES), "text/markdown"],
+      [property(CONTROLLED_INPUT_ROLE_PROPERTY, "config"), sha256(CONFIG_BYTES), "application/json"],
     ]);
-    expect(controlled.flatMap(identifiersOf)).toEqual(
-      expect.arrayContaining([
-        property(CONTROLLED_INPUT_ROLE_PROPERTY, "workflow"),
-        property(CONTROLLED_INPUT_ROLE_PROPERTY, "config"),
-      ]),
-    );
 
     // Gap 2b: the hosted model carries a full service identity rather than a bare label.
     expect(entity(MODEL_SERVICE_ENTITY_ID)).toBeDefined();

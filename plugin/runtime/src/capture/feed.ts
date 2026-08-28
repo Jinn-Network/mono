@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 import { z } from "zod";
 
 import { PluginRuntimeError } from "../errors.js";
-import { SESSION_FEED_VERSION } from "./identity.js";
+import { PRODUCER_IRI, SESSION_FEED_VERSION, executorIri } from "./identity.js";
 
 /**
  * Bounds on the producer-controlled inputs one session may bind. Enforced at parse time so an
@@ -16,6 +16,13 @@ import { SESSION_FEED_VERSION } from "./identity.js";
  */
 export const CONTROLLED_INPUT_MAX_BYTES = 256 * 1024;
 export const CONTROLLED_INPUT_MAX_COUNT = 32;
+
+/**
+ * A coarse pre-decode guard: refuse an obviously oversized string before allocating its decoding.
+ * The exact byte bound is still checked after decoding, because base64 padding makes this length
+ * a block-rounded ceiling rather than an equality.
+ */
+const CONTROLLED_INPUT_MAX_BASE64_LENGTH = Math.ceil(CONTROLLED_INPUT_MAX_BYTES / 3) * 4;
 
 /** The producer-controlled input classes the protocol needs bound rather than labelled. */
 export const CONTROLLED_INPUT_ROLES = ["workflow", "skill", "prompt", "config"] as const;
@@ -32,9 +39,27 @@ const Rfc3339 = z
   )
   .refine((value) => Number.isFinite(Date.parse(value)), "must be a real instant");
 
-/** Canonical base64 with correct padding. `Buffer.from` is lenient, so the shape is checked here. */
+/**
+ * A string the recorder will also accept. Its `nonEmptyString` trims first, so a blank-but-present
+ * value would pass a plain `min(1)` here and then fail deep inside `start()` — an unsealable
+ * session with an unnamed error instead of a named feed error naming the line.
+ */
+const nonBlank = (max: number) =>
+  z
+    .string()
+    .min(1)
+    .max(max)
+    .refine((value) => value.trim().length > 0, "must not be blank");
+
+/**
+ * Canonical base64 with correct padding. `Buffer.from` is lenient, so the shape is checked here.
+ * Non-empty: a zero-byte controlled input would seal a record that claims to bind an input and
+ * binds nothing.
+ */
 const Base64 = z
   .string()
+  .min(1)
+  .max(CONTROLLED_INPUT_MAX_BASE64_LENGTH, "must not exceed the controlled-input byte bound")
   .regex(
     /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u,
     "must be canonical base64",
@@ -77,9 +102,9 @@ const GitObjectName = z
  */
 const ModelServiceSchema = z.strictObject({
   iri: AbsoluteIri,
-  name: z.string().min(1).optional(),
-  version: z.string().min(1).optional(),
-  deployment: z.string().min(1).optional(),
+  name: nonBlank(256).optional(),
+  version: nonBlank(128).optional(),
+  deployment: nonBlank(256).optional(),
   providerIri: AbsoluteIri.optional(),
 });
 
@@ -106,8 +131,8 @@ const RepositoryStateSchema = z.strictObject({
   type: z.literal("repository-state"),
   atUnixNano: UnixNano,
   repository: AbsoluteIri,
-  branch: z.string().min(1),
-  targetBase: z.string().min(1),
+  branch: nonBlank(256),
+  targetBase: nonBlank(256),
   baseCommit: GitObjectName,
   baseTree: GitObjectName,
 });
@@ -123,8 +148,8 @@ const ControlledInputSchema = z.strictObject({
   type: z.literal("controlled-input"),
   atUnixNano: UnixNano,
   role: z.enum(CONTROLLED_INPUT_ROLES),
-  name: z.string().min(1).max(256),
-  mediaType: z.string().min(1).max(128),
+  name: nonBlank(256),
+  mediaType: nonBlank(128),
   contentBase64: Base64,
 });
 
@@ -198,7 +223,6 @@ export type SessionFeedEvent = z.infer<typeof SessionFeedEventSchema>;
 
 /** One producer-controlled input, decoded once at parse time. */
 export interface ControlledInput {
-  readonly ordinal: number;
   readonly role: ControlledInputRole;
   readonly name: string;
   readonly mediaType: string;
@@ -327,7 +351,6 @@ export function parseSessionFeed(bytes: Uint8Array): ParsedSessionFeed {
         );
       }
       controlledInputs.push({
-        ordinal,
         role: event.role,
         name: event.name,
         mediaType: event.mediaType,
@@ -340,6 +363,19 @@ export function parseSessionFeed(bytes: Uint8Array): ParsedSessionFeed {
 
   if (open === undefined) {
     invalid("A session feed must carry exactly one session-open event, first.");
+  }
+  // A service IRI equal to the executor's or the producer's makes the record builder refuse the
+  // whole seal with a graph-identity conflict. Named here, the feed is refused instead.
+  const service = open.model.service;
+  if (service !== undefined) {
+    for (const [taken, whose] of [
+      [executorIri(open.host.name), "executor"],
+      [PRODUCER_IRI, "producer"],
+    ] as const) {
+      if (service.iri === taken) {
+        invalid(`The model service IRI ${service.iri} is already the ${whose} identity.`);
+      }
+    }
   }
   if (close !== undefined && Date.parse(close.endedAt) < Date.parse(open.startedAt)) {
     invalid("The session feed's endedAt precedes its startedAt.");

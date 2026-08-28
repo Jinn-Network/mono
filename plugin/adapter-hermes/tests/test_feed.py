@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import importlib
 import json
+import pathlib
 import threading
 
 import pytest
@@ -160,3 +162,114 @@ def test_a_write_failure_is_swallowed_so_a_session_never_breaks(feed_path):
     writer = feed.SessionFeed(feed_path / "not-a-directory" / "feed.ndjson")
     writer.user_turn("this must not raise")
     assert writer.line_count == 0
+
+
+def test_open_session_carries_the_hosted_model_service_identity(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    writer.open_session(
+        session_id="s-1",
+        host_name="hermes-agent",
+        host_version="1.2.3",
+        model_provider="anthropic",
+        model_name="claude-opus-5",
+        model_service={
+            "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+            "version": "claude-opus-5-20260514",
+            "unknown": "dropped",
+            "deployment": "",
+        },
+    )
+    model = read_lines(feed_path)[0]["model"]
+    assert model["service"] == {
+        "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+        "version": "claude-opus-5-20260514",
+    }
+
+
+def test_open_session_omits_the_service_when_none_is_reported(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    writer.open_session(
+        session_id="s-1",
+        host_name="hermes-agent",
+        host_version="1.2.3",
+        model_provider="anthropic",
+        model_name="claude-opus-5",
+    )
+    assert read_lines(feed_path)[0]["model"] == {
+        "provider": "anthropic",
+        "name": "claude-opus-5",
+    }
+
+
+def test_repository_state_binds_the_base_commit_and_tree(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    writer.repository_state(
+        repository="https://github.com/Jinn-Network/mono",
+        branch="autopilot/3223",
+        target_base="next",
+        base_commit="a" * 40,
+        base_tree="b" * 40,
+    )
+    event = read_lines(feed_path)[0]
+    assert event["type"] == "repository-state"
+    assert event["baseCommit"] == "a" * 40
+    assert event["baseTree"] == "b" * 40
+    assert event["targetBase"] == "next"
+    assert event["atUnixNano"].isdigit()
+
+
+def test_controlled_input_carries_the_exact_bytes(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    writer.controlled_input(
+        role="workflow",
+        name="implement-issue/SKILL.md",
+        media_type="text/markdown",
+        content=b"# implement-issue\n",
+    )
+    event = read_lines(feed_path)[0]
+    assert event["type"] == "controlled-input"
+    assert event["role"] == "workflow"
+    assert base64.b64decode(event["contentBase64"]) == b"# implement-issue\n"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"role": "secrets", "content": b"x"},
+        {"role": "config", "content": b""},
+        {"role": "config", "content": b"x" * (feed.CONTROLLED_INPUT_MAX_BYTES + 1)},
+    ],
+)
+def test_controlled_input_drops_what_the_runtime_would_refuse(feed_path, kwargs):
+    writer = feed.SessionFeed(feed_path)
+    writer.controlled_input(name="n", media_type="text/plain", **kwargs)
+    assert feed_path.read_text(encoding="utf-8") == ""
+
+
+def test_controlled_input_stops_at_the_per_session_budget(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    for index in range(feed.CONTROLLED_INPUT_MAX_COUNT + 3):
+        writer.controlled_input(
+            role="skill",
+            name=f"skill-{index}.md",
+            media_type="text/markdown",
+            content=b"x",
+        )
+    assert len(read_lines(feed_path)) == feed.CONTROLLED_INPUT_MAX_COUNT
+
+
+def test_controlled_input_bounds_match_the_runtime_that_enforces_them():
+    """The runtime refuses the whole feed past these bounds, so drift here loses sessions."""
+    source = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "runtime"
+        / "src"
+        / "capture"
+        / "feed.ts"
+    ).read_text(encoding="utf-8")
+    assert (
+        f"CONTROLLED_INPUT_MAX_BYTES = {feed.CONTROLLED_INPUT_MAX_BYTES // 1024} * 1024" in source
+    )
+    assert f"CONTROLLED_INPUT_MAX_COUNT = {feed.CONTROLLED_INPUT_MAX_COUNT}" in source
+    for role in feed.CONTROLLED_INPUT_ROLES:
+        assert f'"{role}"' in source

@@ -16,15 +16,23 @@ user's session.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 FEED_VERSION = 1
+
+#: Bounds the runtime enforces on ``controlled-input``. Held here too so an oversized input is
+#: dropped rather than refusing the whole capture at seal time.
+CONTROLLED_INPUT_MAX_BYTES = 256 * 1024
+CONTROLLED_INPUT_MAX_COUNT = 32
+
+CONTROLLED_INPUT_ROLES = ("workflow", "skill", "prompt", "config")
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +63,7 @@ class SessionFeed:
         self._lock = threading.Lock()
         self._last_ns = 0
         self.line_count = 0
+        self._controlled_inputs = 0
 
     @property
     def path(self) -> Path:
@@ -70,18 +79,91 @@ class SessionFeed:
         model_provider: str,
         model_name: str,
         conversation_id: Optional[str] = None,
+        model_service: Optional[Mapping[str, str]] = None,
     ) -> None:
+        model: dict = {"provider": model_provider, "name": model_name}
+        if model_service:
+            # The hosted model's deployment identity, which the record carries as an opaque
+            # runtime component. A producer cannot content-address a hosted service, so this
+            # identity is what stands in for one.
+            model["service"] = {
+                key: value
+                for key, value in model_service.items()
+                if key in ("iri", "name", "version", "deployment", "providerIri") and value
+            }
         event = {
             "type": "session-open",
             "v": FEED_VERSION,
             "sessionId": session_id,
             "startedAt": _now_iso(),
             "host": {"name": host_name, "version": host_version},
-            "model": {"provider": model_provider, "name": model_name},
+            "model": model,
         }
         if conversation_id:
             event["conversationId"] = conversation_id
         self._append(event)
+
+    def repository_state(
+        self,
+        repository: str,
+        branch: str,
+        target_base: str,
+        base_commit: str,
+        base_tree: str,
+    ) -> None:
+        """Report the base repository state this session starts from.
+
+        Emitted once, before the first turn. The commit and tree object names are the content
+        binding a verifier resolves; without them the sealed record cannot say what the work
+        started from.
+        """
+        self._append(
+            {
+                "type": "repository-state",
+                "repository": repository,
+                "branch": branch,
+                "targetBase": target_base,
+                "baseCommit": base_commit,
+                "baseTree": base_tree,
+            }
+        )
+
+    def controlled_input(
+        self,
+        role: str,
+        name: str,
+        media_type: str,
+        content: bytes,
+    ) -> None:
+        """Bind the exact bytes of one producer-controlled input.
+
+        Bytes travel inline rather than by path, matching the runtime's contract. The caller
+        assembles ``content`` without credentials: the runtime binds what it is given and does
+        not scrub, so segregation happens here, at the source.
+
+        Silently skipped when the input would be refused, because a capture problem must never
+        break the session — and a refused feed loses every event, not just this one.
+        """
+        if role not in CONTROLLED_INPUT_ROLES:
+            logger.debug("jinn: unknown controlled-input role %r", role)
+            return
+        if not content or len(content) > CONTROLLED_INPUT_MAX_BYTES:
+            logger.debug("jinn: controlled input %r has an unbindable size", name)
+            return
+        with self._lock:
+            if self._controlled_inputs >= CONTROLLED_INPUT_MAX_COUNT:
+                logger.debug("jinn: controlled-input budget spent, dropping %r", name)
+                return
+            self._controlled_inputs += 1
+        self._append(
+            {
+                "type": "controlled-input",
+                "role": role,
+                "name": name,
+                "mediaType": media_type,
+                "contentBase64": base64.b64encode(content).decode("ascii"),
+            }
+        )
 
     def environment(self, tools: Sequence[str], skills: Sequence[str]) -> None:
         self._append({"type": "environment", "tools": list(tools), "skills": list(skills)})

@@ -106,6 +106,20 @@ given and does not scrub (below), so a prompt or effective configuration must be
 without credentials rather than cleaned afterwards. The derivation and scrub pipeline is the
 safety net for the public projection, not the plan.
 
+The Hermes adapter writes all three through `SessionFeed.repository_state`,
+`SessionFeed.controlled_input`, and `open_session(model_service=…)`
+(`plugin/adapter-hermes/feed.py`). It bounds and drops what the runtime would refuse rather than
+losing the session to a rejected feed. **Which** facts a given host reports — where the base
+commit comes from, which workflow and configuration bytes count as controlled — is the host's
+decision, not this runtime's.
+
+**Declare a media type the operator's derivation policy has a rule for.** A public projection
+withholds an artifact whose `encodingFormat` matches no `artifactRules` entry, and a policy set
+to `withhold-record` withholds the whole record
+(`packages/evidence/derivation/src/artifact-transform.ts`). A controlled input declared with an
+exotic media type therefore seals locally and then drops out of — or blocks — the public
+derivative.
+
 ### This runtime does not scrub at capture time
 
 Sealing binds the feed's exact bytes, so a capture-time scrub would both destroy the material

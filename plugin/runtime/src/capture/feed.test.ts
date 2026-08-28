@@ -1,9 +1,15 @@
+import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 
 import { describe, expect, test } from "vitest";
 
 import { PluginRuntimeError } from "../errors.js";
-import { SESSION_FEED_FORMAT_IRI, SESSION_FEED_MEDIA_TYPE, executorIri } from "./identity.js";
+import {
+  SESSION_FEED_FORMAT_IRI,
+  SESSION_FEED_MEDIA_TYPE,
+  controlledInputEntityId,
+  executorIri,
+} from "./identity.js";
 import { parseSessionFeed } from "./feed.js";
 
 const fixture = async (name: string): Promise<Uint8Array> =>
@@ -187,6 +193,14 @@ describe("repository-state", () => {
     ).toThrow(/repository-state/u);
   });
 
+  test("refuses a blank branch or target base", () => {
+    for (const over of [{ branch: " " }, { targetBase: "  " }]) {
+      expect(() =>
+        parseSessionFeed(encode([open, { ...repositoryState, ...over }, close])),
+      ).toThrow(PluginRuntimeError);
+    }
+  });
+
   test("requires full-length lowercase hex object names", () => {
     for (const bad of ["a".repeat(39), "A".repeat(40), "g".repeat(40)]) {
       expect(() =>
@@ -254,6 +268,27 @@ describe("controlled-input", () => {
     ).toThrow(/bytes/u);
   });
 
+  test("refuses a grossly oversized string before decoding it", () => {
+    const huge = Buffer.alloc(1024 * 1024, 0x61).toString("base64");
+    expect(() =>
+      parseSessionFeed(encode([open, controlled({ contentBase64: huge }), close])),
+    ).toThrow(PluginRuntimeError);
+  });
+
+  test("refuses a zero-byte input, which would bind nothing", () => {
+    expect(() =>
+      parseSessionFeed(encode([open, controlled({ contentBase64: "" }), close])),
+    ).toThrow(PluginRuntimeError);
+  });
+
+  test("refuses blank strings the recorder would reject deep inside the seal", () => {
+    for (const over of [{ name: "   " }, { mediaType: " " }]) {
+      expect(() => parseSessionFeed(encode([open, controlled(over), close]))).toThrow(
+        PluginRuntimeError,
+      );
+    }
+  });
+
   test("refuses more controlled inputs than the per-session bound", () => {
     const many = Array.from({ length: 33 }, (_, index) => controlled({ name: `skill-${index}.md` }));
     expect(() => parseSessionFeed(encode([open, ...many, close]))).toThrow(/controlled-input/u);
@@ -279,11 +314,37 @@ describe("hosted model service identity", () => {
     expect(parseSessionFeed(encode([open, close])).open.model.service).toBeUndefined();
   });
 
+  test("refuses a service IRI that is already the executor or producer identity", () => {
+    for (const iri of [
+      "https://spec.jinn.network/software/agent-host/hermes",
+      "https://spec.jinn.network/software/plugin-runtime",
+    ]) {
+      expect(() =>
+        parseSessionFeed(encode([{ ...open, model: { ...open.model, service: { iri } } }, close])),
+      ).toThrow(/identity/u);
+    }
+  });
+
   test("rejects a service identity that is not an absolute IRI", () => {
     expect(() =>
       parseSessionFeed(
         encode([{ ...open, model: { ...open.model, service: { iri: "claude-opus-5" } } }, close]),
       ),
     ).toThrow(PluginRuntimeError);
+  });
+});
+
+describe("controlledInputEntityId", () => {
+  test("keeps a host-written name from reaching the crate as a path", () => {
+    expect(controlledInputEntityId(0, "../../etc/passwd")).toBe("inputs/controlled/00-etc-passwd");
+    expect(controlledInputEntityId(1, "a?b#c\\d")).toBe("inputs/controlled/01-a-b-c-d");
+  });
+
+  test("yields a distinct id for names that slug the same", () => {
+    expect(controlledInputEntityId(0, "SKILL.md")).not.toBe(controlledInputEntityId(1, "skill.md"));
+  });
+
+  test("still yields an id for a name with nothing sluggable in it", () => {
+    expect(controlledInputEntityId(2, "\u65e5\u672c\u8a9e")).toBe("inputs/controlled/02-input");
   });
 });
