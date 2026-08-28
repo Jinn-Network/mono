@@ -165,7 +165,7 @@ export const cryptoEnvironmentRecomputeV2: RecordFactRecompute = async (bytes, r
  *
  * The corpus entries' response bodies are deliberately not edges. They are this record's own
  * content, enumerated inside its bytes and unbounded in number; putting them on the card would
- * defeat the card's filter-before-fetch purpose, and the record digest already covers them.
+ * defeat what a card is for -- filtering before retrieval -- and the record digest covers them.
  */
 export const informationWorldRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
   const facts = await informationWorldRecompute(bytes, refs);
