@@ -303,6 +303,34 @@ describe("v2 recompute: the join edges v1 left out", () => {
     expect(facts.graderDigests).toEqual([]);
   });
 
+  it("reads every list that can carry an ABI: a safety constraint cannot, and the schema says so", async () => {
+    // The completeness claim rests on successPredicates being the only reachable call site, so
+    // pin it against the schema rather than against a reading of it: a call-bearing predicate is
+    // not a legal safety constraint, and a spec that puts one there does not seal at all.
+    const golden = JSON.parse(
+      new TextDecoder().decode(await loadStatePredicateSpecBytes()),
+    ) as Record<string, unknown>;
+    const block = golden.familyBlock as Record<string, unknown>;
+    expect(() => sealEvaluationSpec({
+      ...golden,
+      familyBlock: {
+        ...block,
+        safetyConstraints: [{
+          kind: "callResult",
+          to: `0x${"2".repeat(40)}`,
+          call: {
+            abiRef: { digest: { sha256: "e".repeat(64) } },
+            function: "balanceOf(address)",
+            args: [{ type: "address", value: `0x${"1".repeat(40)}` }],
+          },
+          decode: "uint256",
+          cmp: "eq",
+          value: "1",
+        }],
+      },
+    } as never)).toThrow();
+  });
+
   it("emits no facts for bytes that are not an evaluation spec", async () => {
     expect(await evaluationSpecRecomputeV2(new TextEncoder().encode("{"), noReferencedBytes)).toEqual({});
   });

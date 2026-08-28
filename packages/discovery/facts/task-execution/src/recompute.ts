@@ -287,6 +287,12 @@ export const TASK_EXECUTION_FACTS_RECOMPUTE: FactsRecompute = {
  * specs reading one function through different ABIs are different specs, and "which specs read
  * against ABI sha256:X" is the question asked when an ABI turns out to be wrong. An
  * `encodedCall` target names no ABI and contributes nothing.
+ *
+ * `successPredicates` is the whole reachable set, not the first list that matched. A block's
+ * other two predicate lists cannot carry a call target: `safetyConstraints` is restricted by
+ * `SAFETY_CONSTRAINT_KINDS` to five kinds that read no state through an ABI, and the block's
+ * `measurements` use the observation vocabulary, whose `reportedValue` variant carries a name
+ * and nothing else. `recompute.test.ts` pins the first of those by construction.
  */
 function abiRefDigests(predicates: readonly unknown[]): `sha256:${string}`[] {
   const seen = new Set<string>();

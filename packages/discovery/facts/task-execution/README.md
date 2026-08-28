@@ -67,16 +67,18 @@ Facts profiles must declare their kind's complete outbound-reference set (record
 design §12, amendment 2026-08-28). `task.v2` adds the digest-pinned inputs; `delivery.v2` adds
 the outputs produced, the evidence records about the work, and the Delivery it replaces; and
 `evaluation-spec.v2` adds the graders plus whatever its family block pins — the composite crypto
-environment a state-predicate spec runs against and the ABIs its predicates read through, a
-deterministic-process image, test material and parser, a model-graded rubric and judge output
-schema, a human-review form, a composite's sub-specs. v1 declared only the family, which left "which evaluation specs run in this crypto
-environment" unanswerable from a card. A ResourceDescriptor satisfiable by `uri` or inline
-`content` alone pins nothing and is not an edge, so only digest-bearing members are carried.
+environment a state-predicate spec runs against and the ABIs its success predicates read
+through, a deterministic-process image, test material and parser, a model-graded rubric and
+judge output schema, a human-review form, a composite's sub-specs. v1 declared only the family,
+which left "which evaluation specs run in this crypto environment" unanswerable from a card.
+
+A ResourceDescriptor satisfiable by `uri` or inline `content` alone pins nothing and is not an
+edge, so only digest-bearing members are carried.
 
 Audited and unchanged: `profile-document.v1` already declares its one edge, `extends`, and
-`submission.v1` already declares its one edge, the Task. Its harness pin
-carries a digest, but it lives under a namespaced key of the structurally open `requirements`
-map, which has no field for a profile to declare — the design amendment states that limit.
+`submission.v1` already declares its one edge, the Task. A Submission's harness pin does carry a
+digest, but it lives under a namespaced key of the structurally open `requirements` map, which
+has no field for a profile to declare — the design amendment states that limit.
 
 The plugin and checkpoint profiles stay empty: no defining schema for either exists in-tree, so
 there is nothing to declare, and an empty profile asserts nothing.
