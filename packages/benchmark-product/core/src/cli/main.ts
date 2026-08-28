@@ -111,6 +111,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --draft <draftId> --items <items.jsonl> --sources <sources.jsonl>
                    --admissions <admissions.jsonl>
                    [--name <name>] [--description <text>] [--version <ver>]
+                   [--parser-invalid-policy reject|abstain]
   human-review packet create --workspace <dir> --principal <id> --draft <draftId>
                    --file <packet-request.json>
   human-review response sign --workspace <dir> --principal <id> --draft <draftId>
@@ -221,7 +222,7 @@ const IMPORT_SWEBENCH_FLAGS = [
 ] as const;
 const IMPORT_ITEM_BANK_FLAGS = [
   "workspace", "principal", "json", "profile", "draft", "items", "sources", "admissions",
-  "name", "description", "version",
+  "name", "description", "version", "parser-invalid-policy",
 ] as const;
 const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
@@ -511,6 +512,18 @@ function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: b
   const name = optional(args, "name");
   const description = optional(args, "description");
   const version = optional(args, "version");
+  const parserInvalidPolicy = optional(args, "parser-invalid-policy");
+  if (
+    parserInvalidPolicy !== undefined
+    && parserInvalidPolicy !== "reject"
+    && parserInvalidPolicy !== "abstain"
+  ) {
+    refuse(
+      "invalid-invocation",
+      "--parser-invalid-policy",
+      "--parser-invalid-policy must be reject or abstain",
+    );
+  }
   const input: ImportBinaryItemBankInput = {
     profile,
     draftId: required(args, "draft"),
@@ -520,6 +533,7 @@ function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: b
     ...(name === undefined ? {} : { name }),
     ...(description === undefined ? {} : { description }),
     ...(version === undefined ? {} : { version }),
+    ...(parserInvalidPolicy === undefined ? {} : { parserInvalidPolicy }),
   };
   const operation = importBinaryItemBank(opContext, input);
   return renderResult(

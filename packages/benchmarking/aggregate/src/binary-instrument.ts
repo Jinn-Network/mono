@@ -57,6 +57,8 @@ export interface BinaryInstrumentReductionInput {
   readonly cells: readonly BinaryInstrumentParsedCellInput[];
   /** The sealed `parameters.strata` declared vocabulary (spec §3.2's membership source). */
   readonly strata: readonly string[];
+  /** Defaults to the legacy substantive-REJECT policy for byte-compatible callers. */
+  readonly parserInvalidPolicy?: "reject" | "abstain";
 }
 
 export interface BinaryInstrumentReducedCall {
@@ -65,8 +67,8 @@ export interface BinaryInstrumentReducedCall {
   readonly armId: string;
   readonly replicate: number;
   readonly verdictDigest: string;
-  readonly verdict: "pass" | "fail";
-  readonly judgeDecision: BinaryInstrumentDecision;
+  readonly verdict: "pass" | "fail" | "inconclusive";
+  readonly judgeDecision: BinaryInstrumentDecision | null;
   readonly parseValid: boolean;
   readonly instrumentSha256: string;
   readonly context: BinaryInstrumentItemContext;
@@ -89,7 +91,8 @@ export type BinaryInstrumentExclusionReason =
   | "cell-not-judged"
   | "conflicted-evaluations"
   | "inconclusive-evaluation"
-  | "missing-evaluation";
+  | "missing-evaluation"
+  | "no-valid-majority";
 
 export interface BinaryInstrumentExclusionDetail {
   readonly reason: BinaryInstrumentExclusionReason;
@@ -247,6 +250,10 @@ function validateParsedCell(
 export function reduceBinaryInstrumentReplicates(
   input: BinaryInstrumentReductionInput,
 ): BinaryInstrumentReduction {
+  const parserInvalidPolicy = input.parserInvalidPolicy ?? "reject";
+  if (parserInvalidPolicy !== "reject" && parserInvalidPolicy !== "abstain") {
+    fail("unsupported-vocabulary", "parserInvalidPolicy must be reject or abstain");
+  }
   if (!Number.isSafeInteger(input.k) || input.k < 1 || input.k % 2 === 0) {
     fail("invalid-k", `k must be an odd positive safe integer; got ${String(input.k)}`);
   }
@@ -411,8 +418,10 @@ export function reduceBinaryInstrumentReplicates(
           fail("context-drift", `${matrixCell.cellKey} does not carry Task ${taskDigest}'s expected context`);
         }
         if (parsed.verdict === "inconclusive") {
-          addReason("inconclusive-evaluation", matrixCell.cellKey);
-          continue;
+          if (parserInvalidPolicy !== "abstain" || parsed.parseValid) {
+            addReason("inconclusive-evaluation", matrixCell.cellKey);
+            continue;
+          }
         }
         const call: BinaryInstrumentReducedCall = {
           cellKey: matrixCell.cellKey,
@@ -421,7 +430,7 @@ export function reduceBinaryInstrumentReplicates(
           replicate: matrixCell.replicate,
           verdictDigest: parsed.verdictDigest,
           verdict: parsed.verdict,
-          judgeDecision: parsed.judgeDecision!,
+          judgeDecision: parsed.judgeDecision,
           parseValid: parsed.parseValid,
           instrumentSha256: expectedInstrument,
           context: cloneContext(expectedContext),
@@ -452,7 +461,23 @@ export function reduceBinaryInstrumentReplicates(
       }
       calls.sort((left, right) => left.replicate - right.replicate);
       const accepted = calls.filter((call) => call.judgeDecision === "ACCEPT").length;
-      const rejected = input.k - accepted;
+      const rejected = calls.filter((call) => call.judgeDecision === "REJECT").length;
+      const requiredMajority = Math.floor(input.k / 2) + 1;
+      if (
+        parserInvalidPolicy === "abstain"
+        && accepted < requiredMajority
+        && rejected < requiredMajority
+      ) {
+        excluded.push({
+          taskDigest,
+          armId,
+          instrumentSha256: expectedInstrument,
+          context: cloneContext(expectedContext),
+          cellKeys: allCellKeys,
+          reasons: [{ reason: "no-valid-majority", cellKeys: allCellKeys }],
+        });
+        continue;
+      }
       items.push({
         taskDigest,
         armId,
@@ -462,7 +487,7 @@ export function reduceBinaryInstrumentReplicates(
         calls,
         accepted,
         rejected,
-        decision: accepted > rejected ? "ACCEPT" : "REJECT",
+        decision: accepted >= requiredMajority ? "ACCEPT" : "REJECT",
         unstable: accepted !== 0 && rejected !== 0,
       });
     }
