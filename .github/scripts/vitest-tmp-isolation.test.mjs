@@ -265,6 +265,10 @@ export function stripComments(source) {
  * The index of the `close` that balances an `open` already consumed at `start - 1`, or `-1` when
  * the literal is never terminated. Quote- and regex-aware, so a bracket inside a quoted entry or a
  * regex character class does not close it.
+ *
+ * Quotes follow `stripComments`' rule, single-sourced in `quotedSpanEnd`: a `'`/`"` span ends at a
+ * newline, a backtick span does not. Without that bound an unpairable quote runs past the intended
+ * close and the literal comes back truncated or missing.
  */
 function balancedEnd(source, start, open, close) {
   let depth = 1;
@@ -314,7 +318,9 @@ function enclosedLiterals(source, key, open, close) {
  * the ordinary construct that used to produce exactly that (issue #3154); `regexStartsAt` and the
  * newline-bounded quote span above are what keep it from doing so. That is the same fallback the other
  * scanners take on an unterminated literal, and it is bounded the same way: a config that does not
- * parse cannot load, so its own package job is red before this gate has an opinion.
+ * parse cannot load, so its own package job is red before this gate has an opinion. The quote walk
+ * below is what keeps that bound honest — an unpaired `'` inside a regex literal parses and loads
+ * fine, so without the newline bound the collapse would happen under a green package job.
  *
  * An entry whose own `{` never balances is skipped rather than ending the scan, so the entries
  * after it keep their ranges. `break` here was the amplifier that made a single mis-read line cost
@@ -501,7 +507,7 @@ export function fsAllowPaths(rawSource, configPath, base = root) {
  */
 export function declaredEnvironments(source) {
   const found = [];
-  for (const match of stripComments(source).matchAll(/\benvironment\s*:\s*(?:(['"])([^'"]*)\1|([^,\s}]+))/gu)) {
+  for (const match of stripComments(source).matchAll(/\benvironment\s*:\s*(?:(['"])([^'"]*)\1|(?:[^,\s}]+))/gu)) {
     found.push(match[1] === undefined ? '<computed>' : match[2]);
   }
   return found;
@@ -651,6 +657,27 @@ test('fsAllowPaths reads every fs.allow list, and only those', () => {
   assert.notEqual(scoped[1].scope, scoped[2].scope);
 });
 
+// The newline bound in `balancedEnd`'s quote walk, under its own name. `projectEntryRanges` calls
+// `balancedEnd` too, so the test below it is a second witness — but that one is named for the
+// consequence at ITS site, a collapsed `projects` scope, and the consequence here is a different
+// one: the enclosing literal comes back truncated, or missing entirely when the unbounded span runs
+// past its close. A regex literal carrying an unpaired `'` is valid JavaScript, so the config
+// parses and its own package job stays green while the literal quietly goes unread.
+test('an unpaired quote in a regex literal does not truncate the literal around it', () => {
+  // At the reader: the `}` that ends the fs block sits after the unpaired quote, so unbounded the
+  // scan never balances it and `enclosedLiterals` yields nothing rather than the block.
+  const block = `fs: {\n  a: /['"]/u,\n  allow: ['../..'],\n}`;
+  assert.deepEqual(
+    enclosedLiterals(block, 'fs', '{', '}').map((literal) => literal.inner.trim()),
+    [`a: /['"]/u,\n  allow: ['../..'],`],
+  );
+  // And at the gate: the allowance inside that block is what goes missing.
+  assert.deepEqual(
+    fsAllowPaths(block, 'packages/x/vitest.config.ts').map((entry) => entry.resolved),
+    [''],
+  );
+});
+
 test('wiredPaths reads every setupFiles and globalSetup list', () => {
   const at = (source) =>
     wiredPaths(source, 'packages/x/vitest.config.ts').map(({ key, resolved }) => ({ key, resolved }));
@@ -676,7 +703,7 @@ test('wiredPaths reads every setupFiles and globalSetup list', () => {
   assert.notEqual(scoped[1].scope, scoped[2].scope);
 });
 
-test('projectEntryRanges finds one range per object entry, in source order', () => {
+test('projectEntryRanges finds one range per object entry, ordered per projects literal', () => {
   // Each range spans exactly the object entry it was read from, braces included.
   const entries = (source) =>
     projectEntryRanges(source).map(([start, end]) => source.slice(start, end + 1));
@@ -698,6 +725,27 @@ test('projectEntryRanges finds one range per object entry, in source order', () 
   // An unterminated entry inside a terminated list drops that entry, keeping the ones before it.
   assert.deepEqual(entries(`projects: [{ a: 1 }, { b: 2 ]`), ['{ a: 1 }']);
 
+  // Ordering is per `projects` literal, not global: each literal is walked to completion before the
+  // next one is opened, so a nested literal's entries land after every entry of the literal that
+  // encloses it — including siblings that start later in the source. Starts are not ascending.
+  const unordered = `projects: [{ test: { projects: [{ x: 1 }] } }, { y: 2 }]`;
+  assert.deepEqual(entries(unordered), [
+    `{ test: { projects: [{ x: 1 }] } }`,
+    '{ y: 2 }',
+    '{ x: 1 }',
+  ]);
+  // And `scopeAt` reads that unordered list correctly: an offset inside `{ x: 1 }` is scoped to it,
+  // not to the enclosing entry emitted first. (Innermost-by-maximum-start and a bare last-match-wins
+  // agree on every reachable input — a range that contains an offset is always emitted before the
+  // ranges nested inside it — so no fixture can separate them; the comparison is defensive.)
+  const unorderedRanges = projectEntryRanges(unordered);
+  const [outerRange, , innerRange] = unorderedRanges;
+  assert.ok(outerRange[0] < innerRange[0], 'the enclosing entry starts before the nested one');
+  assert.equal(
+    scopeAt(unordered.indexOf('x: 1'), unorderedRanges),
+    `projects@${innerRange[0]}`,
+  );
+
   // Nested `projects` yield both ranges, and a path inside the inner one is scoped to the inner
   // entry rather than the outer one that also encloses it.
   const nested = `projects: [{ test: { projects: [{ test: { setupFiles: ['./b.ts'] } }] } }]`;
@@ -707,6 +755,24 @@ test('projectEntryRanges finds one range per object entry, in source order', () 
   assert.ok(outer[0] < inner[0] && inner[1] < outer[1], 'inner range must sit inside the outer one');
   const [wired] = wiredPaths(nested, 'packages/x/vitest.config.ts');
   assert.equal(wired.scope, `projects@${inner[0]}`);
+});
+
+// The newline bound in the quote walk of `projectEntryRanges` is the fail-open half of that reader,
+// and nothing else in this suite reaches it. A regex literal carrying an unpaired `'` is valid
+// JavaScript, so the config parses and its own package job stays green; unbounded, that quote span
+// swallows the entry braces, `projects` yields no ranges, and every allowance and seam path
+// collapses into `root` scope — restoring the cross-entry crediting #3123 closed.
+test('an unpaired quote in a regex literal does not collapse projects scope', () => {
+  const regexQuote = [
+    "export default { test: { environment: 'jsdom', projects: [",
+    "    /\\d'/u,",
+    "    { server: { fs: { allow: ['../..'] } } },",
+    "    { test: { setupFiles: ['../../test-support/tmp-isolation/isolate-tmp.ts'] } },",
+    '] } }',
+  ].join('\n');
+  assert.deepEqual(unreachableWirings(regexQuote, 'packages/x/vitest.config.ts'), [
+    { key: 'setupFiles', resolved: 'test-support/tmp-isolation/isolate-tmp.ts' },
+  ]);
 });
 
 // Commenting a wiring line out while chasing a slow or flaky suite is an ordinary edit, and the one

@@ -15,7 +15,8 @@
 // structure, which runs on every pull request with no path filtering.
 
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
@@ -76,8 +77,11 @@ export function citedPrecedents(source, selfName) {
 
     let start = index;
     while (start >= 0 && !/^\s*- /.test(lines[start])) start -= 1;
-    if (start < 0) continue;
 
+    // No `if (start < 0) continue` guard: when the scan runs off the top of
+    // the file `start` is -1, the comment walk below starts at -2 and does not
+    // execute, and the empty comment cites nothing. The guard was unkillable
+    // because it was redundant (#3168 D).
     const comment = [];
     for (let cursor = start - 1; cursor >= 0; cursor -= 1) {
       if (!/^\s*#/.test(lines[cursor])) break;
@@ -131,19 +135,80 @@ test('a citation is only read from the comment attached to a restore step', () =
   assert.deepEqual(restoredArtifactNames(source), ['some-dist']);
 });
 
-test('a citation pointing at a workflow that restores nothing is reported', () => {
-  const citing = [
-    '      # Same shape as consolidated-ci.yml.',
-    '      - name: Restore a distribution',
-    '        uses: actions/download-artifact@v8',
-    '        with:',
-    '          name: some-dist',
-    '',
-  ].join('\n');
-  const consolidated = ['jobs:', '  build:', '    steps:', '      - run: yarn build', ''].join('\n');
+// A workflows directory holding exactly the given files, so a citation can be
+// pointed at a real neighbor without depending on the repository's own
+// workflows. The tests below assert on `findBrokenCitations` itself: asserting
+// only on the two helpers left both of its report branches free to be deleted
+// with every test still green.
+function fixtureWorkflows(files) {
+  const workflowsRoot = mkdtempSync(join(tmpdir(), 'jinn-precedent-citations-'));
+  for (const [name, contents] of Object.entries(files)) {
+    writeFileSync(join(workflowsRoot, name), contents);
+  }
+  return workflowsRoot;
+}
 
-  assert.deepEqual(citedPrecedents(citing, 'citing-ci.yml'), ['consolidated-ci.yml']);
-  assert.equal(restoredArtifactNames(consolidated).length, 0);
+const citingConsolidated = [
+  '      # Same shape as consolidated-ci.yml.',
+  '      - name: Restore a distribution',
+  '        uses: actions/download-artifact@v8',
+  '        with:',
+  '          name: some-dist',
+  '',
+].join('\n');
+
+test('a citation pointing at a workflow that restores nothing is reported', () => {
+  const consolidated = ['jobs:', '  build:', '    steps:', '      - run: yarn build', ''].join('\n');
+  const fixtureRoot = fixtureWorkflows({
+    'citing-ci.yml': citingConsolidated,
+    'consolidated-ci.yml': consolidated,
+  });
+
+  try {
+    assert.deepEqual(citedPrecedents(citingConsolidated, 'citing-ci.yml'), ['consolidated-ci.yml']);
+    assert.equal(restoredArtifactNames(consolidated).length, 0);
+    assert.deepEqual(findBrokenCitations(fixtureRoot), [
+      'citing-ci.yml cites consolidated-ci.yml as by-name-restore precedent, but it restores no artifact by name',
+    ]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('a citation pointing at a workflow that does not exist is reported', () => {
+  // consolidated-ci.yml is deliberately absent: that absence is the branch under
+  // test. Adding it here would fall through to the restores-nothing arm and make
+  // this a duplicate of the test above.
+  const fixtureRoot = fixtureWorkflows({ 'citing-ci.yml': citingConsolidated });
+
+  try {
+    assert.deepEqual(findBrokenCitations(fixtureRoot), [
+      'citing-ci.yml cites consolidated-ci.yml, which does not exist',
+    ]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('a citation pointing at a workflow that does restore by name is not reported', () => {
+  const fixtureRoot = fixtureWorkflows({
+    'citing-ci.yml': citingConsolidated,
+    'consolidated-ci.yml': [
+      'jobs:',
+      '  build:',
+      '    steps:',
+      '      - uses: actions/download-artifact@v8',
+      '        with:',
+      '          name: some-dist',
+      '',
+    ].join('\n'),
+  });
+
+  try {
+    assert.deepEqual(findBrokenCitations(fixtureRoot), []);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 });
 
 test('a restore step at the end of a job does not read the next job\'s name', () => {
@@ -158,6 +223,120 @@ test('a restore step at the end of a job does not read the next job\'s name', ()
     '    name: build',
     '',
   ].join('\n');
+
+  assert.deepEqual(restoredArtifactNames(source), []);
+});
+
+// Cites its own file name, and restores by `pattern:` rather than by name — so
+// dropping the self-citation guard makes this file report itself.
+const citingSelf = [
+  '      # Same shape as self-ci.yml.',
+  '      - name: Restore a distribution',
+  '        uses: actions/download-artifact@v8',
+  '        with:',
+  '          pattern: some-*-dist',
+  '',
+].join('\n');
+
+test('a workflow whose comment names itself is not reported as citing itself', () => {
+  const fixtureRoot = fixtureWorkflows({ 'self-ci.yml': citingSelf });
+
+  try {
+    assert.deepEqual(findBrokenCitations(fixtureRoot), []);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('a .yaml workflow is scanned for broken citations', () => {
+  const fixtureRoot = fixtureWorkflows({ 'citing-ci.yaml': citingConsolidated });
+
+  try {
+    assert.deepEqual(findBrokenCitations(fixtureRoot), [
+      'citing-ci.yaml cites consolidated-ci.yml, which does not exist',
+    ]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('every broken citation is reported, not just the first', () => {
+  const citingTwo = [
+    '      # Same shape as consolidated-ci.yml and archived-ci.yml.',
+    '      - name: Restore a distribution',
+    '        uses: actions/download-artifact@v8',
+    '        with:',
+    '          name: some-dist',
+    '',
+  ].join('\n');
+  const fixtureRoot = fixtureWorkflows({
+    'citing-a-ci.yml': citingTwo,
+    'citing-b-ci.yml': citingConsolidated,
+  });
+
+  try {
+    assert.deepEqual(findBrokenCitations(fixtureRoot).sort(), [
+      'citing-a-ci.yml cites archived-ci.yml, which does not exist',
+      'citing-a-ci.yml cites consolidated-ci.yml, which does not exist',
+      'citing-b-ci.yml cites consolidated-ci.yml, which does not exist',
+    ]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+// A `.yaml` neighbor cited as precedent. Every other fixture cites a `.yml`
+// target, so without this one the `ya?ml` arm of the citation regex is latent:
+// narrowing it to `yml` would read no citation at all and pass silently.
+const citingYamlNeighbor = [
+  '      # Same shape as consolidated-ci.yaml.',
+  '      - name: Restore a distribution',
+  '        uses: actions/download-artifact@v8',
+  '        with:',
+  '          name: some-dist',
+  '',
+].join('\n');
+
+test('a citation naming a .yaml workflow is read', () => {
+  const fixtureRoot = fixtureWorkflows({ 'citing-ci.yml': citingYamlNeighbor });
+
+  try {
+    assert.deepEqual(citedPrecedents(citingYamlNeighbor, 'citing-ci.yml'), ['consolidated-ci.yaml']);
+    assert.deepEqual(findBrokenCitations(fixtureRoot), [
+      'citing-ci.yml cites consolidated-ci.yaml, which does not exist',
+    ]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('a restore step whose name follows a blank line inside its body is read', () => {
+  const source = [
+    'jobs:',
+    '  a:',
+    '    steps:',
+    '      - uses: actions/download-artifact@v8',
+    '        with:',
+    '          path: some/dist',
+    '',
+    '        name: some-dist',
+    '',
+  ].join('\n');
+
+  assert.deepEqual(restoredArtifactNames(source), ['some-dist']);
+});
+
+// The two cases below pin `stepOpenerIndent`'s fallback for a restore step with
+// no `- ` opener above it: the first fails if the fallback is raised (the scan
+// leaves the step at once), the second if it is lowered (the scan never leaves).
+test('a restore step with no opener above it reads its own name', () => {
+  const source = ['uses: actions/download-artifact@v8', '  name: some-dist', ''].join('\n');
+
+  assert.deepEqual(restoredArtifactNames(source), ['some-dist']);
+});
+
+test('a restore step with no opener above it stops at the first column-zero line', () => {
+  const source = ['uses: actions/download-artifact@v8', 'jobs:', '  name: build', ''].join('\n');
 
   assert.deepEqual(restoredArtifactNames(source), []);
 });

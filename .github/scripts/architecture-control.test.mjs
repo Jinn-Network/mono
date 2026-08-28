@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
@@ -18,9 +19,23 @@ function write(path, value = '') {
 }
 
 function walkFirstPartyFiles(root, current = root) {
+  // Dot-prefixed directories are never tracked generator sources - they are
+  // editor state, caches, or transient test fixtures. Skipping them (and
+  // tolerating a directory that vanishes between the readdir and the
+  // recursive descent) keeps this walk immune to concurrent suites' temp
+  // directories; the boundary suite drops one inside .github/scripts for the
+  // length of its run, and .gitignore keeps it out of the tracked inventory.
+  let entries;
+  try {
+    entries = readdirSync(current, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
   const files = [];
-  for (const entry of readdirSync(current, { withFileTypes: true })) {
+  for (const entry of entries) {
     if (entry.isDirectory() && ['node_modules', 'dist', 'build', '.yarn'].includes(entry.name)) continue;
+    if (entry.isDirectory() && entry.name.startsWith('.')) continue;
     const path = join(current, entry.name);
     if (entry.isDirectory()) files.push(...walkFirstPartyFiles(root, path));
     else if (entry.isFile()) files.push(path.slice(root.length + 1).split('\\').join('/'));
@@ -381,6 +396,24 @@ test('repository coverage enumerates every manifest and all control-path categor
       assert.ok(entries.get(path)?.has('generatorSources'), `repository generator ${path}`);
     }
   }
+});
+
+test('the generator walk ignores dot-prefixed directories and tolerates vanished entries', () => {
+  // Regression for the boundary-fixture race: observation-reader-gate-boundary
+  // deliberately mkdtemps .github/scripts/.tmp-observation-reader-guard-* inside
+  // the live checkout, and node --test schedules it in parallel with this file.
+  // .gitignore keeps that directory out of the tracked inventory, so walking it
+  // would assert on a path that can never be a declared generator source.
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-architecture-control-walk-'));
+  try {
+    const transient = join(fixture, '.tmp-observation-reader-guard-abc123');
+    mkdirSync(join(fixture, 'nested'), { recursive: true });
+    mkdirSync(transient);
+    write(join(fixture, 'nested/real-generator.mjs'));
+    write(join(transient, 'synthetic-gate.test.mjs'));
+    assert.deepEqual(walkFirstPartyFiles(fixture), ['nested/real-generator.mjs']);
+    assert.deepEqual(walkFirstPartyFiles(join(fixture, 'gone')), []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
 test('GitHub CODEOWNERS is the human-surface enqueue gate, not the architecture inventory', () => {

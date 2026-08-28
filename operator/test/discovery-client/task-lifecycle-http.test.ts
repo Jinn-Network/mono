@@ -159,7 +159,7 @@ describe('createTaskLifecycleReader.getTaskLifecycleEvidence (#2044)', () => {
     expect(Object.keys(cand)).not.toContain('evaluator');
   });
 
-  it('never lets a candidate-only projection invent a spine (AC3)', async () => {
+  it('queries no downstream leg when the tasks leg comes back empty', async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       if (isReadyProbe(String(url))) return new Response('ok', { status: 200 });
       return new Response(JSON.stringify(page('tasks', [])), {
@@ -170,6 +170,33 @@ describe('createTaskLifecycleReader.getTaskLifecycleEvidence (#2044)', () => {
     // Only the tasks leg ran; a task-less result never queries the meta legs.
     const gqlCalls = fetchImpl.mock.calls.filter(([u]) => !isReadyProbe(String(u)));
     expect(gqlCalls).toHaveLength(1);
+  });
+
+  it('never lets a candidate-only projection invent a spine (AC3)', async () => {
+    // The candidate leg genuinely runs here: one attempt supplies the
+    // requestId_in filter, and the leg answers with a candidate for a
+    // requestId no spine row carries.
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20' },
+      ]),
+      page('verdicts', []),
+      page('attemptEnvelopeMetas', [
+        // Belongs to the spine attempt.
+        { requestId: hex32('b0'), chainId: 84532, manifestCid: 'bafy1', publisherAgentId: '1',
+          manifestHash: hex32('01'), enrichedAtBlock: '25' },
+        // Belongs to nothing — an attempt this read never saw.
+        { requestId: hex32('bf'), chainId: 84532, manifestCid: 'bafyGhost', publisherAgentId: '9',
+          manifestHash: hex32('0f'), enrichedAtBlock: '26' },
+      ]),
+    ]);
+    const ev = (await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).get('7')!;
+    // The orphan candidate did not become a second attempt.
+    expect(ev.authoritative.attempts).toHaveLength(1);
+    expect(ev.authoritative.attempts[0]!.attemptEnvelopeCandidates.map((c) => c.manifestCid))
+      .toEqual(['bafy1']);
   });
 
   it('does not attach an attempt row from a different chain to the spine (AC3)', async () => {
@@ -568,5 +595,33 @@ describe('createTaskLifecycleReader.getTaskLifecycleEvidence (#2044)', () => {
       .map(([, init]) => JSON.parse(String((init as RequestInit).body)))
       .filter((b) => b.query.includes('attemptEnvelopeMetas('));
     expect(metaBodies.map((b) => b.variables.requestIds.length)).toEqual([500, 1]);
+  });
+
+  it('withdraws the whole read when one batch of a batched leg is undrainable', async () => {
+    // The batches merge into one leg, so a batch that cannot be drained is a
+    // hole in that leg — handing back the batches that did drain would present
+    // a truncated candidate set as the complete one.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const attemptRows = Array.from({ length: 501 }, (_, i) => ({
+      taskId: '7', chainId: 84532, attemptIndex: i,
+      requestId: `0x${String(i).padStart(64, '0')}`,
+      operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20',
+    }));
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', attemptRows),
+      page('verdicts', []),
+      page('attemptEnvelopeMetas', [
+        { requestId: `0x${'0'.repeat(64)}`, chainId: 84532, manifestCid: 'bafy1',
+          publisherAgentId: '1', manifestHash: hex32('01'), enrichedAtBlock: '25' },
+      ]),
+      // Second batch: a connection-less body, the undrainable shape.
+      { data: {} },
+    ]);
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('missing or malformed connection on attemptEnvelopeMetas'),
+    );
+    warn.mockRestore();
   });
 });
