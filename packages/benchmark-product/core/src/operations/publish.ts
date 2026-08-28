@@ -1,5 +1,4 @@
 import { rmSync } from "node:fs";
-
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
@@ -214,6 +213,7 @@ export function runPublish(
       // independently; the bundle FORMAT is derived per Report from its own method
       // (`bundle/materialize.ts`), so a real multi-method publish can legitimately emit bundles of
       // different formats from the one Run/Matrix.
+      //
       // Every directory below is unreferenced until `writeRunState` names it. Any refusal before
       // that point removes them again (issue #3074).
       const created: string[] = [];
