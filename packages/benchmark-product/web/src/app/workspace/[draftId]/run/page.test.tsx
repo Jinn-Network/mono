@@ -246,4 +246,36 @@ describe("durable run monitor cancellation language", () => {
     expect(markup).not.toContain("Awaiting evaluation");
     expect(markup).not.toContain("awaiting evaluation");
   });
+
+  // The count is non-zero for most of a healthy run — every delivered cell the live driver has
+  // not judged yet is in it — and `runResume` refuses outright under a cancel marker. The tile
+  // names an action, so it appears only where that action is the answer; the per-cell marker,
+  // which names state, still appears in both.
+  test.each([
+    ["a driver is still working the leg", { driver: { operation: "run.launch", generation: "gen-1", startedAt: "2026-01-01T00:00:00.000Z", status: "active" } }],
+    ["a cancellation is pending", { cancelRequested: true }],
+  ])("suppresses the resume cue while %s", async (_name, overrides) => {
+    loadRunViewMock.mockReturnValue({
+      ok: true,
+      draft: { ok: true, result: {} },
+      status: { ok: true, result: {
+        state: "running",
+        cancelRequested: false,
+        cells: [
+          {
+            cellKey: "cell-gap", armId: "baseline", replicate: 1, taskSha256: "a".repeat(64),
+            status: "delivered", dispatches: 1,
+            evaluationGap: { missingEvalIndexes: [1], deliveryJournaled: true },
+          },
+        ],
+        counts: { expected: 1, dispatched: 1, delivered: 1, judged: 0, failed: 0, awaitingEvaluation: 1 },
+        ...overrides,
+      } },
+    });
+    const markup = renderToStaticMarkup(await RunMonitorPage({
+      params: Promise.resolve({ draftId: "draft-1" }),
+    }));
+    expect(markup).not.toContain("Resume heals these cells.");
+    expect(markup).toContain("awaiting evaluation");
+  });
 });

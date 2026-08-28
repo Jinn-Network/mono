@@ -228,12 +228,14 @@ Covers the design spec §4.6 Official-run row.
   cell that reached a delivery but still has an evaluation leg `resume` would
   act on is additionally marked "awaiting evaluation", and "awaiting evaluation
   (delivery not journaled)" for the stranded shape whose `delivery` record
-  never reached the journal (issue #3084).
+  never reached the journal.
 - **State messages** — infra failures are shown as infra, never as a fail
   (`unscorable` is a named outcome value, not a failure — design spec §4.1,
   §4.6); cap-approach warning; stall notice; a non-zero
-  `counts.awaitingEvaluation` surfaces as its own summary tile naming `resume`
-  as the resolving action; "cancellation requested —
+  `counts.awaitingEvaluation` with no active driver and no pending cancellation
+  surfaces as its own summary tile naming `resume` as the resolving action —
+  gated so, because `resume` is refused under a cancel marker and is not the
+  answer while a driver is still working the leg; "cancellation requested —
   draining in-flight work" until the operation reaches its terminal
   `cancelled` result; a closed run with a valid marker says cancellation is
   finalized, never still draining. Venue/finalization contention retains the

@@ -48,8 +48,10 @@ export interface RunStatusCell {
   };
   /** Present, while the run is `running`, whenever this cell is in the UNFILTERED
    * evaluation-gap set (`../run/journal.ts`'s `evaluationGaps`) — the same set `run.resume`
-   * drives (`./run-launch.ts`) and `run.collect` reads for terminal accounting
-   * (`./run-collect.ts`). Deliberately independent of
+   * sweeps when it is allowed to run at all (`./run-launch.ts`; a pending cancel marker makes
+   * it sweep nothing) and `run.collect` reads for terminal accounting
+   * (`./run-collect.ts`). This is a state, not a call to action: a delivered cell an active
+   * driver is still judging is in this set too. Deliberately independent of
    * `evaluationRecovery`, which reports only infrastructure-retry recovery and disappears
    * entirely when the run's policy allows no retries: a gap can exist with nothing having
    * failed at all (issue #3084). `deliveryJournaled: false` is exactly the issue #3081 shape —
@@ -68,9 +70,10 @@ export interface RunStatusCounts {
   /** Cells that reached a solve delivery (status "delivered" or "judged" — judged implies delivered). */
   readonly delivered: number;
   readonly judged: number;
-  /** Cells carrying an `evaluationGap` — delivered, but with an evaluation leg `run.resume`
-   * would still act on. Non-zero is the operator's cue to resume; zero outside `running`,
-   * where `resume` cannot act. */
+  /** Cells carrying an `evaluationGap` — delivered, but with no journaled verdict yet. Zero
+   * outside `running`, where `resume` cannot act. Non-zero becomes a cue to resume only once
+   * no driver is active and no cancellation is pending; while a driver is working, this is
+   * ordinary in-flight progress. */
   readonly awaitingEvaluation: number;
   /** Cells whose accounted terminal is a non-replaceable failure (excludes "expired"/"cancelled",
    * each visible on the per-cell `status` for callers who want that distinction). */

@@ -1200,12 +1200,12 @@ function handleStatus(args: ParsedArgs, context: CliContext, jsonMode: boolean):
       value.closeAt !== undefined ? `state ${value.state}, closeAt ${value.closeAt}` : `state ${value.state}`,
       ...value.cells.map((cell) => {
         // A stranded cell (issue #3081) reads as an ordinary `delivered` otherwise — the marker
-        // is the only thing that separates "still being judged" from "resume must heal this".
+        // is the only thing that separates a cell with a journaled verdict from one without.
         const gap = cell.evaluationGap === undefined
           ? ""
           : cell.evaluationGap.deliveryJournaled
-            ? "\tawaiting-evaluation"
-            : "\tawaiting-evaluation (delivery not journaled)";
+            ? "\tawaiting evaluation"
+            : "\tawaiting evaluation (delivery not journaled)";
         return `${cell.cellKey}\t${cell.status}\t${cell.dispatches}${gap}`;
       }),
       `expected ${value.counts.expected}, dispatched ${value.counts.dispatched}, delivered ${value.counts.delivered}, `
