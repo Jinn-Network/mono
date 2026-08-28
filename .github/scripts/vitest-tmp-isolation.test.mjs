@@ -537,7 +537,7 @@ test('wiredPaths reads every setupFiles and globalSetup list', () => {
   assert.notEqual(scoped[1].scope, scoped[2].scope);
 });
 
-test('projectEntryRanges finds one range per object entry, in source order', () => {
+test('projectEntryRanges finds one range per object entry, ordered per projects literal', () => {
   // Each range spans exactly the object entry it was read from, braces included.
   const entries = (source) =>
     projectEntryRanges(source).map(([start, end]) => source.slice(start, end + 1));
@@ -558,6 +558,27 @@ test('projectEntryRanges finds one range per object entry, in source order', () 
   assert.deepEqual(projectEntryRanges(`projects: [{ test: { name: 'a' } }`), []);
   // An unterminated entry inside a terminated list drops that entry, keeping the ones before it.
   assert.deepEqual(entries(`projects: [{ a: 1 }, { b: 2 ]`), ['{ a: 1 }']);
+
+  // Ordering is per `projects` literal, not global: each literal is walked to completion before the
+  // next one is opened, so a nested literal's entries land after every entry of the literal that
+  // encloses it — including siblings that start later in the source. Starts are not ascending.
+  const unordered = `projects: [{ test: { projects: [{ x: 1 }] } }, { y: 2 }]`;
+  assert.deepEqual(entries(unordered), [
+    `{ test: { projects: [{ x: 1 }] } }`,
+    '{ y: 2 }',
+    '{ x: 1 }',
+  ]);
+  // And `scopeAt` reads that unordered list correctly: an offset inside `{ x: 1 }` is scoped to it,
+  // not to the enclosing entry emitted first. (Innermost-by-maximum-start and a bare last-match-wins
+  // agree on every reachable input — a range that contains an offset is always emitted before the
+  // ranges nested inside it — so no fixture can separate them; the comparison is defensive.)
+  const unorderedRanges = projectEntryRanges(unordered);
+  const [outerRange, , innerRange] = unorderedRanges;
+  assert.ok(outerRange[0] < innerRange[0], 'the enclosing entry starts before the nested one');
+  assert.equal(
+    scopeAt(unordered.indexOf('x: 1'), unorderedRanges),
+    `projects@${innerRange[0]}`,
+  );
 
   // Nested `projects` yield both ranges, and a path inside the inner one is scoped to the inner
   // entry rather than the outer one that also encloses it.
