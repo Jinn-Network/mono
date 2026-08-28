@@ -444,3 +444,16 @@ def test_open_session_never_raises_on_a_malformed_service(feed_path, service):
         model_service=service,
     )
     assert "service" not in read_lines(feed_path)[0]["model"]
+
+
+@pytest.mark.parametrize(
+    "repository",
+    ["https://exa mple.com/x", "https://example.com/x y", "not-an-iri", " "],
+)
+def test_repository_state_drops_an_iri_the_runtime_would_refuse_whole(feed_path, repository):
+    """The Python check must be no laxer than the runtime's, or the whole feed is lost."""
+    writer = feed.SessionFeed(feed_path)
+    writer.repository_state(
+        repository=repository, base_commit="a" * 40, base_tree="b" * 40
+    )
+    assert feed_path.read_text(encoding="utf-8") == ""

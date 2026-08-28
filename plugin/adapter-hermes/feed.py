@@ -40,7 +40,9 @@ CONTROLLED_INPUT_ROLES = ("workflow", "skill", "prompt", "config")
 MODEL_SERVICE_IRI_PREFIX = "https://spec.jinn.network/services"
 
 _GIT_OBJECT_NAME = re.compile(r"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
-_ABSOLUTE_IRI = re.compile(r"\A[A-Za-z][A-Za-z0-9+.\-]*:\S")
+#: Matches the runtime's `isAbsoluteIri`, which rejects whitespace anywhere — not merely
+#: immediately after the scheme. A laxer check here writes a feed the runtime refuses whole.
+_ABSOLUTE_IRI = re.compile(r"\A[A-Za-z][A-Za-z0-9+.\-]*:\S+\Z")
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 
 

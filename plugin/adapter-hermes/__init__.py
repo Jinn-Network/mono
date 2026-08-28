@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -35,10 +36,21 @@ logger = logging.getLogger(__name__)
 _FIRST_SESSION_MARKER = "first-session-done"
 _SEAL_TIMEOUT_S = 60.0
 
-#: A session start must not feel like a hang, and an unreachable repository is not worth waiting
-#: for: the capture proceeds without the base state rather than late.
-_GIT_TIMEOUT_S = 2.0
-_SSH_REMOTE = re.compile(r"\A(?:ssh://)?git@(?P<host>[^:/]+)[:/](?P<path>.+?)(?:\.git)?\Z")
+#: A session start must not feel like a hang, so the whole observation shares one deadline
+#: rather than giving each read its own: an unreachable repository costs the base state, not the
+#: first turn. The capture proceeds without it rather than late.
+_GIT_BUDGET_S = 2.0
+
+#: scp-style `git@host:path`, where `:` separates the path — a port cannot appear.
+_SCP_REMOTE = re.compile(r"\A(?P<user>[^@/]+)@(?P<host>[^:/]+):(?P<path>.+?)(?:\.git)?\Z")
+#: An explicit URL, where `:NNNN` after the host is unambiguously a port, not a path segment.
+_URL_REMOTE = re.compile(
+    r"\A(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]*)://"
+    r"(?:(?P<userinfo>[^@/]*)@)?"
+    r"(?P<host>[^/:]+)(?::(?P<port>\d+))?"
+    r"(?P<path>/.*?)(?:\.git)?\Z"
+)
+_NETWORK_SCHEMES = ("https", "http", "git", "ssh")
 
 _lock = threading.Lock()
 _sessions: Dict[str, "_SessionState"] = {}
@@ -133,20 +145,31 @@ def _ensure_capture(state: "_SessionState", model: str) -> None:
         model_name=model_name,
         model_service=feed_module.derive_model_service(provider, model_name),
     )
-    observed = _observe_repository_state()
+    observed = _observe_repository_state(state.cwd)
     if observed is not None:
         state.feed.repository_state(**observed)
     state.feed.environment(tools=[], skills=[])
 
 
-def _git(*args: str) -> str:
-    """One short read from the working directory's repository, or "" if anything goes wrong."""
+def _git(cwd: str, deadline: float, *args: str) -> str:
+    """One short read from *cwd*'s repository, or "" if anything goes wrong.
+
+    `-C cwd` is load-bearing, not tidiness: the process directory is not the session's. An
+    orchestrator dispatches a session into a worktree while sitting elsewhere, and reading the
+    wrong repository would seal a confident, wrong answer to the one question this record
+    exists to answer.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        logger.debug("jinn: git budget spent before %s", args[0])
+        return ""
     try:
         done = subprocess.run(
-            ("git", *args),
+            ("git", "-C", cwd, *args),
             capture_output=True,
             text=True,
-            timeout=_GIT_TIMEOUT_S,
+            timeout=remaining,
+            stdin=subprocess.DEVNULL,
             check=False,
         )
     except Exception as exc:
@@ -156,41 +179,63 @@ def _git(*args: str) -> str:
 
 
 def _repository_iri(remote: str) -> str:
-    """Normalize a Git remote to a network IRI, which is what the record requires.
+    """Normalize a Git remote to a credential-free network IRI, which is what the record needs.
 
-    A local remote is dropped rather than normalized. A `file:///Users/<name>/…` URL passes an
-    absolute-IRI check but names a filesystem path, and the record it would land in is durable,
-    never deleted, and publicly projectable.
+    Two things are dropped rather than carried, for the same reason: the record they land in is
+    durable, never deleted, and publicly projectable.
+
+    * **Userinfo.** `https://x-access-token:ghs_…@github.com/o/r` is the remote every GitHub
+      Actions checkout writes. A token sealed into an append-only archive cannot be withdrawn
+      from it, so it is stripped here — at the source, which is the discipline this capture
+      path is supposed to hold rather than leave to a later scrub.
+    * **Local remotes.** `file:///Users/<name>/…` is a well-formed IRI naming a filesystem path,
+      usually with a username in it, and it resolves for nobody.
     """
-    if not remote:
+    remote = (remote or "").strip()
+    # Whitespace anywhere makes it not an IRI, and the runtime refuses the whole feed for one.
+    if not remote or re.search(r"\s", remote):
         return ""
-    match = _SSH_REMOTE.match(remote)
-    if match:
-        return f"https://{match.group('host')}/{match.group('path')}"
-    normalized = remote[:-4] if remote.endswith(".git") else remote
-    if not normalized.startswith(("https://", "http://", "git://")):
-        logger.debug("jinn: remote %r is not a network repository", remote)
-        return ""
-    return normalized
+
+    url = _URL_REMOTE.match(remote)
+    if url is not None:
+        if url.group("scheme").lower() not in _NETWORK_SCHEMES:
+            logger.debug("jinn: remote scheme %r is not a network repository", url.group("scheme"))
+            return ""
+        if url.group("userinfo"):
+            logger.debug("jinn: dropped credentials from the origin remote")
+        # ssh:// is a transport, not a way to fetch; https names the same repository publicly.
+        scheme = "https" if url.group("scheme").lower() == "ssh" else url.group("scheme").lower()
+        port = f":{url.group('port')}" if url.group("port") else ""
+        return f"{scheme}://{url.group('host')}{port}{url.group('path')}"
+
+    scp = _SCP_REMOTE.match(remote)
+    if scp is not None:
+        return f"https://{scp.group('host')}/{scp.group('path')}"
+
+    logger.debug("jinn: remote %r is not a network repository", remote)
+    return ""
 
 
-def _observe_repository_state() -> Optional[Dict[str, str]]:
-    """Read the base commit and tree the session starts from.
+def _observe_repository_state(cwd: Optional[str]) -> Optional[Dict[str, str]]:
+    """Read the base commit and tree the session in *cwd* starts from.
 
     The commit and tree are the content binding; branch and target base are context this may
     legitimately fail to find (a detached head, a repository with no upstream).
     """
-    commit = _git("rev-parse", "HEAD")
-    tree = _git("rev-parse", "HEAD^{tree}")
-    repository = _repository_iri(_git("config", "--get", "remote.origin.url"))
+    if not cwd:
+        return None
+    deadline = time.monotonic() + _GIT_BUDGET_S
+    commit = _git(cwd, deadline, "rev-parse", "HEAD")
+    tree = _git(cwd, deadline, "rev-parse", "HEAD^{tree}")
+    repository = _repository_iri(_git(cwd, deadline, "config", "--get", "remote.origin.url"))
     if not commit or not tree or not repository:
         return None
-    upstream = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+    upstream = _git(cwd, deadline, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
     return {
         "repository": repository,
         "base_commit": commit,
         "base_tree": tree,
-        "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
+        "branch": _git(cwd, deadline, "rev-parse", "--abbrev-ref", "HEAD"),
         # "origin/next" names the same base as "next"; the remote prefix is local bookkeeping.
         "target_base": upstream.split("/", 1)[1] if "/" in upstream else upstream,
     }

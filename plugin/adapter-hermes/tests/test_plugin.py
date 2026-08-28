@@ -5,7 +5,9 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import pathlib
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -233,7 +235,7 @@ def test_session_start_reports_the_model_service_and_the_base_repository_state(
     monkeypatch.setattr(
         jinn,
         "_observe_repository_state",
-        lambda: {
+        lambda cwd: {
             "repository": "https://github.com/Jinn-Network/mono",
             "base_commit": "4f0e2b7c1a9d8e3f5b6a7c8d9e0f1a2b3c4d5e6f",
             "base_tree": "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567",
@@ -266,7 +268,7 @@ def test_an_unreadable_repository_costs_the_base_state_and_nothing_else(
     monkeypatch, tmp_path, lines
 ):
     install_client(monkeypatch, tmp_path)
-    monkeypatch.setattr(jinn, "_observe_repository_state", lambda: None)
+    monkeypatch.setattr(jinn, "_observe_repository_state", lambda cwd: None)
     jinn._on_session_start(session_id="s", platform="cli", cwd=str(tmp_path))
     assert (
         jinn._on_pre_llm_call(session_id="s", user_message="x", is_first_turn=True, model="m")
@@ -294,6 +296,21 @@ def test_an_unreadable_repository_costs_the_base_state_and_nothing_else(
         ("file:///Users/someone/src/mono", ""),
         ("/Users/someone/src/mono", ""),
         ("C:\\Users\\someone\\mono", ""),
+        # A token in the remote is unrevocable once sealed into an append-only archive.
+        (
+            "https://x-access-token:ghs_LIVETOKEN0123456789@github.com/example/repo.git",
+            "https://github.com/example/repo",
+        ),
+        ("https://TOKEN@github.com/example/repo", "https://github.com/example/repo"),
+        # In an explicit ssh:// URL, ":NNNN" is a port, not the first path segment.
+        (
+            "ssh://git@gitlab.example.com:29418/team/repo.git",
+            "https://gitlab.example.com:29418/team/repo",
+        ),
+        ("ssh://git@github.com/Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
+        ("git://github.com/Jinn-Network/mono.git", "git://github.com/Jinn-Network/mono"),
+        # A remote the runtime would refuse whole; the adapter must not write it.
+        ("https://exa mple.com/x", ""),
     ],
 )
 def test_a_git_remote_becomes_an_absolute_iri(remote, expected):
@@ -302,13 +319,54 @@ def test_a_git_remote_becomes_an_absolute_iri(remote, expected):
 
 
 def test_observing_the_repository_reads_the_commit_and_tree_this_session_started_from():
-    observed = jinn._observe_repository_state()
+    observed = jinn._observe_repository_state(str(pathlib.Path(__file__).resolve().parent))
     assert observed is not None
     assert re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", observed["base_commit"])
     assert re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", observed["base_tree"])
     assert observed["repository"].startswith("http")
 
 
-def test_observing_a_directory_that_is_not_a_repository_reports_nothing(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-    assert jinn._observe_repository_state() is None
+def test_observing_a_directory_that_is_not_a_repository_reports_nothing(tmp_path):
+    assert jinn._observe_repository_state(str(tmp_path)) is None
+
+
+def test_observing_reports_nothing_without_a_working_directory():
+    assert jinn._observe_repository_state(None) is None
+
+
+def _make_repo(path, remote):
+    """A real repository with one commit, so the reads under test have something to read."""
+    path.mkdir(parents=True, exist_ok=True)
+    run = lambda *args: subprocess.run(
+        ["git", "-C", str(path), *args], capture_output=True, check=True
+    )
+    run("init", "-q")
+    run("config", "user.email", "t@example.test")
+    run("config", "user.name", "T")
+    run("config", "commit.gpgsign", "false")
+    (path / "f.txt").write_text(path.name, encoding="utf-8")
+    run("add", "f.txt")
+    run("commit", "-qm", "one")
+    run("remote", "add", "origin", remote)
+    return path
+
+
+def test_the_base_state_comes_from_the_session_directory_not_the_process_directory(
+    monkeypatch, tmp_path
+):
+    """An orchestrator dispatches a session into a worktree while sitting elsewhere.
+
+    Reading the process directory would seal a confident, wrong answer to exactly the question
+    this record exists to answer.
+    """
+    elsewhere = _make_repo(tmp_path / "repoA", "https://github.com/example/repoA.git")
+    session = _make_repo(tmp_path / "repoB", "https://github.com/example/repoB.git")
+    monkeypatch.chdir(elsewhere)
+
+    observed = jinn._observe_repository_state(str(session))
+    assert observed is not None
+    assert observed["repository"] == "https://github.com/example/repoB"
+    assert observed["base_commit"] == subprocess.run(
+        ["git", "-C", str(session), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
