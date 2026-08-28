@@ -34,9 +34,10 @@
  * Policy enforced here — three rules over the test trees:
  *
  *   1. No numeric literal in [32768, 65535] in a *port-shaped position* —
- *      the first argument of `.listen(`, the value of a port-shaped object key
- *      (`apiPort` / `grpcPort` / `httpPort` / `portBase` / `ports` /
- *      `dailyDriverPorts` / `port`) including every element of an array
+ *      the first argument of `.listen(`, the value of an object key whose name
+ *      is port-ish (`apiPort`, `daemonPort`, `gammaPort`, `portBase`, `ports`,
+ *      `port` — the same `PORTISH_NAME` test rule 1c applies to a binding
+ *      name, not an enumerated list) including every element of an array
  *      literal in that position, or the initializer of a `const` / `let` /
  *      `var` whose name is port-ish (`const apiPort = 45000`, and the
  *      defaulted form `const portBase = opts.portBase ?? 45000`). The array
@@ -51,14 +52,22 @@
  *   3. No parallelism pin, and no isolation opt-out, in
  *      `operator/vitest.config.ts`.
  *
+ * Rules 1 and 2 read CODE, not raw text: comments and string contents are
+ * blanked (offsets preserved) before they run, so prose about the band and a
+ * port array quoted inside a fixture string are both invisible to them. This is
+ * the same treatment rule 3 has always had, and for the same reason — the
+ * runbook this guard ships with actively teaches contributors to write about
+ * in-band ports.
+ *
  * Rules 1 and 2 deliberately test POSITION ∧ VALUE-BAND, never either alone.
  * `operator/test/**` holds ~1,900 numeric literals that fall inside the band
  * and are not ports at all — timeouts (`50000`, `60000`), Hyperliquid price
  * fixtures (`'50000'`, `'51500'`), and hex-address substrings (`33333`,
  * `55555`, `44444`) — so a value-only rule is pure noise. It also holds 61
- * legitimate fixed port literals in genuine port positions, over 18 distinct
- * numbers (7331, 7332, 7333, 7340, 7342, 7350, 7360, 7400, 7450, 7451, 7732,
- * 7733, 7734, 7740, 7742, 7777, 9331, 9332, 18533), plus the
+ * legitimate fixed port literals in genuine port positions, over the distinct
+ * numbers 7331, 7332, 7333, 7340, 7342, 7350, 7351, 7360, 7388, 7389, 7390,
+ * 7400, 7450, 7451, 7732, 7733, 7734, 7740, 7742, 7777, 9331, 9332, 18532 and
+ * 18533, plus the
  * `const API_PORT = 27331` that rule 1c sees — every one of them safely BELOW
  * the ephemeral band, so a position-only rule condemns the correct code. Only
  * the intersection names the actual hazard. The below-band fixed ports in
@@ -162,17 +171,31 @@
  * claim. Each is a known gap, not an oversight; none has a live instance in
  * the tree today.
  *
- *   - A port inside a URL string — `fetch('http://127.0.0.1:45020/health')`.
- *     The stated invariant is about port-shaped *syntactic positions*, which a
- *     string literal is not. Adding a URL rule would flag ports behind a fully
- *     mocked `fetch` (there is one such literal in the tree today), i.e. it
- *     would condemn code carrying no hazard.
+ *   - Anything inside a comment or a string literal. Rules 1 and 2 match
+ *     against comment- and string-blanked text, so a port inside a URL string
+ *     (`fetch('http://127.0.0.1:45020/health')`), a port array quoted into a
+ *     YAML fixture (`const yaml = 'ports: [45000]'`), and a commented-out
+ *     `srv.listen(45000)` are all invisible to them. The stated invariant is
+ *     about port-shaped *syntactic positions*, which neither a comment nor a
+ *     string literal is; a rule that read them would flag ports behind a fully
+ *     mocked `fetch` (there is one such literal in the tree today) and prose
+ *     that merely discusses the band, i.e. it would condemn code carrying no
+ *     hazard and redden a required gate. Rule 3 blanks comments only — its
+ *     subject is one config object literal, where a pin written inside a
+ *     string does not occur.
+ *   - A port position inside a template literal's `${…}` interpolation. The
+ *     blanking does not parse interpolations back out; the failure is a missed
+ *     literal, never a spurious one.
  *   - A bare reassignment — `apiPort = 45000;` with the declaration elsewhere.
  *     Rule 1c requires the `const` / `let` / `var`, which keeps it away from
  *     every `==` / `>=` / `=>` shape a looser pattern would have to exclude.
- *   - A `]` inside a string inside a port array — `{ ports: [']', 45004] }`.
- *     Rule 1d's array capture is not a bracket matcher, so it stops at the
- *     first `]`. Likewise a nested array reports only its first row.
+ *   - A nested array inside a port array — rule 1d's capture is not a bracket
+ *     matcher, so it stops at the first `]` and reports only the first row. A
+ *     `]` inside a *string* inside the array no longer stops it, since string
+ *     contents are blanked before the capture runs.
+ *   - A port array longer than 400 characters between its brackets. Rule 1d's
+ *     capture is bounded there so an unclosed `[` cannot swallow the rest of
+ *     the file; a real port array is nowhere near that long.
  *   - A ternary default — `const apiPort = cond ? x : 45000`. Rule 1c's
  *     optional prefix covers `??` and `||` only, which are how a default port
  *     is actually written in this tree.
@@ -227,10 +250,25 @@ export const ALLOW_MARKER = 'lint:no-fixed-test-port-allow';
 const NUM = '(\\d[\\d_]*)(?![\\w.])';
 const NUM_FREE = `(?<![\\w.$])${NUM}`;
 
-const PORT_KEY = '\\b(?:apiPort|grpcPort|httpPort|portBase|ports|dailyDriverPorts|port)\\s*:\\s*';
+// An OBJECT KEY, captured by name rather than enumerated. The name is then
+// filtered through `PORTISH_NAME`, exactly as rule 1c filters a binding name —
+// an enumerated list left `{ daemonPort: 45000 }` and `{ gammaPort: 45001 }`
+// green while `const gammaPort = 45001` fired, for the same name and the same
+// value, and both keys carry a real child-process bind in
+// `scripts/release/olas-rails-smoke.ts` and `scripts/release/stage1-closed-loop.ts`.
+// `(?<![\w$])` rather than `\b`, because `$` is not a word character and
+// `$port:` would otherwise slip the boundary.
+const PORT_KEY = '(?<![\\w$])([A-Za-z_$][\\w$]*)\\s*:\\s*';
+// Rule 1d's array capture is bounded. `[^\]]*` is stopped by the first `]`
+// and nothing else, so an unclosed `[` — in prose, in a string, or in a
+// half-written edit — swallowed the rest of the FILE and reported every in-band
+// number inside it, which is the collapse into a value-only rule the doc block
+// above argues is unacceptable noise. A real port array is nowhere near this
+// long.
+const PORT_KEY_ARRAY_MAX = 400;
 const LISTEN_LITERAL = new RegExp(`\\.listen\\(\\s*${NUM}`, 'g');
 const PORT_KEY_LITERAL = new RegExp(`${PORT_KEY}${NUM}`, 'g');
-const PORT_KEY_ARRAY = new RegExp(`${PORT_KEY}\\[([^\\]]*)\\]`, 'g');
+const PORT_KEY_ARRAY = new RegExp(`${PORT_KEY}\\[([^\\]]{0,${PORT_KEY_ARRAY_MAX}})\\]`, 'g');
 const ARRAY_ELEMENT = new RegExp(NUM_FREE, 'g');
 // `const apiPort = 45000` — a bound-later port that PORT_KEY misses because it
 // is an assignment, not an object key. The first optional group is the TS type
@@ -329,16 +367,27 @@ function lineNumberAt(text, offset) {
 /**
  * Blank out `//` and block comments, preserving every byte offset and newline
  * so line numbers and `matchAll` indices stay exact. String and template
- * literals are tracked only so a `//` or `/*` inside one is not mistaken for a
- * comment; their contents are left intact.
+ * literals are tracked so a `//` or `/*` inside one is not mistaken for a
+ * comment; with `{ strings: true }` their CONTENTS are blanked as well, while
+ * the quote characters themselves are kept so the literal keeps its shape.
  *
- * Rule 3 needs this because `operator/vitest.config.ts` explains its own
- * defaults in prose, and a comment saying "we do NOT set `pool: 'threads'`" is
- * not a pin. A regex/division ambiguity is not worth resolving here: the only
- * consumer is a config object literal, where a regex literal containing `//`
- * or an unbalanced quote does not occur.
+ * Rule 3 needs the comment blanking because `operator/vitest.config.ts`
+ * explains its own defaults in prose, and a comment saying "we do NOT set
+ * `pool: 'threads'`" is not a pin. Rules 1 and 2 need both: they scanned raw
+ * text, so `// we used to write ports: [45000, 45001] here` and
+ * `const yaml = 'ports: [45000]'` each reported a violation that did not exist
+ * — a false positive on a required gate, which is the failure mode this file
+ * argues against at length. Blanking strings also makes the "port inside a URL
+ * string" non-catch below structural rather than incidental.
+ *
+ * A template literal's `${…}` interpolations are blanked along with its text.
+ * The failure that buys is a MISSED port position inside an interpolation,
+ * never a spurious one, and a port literal written inside `${…}` does not
+ * occur. A regex/division ambiguity is not worth resolving here either: the
+ * consumers are a config object literal and test source, where a regex literal
+ * containing `//` or an unbalanced quote does not occur.
  */
-export function blankComments(text) {
+export function blankComments(text, { strings = false } = {}) {
   // `split('')`, not `Array.from`: the latter splits by code POINT while every
   // index below (`text[i]`, `out[i]`, `indexOf`) is a code UNIT offset, so one
   // surrogate pair anywhere in the file shifts every later write by a slot —
@@ -351,10 +400,19 @@ export function blankComments(text) {
     const ch = text[i];
     if (quote) {
       if (ch === '\\') {
+        if (strings) {
+          out[i] = ' ';
+          if (i + 1 < text.length && text[i + 1] !== '\n') out[i + 1] = ' ';
+        }
         i += 2;
         continue;
       }
-      if (ch === quote) quote = null;
+      if (ch === quote) {
+        quote = null;
+        i += 1;
+        continue;
+      }
+      if (strings && ch !== '\n') out[i] = ' ';
       i += 1;
       continue;
     }
@@ -399,39 +457,49 @@ function enclosingName(lines, idx) {
  */
 export function scanText(text) {
   const violations = [];
+  // Rules 1 and 2 match against CODE — comments and string contents blanked,
+  // offsets preserved. The suppression marker and every reported snippet are
+  // read off the RAW line: the marker only ever lives in a comment, and a
+  // blanked snippet would show the reader an empty string.
+  const code = blankComments(text, { strings: true });
   const lines = text.split('\n');
+  const codeLines = code.split('\n');
 
-  lines.forEach((line, idx) => {
-    if (line.includes(ALLOW_MARKER)) return;
+  codeLines.forEach((line, idx) => {
+    const raw = lines[idx] ?? '';
+    if (raw.includes(ALLOW_MARKER)) return;
 
     let flagged = false;
 
     // Rule 1a — bind position: `.listen(<port>, …)`.
     for (const m of line.matchAll(LISTEN_LITERAL)) if (inBand(m[1])) flagged = true;
-    // Rule 1b — port-key position, bare literal.
-    for (const m of line.matchAll(PORT_KEY_LITERAL)) if (inBand(m[1])) flagged = true;
+    // Rule 1b — port-key position, bare literal, key filtered by name.
+    for (const m of line.matchAll(PORT_KEY_LITERAL)) {
+      if (PORTISH_NAME.test(m[1]) && inBand(m[2])) flagged = true;
+    }
     // Rule 1c — `const|let|var <port-ish name> = <literal>`, plain or defaulted.
     for (const m of line.matchAll(PORT_DECL_LITERAL)) {
       if (PORTISH_NAME.test(m[1]) && inBand(m[2])) flagged = true;
     }
     // Rule 2 — a guessed port is the same race, harder to reproduce.
     if (RANDOM_CALL.test(line)) {
-      const name = enclosingName(lines, idx);
+      const name = enclosingName(codeLines, idx);
       if (name && PORTISH_NAME.test(name)) flagged = true;
     }
 
-    if (flagged) violations.push({ line: idx + 1, snippet: line.trim() });
+    if (flagged) violations.push({ line: idx + 1, snippet: raw.trim() });
   });
 
   // Rule 1d — port-key position, array literal: EVERY element counts. Run
   // over the whole file text, not line by line, because the array form is
   // routinely written multi-line and a per-line scan can never see across
   // the newline between the `ports: [` and its elements.
-  for (const m of text.matchAll(PORT_KEY_ARRAY)) {
+  for (const m of code.matchAll(PORT_KEY_ARRAY)) {
+    if (!PORTISH_NAME.test(m[1])) continue;
     const contentStart = m.index + m[0].indexOf('[') + 1;
-    for (const el of m[1].matchAll(ARRAY_ELEMENT)) {
+    for (const el of m[2].matchAll(ARRAY_ELEMENT)) {
       if (!inBand(el[1])) continue;
-      const lineNo = lineNumberAt(text, contentStart + el.index);
+      const lineNo = lineNumberAt(code, contentStart + el.index);
       const snippet = lines[lineNo - 1] ?? '';
       if (snippet.includes(ALLOW_MARKER)) continue;
       violations.push({ line: lineNo, snippet: snippet.trim() });

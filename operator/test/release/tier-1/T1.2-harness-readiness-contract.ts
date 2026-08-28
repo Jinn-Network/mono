@@ -19,18 +19,31 @@ const KNOWN_HARNESSES = ['claude-code-learner', 'codex-code-learner', 'hermes-ag
 // The price is that the number must be unique repo-wide, so every one of them
 // is recorded here. `yarn lint:no-fixed-test-port` enforces the band, not this
 // list -- the list is maintained by hand, and a wrong entry is how the next
-// reservation collides. Verified against the tree 2026-08-28; the 7350/7351
-// and 7360/7361 rows were missing from the first pass, which had them filed as
-// inert.
+// reservation collides. Verified against the tree 2026-08-28; the 7350/7351,
+// 7360/7361, 7388 and 7389 rows were missing from earlier passes, and the
+// 7350/7351 double-booking below was found by the same re-walk.
 //
 //   7331          default daemon apiPort -- the conventional one, referenced by
 //                 ~26 call sites (config fixtures, doctor, harness URLs)
-//   7350 / 7351   test/release/tier-3/tier-3-helpers.ts -- the DEFAULT
+//   7350 / 7351   DOUBLE-BOOKED, and the one row here that is not unique.
+//                 test/release/tier-3/tier-3-helpers.ts -- the DEFAULT
 //                 `opts.portBase ?? 7350`, i.e. every tier-3 scenario that does
-//                 not pass its own portBase (solver takes portBase + 1)
+//                 not pass its own portBase (solver takes portBase + 1) -- AND
+//                 scripts/release/stage1-closed-loop.ts:60-61, `EVALUATOR_PORT`
+//                 / `SOLVER_PORT`, which bind the same pair. Safe only because
+//                 stage1-closed-loop is a hand-run release script that never
+//                 runs concurrently with the vitest suite. Do not reuse either
+//                 number, and collapse this row onto one owner the next time
+//                 stage1-closed-loop is touched.
 //   7360 / 7361   test/release/tier-3/T3.1-producer-evaluator-real.ts --
 //                 `PORT_BASE`, passed to setupTier3Scenario, which spawns two
 //                 real daemons on portBase / portBase + 1
+//   7388          scripts/release/olas-rails-smoke.ts:19 -- `DEFAULT_GAMMA_PORT`,
+//                 the local Gamma fixture, bound at :318 via
+//                 `server.listen(port, '127.0.0.1', ...)`
+//   7389          scripts/release/stage1-closed-loop.ts:62 --
+//                 `DEFAULT_GAMMA_PORT`, the local Polymarket Gamma fixture,
+//                 bound at :246 the same way
 //   7732 / 7733   test/helpers/multi-op-daemon.test.ts -- op-a / op-b dummies
 //   7734          test/helpers/multi-op-daemon.test.ts -- 'teardown is idempotent'
 //   7740 / 7741   test/release/tier-2/tier-2-helpers.test.ts -- portBase 7740
@@ -40,10 +53,12 @@ const KNOWN_HARNESSES = ['claude-code-learner', 'codex-code-learner', 'hermes-ag
 //                 listening here" probe; deliberately bound by nothing
 //   27331         THIS file -- the real daemon this scenario spawns
 //
-// Other below-band literals occur in the tree (7332, 7333, 7340, 7342, 7400,
-// 7450, 7451, 7777, 18533) but nothing binds them: they are inert config
-// values, PIDs, or URLs behind a stubbed `fetch`. The full census lives in the
-// doc block of operator/scripts/check-no-fixed-test-port.mjs.
+// Other below-band literals occur in the tree (7332, 7333, 7340, 7342, 7390,
+// 7400, 7450, 7451, 7777, 18532, 18533) but nothing binds them: they are inert
+// config values, PIDs, URLs behind a stubbed `fetch`, or -- in the case of 7390
+// (scripts/release/launch-isolated-solvernet.ts:354) -- unreachable code behind
+// the unconditional throw at :349. The full census lives in the doc block of
+// operator/scripts/check-no-fixed-test-port.mjs.
 //
 // ── Which form to use ───────────────────────────────────────────────────────
 //

@@ -87,6 +87,59 @@ test('rule 1d reports every element of a multi-line port array', () => {
   assert.deepEqual(flagged(src), [3, 4]);
 });
 
+// The port-key list was closed, so `{ daemonPort: 45000 }` and
+// `{ gammaPort: 45001 }` passed while `const gammaPort = 45001` fired — same
+// name, same value, opposite verdicts. Both keys carry a real child-process
+// bind in scripts/release/.
+test('rule 1b filters the key by name, not by an enumerated list', () => {
+  for (const key of ['daemonPort', 'gammaPort', 'rpcPort', 'apiPort', 'portBase', 'ports']) {
+    assert.deepEqual(flagged(`const o = { ${key}: 45000 };`), [1], `${key} is port-ish`);
+  }
+  for (const key of ['transport', 'support', 'report', 'portal', 'importedAt']) {
+    assert.deepEqual(flagged(`const o = { ${key}: 45000 };`), [], `${key} is not port-ish`);
+  }
+  assert.deepEqual(flagged('const o = { daemonPorts: [45000, 45001] };'), [1], 'rule 1d too');
+  assert.deepEqual(flagged('const o = { transports: [45000, 45001] };'), [], 'rule 1d, not port-ish');
+});
+
+// Rules 1 and 2 scanned raw text, so prose about the band was reported as the
+// violation it was describing — a false positive on a required gate, and the
+// runbook this guard ships with teaches contributors to write exactly that
+// prose. Rule 1d's unbounded capture made it worse: an unclosed `[` in a
+// comment swallowed the rest of the file.
+test('rules 1 and 2 do not read comments or strings as code', () => {
+  assert.deepEqual(flagged('// we used to write ports: [45000, 45001] here'), []);
+  assert.deepEqual(flagged('// const apiPort = 45000; // removed'), []);
+  assert.deepEqual(flagged('/* srv.listen(45000) was the old form */'), []);
+  assert.deepEqual(flagged("const yaml = 'ports: [45000]';"), []);
+  assert.deepEqual(flagged('const doc = `ports: [45000]`;'), [], 'template literal too');
+  assert.deepEqual(
+    flagged(['// reserved ports: [', 'const timeoutMs = 45000;', 'const other = 60000;'].join('\n')),
+    [],
+    'an unclosed [ in prose cannot swallow the rest of the file',
+  );
+  assert.deepEqual(
+    flagged(['const apiPort = 45000; // ports: [60001]', 'const b = 1;'].join('\n')),
+    [1],
+    'the code on a line carrying a comment is still scanned',
+  );
+  assert.deepEqual(
+    flagged("function pickPort() {\n  // Math.random() is what this used to do\n  return 1;\n}"),
+    [],
+    'rule 2 does not fire on a comment either',
+  );
+});
+
+test('blankComments with strings blanks contents and keeps the quotes', () => {
+  const src = "const a = 'ports: [45000]';\n";
+  const out = blankComments(src, { strings: true });
+  assert.equal(out.length, src.length, 'byte offsets are preserved');
+  assert.ok(!out.includes('45000'), 'the string contents are blanked');
+  assert.equal(out.indexOf("'"), src.indexOf("'"), 'the opening quote survives in place');
+  assert.equal(out.lastIndexOf("'"), src.lastIndexOf("'"), 'and so does the closing one');
+  assert.ok(blankComments(src).includes('45000'), 'the default still leaves strings intact');
+});
+
 test('rule 2 catches a guessed port, by name, within the lookback', () => {
   assert.deepEqual(flagged('function pickPort() {\n  return 40000 + Math.floor(Math.random() * 20000);\n}'), [2]);
   assert.deepEqual(flagged('function pickColor() {\n  return Math.random();\n}'), [], 'not port-ish');
@@ -207,7 +260,13 @@ test('the allow marker suppresses a rule-3 pin, and reports the raw line', () =>
 test('documented non-catches stay documented', () => {
   assert.deepEqual(flagged("await fetch('http://127.0.0.1:45020/health');"), [], 'URL string');
   assert.deepEqual(flagged('apiPort = 45000;'), [], 'bare reassignment');
-  assert.deepEqual(flagged("const o = { ports: [']', 45004] };"), [], 'a ] inside a string');
+  const nested = ['const o = {', '  ports: [', '    [45004],', '    45005,', '  ],', '};'].join('\n');
+  assert.deepEqual(flagged(nested), [3], 'rule 1d stops at the first ], so row 4 is the gap');
+  assert.deepEqual(
+    flagged(`const o = { ports: [${'0, '.repeat(200)}45004] };`),
+    [],
+    'an array longer than the 400-char bound is not captured',
+  );
   assert.deepEqual(flagged('const apiPort = cond ? x : 45000;'), [], 'ternary default');
   assert.deepEqual(flagged("const o = { 'port': 45000 };"), [], 'quoted key');
   assert.deepEqual(scanVitestConfig('test: { maxWorkers: 1.0 }'), [], 'non-integer pin');
