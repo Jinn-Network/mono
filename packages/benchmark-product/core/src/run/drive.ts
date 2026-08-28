@@ -529,7 +529,9 @@ async function dispatchEvaluation(
     // never the backend's recovery operation: `recover` is. It settles the attempt (durable
     // delivery checkpoint -> delivered; orphaned/absent -> an infrastructure terminal the retry
     // ladder can classify) BEFORE `observe` reads it. Mirrors the solve leg's own reconciliation
-    // in `../operations/run-launch.ts`.
+    // in `../operations/run-launch.ts`, including its ref discipline: the recovery ref is read out
+    // of the replayed bytes, never recomputed from the idempotency key, so a drift between the two
+    // refuses here instead of reconciling nothing and silently degrading to the loss above.
     //
     // The seam is HERE, not beside that solve loop in `runResume`: `recover` re-enters
     // `completeAttempt` -> the evaluation provisioner's `harvest()`, whose materials registry is
@@ -538,7 +540,36 @@ async function dispatchEvaluation(
     // any earlier, recovery throws "harvest ran before setup registered evaluation-cell
     // materials" (`../venue/provisioner.ts`). A never-submitted leg has no attempt to reconcile,
     // so the launch path stays byte-identically untouched.
-    const reconciliation = await deps.backend.recover(submissionUri as SubmissionUri);
+    //
+    // Unlike the solve leg's, both refusals below are contained PER LEG rather than run-fatal:
+    // `prepareAndDispatchEvaluation`'s catch is enclosing, and a `BenchmarkProductError` is no
+    // `TaskExecutionError`, so `retryableFailureFromCause` returns undefined and the leg lands a
+    // could-not-grade terminal carrying the message as its detail. The run and the other cells'
+    // legs continue.
+    //
+    // Residual sub-window: a kill landing BEFORE the delivery checkpoint is durable leaves nothing
+    // recoverable — the verdict never existed. Recovery classifies that attempt orphaned/absent and
+    // `appendTerminal` writes `blame: infrastructure` / `backend-unavailable`, which
+    // `retryableFailureFromSnapshot` does call retryable — but `journalEvaluationFailure` gates the
+    // retry on `evaluationAttempt <= (deps.maxInfrastructureRetries ?? 0)`, so on the legacy
+    // default of 0 the leg still terminals could-not-grade (now carrying `failureCategory`, a
+    // categorized terminal rather than a silent one). Closing that window is a matter of setting
+    // `policy.evaluation.maxInfrastructureRetries` to 1, not of this seam.
+    const replayedSubmission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
+      replayed,
+    )) as { readonly submission?: unknown };
+    if (
+      typeof replayedSubmission.submission !== "string"
+      || !replayedSubmission.submission.startsWith("urn:uuid:")
+    ) {
+      refuse(
+        "record-integrity",
+        `runs.${deps.draftId}.${cellKey}.${dispatch}`,
+        `replayed evaluation Submission carries no valid Submission URI (e${evalIndex}, `
+          + `attempt ${evaluationAttempt})`,
+      );
+    }
+    const reconciliation = await deps.backend.recover(replayedSubmission.submission as SubmissionUri);
     if (reconciliation.classification === "contradictory") {
       refuse(
         "record-integrity",
