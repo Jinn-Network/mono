@@ -80,7 +80,7 @@ export function findBrokenCitations(workflowsRoot = workflowsDir) {
 test('the restore-name walk is defined once, in the shared module', () => {
   const definers = readdirSync(scriptsDir)
     .filter((name) => name.endsWith('.mjs') && name !== 'workflow-artifact-steps.mjs')
-    .filter((name) => /function\s+restoredArtifacts?(Names)?\s*\(/.test(
+    .filter((name) => /(?:function\s+|const\s+|let\s+)restoredArtifacts?(?:Names)?\s*[=(]/.test(
       readFileSync(join(scriptsDir, name), 'utf8'),
     ));
   assert.deepEqual(
