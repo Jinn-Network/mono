@@ -3,13 +3,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { VerifyDriver, VerifySourceOptions } from "@jinn-network/record-discovery-client";
+import type { SourceChainOutcome } from "@jinn-network/record-discovery-protocol";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { resolveRuntimeConfig } from "../config.js";
 import { createCorpusCapability } from "./capability.js";
 import { createFileHighWaterMarkStore } from "./high-water-mark.js";
 import { createNodeCorpusFilesystem } from "./node-fs.test.js";
-import { seedMirror } from "./testing-fixture.js";
+import { buildFixtureArchive, fixtureTrustDsseVerifier, seedMirror } from "./testing-fixture.js";
 
 const corpusFs = createNodeCorpusFilesystem();
 
@@ -38,14 +40,69 @@ function context(file?: unknown) {
   };
 }
 
-function capability(file?: unknown) {
+function capability(file?: unknown, verifyDriver?: VerifyDriver) {
   const built = createCorpusCapability({
     transport,
     fs: corpusFs,
     dsseVerifier: () => ({ validSignerKeyids: [] }),
     readPolicyVersions: async () => [],
+    ...(verifyDriver === undefined ? {} : { verifyDriver }),
   });
   return { capability: built, context: context(file) };
+}
+
+/**
+ * A `VerifyDriver` whose source-chain verdict the test picks. Only
+ * `verifySource` is reachable from the corpus mirror; the two item-level
+ * methods belong to the read path C6 owns and are never called here.
+ */
+function driverReturning(outcome: SourceChainOutcome): VerifyDriver & { readonly calls: VerifySourceOptions[] } {
+  const calls: VerifySourceOptions[] = [];
+  return {
+    calls,
+    async verifySource(opts: VerifySourceOptions): Promise<SourceChainOutcome> {
+      // Drain the entry stream the way the real driver does, so a posture
+      // that never reaches the driver is distinguishable from one that does.
+      for await (const _entry of opts.entries) void _entry;
+      calls.push(opts);
+      return outcome;
+    },
+    async verifyForDecision() {
+      throw new Error("the corpus mirror never verifies items");
+    },
+    async verifyForFilter() {
+      throw new Error("the corpus mirror never verifies items");
+    },
+  };
+}
+
+/** A capability wired to a real fixture archive, so `syncOnce` reaches the posture. */
+function overArchive(options: {
+  readonly file: Record<string, unknown>;
+  readonly verifyDriver?: VerifyDriver;
+  readonly signHead?: boolean;
+}) {
+  const archive = buildFixtureArchive(source(), ["https://agents.test/alice"], {
+    signHead: options.signHead ?? true,
+  });
+  const built = createCorpusCapability({
+    transport: archive.transport,
+    fs: corpusFs,
+    dsseVerifier: fixtureTrustDsseVerifier,
+    readPolicyVersions: async () => archive.policyVersions,
+    now: () => new Date("2026-07-30T00:00:00Z"),
+    ...(options.verifyDriver === undefined ? {} : { verifyDriver: options.verifyDriver }),
+  });
+  return {
+    capability: built,
+    context: context({
+      corpus: {
+        sources: [source()],
+        ...options.file,
+        trust: { genesisDigest: archive.genesisDigest, policyDirectory: "policy" },
+      },
+    }),
+  };
 }
 
 beforeEach(async () => {
@@ -198,7 +255,9 @@ describe("corpus capability", () => {
     expect(chain.remedy).toBeNull();
   });
 
-  test("RED means a real, fixable misconfiguration: archives followed but no posture chosen", async () => {
+  test("RED means a real, fixable misconfiguration: the default posture with no driver composed", async () => {
+    // The default is `verified`, and this composition root injected no
+    // driver — so nothing is indexed, and BOTH exits are in the remedy.
     const { capability: built, context: built_context } = capability({
       corpus: { sources: [source()] },
     });
@@ -208,6 +267,7 @@ describe("corpus capability", () => {
     )!;
     expect(chain.ok).toBe(false);
     expect(chain.detail).toContain("will not index");
+    expect(chain.remedy).toContain("verification driver");
     expect(chain.remedy).toContain("acknowledgeUnverifiedChain");
   });
 
@@ -243,5 +303,145 @@ describe("corpus capability", () => {
     // Sync is skipped-or-failed, and even a populated mirror would read empty.
     const page = await built.reader.listRecords();
     expect(page.items).toEqual([]);
+  });
+});
+
+describe("chain-verification postures", () => {
+  test("VERIFIED is the default, and the injected driver is what decides", async () => {
+    const entryDigest = `sha256:${"b".repeat(64)}` as const;
+    const driver = driverReturning({
+      status: "ok",
+      head: {
+        protocol: "jinn.record-discovery/1",
+        origin: `${source().agent}/${source().name}`,
+        sequence: "0000000000000001",
+        entry: entryDigest,
+        issuedAt: "2026-07-30T00:00:00Z",
+        refreshBy: "2026-08-30T00:00:00Z",
+      },
+      advanced: { sequence: "0000000000000001", entry: entryDigest, issuedAt: "2026-07-30T00:00:00Z" },
+    });
+    // No `chainVerification` key: the posture below is the resolved default.
+    const { capability: built, context: built_context } = overArchive({
+      file: {},
+      verifyDriver: driver,
+    });
+    expect(built_context.config.corpus.chainVerification).toBe("verified");
+
+    await built.start!(built_context);
+    const outcome = await built.mirror.syncOnce();
+
+    expect(driver.calls).toHaveLength(1);
+    expect(driver.calls[0]!.source).toEqual({ agent: source().agent, name: source().name });
+    expect(outcome.sources[0]!.status).toBe("synced");
+    expect(outcome.sources[0]!.indexed).toBeGreaterThan(0);
+
+    const chain = (await built.healthChecks!()).find(
+      (check) => check.name === "corpus-chain-verification",
+    )!;
+    expect(chain.ok).toBe(true);
+    expect(chain.detail).toContain("verified before indexing");
+    expect(chain.remedy).toBeNull();
+  });
+
+  test("a source the driver refuses is not indexed, and health names it with the reason", async () => {
+    const driver = driverReturning({ status: "unauthorized-signer" });
+    const { capability: built, context: built_context } = overArchive({
+      file: {},
+      verifyDriver: driver,
+    });
+    await built.start!(built_context);
+
+    const outcome = await built.mirror.syncOnce();
+    expect(outcome.sources[0]).toMatchObject({
+      status: "failed",
+      indexed: 0,
+      failure: { code: "chain-verification-rejected", message: "unauthorized-signer" },
+    });
+
+    const chain = (await built.healthChecks!()).find(
+      (check) => check.name === "corpus-chain-verification",
+    )!;
+    expect(chain.ok).toBe(false);
+    expect(chain.detail).toContain(`${source().agent}/${source().name}`);
+    expect(chain.detail).toContain("unauthorized-signer");
+    expect(chain.remedy).not.toBeNull();
+  });
+
+  test("VERIFIED refuses an unsigned head before the driver is ever asked", async () => {
+    const driver = driverReturning({ status: "unauthorized-signer" });
+    const { capability: built, context: built_context } = overArchive({
+      file: {},
+      verifyDriver: driver,
+      signHead: false,
+    });
+    await built.start!(built_context);
+
+    const outcome = await built.mirror.syncOnce();
+    expect(driver.calls).toHaveLength(0);
+    expect(outcome.sources[0]).toMatchObject({
+      status: "failed",
+      failure: { code: "chain-verification-rejected", message: "head-unsigned" },
+    });
+    const chain = (await built.healthChecks!()).find(
+      (check) => check.name === "corpus-chain-verification",
+    )!;
+    expect(chain.detail).toContain("head-unsigned");
+  });
+
+  test("VERIFIED without a composed driver fails closed — it never degrades to unverified", async () => {
+    const { capability: built, context: built_context } = overArchive({ file: {} });
+    await built.start!(built_context);
+
+    const outcome = await built.mirror.syncOnce();
+    expect(outcome.sources[0]).toMatchObject({
+      status: "failed",
+      indexed: 0,
+      failure: { code: "chain-verification-rejected", message: "chain-verification-not-configured" },
+    });
+    expect((await built.reader.listRecords()).items).toEqual([]);
+  });
+
+  test("UNVERIFIED indexes without asking the driver, and says so in health", async () => {
+    const driver = driverReturning({ status: "unauthorized-signer" });
+    const { capability: built, context: built_context } = overArchive({
+      file: { chainVerification: "unverified", acknowledgeUnverifiedChain: true },
+      verifyDriver: driver,
+    });
+    await built.start!(built_context);
+
+    const outcome = await built.mirror.syncOnce();
+    expect(driver.calls).toHaveLength(0);
+    expect(outcome.sources[0]!.indexed).toBeGreaterThan(0);
+
+    const chain = (await built.healthChecks!()).find(
+      (check) => check.name === "corpus-chain-verification",
+    )!;
+    expect(chain.ok).toBe(true);
+    expect(chain.detail).toContain("not verified");
+    expect(chain.remedy).toBeNull();
+  });
+
+  test("REJECTING admits nothing even with a driver composed, and is RED while archives are followed", async () => {
+    const driver = driverReturning({ status: "unauthorized-signer" });
+    const { capability: built, context: built_context } = overArchive({
+      file: { chainVerification: "rejecting" },
+      verifyDriver: driver,
+    });
+    await built.start!(built_context);
+
+    const outcome = await built.mirror.syncOnce();
+    expect(driver.calls).toHaveLength(0);
+    expect(outcome.sources[0]).toMatchObject({
+      status: "failed",
+      failure: { code: "chain-verification-rejected", message: "chain-verification-not-configured" },
+    });
+
+    const chain = (await built.healthChecks!()).find(
+      (check) => check.name === "corpus-chain-verification",
+    )!;
+    expect(chain.ok).toBe(false);
+    expect(chain.detail).toContain("rejecting");
+    expect(chain.remedy).toContain("verified");
   });
 });
