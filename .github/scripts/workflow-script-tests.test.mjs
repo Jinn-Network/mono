@@ -47,6 +47,32 @@ export function collectReferencedScriptTests(workflowsRoot = workflowsDir) {
   return referenced;
 }
 
+// Suites that patch files in the checked-out tree while they run. `node --test`
+// schedules the files it is given in parallel, so any suite sharing an invocation
+// with one of these reads manifests mid-rewrite and fails on truncated or
+// canary-versioned JSON. Each must own its invocation.
+const LIVE_TREE_MUTATING_TESTS = new Set(['build-prepublication-bundle.test.mjs']);
+
+export function collectTestInvocations(workflowsRoot = workflowsDir) {
+  const invocations = [];
+  for (const fileName of readdirSync(workflowsRoot).filter((name) => name.endsWith('.yml'))) {
+    const lines = readFileSync(join(workflowsRoot, fileName), 'utf8').split('\n');
+    for (let index = 0; index < lines.length; index += 1) {
+      if (!/\bnode\s+--test\b/u.test(lines[index])) continue;
+      const files = [];
+      let last = index;
+      for (;;) {
+        for (const match of lines[last].matchAll(/([A-Za-z0-9_.-]+\.test\.mjs)/gu)) files.push(match[1]);
+        if (!lines[last].trimEnd().endsWith('\\') || last + 1 >= lines.length) break;
+        last += 1;
+      }
+      invocations.push({ workflow: fileName, files });
+      index = last;
+    }
+  }
+  return invocations;
+}
+
 export function findOrphanedScriptTests(scriptsRoot = scriptsDir, workflowsRoot = workflowsDir) {
   const tests = listScriptTests(scriptsRoot);
   const referenced = collectReferencedScriptTests(workflowsRoot);
@@ -69,4 +95,29 @@ test('every .github/scripts/*.test.mjs is referenced by at least one workflow', 
 
 test('findOrphanedScriptTests detects a planted orphan', () => {
   assert.deepEqual(findOrphanedScriptTests(scriptsDir, workflowsDir), []);
+});
+
+test('a suite that mutates the checked-out tree never shares a node --test invocation', () => {
+  for (const { workflow, files } of collectTestInvocations()) {
+    for (const solo of files.filter((name) => LIVE_TREE_MUTATING_TESTS.has(name))) {
+      assert.deepEqual(
+        files,
+        [solo],
+        `${workflow} runs ${solo} alongside ${files.filter((name) => name !== solo).join(', ')}. `
+        + `${solo} rewrites package.json files in the checked-out tree while it packs, so a `
+        + 'co-scheduled suite reads them mid-rewrite. Give it its own node --test invocation.',
+      );
+    }
+  }
+});
+
+test('collectTestInvocations reads the platform-release-surface lists', () => {
+  const lists = collectTestInvocations()
+    .filter(({ workflow }) => workflow === 'platform-architecture-control.yml')
+    .map(({ files }) => files);
+  assert.ok(lists.some((files) => files.length > 1), 'expected at least one multi-file invocation');
+  assert.ok(
+    lists.some((files) => files.length === 1 && LIVE_TREE_MUTATING_TESTS.has(files[0])),
+    'expected the live-tree-mutating suite to own an invocation',
+  );
 });
