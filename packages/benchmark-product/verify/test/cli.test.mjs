@@ -38,6 +38,7 @@ test("a missing bundle exits 1 with machine-readable invalid-bundle output", asy
       "benchmark-product-public-bundle/4",
       "benchmark-product-public-bundle/5",
       "benchmark-product-public-bundle/6",
+      "benchmark-product-public-bundle/7",
     ],
     code: "record-integrity",
     message: "bundle directory is missing",
@@ -329,4 +330,40 @@ test("human summary names all seven evidence-native checks for bundle v5", async
   assert.match(output, /^Verified: 7 of 7 checks passed/m);
   assert.match(output, new RegExp(`Bundle: sha256:${"a".repeat(64)}`));
   assert.doesNotMatch(output, /sha256:sha256:/);
+});
+
+test("the anchored qualification closure counts its seven checks, not the unanchored six (#3205)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/7",
+    identity: "a".repeat(64),
+    checks: V6_CHECKS,
+    ...V6_IDENTITIES,
+    qualification: {
+      publicationGrade: false,
+      truthAdmission: "operator-only",
+      candidateClasses: ["factuality"],
+      strata: ["core"],
+      armCount: 4,
+      itemCount: 12,
+      exclusionCount: 0,
+    },
+    anchors: {
+      anchors: [{
+        recordSha256: "1".repeat(64),
+        status: "present",
+        provider: "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        subject: "lock",
+        timeBasis: "authority-time",
+        facts: { genTime: "2026-01-01T12:00:00Z", policyOid: "2.999.1", serialNumber: "0a", signerCertificateSha256: "9".repeat(64) },
+        trustMaterial: "none",
+      }],
+      subjects: [{ subject: "lock", outcome: "anchored" }, { subject: "matrix", outcome: "absent" }],
+      invalid: [],
+    },
+  });
+  assert.match(output, /^Verified: 7 of 7 checks passed/m);
+  assert.match(output, /^Format: benchmark-product-public-bundle\/7$/m);
+  assert.match(output, /integrity-anchors\s+passed/);
+  assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
 });

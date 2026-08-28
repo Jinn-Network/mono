@@ -85,7 +85,7 @@ import {
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
 import { PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, BUNDLE_V6_FORMAT } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT } from "./manifest.js";
 import {
   evaluateIntegrityAnchors,
   type IntegrityAnchorsReport,
@@ -131,15 +131,16 @@ export type PublicBundleVerificationCheck =
   | "matrix-rederivation"
   | "report-verification"
   | "claim-consistency"
-  /** Always present for `benchmark-product-public-bundle/6`, never for any earlier closure
-   * (anchor-evidence design §8, §12). */
+  /** Always present for the two anchored closures, `benchmark-product-public-bundle/6` and `/7`,
+   * never for any earlier one (anchor-evidence design §8, §12). */
   | "integrity-anchors";
 
 export interface LegacyPublicBundleVerificationResult {
   readonly format:
     | "benchmark-product-public-bundle/2"
     | "benchmark-product-public-bundle/4"
-    | "benchmark-product-public-bundle/6";
+    | "benchmark-product-public-bundle/6"
+    | "benchmark-product-public-bundle/7";
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
   readonly benchmarkSha256: string;
@@ -411,17 +412,19 @@ export async function verifyPublicBundleSnapshot(
   };
   const checks: PublicBundleVerificationCheck[] = ["manifest"];
   const manifestPaths = new Set(checked.manifest.files.map((file) => file.path));
-  const isV4 = checked.manifest.format === BUNDLE_V4_FORMAT;
-  // The anchored closure is v2's graph plus `anchors/`, so it takes v2's mandatory member list; the
-  // binary qualification projection has its own later anchored allocation and is not this one.
-  const isV6 = checked.manifest.format === BUNDLE_V6_FORMAT;
-  const mandatoryFiles = isV4 ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
+  // Two independent axes, four formats. The qualification axis decides the mandatory member list,
+  // the evidence-catalog grammar, and the trust grammar; the anchor axis decides the `anchors/`
+  // allowlist and the `integrity-anchors` check. v6 is v2 plus anchors, v7 is v4 plus anchors
+  // (issue #3205) — neither axis reinterprets the other.
+  const carriesQualification = checked.manifest.format === BUNDLE_V4_FORMAT || checked.manifest.format === BUNDLE_V7_FORMAT;
+  const carriesAnchors = checked.manifest.format === BUNDLE_V6_FORMAT || checked.manifest.format === BUNDLE_V7_FORMAT;
+  const mandatoryFiles = carriesQualification ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }
 
   const evidenceBytes = read("evidence.json");
-  const evidence = isV4
+  const evidence = carriesQualification
     ? parseJson(evidenceBytes, BundleV4EvidenceCatalogSchema, "evidence.json")
     : parseJson(evidenceBytes, BundleEvidenceCatalogSchema, "evidence.json");
   requireCanonical(evidenceBytes, evidence, "evidence.json");
@@ -435,10 +438,10 @@ export async function verifyPublicBundleSnapshot(
   for (const path of manifestPaths) {
     if (/^native\/inspect\/[a-f0-9]{64}\.eval$/u.test(path)) expectedPaths.add(path);
   }
-  // `anchors/<sha256>.bin` is allowlisted only by the closure version that defines it: an anchor
-  // member in a v2 or v4 bundle is a non-allowlisted file, exactly as it was before this format.
+  // `anchors/<sha256>.bin` is allowlisted only by the closure versions that define it: an anchor
+  // member in a v2 or v4 bundle is a non-allowlisted file, exactly as it was before these formats.
   const anchorPaths: string[] = [];
-  if (isV6) {
+  if (carriesAnchors) {
     for (const path of manifestPaths) {
       if (/^anchors\/[a-f0-9]{64}\.bin$/u.test(path)) {
         expectedPaths.add(path);
@@ -459,7 +462,7 @@ export async function verifyPublicBundleSnapshot(
   }
 
   const trustBytes = read("trust/public-keys.json");
-  const trust = isV4
+  const trust = carriesQualification
     ? parseJson(trustBytes, BundleV4TrustSchema, "trust/public-keys.json")
     : parseJson(trustBytes, BundleTrustSchema, "trust/public-keys.json");
   requireCanonical(trustBytes, trust, "trust/public-keys.json");
@@ -470,7 +473,7 @@ export async function verifyPublicBundleSnapshot(
   ] as const));
 
   let qualification: BundleQualification | undefined;
-  if (isV4) {
+  if (carriesQualification) {
     const qualificationBytes = read("qualification.json");
     qualification = parseJson(qualificationBytes, BundleQualificationSchema, "qualification.json");
     requireCanonical(qualificationBytes, qualification, "qualification.json");
@@ -519,7 +522,7 @@ export async function verifyPublicBundleSnapshot(
   // empty section and an omitted one are different claims, and §7.3's declared-but-absent bundle
   // carries the first.
   let claimAnchors: readonly import("./profile/anchor-claims.js").ClaimAnchor[] | undefined;
-  if (isV6) {
+  if (carriesAnchors) {
     const anchorRecords = anchorPaths
       .map((path) => {
         const bytes = read(path);
@@ -1728,9 +1731,9 @@ export async function verifyPublicBundleSnapshot(
     ...(claimAnchors === undefined ? {} : { anchors: claimAnchors }),
   });
   checks.push("claim-consistency");
-  // Always present for this closure version, and never for any earlier one: an anchored bundle
-  // whose anchors were stripped is a closure failure above, not a shorter check list here.
-  if (isV6) checks.push("integrity-anchors");
+  // Always present for the anchored closure versions, and never for any earlier one: an anchored
+  // bundle whose anchors were stripped is a closure failure above, not a shorter check list here.
+  if (carriesAnchors) checks.push("integrity-anchors");
 
   const dissentCellKeys = assembly.cells
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
