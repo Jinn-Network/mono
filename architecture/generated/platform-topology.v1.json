@@ -7751,6 +7751,19 @@
       {
         "claim": {
           "field": "profile",
+          "identifier": "https://spec.jinn.network/facts/evaluation-spec/v2",
+          "servedPath": "facts/evaluation-spec/v2"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-task-execution",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/task-execution/profiles/evaluation-spec.v2.json",
+        "relativeSource": "profiles/evaluation-spec.v2.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
           "identifier": "https://spec.jinn.network/facts/plugin/v1",
           "servedPath": "facts/plugin/v1"
         },
@@ -16330,6 +16343,13 @@
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-task-execution",
         "path": "packages/discovery/facts/task-execution/profiles/evaluation-spec.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/evaluation-spec/v2",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-task-execution",
+        "path": "packages/discovery/facts/task-execution/profiles/evaluation-spec.v2.json"
       },
       {
         "field": "profile",

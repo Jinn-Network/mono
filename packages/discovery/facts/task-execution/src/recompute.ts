@@ -215,13 +215,19 @@ export const checkpointRecompute: RecordFactRecompute = async () => noFacts();
 // digest-bearing ones pin anything, so only those are edges; a uri-only input or output names a
 // location, not a record, and is not carried. Both fns keep v1's every field.
 
+/** A digest-bearing descriptor's `sha256`, in the prefixed spelling the cards carry. */
+function descriptorDigest(value: unknown): `sha256:${string}` | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const digest = (value as { digest?: Record<string, string> }).digest;
+  return prefixedSha256(digest);
+}
+
 /** The digest-bearing members of a descriptor list, in record order. */
-function descriptorDigests(
-  descriptors: readonly { digest?: Record<string, string> }[] | undefined,
-): `sha256:${string}`[] {
+function descriptorListDigests(value: unknown): `sha256:${string}`[] {
+  if (!Array.isArray(value)) return [];
   const digests: `sha256:${string}`[] = [];
-  for (const descriptor of descriptors ?? []) {
-    const digest = prefixedSha256(descriptor.digest);
+  for (const entry of value) {
+    const digest = descriptorDigest(entry);
     if (digest !== undefined) digests.push(digest);
   }
   return digests;
@@ -232,7 +238,7 @@ export const taskRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
   if (Object.keys(facts).length === 0) return noFacts();
   const result = TaskSpecificationSchema.safeParse(parseJson(bytes));
   if (!result.success) return noFacts();
-  return { ...facts, inputDigests: descriptorDigests(result.data.inputs) };
+  return { ...facts, inputDigests: descriptorListDigests(result.data.inputs) };
 };
 
 export const deliveryRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
@@ -243,7 +249,7 @@ export const deliveryRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
   const delivery = result.data;
   return {
     ...facts,
-    resultDigests: descriptorDigests(delivery.outputs),
+    resultDigests: descriptorListDigests(delivery.outputs),
     evidenceDigests: (delivery.evidenceRecords ?? []).map((reference) => reference.digest),
     ...(delivery.supersedes === undefined ? {} : { supersedesDigest: delivery.supersedes }),
   };
@@ -274,6 +280,48 @@ export const TASK_EXECUTION_FACTS_RECOMPUTE: FactsRecompute = {
   },
 };
 
+/**
+ * v1's `family` plus every component the spec pins by digest. Which of them a given spec carries
+ * is decided by its family: only a state-predicate block names an environment record, only a
+ * deterministic-process block names an image, test material and a parser, and so on. A field the
+ * spec's family does not have is not announced, rather than announced empty.
+ *
+ * `grader` is one descriptor or a list of them, and is the access-classified case the
+ * completeness rule leads with: a private grader's bytes are exactly what a consumer cannot
+ * retrieve, so if the card does not name it, nothing can join on it.
+ */
+export const evaluationSpecRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await evaluationSpecRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  const result = EvaluationSpecSchema.safeParse(parseJson(bytes));
+  if (!result.success) return noFacts();
+  const spec = result.data;
+  const block = (spec.familyBlock ?? {}) as Record<string, unknown>;
+  const graders = Array.isArray(spec.grader) ? spec.grader : [spec.grader];
+  const edges: Record<string, RecordFactValue> = {
+    ...facts,
+    graderDigests: descriptorListDigests(graders),
+  };
+  const add = (name: string, value: RecordFactValue | undefined): void => {
+    if (value !== undefined) edges[name] = value;
+  };
+  add("environmentRecordDigest", descriptorDigest(block.environmentRecord));
+  add("imageDigest", descriptorDigest(block.image));
+  if (Array.isArray(block.testMaterial)) {
+    edges.testMaterialDigests = descriptorListDigests(block.testMaterial);
+  }
+  add("parserDigest", (block.parser as { digest?: string } | undefined)?.digest);
+  add("rubricDigest", descriptorDigest(block.rubric));
+  add("judgeOutputSchemaDigest", descriptorDigest(block.judgeOutputSchema));
+  add("reviewFormDigest", descriptorDigest(block.reviewForm));
+  if (Array.isArray(block.subSpecs)) {
+    edges.subSpecDigests = descriptorListDigests(
+      block.subSpecs.map((sub) => (sub as { spec?: unknown }).spec),
+    );
+  }
+  return edges;
+};
+
 /** Explicit registry for the coexisting Task-Execution facts v2 profiles. */
 export const TASK_EXECUTION_FACTS_RECOMPUTE_V2: FactsRecompute = {
   get(kind: string): RecordFactRecompute | undefined {
@@ -282,6 +330,8 @@ export const TASK_EXECUTION_FACTS_RECOMPUTE_V2: FactsRecompute = {
         return taskRecomputeV2;
       case RECORD_KINDS.delivery:
         return deliveryRecomputeV2;
+      case RECORD_KINDS.evaluationSpec:
+        return evaluationSpecRecomputeV2;
       default:
         return TASK_EXECUTION_FACTS_RECOMPUTE.get(kind);
     }

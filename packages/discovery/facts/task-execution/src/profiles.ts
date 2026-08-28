@@ -38,3 +38,13 @@ export const taskProfileV2: FactsProfileDocument = loadProfile("task.v2.json");
  * Without them an index cannot walk from a Delivery to the evidence and verdicts about it.
  */
 export const deliveryProfileV2: FactsProfileDocument = loadProfile("delivery.v2.json");
+
+/**
+ * Adds every component an evaluation spec pins by digest: its graders, and whatever its family
+ * block references — the composite crypto environment a state-predicate spec runs against, a
+ * deterministic-process image, test material and parser, a model-graded rubric and judge output
+ * schema, a human-review form, a composite's sub-specs. v1 declared only the family, so "which
+ * evaluation specs run in this crypto environment" was unanswerable from a card, and a grader is
+ * exactly the access-classified case where fetching to join is not possible at all.
+ */
+export const evaluationSpecProfileV2: FactsProfileDocument = loadProfile("evaluation-spec.v2.json");

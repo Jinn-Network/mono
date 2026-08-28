@@ -115,6 +115,7 @@ describe("v2 profiles (join-edge completeness, design §12 amendment)", () => {
     expect(referenceBearingFields(chainEnvironmentFactsProfileV2).sort()).toEqual([
       "capabilityEnvelope.toolInterfaceSchemaDigests",
       "fixtureModuleDigests",
+      "runtime.image.indexDigest",
       "runtime.image.manifestDigest",
       "sourceAnchor.headerProofDigest",
       "stateMaterialization.fixtureCoverageManifestDigest",

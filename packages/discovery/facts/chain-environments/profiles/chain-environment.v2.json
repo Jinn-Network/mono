@@ -7,6 +7,7 @@
     { "name": "runtime.family", "class": "record", "cloudEvents": { "attribute": "family", "scalar": "string" } },
     { "name": "runtime.version", "class": "record", "cloudEvents": { "attribute": "rtversion", "scalar": "string" } },
     { "name": "runtime.image.manifestDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "image", "scalar": "string" } },
+    { "name": "runtime.image.indexDigest", "class": "record", "referenceBearing": true },
     { "name": "sourceAnchor.headerProofDigest", "class": "record", "referenceBearing": true },
     { "name": "stateMaterialization.closureClass", "class": "record", "cloudEvents": { "attribute": "closure", "scalar": "string" } },
     { "name": "stateMaterialization.fidelityClass", "class": "record", "cloudEvents": { "attribute": "fidelity", "scalar": "string" } },

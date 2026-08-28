@@ -13,6 +13,7 @@ import {
   deliveryRecomputeV2,
   taskRecomputeV2,
   evaluationSpecRecompute,
+  evaluationSpecRecomputeV2,
   pluginRecompute,
   profileDocumentRecompute,
   submissionRecompute,
@@ -244,9 +245,29 @@ describe("v2 recompute: the join edges v1 left out", () => {
     expect(await deliveryRecomputeV2(junk, noReferencedBytes)).toEqual({});
   });
 
-  it("routes the two revised kinds to v2 and every other kind to its unrevised fn", () => {
+  it("names an evaluation spec's graders and the components its family block pins", async () => {
+    const bytes = await loadSweRebenchEvaluationSpecBytes();
+    const facts = await evaluationSpecRecomputeV2(bytes, noReferencedBytes);
+    expect(facts).toEqual({
+      family: "deterministic-process",
+      graderDigests: ["sha256:d2136b44c86f551b2494d616a8ee7afd58e6f90681f1beb84441113154a13897"],
+      imageDigest: "sha256:e8d6cfe4f52e87a1292f3897bf0bea28e4bde32703e6792bb9b1bc60d3024817",
+      parserDigest: "sha256:d2136b44c86f551b2494d616a8ee7afd58e6f90681f1beb84441113154a13897",
+      // The golden's one test-material entry is uri-only, so it pins nothing and is no edge.
+      testMaterialDigests: [],
+    });
+    expect(facts).not.toHaveProperty("environmentRecordDigest");
+    expect(facts).not.toHaveProperty("rubricDigest");
+  });
+
+  it("emits no facts for bytes that are not an evaluation spec", async () => {
+    expect(await evaluationSpecRecomputeV2(new TextEncoder().encode("{"), noReferencedBytes)).toEqual({});
+  });
+
+  it("routes the three revised kinds to v2 and every other kind to its unrevised fn", () => {
     expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.task)).toBe(taskRecomputeV2);
     expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.delivery)).toBe(deliveryRecomputeV2);
+    expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.evaluationSpec)).toBe(evaluationSpecRecomputeV2);
     expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.submission)).toBe(
       TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.submission),
     );

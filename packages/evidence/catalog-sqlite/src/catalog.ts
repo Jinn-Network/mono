@@ -99,7 +99,7 @@ class SqliteEvidenceCatalogHandle implements SqliteEvidenceCatalog {
   async queryAnnouncementEdges(
     query: AnnouncementEdgeQuery,
     options?: CatalogOperationOptions,
-  ): Promise<readonly AnnouncementEdge[]> {
+  ): Promise<CatalogPage<AnnouncementEdge>> {
     return this.#edges.query(query, options);
   }
 

@@ -63,22 +63,29 @@ orchestration are outside its boundary.
 
 ## The announcement edge index
 
-`indexAnnouncementEdges` takes an announcement facts card plus the field names
-its facts profile declares reference-bearing, and stores the outbound references
-it declares — record kind, record digest, field, ordinal, target digest.
-`queryAnnouncementEdges` reads them in either direction: a record's own edges, or
-the records pointing at a target (the `referrers` inversion of record-discovery
-design §8). Every read requires at least one filter and returns at most
-`ANNOUNCEMENT_EDGE_QUERY_LIMIT` rows.
+`indexAnnouncementEdges` takes an announcement facts card, the source that
+announced it, and the field names its facts profile declares reference-bearing;
+it stores the outbound references the card declares. `queryAnnouncementEdges`
+reads them in either direction: a record's own edges, or the records pointing at
+a target (the `referrers` inversion of record-discovery design §8). Every read
+requires at least one filter and is paged like the rest of this binding — a page
+with more behind it returns a `nextCursor` bound to the query that produced it,
+so a caller never mistakes a full page for the whole answer.
 
 This is the one surface fed from a feed rather than from a fetched record. It is
 what lets an index answer join — "this environment, its attempts, their
 verdicts" — without fetching anything, which for a record behind a payment gate
-is the only way to answer it at all. Cards are holder-authored: an edge is a
-hint, and a decision resting on one re-checks it against the fetched record.
+is the only way to answer it at all.
 
-The SQLite schema version moves with any table change and there is no migration
-path: `openSqliteEvidenceCatalog` refuses a database written under an older
-version. A catalog is a derived index, so the answer is to build a new
-generation and reproject, which `@jinn-network/evidence-local-runtime` already
-does.
+A card is a holder-authored claim and nothing here is checked against the
+record, so edges are scoped to the announcing source: a source replacing its own
+card replaces its own rows and can never displace another source's. Two sources
+may disagree about one record, and a reader sees both with attribution. An edge
+is a hint; a decision resting on one re-checks it against the fetched record.
+
+Any table change moves the SQLite schema version, and there is no migration
+path: `openSqliteEvidenceCatalog` throws `IO_FAILURE` on a database written
+under an older version, and that throw surfaces at open rather than triggering
+a rebuild. A catalog is a derived index, so the recovery is to start a fresh
+generation and reproject — today that means removing the stale generation, not
+an automatic rotation.

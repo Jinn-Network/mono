@@ -144,6 +144,7 @@ export const chainEnvironmentRecomputeV2: RecordFactRecompute = async (bytes, re
     return {
       ...facts,
       ...present({
+        "runtime.image.indexDigest": record.runtime.image.indexDigest,
         "sourceAnchor.headerProofDigest": descriptorDigest(record.sourceAnchor?.headerProof),
         "stateMaterialization.materializerDigest": state.materializer.digest,
         "stateMaterialization.sourceProofsDigest": descriptorDigest(state.sourceProofManifest?.proofs),

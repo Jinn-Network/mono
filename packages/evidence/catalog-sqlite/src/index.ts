@@ -4,7 +4,8 @@ export {
   openSqliteEvidenceCatalog,
 } from "./catalog.js";
 export {
-  ANNOUNCEMENT_EDGE_QUERY_LIMIT,
+  ANNOUNCEMENT_EDGE_DEFAULT_LIMIT,
+  ANNOUNCEMENT_EDGE_MAX_LIMIT,
   announcementEdgesFromCard,
 } from "./announcement-edges.js";
 export { SQLITE_EVIDENCE_CATALOG_SCHEMA_VERSION } from "./schema.js";

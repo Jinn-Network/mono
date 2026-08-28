@@ -52,3 +52,10 @@ These digests point into other record-kind trees, which this leaf cannot parse, 
 emitted from the record's own statement rather than through the fail-closed referenced-bytes
 path the same-tree digests use. Reference-bearing labels an indexing relation; it does not by
 itself promise the target is retrievable.
+
+Audited and unchanged: `run.v1` already declares its one edge, the benchmark — an arm's `pinning`
+is a structurally open map, whose keys no profile can declare. `report.v1`/`.v2` already declare
+their subject matrices; `reportPayloadDigest` is the record's own payload, which is identity
+rather than an edge. An accounting record's `scope.streams[].through.entry` and its registration
+boundaries are stream cursors rather than dependencies, and reach the card verbatim inside
+`scopeStreams` already.
