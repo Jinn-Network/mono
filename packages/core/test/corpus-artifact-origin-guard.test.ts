@@ -229,6 +229,20 @@ describe('fetchArtifactContent redirect handling (#1901)', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it('abandons the body of a redirect that carries no Location', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() { cancelled = true; },
+      pull(controller) { controller.enqueue(new Uint8Array(1024)); },
+    });
+    const result = await fetchArtifactContent('https://op.example.com', SHA, {
+      fetchImpl: async () => new Response(body, { status: 302 }),
+      resolveHostname: publicResolver,
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'network_error' });
+    expect(cancelled).toBe(true);
+  });
+
   it('caps the redirect chain', async () => {
     let hop = 0;
     const fetchImpl = vi.fn(async () => redirectTo(`https://op.example.com/hop${hop++}`));

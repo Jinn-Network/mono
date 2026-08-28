@@ -192,6 +192,7 @@ export async function fetchArtifactContent(
       if (REDIRECT_STATUSES.has(response.status)) {
         const location = response.headers.get('location');
         if (location === null) {
+          await response.body?.cancel().catch(() => {});
           return {
             ok: false,
             reason: 'network_error',
