@@ -481,7 +481,7 @@ test('wiredPaths reads every setupFiles and globalSetup list', () => {
   assert.notEqual(scoped[1].scope, scoped[2].scope);
 });
 
-test('projectEntryRanges finds one range per object entry, innermost first', () => {
+test('projectEntryRanges finds one range per object entry, in source order', () => {
   // Each range spans exactly the object entry it was read from, braces included.
   const entries = (source) =>
     projectEntryRanges(source).map(([start, end]) => source.slice(start, end + 1));
@@ -497,8 +497,11 @@ test('projectEntryRanges finds one range per object entry, innermost first', () 
     '{ a: 1 }',
     '{ b: 2 }',
   ]);
-  // An unterminated list yields no ranges at all — the documented fail-open back to one scope.
+  // The same entry as the first case, with the list left unterminated, yields no ranges at all —
+  // the documented fail-open that puts every allowance and seam path back in one scope.
   assert.deepEqual(projectEntryRanges(`projects: [{ test: { name: 'a' } }`), []);
+  // An unterminated entry inside a terminated list drops that entry, keeping the ones before it.
+  assert.deepEqual(entries(`projects: [{ a: 1 }, { b: 2 ]`), ['{ a: 1 }']);
 
   // Nested `projects` yield both ranges, and a path inside the inner one is scoped to the inner
   // entry rather than the outer one that also encloses it.
