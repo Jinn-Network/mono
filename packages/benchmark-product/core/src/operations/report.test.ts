@@ -1047,6 +1047,37 @@ describe("portable public bundle", () => {
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
   }, 30_000);
 
+  test("a refusal does not remove a bundle directory a concurrent publisher has already named", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    expect((await runReport(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    // Bundle materialization happens outside the publication lock, so a concurrent publisher of the
+    // same draft adopts the byte-identical directory this invocation renamed into place and can go
+    // on to name it in RunState. `beforeRunState` stands in for that peer: it makes the directory
+    // durable and then refuses this invocation. The cleanup runs under the lock and must skip a
+    // directory RunState names (issue #3194).
+    const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
+      beforeRunState: () => {
+        const identity = readdirSync(publicBundlesDir(workspaceDir, "draft-1")).find((name) => /^[a-f0-9]{64}$/u.test(name));
+        expect(identity).toBeDefined();
+        const state = readRunState(workspaceDir, "draft-1");
+        expect(state).toBeDefined();
+        if (state === undefined || identity === undefined) return;
+        writeRunState(workspaceDir, "draft-1", {
+          ...state,
+          bundleIdentity: identity,
+          bundleRelativePath: `artifacts/draft-1/public-bundles/${identity}`,
+        });
+        throw new Error("refused after a peer published the same bundle");
+      },
+    });
+    expect(refused.ok).toBe(false);
+    const identity = readRunState(workspaceDir, "draft-1")?.bundleIdentity;
+    expect(identity).toMatch(/^[a-f0-9]{64}$/);
+    if (identity === undefined) return;
+    expect(existsSync(publicBundlePath(workspaceDir, "draft-1", identity))).toBe(true);
+  }, 30_000);
+
   test("workspace tampering refuses before staging and leaves the reported draft unchanged", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);

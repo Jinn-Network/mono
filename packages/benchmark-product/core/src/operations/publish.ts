@@ -5,8 +5,8 @@ import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { materializePublicBundle, type MaterializeBundleDeps } from "../bundle/materialize.js";
 import { verifyPublicBundle, type PublicBundleVerificationCheck } from "../bundle/verify.js";
-import { acquirePublicationLock } from "../run/publication-lock.js";
-import { requireRunState, writeRunState, type RunState } from "../run/state.js";
+import { acquirePublicationLock, type PublicationLock } from "../run/publication-lock.js";
+import { readRunState, requireRunState, writeRunState, type RunState } from "../run/state.js";
 import { draftPath, publicBundlePath } from "../workspace/layout.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
@@ -98,18 +98,81 @@ async function materializeAndVerifyBundle(
   return { identity: materialized.identity, relativePath: relativeBundlePath(input.draftId, materialized.identity), checks: verified.checks };
 }
 
+/** Bound on waiting for the publication lock to run a refusal's cleanup. Short by design: the
+ * caller already has a refusal to return, and leaving an unreferenced directory behind is a far
+ * smaller cost than making every contended failure wait out the full publication timeout. */
+const REFUSED_CLEANUP_LOCK_TIMEOUT_MS = 2_000;
+
+/** Absolute bundle directories the durable RunState currently names — canonical plus every
+ * additional sibling. A directory in this set belongs to a publication that completed, so it must
+ * survive this invocation's refusal even if this invocation is the one that created it: a
+ * concurrent publisher of the same draft adopts a byte-identical directory rather than refusing,
+ * and may already have made it durable. A missing or unreadable RunState names nothing. */
+function bundleDirsNamedByRunState(workspaceDir: string, draftId: string): ReadonlySet<string> {
+  let state: RunState | undefined;
+  try {
+    state = readRunState(workspaceDir, draftId);
+  } catch {
+    state = undefined;
+  }
+  const named = new Set<string>();
+  if (state === undefined) return named;
+  if (state.bundleIdentity !== undefined) named.add(publicBundlePath(workspaceDir, draftId, state.bundleIdentity));
+  for (const entry of state.additionalBundles ?? []) named.add(publicBundlePath(workspaceDir, draftId, entry.bundleIdentity));
+  return named;
+}
+
 /** Removes the bundle directories this invocation renamed into place, after it refused to publish
  * them. A refused publication never advances the lifecycle, so leaving the directory behind hands an
  * operator collecting bundles by path something that looks shippable and is not (issue #3074).
- * Adopted directories are never removed — they belong to the publication that created them. Cleanup
- * failure is swallowed: it must not replace the refusal the caller needs to see. */
-function removeRefusedBundles(bundleDirs: readonly string[]): void {
-  for (const bundleDir of bundleDirs) {
+ * Adopted directories are never removed — they belong to the publication that created them.
+ *
+ * The removal runs while the publication lock for this draft is HELD (issue #3194). Bundle
+ * materialization happens outside the lock, so a concurrent publisher of the same draft can adopt
+ * a directory this invocation created — the EEXIST path proves byte-identity and adopts rather than
+ * refusing — and go on to name it in RunState. Running the cleanup under the same lock that
+ * serializes publication, and skipping every directory that lock-held read finds named, keeps this
+ * invocation's refusal from deleting a bundle a peer has already published.
+ *
+ * This NARROWS the race rather than closing it. Only the peer's `writeRunState` is inside the lock;
+ * its adoption of the directory is not. A peer that has adopted but not yet named its bundle is
+ * still invisible to the lock-held read, so `adopt → we take the lock and read → we remove →
+ * peer takes the lock and names` remains reachable. Closing it needs adoption itself moved inside
+ * the lock (or a materialization-side marker), which is a larger change to where bundles are built.
+ *
+ * `heldLock` is the caller's lock when the refusal happened inside the locked region; otherwise the
+ * lock is acquired for the cleanup alone, under a short timeout — the caller is already returning a
+ * refusal and must not be made to wait out the full publication timeout a second time. Both lock
+ * failure and removal failure are swallowed — neither may replace the refusal the caller needs to
+ * see — and a lock we cannot take means the directories are left in place rather than removed
+ * unserialized. */
+async function removeRefusedBundles(
+  workspaceDir: string,
+  draftId: string,
+  bundleDirs: readonly string[],
+  heldLock: PublicationLock | undefined,
+): Promise<void> {
+  if (bundleDirs.length === 0) return;
+  let acquired: PublicationLock | undefined;
+  if (heldLock === undefined) {
     try {
-      rmSync(bundleDir, { recursive: true, force: true });
+      acquired = await acquirePublicationLock(workspaceDir, draftId, REFUSED_CLEANUP_LOCK_TIMEOUT_MS);
     } catch {
-      // Best effort.
+      return;
     }
+  }
+  try {
+    const named = bundleDirsNamedByRunState(workspaceDir, draftId);
+    for (const bundleDir of bundleDirs) {
+      if (named.has(bundleDir)) continue;
+      try {
+        rmSync(bundleDir, { recursive: true, force: true });
+      } catch {
+        // Best effort.
+      }
+    }
+  } finally {
+    acquired?.release();
   }
 }
 
@@ -223,6 +286,9 @@ export function runPublish(
       // that point removes them again (issue #3074).
       const created: string[] = [];
       let durable = false;
+      // Held across the catch so a refusal inside the locked region cleans up before releasing it,
+      // and released by the outer finally on every path (issue #3194).
+      let publication: PublicationLock | undefined;
       try {
         const canonical = await materializeAndVerifyBundle(clockedContext, input, runState, document.spec.taskSet.benchmarkSha256, undefined, deps, created);
         const additional: AdditionalRunPublishResult[] = [];
@@ -238,8 +304,8 @@ export function runPublish(
           });
         }
 
-        const publication = await acquirePublicationLock(clockedContext.workspaceDir, input.draftId);
-        try {
+        publication = await acquirePublicationLock(clockedContext.workspaceDir, input.draftId);
+        {
           const latestDocument = readDraftDocument(clockedContext.workspaceDir, input.draftId);
           const latestState = requireRunState(clockedContext.workspaceDir, input.draftId);
           if (latestDocument.state !== "reported" && latestDocument.state !== "published-bundle") {
@@ -298,12 +364,12 @@ export function runPublish(
             checks: canonical.checks,
             ...(additional.length === 0 ? {} : { additionalBundles: additional }),
           };
-        } finally {
-          publication.release();
         }
       } catch (cause) {
-        if (!durable) removeRefusedBundles(created);
+        if (!durable) await removeRefusedBundles(clockedContext.workspaceDir, input.draftId, created, publication);
         throw cause;
+      } finally {
+        publication?.release();
       }
     },
   });
