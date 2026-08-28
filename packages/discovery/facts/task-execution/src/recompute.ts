@@ -233,12 +233,26 @@ function descriptorListDigests(value: unknown): `sha256:${string}`[] {
   return digests;
 }
 
+/**
+ * v1's card plus the inputs the Task pins and the output JSON Schemas its slots pin. `outputs` is
+ * a closed array of a closed slot object, and a slot's `schema` is the same optional-digest
+ * descriptor `profile-document.v2` carries for `outputConventions.slots[].schema` -- so the two
+ * kinds answer "which records pin schema `sha256:X`" the same way rather than disagreeing about a
+ * structurally identical field. An embedded schema carries no digest and is not an edge, which
+ * `descriptorListDigests` already handles by skipping any entry without one.
+ */
 export const taskRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
   const facts = await taskRecompute(bytes, refs);
   if (Object.keys(facts).length === 0) return noFacts();
   const result = TaskSpecificationSchema.safeParse(parseJson(bytes));
   if (!result.success) return noFacts();
-  return { ...facts, inputDigests: descriptorListDigests(result.data.inputs) };
+  return {
+    ...facts,
+    inputDigests: descriptorListDigests(result.data.inputs),
+    outputSlotSchemaDigests: descriptorListDigests(
+      result.data.outputs.map((slot) => slot.schema),
+    ),
+  };
 };
 
 export const deliveryRecomputeV2: RecordFactRecompute = async (bytes, refs) => {

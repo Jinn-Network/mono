@@ -45,6 +45,11 @@ export const chainEnvironmentFactsProfileV2: FactsProfileDocument =
 export const cryptoEnvironmentFactsProfileV2: FactsProfileDocument =
   loadProfile("crypto-environment.v2.json");
 
-/** Adds the re-capture lineage edge. A corpus body is inline, not a referenced record. */
+/**
+ * Adds the re-capture lineage edge. The corpus entries' bodies stay off the card under the
+ * amendment's own-content exclusion -- they are this record's enumerated content, covered by the
+ * record digest and unbounded in number -- not because they are inline: their descriptors carry a
+ * required `sha256:` digest. The genuinely inline body is `missPolicy.body.inlineUtf8`.
+ */
 export const informationWorldFactsProfileV2: FactsProfileDocument =
   loadProfile("information-world.v2.json");

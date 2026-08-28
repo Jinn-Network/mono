@@ -27,7 +27,7 @@ const EXPECTED_DIGESTS: Record<string, string> = {
   "evaluation-spec": "sha256:5173d4c796f6d06ce47e2483fbf98d44133749881ec582308e225898a7c4b97e",
   plugin: "sha256:c35617178306f8321b25459a03b0dd0bd540ce95691dce3ef15af29fbc5f33b3",
   checkpoint: "sha256:44eda1daf7e0d69e470c4d494937b144a24a53ea1af29c945ae137c43a65a545",
-  taskV2: "sha256:aee5adb65b09ff4ab44b71ae379dd077188e6f09874592b5bed56fe5c09af0a7",
+  taskV2: "sha256:20f74b734a4ee20a12617215a86a1ba8db1fa903471c9ffe1d430287a1793e7b",
   deliveryV2: "sha256:180f20a0fe236cadec98eb9d560d55dc9d164374f7d1369edb85d11b6ca9cfa3",
   evaluationSpecV2: "sha256:63511e7d9e009c1af9fe06d2ced0f12c53c4e0482f59b56568815d8da4dd1f53",
   profileDocumentV2: "sha256:c714ddccdfe498ffd6d82550bfbd3f9ebfc9dbe6e723a0cf57cae0a190222980",
@@ -118,7 +118,7 @@ describe("facts/task-execution profile documents", () => {
 });
 
 describe("v2 profiles (join-edge completeness, design §12 amendment)", () => {
-  it("binds the task kind under the next profile version and names its inputs", () => {
+  it("binds the task kind under the next profile version and names its inputs and output schemas", () => {
     expect(taskProfileV2.kind).toBe(RECORD_KINDS.task);
     expect(taskProfileV2.profile).toBe("https://spec.jinn.network/facts/task/v2");
     expect(referenceBearingFields(taskProfileV2)).toEqual([
@@ -126,6 +126,7 @@ describe("v2 profiles (join-edge completeness, design §12 amendment)", () => {
       "evaluationDigest",
       "supersedesDigest",
       "inputDigests",
+      "outputSlotSchemaDigests",
     ]);
   });
 

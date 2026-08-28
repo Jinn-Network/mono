@@ -211,7 +211,11 @@ describe("v2 recompute: the join edges v1 left out", () => {
   it("states an empty input list for a Task that supplies none, keeping every v1 fact", async () => {
     const bytes = await loadGoldenTaskBytes();
     const v1 = await taskRecompute(bytes, noReferencedBytes);
-    expect(await taskRecomputeV2(bytes, noReferencedBytes)).toEqual({ ...v1, inputDigests: [] });
+    expect(await taskRecomputeV2(bytes, noReferencedBytes)).toEqual({
+      ...v1,
+      inputDigests: [],
+      outputSlotSchemaDigests: [],
+    });
   });
 
   it("names a Task's digest-pinned inputs and skips the ones that pin nothing", async () => {
@@ -225,6 +229,20 @@ describe("v2 recompute: the join edges v1 left out", () => {
     });
     const facts = await taskRecomputeV2(bytes, noReferencedBytes);
     expect(facts.inputDigests).toEqual([`sha256:${"d".repeat(64)}`]);
+  });
+
+  it("names a Task's digest-pinned output slot schemas and skips an embedded one", async () => {
+    const golden = JSON.parse(new TextDecoder().decode(await loadGoldenTaskBytes())) as Record<string, unknown>;
+    const slots = golden.outputs as Record<string, unknown>[];
+    const bytes = sealTask({
+      ...golden,
+      outputs: [
+        { ...slots[0], schema: { name: "patch-schema", digest: { sha256: "e".repeat(64) } } },
+        { ...slots[0], name: "inline", schema: { type: "object" } },
+      ],
+    });
+    const facts = await taskRecomputeV2(bytes, noReferencedBytes);
+    expect(facts.outputSlotSchemaDigests).toEqual([`sha256:${"e".repeat(64)}`]);
   });
 
   it("names the outputs a Delivery produced", async () => {

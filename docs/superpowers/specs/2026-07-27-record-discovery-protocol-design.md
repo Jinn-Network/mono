@@ -886,6 +886,20 @@ profile fails loudly, and that the audited set is written down where the next re
 re-check it against the schema. Nothing in the tree derives the outbound set from the schema
 itself; a new profile that omits an edge fails no check at all until someone writes its pin.
 
+**Known exceptions at adoption.** The rule is a MUST and the tree does not yet meet it
+everywhere. Three profiles in the evidence leaf — `execution-evidence.v3`,
+`result-evaluation.v3` and `execution-verification.v2` — declare a strict *subset* of their
+kind's outbound set, and their pinned `referenceBearingFields` are therefore not completeness
+claims and must not be read as the conformance exemplar. What is undeclared, and why, is
+tabulated in `packages/discovery/facts/evidence/README.md`: the recompute functions read the
+record through the frozen `CatalogRecordProjection`, which carries none of the predicate-block
+references, runtime components, execution inputs or derivation lineage those kinds seal, so the
+emission cannot reach them; widening that projection is a change in another package and is a
+named follow-up. A profile document could name the fields ahead of the emission — nothing here
+forbids it — and that leaf chooses not to, so that its declared set and its emitted set stay in
+step. Every other profile in the tree declares its whole outbound set. A new profile is held to
+the MUST; this exception is not a precedent to copy.
+
 Requiring a card to carry every declared edge is a stronger and different rule, and is not
 adopted here: it would reinterpret
 §5.4's contract, under which a card is the subset of facts a holder chooses to publish; it would
