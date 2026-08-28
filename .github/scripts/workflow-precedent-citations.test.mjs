@@ -221,7 +221,8 @@ test('a restore step at the end of a job does not read the next job\'s name', ()
   assert.deepEqual(restoredArtifactNames(source), []);
 });
 
-// A restore step that names nothing by name, so a file citing it is reported.
+// Cites its own file name, and restores by `pattern:` rather than by name — so
+// dropping the self-citation guard makes this file report itself.
 const citingSelf = [
   '      # Same shape as self-ci.yml.',
   '      - name: Restore a distribution',
@@ -254,13 +255,22 @@ test('a .yaml workflow is scanned for broken citations', () => {
 });
 
 test('every broken citation is reported, not just the first', () => {
+  const citingTwo = [
+    '      # Same shape as consolidated-ci.yml and archived-ci.yml.',
+    '      - name: Restore a distribution',
+    '        uses: actions/download-artifact@v8',
+    '        with:',
+    '          name: some-dist',
+    '',
+  ].join('\n');
   const fixtureRoot = fixtureWorkflows({
-    'citing-a-ci.yml': citingConsolidated,
+    'citing-a-ci.yml': citingTwo,
     'citing-b-ci.yml': citingConsolidated,
   });
 
   try {
     assert.deepEqual(findBrokenCitations(fixtureRoot).sort(), [
+      'citing-a-ci.yml cites archived-ci.yml, which does not exist',
       'citing-a-ci.yml cites consolidated-ci.yml, which does not exist',
       'citing-b-ci.yml cites consolidated-ci.yml, which does not exist',
     ]);
