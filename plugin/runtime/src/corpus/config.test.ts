@@ -99,6 +99,47 @@ describe("corpus configuration", () => {
     expect(config.corpus.trust?.policyDirectory).toBe("/home/agent/.jinn-plugin/policy");
   });
 
+  test("defaults the chain-verification posture to verified", () => {
+    // A production mirror over remote holder feeds verifies what it consumes;
+    // choosing anything else takes a config line.
+    expect(resolveRuntimeConfig(base).corpus.chainVerification).toBe("verified");
+  });
+
+  test("accepts all three postures by name", () => {
+    for (const posture of ["verified", "rejecting"] as const) {
+      const config = resolveRuntimeConfig({ ...base, file: { corpus: { chainVerification: posture } } });
+      expect(config.corpus.chainVerification).toBe(posture);
+    }
+    const unverified = resolveRuntimeConfig({
+      ...base,
+      file: { corpus: { chainVerification: "unverified", acknowledgeUnverifiedChain: true } },
+    });
+    expect(unverified.corpus.chainVerification).toBe("unverified");
+  });
+
+  test("the unverified posture is unreachable without the acknowledgement", () => {
+    expect(() =>
+      resolveRuntimeConfig({ ...base, file: { corpus: { chainVerification: "unverified" } } }),
+    ).toThrow(/acknowledgeUnverifiedChain/);
+  });
+
+  test("the acknowledgement alone still selects the unverified posture", () => {
+    // The pre-`chainVerification` spelling of the same intent: an install that
+    // wrote only the flag keeps mirroring, rather than being silently
+    // upgraded into a posture it has no driver for.
+    const config = resolveRuntimeConfig({
+      ...base,
+      file: { corpus: { acknowledgeUnverifiedChain: true } },
+    });
+    expect(config.corpus.chainVerification).toBe("unverified");
+  });
+
+  test("rejects an unknown posture", () => {
+    expect(() =>
+      resolveRuntimeConfig({ ...base, file: { corpus: { chainVerification: "trust-me" } } }),
+    ).toThrow(/corpus configuration is invalid/);
+  });
+
   test("rejects a malformed genesis digest", () => {
     expect(() =>
       resolveRuntimeConfig({
