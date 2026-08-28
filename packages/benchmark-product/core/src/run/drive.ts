@@ -520,40 +520,38 @@ async function dispatchEvaluation(
   });
 
   if (replayed !== undefined) {
-    // A resumed leg whose Submission the backend already accepted may be pointing at an attempt
-    // the killed process left MID-EXECUTION. Replay makes `submit` idempotent, so it hands back
-    // that same nonterminal attempt; `drain()` is a no-op in a fresh process (no workers, no
-    // inflight), `observe` reports the state the attempt froze at, and `retryableFailureFromSnapshot`
-    // sees no `attempt-terminal` observation — so the leg terminals could-not-grade, which
-    // completes the evalIndex and loses the verdict for good. Exact resubmission is idempotent,
-    // never the backend's recovery operation: `recover` is. It settles the attempt (durable
-    // delivery checkpoint -> delivered; orphaned/absent -> an infrastructure terminal the retry
-    // ladder can classify) BEFORE `observe` reads it. Mirrors the solve leg's own reconciliation
-    // in `../operations/run-launch.ts`, including its ref discipline: the recovery ref is read out
-    // of the replayed bytes, never recomputed from the idempotency key, so a drift between the two
-    // refuses here instead of reconciling nothing and silently degrading to the loss above.
+    // A resumed leg whose Submission the backend already accepted may point at an attempt the
+    // killed process left MID-EXECUTION. Replay makes `submit` idempotent, so it hands back that
+    // same nonterminal attempt; `drain()` is a no-op in a fresh process (no workers, no inflight),
+    // `observe` reports the state the attempt froze at, and `retryableFailureFromSnapshot` sees no
+    // `attempt-terminal` observation — so the leg terminals could-not-grade, which completes the
+    // evalIndex and loses the verdict for good. Exact resubmission is idempotent, never the
+    // backend's recovery operation: `recover` is. It settles the attempt (durable delivery
+    // checkpoint -> delivered; orphaned/absent -> an infrastructure terminal the retry ladder can
+    // classify) BEFORE `observe` reads it. Mirrors the solve leg's reconciliation in
+    // `../operations/run-launch.ts`, including its ref discipline — the recovery ref is read out of
+    // the replayed bytes, never recomputed from the idempotency key, so a drift between the two
+    // refuses here rather than reconciling nothing and silently degrading to the loss above.
     //
     // The seam is HERE, not beside that solve loop in `runResume`: `recover` re-enters
-    // `completeAttempt` -> the evaluation provisioner's `harvest()`, whose materials registry is
-    // empty in a fresh process until `venue.prepareEvaluationCell()` populates it — and
+    // `completeAttempt` -> the evaluation provisioner's `harvest()`, whose materials registry stays
+    // empty in a fresh process until `venue.prepareEvaluationCell()` populates it, and
     // `prepareAndDispatchEvaluation` calls that once per cell before dispatching its legs. Called
-    // any earlier, recovery throws "harvest ran before setup registered evaluation-cell
-    // materials" (`../venue/provisioner.ts`). A never-submitted leg has no attempt to reconcile,
-    // so the launch path stays byte-identically untouched.
+    // any earlier, recovery throws "harvest ran before setup registered evaluation-cell materials"
+    // (`../venue/provisioner.ts`). A never-submitted leg has no attempt to reconcile, so the launch
+    // path stays byte-identically untouched.
     //
-    // Unlike the solve leg's, both refusals below are contained PER LEG rather than run-fatal:
-    // `prepareAndDispatchEvaluation`'s catch is enclosing, and a `BenchmarkProductError` is no
-    // `TaskExecutionError`, so `retryableFailureFromCause` returns undefined and the leg lands a
-    // could-not-grade terminal carrying the message as its detail. The run and the other cells'
-    // legs continue.
+    // Both refusals below are contained PER LEG, not run-fatal like the solve leg's:
+    // `prepareAndDispatchEvaluation`'s catch encloses them, and a `BenchmarkProductError` is no
+    // `TaskExecutionError`, so the leg lands a could-not-grade carrying the message as its detail
+    // while the run and the other cells' legs continue.
     //
     // Residual sub-window: a kill landing BEFORE the delivery checkpoint is durable leaves nothing
-    // recoverable — the verdict never existed. Recovery classifies that attempt orphaned/absent and
-    // `appendTerminal` writes `blame: infrastructure` / `backend-unavailable`, which
-    // `retryableFailureFromSnapshot` does call retryable — but `journalEvaluationFailure` gates the
-    // retry on `evaluationAttempt <= (deps.maxInfrastructureRetries ?? 0)`, so on the legacy
-    // default of 0 the leg still terminals could-not-grade (now carrying `failureCategory`, a
-    // categorized terminal rather than a silent one). Closing that window is a matter of setting
+    // recoverable — the verdict never existed. Recovery terminals that attempt `blame:
+    // infrastructure` / `backend-unavailable`, which IS retryable, but `journalEvaluationFailure`
+    // gates the retry on `evaluationAttempt <= (deps.maxInfrastructureRetries ?? 0)`, so on the
+    // legacy default of 0 the leg still terminals could-not-grade — now carrying `failureCategory`,
+    // a categorized terminal rather than a silent one. Closing that window is a matter of setting
     // `policy.evaluation.maxInfrastructureRetries` to 1, not of this seam.
     const replayedSubmission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
       replayed,
