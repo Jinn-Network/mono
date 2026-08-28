@@ -75,10 +75,18 @@ which left "which evaluation specs run in this crypto environment" unanswerable 
 A ResourceDescriptor satisfiable by `uri` or inline `content` alone pins nothing and is not an
 edge, so only digest-bearing members are carried.
 
-Audited and unchanged: `profile-document.v1` already declares its one edge, `extends`, and
-`submission.v1` already declares its one edge, the Task. A Submission's harness pin does carry a
-digest, but it lives under a namespaced key of the structurally open `requirements` map, which
-has no field for a profile to declare — the design amendment states that limit.
+`profile-document.v2` adds the output-slot schemas a profile pins. v1 declared only `extends`,
+but `outputConventions.slots[].schema` is the same optional-digest ResourceDescriptor this leaf
+already treats as an edge on an evaluation spec.
+
+Audited and unchanged: `submission.v1` already declares its one edge, the Task. A Submission's
+harness pin does carry a digest, but it lives under a namespaced key of the structurally open
+`requirements` map, which has no field for a profile to declare — the design amendment states
+that limit.
 
 The plugin and checkpoint profiles stay empty: no defining schema for either exists in-tree, so
 there is nothing to declare, and an empty profile asserts nothing.
+
+Each profile's `referenceBearingFields` is pinned in `profiles.test.ts`. That pin is a
+change-detector authored from the same reading of the schema as the profile itself, not an
+independent completeness proof; see the design amendment's *What enforces this*.

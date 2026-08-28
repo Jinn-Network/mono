@@ -26,6 +26,10 @@ it before authoring or revising a profile.
 
 `referenceBearingFields` reports what a profile declares. Whether that set is complete is a
 question about the record kind, so each `discovery/facts/*` leaf pins its own answer in tests.
+Those pins are change-detectors, not completeness proofs: pin and profile are authored together
+from one reading of the defining schema, so a missed edge is missed by both. Nothing here
+derives the outbound set from the schema — a reviewer re-checking the pin against the schema is
+the check.
 
 ## Development
 

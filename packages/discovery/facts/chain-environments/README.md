@@ -22,3 +22,7 @@ naming them, and left its service-runtime images and miss-policy body unnamed. E
 its supersession pointer, and the information world its capturer.
 
 A record's own enumerated content — a captured corpus's entries — is not an outbound reference.
+
+Each profile's `referenceBearingFields` is pinned in `profiles.test.ts`. That pin is a
+change-detector authored from the same reading of the schema as the profile itself, not an
+independent completeness proof; see the design amendment's *What enforces this*.

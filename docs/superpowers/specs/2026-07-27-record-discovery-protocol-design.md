@@ -857,18 +857,37 @@ pinned to it keep working (§15's versioning discipline; the retention conventio
 amendment's) — never an in-place edit.
 
 One limit, stated rather than hidden. Some record kinds carry structurally *open* maps — TEP's
-`requirements` and `preferences`, a run's `pinning` — whose keys are namespaced extensions the
-defining schema does not enumerate. A digest placed under such a key is an outbound reference
-no profile can name, because a profile declares fields and there is no field to declare. Those
-references are outside the completeness rule until the kind closes the shape or names the key.
+`requirements` and `preferences`, a run's `pinning` and the `policy.submissionBaseline` it is
+checked against, an environment's `build.dependencyPinning` — whose keys are namespaced
+extensions or mechanism-specific members the defining schema does not enumerate. A digest placed
+under such a key is an outbound reference no profile can name, because a profile declares fields
+and there is no field to declare. Those references are outside the completeness rule until the
+kind closes the shape or names the key. A *namespaced extension whose own shape is closed* is not
+this case: a benchmarking publication extension validates against a fixed schema, so its members
+are enumerable fields the rule does reach.
 
 **What enforces this.** Not `facts-consistency`. That check compares announced fields against
 the record and skips any field the card does not announce, so it catches a *misstated* edge and
 never a *missing* one — a holder who suppresses a dispute edge publishes a card that verifies
-`consistent`. Completeness is a rule on the profile document, checked where profiles are
+`consistent`. Its reach over a *misstated* edge is narrower still for an **optional** component:
+when the record does not carry one, the recompute omits the key, and an announced value for it
+compares against `undefined`, which is `indeterminate` — the unavailable-referenced-bytes signal
+— rather than `inconsistent`. So for an optional edge a fabricated value is indistinguishable
+from referenced bytes the checker could not obtain. Only a required component's edge is caught
+outright when it is misstated.
+
+Completeness is therefore a rule on the profile document, checked where profiles are
 authored: each `discovery/facts/*` leaf's tests pin its `referenceBearingFields` to the kind's
-whole outbound set, and that pin is what a reviewer reads. Requiring a card to carry every
-declared edge is a stronger and different rule, and is not adopted here: it would reinterpret
+whole outbound set, and that pin is what a reviewer reads. Those pins are **change-detectors,
+not completeness proofs**: the pinned list and the profile it checks are authored in the same
+change from the same reading of the defining schema, so an edge missed in that reading is
+missed by both and the test is green. What the pin buys is that a *later* silent narrowing of a
+profile fails loudly, and that the audited set is written down where the next reviewer can
+re-check it against the schema. Nothing in the tree derives the outbound set from the schema
+itself; a new profile that omits an edge fails no check at all until someone writes its pin.
+
+Requiring a card to carry every declared edge is a stronger and different rule, and is not
+adopted here: it would reinterpret
 §5.4's contract, under which a card is the subset of facts a holder chooses to publish; it would
 invalidate every card already published against a profile whose field set later grows; and
 `undefined` from a recompute is already spoken for as the unavailable-referenced-bytes signal
@@ -877,8 +896,8 @@ and the card hid it".
 
 The §5.4 caveat is unchanged and bounds what an edge is worth: a card is a holder-authored
 summary. Edges are for assembling a graph cheaply and for `referrers` inversion; a decision
-resting on one re-checks it against the fetched record, where `facts-consistency` will catch a
-card that misstates it.
+resting on one re-checks it against the fetched record, where — subject to the optional-edge
+limit above — `facts-consistency` will catch a card that misstates it.
 
 Unknown kinds are not errors: a consumer skips announcements for kinds it has no profile
 for. This is what lets new record kinds deploy without touching the protocol.

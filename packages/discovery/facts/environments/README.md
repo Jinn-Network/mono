@@ -20,3 +20,7 @@ design §12, amendment 2026-08-28). `environment.v2` adds the three components v
 `parser.digest`, `image.indexDigest`, and `build.recipeDigest`. "Which environments run parser
 `sha256:X`" is a query the card owes an index, and v1 could not answer it. A recipe satisfied by
 a uri alone pins nothing and is not carried. v1 stays frozen and registered.
+
+Each profile's `referenceBearingFields` is pinned in `profiles.test.ts`. That pin is a
+change-detector authored from the same reading of the schema as the profile itself, not an
+independent completeness proof; see the design amendment's *What enforces this*.

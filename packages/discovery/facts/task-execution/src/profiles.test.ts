@@ -9,6 +9,7 @@ import {
   evaluationSpecProfileV2,
   pluginProfile,
   profileDocumentProfile,
+  profileDocumentProfileV2,
   submissionProfile,
   taskProfile,
   taskProfileV2,
@@ -29,6 +30,7 @@ const EXPECTED_DIGESTS: Record<string, string> = {
   taskV2: "sha256:aee5adb65b09ff4ab44b71ae379dd077188e6f09874592b5bed56fe5c09af0a7",
   deliveryV2: "sha256:180f20a0fe236cadec98eb9d560d55dc9d164374f7d1369edb85d11b6ca9cfa3",
   evaluationSpecV2: "sha256:63511e7d9e009c1af9fe06d2ced0f12c53c4e0482f59b56568815d8da4dd1f53",
+  profileDocumentV2: "sha256:c714ddccdfe498ffd6d82550bfbd3f9ebfc9dbe6e723a0cf57cae0a190222980",
 };
 
 function expectPinnedDigest(name: string, digest: string) {
@@ -138,8 +140,19 @@ describe("v2 profiles (join-edge completeness, design §12 amendment)", () => {
     ]);
   });
 
+  it("binds the profile-document kind under the next profile version and names its output schemas", () => {
+    expect(profileDocumentProfileV2.kind).toBe(RECORD_KINDS.profileDocument);
+    expect(profileDocumentProfileV2.profile).toBe("https://spec.jinn.network/facts/profile-document/v2");
+    expect(referenceBearingFields(profileDocumentProfileV2)).toEqual([
+      "extendsDigest",
+      "outputSlotSchemaDigests",
+    ]);
+    expect(referenceBearingFields(profileDocumentProfile)).toEqual(["extendsDigest"]);
+    expectPinnedDigest("profileDocumentV2", sealJson(profileDocumentProfileV2).digest);
+  });
+
   it("declares every field of both revisions a record fact", () => {
-    for (const profile of [taskProfileV2, deliveryProfileV2]) {
+    for (const profile of [taskProfileV2, deliveryProfileV2, profileDocumentProfileV2]) {
       for (const field of profile.fields) expect(field.class).toBe("record");
     }
   });

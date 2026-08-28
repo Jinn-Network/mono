@@ -23,9 +23,16 @@ const generation = {
 const digest = (seed: string): Sha256Digest =>
   `sha256:${seed.repeat(64).slice(0, 64)}` as Sha256Digest;
 
-// Record kinds and the reference-bearing field names their facts profiles declare. The leaf
-// packages' own `profiles.test.ts` pin these same lists against the real profile documents, so
-// the two halves of the contract cannot drift apart silently.
+// Record kinds and reference-bearing field names, transcribed from the facts profiles those
+// kinds have. This package does not depend on the `discovery/facts/*` leaves and deliberately
+// does not: `indexAnnouncementEdges` takes the field-name list as plain data, and these
+// literals stand in for whatever a caller passes. So they are *inputs to this test*, not a
+// second copy of a contract — nothing here checks them against a profile document, and a
+// profile revision does not fail this file.
+//
+// The environment list is deliberately a strict subset of what `environment.v2` declares (it
+// also has `image.indexDigest` and `build.recipeDigest`): a caller may index the edges it cares
+// about, and the writer must handle a card carrying fields the list does not name.
 const ENVIRONMENT_KIND = "https://spec.jinn.network/records/environment/v1";
 const ENVIRONMENT_EDGE_FIELDS = ["image.manifestDigest", "parser.digest"] as const;
 const EXECUTION_KIND = "https://spec.jinn.network/records/execution-evidence/v1";
@@ -119,6 +126,17 @@ describe("announcementEdgesFromCard", () => {
       { taskDigest: TASK, runtimeDigest: undefined, nativeTraceDigest: null },
     ));
     expect(edges.map((edge) => edge.field)).toEqual(["taskDigest"]);
+  });
+
+  test("indexes only the fields the caller names, ignoring a card's other digest-valued fields", () => {
+    // The environment card carries `parser.digest`; a caller that asked only for the image gets
+    // only the image. The field list is the caller's selection, not a claim about the profile.
+    const edges = announcementEdgesFromCard(announcement(
+      HOLDER, "ann-env", ENVIRONMENT_KIND, ENVIRONMENT, ["image.manifestDigest"], environmentCard,
+    ));
+    expect(edges.map((edge) => [edge.field, edge.targetDigest])).toEqual([
+      ["image.manifestDigest", IMAGE],
+    ]);
   });
 
   test("rejects a reference-bearing field holding something that is not a digest", () => {

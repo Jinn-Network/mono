@@ -359,6 +359,26 @@ export const evaluationSpecRecomputeV2: RecordFactRecompute = async (bytes, refs
   return edges;
 };
 
+/**
+ * v1's card plus the output-slot schemas a profile pins. v1 declared only `extends`, but a slot's
+ * `schema` is the same optional-digest ResourceDescriptor this leaf already treats as an edge on
+ * an evaluation spec: satisfiable by a `uri` alone under §6.4, in which case it pins nothing and
+ * is not carried, and an edge when it does carry a digest. "Which profiles validate output
+ * against schema `sha256:X`" is the query a wrong schema makes someone ask.
+ */
+export const profileDocumentRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await profileDocumentRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  const result = TaskProfileDocumentSchema.safeParse(parseJson(bytes));
+  if (!result.success) return noFacts();
+  return {
+    ...facts,
+    outputSlotSchemaDigests: descriptorListDigests(
+      result.data.outputConventions.slots.map((slot) => (slot as { schema?: unknown }).schema),
+    ),
+  };
+};
+
 /** Explicit registry for the coexisting Task-Execution facts v2 profiles. */
 export const TASK_EXECUTION_FACTS_RECOMPUTE_V2: FactsRecompute = {
   get(kind: string): RecordFactRecompute | undefined {
@@ -369,6 +389,8 @@ export const TASK_EXECUTION_FACTS_RECOMPUTE_V2: FactsRecompute = {
         return deliveryRecomputeV2;
       case RECORD_KINDS.evaluationSpec:
         return evaluationSpecRecomputeV2;
+      case RECORD_KINDS.profileDocument:
+        return profileDocumentRecomputeV2;
       default:
         return TASK_EXECUTION_FACTS_RECOMPUTE.get(kind);
     }

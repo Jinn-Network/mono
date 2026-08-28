@@ -48,3 +48,11 @@ export const deliveryProfileV2: FactsProfileDocument = loadProfile("delivery.v2.
  * exactly the access-classified case where fetching to join is not possible at all.
  */
 export const evaluationSpecProfileV2: FactsProfileDocument = loadProfile("evaluation-spec.v2.json");
+
+/**
+ * Adds the output-slot schemas a profile pins. `extends` was v1's only declared edge, but a
+ * slot's optional `schema` is the same digest-bearing-descriptor shape this leaf treats as an
+ * edge on an evaluation spec; a descriptor satisfied by a `uri` alone pins nothing and is not
+ * carried.
+ */
+export const profileDocumentProfileV2: FactsProfileDocument = loadProfile("profile-document.v2.json");

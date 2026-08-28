@@ -17,6 +17,7 @@ import {
   evaluationSpecRecomputeV2,
   pluginRecompute,
   profileDocumentRecompute,
+  profileDocumentRecomputeV2,
   submissionRecompute,
   taskRecompute,
 } from "./recompute.js";
@@ -333,14 +334,41 @@ describe("v2 recompute: the join edges v1 left out", () => {
     } as never)).toThrow(/safetyConstraints are bounded to log- and transaction-observable kinds/);
   });
 
-  it("emits no facts for bytes that are not an evaluation spec", async () => {
-    expect(await evaluationSpecRecomputeV2(new TextEncoder().encode("{"), noReferencedBytes)).toEqual({});
+  it("names the output-slot schemas a profile pins, skipping slots that pin nothing", async () => {
+    const bytes = await loadRepositoryWorkProfileBytes();
+    const document = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    const slots = (document.outputConventions as { slots: Record<string, unknown>[] }).slots;
+    // The published profile's three slots carry no schema at all, so v2's card states an empty
+    // list — a true recomputed statement, not an omission.
+    expect((await profileDocumentRecomputeV2(bytes, noReferencedBytes)).outputSlotSchemaDigests).toEqual([]);
+
+    // Give two of them a schema: one digest-pinned, one satisfied by a uri alone. Only the
+    // first is an edge (§6.4), which is the same line the evaluation-spec card draws.
+    const withSchemas = new TextEncoder().encode(JSON.stringify({
+      ...document,
+      outputConventions: {
+        slots: [
+          { ...slots[0], schema: { name: "patch-schema", digest: { sha256: "a".repeat(64) } } },
+          { ...slots[1], schema: { name: "summary-schema", uri: "https://example.test/summary.json" } },
+          slots[2],
+        ],
+      },
+    }));
+    const facts = await profileDocumentRecomputeV2(withSchemas, noReferencedBytes);
+    expect(facts.outputSlotSchemaDigests).toEqual([`sha256:${"a".repeat(64)}`]);
+    expect(facts.profile).toBe(document.profile);
   });
 
-  it("routes the three revised kinds to v2 and every other kind to its unrevised fn", () => {
+  it("emits no facts for bytes that are not an evaluation spec or a profile document", async () => {
+    expect(await evaluationSpecRecomputeV2(new TextEncoder().encode("{"), noReferencedBytes)).toEqual({});
+    expect(await profileDocumentRecomputeV2(new TextEncoder().encode("{"), noReferencedBytes)).toEqual({});
+  });
+
+  it("routes the four revised kinds to v2 and every other kind to its unrevised fn", () => {
     expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.task)).toBe(taskRecomputeV2);
     expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.delivery)).toBe(deliveryRecomputeV2);
     expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.evaluationSpec)).toBe(evaluationSpecRecomputeV2);
+    expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.profileDocument)).toBe(profileDocumentRecomputeV2);
     expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.submission)).toBe(
       TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.submission),
     );
