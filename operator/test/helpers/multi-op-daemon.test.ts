@@ -85,12 +85,20 @@ describe('spawnMultiOpDaemons', () => {
     // ephemeral band (32768-65535) is one no sibling vitest worker's `listen(0)`
     // can ever be handed, so a fixed reservation has NO window at all;
     // `allocateAnvilPort()` would move these into the band and open an
-    // allocate-then-rebind window between `beforeAll` and the child's bind
-    // (two file writes, the hook-to-test transition, then node spawn +
-    // startup), which the dummy daemon — no `'error'` handler — would lose as a
-    // child crash surfacing as a 30s readiness timeout. Registered in the port
-    // registry in test/release/tier-1/T1.2-harness-readiness-contract.ts.
-    // See issue #1627 and docs/runbooks/testing.md, "Worker parallelism and ports".
+    // allocate-then-rebind window that the dummy daemon — no `'error'` handler —
+    // would lose as a child crash surfacing as a 30s readiness timeout.
+    //
+    // The discriminator is WINDOW LENGTH, not the technique. Here the window
+    // would span the whole of `beforeAll` and the hook-to-test transition
+    // before the child even spawns, which is why these stay fixed; the
+    // allocator IS the right call in the second describe below, where the
+    // allocation happens inside the test, one statement before the spawn. Both
+    // beat the `pickPort()` blind random guess they replaced, which sat inside
+    // the band and never checked the port was free at all.
+    //
+    // Registered in the port registry in
+    // test/release/tier-1/T1.2-harness-readiness-contract.ts. See issue #1627
+    // and docs/runbooks/testing.md, "Worker parallelism and ports".
     await fs.writeFile(path.join(opAHome, '.jinn-client', 'config.json'), minimalCfg(7732));
     await fs.writeFile(path.join(opBHome, '.jinn-client', 'config.json'), minimalCfg(7733));
   });

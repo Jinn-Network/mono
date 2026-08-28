@@ -33,14 +33,15 @@
  *
  * Policy enforced here — three rules over the test trees:
  *
- *   1. No numeric literal in [32768, 65535] in a *bind or probe position* —
+ *   1. No numeric literal in [32768, 65535] in a *port-shaped position* —
  *      the first argument of `.listen(`, the value of a port-shaped object key
  *      (`apiPort` / `grpcPort` / `httpPort` / `portBase` / `ports` /
  *      `dailyDriverPorts` / `port`) including every element of an array
  *      literal in that position, or the initializer of a `const` / `let` /
- *      `var` whose name is port-ish (`const apiPort = 45000`). The array form
- *      is matched against the whole file text rather than line by line, so a
- *      `ports: [\n  60001,\n]` spread over several lines is caught too.
+ *      `var` whose name is port-ish (`const apiPort = 45000`, and the
+ *      defaulted form `const portBase = opts.portBase ?? 45000`). The array
+ *      form is matched against the whole file text rather than line by line,
+ *      so a `ports: [\n  60001,\n]` spread over several lines is caught too.
  *   2. No randomly-guessed port — a `Math.random` call whose line, or whose
  *      nearest enclosing `function <name>` / `const <name> =` declaration
  *      within 10 lines, is named something port-ish. Guessing is the same race
@@ -55,13 +56,20 @@
  * fixtures (`'50000'`, `'51500'`), and hex-address substrings (`33333`,
  * `55555`, `44444`) — so a value-only rule is pure noise. It also holds 61
  * legitimate fixed port literals in genuine port positions, over 18 distinct
- * numbers (7331, 7332, 7333, 7340, 7342, 7360, 7400, 7450, 7451, 7732, 7733,
- * 7734, 7740, 7742, 7777, 9331, 9332, 18533), plus the `const API_PORT = 27331`
- * that rule 1c sees — every one of them safely BELOW the ephemeral band, so a
- * position-only rule condemns the correct code. Only the intersection names
- * the actual hazard. The below-band fixed ports in current use are registered
- * in the header comment of
+ * numbers (7331, 7332, 7333, 7340, 7342, 7350, 7360, 7400, 7450, 7451, 7732,
+ * 7733, 7734, 7740, 7742, 7777, 9331, 9332, 18533), plus the
+ * `const API_PORT = 27331` that rule 1c sees — every one of them safely BELOW
+ * the ephemeral band, so a position-only rule condemns the correct code. Only
+ * the intersection names the actual hazard. The below-band fixed ports in
+ * current use are registered in the header comment of
  * `operator/test/release/tier-1/T1.2-harness-readiness-contract.ts`.
+ *
+ * Numeric separators count. `45_000` is the same port as `45000`, and the
+ * repository writes 4- and 5-digit numbers in separated form on well over a
+ * thousand lines (`10_000`, `30_000`), including inside this very change. A
+ * digit-run pattern that cannot cross the `_` would let one underscore walk
+ * straight through every rule above while the gate stayed green, so every
+ * literal is normalised (separators stripped) before its band is tested.
  *
  * "Port-ish name" is matched at a word or camelCase boundary, NOT as a bare
  * substring: `portBase`, `apiPort`, `pickPort`, `API_PORT` are port-ish;
@@ -105,13 +113,24 @@
  * Rule 3 reads `operator/vitest.config.ts` and that file ONLY. It never reads
  * `vitest.hermetic.config.ts`, which is deliberately sequential — the hermetic
  * gate spawns Anvil, Ponder, and real daemons against shared fixtures and must
- * not run those files concurrently.
+ * not run those files concurrently. It reads that config with comments
+ * stripped: today the file is roughly half prose, and the natural way to
+ * record *why* `pool` and `maxWorkers` are left alone is a comment naming
+ * them — which a raw line scan reports as the very pin it is explaining, on a
+ * required gate, with a message that contradicts the file.
  *
- * Scope: the trees `nodeInclude` in `vitest.config.ts` collects from —
- * `operator/test/`, `operator/scripts/release/`, and the `test/` dir of each
- * `operator/plugins/<name>` and `operator/packages/<name>` workspace. The two
- * workspace probes are ONE level deep — literally `<group>/<name>/test` —
- * whereas the vitest plugin glob is recursive under `plugins/` and would also
+ * Scope: the whole `operator/test/` tree, plus `operator/scripts/release/` and
+ * the `test/` dir of each `operator/plugins/<name>` and
+ * `operator/packages/<name>` workspace. `operator/test/` is deliberately a
+ * SUPERSET of what `nodeInclude` in `vitest.config.ts` collects: it also holds
+ * `test/e2e/**` and `test/hermetic/**`, which the default parallel suite
+ * excludes. Those trees run under their own sequential entry points and so do
+ * not face the cross-worker race, but they are policed anyway — a file moves
+ * between trees far more easily than a reviewer notices that its fixed port
+ * has just entered a parallel suite. A genuinely sequential-only fixed port in
+ * the band is the case the `lint:no-fixed-test-port-allow` marker exists for.
+ * The two workspace probes are ONE level deep — literally `<group>/<name>/test`
+ * — whereas the vitest plugin glob is recursive under `plugins/` and would also
  * collect a `test/` dir nested deeper than one level. Today that difference is
  * inert: `operator/plugins/` has exactly one workspace with a `test/` dir and
  * none nested deeper, and `operator/packages/` does not exist at all — its
@@ -128,11 +147,36 @@
  *
  * Suppression: a line carrying the inline comment
  * `lint:no-fixed-test-port-allow` is skipped, matching the house
- * `lint:no-error-leak-allow` convention. It is expected to have ZERO consumers
- * on landing — it exists for a future case nobody has met yet, not for the
- * ones this guard was written against.
+ * `lint:no-error-leak-allow` convention. For the multi-line array form the
+ * marker is per-ELEMENT line, not on the `ports: [` header — the header line
+ * is not where the literal is reported. It is expected to have ZERO consumers
+ * on landing: it exists for a future case nobody has met yet, not for the ones
+ * this guard was written against.
+ *
+ * ── What this guard deliberately does NOT catch ─────────────────────────────
+ *
+ * Named so that the doc, the runbook, and this file agree on the size of the
+ * claim. Each is a known gap, not an oversight; none has a live instance in
+ * the tree today.
+ *
+ *   - A port inside a URL string — `fetch('http://127.0.0.1:45020/health')`.
+ *     The stated invariant is about port-shaped *syntactic positions*, which a
+ *     string literal is not. Adding a URL rule would flag ports behind a fully
+ *     mocked `fetch` (there is one such literal in the tree today), i.e. it
+ *     would condemn code carrying no hazard.
+ *   - A bare reassignment — `apiPort = 45000;` with the declaration elsewhere.
+ *     Rule 1c requires the `const` / `let` / `var`, which keeps it away from
+ *     every `==` / `>=` / `=>` shape a looser pattern would have to exclude.
+ *   - A `]` inside a string inside a port array — `{ ports: [']', 45004] }`.
+ *     Rule 1d's array capture is not a bracket matcher, so it stops at the
+ *     first `]`. Likewise a nested array reports only its first row.
+ *   - A computed pin in rule 3 — `maxWorkers: process.env.CI ? 1 : 4`, or the
+ *     same flag passed to vitest from the `test` script in `package.json`
+ *     rather than written in the config. Rule 3 reads one file and matches
+ *     literals; it is a speed bump against a silent edit, not a sandbox
+ *     against a determined one.
  */
-import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -149,19 +193,32 @@ const VITEST_CONFIG = join(OPERATOR_ROOT, 'vitest.config.ts');
 // The UNION of the two ephemeral ranges this suite runs on: Linux's
 // `ip_local_port_range` default (32768–60999) and macOS's (49152–65535).
 // Neither contains the other — see the doc block.
-const EPHEMERAL_MIN = 32768;
-const EPHEMERAL_MAX = 65535;
+export const EPHEMERAL_MIN = 32768;
+export const EPHEMERAL_MAX = 65535;
 
-const ALLOW_MARKER = 'lint:no-fixed-test-port-allow';
+export const ALLOW_MARKER = 'lint:no-fixed-test-port-allow';
+
+// A numeric literal as JavaScript actually writes one: digits, optionally
+// broken by `_` separators. The trailing `(?![\w.])` rejects a longer run and a
+// decimal (`45000.5`, `1.32768`), and the leading `(?<![\w.$])` — used where
+// the match is not already anchored by `(` or `:` or `=` — keeps the scan from
+// biting a digit run out of the middle of a hex address or a decimal.
+const NUM = '(\\d[\\d_]*)(?![\\w.])';
+const NUM_FREE = `(?<![\\w.$])${NUM}`;
 
 const PORT_KEY = '\\b(?:apiPort|grpcPort|httpPort|portBase|ports|dailyDriverPorts|port)\\s*:\\s*';
-const LISTEN_LITERAL = /\.listen\(\s*(\d{4,5})\b/g;
-const PORT_KEY_LITERAL = new RegExp(`${PORT_KEY}(\\d{4,5})\\b`, 'g');
+const LISTEN_LITERAL = new RegExp(`\\.listen\\(\\s*${NUM}`, 'g');
+const PORT_KEY_LITERAL = new RegExp(`${PORT_KEY}${NUM}`, 'g');
 const PORT_KEY_ARRAY = new RegExp(`${PORT_KEY}\\[([^\\]]*)\\]`, 'g');
-const ARRAY_ELEMENT = /\b(\d{4,5})\b/g;
+const ARRAY_ELEMENT = new RegExp(NUM_FREE, 'g');
 // `const apiPort = 45000` — a bound-later port that PORT_KEY misses because it
-// is an assignment, not an object key.
-const PORT_DECL_LITERAL = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(\d{4,5})\b/g;
+// is an assignment, not an object key. The optional middle group covers the
+// defaulted form `const portBase = opts.portBase ?? 45000`, which is how a
+// helper's default port is actually written in this tree.
+const PORT_DECL_LITERAL = new RegExp(
+  `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:[^;\\n]*?(?:\\?\\?|\\|\\|)\\s*)?${NUM}`,
+  'g',
+);
 
 const RANDOM_CALL = /Math\.random/;
 const DECLARATION = /\bfunction\s+([A-Za-z_$][\w$]*)|\bconst\s+([A-Za-z_$][\w$]*)\s*=/;
@@ -186,7 +243,7 @@ const DECLARATION_LOOKBACK_LINES = 10;
 // Rule 3: a parallelism pin or isolation opt-out in vitest.config.ts. Each
 // pattern carries the sentence that explains why it is rejected — see the doc
 // block for the long form.
-const PARALLELISM_PINS = [
+export const PARALLELISM_PINS = [
   {
     re: /\bisolate\s*:\s*false\b/,
     why: '`isolate: false` reuses one worker process across test files. It is the most dangerous entry here: the others cost wall-clock or reproduction rate, this one costs the conclusion — it silently invalidates the #1627 finding that cross-file module / global / $HOME / $TMPDIR leakage is structurally impossible, while leaving the suite green.',
@@ -217,8 +274,21 @@ const PARALLELISM_PINS = [
   },
 ];
 
-function inBand(value) {
-  return value >= EPHEMERAL_MIN && value <= EPHEMERAL_MAX;
+/**
+ * The band test, over a literal as written. Separators are stripped before the
+ * comparison (`45_000` is port 45000), and anything that does not normalise to
+ * a 4- or 5-digit run is not a port-shaped literal at all.
+ */
+export function portValue(raw) {
+  if (!/^\d(?:_?\d)*$/.test(raw)) return null;
+  const digits = raw.replace(/_/g, '');
+  if (digits.length < 4 || digits.length > 5) return null;
+  return Number(digits);
+}
+
+export function inBand(raw) {
+  const value = portValue(raw);
+  return value !== null && value >= EPHEMERAL_MIN && value <= EPHEMERAL_MAX;
 }
 
 /** 1-based line number of a character offset in `text`. */
@@ -228,6 +298,137 @@ function lineNumberAt(text, offset) {
     if (text.charCodeAt(i) === 10) line += 1;
   }
   return line;
+}
+
+/**
+ * Blank out `//` and block comments, preserving every byte offset and newline
+ * so line numbers and `matchAll` indices stay exact. String and template
+ * literals are tracked only so a `//` or `/*` inside one is not mistaken for a
+ * comment; their contents are left intact.
+ *
+ * Rule 3 needs this because `operator/vitest.config.ts` explains its own
+ * defaults in prose, and a comment saying "we do NOT set `pool: 'threads'`" is
+ * not a pin. A regex/division ambiguity is not worth resolving here: the only
+ * consumer is a config object literal, where a regex literal containing `//`
+ * or an unbalanced quote does not occur.
+ */
+export function blankComments(text) {
+  const out = Array.from(text);
+  let i = 0;
+  let quote = null; // "'" | '"' | '`'
+  while (i < text.length) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === '\\') {
+        i += 2;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      i += 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') {
+        out[i] = ' ';
+        i += 1;
+      }
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      const stop = end === -1 ? text.length : end + 2;
+      for (; i < stop; i += 1) if (text[i] !== '\n') out[i] = ' ';
+      continue;
+    }
+    i += 1;
+  }
+  return out.join('');
+}
+
+/** Rule 2: the name this `Math.random` line belongs to, or null. */
+function enclosingName(lines, idx) {
+  const floor = Math.max(0, idx - DECLARATION_LOOKBACK_LINES);
+  for (let i = idx; i >= floor; i -= 1) {
+    const m = DECLARATION.exec(lines[i]);
+    if (m) return m[1] ?? m[2];
+  }
+  return null;
+}
+
+/**
+ * Rules 1 and 2 over one file's text. Pure: takes the source and the name to
+ * report it under, returns `{ line, snippet }` violations. Exported so
+ * `check-no-fixed-test-port.test.mjs` can drive it over fixtures without a
+ * filesystem.
+ */
+export function scanText(text) {
+  const violations = [];
+  const lines = text.split('\n');
+
+  lines.forEach((line, idx) => {
+    if (line.includes(ALLOW_MARKER)) return;
+
+    let flagged = false;
+
+    // Rule 1a — bind position: `.listen(<port>, …)`.
+    for (const m of line.matchAll(LISTEN_LITERAL)) if (inBand(m[1])) flagged = true;
+    // Rule 1b — port-key position, bare literal.
+    for (const m of line.matchAll(PORT_KEY_LITERAL)) if (inBand(m[1])) flagged = true;
+    // Rule 1c — `const|let|var <port-ish name> = <literal>`, plain or defaulted.
+    for (const m of line.matchAll(PORT_DECL_LITERAL)) {
+      if (PORTISH_NAME.test(m[1]) && inBand(m[2])) flagged = true;
+    }
+    // Rule 2 — a guessed port is the same race, harder to reproduce.
+    if (RANDOM_CALL.test(line)) {
+      const name = enclosingName(lines, idx);
+      if (name && PORTISH_NAME.test(name)) flagged = true;
+    }
+
+    if (flagged) violations.push({ line: idx + 1, snippet: line.trim() });
+  });
+
+  // Rule 1d — port-key position, array literal: EVERY element counts. Run
+  // over the whole file text, not line by line, because the array form is
+  // routinely written multi-line and a per-line scan can never see across
+  // the newline between the `ports: [` and its elements.
+  for (const m of text.matchAll(PORT_KEY_ARRAY)) {
+    const contentStart = m.index + m[0].indexOf('[') + 1;
+    for (const el of m[1].matchAll(ARRAY_ELEMENT)) {
+      if (!inBand(el[1])) continue;
+      const lineNo = lineNumberAt(text, contentStart + el.index);
+      const snippet = lines[lineNo - 1] ?? '';
+      if (snippet.includes(ALLOW_MARKER)) continue;
+      violations.push({ line: lineNo, snippet: snippet.trim() });
+    }
+  }
+
+  // One report line per line, however many rules fired on it.
+  const seen = new Set();
+  return violations.filter((v) => {
+    if (seen.has(v.line)) return false;
+    seen.add(v.line);
+    return true;
+  });
+}
+
+/** Rule 3 over one config's text. Comments are blanked before matching. */
+export function scanVitestConfig(text) {
+  const found = [];
+  blankComments(text)
+    .split('\n')
+    .forEach((line, idx) => {
+      if (line.includes(ALLOW_MARKER)) return;
+      for (const pin of PARALLELISM_PINS) {
+        if (!pin.re.test(line)) continue;
+        found.push({ line: idx + 1, snippet: line.trim(), why: pin.why });
+      }
+    });
+  return found;
 }
 
 function walk(dir, out = []) {
@@ -274,189 +475,123 @@ function scanRoots() {
   return roots;
 }
 
-/** Rule 2: the name this `Math.random` line belongs to, or null. */
-function enclosingName(lines, idx) {
-  const floor = Math.max(0, idx - DECLARATION_LOOKBACK_LINES);
-  for (let i = idx; i >= floor; i -= 1) {
-    const m = DECLARATION.exec(lines[i]);
-    if (m) return m[1] ?? m[2];
-  }
-  return null;
-}
-
 /** The guard is useless if it cannot find what it polices. Say so, loudly. */
 function bail(...message) {
   for (const line of message) console.error(line);
   process.exit(1);
 }
 
-const roots = scanRoots();
-if (!existsSync(TEST_ROOT)) {
-  bail(
-    '✗ operator/test/ does not exist, so this guard scanned nothing.',
-    '  That is the tree it exists to police. If the test tree moved,',
-    '  move TEST_ROOT in operator/scripts/check-no-fixed-test-port.mjs with it.',
-    '  Failing loudly rather than reporting a vacuous pass. See issue #1627.',
-  );
-}
-if (roots.length === 0) {
-  bail(
-    '✗ This guard found no test tree to scan.',
-    '  A green check from a guard that policed nothing reads as coverage it did',
-    '  not provide, so this is a failure. See issue #1627.',
-  );
-}
+function main() {
+  const roots = scanRoots();
+  if (!existsSync(TEST_ROOT)) {
+    bail(
+      '✗ operator/test/ does not exist, so this guard scanned nothing.',
+      '  That is the tree it exists to police. If the test tree moved,',
+      '  move TEST_ROOT in operator/scripts/check-no-fixed-test-port.mjs with it.',
+      '  Failing loudly rather than reporting a vacuous pass. See issue #1627.',
+    );
+  }
+  if (roots.length === 0) {
+    bail(
+      '✗ This guard found no test tree to scan.',
+      '  A green check from a guard that policed nothing reads as coverage it did',
+      '  not provide, so this is a failure. See issue #1627.',
+    );
+  }
 
-const violations = [];
-const parallelismViolations = [];
-let scannedFiles = 0;
+  const violations = [];
+  let scannedFiles = 0;
 
-for (const root of roots) {
-  for (const file of walk(root)) {
-    scannedFiles += 1;
-    const rel = relative(OPERATOR_ROOT, file).split('\\').join('/');
-    const display = `operator/${rel}`;
-    const text = readFileSync(file, 'utf8');
-    const lines = text.split('\n');
-
-    lines.forEach((line, idx) => {
-      if (line.includes(ALLOW_MARKER)) return;
-
-      const flagged = [];
-
-      // Rule 1a — bind position: `.listen(<port>, …)`.
-      for (const m of line.matchAll(LISTEN_LITERAL)) {
-        if (inBand(Number(m[1]))) flagged.push(m[1]);
-      }
-      // Rule 1b — port-key position, bare literal.
-      for (const m of line.matchAll(PORT_KEY_LITERAL)) {
-        if (inBand(Number(m[1]))) flagged.push(m[1]);
-      }
-      // Rule 1c — `const|let|var <port-ish name> = <literal>`.
-      for (const m of line.matchAll(PORT_DECL_LITERAL)) {
-        if (PORTISH_NAME.test(m[1]) && inBand(Number(m[2]))) flagged.push(m[2]);
-      }
-      // Rule 2 — a guessed port is the same race, harder to reproduce.
-      if (RANDOM_CALL.test(line)) {
-        const name = enclosingName(lines, idx);
-        if (name && PORTISH_NAME.test(name)) flagged.push('Math.random');
-      }
-
-      if (flagged.length > 0) {
-        violations.push({ file: display, line: idx + 1, snippet: line.trim() });
-      }
-    });
-
-    // Rule 1d — port-key position, array literal: EVERY element counts. Run
-    // over the whole file text, not line by line, because the array form is
-    // routinely written multi-line and a per-line scan can never see across
-    // the newline between the `ports: [` and its elements.
-    for (const m of text.matchAll(PORT_KEY_ARRAY)) {
-      const contentStart = m.index + m[0].indexOf('[') + 1;
-      for (const el of m[1].matchAll(ARRAY_ELEMENT)) {
-        if (!inBand(Number(el[1]))) continue;
-        const lineNo = lineNumberAt(text, contentStart + el.index);
-        const snippet = lines[lineNo - 1] ?? '';
-        if (snippet.includes(ALLOW_MARKER)) continue;
-        violations.push({ file: display, line: lineNo, snippet: snippet.trim() });
+  for (const root of roots) {
+    for (const file of walk(root)) {
+      scannedFiles += 1;
+      const rel = relative(OPERATOR_ROOT, file).split('\\').join('/');
+      const display = `operator/${rel}`;
+      for (const v of scanText(readFileSync(file, 'utf8'))) {
+        violations.push({ file: display, ...v });
       }
     }
   }
-}
 
-if (scannedFiles === 0) {
-  bail(
-    '✗ This guard walked its scan roots and collected zero .ts files.',
-    `  Roots walked: ${roots.map((r) => relative(OPERATOR_ROOT, r)).join(', ')}`,
-    '  A green check from a guard that policed nothing reads as coverage it did',
-    '  not provide, so this is a failure. See issue #1627.',
-  );
-}
+  if (scannedFiles === 0) {
+    bail(
+      '✗ This guard walked its scan roots and collected zero .ts files.',
+      `  Roots walked: ${roots.map((r) => relative(OPERATOR_ROOT, r)).join(', ')}`,
+      '  A green check from a guard that policed nothing reads as coverage it did',
+      '  not provide, so this is a failure. See issue #1627.',
+    );
+  }
 
-// Rule 3 — vitest.config.ts only. vitest.hermetic.config.ts is deliberately
-// sequential and is never read here.
-if (!existsSync(VITEST_CONFIG)) {
-  bail(
-    '✗ operator/vitest.config.ts not found, so the parallelism rule (rule 3)',
-    '  checked nothing. That file IS the subject of rule 3: the port rules are',
-    '  load-bearing only while it leaves parallelism and isolation at their',
-    '  defaults. If the config was renamed or moved, move VITEST_CONFIG in',
-    '  operator/scripts/check-no-fixed-test-port.mjs with it. See issue #1627.',
-  );
-}
-readFileSync(VITEST_CONFIG, 'utf8')
-  .split('\n')
-  .forEach((line, idx) => {
-    if (line.includes(ALLOW_MARKER)) return;
-    for (const pin of PARALLELISM_PINS) {
-      if (!pin.re.test(line)) continue;
-      parallelismViolations.push({
-        file: 'operator/vitest.config.ts',
-        line: idx + 1,
-        snippet: line.trim(),
-        why: pin.why,
-      });
+  // Rule 3 — vitest.config.ts only. vitest.hermetic.config.ts is deliberately
+  // sequential and is never read here.
+  if (!existsSync(VITEST_CONFIG)) {
+    bail(
+      '✗ operator/vitest.config.ts not found, so the parallelism rule (rule 3)',
+      '  checked nothing. That file IS the subject of rule 3: the port rules are',
+      '  load-bearing only while it leaves parallelism and isolation at their',
+      '  defaults. If the config was renamed or moved, move VITEST_CONFIG in',
+      '  operator/scripts/check-no-fixed-test-port.mjs with it. See issue #1627.',
+    );
+  }
+  const parallelismViolations = scanVitestConfig(readFileSync(VITEST_CONFIG, 'utf8')).map((v) => ({
+    file: 'operator/vitest.config.ts',
+    ...v,
+  }));
+
+  if (violations.length === 0 && parallelismViolations.length === 0) {
+    console.log('✓ No fixed ephemeral-range test ports, and suite parallelism is unpinned.');
+    process.exit(0);
+  }
+
+  if (violations.length > 0) {
+    console.error('✗ Fixed (or randomly guessed) 127.0.0.1 port inside the OS ephemeral');
+    console.error('  range 32768–65535 detected in a test file. That band is the union of the');
+    console.error('  Linux ip_local_port_range default (32768–60999) and the macOS ephemeral');
+    console.error('  range (49152–65535). Vitest runs ~850 test files across 3 forked workers');
+    console.error('  on CI, and those workers share one kernel-global port space, so a');
+    console.error("  sibling's listen(0) can take this port between the moment the test picks");
+    console.error('  it and the moment it binds. See issue #1627.\n');
+    console.error('  Use one of the three sanctioned forms instead:');
+    console.error('    1. The TEST ITSELF binds it: `listen(0, \'127.0.0.1\')`, then read the');
+    console.error('       assigned port off `server.address().port`. This is atomic — there is');
+    console.error('       no allocate-then-rebind window for a sibling worker to win. Always');
+    console.error('       preferred where it is available.');
+    console.error('    2. A CHILD PROCESS binds it (Anvil, Ponder, a spawned daemon): either a');
+    console.error('       fixed port BELOW 32768, reserved in the port registry in');
+    console.error('       test/release/tier-1/T1.2-harness-readiness-contract.ts (no window at');
+    console.error('       all, but the number must be unique repo-wide), or');
+    console.error("       `await allocateAnvilPort()` from '@test/chain/port-allocator.js' when");
+    console.error('       a fixed reservation is impractical (many ports, or several instances');
+    console.error('       inside one file) — that has a narrow allocate-then-rebind window.');
+    console.error('    3. The assertion is "NOTHING is listening here": use a fixed port BELOW');
+    console.error('       32768, with a comment saying why that port is expected to be free.\n');
+    console.error('  Violations:');
+    for (const v of violations) {
+      console.error(`    ${v.file}:${v.line}  ${v.snippet}`);
     }
-  });
-
-// One report line per file:line, however many rules fired on it.
-const deduped = [];
-const seen = new Set();
-for (const v of violations) {
-  const key = `${v.file}:${v.line}`;
-  if (seen.has(key)) continue;
-  seen.add(key);
-  deduped.push(v);
-}
-
-if (deduped.length === 0 && parallelismViolations.length === 0) {
-  console.log('✓ No fixed ephemeral-range test ports, and suite parallelism is unpinned.');
-  process.exit(0);
-}
-
-if (deduped.length > 0) {
-  console.error('✗ Fixed (or randomly guessed) 127.0.0.1 port inside the OS ephemeral');
-  console.error('  range 32768–65535 detected in a test file. That band is the union of the');
-  console.error('  Linux ip_local_port_range default (32768–60999) and the macOS ephemeral');
-  console.error('  range (49152–65535). Vitest runs ~850 test files across 3 forked workers');
-  console.error('  on CI, and those workers share one kernel-global port space, so a');
-  console.error("  sibling's listen(0) can take this port between the moment the test picks");
-  console.error('  it and the moment it binds. See issue #1627.\n');
-  console.error('  Use one of the three sanctioned forms instead:');
-  console.error('    1. The TEST ITSELF binds it: `listen(0, \'127.0.0.1\')`, then read the');
-  console.error('       assigned port off `server.address().port`. This is atomic — there is');
-  console.error('       no allocate-then-rebind window for a sibling worker to win. Always');
-  console.error('       preferred where it is available.');
-  console.error('    2. A CHILD PROCESS binds it (Anvil, Ponder, a spawned daemon): either a');
-  console.error('       fixed port BELOW 32768, reserved in the port registry in');
-  console.error('       test/release/tier-1/T1.2-harness-readiness-contract.ts (no window at');
-  console.error('       all, but the number must be unique repo-wide), or');
-  console.error("       `await allocateAnvilPort()` from '@test/chain/port-allocator.js' when");
-  console.error('       a fixed reservation is impractical (many ports, or several instances');
-  console.error('       inside one file) — that has a narrow allocate-then-rebind window.');
-  console.error('    3. The assertion is "NOTHING is listening here": use a fixed port BELOW');
-  console.error('       32768, with a comment saying why that port is expected to be free.\n');
-  console.error('  Violations:');
-  for (const v of deduped) {
-    console.error(`    ${v.file}:${v.line}  ${v.snippet}`);
   }
-}
 
-if (parallelismViolations.length > 0) {
-  if (deduped.length > 0) console.error('');
-  console.error('✗ Test-suite parallelism or per-file process isolation is pinned in');
-  console.error('  operator/vitest.config.ts.');
-  console.error('  The port rules above are load-bearing only while vitest actually runs test');
-  console.error('  files in parallel, each in its own fresh process. Turning either off makes');
-  console.error('  every cross-worker collision vanish locally and silently retires the reason');
-  console.error('  those rules exist. If parallelism genuinely must change, that is a');
-  console.error('  deliberate decision that should edit this guard in the same commit.');
-  console.error('  See issue #1627.\n');
-  console.error('  Violations:');
-  for (const v of parallelismViolations) {
-    console.error(`    ${v.file}:${v.line}  ${v.snippet}`);
-    console.error(`      → ${v.why}`);
+  if (parallelismViolations.length > 0) {
+    if (violations.length > 0) console.error('');
+    console.error('✗ Test-suite parallelism or per-file process isolation is pinned in');
+    console.error('  operator/vitest.config.ts.');
+    console.error('  The port rules above are load-bearing only while vitest actually runs test');
+    console.error('  files in parallel, each in its own fresh process. Turning either off makes');
+    console.error('  every cross-worker collision vanish locally and silently retires the reason');
+    console.error('  those rules exist. If parallelism genuinely must change, that is a');
+    console.error('  deliberate decision that should edit this guard in the same commit.');
+    console.error('  See issue #1627.\n');
+    console.error('  Violations:');
+    for (const v of parallelismViolations) {
+      console.error(`    ${v.file}:${v.line}  ${v.snippet}`);
+      console.error(`      → ${v.why}`);
+    }
   }
+
+  process.exit(1);
 }
 
-process.exit(1);
+// Run only when invoked as the CLI, so the test file can import the rules.
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
+  main();
+}

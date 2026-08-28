@@ -198,7 +198,8 @@ Use **Node 22** where possible (`engines` in `operator/package.json`). CI should
 
 - Every PR that touches the operator lane (the `changes` job in `ci.yml` gates
   this): `yarn typecheck` + `yarn lint:no-late-mount` + `yarn lint:no-error-leak`
-  + `yarn lint:no-fixed-test-port` + `yarn test`.
+  + `yarn lint:no-fixed-test-port` + `node --test
+  scripts/check-no-fixed-test-port.test.mjs` + `yarn test`.
 - Nightly / release: all `yarn e2e*` scenarios serially.
 - The default suite already runs in parallel on CI — three forked workers over
   ~850 files. See [Worker parallelism and ports](#worker-parallelism-and-ports)
@@ -240,9 +241,14 @@ can have it taken mid-run. Three sanctioned forms, in preference order:
 | a child process (Anvil, Ponder, a spawned daemon) | either a **fixed port below 32768** reserved in the port registry, or `await allocateAnvilPort()` from `@test/chain/port-allocator.js` when a fixed reservation is impractical (many ports, or several instances inside one file). The tradeoff: the allocator has a narrow allocate-then-rebind window, the fixed reservation has none but must be unique repo-wide. |
 | nothing — the assertion *is* "nothing is listening here" | a fixed port **below 32768**, with a comment saying why |
 
-The invariant under all three: **never a literal inside 32768–65535 at a bind
-or probe site.** The registry of fixed below-band ports currently in use lives
-in the header of
+The invariant under all three: **never a literal inside 32768–65535 in a
+port-shaped position** — a `.listen(` argument, a port-shaped object key, or a
+port-ish `const`. Those are the positions the lint can see; a port buried in a
+URL string (`fetch('http://127.0.0.1:45020/health')`) is outside it, and so are
+the other gaps listed under "What this guard does not catch" in the header of
+[`operator/scripts/check-no-fixed-test-port.mjs`](../../operator/scripts/check-no-fixed-test-port.mjs).
+The rule still applies to them; only the enforcement stops. The registry of
+fixed below-band ports currently in use lives in the header of
 [`operator/test/release/tier-1/T1.2-harness-readiness-contract.ts`](../../operator/test/release/tier-1/T1.2-harness-readiness-contract.ts) —
 add to it when you reserve one.
 
@@ -256,6 +262,14 @@ vanish locally and silently retire the reason these rules exist. `isolate:
 false` is the worst of the set: it also retires the fresh-process-per-file
 property that [the measurement](#the-measurement-1627-2026-08-27) rests on,
 and it does so while leaving the suite green.
+
+A line carrying `lint:no-fixed-test-port-allow` is skipped. For the multi-line
+array form the marker goes on the **element** line, not on the `ports: [`
+header — the header is not where the literal is reported. The guard is seven
+regexes over source text and both of its failure modes are expensive on a
+required gate, so its behaviour is pinned by a fixture table,
+`operator/scripts/check-no-fixed-test-port.test.mjs`, which CI runs under
+`node --test` in the same job. Change a rule and change the table with it.
 
 ### Beware fixed time and iteration budgets
 
@@ -276,7 +290,26 @@ Two instruments, and only one of them is CI-equivalent.
 the real runner under the real topology, so each is a genuine sample of the
 thing under diagnosis: **1176 executed `check` jobs across 70 days**
 (2026-06-18 to 2026-08-27; runs where the `changes` gate skipped `check` are
-excluded).
+excluded). Every rate below comes from this instrument, so here is how to
+re-derive it — the numbers are a point-in-time reading of a moving window, not
+a committed artifact, and a later run will not reproduce them exactly:
+
+```bash
+gh run list --repo Jinn-Network/mono --workflow ci.yml \
+  --created 2026-06-18..2026-08-27 --limit 2000 \
+  --json databaseId --jq '.[].databaseId' > runs.txt
+# One `check` job per run, skipping runs where the `changes` gate never started it.
+while read -r id; do
+  gh api "repos/Jinn-Network/mono/actions/runs/$id/jobs?per_page=100" \
+    --jq '.jobs[] | select(.name == "Typecheck & Test") | [.id, .conclusion] | @tsv'
+done < runs.txt > check-jobs.tsv
+# The failure logs the classification below reads.
+mkdir -p logs && awk -F'\t' '$2 == "failure" { print $1 }' check-jobs.tsv |
+  while read -r job; do
+    gh api "repos/Jinn-Network/mono/actions/jobs/$job/logs" > "logs/$job.txt"
+  done
+grep -rl 'EADDRINUSE' logs/ | wc -l   # the port-collision census: 0
+```
 
 **The local runs are a lower-contention approximation.** The full suite was run
 at the CI *worker count* — three — but on a 12-core macOS host, so the
@@ -318,6 +351,10 @@ Results:
   pass/fail evidence that proves a flake rather than a moving base).
 - **No broad serialization was added**, and none is warranted: nothing measured
   was cross-worker *state* leakage, so `isolate: true` is doing its job.
+- **Confirmed after the fixes, 2026-08-28.** Three further full-suite runs at
+  `--maxWorkers=3` on the same host: 841 files / 7512 tests passed on each, exit
+  0, zero `EADDRINUSE`, and the home stat manifest below unchanged across all
+  three.
 
 Named but not fixed here, both load-sensitive budgets with CI evidence and no
 local reproduction: `test/cli/native-identity.test.ts` (18 real process boots
@@ -332,10 +369,23 @@ over the network).
 angles and no fourth was added. They cannot, however, catch an out-of-band
 write (a `process.chdir`, a `'/tmp/…'` literal, a spawned child whose env
 allowlist drops `TMPDIR`), so the reproduction runs took an external stat
-manifest of `~/.jinn-operator` and `~/.jinn-client` before and after each run.
-Across five runs: no new entries, no mtime or size change, and nothing written
-into the checkout. Exclude `~/.jinn-client/autopilot` from any such manifest —
-a running autopilot writes there concurrently and guarantees a false positive.
+manifest of `~/.jinn-operator` and `~/.jinn-client` before and after each run:
+
+```bash
+snap() {
+  for d in "$HOME/.jinn-operator" "$HOME/.jinn-client"; do
+    # Exclude ~/.jinn-client/autopilot: a running autopilot writes there
+    # concurrently and guarantees a false positive.
+    [ -d "$d" ] && find "$d" -path "$HOME/.jinn-client/autopilot" -prune -o -print0 |
+      xargs -0 stat -f '%N %m %z'   # GNU: stat -c '%n %Y %s'
+  done | sort
+}
+snap > before.txt && <the suite run> ; snap > after.txt && diff before.txt after.txt
+git -C <checkout> status --porcelain   # and nothing written into the tree
+```
+
+Across the five original runs and the three confirmation runs: no new entries,
+no mtime or size change, and nothing written into the checkout.
 
 ### Run `yarn test`, not a bare `vitest run`
 

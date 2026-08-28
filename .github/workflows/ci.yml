@@ -206,6 +206,13 @@ jobs:
       # a test picks it and the moment it binds, producing an EADDRINUSE that
       # only ever reproduces under parallel CI load. See issue #1627.
       - run: yarn lint:no-fixed-test-port
+      # The guard above is seven regexes over source text, and both of its
+      # failure modes are expensive on a required gate: a false negative reads
+      # as coverage it does not provide, a false positive reddens unrelated PRs.
+      # Its fixture table is a node:test file, not a vitest one — it lives in
+      # scripts/, which no `nodeInclude` glob collects — so it needs its own
+      # step, the same way npm-publish-workflow.test.mjs below does.
+      - run: node --test scripts/check-no-fixed-test-port.test.mjs
       # SKIP_HL_TESTS gates test/venues/hyperliquid/client.test.ts, which hits
       # the live Hyperliquid testnet. Without it, transient 429/503/ECONNREFUSED
       # from that endpoint red-gate unrelated PRs (it flaked 4 PRs on 2026-06-03).

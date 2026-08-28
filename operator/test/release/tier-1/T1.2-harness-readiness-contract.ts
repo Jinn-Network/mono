@@ -18,11 +18,19 @@ const KNOWN_HARNESSES = ['claude-code-learner', 'codex-code-learner', 'hermes-ag
 // child-process bind, because it has no allocate-then-rebind window at all.
 // The price is that the number must be unique repo-wide, so every one of them
 // is recorded here. `yarn lint:no-fixed-test-port` enforces the band, not this
-// list -- the list is maintained by hand. Verified against the tree
-// 2026-08-27.
+// list -- the list is maintained by hand, and a wrong entry is how the next
+// reservation collides. Verified against the tree 2026-08-28; the 7350/7351
+// and 7360/7361 rows were missing from the first pass, which had them filed as
+// inert.
 //
 //   7331          default daemon apiPort -- the conventional one, referenced by
 //                 ~26 call sites (config fixtures, doctor, harness URLs)
+//   7350 / 7351   test/release/tier-3/tier-3-helpers.ts -- the DEFAULT
+//                 `opts.portBase ?? 7350`, i.e. every tier-3 scenario that does
+//                 not pass its own portBase (solver takes portBase + 1)
+//   7360 / 7361   test/release/tier-3/T3.1-producer-evaluator-real.ts --
+//                 `PORT_BASE`, passed to setupTier3Scenario, which spawns two
+//                 real daemons on portBase / portBase + 1
 //   7732 / 7733   test/helpers/multi-op-daemon.test.ts -- op-a / op-b dummies
 //   7734          test/helpers/multi-op-daemon.test.ts -- 'teardown is idempotent'
 //   7740 / 7741   test/release/tier-2/tier-2-helpers.test.ts -- portBase 7740
@@ -32,10 +40,10 @@ const KNOWN_HARNESSES = ['claude-code-learner', 'codex-code-learner', 'hermes-ag
 //                 listening here" probe; deliberately bound by nothing
 //   27331         THIS file -- the real daemon this scenario spawns
 //
-// Other below-band literals occur in the tree (7332, 7333, 7340, 7342, 7360,
-// 7400, 7450, 7451, 7777, 18533) but nothing binds them: they are inert config
-// values or URLs behind a stubbed `fetch`. The full census lives in the doc
-// block of operator/scripts/check-no-fixed-test-port.mjs.
+// Other below-band literals occur in the tree (7332, 7333, 7340, 7342, 7400,
+// 7450, 7451, 7777, 18533) but nothing binds them: they are inert config
+// values, PIDs, or URLs behind a stubbed `fetch`. The full census lives in the
+// doc block of operator/scripts/check-no-fixed-test-port.mjs.
 //
 // ── Which form to use ───────────────────────────────────────────────────────
 //
@@ -51,8 +59,11 @@ const KNOWN_HARNESSES = ['claude-code-learner', 'codex-code-learner', 'hermes-ag
 //   3. The assertion IS "nothing is listening here" -> a fixed port below
 //      32768, with a comment saying why.
 //
-// The invariant under all three: never a literal inside 32768-65535 at a bind
-// or probe site.
+// The invariant under all three: never a literal inside 32768-65535 in a
+// port-shaped position -- a `.listen(` argument, a port-shaped object key, or a
+// port-ish `const`. A port buried in a URL string is outside what the lint can
+// see; see the "does NOT catch" list in
+// operator/scripts/check-no-fixed-test-port.mjs.
 //
 // This scenario is case 2 with a fixed reservation: it spawns one real daemon,
 // one port, for the lifetime of the file. See issue #1627 and
