@@ -380,7 +380,13 @@ export function createCorpusCapability(
    */
   function chainVerificationCheck(state: Started): HealthCheck {
     const name = "corpus-chain-verification";
-    if (state.chainVerification.mode === "verified") {
+    // Every branch below keys off the CONFIGURED posture, never the live
+    // object's `mode`: `mode` has two values for three postures — rejecting
+    // reports itself as `unverified` because it, too, verifies nothing — so
+    // reading it here would render an install that admits nothing as one that
+    // is happily mirroring.
+    const configured = state.corpus.chainVerification;
+    if (configured === "verified" && state.chainVerificationShortfall === undefined) {
       const refused = [...state.chainRejections.entries()];
       return {
         name,
@@ -389,7 +395,7 @@ export function createCorpusCapability(
           refused.length === 0
             ? "Announcement chains are verified before indexing."
             : `Announcement chains are verified before indexing; ${String(refused.length)} ` +
-              `archive(s) were refused: ${refused
+              `archive(s) were refused at their last verification: ${refused
                 .map(([source, reason]) => `${source} (${reason})`)
                 .join(", ")}.`,
         remedy:
@@ -407,7 +413,7 @@ export function createCorpusCapability(
         remedy: null,
       };
     }
-    if (state.chainVerificationShortfall === "driver-unavailable") {
+    if (configured === "verified") {
       return {
         name,
         ok: false,
@@ -421,7 +427,7 @@ export function createCorpusCapability(
           "`corpus.acknowledgeUnverifiedChain`.",
       };
     }
-    if (state.chainVerification.mode === "unverified" && state.corpus.acknowledgeUnverifiedChain) {
+    if (configured === "unverified") {
       return {
         name,
         ok: true,

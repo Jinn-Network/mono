@@ -422,6 +422,28 @@ describe("chain-verification postures", () => {
     expect(chain.remedy).toBeNull();
   });
 
+  test("REJECTING is reported as itself even when the acknowledgement flag is also set", async () => {
+    // The two postures collapse to the same `mode` — rejecting verifies
+    // nothing, so it calls itself `unverified` too. Reading that mode instead
+    // of the configured posture rendered this install GREEN with a detail
+    // claiming it was mirroring, while it admitted nothing.
+    const { capability: built, context: built_context } = overArchive({
+      file: { chainVerification: "rejecting", acknowledgeUnverifiedChain: true },
+    });
+    await built.start!(built_context);
+
+    expect((await built.mirror.syncOnce()).sources[0]).toMatchObject({
+      status: "failed",
+      indexed: 0,
+    });
+    const chain = (await built.healthChecks!()).find(
+      (check) => check.name === "corpus-chain-verification",
+    )!;
+    expect(chain.ok).toBe(false);
+    expect(chain.detail).toContain("rejecting");
+    expect(chain.remedy).not.toBeNull();
+  });
+
   test("REJECTING admits nothing even with a driver composed, and is RED while archives are followed", async () => {
     const driver = driverReturning({ status: "unauthorized-signer" });
     const { capability: built, context: built_context } = overArchive({
