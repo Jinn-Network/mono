@@ -63,11 +63,11 @@
  * `operator/test/**` holds ~1,900 numeric literals that fall inside the band
  * and are not ports at all — timeouts (`50000`, `60000`), Hyperliquid price
  * fixtures (`'50000'`, `'51500'`), and hex-address substrings (`33333`,
- * `55555`, `44444`) — so a value-only rule is pure noise. It also holds 61
+ * `55555`, `44444`) — so a value-only rule is pure noise. It also holds 62
  * legitimate fixed port literals in genuine port positions, over the distinct
  * numbers 7331, 7332, 7333, 7340, 7342, 7350, 7351, 7360, 7388, 7389, 7390,
- * 7400, 7450, 7451, 7732, 7733, 7734, 7740, 7742, 7777, 9331, 9332, 18532 and
- * 18533, plus the
+ * 7400, 7450, 7451, 7732, 7733, 7734, 7740, 7742, 7777, 9331, 9332, 17398,
+ * 18532 and 18533, plus the
  * `const API_PORT = 27331` that rule 1c sees — every one of them safely BELOW
  * the ephemeral band, so a position-only rule condemns the correct code. Only
  * the intersection names the actual hazard. The below-band fixed ports in
@@ -383,9 +383,14 @@ function lineNumberAt(text, offset) {
  * A template literal's `${…}` interpolations are blanked along with its text.
  * The failure that buys is a MISSED port position inside an interpolation,
  * never a spurious one, and a port literal written inside `${…}` does not
- * occur. A regex/division ambiguity is not worth resolving here either: the
- * consumers are a config object literal and test source, where a regex literal
- * containing `//` or an unbalanced quote does not occur.
+ * occur. A regex/division ambiguity is not resolved here: a regex
+ * literal is not tracked, so `/a\\/\\//` reads as a line comment and blanks the
+ * rest of its line, and a `'` or `"` inside a regex reads as a string opener.
+ * Both are bounded to the line that starts them -- the comment form by
+ * construction, the quote form by the newline test in the quote state below --
+ * so the worst case is a missed port position on that one line, never an
+ * inverted classification for the rest of the file. A backtick may still span
+ * lines, as it must.
  */
 export function blankComments(text, { strings = false } = {}) {
   // `split('')`, not `Array.from`: the latter splits by code POINT while every
@@ -408,6 +413,19 @@ export function blankComments(text, { strings = false } = {}) {
         continue;
       }
       if (ch === quote) {
+        quote = null;
+        i += 1;
+        continue;
+      }
+      // A `'` or `"` literal cannot contain a raw newline, so an apparent
+      // opener that reaches one was never a string: it is a `'` or `"` inside
+      // a regex literal (`/from ['"]\\w+/`, `/don't/`), which this machine
+      // does not track. Closing the state at the newline bounds the resulting
+      // desync to the line that started it, instead of inverting code/string
+      // classification for the rest of the file. A backslash-newline line
+      // continuation still works: the `\\` branch above consumes the newline
+      // before this test ever sees it.
+      if (ch === '\n' && quote !== '`') {
         quote = null;
         i += 1;
         continue;

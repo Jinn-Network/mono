@@ -19,9 +19,9 @@ const KNOWN_HARNESSES = ['claude-code-learner', 'codex-code-learner', 'hermes-ag
 // The price is that the number must be unique repo-wide, so every one of them
 // is recorded here. `yarn lint:no-fixed-test-port` enforces the band, not this
 // list -- the list is maintained by hand, and a wrong entry is how the next
-// reservation collides. Verified against the tree 2026-08-28; the 7350/7351,
-// 7360/7361, 7388 and 7389 rows were missing from earlier passes, and the
-// 7350/7351 double-booking below was found by the same re-walk.
+// reservation collides. Verified against the tree 2026-08-29; the 7350/7351,
+// 7360/7361, 7388, 7389 and 17398-17400 rows were missing from earlier passes,
+// and the 7350/7351 double-booking below was found by the same re-walk.
 //
 //   7331          default daemon apiPort -- the conventional one, referenced by
 //                 ~26 call sites (config fixtures, doctor, harness URLs)
@@ -51,6 +51,12 @@ const KNOWN_HARNESSES = ['claude-code-learner', 'codex-code-learner', 'hermes-ag
 //   7742 / 7743   test/release/tier-2/tier-2-helpers.test.ts -- portBase 7742
 //   9331 / 9332   test/release/tier-3/tier-3-helpers.test.ts -- the "nothing is
 //                 listening here" probe; deliberately bound by nothing
+//   17398-17400   test/main/degraded-daemon-guard.e2e.test.ts -- `nextPort`,
+//                 handed to a spawned daemon as its apiPort. The one RANGE in
+//                 this table rather than a number: `nextPort++` at :110 (called
+//                 twice) and at :236 allocates three ports per run today, so it
+//                 runs 17398-17400 and the next reservation must start at
+//                 17401 or higher. Widen this row if a fourth spawn is added.
 //   27331         THIS file -- the real daemon this scenario spawns
 //
 // Other below-band literals occur in the tree (7332, 7333, 7340, 7342, 7390,

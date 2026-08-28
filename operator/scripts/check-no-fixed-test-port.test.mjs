@@ -229,6 +229,37 @@ test('blankComments preserves offsets and leaves string contents intact', () => 
   assert.ok(out.includes('// not a comment'), 'a string is not a comment');
 });
 
+// A regex literal is not tracked, so a `'` or `"` inside one opens a "string"
+// the machine never sees closed. Terminating the `'` and `"` states at the
+// newline bounds that desync to the line that starts it; without the bound, the
+// classification stays inverted -- real code blanked and never scanned, string
+// contents scanned as code -- until the next matching quote anywhere in the
+// file.
+test('a quote inside a regex literal desyncs at most its own line', () => {
+  const src = [
+    "const re = /from ['\"]intents/;",
+    'const apiPort = 45000;',
+    "const yaml = 'ports: [45000]';",
+  ].join('\n');
+  assert.deepEqual(flagged(src), [2], 'the next line is still scanned as code');
+  const out = blankComments(src, { strings: true });
+  assert.ok(out.includes('const apiPort = 45000;'), 'real code past the regex is not blanked');
+  assert.ok(!out.split('\n')[2].includes('45000'), 'and a real string past it is still blanked');
+});
+
+// A backtick legitimately spans lines, so it keeps the old behaviour.
+test('a template literal still spans lines', () => {
+  const out = blankComments('const t = `a\nports: [45000]\n`;\n', { strings: true });
+  assert.ok(!out.includes('45000'), 'the multi-line template contents are blanked');
+});
+
+// The `\\` branch consumes the newline before the newline test sees it, so a
+// backslash-newline line continuation still holds the string open.
+test('a backslash-newline continuation still holds a string open', () => {
+  const out = blankComments("const a = 'x\\\nports: [45000]';\n", { strings: true });
+  assert.ok(!out.includes('45000'), 'the continued string is blanked');
+});
+
 // A code-POINT split would run one slot short of a code-UNIT index here, blank
 // past the end of the comment, eat the newline, and shift rule 3's line
 // numbers — or chew the first character of a real pin and miss it outright.
