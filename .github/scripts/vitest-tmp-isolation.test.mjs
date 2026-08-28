@@ -1037,13 +1037,27 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
   // next entry rather than abandoning the array, so the sibling keeps its range — which is what
   // makes the one-line bound above true of the consequence and not only of the consumed text.
   assert.equal(projectEntryRanges(withProperty(`x: /['"]u, `)).length, 1);
+
+  // Every fixture above writes the array across several lines, where `quotedSpanEnd`'s newline
+  // bound rescues the scan on its own even if `projectEntryRanges` never recognised the regex. A
+  // single-line array is the only shape that reaches that branch, and without it the unpaired quote
+  // runs to the end of the array: zero ranges, every entry falling back to root scope, which is the
+  // cross-entry crediting fail-open of #3154 returning.
+  assert.equal(projectEntryRanges(stripComments(`projects: [ /'/u, { a: 1 }, { b: 2 } ]`)).length, 2);
 });
 
 // `stripComments` passes regex literals through verbatim, and that branch is not redundant with the
-// comment checks that precede it: a regex whose body holds an escaped `\/\/` reaches those checks
-// first without it, and the literal is truncated from there to the end of the line. Nothing in the
-// tree writes that shape today, which is why it is pinned here rather than left to the configs.
-test('stripComments does not read an escaped // inside a regex as a comment', () => {
-  const source = "x: /a\\/\\/b/u, setupFiles: ['isolate-tmp.ts']";
-  assert.equal(stripComments(source), source);
+// comment checks that precede it. What reaches those checks is an *unescaped* `/` inside the
+// literal followed by `/` or `*` — which is why a character class is the shape that gets there, and
+// an escaped `\/` is not: the backslash sits between the slashes, so there is no adjacent `//` for
+// the line-comment check to see. Without the regex branch each fixture below is blanked from its
+// inner `/` to the end of the line. Nothing in the tree writes those shapes today, which is why
+// they are pinned here rather than left to the configs.
+test('stripComments does not read a / inside a regex character class as a comment', () => {
+  for (const source of [
+    "x: /[/*]/u, setupFiles: ['isolate-tmp.ts']",
+    "x: /[//]/u, setupFiles: ['isolate-tmp.ts']",
+  ]) {
+    assert.equal(stripComments(source), source);
+  }
 });
