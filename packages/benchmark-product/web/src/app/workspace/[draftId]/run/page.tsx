@@ -47,6 +47,7 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
         <Card><CardHeader><CardTitle>Expected</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{status?.counts.expected}</CardContent></Card>
         <Card><CardHeader><CardTitle>Delivered</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{status?.counts.delivered}</CardContent></Card>
         <Card><CardHeader><CardTitle>Judged / failed</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{status?.counts.judged} / {status?.counts.failed}</CardContent></Card>
+        {status !== undefined && status.counts.awaitingEvaluation > 0 ? <Card><CardHeader><CardTitle>Awaiting evaluation</CardTitle></CardHeader><CardContent><p className="text-2xl font-semibold">{status.counts.awaitingEvaluation}</p><p role="status">Resume heals these cells.</p></CardContent></Card> : null}
       </section>
       {status?.driver ? <Card><CardHeader><CardTitle>Driver generation</CardTitle></CardHeader><CardContent>
         <dl className="grid gap-2 sm:grid-cols-2"><div><dt className="font-medium">Operation</dt><dd>{status.driver.operation}</dd></div><div><dt className="font-medium">Durable outcome</dt><dd>{status.driver.status}</dd></div></dl>

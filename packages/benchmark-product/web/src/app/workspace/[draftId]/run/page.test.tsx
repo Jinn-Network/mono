@@ -218,5 +218,32 @@ describe("durable run monitor cancellation language", () => {
       params: Promise.resolve({ draftId: "draft-1" }),
     }));
     expect(markup).toContain("awaiting evaluation (delivery not journaled)");
+    // The aggregate cue: an operator scanning the summary row sees the actionable count and the
+    // operation that resolves it without reading every cell row.
+    expect(markup).toContain("Awaiting evaluation");
+    expect(markup).toContain("Resume heals these cells.");
+  });
+
+  test("omits the awaiting-evaluation tile when no cell has a gap resume would act on", async () => {
+    loadRunViewMock.mockReturnValue({
+      ok: true,
+      draft: { ok: true, result: {} },
+      status: { ok: true, result: {
+        state: "running",
+        cancelRequested: false,
+        cells: [
+          {
+            cellKey: "cell-judged", armId: "baseline", replicate: 1, taskSha256: "b".repeat(64),
+            status: "judged", dispatches: 1,
+          },
+        ],
+        counts: { expected: 1, dispatched: 1, delivered: 1, judged: 1, failed: 0, awaitingEvaluation: 0 },
+      } },
+    });
+    const markup = renderToStaticMarkup(await RunMonitorPage({
+      params: Promise.resolve({ draftId: "draft-1" }),
+    }));
+    expect(markup).not.toContain("Awaiting evaluation");
+    expect(markup).not.toContain("awaiting evaluation");
   });
 });

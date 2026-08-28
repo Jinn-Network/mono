@@ -231,8 +231,9 @@ Covers the design spec §4.6 Official-run row.
   never reached the journal (issue #3084).
 - **State messages** — infra failures are shown as infra, never as a fail
   (`unscorable` is a named outcome value, not a failure — design spec §4.1,
-  §4.6); cap-approach warning; stall notice — including a non-zero
-  `counts.awaitingEvaluation`, whose resolving action is `resume`; "cancellation requested —
+  §4.6); cap-approach warning; stall notice; a non-zero
+  `counts.awaitingEvaluation` surfaces as its own summary tile naming `resume`
+  as the resolving action; "cancellation requested —
   draining in-flight work" until the operation reaches its terminal
   `cancelled` result; a closed run with a valid marker says cancellation is
   finalized, never still draining. Venue/finalization contention retains the
