@@ -220,3 +220,61 @@ test('a restore step at the end of a job does not read the next job\'s name', ()
 
   assert.deepEqual(restoredArtifactNames(source), []);
 });
+
+// Cites its own file name, and restores by `pattern:` rather than by name — so
+// dropping the self-citation guard makes this file report itself.
+const citingSelf = [
+  '      # Same shape as self-ci.yml.',
+  '      - name: Restore a distribution',
+  '        uses: actions/download-artifact@v8',
+  '        with:',
+  '          pattern: some-*-dist',
+  '',
+].join('\n');
+
+test('a workflow whose comment names itself is not reported as citing itself', () => {
+  const fixtureRoot = fixtureWorkflows({ 'self-ci.yml': citingSelf });
+
+  try {
+    assert.deepEqual(findBrokenCitations(fixtureRoot), []);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('a .yaml workflow is scanned for broken citations', () => {
+  const fixtureRoot = fixtureWorkflows({ 'citing-ci.yaml': citingConsolidated });
+
+  try {
+    assert.deepEqual(findBrokenCitations(fixtureRoot), [
+      'citing-ci.yaml cites consolidated-ci.yml, which does not exist',
+    ]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('every broken citation is reported, not just the first', () => {
+  const citingTwo = [
+    '      # Same shape as consolidated-ci.yml and archived-ci.yml.',
+    '      - name: Restore a distribution',
+    '        uses: actions/download-artifact@v8',
+    '        with:',
+    '          name: some-dist',
+    '',
+  ].join('\n');
+  const fixtureRoot = fixtureWorkflows({
+    'citing-a-ci.yml': citingTwo,
+    'citing-b-ci.yml': citingConsolidated,
+  });
+
+  try {
+    assert.deepEqual(findBrokenCitations(fixtureRoot).sort(), [
+      'citing-a-ci.yml cites archived-ci.yml, which does not exist',
+      'citing-a-ci.yml cites consolidated-ci.yml, which does not exist',
+      'citing-b-ci.yml cites consolidated-ci.yml, which does not exist',
+    ]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
