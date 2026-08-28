@@ -722,6 +722,10 @@ test('stripComments leaves comment markers inside strings alone', () => {
   // A quote the scanner cannot pair off must not leak the next line's comments back as live source.
   const afterOddQuote = stripComments("const RE = /['\"]/u;\n// setupFiles: ['isolate-tmp.ts']");
   assert.ok(!afterOddQuote.includes('isolate-tmp'));
+
+  // The same, where the quote is not in a regex literal at all: `regexStartsAt` reads a `/` after
+  // an operand as division, so only the newline bound stops the span here.
+  assert.ok(!stripComments("a: b '\n// setupFiles: ['isolate-tmp.ts']").includes('isolate-tmp'));
 });
 
 // A `projects` config gives each entry its own Vite root, so an `fs.allow` under one entry says
@@ -856,13 +860,17 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
   const properties = [
     '',
     `x: /['"]/u, `,
-    // A `/` inside a character class does not close the literal, and an escaped one does not either.
-    `x: /['"\\/]|a\\/b/u, `,
+    // A `/` inside a character class does not close the literal. Unescaped, so this fails if the
+    // class is not tracked rather than only if the escape is not skipped.
+    `x: /[/]'/u, `,
+    // An escaped `/` outside a class does not close it either.
+    `x: /a\\/'b/u, `,
     // A brace or bracket inside the literal must not be read as structure.
     `x: /[{}\\]]/u, `,
   ];
   for (const property of properties) {
-    assert.equal(projectEntryRanges(withProperty(property)).length, 2, property);
+    // Through `stripComments`, the way every production caller reaches this reader.
+    assert.equal(projectEntryRanges(stripComments(withProperty(property))).length, 2, property);
     assert.deepEqual(
       unreachableWirings(withProperty(property), config),
       [{ key: 'setupFiles', resolved }],
@@ -883,6 +891,13 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
 
   // The same postfix shape must not hand a trailing comment's prose back as live source (#3027).
   assert.ok(!stripComments('x: total-- / 2, // setupFiles: isolate-tmp.ts').includes('isolate-tmp'));
+
+  // Bounding it at the line is what keeps the damage local: the entries after the bad one still
+  // get their ranges, where an unbounded scan runs to the next `/` in the file or off the end.
+  assert.equal(
+    projectEntryRanges(`projects: [\n  { a: 1 },\n  { x: /['"]u\n  },\n  { b: 2 },\n]`).length,
+    3,
+  );
 
   // An unterminated literal is bounded at its own line rather than the file, but it still takes
   // that line's braces with it, so the entry is dropped. That is the same fail-open the doc block
