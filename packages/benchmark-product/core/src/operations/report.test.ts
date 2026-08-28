@@ -1025,6 +1025,50 @@ describe("portable public bundle", () => {
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
   }, 30_000);
 
+  test("a refusal after materialization removes the additional-Report bundle directories too", async () => {
+    // The sibling test above pins only the single-bundle case. A publish with additional Reports
+    // materializes one directory per Report (packet P5), all accumulated into the one `created`
+    // list; a regression that dropped the `created` argument from the additional call site, or
+    // reset the list per bundle, would strand the additional directories and go unnoticed
+    // (issue #3193). Setup mirrors the P5 packaging test: pairing needs task provenance the
+    // bundled sample benchmark does not carry, so every evaluation is dispatched "no-verdict".
+    const clock = makeClock();
+    await setUpClosedRun(clock, "draft-1", {
+      evaluationModes: Array(8).fill("no-verdict"),
+      additionalAnalyses: [
+        {
+          method: "jinn.benchmarking.method/paired-delta",
+          version: "1",
+          baseline: "baseline",
+          candidate: "sample",
+          parameters: { seed: 123456789, resamples: 1000, alpha: "0.05" },
+        },
+      ],
+    });
+    const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    if (!reported.ok) return;
+    // Guards the assertion below against passing vacuously: without an additional Report the
+    // refusal would only ever stage the canonical bundle.
+    expect(readRunState(workspaceDir, "draft-1")?.additionalReports).toHaveLength(1);
+
+    const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
+      beforeRunState: () => { throw new Error("refused after materialization"); },
+    });
+    expect(refused.ok).toBe(false);
+    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
+      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
+      : []).toHaveLength(0);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
+    expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
+
+    const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
+    expect(retry.ok, JSON.stringify(retry)).toBe(true);
+    if (!retry.ok) return;
+    expect(retry.result.additionalBundles).toHaveLength(1);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
+  }, 60_000);
+
   test("workspace tampering refuses before staging and leaves the reported draft unchanged", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);
