@@ -447,7 +447,10 @@ async function buildJoinFixture(): Promise<JoinFixture> {
   ) as Record<ItemKey, ItemMaterial>;
 
   const responseBytesByName = new Map<string, Uint8Array>();
-  for (const name of ["live-prose-then-fence", "double-fence", "bare-prose", "parseable-correct"]) {
+  const responseNames = new Set(
+    Object.values(CELL_RESPONSES).flatMap((byArm) => Object.values(byArm).flat()),
+  );
+  for (const name of responseNames) {
     responseBytesByName.set(name, await readFixture(name));
   }
 
@@ -574,23 +577,49 @@ async function buildJoinFixture(): Promise<JoinFixture> {
   const run = parseRun(sealedRun.bytes);
 
   const assembled = await assembleMatrix(bench, run, assemblyPorts(cells));
-  const resolve = (digest: string): Uint8Array | undefined => records.get(digest);
   return {
     cells,
     records,
     bench,
     run,
     matrix: assembled.record,
-    input: {
-      subjects: [{ subjectSha256: assembled.digest.slice("sha256:".length), matrix: assembled.record }],
-      parameters: PARAMETERS,
-      verdictRule: "sole",
-      resolveVerdictBytes: resolve,
-      resolveRunBytes: resolve,
-      resolveTaskBytes: resolve,
-      resolveRecordBytes: resolve,
-    } as unknown as MethodComputeInput,
+    input: computeInput(assembled.digest, assembled.record, records),
   };
+}
+
+/**
+ * The `binary-instrument@1` compute input for one subject Matrix. Every `resolve*` port reads the
+ * same record map, so the method walks the exact bytes the harness and assemble produced.
+ */
+function computeInput(
+  subjectDigest: `sha256:${string}`,
+  matrix: MatrixRecord,
+  records: ReadonlyMap<string, Uint8Array>,
+): MethodComputeInput {
+  const resolve = (digest: string): Uint8Array | undefined => records.get(digest);
+  return {
+    subjects: [{ subjectSha256: subjectDigest.slice("sha256:".length), matrix }],
+    parameters: PARAMETERS,
+    verdictRule: "sole",
+    resolveVerdictBytes: resolve,
+    resolveRunBytes: resolve,
+    resolveTaskBytes: resolve,
+    resolveRecordBytes: resolve,
+  } as unknown as MethodComputeInput;
+}
+
+/** The registered production method under test. */
+function binaryInstrumentMethod() {
+  return createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+}
+
+/** The three cells whose judge response is genuinely unparseable (item alpha, arm arm-alpha). */
+function unparseableCells(): readonly HarnessCellResult[] {
+  return fixture.cells.filter((cell) => cell.itemKey === "alpha" && cell.armId === "arm-alpha");
+}
+
+function firstUnparseableCell(): HarnessCellResult {
+  return unparseableCells().find((cell) => cell.replicate === 1)!;
 }
 
 function assemblyPorts(cells: readonly HarnessCellResult[]) {
@@ -649,14 +678,11 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
 
   test("the hand-authored parameters are the registered method's own admitted set", () => {
     expect(validateBinaryInstrumentParameters(PARAMETERS)).toEqual({ ok: true });
-    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
-    expect(method.validateParameters(PARAMETERS)).toEqual({ ok: true });
+    expect(binaryInstrumentMethod().validateParameters(PARAMETERS)).toEqual({ ok: true });
   });
 
   test("the harness delivers a counted inconclusive verdict for every unparseable shape", () => {
-    const invalid = fixture.cells.filter((cell) =>
-      cell.itemKey === "alpha" && cell.armId === "arm-alpha"
-    );
+    const invalid = unparseableCells();
     expect(invalid).toHaveLength(3);
     for (const cell of invalid) {
       expect(cell.predicate["verdict"]).toBe("inconclusive");
@@ -677,10 +703,7 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
   });
 
   test("aggregate reduction derives inconclusive and surfaces the no-valid-majority exclusion", () => {
-    const invalidKeys = fixture.cells
-      .filter((cell) => cell.itemKey === "alpha" && cell.armId === "arm-alpha")
-      .map((cell) => cell.cellKey)
-      .sort();
+    const invalidKeys = unparseableCells().map((cell) => cell.cellKey).sort();
     // The reduction half, asserted directly: an abstained call is ADMITTED (it counts toward k)
     // and carries the neutral inconclusive verdict with no decision — never a manufactured REJECT
     // and never silently dropped.
@@ -711,8 +734,7 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
       expect(call.parseValid).toBe(false);
     }
 
-    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
-    const result = method.compute!(fixture.input).perSubject[0]!.results as {
+    const result = binaryInstrumentMethod().compute!(fixture.input).perSubject[0]!.results as {
       configuration: { parserInvalidPolicy: string };
       arms: Record<string, { call: { evaluated: number; parseInvalid: number } }>;
       itemDecisions: readonly unknown[];
@@ -738,9 +760,7 @@ describe("consistency-violating verdicts are refused at both boundaries", () => 
     bytes: Uint8Array;
     digest: `sha256:${string}`;
   } {
-    const cell = fixture.cells.find((candidate) =>
-      candidate.itemKey === "alpha" && candidate.armId === "arm-alpha" && candidate.replicate === 1
-    )!;
+    const cell = firstUnparseableCell();
     const statement = JSON.parse(Buffer.from(cell.verdictPayloadBytes).toString("utf8")) as
       Record<string, unknown>;
     mutate(statement["predicate"] as Record<string, unknown>);
@@ -758,9 +778,7 @@ describe("consistency-violating verdicts are refused at both boundaries", () => 
    * all — the aggregate boundary has to be exercised directly for the refusal to mean anything.
    */
   function tamperedInput(bytes: Uint8Array, digest: `sha256:${string}`): MethodComputeInput {
-    const target = fixture.cells.find((candidate) =>
-      candidate.itemKey === "alpha" && candidate.armId === "arm-alpha" && candidate.replicate === 1
-    )!;
+    const target = firstUnparseableCell();
     const mutated = {
       ...(structuredClone(fixture.matrix) as MatrixRecord),
       cells: fixture.matrix.cells.map((cell) =>
@@ -770,19 +788,9 @@ describe("consistency-violating verdicts are refused at both boundaries", () => 
       ),
     };
     const sealed = sealMatrix(mutated);
-    const matrix = parseMatrix(sealed.bytes);
     const records = new Map(fixture.records);
     records.set(digest, bytes);
-    const resolve = (value: string): Uint8Array | undefined => records.get(value);
-    return {
-      subjects: [{ subjectSha256: sealed.digest.slice("sha256:".length), matrix }],
-      parameters: PARAMETERS,
-      verdictRule: "sole",
-      resolveVerdictBytes: resolve,
-      resolveRunBytes: resolve,
-      resolveTaskBytes: resolve,
-      resolveRecordBytes: resolve,
-    } as unknown as MethodComputeInput;
+    return computeInput(sealed.digest, parseMatrix(sealed.bytes), records);
   }
 
   /** The `invalid-accept` tamper: an unparseable call re-signed as an agreeing ACCEPT pass. */
@@ -800,9 +808,9 @@ describe("consistency-violating verdicts are refused at both boundaries", () => 
 
   test("an INVALID parse signed as an ACCEPT pass is refused at the aggregate boundary", () => {
     const { bytes, digest } = tamperedEnvelope(invalidSignedAsAcceptPass);
-    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
-    expect(() => method.compute!(tamperedInput(bytes, digest))).toThrow(MethodInputError);
-    expect(() => method.compute!(tamperedInput(bytes, digest))).toThrow(expect.objectContaining({
+    const compute = () => binaryInstrumentMethod().compute!(tamperedInput(bytes, digest));
+    expect(compute).toThrow(MethodInputError);
+    expect(compute).toThrow(expect.objectContaining({
       code: "binary-binding-mismatch",
       message: expect.stringContaining(
         "signed response measurements do not replay from exact judge-response bytes",
@@ -814,38 +822,23 @@ describe("consistency-violating verdicts are refused at both boundaries", () => 
     const { bytes, digest } = tamperedEnvelope((predicate) => {
       predicate["verdict"] = "pass";
     });
-    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
-    expect(() => method.compute!(tamperedInput(bytes, digest))).toThrow(expect.objectContaining({
-      code: "binary-binding-mismatch",
-      message: expect.stringContaining("Result Evaluation verdict contradicts signed agreement"),
-    }));
+    expect(() => binaryInstrumentMethod().compute!(tamperedInput(bytes, digest)))
+      .toThrow(expect.objectContaining({
+        code: "binary-binding-mismatch",
+        message: expect.stringContaining("Result Evaluation verdict contradicts signed agreement"),
+      }));
   });
 
   test("assemble refuses the same tamper before it can reach the aggregate", async () => {
     const { digest } = tamperedEnvelope(invalidSignedAsAcceptPass);
-    const target = fixture.cells.find((candidate) =>
-      candidate.itemKey === "alpha" && candidate.armId === "arm-alpha" && candidate.replicate === 1
-    )!;
-    const tamperedCells = fixture.cells.map((cell) =>
-      cell === target
-        ? {
-          ...cell,
-          verdictDigest: digest,
-          predicate: {
-            ...cell.predicate,
-            verdict: "pass",
-            measurements: (cell.predicate["measurements"] as { name: string; value: unknown }[])
-              .map((measurement) =>
-                measurement.name === "judgeDecision"
-                  ? { ...measurement, value: "ACCEPT" }
-                  : measurement.name === "agreement"
-                  ? { ...measurement, value: true }
-                  : measurement
-              ),
-          } as Record<string, unknown>,
-        }
-        : cell
-    );
+    const target = firstUnparseableCell();
+    const tamperedCells = fixture.cells.map((cell) => {
+      if (cell !== target) return cell;
+      // The identical tamper the aggregate leg refuses, applied to the cell assemble sees.
+      const predicate = { ...cell.predicate };
+      invalidSignedAsAcceptPass(predicate);
+      return { ...cell, verdictDigest: digest, predicate };
+    });
     const assembled = await assembleMatrix(
       fixture.bench,
       fixture.run,
