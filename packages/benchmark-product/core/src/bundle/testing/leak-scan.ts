@@ -15,23 +15,19 @@
  * markers. This scanner therefore walks JSON structurally and decodes base64
  * rather than pattern-matching its alphabet:
  *
- * - a DSSE `payload` (and any `*Base64`-suffixed field) is decoded and its
- *   decoding rescanned, recursively -- a payload is usually itself JSON;
- * - a signature (`sig`) decodes to random bytes and carries no text;
- * - any other string long enough to be an unambiguous base64 blob (>= 64
- *   canonical standard-alphabet characters) is decoded the same way.
+ * - a DSSE `payload` is decoded and its decoding rescanned, recursively -- a
+ *   payload is usually itself JSON -- as is any `*Base64`-suffixed field;
+ * - a DSSE signature (`sig`) decodes to random bytes and carries no text.
  *
- * Everything else -- object keys, ordinary string values, non-JSON files -- is
- * scanned as text exactly as before, so no plain-text leak escapes. The `_`
- * and `-` spellings of the key-material marker are outside the standard base64
- * alphabet and are therefore always text-scanned.
+ * Only those *named* fields are exempted from the text scan; every base64
+ * carrier a bundle actually has is one of them. Everything else -- object keys,
+ * ordinary string values, non-JSON files -- is scanned as text exactly as
+ * before, so no plain-text leak escapes: a value is never skipped on the
+ * strength of merely looking like base64.
  *
- * Files that are not valid UTF-8 are skipped, as they were before (the previous
- * scan skipped any file containing a NUL byte).
- *
- * Residual: a leak word embedded in a >= 64-character run of pure base64
- * alphabet that is not itself decodable text would be missed. No bundle field
- * has that shape.
+ * Binary files -- those containing a NUL byte -- are skipped, exactly as the
+ * previous scan skipped them; every other file is read as text and scanned.
+ * A base64 field that decodes to binary is likewise not text to scan.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -39,9 +35,6 @@ import { join } from "node:path";
 
 /** Licensed-dataset and key-material markers that must never reach a public bundle. */
 export const BUNDLE_LEAK_PATTERN = /LoCoMo|licensed benchmark|api[_-]?key/iu;
-
-/** A minimum length at which a standard-alphabet base64 string is unambiguous. */
-const BLOB_MIN_LENGTH = 64;
 
 export interface LeakFinding {
   /** Bundle-relative (or caller-supplied) path of the file the finding is in. */
@@ -63,14 +56,14 @@ function decodeCanonicalBase64(value: string): Uint8Array | undefined {
   return new Uint8Array(buffer);
 }
 
-/** Decodes UTF-8 bytes, or returns undefined when they are not valid UTF-8 text. */
-function decodeUtf8(bytes: Uint8Array): string | undefined {
+/**
+ * Reads bytes as text, or returns undefined for binary. The NUL test and the
+ * lenient (replacement-character) decode are both deliberate: they are exactly
+ * what the previous whole-file scan did, so no file it read is skipped here.
+ */
+function readText(bytes: Uint8Array): string | undefined {
   if (bytes.includes(0)) return undefined;
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return undefined;
-  }
+  return Buffer.from(bytes).toString("utf8");
 }
 
 function isBase64Field(key: string | undefined, isDsseEnvelope: boolean): boolean {
@@ -108,7 +101,7 @@ class Scanner {
       this.text(value, origin);
       return;
     }
-    this.value(parsed, where, undefined);
+    this.value(parsed, origin, undefined);
   }
 
   private value(node: unknown, where: string, key: string | undefined, inDsse = false): void {
@@ -132,19 +125,13 @@ class Scanner {
   }
 
   private string(value: string, where: string, key: string | undefined, inDsse: boolean): void {
-    const named = isBase64Field(key, inDsse);
-    if (!named && value.length < BLOB_MIN_LENGTH) {
-      this.text(value, where);
-      return;
-    }
-    const decoded = decodeCanonicalBase64(value);
+    const decoded = isBase64Field(key, inDsse) ? decodeCanonicalBase64(value) : undefined;
     if (decoded === undefined) {
-      // Not base64 after all (a long sentence, a path, a hex digest with an odd
-      // length) -- scan it as the text it is.
+      // Not a base64 field, or not canonical base64 after all -- scan the text.
       this.text(value, where);
       return;
     }
-    const text = decodeUtf8(decoded);
+    const text = readText(decoded);
     // Binary decodings (signatures, DER keys) carry no scannable text.
     if (text !== undefined) this.document(text, `${where} (base64)`);
   }
@@ -155,7 +142,7 @@ export function findLeaks(
   bytes: Uint8Array,
   options: { readonly path: string; readonly workspaceDir?: string },
 ): LeakFinding[] {
-  const text = decodeUtf8(bytes);
+  const text = readText(bytes);
   if (text === undefined) return [];
   const scanner = new Scanner(options.path, options.workspaceDir);
   scanner.document(text, "");

@@ -72,6 +72,22 @@ describe("bundle leak scan (#3063)", () => {
     expect(findings[0].where).toContain("base64");
   });
 
+  test("an unnamed string that merely looks like base64 is still text-scanned", () => {
+    // The exemption is by field name, never by shape: a value is never skipped
+    // because it happens to be spellable in the base64 alphabet.
+    const looksLikeBase64 = `corpus/LoCoMo/sessions/train/${"A".repeat(35)}`;
+    expect(looksLikeBase64.length % 4).toBe(0);
+    expect(findLeaks(utf8(JSON.stringify({ datasetPath: looksLikeBase64 })), { path: "a.json" }))
+      .toEqual([expect.objectContaining({ kind: "pattern", match: "LoCoMo" })]);
+  });
+
+  test("a leak inside a decoded non-JSON base64 field is a finding", () => {
+    const script = Buffer.from("#!/bin/sh\nfetch LoCoMo\n", "utf8").toString("base64");
+    const findings = findLeaks(utf8(JSON.stringify({ samplingScriptBase64: script })), { path: "a.json" });
+    expect(findings).toEqual([expect.objectContaining({ kind: "pattern", match: "LoCoMo" })]);
+    expect(findings[0].where).toBe("raw.samplingScriptBase64 (base64)");
+  });
+
   test("plain-text leaks in ordinary fields, keys, and non-JSON files are still findings", () => {
     expect(findLeaks(utf8(JSON.stringify({ note: "sourced from a licensed benchmark" })), { path: "a.json" }))
       .toHaveLength(1);
@@ -86,6 +102,13 @@ describe("bundle leak scan (#3063)", () => {
     const record = envelope(payloadOf({ dir: `${workspaceDir}/run` }), CLEAN_SIGNATURE);
     expect(findLeaks(utf8(record), { path: "records/a.bin", workspaceDir }))
       .toEqual([expect.objectContaining({ kind: "workspace-path" })]);
+  });
+
+  test("a non-UTF-8 text file is still scanned, as it was before", () => {
+    const latin1 = new Uint8Array(Buffer.from("caf\u00e9 sourced from a licensed benchmark\n", "latin1"));
+    expect(findLeaks(latin1, { path: "notes.txt" })).toEqual([
+      expect.objectContaining({ kind: "pattern", match: "licensed benchmark" }),
+    ]);
   });
 
   test("binary files are skipped and a bundle directory is walked whole", () => {
