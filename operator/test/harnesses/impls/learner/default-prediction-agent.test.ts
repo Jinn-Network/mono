@@ -124,11 +124,6 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
     const workingDir = mkdtempSync(join(tmpdir(), 'jinn-claude-adapter-work-'));
     const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-adapter-state-'));
     const pluginInstallDir = mkdtempSync(join(tmpdir(), 'jinn-claude-adapter-plugins-'));
-    // The adapter lets an operator-set JINN_NETWORK_TOOLS_CLIENT_ROOT win over
-    // the configured clientRoot. Clear it so this test exercises the config
-    // value deterministically regardless of the runner's ambient env.
-    const previousClientRoot = process.env['JINN_NETWORK_TOOLS_CLIENT_ROOT'];
-    delete process.env['JINN_NETWORK_TOOLS_CLIENT_ROOT'];
     try {
       const adapter = new ClaudeCodeHarnessAdapter({
         claudePath: 'claude-test',
@@ -140,7 +135,6 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
           discoveryUrl: 'https://subgraph.example',
           ipfsGatewayUrl: 'https://ipfs.example',
         },
-        clientRoot: '/client/root',
         pluginInstallDir,
         _spawnFn: spawnFn as never,
       });
@@ -200,17 +194,10 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
         JINN_DISCOVERY_URL: 'https://subgraph.example',
         JINN_DISCOVERY_MODE: 'http',
         JINN_CORPUS_IPFS_GATEWAY_URL: 'https://ipfs.example',
-        // Regression: the Network Tools MCP launcher needs this to resolve the
-        // real Jinn MCP server. The bundled plugin is materialized into the
-        // operator vendor root, so its own `../..` resolution misses the
-        // client tree and the jinn-client MCP server fails to start —
-        // dropping submit_typed_payload from the agent's tools.
-        JINN_NETWORK_TOOLS_CLIENT_ROOT: '/client/root',
       });
       expect(calls[0]!.options.env?.['DESIRED_STATE_CONTEXT']).toBe('');
+      expect(calls[0]!.options.env).not.toHaveProperty('JINN_NETWORK_TOOLS_CLIENT_ROOT');
     } finally {
-      if (previousClientRoot === undefined) delete process.env['JINN_NETWORK_TOOLS_CLIENT_ROOT'];
-      else process.env['JINN_NETWORK_TOOLS_CLIENT_ROOT'] = previousClientRoot;
       rmSync(workingDir, { recursive: true, force: true });
       rmSync(implStateDir, { recursive: true, force: true });
       rmSync(pluginInstallDir, { recursive: true, force: true });
