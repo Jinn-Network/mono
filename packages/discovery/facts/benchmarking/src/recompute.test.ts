@@ -1,4 +1,5 @@
 import {
+  BENCHMARK_PUBLICATION_EXTENSION,
   loadGoldenBytes,
   parseBenchmark,
   parseMatrix,
@@ -29,6 +30,7 @@ import {
   reportRecompute,
   signedReportRecompute,
   runRecompute,
+  runRecomputeV2,
 } from "./recompute.js";
 
 const noReferencedBytes: ReferencedBytes = {
@@ -408,17 +410,71 @@ describe("v2 recompute: the join edges v1 left out", () => {
     expect(facts.verdictDigests).toEqual([...first.verdicts, `sha256:${"b".repeat(64)}`]);
   });
 
+  it("names the accounting record an assembly-v2 Matrix pins, entering the dispatch closure", async () => {
+    const bytes = await fixtureBytes("matrix", "valid");
+    const document = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    const accounting = "f".repeat(64);
+    // The extension is mandatory for assembly v2 and rejected for anything else, so the two move
+    // together. This is the hop that makes `matrix -> accounting -> dispatches` walkable.
+    const withAccounting = {
+      ...document,
+      assembly: { procedure: "jinn.benchmarking.assembly", version: "2.0" },
+      [BENCHMARK_PUBLICATION_EXTENSION]: {
+        accounting: { name: "accounting", digest: { sha256: accounting } },
+      },
+    };
+    const facts = await matrixRecomputeV2(sealMatrix(withAccounting).bytes, noReferencedBytes);
+    expect(facts.accountingDigest).toBe(`sha256:${accounting}`);
+  });
+
+  it("omits the accounting edge on an assembly-v1 Matrix, which pins no accounting record", async () => {
+    const bytes = await fixtureBytes("matrix", "valid");
+    const facts = await matrixRecomputeV2(bytes, noReferencedBytes);
+    expect(facts).not.toHaveProperty("accountingDigest");
+  });
+
+  it("names the registration artifacts a Run's publication extension pins", async () => {
+    const bytes = await fixtureBytes("run", "valid");
+    const document = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    // Sorted and unique by role then sha256, which the extension schema enforces.
+    const withArtifacts = {
+      ...document,
+      [BENCHMARK_PUBLICATION_EXTENSION]: {
+        registrationArtifacts: [
+          { role: "https://example.test/preregistration/v1", artifact: { name: "prereg", digest: { sha256: "1".repeat(64) } } },
+          { role: "https://example.test/runtime/v1", artifact: { name: "runtime", digest: { sha256: "2".repeat(64) } } },
+        ],
+      },
+    };
+    const facts = await runRecomputeV2(sealRun(withArtifacts).bytes, noReferencedBytes);
+    expect(facts.registrationArtifactDigests).toEqual([
+      `sha256:${"1".repeat(64)}`,
+      `sha256:${"2".repeat(64)}`,
+    ]);
+    expect(facts.benchmarkDigest).toBeUndefined();
+  });
+
+  it("keeps v1's card unchanged for a Run that registers nothing", async () => {
+    const bytes = await fixtureBytes("run", "valid");
+    const v1 = await runRecompute(bytes, noReferencedBytes);
+    const v2 = await runRecomputeV2(bytes, noReferencedBytes);
+    expect(v2).toEqual(v1);
+    expect(v2).not.toHaveProperty("registrationArtifactDigests");
+  });
+
   it("emits no facts at all for bytes that are not the record kind", async () => {
     const junk = new TextEncoder().encode('{"a":1}');
     expect(await benchmarkRecomputeV2(junk, noReferencedBytes)).toEqual({});
     expect(await matrixRecomputeV2(junk, noReferencedBytes)).toEqual({});
+    expect(await runRecomputeV2(junk, noReferencedBytes)).toEqual({});
   });
 
   it("routes the two revised kinds to v2 and every other kind to its unrevised fn", () => {
     expect(BENCHMARKING_FACTS_RECOMPUTE_V2.get(BENCHMARK_RECORD_KIND)).toBe(benchmarkRecomputeV2);
     expect(BENCHMARKING_FACTS_RECOMPUTE_V2.get(MATRIX_RECORD_KIND)).toBe(matrixRecomputeV2);
-    expect(BENCHMARKING_FACTS_RECOMPUTE_V2.get(RUN_RECORD_KIND)).toBe(
-      BENCHMARKING_FACTS_RECOMPUTE.get(RUN_RECORD_KIND),
+    expect(BENCHMARKING_FACTS_RECOMPUTE_V2.get(RUN_RECORD_KIND)).toBe(runRecomputeV2);
+    expect(BENCHMARKING_FACTS_RECOMPUTE_V2.get(REPORT_RECORD_KIND)).toBe(
+      BENCHMARKING_FACTS_RECOMPUTE.get(REPORT_RECORD_KIND),
     );
     expect(BENCHMARKING_FACTS_RECOMPUTE_V2.get("https://spec.jinn.network/records/nope/v1")).toBeUndefined();
   });

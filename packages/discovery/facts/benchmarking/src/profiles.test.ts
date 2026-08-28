@@ -19,6 +19,7 @@ import {
   reportProfile,
   signedReportProfile,
   runProfile,
+  runProfileV2,
 } from "./profiles.js";
 
 // Pinned-digest golden documents (plan Task 6.2): each facts profile is a
@@ -32,8 +33,9 @@ const EXPECTED_DIGESTS: Record<string, string> = {
   reportV2: "sha256:23e0de1dc0b30dc1cf8fa3eac8941fb9235240cc46c139b64b91eda4968a984f",
   accounting: "sha256:05344dba20f0ad2b229ce45b1d15a77e3982b396ccad5b592c690f0e2cc0ec50",
   benchmarkV2: "sha256:5d65fba065667117aaf220bfcd524c28b827760108c6d46550aa7d0cc6ccb451",
-  matrixV2: "sha256:27c17000ea7146ea9b8403744eece480ef654079711268e7691878f01ac817e2",
+  matrixV2: "sha256:586cf7ef7d6903ab4757a705d4caf292132e349a3e8b7632aaf090cea1af7948",
   accountingV2: "sha256:4d4985a15948809674227ae66bb83faefcd5df0777741b7ee6c85be1e02fe5cd",
+  runV2: "sha256:d630497e07875ec1fc47e1e83d962f04663109886c3713cb3c8a63e2df6686b4",
 };
 
 function expectPinnedDigest(name: string, digest: string) {
@@ -96,6 +98,7 @@ describe("facts/benchmarking profile documents (program §7.128)", () => {
       "runOutcome",
     ]);
     expect(referenceBearingFields(matrixProfile)).toEqual(["runDigest"]);
+    expect(referenceBearingFields(runProfile)).toEqual(["benchmarkDigest"]);
     expect(
       cloudEventsFields(matrixProfile).map((field) => [
         field.name,
@@ -215,11 +218,23 @@ describe("v2 profiles (join-edge completeness, design §12 amendment)", () => {
       "submissionDigests",
       "deliveryDigests",
       "verdictDigests",
+      "accountingDigest",
+    ]);
+  });
+
+  it("binds the run kind under the next profile version and names its registration artifacts", () => {
+    expect(runProfileV2.kind).toBe(RUN_RECORD_KIND);
+    expect(runProfileV2.profile).toBe("https://spec.jinn.network/facts/benchmark-run/v2");
+    // The whole outbound set a Run's closed schema can declare: the Benchmark it runs, and the
+    // registration artifacts its publication extension pins. An arm's `pinning` is an open map.
+    expect(referenceBearingFields(runProfileV2)).toEqual([
+      "benchmarkDigest",
+      "registrationArtifactDigests",
     ]);
   });
 
   it("declares every field of both revisions a record fact", () => {
-    for (const profile of [benchmarkProfileV2, matrixProfileV2]) {
+    for (const profile of [benchmarkProfileV2, matrixProfileV2, runProfileV2]) {
       for (const field of profile.fields) expect(field.class).toBe("record");
     }
   });
@@ -227,6 +242,7 @@ describe("v2 profiles (join-edge completeness, design §12 amendment)", () => {
   it("leaves the v1 profiles untouched", () => {
     expect(referenceBearingFields(benchmarkProfile)).toEqual([]);
     expect(referenceBearingFields(matrixProfile)).toEqual(["runDigest"]);
+    expect(referenceBearingFields(runProfile)).toEqual(["benchmarkDigest"]);
   });
 
   it("binds the accounting kind under the next profile version and names its dispatch records", () => {
@@ -249,5 +265,6 @@ describe("v2 profiles (join-edge completeness, design §12 amendment)", () => {
     expectPinnedDigest("benchmarkV2", sealJson(benchmarkProfileV2).digest);
     expectPinnedDigest("matrixV2", sealJson(matrixProfileV2).digest);
     expectPinnedDigest("accountingV2", sealJson(benchmarkAccountingProfileV2).digest);
+    expectPinnedDigest("runV2", sealJson(runProfileV2).digest);
   });
 });

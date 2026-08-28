@@ -31,10 +31,19 @@ export const benchmarkProfileV2: FactsProfileDocument = loadProfile("benchmark.v
 
 /**
  * Adds the per-cell record references — Tasks, Submissions, Deliveries, verdicts — that make a
- * matrix the join table it already is in substance. Without them, "this environment, its
- * attempts, their verdicts" is unanswerable from the card.
+ * matrix the join table it already is in substance, plus the accounting record its mandatory
+ * assembly-v2 publication extension pins. Without them, "this environment, its attempts, their
+ * verdicts" is unanswerable from the card, and `matrix -> accounting -> dispatches` — the hop
+ * `benchmark-accounting.v2` exists to make walkable — cannot be entered from one at all.
  */
 export const matrixProfileV2: FactsProfileDocument = loadProfile("matrix.v2.json");
+
+/**
+ * Adds the registration artifacts a Run's publication extension pins. That extension's shape is
+ * closed and schema-validated, so its members are enumerable fields and the open-map limit the
+ * §12 amendment states does not reach them — unlike an arm's `pinning`, which stays outside.
+ */
+export const runProfileV2: FactsProfileDocument = loadProfile("run.v2.json");
 
 /**
  * Adds the dispatch-level references an accounting record already carries in substance: the

@@ -9,6 +9,7 @@
     { "name": "taskDigests", "class": "record", "referenceBearing": true },
     { "name": "submissionDigests", "class": "record", "referenceBearing": true },
     { "name": "deliveryDigests", "class": "record", "referenceBearing": true },
-    { "name": "verdictDigests", "class": "record", "referenceBearing": true }
+    { "name": "verdictDigests", "class": "record", "referenceBearing": true },
+    { "name": "accountingDigest", "class": "record", "referenceBearing": true }
   ]
 }

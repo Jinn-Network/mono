@@ -8,6 +8,8 @@ import {
   parseReport,
   parseRun,
   parseSignedReportRecord,
+  readMatrixPublicationExtension,
+  readRunPublicationExtension,
   serializeCanonicalJson,
 } from "@jinn-network/benchmarking-records";
 import { recordDigest } from "@jinn-network/record-discovery-protocol";
@@ -291,6 +293,11 @@ export const matrixRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
   if (Object.keys(facts).length === 0) return noFacts();
   try {
     const record = parseMatrix(bytes);
+    // Mandatory for assembly v2 and rejected outright for anything else, so an absent extension
+    // means an assembly-v1 matrix, which pins no accounting record and owes the card no edge.
+    const accounting = asPrefixedDigest(
+      readMatrixPublicationExtension(record)?.accounting.digest.sha256,
+    );
     return {
       ...facts,
       taskDigests: distinct(record.cells.map((cell) => asPrefixedDigest(cell.taskDigest))),
@@ -298,6 +305,31 @@ export const matrixRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
       deliveryDigests: distinct(record.cells.map((cell) => cell.delivery as `sha256:${string}` | undefined)),
       verdictDigests: distinct(
         record.cells.flatMap((cell) => cell.verdicts as `sha256:${string}`[]),
+      ),
+      ...(accounting === undefined ? {} : { accountingDigest: accounting }),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
+/**
+ * v1's card plus the registration artifacts the Run's publication extension pins. The extension
+ * is namespaced but its shape is closed and schema-validated, so `registrationArtifacts` is an
+ * enumerable field. An arm's `pinning` map stays outside the rule: its keys are not enumerated
+ * by the defining schema, so there is no field for a profile to declare.
+ */
+export const runRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await runRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const record = parseRun(bytes);
+    const extension = readRunPublicationExtension(record);
+    if (extension === undefined) return facts;
+    return {
+      ...facts,
+      registrationArtifactDigests: distinct(
+        extension.registrationArtifacts.map((entry) => asPrefixedDigest(entry.artifact.digest.sha256)),
       ),
     };
   } catch {
@@ -373,6 +405,8 @@ export const BENCHMARKING_FACTS_RECOMPUTE_V2: FactsRecompute = {
     switch (kind) {
       case BENCHMARK_RECORD_KIND:
         return benchmarkRecomputeV2;
+      case RUN_RECORD_KIND:
+        return runRecomputeV2;
       case MATRIX_RECORD_KIND:
         return matrixRecomputeV2;
       case BENCHMARK_ACCOUNTING_RECORD_KIND:

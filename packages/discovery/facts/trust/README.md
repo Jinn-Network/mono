@@ -33,7 +33,19 @@ plan.
 ## Join edges
 
 Facts profiles must declare their kind's complete outbound-reference set (record-discovery
-design §12, amendment 2026-08-28). These three profiles already did at v1 — a key binding's
-`supersedes`, an authorization's `revocation`, a trust policy's `predecessor` are the whole set
-— so the audit that produced the other leaves' revisions left this leaf unchanged. Its
-`profiles.test.ts` pins that set, which is what keeps the claim true.
+design §12, amendment 2026-08-28). Only `trust-policy.v1` was already complete: `predecessor`
+really is its whole outbound set. The other two were not, and the v2 revisions close them.
+
+`key-binding.v2` adds `ceremony.digest` — the ceremony evidence the binding rests on, required
+on every binding — and `anchorDigests`, one per cited time anchor. `authorization.v2` adds
+`proofs`, the parent authorizations this one attenuates, which is the same lineage class as the
+`revocation` declared beside it in v1; and `subjectDigests`, the statement's own subjects, each
+of which pins bytes by digest. v1 stays frozen and registered.
+
+Ceremony evidence and time anchors are digest-pinned artifacts rather than announceable
+records, so reference-bearing here labels the indexing relation and does not promise the target
+is retrievable — the same posture the environment leaf documents for its image digest.
+
+Each profile's `referenceBearingFields` is pinned in `profiles.test.ts`. That pin is a
+change-detector authored from the same reading of the schema as the profile itself, not an
+independent completeness proof; see the design amendment's *What enforces this*.

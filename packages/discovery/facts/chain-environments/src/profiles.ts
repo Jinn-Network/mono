@@ -27,7 +27,13 @@ export const informationWorldFactsProfile: FactsProfileDocument =
 // The v2 revisions close the join-edge gap the completeness rule names (protocol design §12,
 // amendment 2026-08-28). Each coexists with its v1; v1 bytes and meaning stay frozen.
 
-/** Adds the promotion-lineage edge every chain environment may carry. */
+/**
+ * Adds the thirteen components a chain world pins by digest that v1 left unnamed — the pinned
+ * simulator binary, the multi-arch index, the header proof, the materializer, the source
+ * proofs, the fixture-coverage manifest, the fixture modules, the tool-interface schemas, the
+ * probe suite, the observation schema, the baseline observation and the comparator — plus the
+ * promotion-lineage edge every chain environment may carry.
+ */
 export const chainEnvironmentFactsProfileV2: FactsProfileDocument =
   loadProfile("chain-environment.v2.json");
 

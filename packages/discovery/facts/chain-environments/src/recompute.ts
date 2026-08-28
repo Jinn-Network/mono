@@ -151,6 +151,7 @@ export const chainEnvironmentRecomputeV2: RecordFactRecompute = async (bytes, re
         "stateMaterialization.fixtureCoverageManifestDigest": descriptorDigest(state.fixtureCoverage?.manifest),
         supersedesDigest: descriptorDigest(record.supersedes),
       }),
+      "runtime.binary.digest": record.runtime.binary.digest,
       fixtureModuleDigests: record.fixtures.modules.map((module) => descriptorDigest(module.module)!),
       "capabilityEnvelope.toolInterfaceSchemaDigests": record.capabilityEnvelope.toolInterfaces.map(
         (tool) => descriptorDigest(tool.schema)!,
