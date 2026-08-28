@@ -39,6 +39,10 @@ server: {
 `packages/indexer/explorer/vitest.config.ts` is the repository's only such suite and
 carries the worked example.
 
+A config that declares `projects` gets one Vite config per entry, and the gate reads
+`server.fs.allow` the same way: an allowance inside a `projects` entry covers only the
+seam paths named in that entry, while a root-level one covers them all.
+
 `.github/scripts/vitest-tmp-isolation.test.mjs` runs on every pull request and fails
 if any Vitest config under `packages/` (or the operator's five configs, which use the
 operator's own home-plus-temp seam at `operator/test/_support/`) names an entry that
