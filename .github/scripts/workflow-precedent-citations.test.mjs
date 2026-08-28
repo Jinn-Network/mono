@@ -220,3 +220,51 @@ test('a restore step at the end of a job does not read the next job\'s name', ()
 
   assert.deepEqual(restoredArtifactNames(source), []);
 });
+
+// A restore step that names nothing by name, so a file citing it is reported.
+const citingSelf = [
+  '      # Same shape as self-ci.yml.',
+  '      - name: Restore a distribution',
+  '        uses: actions/download-artifact@v8',
+  '        with:',
+  '          pattern: some-*-dist',
+  '',
+].join('\n');
+
+test('a workflow whose comment names itself is not reported as citing itself', () => {
+  const fixtureRoot = fixtureWorkflows({ 'self-ci.yml': citingSelf });
+
+  try {
+    assert.deepEqual(findBrokenCitations(fixtureRoot), []);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('a .yaml workflow is scanned for broken citations', () => {
+  const fixtureRoot = fixtureWorkflows({ 'citing-ci.yaml': citingConsolidated });
+
+  try {
+    assert.deepEqual(findBrokenCitations(fixtureRoot), [
+      'citing-ci.yaml cites consolidated-ci.yml, which does not exist',
+    ]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('every broken citation is reported, not just the first', () => {
+  const fixtureRoot = fixtureWorkflows({
+    'citing-a-ci.yml': citingConsolidated,
+    'citing-b-ci.yml': citingConsolidated,
+  });
+
+  try {
+    assert.deepEqual(findBrokenCitations(fixtureRoot).sort(), [
+      'citing-a-ci.yml cites consolidated-ci.yml, which does not exist',
+      'citing-b-ci.yml cites consolidated-ci.yml, which does not exist',
+    ]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
