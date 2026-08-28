@@ -3,7 +3,7 @@
 This package is published from the monorepo, but operators consume it as a standalone artifact:
 
 - installed CLI: `npm install -g @jinn-network/operator@latest`
-- no-install trial: `npx -p @jinn-network/operator@latest jinn <verb>`
+- no-install trial: `npx @jinn-network/operator@latest <verb>`
 - container: `ghcr.io/jinn-network/operator:<version>`
 
 The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `v<semver>` (new, produced by the Monday scaffold workflow) or `client-v<semver>` (legacy). The engineering handbook ([`docs/engineering/handbook.md`](../docs/engineering/handbook.md)) is the canonical reference for the cadence.
@@ -52,8 +52,8 @@ Do this once because the package did not exist on npm initially.
 4. Verify the registry artifact:
    ```bash
    npm view @jinn-network/operator version
-   npx -p @jinn-network/operator@latest jinn version --json
-   npx -p @jinn-network/operator@latest jinn --help
+   npx @jinn-network/operator@latest version --json
+   npx @jinn-network/operator@latest --help
    ```
 
 ## Configure trusted publishing
@@ -78,8 +78,8 @@ Every push to `next` that touches `operator/**` triggers [`.github/workflows/npm
 Post-publish verification:
 
 ```bash
-npx -p @jinn-network/operator@canary jinn version --json
-npx -p @jinn-network/operator@canary jinn --help
+npx @jinn-network/operator@canary version --json
+npx @jinn-network/operator@canary --help
 ```
 
 ## Stable releases

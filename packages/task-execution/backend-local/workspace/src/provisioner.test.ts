@@ -206,6 +206,12 @@ describe("directory provisioner", () => {
         JINN_LOADOUT_DIR: "/attempt/input/loadout",
         JINN_CLAUDE_OAUTH_TOKEN_FILE: "secrets/claude-oauth",
         OPENROUTER_API_KEY: "secrets/key",
+        // All three temp names the launcher pins at `paths.tmp`. Carrying only TMPDIR sends a
+        // child that reads TEMP or TMP back to the platform default, outside the attempt
+        // directory this allowlist exists to confine it to.
+        TMPDIR: "/attempt/tmp",
+        TMP: "/attempt/tmp",
+        TEMP: "/attempt/tmp",
         LEAKED_TOKEN: "ambient-token",
       },
     })).toEqual({
@@ -214,6 +220,9 @@ describe("directory provisioner", () => {
       JINN_LOADOUT_DIR: "/attempt/input/loadout",
       JINN_CLAUDE_OAUTH_TOKEN_FILE: "secrets/claude-oauth",
       OPENROUTER_API_KEY: "secrets/key",
+      TMPDIR: "/attempt/tmp",
+      TMP: "/attempt/tmp",
+      TEMP: "/attempt/tmp",
     });
   });
 

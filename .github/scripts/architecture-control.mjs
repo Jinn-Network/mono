@@ -294,6 +294,30 @@ export function validateArchitectureControl({ repoRoot, codeownersText, ownersTe
   };
 }
 
+/**
+ * The subset of the ownership report that is safe to COMMIT (#3076).
+ *
+ * `paths` and `counts` are a file census: they change whenever any file is
+ * added, renamed, or deleted anywhere in the controlled scopes. Committing
+ * them made every long-lived branch conflict, and — worse — made independent
+ * branches mutually inconsistent: two PRs that each add files and each
+ * regenerate correctly produce a clean textual merge whose counts are wrong
+ * for the combined tree, which the `--check` byte-compare then correctly
+ * rejects at the merge queue (PR #2952 was ejected twice this way).
+ *
+ * The invariant itself is unaffected: validateArchitectureControl still
+ * enumerates every controlled path and still THROWS when one does not resolve
+ * to the required owners. Only the snapshot stops being committed. The full
+ * report, census included, remains available from this module's CLI and is
+ * uploaded as the coverage artifact by platform-architecture-control.
+ */
+export function committedOwnershipView(report) {
+  return {
+    version: report.version,
+    requiredOwners: report.requiredOwners,
+  };
+}
+
 function parseArguments(argv) {
   const options = { repoRoot: process.cwd(), out: undefined };
   for (let index = 0; index < argv.length; index += 1) {
