@@ -176,6 +176,11 @@ function enclosedLiterals(source, key, open, close) {
  * Vitest gives every `projects` entry its own Vite config, so `server.fs.allow` under one entry
  * says nothing about a seam path named under another. These ranges are how the reachability check
  * tells the two apart (issue #3123).
+ *
+ * An unterminated `projects: [` yields no ranges, which puts every allowance and seam path back in
+ * one scope and restores the cross-entry crediting this closes. That is the same fallback the other
+ * scanners take on an unterminated literal, and it is bounded the same way: a config that does not
+ * parse cannot load, so its own package job is red before this gate has an opinion.
  */
 export function projectEntryRanges(source) {
   const ranges = [];
@@ -570,9 +575,8 @@ test('fs.allow in one projects entry does not cover a seam path in another', () 
   // So does a root-level one, which every project inherits as its base config.
   assert.deepEqual(
     unreachableWirings(
-      `export default { server: { fs: { allow: ['../..'] } }, ${inProjects(
-        `{ test: { setupFiles: ['${seam}'] } }`,
-      ).replace('export default { ', '')}`,
+      `export default { server: { fs: { allow: ['../..'] } }, test: { environment: 'jsdom', ` +
+        `projects: [{ test: { setupFiles: ['${seam}'] } }] } }`,
       config,
     ),
     [],
