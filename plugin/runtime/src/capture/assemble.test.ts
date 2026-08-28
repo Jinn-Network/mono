@@ -399,3 +399,32 @@ describe("buildStartInput — hosted model service identity (capture gap 2)", ()
     expect(start.runtime.components.every((component) => component.kind === "controlled")).toBe(true);
   });
 });
+
+describe("the adapter/runtime seam", () => {
+  test("a feed the Hermes adapter wrote parses and assembles with both gaps closed", async () => {
+    const feed = parseSessionFeed(
+      new Uint8Array(
+        await readFile(
+          new URL("../../fixtures/capture/session-autopilot.ndjson", import.meta.url),
+        ),
+      ),
+    );
+    const start = buildStartInput({
+      feed,
+      feedPath: "/home/op/capture/sessions/s-autopilot/feed.ndjson",
+      workspaceDir: "/home/op/capture/workspaces/s-autopilot",
+      producerVersion: "0.1.0",
+      outcome: resolveSessionOutcome(feed),
+      traceDigest: TRACE_DIGEST,
+    });
+
+    expect(start.repositoryState?.repository).toBe("https://github.com/Jinn-Network/mono");
+    expect(start.initialInputs?.map((input) => input.identifiers?.[0]?.value)).toEqual([
+      "workflow",
+      "config",
+    ]);
+    expect(start.runtime.components.filter((component) => component.kind === "opaque")).toHaveLength(
+      1,
+    );
+  });
+});

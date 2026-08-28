@@ -273,3 +273,56 @@ def test_controlled_input_bounds_match_the_runtime_that_enforces_them():
     assert f"CONTROLLED_INPUT_MAX_COUNT = {feed.CONTROLLED_INPUT_MAX_COUNT}" in source
     for role in feed.CONTROLLED_INPUT_ROLES:
         assert f'"{role}"' in source
+
+
+def _fixture_events():
+    path = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "runtime"
+        / "fixtures"
+        / "capture"
+        / "session-autopilot.ndjson"
+    )
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_the_writer_still_produces_the_shape_the_runtime_fixture_pins(feed_path):
+    """The fixture is adapter output the runtime parses; drift on either side breaks capture."""
+    writer = feed.SessionFeed(feed_path)
+    writer.open_session(
+        session_id="s-autopilot",
+        host_name="hermes-agent",
+        host_version="1.2.3",
+        model_provider="anthropic",
+        model_name="claude-opus-5",
+        conversation_id="s-autopilot",
+        model_service={
+            "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+            "name": "Anthropic Messages API",
+            "version": "claude-opus-5-20260514",
+            "deployment": "api.anthropic.com",
+            "providerIri": "https://spec.jinn.network/organizations/anthropic",
+        },
+    )
+    writer.repository_state(
+        repository="https://github.com/Jinn-Network/mono",
+        branch="autopilot/3223",
+        target_base="next",
+        base_commit="4f0e2b7c1a9d8e3f5b6a7c8d9e0f1a2b3c4d5e6f",
+        base_tree="0a1b2c3d4e5f60718293a4b5c6d7e8f901234567",
+    )
+    writer.controlled_input(
+        role="workflow",
+        name=".claude/skills/implement-issue/SKILL.md",
+        media_type="text/markdown",
+        content=b"# implement-issue\n",
+    )
+
+    written = read_lines(feed_path)
+    pinned = _fixture_events()[: len(written)]
+    for actual, expected in zip(written, pinned):
+        assert set(actual) == set(expected), actual["type"]
+        for key, value in expected.items():
+            if key in ("atUnixNano", "startedAt"):
+                continue
+            assert actual[key] == value, key
