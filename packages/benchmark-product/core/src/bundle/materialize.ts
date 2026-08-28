@@ -529,11 +529,20 @@ function recordClosure(input: MaterializeBundleInput): {
       strata: admission.strata,
       arms,
       items: qualificationItems,
-      exclusions: admission.excluded.map((entry) => ({
-        itemSha256: entry.itemSha256,
-        replacementItemSha256: entry.replacementItemSha256,
-        reason: entry.reason,
-      })),
+      // Sorted by `itemSha256`, like `items` and `arms` above, because
+      // `BundleQualificationSchema` requires this projection to be code-unit sorted and unique.
+      // The authenticated `admission.excluded` list is in REPLACEMENT-LEDGER order, which is the
+      // ledger's own authenticated order and carries no sortedness guarantee, so every admission
+      // whose ledger happened to be unsorted refused at the schema instead of publishing. No
+      // previously producible bundle moves: an unsorted projection never got past this parse, so
+      // the only lists this sort can reorder are ones that could not be published at all.
+      exclusions: admission.excluded
+        .map((entry) => ({
+          itemSha256: entry.itemSha256,
+          replacementItemSha256: entry.replacementItemSha256,
+          reason: entry.reason,
+        }))
+        .sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256)),
       admissionRecords: admission.reachableRecords,
       reachableSha256s: admission.reachableSha256s,
     });
