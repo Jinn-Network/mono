@@ -19,49 +19,13 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
+import { restoredArtifactNames } from './workflow-artifact-steps.mjs';
+
 const root = resolve(import.meta.dirname, '../..');
 const workflowsDir = resolve(root, '.github/workflows');
+const scriptsDir = resolve(root, '.github/scripts');
 
-// True at the first line that cannot belong to the step opened at `stepIndent`:
-// the next step, or any dedent out of the step's block. Without the dedent arm a
-// `pattern:` restore that is the last step of its job keeps scanning into the
-// next job and matches that job's `name:`, scoring a workflow that restores
-// nothing by name as compliant.
-function leavesStep(line, stepIndent) {
-  if (line.trim() === '') return false;
-  const indent = line.match(/^\s*/)[0].length;
-  return indent <= stepIndent;
-}
-
-// Reads the `name:` of every `actions/download-artifact` step. A bare search
-// for `name:` over the whole file also matches the upload steps, so the walk
-// stays inside the step it started in.
-export function restoredArtifactNames(source) {
-  const names = [];
-  const lines = source.split('\n');
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!lines[index].includes('uses: actions/download-artifact')) continue;
-    const stepIndent = stepOpenerIndent(lines, index);
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      if (leavesStep(lines[cursor], stepIndent)) break;
-      const name = lines[cursor].match(/^\s+name: (\S+)$/);
-      if (name) {
-        names.push(name[1]);
-        break;
-      }
-    }
-  }
-  return names;
-}
-
-// The indentation of the `- ` line that opens the step containing `index`.
-function stepOpenerIndent(lines, index) {
-  for (let cursor = index; cursor >= 0; cursor -= 1) {
-    const opener = lines[cursor].match(/^(\s*)- /);
-    if (opener) return opener[1].length;
-  }
-  return 0;
-}
+export { restoredArtifactNames };
 
 // Returns every workflow file name cited in a comment attached to a
 // download-artifact step, self-citations excluded. The comment block is the run
@@ -108,6 +72,23 @@ export function findBrokenCitations(workflowsRoot = workflowsDir) {
   }
   return broken;
 }
+
+// The acceptance criterion of #3131: one behaviour of the restore-name walk in
+// `.github/scripts`. Copies drift — #3127 fixed this file's walk while the two
+// per-workflow tests kept the pre-fix one, so a `pattern:` restore at the end of
+// a job still read the next job's `name:` there.
+test('the restore-name walk is defined once, in the shared module', () => {
+  const definers = readdirSync(scriptsDir)
+    .filter((name) => name.endsWith('.mjs') && name !== 'workflow-artifact-steps.mjs')
+    .filter((name) => /function\s+restoredArtifacts?(Names)?\s*\(/.test(
+      readFileSync(join(scriptsDir, name), 'utf8'),
+    ));
+  assert.deepEqual(
+    definers,
+    [],
+    'import restoredArtifacts / restoredArtifactNames from workflow-artifact-steps.mjs instead of redefining the walk',
+  );
+});
 
 test('every workflow cited as by-name precedent actually restores by name', () => {
   assert.deepEqual(findBrokenCitations(), []);

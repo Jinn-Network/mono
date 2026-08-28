@@ -15,23 +15,17 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
+import {
+  artifactValue,
+  restoredArtifactNames,
+  restoredArtifacts,
+} from './workflow-artifact-steps.mjs';
+
 const root = resolve(import.meta.dirname, '../..');
 const workflow = readFileSync(
   resolve(root, '.github/workflows/policy-ci.yml'),
   'utf8',
 );
-
-// A `name:` value is a whole YAML scalar, not a single unquoted token. Reading
-// it as `(\S+)` skipped any name carrying a `${{ }}` expression, because the
-// spaces inside the expression defeat `\S+` — and a skipped uploader is one the
-// count assertion below never sees, which is exactly the regression this file
-// exists to catch. It also kept the surrounding quotes of a quoted name, so
-// quoting an artifact consistently on both sides read as a missing restore.
-function artifactValue(line, key) {
-  const match = line.match(new RegExp(`^\\s+${key}:\\s+(.+?)\\s*$`));
-  if (!match) return undefined;
-  return match[1].replace(/^(['"])(.*)\1$/, '$2');
-}
 
 function uploadedArtifactNames(source) {
   const names = [];
@@ -48,32 +42,6 @@ function uploadedArtifactNames(source) {
     }
   }
   return names;
-}
-
-// Returns one `{ name, path }` per download step. Reading both from inside the
-// step is what makes the placement assertion below mean anything: a bare
-// `name: x` / `path: y` search over the whole file also matches the *upload*
-// steps, so it would pass while the restores land somewhere else entirely.
-function restoredArtifacts(source) {
-  const restored = [];
-  const lines = source.split('\n');
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!lines[index].includes('uses: actions/download-artifact')) continue;
-    const step = { name: undefined, path: undefined };
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      if (/^\s+- /.test(lines[cursor])) break;
-      const name = artifactValue(lines[cursor], 'name');
-      if (name) step.name = name;
-      const path = artifactValue(lines[cursor], 'path');
-      if (path) step.path = path;
-    }
-    if (step.name) restored.push(step);
-  }
-  return restored;
-}
-
-function restoredArtifactNames(source) {
-  return restoredArtifacts(source).map((step) => step.name);
 }
 
 test('every uploaded distribution is restored by name, never by pattern', () => {
