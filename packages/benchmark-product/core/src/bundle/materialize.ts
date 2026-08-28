@@ -178,6 +178,12 @@ export interface MaterializeBundleDeps {
   /** Fault-injection hooks used only by crash-safety tests. */
   readonly beforeRename?: () => void;
   readonly afterRename?: () => void;
+  /** Called with the digest-addressed target the moment `renameSync` succeeds — before the parent
+   * fsync and before this function returns. A caller that cleans up after a refusal learns the path
+   * of a directory this invocation created even when the throw lands in that window, instead of
+   * only on the success path (issue #3195). Never called for an adopted target: that directory
+   * belongs to whoever published it first. */
+  readonly onRenamed?: (bundleDir: string) => void;
 }
 
 export interface MaterializedBundle {
@@ -1083,6 +1089,7 @@ export function materializePublicBundle(
     try {
       renameSync(stage, target);
       renamed = true;
+      deps.onRenamed?.(target);
       fsyncDirectorySync(parent);
     } catch (cause) {
       const code = nodeCode(cause);
