@@ -232,6 +232,12 @@ jobs:
       # Their CPU binaries remain bundled in the npm packages.
       ONNXRUNTIME_NODE_INSTALL: skip
       ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+      # The packed-closure smoke test's `tsc` compile of the operator client sits
+      # near Node's default ~4GB heap cap as the tree grows; on 2026-08-28 two
+      # consecutive merge-group runs died there with heap OOM while the push lane
+      # squeaked past. The runner has 16GB; give every node child real headroom.
+      # The smoke script's run() inherits process.env, so this reaches the child.
+      NODE_OPTIONS: --max-old-space-size=8192
       # This job's outcome is the suite signal. The required context is the
       # terminal job `hermetic-gate` below.
     steps:
