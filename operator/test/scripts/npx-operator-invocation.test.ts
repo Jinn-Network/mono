@@ -10,7 +10,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const operatorRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const pkg = JSON.parse(readFileSync(join(operatorRoot, 'package.json'), 'utf8')) as {
@@ -21,11 +21,12 @@ const operatorReadme = readFileSync(join(operatorRoot, 'README.md'), 'utf8');
 const releasingDoc = readFileSync(join(operatorRoot, 'RELEASING.md'), 'utf8');
 const testnetRunbook = readFileSync(join(operatorRoot, '../docs/operator-testnet.md'), 'utf8');
 
-const tempDirs: string[] = [];
+let fixtureRoot: string | undefined;
 
-afterEach(() => {
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
+afterAll(() => {
+  if (fixtureRoot) {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+    fixtureRoot = undefined;
   }
 });
 
@@ -37,9 +38,9 @@ function run(command: string, args: string[], cwd: string) {
   });
 }
 
-function packStubWithOperatorBins(): { tarball: string; consumerDir: string } {
+function packStubWithOperatorBins(): { consumerDir: string } {
   const root = mkdtempSync(join(tmpdir(), 'jinn-npx-operator-'));
-  tempDirs.push(root);
+  fixtureRoot = root;
   const pkgDir = join(root, 'pkg');
   mkdirSync(join(pkgDir, 'dist', 'bin'), { recursive: true });
   writeFileSync(
@@ -69,12 +70,22 @@ function packStubWithOperatorBins(): { tarball: string; consumerDir: string } {
   const consumerDir = join(root, 'consumer');
   mkdirSync(consumerDir);
   run('npm', ['init', '-y'], consumerDir);
-  const install = run('npm', ['install', '--loglevel=error', join(root, filename)], consumerDir);
+  const install = run(
+    'npm',
+    ['install', '--loglevel=error', '--no-audit', '--no-fund', join(root, filename)],
+    consumerDir,
+  );
   expect(install.status, install.stderr || install.stdout).toBe(0);
-  return { tarball: join(root, filename), consumerDir };
+  return { consumerDir };
 }
 
 describe('public @jinn-network/operator npx invocation', () => {
+  let consumerDir: string;
+
+  beforeAll(() => {
+    ({ consumerDir } = packStubWithOperatorBins());
+  });
+
   it('declares an operator bin alias of the jinn CLI and keeps jinn-stop-hook', () => {
     expect(pkg.name).toBe('@jinn-network/operator');
     expect(pkg.bin.jinn).toBe('./dist/bin/jinn.js');
@@ -92,7 +103,6 @@ describe('public @jinn-network/operator npx invocation', () => {
   });
 
   it('runs the public no-install command against a packed tarball', () => {
-    const { consumerDir } = packStubWithOperatorBins();
     const result = run('npx', ['--no-install', '@jinn-network/operator', 'doctor'], consumerDir);
     expect(result.stderr ?? '').not.toMatch(/could not determine executable/);
     expect(result.status, result.stderr || result.stdout).toBe(0);
@@ -100,7 +110,6 @@ describe('public @jinn-network/operator npx invocation', () => {
   });
 
   it('keeps jinn-stop-hook invocable by name from the packed tarball', () => {
-    const { consumerDir } = packStubWithOperatorBins();
     const result = run(
       'npx',
       ['--no-install', '-p', '@jinn-network/operator', 'jinn-stop-hook'],
