@@ -192,7 +192,8 @@ export function stripComments(source) {
 
 /**
  * The index of the `close` that balances an `open` already consumed at `start - 1`, or `-1` when
- * the literal is never terminated. Quote-aware so a bracket inside a quoted entry does not close it.
+ * the literal is never terminated. Quote- and regex-aware, so a bracket inside a quoted entry or a
+ * regex character class does not close it.
  */
 function balancedEnd(source, start, open, close) {
   let depth = 1;
