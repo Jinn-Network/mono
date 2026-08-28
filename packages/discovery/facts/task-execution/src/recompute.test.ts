@@ -2,13 +2,16 @@ import { readFile } from "node:fs/promises";
 
 import { RECORD_KINDS, recordDigest } from "@jinn-network/record-discovery-protocol";
 import type { ReferencedBytes } from "@jinn-network/record-discovery-protocol";
-import { sealDelivery, sealSubmission } from "@jinn-network/task-execution-protocol";
+import { sealDelivery, sealSubmission, sealTask } from "@jinn-network/task-execution-protocol";
 import { describe, expect, it } from "vitest";
 
 import {
   TASK_EXECUTION_FACTS_RECOMPUTE,
+  TASK_EXECUTION_FACTS_RECOMPUTE_V2,
   checkpointRecompute,
   deliveryRecompute,
+  deliveryRecomputeV2,
+  taskRecomputeV2,
   evaluationSpecRecompute,
   pluginRecompute,
   profileDocumentRecompute,
@@ -186,5 +189,67 @@ describe("facts/task-execution recompute functions", () => {
     expect(TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.plugin)).toBe(pluginRecompute);
     expect(TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.checkpoint)).toBe(checkpointRecompute);
     expect(TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.executionEvidence)).toBeUndefined();
+  });
+});
+
+describe("v2 recompute: the join edges v1 left out", () => {
+  it("states an empty input list for a Task that supplies none, keeping every v1 fact", async () => {
+    const bytes = await loadGoldenTaskBytes();
+    const v1 = await taskRecompute(bytes, noReferencedBytes);
+    expect(await taskRecomputeV2(bytes, noReferencedBytes)).toEqual({ ...v1, inputDigests: [] });
+  });
+
+  it("names a Task's digest-pinned inputs and skips the ones that pin nothing", async () => {
+    const golden = JSON.parse(new TextDecoder().decode(await loadGoldenTaskBytes())) as Record<string, unknown>;
+    const bytes = sealTask({
+      ...golden,
+      inputs: [
+        { name: "seed", digest: { sha256: "d".repeat(64) } },
+        { name: "docs", uri: "https://example.test/docs" },
+      ],
+    });
+    const facts = await taskRecomputeV2(bytes, noReferencedBytes);
+    expect(facts.inputDigests).toEqual([`sha256:${"d".repeat(64)}`]);
+  });
+
+  it("names the outputs a Delivery produced", async () => {
+    const bytes = await loadGoldenDeliveryBytes();
+    const facts = await deliveryRecomputeV2(bytes, noReferencedBytes);
+    expect(facts.resultDigests).toEqual([
+      "sha256:dc8231acfaa265ffcb0853fdb6716718e4e75c68f372e73ccea21e7a6f44a0de",
+    ]);
+    expect(facts.evidenceDigests).toEqual([]);
+    expect(facts).not.toHaveProperty("supersedesDigest");
+  });
+
+  it("names the evidence records and the Delivery it replaces", async () => {
+    const bytes = sealDelivery({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      attempt: "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
+      task: `sha256:${"1".repeat(64)}`,
+      outputs: [],
+      outcome: "fulfilled",
+      evidenceRecords: [{ family: "execution-evidence", digest: `sha256:${"2".repeat(64)}` }],
+      supersedes: `sha256:${"3".repeat(64)}`,
+      createdAt: "2026-08-01T00:05:00Z",
+    });
+    const facts = await deliveryRecomputeV2(bytes, noReferencedBytes);
+    expect(facts.evidenceDigests).toEqual([`sha256:${"2".repeat(64)}`]);
+    expect(facts.supersedesDigest).toBe(`sha256:${"3".repeat(64)}`);
+  });
+
+  it("emits no facts for bytes that are not the record kind", async () => {
+    const junk = new TextEncoder().encode("not json at all");
+    expect(await taskRecomputeV2(junk, noReferencedBytes)).toEqual({});
+    expect(await deliveryRecomputeV2(junk, noReferencedBytes)).toEqual({});
+  });
+
+  it("routes the two revised kinds to v2 and every other kind to its unrevised fn", () => {
+    expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.task)).toBe(taskRecomputeV2);
+    expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.delivery)).toBe(deliveryRecomputeV2);
+    expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.submission)).toBe(
+      TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.submission),
+    );
+    expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get("https://spec.jinn.network/records/nope/v1")).toBeUndefined();
   });
 });

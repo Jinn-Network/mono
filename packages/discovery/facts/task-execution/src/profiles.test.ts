@@ -4,11 +4,13 @@ import { describe, expect, it } from "vitest";
 import {
   checkpointProfile,
   deliveryProfile,
+  deliveryProfileV2,
   evaluationSpecProfile,
   pluginProfile,
   profileDocumentProfile,
   submissionProfile,
   taskProfile,
+  taskProfileV2,
 } from "./profiles.js";
 
 // Pinned-digest golden documents (plan Task 24 Step 3, mirroring
@@ -23,6 +25,8 @@ const EXPECTED_DIGESTS: Record<string, string> = {
   "evaluation-spec": "sha256:5173d4c796f6d06ce47e2483fbf98d44133749881ec582308e225898a7c4b97e",
   plugin: "sha256:c35617178306f8321b25459a03b0dd0bd540ce95691dce3ef15af29fbc5f33b3",
   checkpoint: "sha256:44eda1daf7e0d69e470c4d494937b144a24a53ea1af29c945ae137c43a65a545",
+  taskV2: "sha256:aee5adb65b09ff4ab44b71ae379dd077188e6f09874592b5bed56fe5c09af0a7",
+  deliveryV2: "sha256:180f20a0fe236cadec98eb9d560d55dc9d164374f7d1369edb85d11b6ca9cfa3",
 };
 
 function expectPinnedDigest(name: string, digest: string) {
@@ -106,5 +110,49 @@ describe("facts/task-execution profile documents", () => {
     });
     expect(shuffled.digest).toBe(sealed.digest);
     expect(sealed.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+});
+
+describe("v2 profiles (join-edge completeness, design §12 amendment)", () => {
+  it("binds the task kind under the next profile version and names its inputs", () => {
+    expect(taskProfileV2.kind).toBe(RECORD_KINDS.task);
+    expect(taskProfileV2.profile).toBe("https://spec.jinn.network/facts/task/v2");
+    expect(referenceBearingFields(taskProfileV2)).toEqual([
+      "profileDigest",
+      "evaluationDigest",
+      "supersedesDigest",
+      "inputDigests",
+    ]);
+  });
+
+  it("binds the delivery kind under the next profile version and names its outputs and evidence", () => {
+    expect(deliveryProfileV2.kind).toBe(RECORD_KINDS.delivery);
+    expect(deliveryProfileV2.profile).toBe("https://spec.jinn.network/facts/delivery/v2");
+    expect(referenceBearingFields(deliveryProfileV2)).toEqual([
+      "taskDigest",
+      "resultDigests",
+      "evidenceDigests",
+      "supersedesDigest",
+    ]);
+  });
+
+  it("declares every field of both revisions a record fact", () => {
+    for (const profile of [taskProfileV2, deliveryProfileV2]) {
+      for (const field of profile.fields) expect(field.class).toBe("record");
+    }
+  });
+
+  it("leaves the v1 profiles untouched", () => {
+    expect(referenceBearingFields(taskProfile)).toEqual([
+      "profileDigest",
+      "evaluationDigest",
+      "supersedesDigest",
+    ]);
+    expect(referenceBearingFields(deliveryProfile)).toEqual(["taskDigest"]);
+  });
+
+  it("seals to its pinned digest", () => {
+    expectPinnedDigest("taskV2", sealJson(taskProfileV2).digest);
+    expectPinnedDigest("deliveryV2", sealJson(deliveryProfileV2).digest);
   });
 });

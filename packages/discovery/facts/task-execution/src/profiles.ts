@@ -25,3 +25,16 @@ export const profileDocumentProfile: FactsProfileDocument = loadProfile("profile
 export const evaluationSpecProfile: FactsProfileDocument = loadProfile("evaluation-spec.v1.json");
 export const pluginProfile: FactsProfileDocument = loadProfile("plugin.v1.json");
 export const checkpointProfile: FactsProfileDocument = loadProfile("checkpoint.v1.json");
+
+// The v2 revisions close the join-edge gap the completeness rule names (protocol design §12,
+// amendment 2026-08-28). Each coexists with its v1; v1 bytes and meaning stay frozen.
+
+/** Adds the digest-pinned inputs a Task supplies to its attempts. */
+export const taskProfileV2: FactsProfileDocument = loadProfile("task.v2.json");
+
+/**
+ * Adds the records a Delivery points at beyond its Task: the outputs it produced, the evidence
+ * records that describe the work, and the earlier Delivery of the same Attempt it replaces.
+ * Without them an index cannot walk from a Delivery to the evidence and verdicts about it.
+ */
+export const deliveryProfileV2: FactsProfileDocument = loadProfile("delivery.v2.json");

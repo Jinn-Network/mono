@@ -209,6 +209,46 @@ export const evaluationSpecRecompute: RecordFactRecompute = async (bytes) => {
 export const pluginRecompute: RecordFactRecompute = async () => noFacts();
 export const checkpointRecompute: RecordFactRecompute = async () => noFacts();
 
+// --- v2 revisions (join-edge completeness, protocol design §12 amendment 2026-08-28) --------
+//
+// A ResourceDescriptor is satisfiable by `uri` or inline `content` alone (§6.4). Only the
+// digest-bearing ones pin anything, so only those are edges; a uri-only input or output names a
+// location, not a record, and is not carried. Both fns keep v1's every field.
+
+/** The digest-bearing members of a descriptor list, in record order. */
+function descriptorDigests(
+  descriptors: readonly { digest?: Record<string, string> }[] | undefined,
+): `sha256:${string}`[] {
+  const digests: `sha256:${string}`[] = [];
+  for (const descriptor of descriptors ?? []) {
+    const digest = prefixedSha256(descriptor.digest);
+    if (digest !== undefined) digests.push(digest);
+  }
+  return digests;
+}
+
+export const taskRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await taskRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  const result = TaskSpecificationSchema.safeParse(parseJson(bytes));
+  if (!result.success) return noFacts();
+  return { ...facts, inputDigests: descriptorDigests(result.data.inputs) };
+};
+
+export const deliveryRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await deliveryRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  const result = DeliveryRecordSchema.safeParse(parseJson(bytes));
+  if (!result.success) return noFacts();
+  const delivery = result.data;
+  return {
+    ...facts,
+    resultDigests: descriptorDigests(delivery.outputs),
+    evidenceDigests: (delivery.evidenceRecords ?? []).map((reference) => reference.digest),
+    ...(delivery.supersedes === undefined ? {} : { supersedesDigest: delivery.supersedes }),
+  };
+};
+
 /** The leaf's `FactsRecompute` registry entry (program §7.13): the host
  * assembles the tree-wide registry by merging each leaf's export. */
 export const TASK_EXECUTION_FACTS_RECOMPUTE: FactsRecompute = {
@@ -230,6 +270,20 @@ export const TASK_EXECUTION_FACTS_RECOMPUTE: FactsRecompute = {
         return checkpointRecompute;
       default:
         return undefined;
+    }
+  },
+};
+
+/** Explicit registry for the coexisting Task-Execution facts v2 profiles. */
+export const TASK_EXECUTION_FACTS_RECOMPUTE_V2: FactsRecompute = {
+  get(kind: string): RecordFactRecompute | undefined {
+    switch (kind) {
+      case RECORD_KINDS.task:
+        return taskRecomputeV2;
+      case RECORD_KINDS.delivery:
+        return deliveryRecomputeV2;
+      default:
+        return TASK_EXECUTION_FACTS_RECOMPUTE.get(kind);
     }
   },
 };
