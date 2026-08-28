@@ -17,8 +17,9 @@ node_modules/
 # (jinn-mono-2cl.15). Sub-paths inside .claude/skills/ that are themselves
 # operator-local (e.g. cached state files) can be added back here with
 # explicit .claude/skills/<name>/<path> ignore rules.
-# Cursor/Codex: .cursor/skills/ and .codex/skills/ are symlinks into
-# .claude/skills/ — run ./scripts/sync-skills.sh after adding a skill.
+# Generated skill mirrors (.agents/skills, .cursor/skills, .codex/skills)
+# are committed so tools discover them on clone. Edit only .claude/skills/.
+# Refresh with ./scripts/sync-skills.sh; CI runs --check.
 .claude/*
 !.claude/skills/
 
