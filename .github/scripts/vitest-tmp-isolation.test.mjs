@@ -72,6 +72,68 @@ export function findVitestConfigs(directory, base = root) {
 }
 
 /**
+ * The index of the character that closes the regex literal opened at `start` — its unescaped
+ * closing `/`, or the newline that bounds it, or `source.length`.
+ *
+ * A `/` opens a regex only where a value may begin, which `regexStartsAt` decides. Inside the
+ * literal a `/` in a character class does not close it, so `[...]` spans are tracked; a regex
+ * literal cannot hold an unescaped newline, so one bounds the scan the same way it bounds a
+ * `'`/`"` string.
+ */
+function regexLiteralEnd(source, start) {
+  let inClass = false;
+  for (let index = start + 1; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '\n') return index;
+    if (character === '\\') index += 1;
+    else if (inClass) inClass = character !== ']';
+    else if (character === '[') inClass = true;
+    else if (character === '/') return index;
+  }
+  return source.length;
+}
+
+/**
+ * Whether the `/` at `index` opens a regex literal rather than a division.
+ *
+ * Decided from the previous significant character, the usual heuristic for a scanner with no
+ * expression parser: a value may begin after an operator, a separator, or an opening bracket, and
+ * not after something that can end an operand. Closing brackets are read as operands, so
+ * `f(x) / 2` is division; a regex directly after one — `(a + b) /re/.test(c)` is not valid code
+ * anyway — would fall back to the pre-#3154 read, bounded to its own line by the scanners below.
+ */
+function regexStartsAt(source, index) {
+  let back = index - 1;
+  while (back >= 0 && /\s/u.test(source[back])) back -= 1;
+  return back < 0 || '(,=:[!&|?{;+-*%~^<>'.includes(source[back]);
+}
+
+/**
+ * The index of the character that closes the quoted span opened at `start` — the matching quote, or
+ * the newline that bounds it, or `source.length`.
+ *
+ * A `'`/`"` string cannot hold an unescaped newline, so ending the span at one bounds any mis-read
+ * to a single line. Template literals really do span lines, so only `'` and `"` take the bound.
+ *
+ * The hazard is a quote the scanner cannot pair off — most often one inside a regex literal,
+ * `/['"]/u`. `regexStartsAt` recognizes those where a value may begin, which is every position a
+ * config actually writes one; the newline bound is what backstops the rest, and it is the reason a
+ * mis-read costs one line rather than the file. Unbounded, such a quote swallowed everything up to
+ * the next one anywhere in the source: in `stripComments` that handed later comments back as live
+ * source, and in the balanced scanners it ran past a `projects` entry's closing brace and dropped
+ * every range, putting each allowance and seam path back in one scope (issues #3027, #3154).
+ */
+function quotedSpanEnd(source, start) {
+  const quote = source[start];
+  let index = start + 1;
+  while (index < source.length && source[index] !== quote) {
+    if (quote !== '`' && source[index] === '\n') return index;
+    index += source[index] === '\\' ? 2 : 1;
+  }
+  return index;
+}
+
+/**
  * `source` with line and block comments replaced by whitespace, preserving offsets and line
  * structure so the readers below can keep matching over a plain string.
  *
@@ -80,10 +142,16 @@ export function findVitestConfigs(directory, base = root) {
  * the suite resumed leaking (issue #3027). Quoted text is skipped, so a `//` inside a path or URL
  * is not mistaken for a comment.
  *
- * Stripping also protects the balanced scanners below, which are quote-aware but not
- * comment-aware. These configs are prose-heavy: an apostrophe in a comment inside a multi-line
- * array opens a phantom string that swallows the closing bracket, and a stray `]` in a comment
- * closes the array early. Either one drops a real seam entry and reds a correctly wired config.
+ * Stripping also protects the balanced scanners below, which share this pass's quote and regex
+ * awareness but not its comment awareness. These configs are prose-heavy: an apostrophe in a
+ * comment inside a multi-line array opens a phantom string that swallows the closing bracket, and
+ * a stray `]` in a comment closes the array early. Either one drops a real seam entry and reds a
+ * correctly wired config.
+ *
+ * Regex literals are passed through verbatim rather than blanked: they preserve offsets either
+ * way, and every reader below skips them itself, so leaving them intact keeps this pass to the one
+ * job its name states. A comment marker wins over a regex — `//` never opens a regex literal, and
+ * `/*` cannot start a valid one — so the comment checks run first.
  */
 export function stripComments(source) {
   let out = '';
@@ -91,18 +159,9 @@ export function stripComments(source) {
   while (index < source.length) {
     const char = source[index];
     if (char === "'" || char === '"' || char === '`') {
-      const start = index;
-      index += 1;
-      // A `'`/`"` string cannot hold an unescaped newline, so ending the span at one bounds any
-      // mis-read to a single line. Without that an odd quote count outside a string — a regex like
-      // `/['"]/u`, since regex literals are not tokenized — would swallow the rest of the file and
-      // hand every later comment back as live source, which is the failure this whole change removes.
-      while (index < source.length && source[index] !== char) {
-        if (char !== '`' && source[index] === '\n') break;
-        index += source[index] === '\\' ? 2 : 1;
-      }
-      index += 1;
-      out += source.slice(start, Math.min(index, source.length));
+      const stop = Math.min(quotedSpanEnd(source, index) + 1, source.length);
+      out += source.slice(index, stop);
+      index = stop;
       continue;
     }
     if (char === '/' && source[index + 1] === '/') {
@@ -119,6 +178,12 @@ export function stripComments(source) {
       index = stop;
       continue;
     }
+    if (char === '/' && regexStartsAt(source, index)) {
+      const stop = Math.min(regexLiteralEnd(source, index) + 1, source.length);
+      out += source.slice(index, stop);
+      index = stop;
+      continue;
+    }
     out += char;
     index += 1;
   }
@@ -131,15 +196,10 @@ export function stripComments(source) {
  */
 function balancedEnd(source, start, open, close) {
   let depth = 1;
-  let quote = null;
   for (let i = start; i < source.length; i += 1) {
     const character = source[i];
-    if (quote !== null) {
-      if (character === '\\') i += 1;
-      else if (character === quote) quote = null;
-      continue;
-    }
-    if (character === "'" || character === '"' || character === '`') quote = character;
+    if (character === "'" || character === '"' || character === '`') i = quotedSpanEnd(source, i);
+    else if (character === '/' && regexStartsAt(source, i)) i = regexLiteralEnd(source, i);
     else if (character === open) depth += 1;
     else if (character === close) {
       depth -= 1;
@@ -178,7 +238,9 @@ function enclosedLiterals(source, key, open, close) {
  * tells the two apart (issue #3123).
  *
  * An unterminated `projects: [` yields no ranges, which puts every allowance and seam path back in
- * one scope and restores the cross-entry crediting this closes. That is the same fallback the other
+ * one scope and restores the cross-entry crediting this closes. A regex literal holding a quote is
+ * the ordinary construct that used to produce exactly that (issue #3154); `regexStartsAt` and the
+ * newline-bounded quote span above are what keep it from doing so. That is the same fallback the other
  * scanners take on an unterminated literal, and it is bounded the same way: a config that does not
  * parse cannot load, so its own package job is red before this gate has an opinion.
  *
@@ -201,15 +263,10 @@ function enclosedLiterals(source, key, open, close) {
 export function projectEntryRanges(source) {
   const ranges = [];
   for (const { inner, start } of arrayLiterals(source, 'projects')) {
-    let quote = null;
     for (let i = 0; i < inner.length; i += 1) {
       const character = inner[i];
-      if (quote !== null) {
-        if (character === '\\') i += 1;
-        else if (character === quote) quote = null;
-        continue;
-      }
-      if (character === "'" || character === '"' || character === '`') quote = character;
+      if (character === "'" || character === '"' || character === '`') i = quotedSpanEnd(inner, i);
+      else if (character === '/' && regexStartsAt(inner, i)) i = regexLiteralEnd(inner, i);
       else if (character === '{') {
         const end = balancedEnd(inner, i + 1, '{', '}');
         if (end === -1) break;
@@ -458,7 +515,8 @@ test('the seam files every config points at exist', () => {
 // The three readers above are text scanners over config sources, and the shapes they have to
 // survive are not all present in the tree at any one moment. These pin the shapes that a
 // first-match regex reads wrongly: a computed environment, a second `environment:` under
-// `projects`, a second `allow:` key, a nested array, and a `]` inside a quoted entry.
+// `projects`, a second `allow:` key, a nested array, a `]` inside a quoted entry, and a regex
+// literal holding a quote.
 
 test('declaredEnvironments reads every declaration, not the first', () => {
   assert.deepEqual(declaredEnvironments('export default { test: { globals: true } }'), []);
@@ -744,4 +802,47 @@ test("an extending entry's own fs.allow covers the root-scoped seam path it inhe
     ),
     [],
   );
+});
+
+// Regex literals are not tokenized by these scanners, so a quote inside one — `/['"]/u` — is read
+// as opening a string. `stripComments` already bounds a `'`/`"` span at a newline for exactly that
+// reason; the balanced scanners did not, so the phantom string ran past the entry's closing brace
+// and every range vanished. That put every allowance and seam path back in root scope and handed
+// back a green read on precisely the cross-entry crediting #3123 closes (issue #3154).
+test('a regex literal holding a quote does not swallow a projects entry', () => {
+  const config = 'packages/x/vitest.config.ts';
+  const seam = '../../test-support/tmp-isolation/isolate-tmp.ts';
+  const resolved = 'test-support/tmp-isolation/isolate-tmp.ts';
+  const withProperty = (property) =>
+    `export default { test: { environment: 'jsdom', projects: [\n` +
+    `  { ${property}server: { fs: { allow: ['../..'] } } },\n` +
+    `  { test: { setupFiles: ['${seam}'] } },\n` +
+    `] } }`;
+
+  // Both entries keep their range, and the sibling's allowance stays out of the seam entry's scope.
+  const properties = [
+    '',
+    `x: /['"]/u, `,
+    // A `/` inside a character class does not close the literal, and an escaped one does not either.
+    `x: /['"\\/]|a\\/b/u, `,
+    // A brace or bracket inside the literal must not be read as structure.
+    `x: /[{}\\]]/u, `,
+  ];
+  for (const property of properties) {
+    assert.equal(projectEntryRanges(withProperty(property)).length, 2, property);
+    assert.deepEqual(
+      unreachableWirings(withProperty(property), config),
+      [{ key: 'setupFiles', resolved }],
+      property,
+    );
+  }
+
+  // A division is not a regex: reading `/ 2` as one would swallow the rest of its line.
+  assert.equal(projectEntryRanges(withProperty('x: total / 2, ')).length, 2);
+
+  // An unterminated literal is bounded at its own line rather than the file, but it still takes
+  // that line's braces with it, so the entry is dropped. That is the same fail-open the doc block
+  // records for an unterminated array, and bounded the same way: the construct is not valid
+  // JavaScript, so the config cannot load and its own package job is red first.
+  assert.deepEqual(projectEntryRanges(withProperty(`x: /['"]u, `)), []);
 });
