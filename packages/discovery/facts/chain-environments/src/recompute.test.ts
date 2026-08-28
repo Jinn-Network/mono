@@ -5,6 +5,7 @@ import {
   sealChainEnvironmentRecord,
   sealCryptoEnvironmentRecord,
 } from "@jinn-network/chain-environment-record";
+import { sealInformationWorldRecord } from "@jinn-network/information-world";
 import { recordDigest } from "@jinn-network/record-discovery-protocol";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
@@ -34,6 +35,9 @@ const goldenJson = async (path: string): Promise<Record<string, unknown>> =>
 
 const loadInformationWorldGolden = (): Promise<Uint8Array> =>
   readFile(new URL(import.meta.resolve("@jinn-network/information-world/fixtures/world/synthetic.json")));
+
+const loadCapturedInformationWorldGolden = (): Promise<Uint8Array> =>
+  readFile(new URL(import.meta.resolve("@jinn-network/information-world/fixtures/world/captured.json")));
 
 describe("chain-environment record-fact recompute", () => {
   it("recomputes every fact from the record's own sealed bytes", async () => {
@@ -208,13 +212,89 @@ describe("v2 recompute: the join edges v1 left out", () => {
     expect(facts.informationWorldDigests).toEqual([]);
   });
 
-  it("carries the information world's re-capture lineage edge", async () => {
-    const bytes = await loadInformationWorldGolden();
-    const document = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
-    expect(await informationWorldRecomputeV2(bytes, noReferences)).toEqual(
-      await informationWorldRecompute(bytes, noReferences),
+  it("names the pinned simulator binary and the multi-arch index the runtime came from", async () => {
+    const document = await goldenJson("chain/closed-local.json");
+    const runtime = document.runtime as {
+      binary: { digest: string };
+      image: { indexDigest: string };
+    };
+    const facts = await chainEnvironmentRecomputeV2(
+      sealChainEnvironmentRecord(document),
+      noReferences,
     );
-    expect(Object.hasOwn(document, "supersedes")).toBe(false);
+    expect(facts["runtime.binary.digest"]).toBe(runtime.binary.digest);
+    expect(facts["runtime.image.indexDigest"]).toBe(runtime.image.indexDigest);
+  });
+
+  it("names the header proof, the source proofs and the fixture-coverage manifest of an anchored world", async () => {
+    // `closed-local.json` carries none of these three, so the fixture with them is the one that
+    // can prove they are emitted at all.
+    const document = await goldenJson("chain/closed-anchored-subset.json");
+    const state = document.stateMaterialization as {
+      sourceProofManifest: { proofs: { digest: { sha256: string } } };
+      fixtureCoverage: { manifest: { digest: { sha256: string } } };
+    };
+    const headerProof = { name: "header-proof.json", digest: { sha256: "8".repeat(64) } };
+    const anchored = {
+      ...document,
+      sourceAnchor: { ...(document.sourceAnchor as object), headerProof },
+    };
+    const facts = await chainEnvironmentRecomputeV2(
+      sealChainEnvironmentRecord(anchored),
+      noReferences,
+    );
+    expect(facts["sourceAnchor.headerProofDigest"]).toBe(prefixedDigest(headerProof.digest.sha256));
+    expect(facts["stateMaterialization.sourceProofsDigest"]).toBe(
+      prefixedDigest(state.sourceProofManifest.proofs.digest.sha256),
+    );
+    expect(facts["stateMaterialization.fixtureCoverageManifestDigest"]).toBe(
+      prefixedDigest(state.fixtureCoverage.manifest.digest.sha256),
+    );
+  });
+
+  it("omits the three optional anchored edges on a world that carries none of them", async () => {
+    const bytes = sealChainEnvironmentRecord(await goldenJson("chain/closed-local.json"));
+    const facts = await chainEnvironmentRecomputeV2(bytes, noReferences);
+    for (const field of [
+      "sourceAnchor.headerProofDigest",
+      "stateMaterialization.sourceProofsDigest",
+      "stateMaterialization.fixtureCoverageManifestDigest",
+    ]) {
+      expect(Object.hasOwn(facts, field)).toBe(false);
+    }
+  });
+
+  it("names the miss-policy body the composite pins", async () => {
+    const document = await goldenJson("composite/composed.json");
+    const missBody = (document.composition as { missPolicy: { body: { digest: { sha256: string } } } })
+      .missPolicy.body;
+    const facts = await cryptoEnvironmentRecomputeV2(
+      sealCryptoEnvironmentRecord(document),
+      noReferences,
+    );
+    expect(facts["composition.missPolicy.bodyDigest"]).toBe(prefixedDigest(missBody.digest.sha256));
+  });
+
+  it("carries the information world's capturer and its re-capture lineage edge", async () => {
+    // The synthetic golden has neither component, so it can only prove absence. A captured
+    // corpus must pin its capturer, and a re-capture pins the world it replaces.
+    const captured = JSON.parse(
+      new TextDecoder().decode(await loadCapturedInformationWorldGolden()),
+    ) as Record<string, unknown>;
+    const lineage = { digest: `sha256:${"9".repeat(64)}` };
+    const recapture = sealInformationWorldRecord({ ...captured, supersedes: lineage });
+    const facts = await informationWorldRecomputeV2(recapture, noReferences);
+    const capturer = (captured.capture as { capturer: { digest: string } }).capturer;
+    expect(facts["capture.capturerDigest"]).toBe(capturer.digest);
+    expect(facts.supersedesDigest).toBe(lineage.digest);
+  });
+
+  it("omits both information-world edges for a synthetic corpus, which pins neither", async () => {
+    const bytes = await loadInformationWorldGolden();
+    const facts = await informationWorldRecomputeV2(bytes, noReferences);
+    expect(facts).toEqual(await informationWorldRecompute(bytes, noReferences));
+    expect(Object.hasOwn(facts, "supersedesDigest")).toBe(false);
+    expect(Object.hasOwn(facts, "capture.capturerDigest")).toBe(false);
   });
 
   it("emits no facts for bytes that are not the record kind", async () => {

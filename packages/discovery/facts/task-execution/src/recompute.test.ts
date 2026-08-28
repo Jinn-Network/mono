@@ -49,6 +49,12 @@ async function loadRepositoryWorkProfileBytes(): Promise<Uint8Array> {
   return fixtureBytes("@jinn-network/task-execution-profiles/profiles/task-profiles/repository-work/1.0/profile.json");
 }
 
+async function loadDeterministicEvaluationSpecBytes(): Promise<Uint8Array> {
+  return fixtureBytes(
+    "@jinn-network/task-execution-profiles/fixtures/evaluation-spec/golden/deterministic-minimal.json",
+  );
+}
+
 async function loadStatePredicateSpecBytes(): Promise<Uint8Array> {
   return fixtureBytes(
     "@jinn-network/task-execution-profiles/fixtures/evaluation-spec/golden/state-predicate-minimal.json",
@@ -302,6 +308,53 @@ describe("v2 recompute: the join edges v1 left out", () => {
     expect(facts.environmentRecordDigest).toBe(`sha256:${"a".repeat(64)}`);
     // The golden's grader is uri-only, so it pins nothing and contributes no edge.
     expect(facts.graderDigests).toEqual([]);
+  });
+
+  it("names what a model-graded, a human-review and a composite spec pin", async () => {
+    // Three families the goldens do not cover. Each has exactly one class of pinned component,
+    // and none of them was exercised by a value before — only by `not.toHaveProperty`.
+    const base = JSON.parse(
+      new TextDecoder().decode(await loadDeterministicEvaluationSpecBytes()),
+    ) as Record<string, unknown>;
+    const descriptor = (seed: string) => ({ name: seed, digest: { sha256: seed.repeat(64).slice(0, 64) } });
+    const digestOf = (seed: string) => `sha256:${seed.repeat(64).slice(0, 64)}`;
+
+    const modelGraded = await evaluationSpecRecomputeV2(sealEvaluationSpec({
+      ...base,
+      family: "model-graded",
+      familyBlock: {
+        rubric: descriptor("1"),
+        judgeModel: { provider: "example", modelId: "judge-1" },
+        judgeOutputSchema: descriptor("2"),
+        structuralGates: {},
+      },
+    } as never).bytes, noReferencedBytes);
+    expect(modelGraded.rubricDigest).toBe(digestOf("1"));
+    expect(modelGraded.judgeOutputSchemaDigest).toBe(digestOf("2"));
+
+    const humanReview = await evaluationSpecRecomputeV2(sealEvaluationSpec({
+      ...base,
+      family: "human-review",
+      familyBlock: {
+        reviewForm: descriptor("3"),
+        reviewerQualifications: {},
+        attestationShape: {},
+      },
+    } as never).bytes, noReferencedBytes);
+    expect(humanReview.reviewFormDigest).toBe(digestOf("3"));
+
+    const composite = await evaluationSpecRecomputeV2(sealEvaluationSpec({
+      ...base,
+      family: "composite",
+      familyBlock: {
+        subSpecs: [
+          { spec: descriptor("4"), weight: "0.5" },
+          { spec: { name: "uri-only", uri: "https://example.test/sub-spec" }, weight: "0.5" },
+        ],
+      },
+    } as never).bytes, noReferencedBytes);
+    // The second sub-spec is uri-only: it pins nothing, so it is not an edge.
+    expect(composite.subSpecDigests).toEqual([digestOf("4")]);
   });
 
   it("reads every list that can carry an ABI: a safety constraint cannot, and the schema says so", async () => {
