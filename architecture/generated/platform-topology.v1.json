@@ -2022,7 +2022,7 @@
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 6,
-      "discoveredFirstPartySurfaces": 4078,
+      "discoveredFirstPartySurfaces": 4079,
       "generatedOutputSources": 1445,
       "generatorSources": 680,
       "marketplaceControl": 2,
@@ -9852,6 +9852,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/daemon/loop-admission.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/daemon/loop-crash-emission.test.ts"
       },
       {
         "categories": [
