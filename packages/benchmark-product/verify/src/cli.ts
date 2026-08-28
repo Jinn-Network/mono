@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
-import { PUBLIC_BUNDLE_VERIFICATION_CHECKS, PUBLIC_BUNDLE_V6_CHECKS } from "./reader-instructions.js";
+import {
+  PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+  PUBLIC_BUNDLE_V6_CHECKS,
+  PUBLIC_BUNDLE_V7_CHECKS,
+} from "./reader-instructions.js";
 import { verifyPublicBundle, type PublicBundleVerificationResult, type VerifyPublicBundleDeps } from "./verify.js";
 import type {
   AnchorSubjectReport,
@@ -108,7 +112,9 @@ export function renderVerifiedBundle(result: PublicBundleVerificationResult): st
     ? EVIDENCE_NATIVE_BUNDLE_V5_CHECKS.length
     : result.format === "benchmark-product-public-bundle/6"
       ? PUBLIC_BUNDLE_V6_CHECKS.length
-      : PUBLIC_BUNDLE_VERIFICATION_CHECKS.length;
+      : result.format === "benchmark-product-public-bundle/7"
+        ? PUBLIC_BUNDLE_V7_CHECKS.length
+        : PUBLIC_BUNDLE_VERIFICATION_CHECKS.length;
   const identity = result.identity.startsWith("sha256:") ? result.identity : `sha256:${result.identity}`;
   const anchors = "anchors" in result && result.anchors !== undefined
     ? renderAnchorReport(result.anchors)

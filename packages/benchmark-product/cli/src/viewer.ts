@@ -6,6 +6,7 @@ import {
   PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   verifyPublicBundleSnapshot,
   type PublicComparisonCell,
   type PublicComparisonView,
@@ -69,11 +70,15 @@ function viewerHtml(
   availablePaths: ReadonlySet<string>,
 ): string {
   const checks = verification.checks.map((check) => `<li><strong>${escapeMarkup(check)}</strong> <span>passed</span></li>`).join("");
+  // The anchored binary-qualification closure is the one format the @0.1 line cannot read
+  // (issue #3205), so it is named before the fall-through rather than inheriting it.
   const verificationCommand = verification.format === "benchmark-product-public-bundle/5"
     ? PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND
-    : verification.format === "benchmark-product-public-bundle/4"
-      ? PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND
-      : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
+    : verification.format === "benchmark-product-public-bundle/7"
+      ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
+      : verification.format === "benchmark-product-public-bundle/4"
+        ? PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND
+        : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
   const copyCommand = `${verificationCommand} ${JSON.stringify(bundleDir)}`;
   const qualification = verification.format === "benchmark-product-public-bundle/5"
     ? undefined

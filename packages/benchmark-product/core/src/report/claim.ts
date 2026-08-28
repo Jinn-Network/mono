@@ -27,6 +27,11 @@
  * disclosure. The one deliberate exception to "never cross-check here": `buildClaimPackage`
  * THROWS when the stated primitives disagree with what the sealed Run record's own policy
  * carries — a claim stating primitives the sealed Run does not carry would be dishonest.
+ *
+ * Issue #3205: the claim id is chosen on TWO independent axes — anchored or not, and
+ * qualification-projecting or not — which is four allocations, not three. `claim-package/5` is
+ * the fourth cell; before it existed an anchored binary-instrument run could not produce a
+ * claim at all, which made anchoring and binary-instrument benchmarking mutually exclusive.
  */
 
 import { z } from "zod";
@@ -43,6 +48,9 @@ import {
   PUBLIC_BUNDLE_V6_CHECKS as READER_ANCHORED_VERIFICATION_CHECKS,
   PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V7_CHECKS as READER_ANCHORED_QUALIFICATION_VERIFICATION_CHECKS,
+  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
   PROMPTED_SCREENING_PROFILE,
   SELF_RUN_TRUST_ROOT,
   anchoredTrustRoot,
@@ -62,6 +70,15 @@ export const BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.c
  * own later allocation.
  */
 export const ANCHORED_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/4";
+/**
+ * The anchored binary-qualification claim package (issue #3205): claim-package/2's exact
+ * qualification projection plus claim-package/4's `anchors` section, carried by
+ * `benchmark-product-public-bundle/7`. This is the "later allocation" both earlier guards named:
+ * /2 has no anchors slot and /4 has no qualification slot, so before this number existed an
+ * anchored run of a binary-instrument benchmark could not produce a claim at all. The allocation is
+ * an ADDITION — /1, /2, /3, and /4 keep their meanings and their bytes.
+ */
+export const ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/5";
 export const BINARY_QUALIFICATION_VERIFICATION_COMMAND =
   "npx @colophon-claims/verify@0.1.0 <bundle-dir>" as const;
 export const BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
@@ -236,6 +253,7 @@ const ClaimPackageWireSchema = z.object({
     z.literal(CLAIM_PACKAGE_SCHEMA_ID),
     z.literal(BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID),
     z.literal(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID),
+    z.literal(ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID),
   ]),
   scope: z.object({
     draftId: z.string().min(1),
@@ -295,9 +313,10 @@ const ClaimPackageWireSchema = z.object({
    * headline, comparison, threshold, selection, or ranking projection. */
   qualification: z.unknown().optional(),
   /** anchor-evidence §7.4: one entry per AnchorEvidence record the bundle carries, in record-digest
-   * order, each carrying only the facts embedded in the proof's own bytes. Present exactly on
-   * claim-package/4 — the schema-level refine below refuses it on /1 and /2, so an unanchored claim
-   * cannot grow an anchors section and an anchored one cannot be published without it. */
+   * order, each carrying only the facts embedded in the proof's own bytes. Present exactly on the
+   * two anchored allocations, claim-package/4 and claim-package/5 — the schema-level refine below
+   * refuses it on /1 and /2, so an unanchored claim cannot grow an anchors section and an anchored
+   * one cannot be published without it. */
   anchors: z.array(ClaimAnchorSchema).optional(),
   /** Optional Colophon suite-protocol bits. Not Report v2 required fields. */
   suiteComparability: z.object({
@@ -306,30 +325,34 @@ const ClaimPackageWireSchema = z.object({
     leaderboardSubmitReady: z.boolean(),
   }).strict().optional(),
 }).superRefine((claim, ctx) => {
-  if (claim.claimSchema !== ANCHORED_CLAIM_PACKAGE_SCHEMA_ID && claim.anchors !== undefined) {
+  // The two anchored allocations differ only in which method projection they carry: /4 takes the
+  // headline/comparison family, /5 (issue #3205) the binary qualification. Both carry the section.
+  const anchoredClosure = claim.claimSchema === ANCHORED_CLAIM_PACKAGE_SCHEMA_ID
+    || claim.claimSchema === ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID;
+  if (!anchoredClosure && claim.anchors !== undefined) {
     ctx.addIssue({
       code: "custom",
-      message: `only ${ANCHORED_CLAIM_PACKAGE_SCHEMA_ID} carries an anchors section`,
+      message: `only ${ANCHORED_CLAIM_PACKAGE_SCHEMA_ID} and ${ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID} carry an anchors section`,
+      path: ["anchors"],
+    });
+  }
+  if (anchoredClosure && claim.anchors === undefined) {
+    // Present, not necessarily non-empty. An empty section is legal on exactly one bundle: one
+    // whose sealed Run declared anchoring intent that no carried anchor satisfies (§7.3). That
+    // bundle must still be on the anchored closure so the check that reports the absence runs,
+    // and its claim must therefore still state the closure's seven checks. What no claim may do
+    // is omit the section while claiming the closure, or carry one while claiming an earlier one.
+    ctx.addIssue({
+      code: "custom",
+      message: `${claim.claimSchema} must carry its anchors section, even when the section is empty`,
       path: ["anchors"],
     });
   }
   if (claim.claimSchema === ANCHORED_CLAIM_PACKAGE_SCHEMA_ID) {
-    if (claim.anchors === undefined) {
-      // Present, not necessarily non-empty. An empty section is legal on exactly one bundle: one
-      // whose sealed Run declared anchoring intent that no carried anchor satisfies (§7.3). That
-      // bundle must still be on the anchored closure so the check that reports the absence runs,
-      // and its claim must therefore still state the closure's seven checks. What no claim may do
-      // is omit the section while claiming the closure, or carry one while claiming an earlier one.
-      ctx.addIssue({
-        code: "custom",
-        message: `${ANCHORED_CLAIM_PACKAGE_SCHEMA_ID} must carry its anchors section, even when the section is empty`,
-        path: ["anchors"],
-      });
-    }
     if (claim.qualification !== undefined) {
       ctx.addIssue({
         code: "custom",
-        message: "the anchored binary-qualification closure is a later allocation, not claim-package/4",
+        message: `the anchored binary-qualification closure is ${ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID}, not claim-package/4`,
         path: ["qualification"],
       });
     }
@@ -430,6 +453,28 @@ const ClaimPackageWireSchema = z.object({
   if (!exactResult) {
     ctx.addIssue({ code: "custom", message: "qualification must exactly equal the Report's one F6 per-subject result", path: ["qualification"] });
   }
+  if (claim.claimSchema === ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID) {
+    // No released reader before 0.2.1 understands `benchmark-product-public-bundle/7`, so this
+    // allocation pins that line unconditionally rather than inheriting /2's prompted/unprompted
+    // split — a claim naming an older reader would be an instruction to fail.
+    if (
+      claim.verification.command !== PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND
+      || claim.verification.compatibleCommand !== PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
+    ) {
+      ctx.addIssue({ code: "custom", message: "anchored binary claim package must pin verifier 0.2.1/@0.2", path: ["verification"] });
+    }
+    if (
+      claim.verification.checks.length !== READER_ANCHORED_QUALIFICATION_VERIFICATION_CHECKS.length
+      || claim.verification.checks.some((check, index) => check !== READER_ANCHORED_QUALIFICATION_VERIFICATION_CHECKS[index])
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "anchored binary claim package must retain the six frozen verification checks plus integrity-anchors, in order",
+        path: ["verification", "checks"],
+      });
+    }
+    return;
+  }
   const prompted = (claim.method.parameters as Record<string, unknown>)["promptedScreeningProfile"] === PROMPTED_SCREENING_PROFILE;
   const command = prompted
     ? PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND
@@ -493,9 +538,16 @@ function exactBinaryClaimControls(input: Record<string, unknown>): boolean {
     && (input.rehearsal === undefined || exactKeys(input.rehearsal, ["previewCount", "timestamps"]));
 }
 
+/** Both binary allocations pass through the same anti-conclusion control-shape gate: /5 is /2's
+ * projection plus an anchors section, so smuggling a ranking into it must fail identically. */
+const BINARY_CLAIM_PACKAGE_SCHEMA_IDS: readonly unknown[] = [
+  BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+];
+
 export const ClaimPackageSchema = z.preprocess((input) => {
   if (typeof input === "object" && input !== null && !Array.isArray(input)
-    && (input as { readonly claimSchema?: unknown }).claimSchema === BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID
+    && BINARY_CLAIM_PACKAGE_SCHEMA_IDS.includes((input as { readonly claimSchema?: unknown }).claimSchema)
     && !exactBinaryClaimControls(input as Record<string, unknown>)) {
     return { claimSchema: "invalid-binary-claim-control-shape" };
   }
@@ -860,19 +912,19 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
   // this builder produced before the feature existed.
   const anchors = input.anchors ?? [];
   const anchored = input.anchors !== undefined;
-  if (anchored && projection.qualification !== undefined) {
-    throw new Error(
-      "claim package: the anchored binary-qualification closure is a later allocation"
-      + " — claim-package/4 has no qualification projection",
-    );
-  }
+  // Four allocations across two independent axes (anchored yes/no × qualification yes/no). The
+  // fourth cell, anchored+qualification, is claim-package/5 (issue #3205); before it existed this
+  // pairing threw, which made anchoring and binary-instrument benchmarking mutually exclusive.
+  const anchoredQualification = anchored && projection.qualification !== undefined;
 
   return {
-    claimSchema: anchored
-      ? ANCHORED_CLAIM_PACKAGE_SCHEMA_ID
-      : projection.qualification === undefined
-        ? CLAIM_PACKAGE_SCHEMA_ID
-        : BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+    claimSchema: anchoredQualification
+      ? ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID
+      : anchored
+        ? ANCHORED_CLAIM_PACKAGE_SCHEMA_ID
+        : projection.qualification === undefined
+          ? CLAIM_PACKAGE_SCHEMA_ID
+          : BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
     scope: {
       draftId: input.draftId,
       benchmarkSha256: input.benchmarkSha256,
@@ -918,20 +970,24 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     limitations: [...(reportRecord.limitations ?? [])],
     venueHonesty: input.venueHonesty,
     verification: {
-      command: anchored
-        ? PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
-        : promptedScreening
-          ? PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND
-          : projection.qualification === undefined
-            ? PUBLIC_BUNDLE_VERIFICATION_COMMAND
-            : BINARY_QUALIFICATION_VERIFICATION_COMMAND,
-      compatibleCommand: anchored
-        ? PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
-        : promptedScreening
-          ? PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
-          : projection.qualification === undefined
-            ? PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND
-            : BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+      command: anchoredQualification
+        ? PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND
+        : anchored
+          ? PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
+          : promptedScreening
+            ? PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND
+            : projection.qualification === undefined
+              ? PUBLIC_BUNDLE_VERIFICATION_COMMAND
+              : BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+      compatibleCommand: anchoredQualification
+        ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
+        : anchored
+          ? PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
+          : promptedScreening
+            ? PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
+            : projection.qualification === undefined
+              ? PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND
+              : BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
       checks: anchored ? [...ANCHORED_CLAIM_VERIFICATION_CHECKS] : [...CLAIM_VERIFICATION_CHECKS],
       // §9.2: the trust-root sentence is replaced only by a governing lock anchor. A bundle whose
       // only anchors are pending, or cover the Matrix alone, keeps the unconditional sentence.
