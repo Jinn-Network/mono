@@ -234,6 +234,32 @@ function scopeAt(offset, ranges) {
   return innermost === null ? 'root' : `projects@${innermost}`;
 }
 
+/**
+ * The scopes of the `projects` entries that set `extends: true`, as the same keys `scopeAt`
+ * returns.
+ *
+ * Vitest does not fold the root config into a `projects` entry — an entry opts in, and this
+ * repository already turns on that fact: `operator/vitest.config.ts` writes `extends: true`
+ * explicitly, and both `global-tmp-root.ts` copies document the double `globalSetup` invocation it
+ * causes. Without reading it, the reachability check below credits a root `server.fs.allow` to an
+ * entry whose Vite server is built standalone and never sees it.
+ *
+ * Only the literal `true` counts. A path-valued `extends` names a different file, which this gate
+ * cannot follow and must not read as inheritance of the root scope it can see. The declaration is
+ * matched at the entry's own scope, so one nested inside an inner `projects` entry belongs to that
+ * entry rather than this one.
+ */
+export function extendingScopes(source) {
+  const stripped = stripComments(source);
+  const ranges = projectEntryRanges(stripped);
+  const extending = new Set();
+  for (const match of stripped.matchAll(/\bextends\s*:\s*true\b/gu)) {
+    const scope = scopeAt(match.index, ranges);
+    if (scope !== 'root') extending.add(scope);
+  }
+  return extending;
+}
+
 /** The array literal that follows each `key:` in `source`, as raw inner text. */
 function arrayLiterals(source, key) {
   return enclosedLiterals(source, key, '[', ']');
@@ -353,25 +379,39 @@ function contains(ancestor, path) {
  * The `setupFiles`/`globalSetup` entries of `source` that its own Vite root does not contain and no
  * applicable `server.fs.allow` covers, as `{ key, resolved }`.
  *
- * Applicable means declared at root scope, or in the same `projects` entry as the seam path. Each
- * entry is its own Vite config, so crediting a sibling entry's allowance would be fail-open for
- * exactly the shape this check exists to close. Root-scope allowances count everywhere: they are
- * the base config a `projects` entry extends, and reading them narrowly would red a config that
- * loads fine.
+ * Applicability follows Vitest's own inheritance rule, which is opt-in per `projects` entry (see
+ * `extendingScopes`). Each entry gets its own Vite config, so:
+ *
+ * - a seam path named inside an entry is covered by that entry's own allowances, plus the root's
+ *   only when the entry sets `extends: true`. Crediting a sibling entry's allowance — or the root's
+ *   to an entry that never reads it — is fail-open for exactly the import failure this check
+ *   predicts (issues #3123, #3136);
+ * - a seam path named at root scope is loaded by every extending entry, under that entry's own
+ *   server. So it is covered when the root's allowances cover it, or when every extending entry
+ *   covers it with its own. A non-extending sibling never loads it, so its lack of coverage says
+ *   nothing.
+ *
+ * A config with `projects` but no extending entry keeps the plain root-scope read. Nothing loads
+ * its root-scoped seam path in that shape, so this cannot be the import failure — but the wiring
+ * gate above reads scope-agnostically and would call it wired, so failing closed here is the only
+ * signal left.
  */
 export function unreachableWirings(source, configPath, base = root) {
   const configDir = relative(base, dirname(resolve(base, configPath))).split('\\').join('/');
   const allowed = fsAllowPaths(source, configPath, base);
+  const extending = extendingScopes(source);
+  const coveredBy = (path, scopes) =>
+    allowed.some((allow) => scopes.includes(allow.scope) && contains(allow.resolved, path));
+  const reachable = (entry) => {
+    if (entry.scope !== 'root') {
+      return coveredBy(entry.resolved, extending.has(entry.scope) ? ['root', entry.scope] : [entry.scope]);
+    }
+    if (extending.size === 0) return coveredBy(entry.resolved, ['root']);
+    return [...extending].every((scope) => coveredBy(entry.resolved, ['root', scope]));
+  };
   return wiredPaths(source, configPath, base)
     .filter((entry) => !contains(configDir, entry.resolved))
-    .filter(
-      (entry) =>
-        !allowed.some(
-          (allow) =>
-            (allow.scope === 'root' || allow.scope === entry.scope) &&
-            contains(allow.resolved, entry.resolved),
-        ),
-    )
+    .filter((entry) => !reachable(entry))
     .map((entry) => ({ key: entry.key, resolved: entry.resolved }));
 }
 
@@ -621,11 +661,85 @@ test('fs.allow in one projects entry does not cover a seam path in another', () 
     [],
   );
 
-  // So does a root-level one, which every project inherits as its base config.
+  // So does a root-level one, but only for an entry that opts into the root config (issue #3136).
   assert.deepEqual(
     unreachableWirings(
       `export default { server: { fs: { allow: ['../..'] } }, test: { environment: 'jsdom', ` +
-        `projects: [{ test: { setupFiles: ['${seam}'] } }] } }`,
+        `projects: [{ extends: true, test: { setupFiles: ['${seam}'] } }] } }`,
+      config,
+    ),
+    [],
+  );
+});
+
+// Vitest does not fold the root config into a `projects` entry; an entry opts in with
+// `extends: true` (this repo relies on that at `operator/vitest.config.ts`, and both
+// `global-tmp-root.ts` copies document the double `globalSetup` invocation it causes). Reading
+// the root allowance as universal was wrong in both directions: it credited coverage to an entry
+// that never sees the root config, and it withheld an extending entry's own coverage from the
+// root-scoped seam path that entry inherits.
+test('extendingScopes reads the entries that opt into the root config', () => {
+  const scopes = (source) => [...extendingScopes(source)];
+  assert.deepEqual(scopes('export default { test: { setupFiles: [] } }'), []);
+  assert.equal(scopes(`projects: [{ extends: true, test: {} }]`).length, 1);
+  // A path-valued `extends` names another file, not this config's root scope.
+  assert.deepEqual(scopes(`projects: [{ extends: './base.ts', test: {} }]`), []);
+  assert.deepEqual(scopes(`projects: [{ /* extends: true */ test: {} }]`), []);
+  // Only the entry that declares it opts in.
+  const mixed = extendingScopes(`projects: [{ extends: true }, { test: {} }]`);
+  const ranges = projectEntryRanges(`projects: [{ extends: true }, { test: {} }]`);
+  assert.equal(mixed.size, 1);
+  assert.ok(mixed.has(`projects@${ranges[0][0]}`));
+});
+
+test('a root fs.allow reaches only the projects entries that extend the root config', () => {
+  const config = 'packages/x/vitest.config.ts';
+  const seam = '../../test-support/tmp-isolation/isolate-tmp.ts';
+  const resolved = 'test-support/tmp-isolation/isolate-tmp.ts';
+  const withRootAllowance = (entry) =>
+    `export default { server: { fs: { allow: ['../..'] } }, test: { environment: 'jsdom', ` +
+    `projects: [${entry}] } }`;
+
+  // Fail-open closed: the entry never sees the root config, so its Vite server is built without
+  // that allowance and every test file in it dies on `Cannot find module '/@fs/…'`.
+  assert.deepEqual(unreachableWirings(withRootAllowance(`{ test: { setupFiles: ['${seam}'] } }`), config), [
+    { key: 'setupFiles', resolved },
+  ]);
+
+  // An extending entry does inherit it.
+  assert.deepEqual(
+    unreachableWirings(withRootAllowance(`{ extends: true, test: { setupFiles: ['${seam}'] } }`), config),
+    [],
+  );
+});
+
+test("an extending entry's own fs.allow covers the root-scoped seam path it inherits", () => {
+  const config = 'packages/x/vitest.config.ts';
+  const seam = '../../test-support/tmp-isolation/isolate-tmp.ts';
+  const resolved = 'test-support/tmp-isolation/isolate-tmp.ts';
+  const withRootSeam = (entries) =>
+    `export default { test: { environment: 'jsdom', setupFiles: ['${seam}'], ` +
+    `projects: [${entries}] } }`;
+
+  // False red closed: the inherited setup file loads under the extending entry's own server.
+  assert.deepEqual(
+    unreachableWirings(withRootSeam(`{ extends: true, server: { fs: { allow: ['../..'] } } }`), config),
+    [],
+  );
+
+  // Every extending entry loads it, so one uncovered entry is still a real import failure.
+  assert.deepEqual(
+    unreachableWirings(
+      withRootSeam(`{ extends: true, server: { fs: { allow: ['../..'] } } }, { extends: true }`),
+      config,
+    ),
+    [{ key: 'setupFiles', resolved }],
+  );
+
+  // A non-extending sibling never loads the root seam path, so its lack of coverage says nothing.
+  assert.deepEqual(
+    unreachableWirings(
+      withRootSeam(`{ extends: true, server: { fs: { allow: ['../..'] } } }, { test: {} }`),
       config,
     ),
     [],
