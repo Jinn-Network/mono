@@ -93,6 +93,11 @@ async function materializeAndVerifyBundle(
   return { identity: materialized.identity, relativePath: relativeBundlePath(input.draftId, materialized.identity), checks: verified.checks };
 }
 
+/** Bound on waiting for the publication lock to run a refusal's cleanup. Short by design: the
+ * caller already has a refusal to return, and leaving an unreferenced directory behind is a far
+ * smaller cost than making every contended failure wait out the full publication timeout. */
+const REFUSED_CLEANUP_LOCK_TIMEOUT_MS = 2_000;
+
 /** Absolute bundle directories the durable RunState currently names — canonical plus every
  * additional sibling. A directory in this set belongs to a publication that completed, so it must
  * survive this invocation's refusal even if this invocation is the one that created it: a
@@ -120,14 +125,22 @@ function bundleDirsNamedByRunState(workspaceDir: string, draftId: string): Reado
  * The removal runs while the publication lock for this draft is HELD (issue #3194). Bundle
  * materialization happens outside the lock, so a concurrent publisher of the same draft can adopt
  * a directory this invocation created — the EEXIST path proves byte-identity and adopts rather than
- * refusing — and go on to name it in RunState. Serializing the cleanup against the same lock that
- * serializes publication, and skipping every directory that lock-held read finds named, is what
- * stops this invocation's refusal from deleting a peer's published bundle underneath it.
+ * refusing — and go on to name it in RunState. Running the cleanup under the same lock that
+ * serializes publication, and skipping every directory that lock-held read finds named, keeps this
+ * invocation's refusal from deleting a bundle a peer has already published.
+ *
+ * This NARROWS the race rather than closing it. Only the peer's `writeRunState` is inside the lock;
+ * its adoption of the directory is not. A peer that has adopted but not yet named its bundle is
+ * still invisible to the lock-held read, so `adopt → we take the lock and read → we remove →
+ * peer takes the lock and names` remains reachable. Closing it needs adoption itself moved inside
+ * the lock (or a materialization-side marker), which is a larger change to where bundles are built.
  *
  * `heldLock` is the caller's lock when the refusal happened inside the locked region; otherwise the
- * lock is acquired for the cleanup alone. Both lock failure and removal failure are swallowed —
- * neither may replace the refusal the caller needs to see — and a lock we cannot take means the
- * directories are left in place rather than removed unserialized. */
+ * lock is acquired for the cleanup alone, under a short timeout — the caller is already returning a
+ * refusal and must not be made to wait out the full publication timeout a second time. Both lock
+ * failure and removal failure are swallowed — neither may replace the refusal the caller needs to
+ * see — and a lock we cannot take means the directories are left in place rather than removed
+ * unserialized. */
 async function removeRefusedBundles(
   workspaceDir: string,
   draftId: string,
@@ -138,7 +151,7 @@ async function removeRefusedBundles(
   let acquired: PublicationLock | undefined;
   if (heldLock === undefined) {
     try {
-      acquired = await acquirePublicationLock(workspaceDir, draftId);
+      acquired = await acquirePublicationLock(workspaceDir, draftId, REFUSED_CLEANUP_LOCK_TIMEOUT_MS);
     } catch {
       return;
     }
