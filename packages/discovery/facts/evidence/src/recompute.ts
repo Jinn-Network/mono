@@ -118,6 +118,60 @@ export const executionVerificationRecompute: RecordFactRecompute = async (bytes)
   }
 };
 
+// --- next revisions (join-edge completeness, protocol design §12 amendment 2026-08-28) ------
+//
+// Every added field is a digest the record states in its own bytes, read through the same
+// `validateAndProjectEvidenceRecord` path as v1/v2; `refs` stays unused.
+
+/** v2's card plus the native trace artifact the record pins. */
+export const executionEvidenceRecomputeV3: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await executionEvidenceRecomputeV2(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const result = validateAndProjectEvidenceRecord({ family: "execution-evidence", digest: recordDigest(bytes) }, bytes);
+    if (!result.conforms || result.projection.family !== "execution-evidence") return noFacts();
+    return { ...facts, nativeTraceDigest: result.projection.nativeTrace.digest };
+  } catch {
+    return noFacts();
+  }
+};
+
+/** v2's card plus the evaluations this one supersedes and the ones it disputes. */
+export const resultEvaluationRecomputeV3: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await resultEvaluationRecomputeV2(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const result = validateAndProjectEvidenceRecord({ family: "result-evaluation", digest: recordDigest(bytes) }, bytes);
+    if (!result.conforms || result.projection.family !== "result-evaluation") return noFacts();
+    const { projection } = result;
+    return {
+      ...facts,
+      supersedesDigests: projection.supersedes.map(({ digest }) => digest),
+      disputesDigests: projection.disputes.map(({ digest }) => digest),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
+/** v1's card plus the same two lineage edges. */
+export const executionVerificationRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await executionVerificationRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const result = validateAndProjectEvidenceRecord({ family: "execution-verification", digest: recordDigest(bytes) }, bytes);
+    if (!result.conforms || result.projection.family !== "execution-verification") return noFacts();
+    const { projection } = result;
+    return {
+      ...facts,
+      supersedesDigests: projection.supersedes.map(({ digest }) => digest),
+      disputesDigests: projection.disputes.map(({ digest }) => digest),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
 /** The leaf's `FactsRecompute` registry entry (program §7.13): the host
  * assembles the tree-wide registry by merging each leaf's export. */
 export const EVIDENCE_FACTS_RECOMPUTE: FactsRecompute = {
@@ -145,6 +199,22 @@ export const EVIDENCE_FACTS_RECOMPUTE_V2: FactsRecompute = {
         return resultEvaluationRecomputeV2;
       case RECORD_KINDS.executionVerification:
         return executionVerificationRecompute;
+      default:
+        return undefined;
+    }
+  },
+};
+
+/** Explicit registry for the coexisting Evidence public-facts next revisions. */
+export const EVIDENCE_FACTS_RECOMPUTE_V3: FactsRecompute = {
+  get(kind: string): RecordFactRecompute | undefined {
+    switch (kind) {
+      case RECORD_KINDS.executionEvidence:
+        return executionEvidenceRecomputeV3;
+      case RECORD_KINDS.resultEvaluation:
+        return resultEvaluationRecomputeV3;
+      case RECORD_KINDS.executionVerification:
+        return executionVerificationRecomputeV2;
       default:
         return undefined;
     }

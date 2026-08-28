@@ -13,11 +13,15 @@ import { describe, expect, it } from "vitest";
 import {
   EVIDENCE_FACTS_RECOMPUTE,
   EVIDENCE_FACTS_RECOMPUTE_V2,
+  EVIDENCE_FACTS_RECOMPUTE_V3,
   executionEvidenceRecompute,
   executionEvidenceRecomputeV2,
+  executionEvidenceRecomputeV3,
   executionVerificationRecompute,
+  executionVerificationRecomputeV2,
   resultEvaluationRecompute,
   resultEvaluationRecomputeV2,
+  resultEvaluationRecomputeV3,
 } from "./recompute.js";
 
 const fixtureRoot = new URL(
@@ -140,5 +144,77 @@ describe("facts/evidence recompute functions", () => {
     expect(EVIDENCE_FACTS_RECOMPUTE.get(RECORD_KINDS.resultEvaluation)).toBe(resultEvaluationRecompute);
     expect(EVIDENCE_FACTS_RECOMPUTE.get(RECORD_KINDS.executionVerification)).toBe(executionVerificationRecompute);
     expect(EVIDENCE_FACTS_RECOMPUTE.get(RECORD_KINDS.task)).toBeUndefined();
+  });
+});
+
+describe("the next revisions: the join edges the earlier cards left out", () => {
+  it("names the native trace an execution pins, keeping every v2 fact", async () => {
+    const bytes = await readFile(new URL("public/ro-crate-metadata.json", fixtureRoot));
+    const reference = validateAndProjectEvidenceRecord(
+      { family: "execution-evidence", digest: recordDigest(bytes) },
+      bytes,
+    );
+    if (!reference.conforms || reference.projection.family !== "execution-evidence") {
+      throw new Error("fixture did not conform to execution-evidence");
+    }
+    const v2 = await executionEvidenceRecomputeV2(bytes, noReferencedBytes);
+    expect(await executionEvidenceRecomputeV3(bytes, noReferencedBytes)).toEqual({
+      ...v2,
+      nativeTraceDigest: reference.projection.nativeTrace.digest,
+    });
+  });
+
+  it("names the evaluations an evaluation supersedes and disputes", async () => {
+    const bytes = await readFile(
+      new URL("claims/result-evaluation/result-evaluation.dsse.json", fixtureRoot),
+    );
+    const reference = validateAndProjectEvidenceRecord(
+      { family: "result-evaluation", digest: recordDigest(bytes) },
+      bytes,
+    );
+    if (!reference.conforms || reference.projection.family !== "result-evaluation") {
+      throw new Error("fixture did not conform to result-evaluation");
+    }
+    const { projection } = reference;
+    const v2 = await resultEvaluationRecomputeV2(bytes, noReferencedBytes);
+    expect(await resultEvaluationRecomputeV3(bytes, noReferencedBytes)).toEqual({
+      ...v2,
+      supersedesDigests: projection.supersedes.map(({ digest }) => digest),
+      disputesDigests: projection.disputes.map(({ digest }) => digest),
+    });
+  });
+
+  it("names the same two lineage edges on a verification record", async () => {
+    const bytes = await readFile(
+      new URL("claims/execution-verification/execution-verification.dsse.json", fixtureRoot),
+    );
+    const reference = validateAndProjectEvidenceRecord(
+      { family: "execution-verification", digest: recordDigest(bytes) },
+      bytes,
+    );
+    if (!reference.conforms || reference.projection.family !== "execution-verification") {
+      throw new Error("fixture did not conform to execution-verification");
+    }
+    const { projection } = reference;
+    const v1 = await executionVerificationRecompute(bytes, noReferencedBytes);
+    expect(await executionVerificationRecomputeV2(bytes, noReferencedBytes)).toEqual({
+      ...v1,
+      supersedesDigests: projection.supersedes.map(({ digest }) => digest),
+      disputesDigests: projection.disputes.map(({ digest }) => digest),
+    });
+  });
+
+  it("recomputes to no facts for bytes that do not conform", async () => {
+    const bytes = new TextEncoder().encode("{");
+    expect(await executionEvidenceRecomputeV3(bytes, noReferencedBytes)).toEqual({});
+    expect(await resultEvaluationRecomputeV3(bytes, noReferencedBytes)).toEqual({});
+    expect(await executionVerificationRecomputeV2(bytes, noReferencedBytes)).toEqual({});
+  });
+
+  it("registers each evidence kind under its newest revision and nothing else", () => {
+    expect(EVIDENCE_FACTS_RECOMPUTE_V3.get(RECORD_KINDS.executionEvidence)).toBe(executionEvidenceRecomputeV3);
+    expect(EVIDENCE_FACTS_RECOMPUTE_V3.get(RECORD_KINDS.resultEvaluation)).toBe(resultEvaluationRecomputeV3);
+    expect(EVIDENCE_FACTS_RECOMPUTE_V3.get(RECORD_KINDS.executionVerification)).toBe(executionVerificationRecomputeV2);
+    expect(EVIDENCE_FACTS_RECOMPUTE_V3.get(RECORD_KINDS.task)).toBeUndefined();
   });
 });
