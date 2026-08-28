@@ -175,7 +175,12 @@ jobs:
     # (DR-2026-08-18-b D3) — keep them in sync.
     name: repo-structure-gate
     needs:
-      [changes, gitlinks, identifier-origin, evidence-architecture, workflow-selection, skills-mirror]
+      - changes
+      - gitlinks
+      - identifier-origin
+      - evidence-architecture
+      - workflow-selection
+      - skills-mirror
     if: always()
     runs-on: ubuntu-latest
     # One `test` per upstream result. The bound keeps a wedged runner from
