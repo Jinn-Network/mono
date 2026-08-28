@@ -263,9 +263,13 @@ false` is the worst of the set: it also retires the fresh-process-per-file
 property that [the measurement](#the-measurement-1627-2026-08-27) rests on,
 and it does so while leaving the suite green.
 
-A line carrying `lint:no-fixed-test-port-allow` is skipped. For the multi-line
-array form the marker goes on the **element** line, not on the `ports: [`
-header — the header is not where the literal is reported. The guard is seven
+A line carrying `lint:no-fixed-test-port-allow` is skipped, on all three rules.
+For the multi-line array form the marker goes on the **element** line, not on
+the `ports: [` header — the header is not where the literal is reported.
+Suppressing a parallelism pin is the one use that should give you pause: the
+guard's premise is that changing parallelism is a deliberate decision that
+edits the guard in the same commit, so a marker there is a note to the next
+reader that you chose not to. The guard is seven
 regexes over source text and both of its failure modes are expensive on a
 required gate, so its behaviour is pinned by a fixture table,
 `operator/scripts/check-no-fixed-test-port.test.mjs`, which CI runs under

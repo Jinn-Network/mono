@@ -163,11 +163,44 @@ test('blankComments preserves offsets and leaves string contents intact', () => 
   assert.ok(out.includes('// not a comment'), 'a string is not a comment');
 });
 
+// A code-POINT split would run one slot short of a code-UNIT index here, blank
+// past the end of the comment, eat the newline, and shift rule 3's line
+// numbers — or chew the first character of a real pin and miss it outright.
+test('blankComments stays aligned across a surrogate pair', () => {
+  const src = "const e = '\u{1F600}';\n// pool: 'threads'\nisolate: false,\n";
+  const out = blankComments(src);
+  assert.equal(out.length, src.length, 'code-unit offsets are preserved');
+  assert.equal(out.split('\n').length, src.split('\n').length, 'line numbers are preserved');
+  assert.ok(!out.includes('threads'), 'the comment is fully blanked');
+  const found = scanVitestConfig(src);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].line, 3, 'the real pin is still reported on its own line');
+});
+
+// The marker only ever lives inside a comment, and rule 3 matches against
+// blanked text — so it has to be read off the raw line or the hatch is dead.
+test('the allow marker suppresses a rule-3 pin, and reports the raw line', () => {
+  const marked = `export default { test: {\n  maxWorkers: 1, // ${ALLOW_MARKER}\n} };`;
+  assert.deepEqual(scanVitestConfig(marked), []);
+  const unmarked = 'export default { test: {\n  maxWorkers: 1, // deliberate\n} };';
+  const found = scanVitestConfig(unmarked);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].snippet, 'maxWorkers: 1, // deliberate', 'the reader sees the real line');
+});
+
 // These are the gaps the guard's header names explicitly. Pinning them keeps
 // the header honest: closing one should be a deliberate edit here, not a
 // silent change of scope.
 test('documented non-catches stay documented', () => {
   assert.deepEqual(flagged("await fetch('http://127.0.0.1:45020/health');"), [], 'URL string');
   assert.deepEqual(flagged('apiPort = 45000;'), [], 'bare reassignment');
-  assert.deepEqual(flagged("const o = { ports: [']', 45004] };"), [], "a ] inside a string");
+  assert.deepEqual(flagged("const o = { ports: [']', 45004] };"), [], 'a ] inside a string');
+  assert.deepEqual(flagged('const apiPort = cond ? x : 45000;'), [], 'ternary default');
+  assert.deepEqual(flagged("const o = { 'port': 45000 };"), [], 'quoted key');
+  assert.deepEqual(scanVitestConfig('test: { maxWorkers: 1.0 }'), [], 'non-integer pin');
+  assert.deepEqual(
+    scanVitestConfig('test: { maxWorkers: process.env.CI ? 1 : 4 }'),
+    [],
+    'computed pin',
+  );
 });

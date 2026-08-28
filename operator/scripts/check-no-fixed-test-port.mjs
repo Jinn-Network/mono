@@ -147,11 +147,13 @@
  *
  * Suppression: a line carrying the inline comment
  * `lint:no-fixed-test-port-allow` is skipped, matching the house
- * `lint:no-error-leak-allow` convention. For the multi-line array form the
- * marker is per-ELEMENT line, not on the `ports: [` header — the header line
- * is not where the literal is reported. It is expected to have ZERO consumers
- * on landing: it exists for a future case nobody has met yet, not for the ones
- * this guard was written against.
+ * `lint:no-error-leak-allow` convention. It applies to all three rules. For
+ * the multi-line array form the marker is per-ELEMENT line, not on the
+ * `ports: [` header — the header line is not where the literal is reported.
+ * For rule 3 the marker is read off the raw line rather than the blanked one,
+ * since a marker only ever lives inside a comment. It is expected to have ZERO
+ * consumers on landing: it exists for a future case nobody has met yet, not
+ * for the ones this guard was written against.
  *
  * ── What this guard deliberately does NOT catch ─────────────────────────────
  *
@@ -170,11 +172,21 @@
  *   - A `]` inside a string inside a port array — `{ ports: [']', 45004] }`.
  *     Rule 1d's array capture is not a bracket matcher, so it stops at the
  *     first `]`. Likewise a nested array reports only its first row.
- *   - A computed pin in rule 3 — `maxWorkers: process.env.CI ? 1 : 4`, or the
- *     same flag passed to vitest from the `test` script in `package.json`
- *     rather than written in the config. Rule 3 reads one file and matches
- *     literals; it is a speed bump against a silent edit, not a sandbox
- *     against a determined one.
+ *   - A ternary default — `const apiPort = cond ? x : 45000`. Rule 1c's
+ *     optional prefix covers `??` and `||` only, which are how a default port
+ *     is actually written in this tree.
+ *   - A quoted object key — `{ 'port': 45000 }`. The key pattern is unquoted.
+ *   - A computed or non-integer pin in rule 3 — `maxWorkers: process.env.CI ? 1
+ *     : 4`, `maxThreads: 1.0`, or the same flag passed to vitest from the
+ *     `test` script in `package.json` rather than written in the config. Rule 3
+ *     reads one file and matches literals; it is a speed bump against a silent
+ *     edit, not a sandbox against a determined one.
+ *   - A pin sharing a line with a regex literal containing `/` — rule 3's
+ *     comment blanking does not resolve the regex/division ambiguity, so
+ *     `exclude: [/a\/\//]` blanks the rest of its line. The failure is a
+ *     MISSED pin, never a spurious one, and vitest's `exclude` does accept a
+ *     `RegExp`; it is left unresolved because a pin and such a regex on one
+ *     line does not occur in a config object literal.
  */
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
@@ -313,7 +325,12 @@ function lineNumberAt(text, offset) {
  * or an unbalanced quote does not occur.
  */
 export function blankComments(text) {
-  const out = Array.from(text);
+  // `split('')`, not `Array.from`: the latter splits by code POINT while every
+  // index below (`text[i]`, `out[i]`, `indexOf`) is a code UNIT offset, so one
+  // surrogate pair anywhere in the file shifts every later write by a slot —
+  // blanking a newline, or eating the first character of a real pin and
+  // turning rule 3 into a false negative.
+  const out = text.split('');
   let i = 0;
   let quote = null; // "'" | '"' | '`'
   while (i < text.length) {
@@ -416,16 +433,23 @@ export function scanText(text) {
   });
 }
 
-/** Rule 3 over one config's text. Comments are blanked before matching. */
+/**
+ * Rule 3 over one config's text. Pins are matched against the comment-blanked
+ * text; the suppression marker is read off the RAW line, because the marker
+ * only ever lives *in* a comment and blanking would make the check
+ * unreachable. The reported snippet is the raw line too — a blanked one would
+ * show the reader an empty string.
+ */
 export function scanVitestConfig(text) {
+  const raw = text.split('\n');
   const found = [];
   blankComments(text)
     .split('\n')
     .forEach((line, idx) => {
-      if (line.includes(ALLOW_MARKER)) return;
+      if ((raw[idx] ?? '').includes(ALLOW_MARKER)) return;
       for (const pin of PARALLELISM_PINS) {
         if (!pin.re.test(line)) continue;
-        found.push({ line: idx + 1, snippet: line.trim(), why: pin.why });
+        found.push({ line: idx + 1, snippet: (raw[idx] ?? line).trim(), why: pin.why });
       }
     });
   return found;

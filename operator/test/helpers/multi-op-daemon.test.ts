@@ -92,9 +92,10 @@ describe('spawnMultiOpDaemons', () => {
     // would span the whole of `beforeAll` and the hook-to-test transition
     // before the child even spawns, which is why these stay fixed; the
     // allocator IS the right call in the second describe below, where the
-    // allocation happens inside the test, one statement before the spawn. Both
-    // beat the `pickPort()` blind random guess they replaced, which sat inside
-    // the band and never checked the port was free at all.
+    // allocation happens inside the test body — one statement before the spawn
+    // in two of the three, a `path.join` and a `writeFile` before it in the
+    // third. Both beat the `pickPort()` blind random guess they replaced, which
+    // sat inside the band and never checked the port was free at all.
     //
     // Registered in the port registry in
     // test/release/tier-1/T1.2-harness-readiness-contract.ts. See issue #1627
