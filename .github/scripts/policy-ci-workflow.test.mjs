@@ -103,3 +103,26 @@ test('each package distribution is restored straight into its package', () => {
     'the staging directory and its placement copy are gone; restore in place',
   );
 });
+
+// The restore step's comment is where the by-name shape is explained and its
+// precedent cited. The repository-wide gate in
+// `workflow-precedent-citations.test.mjs` checks that every cited workflow
+// still restores by name; this keeps the citation itself from simply
+// disappearing from this workflow.
+test('the restore step carries a comment citing a precedent workflow', () => {
+  const lines = workflow.split('\n');
+  const restoreStep = lines.findIndex((line) => line.includes('- name: Restore Policy Identity distribution'));
+  assert.ok(restoreStep > 0, 'the identity restore step must exist');
+
+  const comment = [];
+  for (let cursor = restoreStep - 1; cursor >= 0; cursor -= 1) {
+    if (!/^\s*#/.test(lines[cursor])) break;
+    comment.unshift(lines[cursor]);
+  }
+  assert.ok(comment.length > 0, 'the restore step must carry its explanatory comment');
+
+  const cited = [...new Set(comment.join('\n').match(/[\w-]+\.ya?ml/g) ?? [])].filter(
+    (name) => name !== 'policy-ci.yml',
+  );
+  assert.ok(cited.length > 0, 'the comment must cite at least one precedent workflow');
+});

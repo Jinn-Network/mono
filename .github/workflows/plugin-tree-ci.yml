@@ -157,14 +157,14 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
-      # Restore by name, straight into the destination, the way the per-package
-      # restores in policy-ci.yml do. A `pattern:` restore nests each artifact
-      # under `path/<artifact>/` only while two or more artifacts match;
-      # download-artifact v5 made a lone match extract directly into `path/`
-      # instead, so the pattern form silently changes shape with the artifact
-      # count. `runtime` is this workflow's only uploader, so it always matched
-      # alone. Restoring by name has no such dependency. Add one named step per
-      # package when C4-C7 land further `plugin-*-dist` uploads.
+      # Restore by name, straight into the destination, the way the single
+      # restore in lifecycle-notifications-ci.yml does. A `pattern:` restore
+      # nests each artifact under `path/<artifact>/` only while two or more
+      # artifacts match; download-artifact v5 made a lone match extract directly
+      # into `path/` instead, so the pattern form silently changes shape with
+      # the artifact count. `runtime` is this workflow's only uploader, so it
+      # always matched alone. Restoring by name has no such dependency. Add one
+      # named step per package when C4-C7 land further `plugin-*-dist` uploads.
       - name: Restore Plugin Runtime distribution
         uses: actions/download-artifact@v8
         with:
