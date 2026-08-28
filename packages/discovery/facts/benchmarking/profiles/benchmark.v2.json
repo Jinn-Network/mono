@@ -1,0 +1,12 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/benchmark/v1",
+  "profile": "https://spec.jinn.network/facts/benchmark/v2",
+  "fields": [
+    { "name": "benchmarkDigest", "class": "record" },
+    { "name": "author", "class": "record", "cloudEvents": { "attribute": "author", "scalar": "string" } },
+    { "name": "version", "class": "record", "cloudEvents": { "attribute": "benchversion", "scalar": "string" } },
+    { "name": "taskDigests", "class": "record", "referenceBearing": true },
+    { "name": "supersedesDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "supersedes", "scalar": "string" } }
+  ]
+}

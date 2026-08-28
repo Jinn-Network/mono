@@ -240,6 +240,71 @@ export const benchmarkAccountingRecompute: RecordFactRecompute = async (bytes, r
   }
 };
 
+// --- v2 revisions (join-edge completeness, protocol design §12 amendment 2026-08-28) --------
+//
+// The added fields point at records this tree cannot parse — Tasks, Submissions, Deliveries and
+// verdicts are owned by other trees, and this leaf's frozen dependency set is the benchmarking
+// tree plus discovery. So they cannot use the fail-closed `referencedKindOk` path the
+// same-tree digests above use; they are emitted directly from the record's own statement, the
+// posture the environment leaf documents for its image digest. Reference-bearing labels the
+// indexing relation; it does not by itself promise the target is retrievable.
+
+/** Ordered de-duplication: a matrix names the same Task once per cell that ran it. */
+function distinct(digests: readonly (`sha256:${string}` | undefined)[]): `sha256:${string}`[] {
+  const seen = new Set<string>();
+  const out: `sha256:${string}`[] = [];
+  for (const digest of digests) {
+    if (digest === undefined || seen.has(digest)) continue;
+    seen.add(digest);
+    out.push(digest);
+  }
+  return out;
+}
+
+/** v1's card plus the Tasks the benchmark is made of and its supersession pointer. */
+export const benchmarkRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await benchmarkRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const record = parseBenchmark(bytes);
+    const taskDigests = distinct(record.items.map((item) => asPrefixedDigest(item.task.digest.sha256)));
+    const supersedes = asPrefixedDigest(record.supersedes?.digest.sha256);
+    return {
+      ...facts,
+      taskDigests,
+      ...(supersedes === undefined ? {} : { supersedesDigest: supersedes }),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
+/**
+ * v1's card plus the per-cell references. A matrix is already the join table between a run's
+ * cells and the records that produced them; v1 stated only the run, so the join stopped there.
+ *
+ * `verdictDigests` carries every verdict the cells name. Validity is the matrix's own judgment
+ * about a verdict, not an edge to a different record, so it stays in the record.
+ */
+export const matrixRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await matrixRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const record = parseMatrix(bytes);
+    return {
+      ...facts,
+      taskDigests: distinct(record.cells.map((cell) => asPrefixedDigest(cell.taskDigest))),
+      submissionDigests: distinct(record.cells.map((cell) => cell.submission as `sha256:${string}` | undefined)),
+      deliveryDigests: distinct(record.cells.map((cell) => cell.delivery as `sha256:${string}` | undefined)),
+      verdictDigests: distinct(
+        record.cells.flatMap((cell) => cell.verdicts as `sha256:${string}`[]),
+      ),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
 /** The leaf's `FactsRecompute` registry entry (program §7.13): the host
  * assembles the tree-wide registry by merging each leaf's export. Unknown
  * kinds return `undefined` (preserved unknown-kind behavior). */
@@ -260,6 +325,20 @@ export const BENCHMARKING_FACTS_RECOMPUTE: FactsRecompute = {
         return benchmarkAccountingRecompute;
       default:
         return undefined;
+    }
+  },
+};
+
+/** Explicit registry for the coexisting Benchmarking facts v2 profiles. */
+export const BENCHMARKING_FACTS_RECOMPUTE_V2: FactsRecompute = {
+  get(kind: string): RecordFactRecompute | undefined {
+    switch (kind) {
+      case BENCHMARK_RECORD_KIND:
+        return benchmarkRecomputeV2;
+      case MATRIX_RECORD_KIND:
+        return matrixRecomputeV2;
+      default:
+        return BENCHMARKING_FACTS_RECOMPUTE.get(kind);
     }
   },
 };
