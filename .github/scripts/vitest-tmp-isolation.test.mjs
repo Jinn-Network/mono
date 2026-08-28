@@ -481,6 +481,39 @@ test('wiredPaths reads every setupFiles and globalSetup list', () => {
   assert.notEqual(scoped[1].scope, scoped[2].scope);
 });
 
+test('projectEntryRanges finds one range per object entry, in source order', () => {
+  // Each range spans exactly the object entry it was read from, braces included.
+  const entries = (source) =>
+    projectEntryRanges(source).map(([start, end]) => source.slice(start, end + 1));
+
+  // A glob string alongside an object entry: only the object gets a range.
+  assert.deepEqual(entries(`projects: ['./p/*', { test: { name: 'a' } }]`), [
+    `{ test: { name: 'a' } }`,
+  ]);
+  // A brace inside a quoted glob is not an entry.
+  assert.deepEqual(entries(`projects: ['./{a,b}/*']`), []);
+  // Call-wrapped entries are read through the wrapper.
+  assert.deepEqual(entries(`projects: [defineProject({ a: 1 }), defineProject({ b: 2 })]`), [
+    '{ a: 1 }',
+    '{ b: 2 }',
+  ]);
+  // The same entry as the first case, with the list left unterminated, yields no ranges at all —
+  // the documented fail-open that puts every allowance and seam path back in one scope.
+  assert.deepEqual(projectEntryRanges(`projects: [{ test: { name: 'a' } }`), []);
+  // An unterminated entry inside a terminated list drops that entry, keeping the ones before it.
+  assert.deepEqual(entries(`projects: [{ a: 1 }, { b: 2 ]`), ['{ a: 1 }']);
+
+  // Nested `projects` yield both ranges, and a path inside the inner one is scoped to the inner
+  // entry rather than the outer one that also encloses it.
+  const nested = `projects: [{ test: { projects: [{ test: { setupFiles: ['./b.ts'] } }] } }]`;
+  const ranges = projectEntryRanges(nested);
+  assert.equal(ranges.length, 2);
+  const [outer, inner] = ranges;
+  assert.ok(outer[0] < inner[0] && inner[1] < outer[1], 'inner range must sit inside the outer one');
+  const [wired] = wiredPaths(nested, 'packages/x/vitest.config.ts');
+  assert.equal(wired.scope, `projects@${inner[0]}`);
+});
+
 // Commenting a wiring line out while chasing a slow or flaky suite is an ordinary edit, and the one
 // most likely to be committed by accident. Every reader above matches over the raw source, so
 // without `stripComments` a commented-out entry reads exactly like a live one and the gate above
