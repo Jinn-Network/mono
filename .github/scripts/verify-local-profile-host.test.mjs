@@ -102,25 +102,36 @@ function signRoot(root, privateKeyPem) {
   return bytes;
 }
 
+function signingKeys() {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  return {
+    privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+  };
+}
+
 /**
  * A signed, attested profile root plus the deploy bundle built from it and the
  * verification receipt that names both.
+ *
+ * `bundle` is supplied when several release groups share one deploy directory: the
+ * caller signs each root through this helper, then merges them in a single build. `keys`
+ * is supplied for the same reason -- one origin publishes one signing key, so the groups
+ * that share it must share the key too.
  */
-function attestedFixture(root, manifest) {
-  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-  const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-  const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+function attestedFixture(root, manifest, { bundle: sharedBundle = null, keys = null } = {}) {
+  const { privateKeyPem, publicKeyPem } = keys ?? signingKeys();
   const localManifestBytes = readFileSync(join(root, 'manifest.json'));
   const signatureBytes = signRoot(root, privateKeyPem);
 
-  const bundle = join(temporaryDirectory('jinn-local-host-bundle-'), 'deploy');
-  const built = buildProfileHostBundle({ profileRoot: root, outDir: bundle });
+  const bundle = sharedBundle ?? join(temporaryDirectory('jinn-local-host-bundle-'), 'deploy');
+  const built = sharedBundle ? null : buildProfileHostBundle({ profileRoot: root, outDir: bundle });
 
   const receipt = {
     schemaVersion: 1,
     sourceSha,
     catalog: { path: PLATFORM_CATALOG_PATH, sha256: catalogDigest },
-    releaseGroup: 'sealed-platform-v1',
+    releaseGroup: manifest.releaseGroup,
     lane: 'canary',
     surfaces: {
       profile: {
@@ -147,6 +158,7 @@ function attestedFixture(root, manifest) {
     privateKeyPem,
     publicKeyPem,
     publicKeySha256: canonicalPublicKeySha256(publicKeyPem).sha256,
+    keys: { privateKeyPem, publicKeyPem },
     receipt,
     receiptPath,
   };
@@ -250,6 +262,7 @@ function runGate(fixture, origin, {
   lane = 'canary',
   expectPublicKeySha256 = fixture.publicKeySha256,
   publicKeyPath = DEFAULT_PUBLIC_KEY_PATH,
+  releaseGroup = fixture.receipt.releaseGroup,
 } = {}) {
   const outputPath = join(temporaryDirectory('jinn-local-host-out-'), 'live-host-receipt.json');
   const argv = [
@@ -259,7 +272,7 @@ function runGate(fixture, origin, {
     '--repo-root', repoRoot,
     '--source-sha', sourceSha,
     '--catalog-digest', catalogDigest,
-    '--release-group', 'sealed-platform-v1',
+    '--release-group', releaseGroup,
     '--lane', lane,
     '--origin', origin,
     '--public-key-url', `${origin}/${publicKeyPath}`,
@@ -321,8 +334,9 @@ test('the gate passes against a real socket serving the whole real profile root'
   const refused = new Set(server.requests.filter(({ status }) => status === 404).map(({ target }) => target));
   for (const [label, shape] of [
     ['a random path', /^\/[0-9a-f-]{36}$/u],
-    ['a digest sidecar beside the manifest', /^\/manifest\.json\.sha256$/u],
+    ['a digest sidecar beside the manifest', /^\/sealed-platform-v1\/manifest\.json\.sha256$/u],
     ['an unpublished package manifest', /^\/@jinn-network\/not-a-published-package-[0-9a-f-]{36}\/package\.json$/u],
+    ['a root manifest left by a stale single-group deployment', /^\/manifest\.json$/u],
   ]) {
     assert.ok([...refused].some((target) => shape.test(target)), `no anti-fallback probe for ${label} was refused`);
   }
@@ -341,6 +355,83 @@ test('the gate passes against a real socket serving the whole real profile root'
   // the harness chose: the count the catalog actually declares for this release set.
   assert.equal(result.receipt.resolvableIdentifiersVerified, registered.length);
   assert.ok(registered.length > 0);
+});
+
+// --- two release groups, one origin -----------------------------------------
+
+test('two release groups share one origin: the gate passes once per group', async () => {
+  // The defect this closes: both stack-published groups deploy to spec.jinn.network and
+  // each authored a `manifest.json` at the root, so one group's gate always byte-compared
+  // the other group's inventory. Here they are merged into one deploy directory, served
+  // once, and the gate is run once per group against the same origin.
+  const sealedRoot = temporaryDirectory('jinn-local-host-both-sealed-');
+  const sealedManifest = buildProfileRoot({
+    repoRoot,
+    outDir: sealedRoot,
+    commit: sourceSha,
+    catalogDigest,
+    releaseGroup: 'sealed-platform-v1',
+  });
+  const implementationsRoot = temporaryDirectory('jinn-local-host-both-impl-');
+  const implementationsManifest = buildProfileRoot({
+    repoRoot,
+    outDir: implementationsRoot,
+    commit: sourceSha,
+    catalogDigest,
+    releaseGroup: 'implementations-v1',
+  });
+
+  // One origin publishes one signing key, so both groups are signed with it. Signing runs
+  // first: the merged build byte-copies each group's sidecar.
+  const keys = signingKeys();
+  const bundle = join(temporaryDirectory('jinn-local-host-both-bundle-'), 'deploy');
+  const sealed = attestedFixture(sealedRoot, sealedManifest, { bundle, keys });
+  const implementations = attestedFixture(implementationsRoot, implementationsManifest, { bundle, keys });
+  const built = buildProfileHostBundle({
+    profileRoots: [sealedRoot, implementationsRoot],
+    outDir: bundle,
+  });
+  assert.deepEqual(built.groups, ['implementations-v1', 'sealed-platform-v1']);
+
+  const server = await serve(sealed);
+  let results;
+  try {
+    results = [
+      await runGate(sealed, server.origin),
+      await runGate(implementations, server.origin),
+    ];
+  } finally {
+    await server.close();
+  }
+
+  for (const [fixture, result] of [[sealed, results[0]], [implementations, results[1]]]) {
+    const group = fixture.receipt.releaseGroup;
+    assert.equal(result.code, 0, `${group}: expected exit 0, got ${result.code}: ${result.stdout}${result.stderr}`);
+    assert.ok(result.receipt, `${group}: a passing run must emit a live-host receipt`);
+    assert.equal(result.receipt.releaseGroup, group);
+    assert.equal(result.receipt.documentsVerified, fixture.manifest.documents.length);
+    assert.equal(result.receipt.profileManifestSha256, sha256(fixture.manifestBytes));
+    assert.equal(result.receipt.signature.sidecarSha256, sha256(fixture.signatureBytes));
+  }
+  assert.notEqual(
+    results[0].receipt.profileManifestSha256,
+    results[1].receipt.profileManifestSha256,
+    'each group must have verified its own inventory, not a shared one',
+  );
+
+  // The origin root serves neither inventory. Asserted over cleartext because this
+  // process, unlike the gate subprocess, is not handed the loopback trust anchor.
+  const plain = await startProfileHost({ bundleDir: bundle, publicKey: { pem: keys.publicKeyPem } });
+  try {
+    for (const probe of ['/manifest.json', '/manifest.dsse.json']) {
+      assert.equal((await fetch(`${plain.origin}${probe}`, { redirect: 'manual' })).status, 404, probe);
+    }
+    for (const group of ['sealed-platform-v1', 'implementations-v1']) {
+      assert.equal((await fetch(`${plain.origin}/${group}/manifest.json`, { redirect: 'manual' })).status, 200, group);
+    }
+  } finally {
+    await plain.close();
+  }
 });
 
 // --- the hazardous path shapes, byte for byte, over the wire ----------------
@@ -374,7 +465,14 @@ test('every hazardous path shape is served exactly, from the real profile root',
     }
 
     // The anti-fallback probes must be real 404s, or every byte comparison above is vacuous.
-    for (const probe of ['/definitely-not-a-document', '/manifest.json.sha256', '/@jinn-network/not-a-package/package.json']) {
+    for (const probe of [
+      '/definitely-not-a-document',
+      '/manifest.json.sha256',
+      '/@jinn-network/not-a-package/package.json',
+      // Each group serves its own inventory; the origin root serves none.
+      '/manifest.json',
+      '/manifest.dsse.json',
+    ]) {
       assert.equal((await fetch(`${server.origin}${probe}`, { redirect: 'manual' })).status, 404, probe);
     }
   } finally {
@@ -461,7 +559,7 @@ for (const [label, fault, expected] of HOST_FAULTS) {
 test('the gate refuses a host that does not serve the signature sidecar', async () => {
   const stripped = { ...subset, bundle: join(temporaryDirectory('jinn-local-host-unsigned-'), 'deploy') };
   cpSync(subset.bundle, stripped.bundle, { recursive: true });
-  rmSync(join(stripped.bundle, SIGNATURE_FILE_NAME));
+  rmSync(join(stripped.bundle, subset.receipt.releaseGroup, SIGNATURE_FILE_NAME));
   const result = await gateAgainst(stripped);
   assert.notEqual(result.code, 0);
   assert.match(result.stdout, new RegExp(`${SIGNATURE_FILE_NAME} returned 404, expected 200`, 'u'));
