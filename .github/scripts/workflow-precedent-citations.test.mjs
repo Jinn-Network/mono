@@ -133,16 +133,16 @@ test('a citation is only read from the comment attached to a restore step', () =
 });
 
 // A workflows directory holding exactly the given files, so a citation can be
-// pointed at a real neighbour without depending on the repository's own
+// pointed at a real neighbor without depending on the repository's own
 // workflows. The tests below assert on `findBrokenCitations` itself: asserting
 // only on the two helpers left both of its report branches free to be deleted
 // with every test still green.
 function fixtureWorkflows(files) {
-  const root = mkdtempSync(join(tmpdir(), 'jinn-precedent-citations-'));
+  const workflowsRoot = mkdtempSync(join(tmpdir(), 'jinn-precedent-citations-'));
   for (const [name, contents] of Object.entries(files)) {
-    writeFileSync(join(root, name), contents);
+    writeFileSync(join(workflowsRoot, name), contents);
   }
-  return root;
+  return workflowsRoot;
 }
 
 const citingConsolidated = [
@@ -156,7 +156,7 @@ const citingConsolidated = [
 
 test('a citation pointing at a workflow that restores nothing is reported', () => {
   const consolidated = ['jobs:', '  build:', '    steps:', '      - run: yarn build', ''].join('\n');
-  const root = fixtureWorkflows({
+  const fixtureRoot = fixtureWorkflows({
     'citing-ci.yml': citingConsolidated,
     'consolidated-ci.yml': consolidated,
   });
@@ -164,28 +164,28 @@ test('a citation pointing at a workflow that restores nothing is reported', () =
   try {
     assert.deepEqual(citedPrecedents(citingConsolidated, 'citing-ci.yml'), ['consolidated-ci.yml']);
     assert.equal(restoredArtifactNames(consolidated).length, 0);
-    assert.deepEqual(findBrokenCitations(root), [
+    assert.deepEqual(findBrokenCitations(fixtureRoot), [
       'citing-ci.yml cites consolidated-ci.yml as by-name-restore precedent, but it restores no artifact by name',
     ]);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(fixtureRoot, { recursive: true, force: true });
   }
 });
 
 test('a citation pointing at a workflow that does not exist is reported', () => {
-  const root = fixtureWorkflows({ 'citing-ci.yml': citingConsolidated });
+  const fixtureRoot = fixtureWorkflows({ 'citing-ci.yml': citingConsolidated });
 
   try {
-    assert.deepEqual(findBrokenCitations(root), [
+    assert.deepEqual(findBrokenCitations(fixtureRoot), [
       'citing-ci.yml cites consolidated-ci.yml, which does not exist',
     ]);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(fixtureRoot, { recursive: true, force: true });
   }
 });
 
 test('a citation pointing at a workflow that does restore by name is not reported', () => {
-  const root = fixtureWorkflows({
+  const fixtureRoot = fixtureWorkflows({
     'citing-ci.yml': citingConsolidated,
     'consolidated-ci.yml': [
       'jobs:',
@@ -199,9 +199,9 @@ test('a citation pointing at a workflow that does restore by name is not reporte
   });
 
   try {
-    assert.deepEqual(findBrokenCitations(root), []);
+    assert.deepEqual(findBrokenCitations(fixtureRoot), []);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(fixtureRoot, { recursive: true, force: true });
   }
 });
 
