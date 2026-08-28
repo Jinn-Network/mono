@@ -82,21 +82,29 @@ const FIXTURE_CREATING_CALLS = new Map([
 ]);
 
 /** Splits a call's argument text on its top-level commas. */
-function callArguments(text) {
-  const parts = [];
+function argumentBoundaries(masked) {
+  const boundaries = [];
   let depth = 0;
-  let start = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
+  for (let index = 0; index < masked.length; index += 1) {
+    const char = masked[index];
     if (char === '(' || char === '[' || char === '{') depth += 1;
     else if (char === ')' || char === ']' || char === '}') depth -= 1;
-    else if (char === ',' && depth === 0) {
-      parts.push(text.slice(start, index));
-      start = index + 1;
-    }
+    else if (char === ',' && depth === 0) boundaries.push(index);
   }
-  parts.push(text.slice(start));
-  return parts;
+  return boundaries;
+}
+
+/**
+ * The `index`-th argument of a call, read from both the masked and the raw text. Boundaries come
+ * from the masked copy only: a comma inside a string literal is a separator in the raw text but
+ * not in the masked one, and splitting each independently would misalign the two.
+ */
+function argumentAt(masked, raw, index) {
+  const boundaries = [-1, ...argumentBoundaries(masked), masked.length];
+  if (index + 1 >= boundaries.length) return { masked: '', raw: '' };
+  const from = boundaries[index] + 1;
+  const to = boundaries[index + 1];
+  return { masked: masked.slice(from, to), raw: raw.slice(from, to) };
 }
 
 /**
@@ -112,8 +120,14 @@ export function maskLiterals(source) {
   const blank = (from, to, filler) => {
     for (let cursor = from; cursor < to; cursor += 1) if (out[cursor] !== '\n') out[cursor] = filler;
   };
-  // The character before a `/` decides regex-vs-division. After a value (identifier, literal,
-  // closing bracket) a slash divides; after an operator, keyword, or nothing, it opens a regex.
+  // What precedes a `/` decides regex-vs-division. After a value — an identifier, a literal, a
+  // closing bracket — a slash divides. After an operator, or after a keyword that can be followed
+  // by an expression, it opens a regex. Testing only the previous *character* reads `return /x/`
+  // as division (`n` looks like an identifier), so the keyword set is checked too; the same
+  // predicate shape is used by policy-optimization-source-boundaries.test.mjs.
+  const EXPRESSION_KEYWORDS = /(?:^|[^\w$])(?:return|typeof|instanceof|in|of|new|delete|void|do|else|case|yield|await)$/u;
+  const opensRegex = (index, previous) => !/[A-Za-z0-9_$)\]]/u.test(previous)
+    || EXPRESSION_KEYWORDS.test(source.slice(Math.max(0, index - 12), index).trimEnd());
   let previous = '';
   for (let index = 0; index < source.length; index += 1) {
     const char = source[index];
@@ -126,7 +140,7 @@ export function maskLiterals(source) {
       index = end - 1;
       continue;
     }
-    if (char === '/' && !/[A-Za-z0-9_$)\]]/u.test(previous)) {
+    if (char === '/' && opensRegex(index, previous)) {
       let cursor = index + 1;
       let inClass = false;
       for (; cursor < source.length && source[cursor] !== '\n'; cursor += 1) {
@@ -142,11 +156,24 @@ export function maskLiterals(source) {
     }
     if (char === "'" || char === '"' || char === '`') {
       let cursor = index + 1;
+      let literalStart = cursor;
       for (; cursor < source.length; cursor += 1) {
         if (source[cursor] === '\\') { cursor += 1; continue; }
+        // A template's `${ … }` holds code, not text. Leaving it unmasked is what makes an
+        // interpolated fixture path such as `` `${root}/tmp-x-` `` fail closed rather than open.
+        if (char === '`' && source[cursor] === '$' && source[cursor + 1] === '{') {
+          blank(literalStart, cursor, 'x');
+          let depth = 0;
+          for (; cursor < source.length; cursor += 1) {
+            if (source[cursor] === '{') depth += 1;
+            else if (source[cursor] === '}' && (depth -= 1) === 0) break;
+          }
+          literalStart = cursor + 1;
+          continue;
+        }
         if (source[cursor] === char) break;
       }
-      blank(index + 1, cursor, 'x');
+      blank(literalStart, cursor, 'x');
       index = cursor;
       previous = char;
       continue;
@@ -216,10 +243,11 @@ export function findInCheckoutFixtureCalls(source) {
   for (const [name, destination] of FIXTURE_CREATING_CALLS) {
     for (const match of masked.matchAll(new RegExp(`\\b${name}\\(`, 'gu'))) {
       const open = match.index + name.length;
-      const maskedTarget = callArguments(callArgumentText(masked, open))[destination] ?? '';
+      const argument = argumentAt(callArgumentText(masked, open), callArgumentText(source, open), destination);
+      const maskedTarget = argument.masked;
       const viaRoot = rootReference.test(maskedTarget);
       if (!viaRoot && !(pathReference && pathReference.test(maskedTarget))) continue;
-      const target = callArguments(callArgumentText(source, open))[destination] ?? '';
+      const target = argument.raw;
       const inherited = viaRoot
         ? []
         : pathBindings.get([...pathBindings.keys()].find((key) => new RegExp(`\\b${key}\\b`, 'u').test(maskedTarget))) ?? [];
@@ -403,6 +431,54 @@ test('the mask survives quotes inside regex literals and comments', () => {
 
   const divided = "const half = (a + b) / 2; const other = c / 2;";
   assert.equal(maskLiterals(divided), divided, 'division must not be read as a regex literal');
+
+  // `return /…/` looks like division if only the previous character is consulted: `n` reads as an
+  // identifier. A quote inside such a regex would then open a phantom string over later calls.
+  const afterKeyword = [
+    "const root = resolve(import.meta.dirname, '../..');",
+    "const q = (name) => { return /['\"]/u.test(name); };",
+    "mkdtempSync(join(root, 'packages', '.tmp-after-return-regex-'));",
+  ].join('\n');
+  assert.deepEqual(
+    findInCheckoutFixtureCalls(afterKeyword).map(({ segments }) => segments),
+    [['packages', '.tmp-after-return-regex-']],
+  );
+});
+
+test('an interpolated in-checkout fixture path fails closed', () => {
+  // A template literal hides `root` inside the literal unless `${ … }` stays unmasked, and a
+  // fixture the scanner cannot see is a silently green gate. It must be reported with a null
+  // prefix instead, which the declaration gate rejects with a message naming the shape.
+  const interpolated = [
+    "const root = resolve(import.meta.dirname, '../..');",
+    'const fixture = mkdtempSync(`${root}/tmp-interpolated-`);',
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(interpolated), [{ call: 'mkdtempSync', segments: null }]);
+
+  const interpolatedTmpdir = ['const fixture = mkdtempSync(`${tmpdir()}/jinn-`);'].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(interpolatedTmpdir), []);
+});
+
+test('argument boundaries come from the masked copy, not the raw text', () => {
+  // A comma inside a string literal is a separator in the raw text but not the masked one.
+  // Splitting each independently would make `cpSync` read the wrong argument.
+  const source = [
+    "const root = resolve(import.meta.dirname, '../..');",
+    "cpSync(from, join(root, 'packages', '.tmp-copy-target-'), { recursive: true });",
+  ].join('\n');
+  assert.deepEqual(
+    findInCheckoutFixtureCalls(source).map(({ segments }) => segments),
+    [['packages', '.tmp-copy-target-']],
+  );
+
+  const commaInLiteral = [
+    "const root = resolve(import.meta.dirname, '../..');",
+    "cpSync('a, b', join(root, 'packages', '.tmp-comma-'), { recursive: true });",
+  ].join('\n');
+  assert.deepEqual(
+    findInCheckoutFixtureCalls(commaInLiteral).map(({ segments }) => segments),
+    [['packages', '.tmp-comma-']],
+  );
 });
 
 test('the gate rejects an in-checkout fixture that is not dot-prefixed', () => {
