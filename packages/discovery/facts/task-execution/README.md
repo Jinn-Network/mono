@@ -60,3 +60,14 @@ yarn pack:smoke
 
 See `docs/superpowers/plans/2026-07-28-record-discovery.md` (Task 24) and its Addendum
 2026-07-28-b for the implementation plan.
+
+## Join edges
+
+Facts profiles must declare their kind's complete outbound-reference set (record-discovery
+design §12, amendment 2026-08-28). `task.v2` adds the digest-pinned inputs; `delivery.v2` adds
+the outputs produced, the evidence records about the work, and the Delivery it replaces. A
+ResourceDescriptor satisfiable by `uri` or inline `content` alone pins nothing and is not an
+edge, so only digest-bearing members are carried.
+
+The plugin and checkpoint profiles stay empty: no defining schema for either exists in-tree, so
+there is nothing to declare, and an empty profile asserts nothing.

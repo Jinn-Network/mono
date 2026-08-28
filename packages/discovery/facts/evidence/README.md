@@ -33,3 +33,11 @@ yarn pack:smoke
 
 See `docs/superpowers/plans/2026-07-28-record-discovery.md` (Task 22) for the implementation
 plan.
+
+## Join edges
+
+Facts profiles must declare their kind's complete outbound-reference set (record-discovery
+design §12, amendment 2026-08-28). `execution-evidence.v3` adds the native trace the record
+pins; `result-evaluation.v3` and `execution-verification.v2` add the supersession and dispute
+edges, without which the evaluation lineage an index needs to pick the live verdict is
+unreachable from the feed. Every earlier revision stays frozen and registered.

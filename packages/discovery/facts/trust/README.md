@@ -29,3 +29,11 @@ yarn pack:smoke
 
 See `docs/superpowers/plans/2026-07-28-record-discovery.md` (Task 23) for the implementation
 plan.
+
+## Join edges
+
+Facts profiles must declare their kind's complete outbound-reference set (record-discovery
+design §12, amendment 2026-08-28). These three profiles already did at v1 — a key binding's
+`supersedes`, an authorization's `revocation`, a trust policy's `predecessor` are the whole set
+— so the audit that produced the other leaves' revisions left this leaf unchanged. Its
+`profiles.test.ts` pins that set, which is what keeps the claim true.

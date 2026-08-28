@@ -37,3 +37,16 @@ yarn pack:smoke
 
 See `docs/superpowers/plans/2026-07-28-benchmarking-application.md` (M6) for the implementation
 plan. Shipped-surface record: `docs/superpowers/specs/2026-07-28-benchmarking-implementation-addendum.md`.
+
+## Join edges
+
+Facts profiles must declare their kind's complete outbound-reference set (record-discovery
+design §12, amendment 2026-08-28). `benchmark.v2` adds the Tasks a benchmark is made of and its
+supersession pointer; `matrix.v2` adds the per-cell Task, Submission, Delivery and verdict
+digests that make a matrix the join table it already is in substance. Both coexist with v1,
+whose bytes stay frozen.
+
+These digests point into other record-kind trees, which this leaf cannot parse, so they are
+emitted from the record's own statement rather than through the fail-closed referenced-bytes
+path the same-tree digests use. Reference-bearing labels an indexing relation; it does not by
+itself promise the target is retrievable.
