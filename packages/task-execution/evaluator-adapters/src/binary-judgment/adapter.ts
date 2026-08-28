@@ -14,6 +14,8 @@ import {
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
   BINARY_JUDGMENT_EVALUATION_PARSER_SEALED,
+  BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY,
+  BINARY_JUDGMENT_EVALUATION_PARSER_V2_SEALED,
   BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE,
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
   BINARY_JUDGMENT_LABEL_RESOLUTION_MEDIA_TYPE,
@@ -68,6 +70,34 @@ export const BINARY_JUDGMENT_LABEL_RESOLUTION_NAME = "label-resolution.json" as 
 export const BINARY_JUDGMENT_EVALUATION_OUTCOME_PROTOCOL =
   "https://spec.jinn.network/binary-judgment/evaluation-outcome/v1" as const;
 
+export type BinaryJudgmentParserInvalidPolicy = "reject" | "abstain";
+
+function evaluationParserFor(policy: BinaryJudgmentParserInvalidPolicy) {
+  return policy === "abstain"
+    ? {
+      identity: BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY,
+      sealed: BINARY_JUDGMENT_EVALUATION_PARSER_V2_SEALED,
+    }
+    : {
+      identity: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
+      sealed: BINARY_JUDGMENT_EVALUATION_PARSER_SEALED,
+    };
+}
+
+/**
+ * The parser-invalid policy an EvaluationSpec actually seals, read off its sealed evaluation
+ * parser identity. `undefined` for any spec this evaluator does not serve.
+ */
+export function evaluationPolicyFromSpecification(
+  specification: EvaluationSpec,
+): BinaryJudgmentParserInvalidPolicy | undefined {
+  if (specification.family !== "deterministic-process") return undefined;
+  const parser = (specification.familyBlock as DeterministicProcessBlock).parser;
+  if (sameJson(parser, BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY)) return "reject";
+  if (sameJson(parser, BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY)) return "abstain";
+  return undefined;
+}
+
 export const BINARY_JUDGMENT_MEASUREMENTS = Object.freeze({
   judgeDecision: "judgeDecision",
   truthLabel: "truthLabel",
@@ -92,14 +122,71 @@ export function binaryJudgmentEvaluationSpecMeasurements(): EvaluationSpec["meas
   ];
 }
 
-export function binaryJudgmentEvaluationSpecVerdictRule(): EvaluationSpec["verdictRule"] {
-  return {
+/**
+ * The abstain policy's recorded-inconclusive class (§7.4). A judge response the sealed grammar
+ * refuses carries no decision at all, so the cell is recorded inconclusive rather than scored —
+ * that is the whole point of the neutral-invalid policy, and `EvaluationSpec.unscorable` is the
+ * only place the platform lets a spec say so.
+ */
+export const BINARY_JUDGMENT_UNPARSEABLE_RESPONSE_CLASS = "unparseable-judge-response" as const;
+
+/**
+ * The reject policy scores every response, so its rule stays the bare agreement threshold —
+ * byte-identical to what it has always been.
+ *
+ * The abstain policy additionally declares, in the closed verdict-rule vocabulary, the one
+ * situation in which there is nothing to score: `parseValid=false`. Without this node
+ * `evaluateVerdictRule` recomputes `fail` for an unparseable response, and the harness's own
+ * verdict-consistency check (§7.3/§7.4) refuses the adapter's `inconclusive` delivery — which is
+ * exactly how the official run lost cell 535. The shape follows the prediction evaluator's
+ * `market-unresolved` precedent: an `inconclusiveWhen` node naming a class declared in
+ * `unscorable`.
+ */
+export function binaryJudgmentEvaluationSpecVerdictRule(
+  parserInvalidPolicy: BinaryJudgmentParserInvalidPolicy = "reject",
+): EvaluationSpec["verdictRule"] {
+  const agreementThreshold = {
     threshold: {
       measurement: BINARY_JUDGMENT_MEASUREMENTS.agreement,
-      op: "eq",
+      op: "eq" as const,
       value: true,
     },
   };
+  if (parserInvalidPolicy !== "abstain") return agreementThreshold;
+  return {
+    // Clause ORDER is load-bearing. `evaluateVerdictRule`'s `all` evaluates clauses in order and
+    // short-circuits: a false clause returns `fail` before a later `inconclusiveWhen` can fire,
+    // and `agreement` is false whenever `parseValid` is false — so a threshold-first ordering
+    // would score every unparseable response `fail` and silently restore the cell-535 loss.
+    // Guard first, threshold second. The prediction evaluator's guard-second order is not a
+    // counter-example: its leading clause is independent of its guard's condition.
+    all: [
+      {
+        class: BINARY_JUDGMENT_UNPARSEABLE_RESPONSE_CLASS,
+        inconclusiveWhen: {
+          threshold: {
+            measurement: BINARY_JUDGMENT_MEASUREMENTS.parseValid,
+            op: "eq" as const,
+            value: false,
+          },
+        },
+      },
+      agreementThreshold,
+    ],
+  };
+}
+
+/** The reject policy declares none; the abstain policy declares its one recorded-inconclusive
+ * class, which is what makes an `inconclusive` delivery legal at all (§7.4). */
+export function binaryJudgmentEvaluationSpecUnscorable(
+  parserInvalidPolicy: BinaryJudgmentParserInvalidPolicy = "reject",
+): EvaluationSpec["unscorable"] {
+  return parserInvalidPolicy === "abstain"
+    ? [{
+      name: BINARY_JUDGMENT_UNPARSEABLE_RESPONSE_CLASS,
+      disposition: "recorded-inconclusive" as const,
+    }]
+    : [];
 }
 
 function bareSha256(digest: `sha256:${string}`, label: string): string {
@@ -118,13 +205,15 @@ function bareSha256(digest: `sha256:${string}`, label: string): string {
  */
 export function buildBinaryJudgmentEvaluationSpecification(
   analysisContextSha256: `sha256:${string}`,
+  parserInvalidPolicy: BinaryJudgmentParserInvalidPolicy = "reject",
 ): EvaluationSpec {
   const analysisContextDigest = bareSha256(
     analysisContextSha256,
     "binary judgment analysis context",
   );
+  const evaluationParser = evaluationParserFor(parserInvalidPolicy);
   const parserDigest = bareSha256(
-    BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest,
+    evaluationParser.identity.digest,
     "binary judgment evaluation parser",
   );
   return {
@@ -132,7 +221,7 @@ export function buildBinaryJudgmentEvaluationSpecification(
     semanticsVersion: EVAL_SEMANTICS_VERSION,
     family: "deterministic-process",
     grader: {
-      name: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.id,
+      name: evaluationParser.identity.id,
       digest: { sha256: parserDigest },
       accessClass: "public",
     },
@@ -149,23 +238,26 @@ export function buildBinaryJudgmentEvaluationSpecification(
         mediaType: BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
         accessClass: "private",
       }],
-      parser: { ...BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY },
+      parser: { ...evaluationParser.identity },
       transitions: { failToPass: [], passToPass: [] },
       timeout: 60,
     },
     measurements: binaryJudgmentEvaluationSpecMeasurements(),
-    verdictRule: binaryJudgmentEvaluationSpecVerdictRule(),
-    unscorable: [],
+    verdictRule: binaryJudgmentEvaluationSpecVerdictRule(parserInvalidPolicy),
+    unscorable: binaryJudgmentEvaluationSpecUnscorable(parserInvalidPolicy),
     evidenceConventions: { requiredRefs: [BINARY_JUDGMENT_LABEL_RESOLUTION_NAME] },
   };
 }
 
 /** The method bytes are the profiles-owned, code-free umbrella parser semantics. */
-export function binaryJudgmentEvaluationMethodDescriptor(): ResourceDescriptor {
+export function binaryJudgmentEvaluationMethodDescriptor(
+  parserInvalidPolicy: BinaryJudgmentParserInvalidPolicy = "reject",
+): ResourceDescriptor {
+  const evaluationParser = evaluationParserFor(parserInvalidPolicy);
   return {
     name: "binary-judgment-evaluation-parser-semantics.json",
     digest: {
-      sha256: BINARY_JUDGMENT_EVALUATION_PARSER_SEALED.digest.slice("sha256:".length),
+      sha256: evaluationParser.sealed.digest.slice("sha256:".length),
     },
     mediaType: "application/json",
   };
@@ -527,6 +619,15 @@ function requireJoinedInputs(options: {
     if (!matches) mismatch(`binary judgment digest join failed: ${label}`);
   }
 
+  const parserInvalidPolicy = evaluationPolicyFromSpecification(options.specification);
+  if (parserInvalidPolicy === undefined) {
+    mismatch("binary judgment EvaluationSpec parser identity is unsupported");
+  }
+  const expectedInvalidDecision = parserInvalidPolicy === "abstain" ? "INVALID" : "REJECT";
+  if (options.inputs.instrument.response.invalidOutputDecision !== expectedInvalidDecision) {
+    mismatch("binary judgment instrument invalid-output policy differs from its EvaluationSpec");
+  }
+
   const block = options.specification.familyBlock as DeterministicProcessBlock;
   const [analysisDescriptor] = block.testMaterial;
   if (digestFromDescriptor(analysisDescriptor) !== analysisContextDigest) {
@@ -537,6 +638,7 @@ function requireJoinedInputs(options: {
     observation,
     responseParse: selectBinaryJudgmentResponseParser(
       options.inputs.instrument.response.parser.id,
+      options.inputs.instrument.response.parser.version,
     )(options.results.response.bytes),
   };
 }
@@ -578,10 +680,10 @@ export function isBinaryJudgmentEvaluationSpecification(
     const block = specification.familyBlock as DeterministicProcessBlock;
     const analysisContextSha256 = exactAnalysisDescriptorDigest(block);
     if (analysisContextSha256 === undefined) return false;
-    return sameJson(
+    return (["reject", "abstain"] as const).some((policy) => sameJson(
       specification,
-      buildBinaryJudgmentEvaluationSpecification(analysisContextSha256),
-    );
+      buildBinaryJudgmentEvaluationSpecification(analysisContextSha256, policy),
+    ));
   } catch {
     return false;
   }
@@ -630,6 +732,16 @@ export function createBinaryJudgmentEvaluatorAdapter(
       });
       const truthLabel = inputs.analysisContext.truthLabel;
       const agreement = agrees(responseParse.decision, truthLabel);
+      const parserInvalidPolicy = evaluationPolicyFromSpecification(specification);
+      if (parserInvalidPolicy === undefined) {
+        operational({
+          canonicalCode: "FAILED_PRECONDITION",
+          reason: "unsupported-specification",
+          recoveryAdvice: "do-not-retry",
+          safeDetail: "the binary judgment EvaluationSpec parser identity is unsupported",
+        });
+      }
+      const evaluationParser = evaluationParserFor(parserInvalidPolicy);
       const instrumentSha256 = recordDigest(inputs.instrumentBytes);
       const labelResolutionSha256 = recordDigest(inputs.labelResolutionBytes);
       const measurements: EvaluationMeasurement[] = [
@@ -645,7 +757,7 @@ export function createBinaryJudgmentEvaluatorAdapter(
       return {
         detailedOutcome: {
           protocol: BINARY_JUDGMENT_EVALUATION_OUTCOME_PROTOCOL,
-          parser: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
+          parser: evaluationParser.identity,
           itemId: inputs.analysisContext.itemId,
           judgeDecision: responseParse.decision,
           truthLabel,
@@ -660,12 +772,16 @@ export function createBinaryJudgmentEvaluatorAdapter(
           labelResolutionSha256,
           instrumentSha256,
         },
-        verdict: agreement ? "pass" : "fail",
+        verdict: responseParse.parseValid || parserInvalidPolicy === "reject"
+          ? (agreement ? "pass" : "fail")
+          : "inconclusive",
         evaluatedAt: now().toISOString(),
         measurements,
-        explanation: agreement
-          ? "The parsed judge decision agrees with the admitted truth label."
-          : "The parsed judge decision disagrees with the admitted truth label.",
+        explanation: responseParse.parseValid || parserInvalidPolicy === "reject"
+          ? (agreement
+            ? "The parsed judge decision agrees with the admitted truth label."
+            : "The parsed judge decision disagrees with the admitted truth label.")
+          : "The judge response did not produce a substantive decision.",
         limitations: [...observation.limitations],
         claimEvidence: [{
           kind: "content",
@@ -709,12 +825,25 @@ export function validateBinaryJudgmentCompletedEvaluation(
   const judgeDecision = outcome["judgeDecision"];
   const truthLabel = outcome["truthLabel"];
   const agreement = outcome["agreement"];
+  const parserInvalidPolicy = sameJson(
+    outcome["parser"],
+    BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
+  )
+    ? "reject"
+    : sameJson(outcome["parser"], BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY)
+      ? "abstain"
+      : undefined;
+  const parseValid = outcome["parseValid"];
+  const expectedDecisionForInvalid = parserInvalidPolicy === "abstain" ? "INVALID" : "REJECT";
+  const expectedVerdict = parseValid === false
+    ? (parserInvalidPolicy === "abstain" ? "inconclusive" : agrees("REJECT", truthLabel as BinaryJudgmentTruthLabel) ? "pass" : "fail")
+    : agreement === true ? "pass" : "fail";
   if (
     outcome["protocol"] !== BINARY_JUDGMENT_EVALUATION_OUTCOME_PROTOCOL
-    || !sameJson(outcome["parser"], BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY)
-    || (judgeDecision !== "ACCEPT" && judgeDecision !== "REJECT")
+    || parserInvalidPolicy === undefined
+    || (judgeDecision !== "ACCEPT" && judgeDecision !== "REJECT" && judgeDecision !== "INVALID")
     || (truthLabel !== "CORRECT" && truthLabel !== "WRONG")
-    || typeof outcome["parseValid"] !== "boolean"
+    || typeof parseValid !== "boolean"
     || (outcome["truthAdmission"] !== "two-human-unanimous"
       && outcome["truthAdmission"] !== "operator-only"
       && outcome["truthAdmission"] !== "screened-operator-sampled")
@@ -729,9 +858,10 @@ export function validateBinaryJudgmentCompletedEvaluation(
     || !/^sha256:[0-9a-f]{64}$/u.test(outcome["labelResolutionSha256"] as string)
     || typeof outcome["instrumentSha256"] !== "string"
     || !/^sha256:[0-9a-f]{64}$/u.test(outcome["instrumentSha256"] as string)
-    || (outcome["parseValid"] === false && judgeDecision !== "REJECT")
+    || (parseValid === false && judgeDecision !== expectedDecisionForInvalid)
+    || (parseValid === true && judgeDecision === "INVALID")
     || agreement !== agrees(judgeDecision, truthLabel)
-    || evaluation.verdict !== (agreement ? "pass" : "fail")
+    || evaluation.verdict !== expectedVerdict
   ) {
     malformed("binary judgment detailedOutcome is internally inconsistent");
   }

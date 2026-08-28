@@ -6,6 +6,11 @@ name: jinn-agent CI
 # at all, and the entry hangs until the check-response timeout ejects it. A
 # filtered-out *job* reports success, which is what the queue needs
 # (DR-2026-08-18-b D3/D6).
+#
+# The vendored Hermes host is gone. This workflow keeps the exact required
+# context name `jinn-agent-gate` so the `next` ruleset does not need an admin
+# update. The remaining first-party proof is the frozen 0.1.2 cold-stock
+# journey under `plugin/scripts/`.
 on:
   pull_request:
   merge_group:
@@ -24,7 +29,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: apps/jinn-agent
+    working-directory: plugin/scripts
 
 jobs:
   changes:
@@ -35,9 +40,14 @@ jobs:
     name: jinn-agent-changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # checks: read feeds the push-lane dedup probe below (#2996). Job-level
+    # permissions replace the workflow grant, so contents: read is restated.
+    permissions:
+      contents: read
+      checks: read
     defaults:
       run:
-        # This job runs no agent command, and the workflow-level `apps/jinn-agent`
+        # This job runs no product command, and the workflow-level `plugin/scripts`
         # default would send its `git` calls into a subdirectory of the checkout.
         working-directory: .
     outputs:
@@ -61,6 +71,7 @@ jobs:
           MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
           PUSH_HEAD_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           case "${EVENT_NAME}" in
@@ -73,6 +84,26 @@ jobs:
               diff_head="${MG_HEAD_SHA}"
               ;;
             push)
+              # Dedup a queue landing: a completed successful WORKER check-run on
+              # this exact SHA (from its merge_group build) proves the lane already
+              # ran against this tree. Worker name, never the gate context - the
+              # gate is green even when selection skipped the worker. Rationale and
+              # fail-open rules: hermetic-gate.yml push arm (#2996).
+              if [ "${GITHUB_REF:-}" = 'refs/heads/next' ] && [ "${GITHUB_RUN_ATTEMPT:-1}" = '1' ]; then
+                verified="$(gh api -X GET "repos/${GITHUB_REPOSITORY:-}/commits/${GITHUB_SHA:-}/check-runs" \
+                  -f check_name='Cold-stock Stage 1 product gate' -f status=completed -f per_page=100 \
+                  --jq '[.check_runs[] | select(.conclusion == "success")] | length' \
+                  2>/dev/null || echo 0)"
+                case "${verified}" in
+                  *[!0-9]*|'') verified=0 ;;
+                esac
+                if [ "${verified}" -gt 0 ]; then
+                  echo "::notice::cold-stock worker already ran and passed on this SHA in its merge_group build; deduplicating the push-lane run (#2996)"
+                  echo 'run=false' >> "${GITHUB_OUTPUT}"
+                  exit 0
+                fi
+                echo "::notice::no completed successful worker check-run found on this SHA; falling through to the diff"
+              fi
               diff_base="${PUSH_BEFORE_SHA}"
               diff_head="${PUSH_HEAD_SHA}"
               ;;
@@ -102,8 +133,8 @@ jobs:
           # single `*` matches within one path segment, and a literal path is anchored
           # at both ends.
           patterns=(
-            '^apps/jinn-agent/'
             '^plugin/frozen/'
+            '^plugin/scripts/'
             '^packages/plugin/'
             '^packages/core/'
             '^packages/layer/'
@@ -134,157 +165,6 @@ jobs:
             echo 'run=false' >> "${GITHUB_OUTPUT}"
           fi
 
-  generate:
-    name: Generate test slices
-    needs: changes
-    if: >-
-      needs.changes.outputs.run == 'true' &&
-      (github.event_name == 'pull_request' ||
-      github.event_name == 'push' ||
-      github.event_name == 'merge_group')
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Restore duration cache
-        id: durations
-        uses: actions/cache/restore@v6
-        with:
-          path: apps/jinn-agent/test_durations.json
-          key: jinn-agent-test-durations-${{ github.run_id }}
-          restore-keys: |
-            jinn-agent-test-durations-
-
-      - name: Seed cold durations if cache miss
-        if: steps.durations.outputs.cache-hit != 'true'
-        working-directory: apps/jinn-agent
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          path = Path('test_durations.json')
-          data = {}
-          if path.is_file():
-              try:
-                  data = json.loads(path.read_text())
-              except json.JSONDecodeError:
-                  data = {}
-          # Cold seed: isolate the heavy acceptance gate under LPT on first runs.
-          data.setdefault(
-              'tests/dehermes/test_main_path_acceptance.py',
-              790.0,
-          )
-          path.write_text(json.dumps(data, indent=2, sort_keys=True) + '\n')
-          print(f'seeded {path} entries={len(data)}')
-          PY
-
-      - name: Generate test slices
-        id: matrix
-        working-directory: apps/jinn-agent
-        run: |
-          set -euo pipefail
-          # Same file set as the former two-step job, INCLUDING acceptance.
-          # Ubuntu runners have GNU paste; keep paste -sd: for CI parity with
-          # the previous workflow snippet.
-          FILES=$( {
-            find tests/hermes_cli tests/dehermes -name 'test_*.py'
-            find tests/plugins -maxdepth 1 -name 'test_jinn_*.py'
-            printf '%s\n' tests/scripts/test_clean_jinn_test_pollution.py
-          } | sort | paste -sd: )
-          MATRIX=$(python3 scripts/run_tests_parallel.py --files "$FILES" --generate-slices 4)
-          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
-
-  test:
-    name: Test slice ${{ matrix.slice.index }}/4
-    if: >-
-      needs.changes.outputs.run == 'true' &&
-      (github.event_name == 'pull_request' ||
-      github.event_name == 'push' ||
-      github.event_name == 'merge_group')
-    needs: [changes, generate]
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.generate.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # 10.0.1
-        with:
-          enable-cache: true
-          cache-dependency-glob: |
-            apps/jinn-agent/pyproject.toml
-            apps/jinn-agent/uv.lock
-
-      - name: Set up Python 3.11
-        working-directory: apps/jinn-agent
-        run: uv python install 3.11
-
-      - name: Install dependencies
-        uses: ./apps/jinn-agent/.github/actions/retry
-        with:
-          working-directory: apps/jinn-agent
-          command: uv sync --locked --python 3.11 --extra all --extra dev
-
-      - name: Minimize uv cache
-        working-directory: apps/jinn-agent
-        run: uv cache prune --ci
-
-      - name: Run tests (slice ${{ matrix.slice.index }}/4)
-        # Per-file isolation via scripts/run_tests.sh. File list comes from
-        # generate (--generate-slices + --files); no solo acceptance step.
-        run: |
-          source .venv/bin/activate
-          ./scripts/run_tests.sh --files '${{ matrix.slice.files }}' -j 4 --file-timeout 1200 -q
-        env:
-          OPENROUTER_API_KEY: ""
-          OPENAI_API_KEY: ""
-          NOUS_API_KEY: ""
-
-      - name: Upload per-slice durations
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-durations-slice-${{ matrix.slice.index }}
-          path: apps/jinn-agent/test_durations.json
-          retention-days: 1
-          if-no-files-found: warn
-
-  save-durations:
-    name: Save merged test durations
-    needs: [changes, test]
-    if: >-
-      needs.changes.outputs.run == 'true' &&
-      needs.test.result == 'success' &&
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/next' || github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: .   # override workflow default (apps/jinn-agent)
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Download all slice durations
-        uses: actions/download-artifact@v8
-        with:
-          pattern: test-durations-slice-*
-          path: durations
-
-      - name: Merge into single durations file
-        run: >-
-          python3 apps/jinn-agent/scripts/merge_test_durations.py
-          durations apps/jinn-agent/test_durations.json
-
-      - name: Save merged duration cache
-        uses: actions/cache/save@v6
-        with:
-          path: apps/jinn-agent/test_durations.json
-          key: jinn-agent-test-durations-${{ github.run_id }}
-
   cold-stock-e2e:
     name: Cold-stock Stage 1 product gate
     needs: changes
@@ -299,6 +179,9 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'merge_group' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'main'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: .
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -341,21 +224,21 @@ jobs:
       - name: Pinned stock-Hermes Stage 1 product journey
         env:
           JINN_STAGE1_SKIP_CLIENT_BUILD: '1'
-        run: bash scripts/cold-stock-e2e.sh
+        run: bash plugin/scripts/cold-stock-e2e.sh
 
   jinn-agent-gate:
     # The check-run name GitHub reports is this job's display `name:` below, and that
     # string is the required-status-check context registered on the `next` ruleset
     # (DR-2026-08-18-b D3) — keep them in sync.
     name: jinn-agent-gate
-    needs: [changes, generate, test, save-durations, cold-stock-e2e]
+    needs: [changes, cold-stock-e2e]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
       run:
-        # This job never checks out, so the workflow-level `apps/jinn-agent` default
-        # would point every `run:` step at a directory that does not exist.
+        # This job never checks out, so the workflow-level `plugin/scripts` default
+        # would point every `run:` step at a directory that does not exist here.
         working-directory: .
     steps:
       - name: Require exact success from every selected jinn-agent job
@@ -367,17 +250,11 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           SELECTED: ${{ needs.changes.outputs.run }}
           CHANGES_RESULT: ${{ needs.changes.result }}
-          GENERATE_RESULT: ${{ needs.generate.result }}
-          # A matrix job's `result` is the aggregate over its slices: `success` only
-          # when every slice passed. `save-durations` has always relied on that.
-          TEST_RESULT: ${{ needs.test.result }}
-          SAVE_DURATIONS_RESULT: ${{ needs.save-durations.result }}
           COLD_STOCK_RESULT: ${{ needs.cold-stock-e2e.result }}
         run: |
           set -euo pipefail
           echo "event=${EVENT_NAME} ref=${REF} selected=${SELECTED} changes=${CHANGES_RESULT}"
-          echo "generate=${GENERATE_RESULT} test=${TEST_RESULT}"
-          echo "save-durations=${SAVE_DURATIONS_RESULT} cold-stock-e2e=${COLD_STOCK_RESULT}"
+          echo "cold-stock-e2e=${COLD_STOCK_RESULT}"
           test "${CHANGES_RESULT}" = success
           # The selection is read from a job output, which is the empty string when the
           # select step never wrote one. Empty must never be read as "unselected", or a
@@ -389,18 +266,6 @@ jobs:
               exit 1
               ;;
           esac
-          # The slice jobs carry their own event gate: they run on pull_request, push,
-          # and merge_group, and never on the nightly schedule or a manual dispatch.
-          slice_expected=skipped
-          case "${EVENT_NAME}" in
-            pull_request|push|merge_group)
-              if [ "${SELECTED}" = true ]; then
-                slice_expected=success
-              fi
-              ;;
-          esac
-          test "${GENERATE_RESULT}" = "${slice_expected}"
-          test "${TEST_RESULT}" = "${slice_expected}"
           # The cold-stock gate runs on every event this workflow accepts EXCEPT
           # queue-bound pull_request, where the fast PR lane moves its 60-minute
           # journey onto the merge group (DR-2026-08-18-b D3). PRs targeting `main`
@@ -422,11 +287,3 @@ jobs:
               ;;
           esac
           test "${COLD_STOCK_RESULT}" = "${cold_expected}"
-          # Duration-cache writes are push-only by design.
-          durations_expected=skipped
-          if [ "${SELECTED}" = true ] \
-            && [ "${EVENT_NAME}" = push ] \
-            && { [ "${REF}" = refs/heads/next ] || [ "${REF}" = refs/heads/main ]; }; then
-            durations_expected=success
-          fi
-          test "${SAVE_DURATIONS_RESULT}" = "${durations_expected}"

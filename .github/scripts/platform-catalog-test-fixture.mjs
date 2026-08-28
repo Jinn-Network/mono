@@ -92,7 +92,6 @@ export function fixtureCatalog() {
     publishPolicy: 'independent',
   }));
   const otherPackages = [
-    ['@jinn-network/autopilot', 'packages/autopilot', 4, 'product', 'private'],
     ['@jinn-network/indexer', 'packages/indexer', null, 'transitional', 'never'],
     ['@jinn-network/indexer-enrichment', 'packages/indexer-enrichment', null, 'product-support', 'never'],
     ['@jinn-network/explorer-spa', 'packages/indexer/explorer', 4, 'product', 'private'],
@@ -155,7 +154,7 @@ export function fixtureCatalog() {
         stable: false,
       },
       'transitional-or-private': {
-        expectedPackageCount: 7,
+        expectedPackageCount: 6,
         publishPolicies: ['private', 'never'],
         requiredGateIds: ['fixture-ci'],
         allowedClassifications: ['product', 'product-support', 'repository-tooling', 'transitional'],

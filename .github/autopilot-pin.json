@@ -1,0 +1,6 @@
+{
+  "repository": "Jinn-Network/autopilot",
+  "sha": "30b53ae99316e1a5256a57bab0ed88d62266e93f",
+  "committedAt": "2026-08-07T15:39:06Z",
+  "note": "Exact pin for mono board-painter and documented session resolution. Do not float to a branch. Unpublished npm @jinn-network/autopilot is not a gate."
+}

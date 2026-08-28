@@ -236,15 +236,71 @@ export function maskRpcHost(url: string): string {
 }
 
 /**
- * Redact any `http(s)://` URL embedded in an arbitrary error message down to
- * its hostname (via {@link maskRpcHost}). `maskRpcHost` itself only covers
- * the boot/preflight *log* path (its three existing call sites); this is the
- * companion used on the API-response / receipt-persistence path, where a
- * failing paid RPC (key-in-path) would otherwise leak its key through a
- * viem `HttpRequestError`-shaped message (spec §14.2 item 2, issue #2402).
+ * Redact any `http(s)://` or `ws(s)://` URL embedded in an arbitrary error
+ * message down to its hostname (via {@link maskRpcHost}). `maskRpcHost`
+ * itself only covers the boot/preflight *log* path (its three existing call
+ * sites); this is the companion used on the API-response /
+ * receipt-persistence path, where a failing paid RPC (key-in-path) would
+ * otherwise leak its key through a viem `HttpRequestError`-shaped message
+ * (spec §14.2 item 2, issue #2402).
+ *
+ * WebSocket schemes are covered because a `wss://` endpoint carries the same
+ * key-in-userinfo/path/query shape and no scheme normalisation happens before
+ * an error message is built (#3035).
+ *
+ * Protocol-relative `//host/path` is deliberately *not* matched. A bare `//`
+ * in free text is not reliably a URL (doubled path separators, comment
+ * markers), it carries no scheme for `new URL` to parse without inventing a
+ * base, and a scheme-less slot cannot reach a live transport — viem's
+ * `http()` requires an absolute http(s) URL. Matching it would buy a
+ * false-positive rate against a leak that cannot occur.
  */
 export function maskUrlsInMessage(message: string): string {
-  return message.replace(/https?:\/\/\S+/g, (url) => maskRpcHost(url));
+  return message.replace(/(?:https?|wss?):\/\/[^\s"'<>]+/gi, (url) => maskRpcHost(url));
+}
+
+/**
+ * Shared persistence/emission sanitizer for RPC-derived error text (#642).
+ * Walks `Error.cause` so nested viem HttpRequestError URLs cannot bypass
+ * {@link maskUrlsInMessage}. Uses the same host-only dialect — no second
+ * redaction vocabulary.
+ */
+export function sanitizeErrorText(input: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let cursor: unknown = input;
+  while (cursor !== undefined && cursor !== null && !seen.has(cursor)) {
+    seen.add(cursor);
+    if (cursor instanceof Error) {
+      const text = cursor.message.trim() || cursor.name;
+      if (text) parts.push(maskUrlsInMessage(text));
+      cursor = cursor.cause;
+      continue;
+    }
+    parts.push(maskUrlsInMessage(String(cursor)));
+    break;
+  }
+  return parts.join(' caused by: ');
+}
+
+export function sanitizePersistedText(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  return maskUrlsInMessage(value);
+}
+
+export function sanitizeStructuredValue(value: unknown, depth = 0): unknown {
+  if (depth > 6) return '[truncated]';
+  if (typeof value === 'string') return maskUrlsInMessage(value);
+  if (value instanceof Error) return sanitizeErrorText(value);
+  if (Array.isArray(value)) return value.map((entry) => sanitizeStructuredValue(entry, depth + 1));
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      out[key] = sanitizeStructuredValue(entry, depth + 1);
+    }
+    return out;
+  }
+  return value;
 }
 
 export interface BuildFallbackTransportOptions {

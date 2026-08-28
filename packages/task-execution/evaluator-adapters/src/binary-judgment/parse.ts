@@ -1,26 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure implementations of the five closed response-parser contracts sealed under the
+ * Pure implementations of the closed response-parser contracts sealed under the
  * `network.jinn.parser.binary-*` identities (profiles `binary-judgment/contracts.ts`). There is
- * deliberately no locale, Unicode normalization, regular-expression whitespace class, model
- * call, or clock anywhere in this file.
+ * deliberately no locale-sensitive API, Unicode normalization, model call, or clock anywhere
+ * in this file. The two source-derived extractors retain their published `\s` regular-expression
+ * behavior as part of their sealed contracts.
  */
 import {
   BINARY_ACCEPT_REJECT_PARSER_ID,
+  BINARY_COMPLETE_JSON_LABEL_PARSER_ID,
+  BINARY_COMPLETE_JSON_LABEL_PARSER_V2_VERSION,
   BINARY_CORRECT_WRONG_PARSER_ID,
+  BINARY_EVERMEM_JSON_LABEL_PARSER_ID,
+  BINARY_EVERMEM_JSON_LABEL_PARSER_V2_VERSION,
   BINARY_JSON_VERDICT_PARSER_ID,
   BINARY_LABEL_IN_PROSE_PARSER_ID,
+  BINARY_MEM0_JSON_LABEL_PARSER_ID,
+  BINARY_MEM0_JSON_LABEL_PARSER_V2_VERSION,
+  BINARY_STRICT_JSON_LABEL_PARSER_ID,
+  BINARY_STRICT_JSON_LABEL_PARSER_V2_VERSION,
   BINARY_YES_NO_PARSER_ID,
   type BinaryJudgmentResponseParserId,
 } from "@jinn-network/task-execution-profiles";
 
 const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
-export type BinaryJudgmentDecision = "ACCEPT" | "REJECT";
+export type BinaryJudgmentDecision = "ACCEPT" | "REJECT" | "INVALID";
 
 export interface BinaryJudgmentResponseParse {
-  /** Invalid delivered output deterministically maps to REJECT. */
+  /** V1 parsers map invalid output to REJECT; neutral v2 parsers return INVALID. */
   readonly decision: BinaryJudgmentDecision;
   /** Distinguishes an actual REJECT token from the invalid-output fallback. */
   readonly parseValid: boolean;
@@ -46,6 +55,10 @@ function invalidUtf8(): BinaryJudgmentResponseParse {
 
 function unexpectedToken(): BinaryJudgmentResponseParse {
   return { decision: "REJECT", parseValid: false, invalidReason: "unexpected-token" };
+}
+
+function neutralInvalid(parse: BinaryJudgmentResponseParse): BinaryJudgmentResponseParse {
+  return parse.parseValid ? parse : { ...parse, decision: "INVALID" };
 }
 
 function decodeStrictUtf8(bytes: Uint8Array): string | undefined {
@@ -178,6 +191,154 @@ export function parseBinaryJsonVerdictResponse(bytes: Uint8Array): BinaryJudgmen
   return unexpectedToken();
 }
 
+function parseObjectRoot(text: string): Record<string, unknown> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : undefined;
+}
+
+/**
+ * Accept either a complete bare JSON response or one exact outer Markdown fence. The fence must
+ * be untyped or lowercase `json`, occupy its own opening and closing lines, and be the entire
+ * edge-trimmed response. Surrounding prose and multiple outer fences are therefore refused.
+ */
+function extractExactOptionalJsonFence(text: string): string | undefined {
+  const trimmed = trimBinaryJudgmentResponseEdges(text);
+  if (!trimmed.startsWith("```")) return trimmed;
+  const match = /^```(?:json)?\r?\n([\s\S]*)\r?\n```$/u.exec(trimmed);
+  return match?.[1];
+}
+
+function labelDecision(accepted: boolean): BinaryJudgmentResponseParse {
+  return { decision: accepted ? "ACCEPT" : "REJECT", parseValid: true };
+}
+
+/** Backboard/revised-family complete-JSON parser. */
+export function parseBinaryCompleteJsonLabelResponse(
+  bytes: Uint8Array,
+): BinaryJudgmentResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return invalidUtf8();
+  const parsed = parseObjectRoot(decoded);
+  if (parsed === undefined) return unexpectedToken();
+  const label = Object.hasOwn(parsed, "label") ? parsed["label"] : "WRONG";
+  if (typeof label !== "string") return unexpectedToken();
+  return labelDecision(label.toUpperCase() === "CORRECT");
+}
+
+function extractEvermemJson(text: string): string {
+  const fenced = /```(?:json)?\s*(\{[^`]*\})\s*```/s.exec(text);
+  if (fenced?.[1] !== undefined) return fenced[1];
+  const flat = /\{[^{}]*"label"\s*:\s*"[^"]*"[^{}]*\}/s.exec(text);
+  return flat?.[0] ?? text.trim();
+}
+
+/** EverMemOS-family fenced/flat/complete JSON extraction and label comparison. */
+export function parseBinaryEvermemJsonLabelResponse(
+  bytes: Uint8Array,
+): BinaryJudgmentResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return invalidUtf8();
+  const parsed = parseObjectRoot(extractEvermemJson(decoded));
+  if (parsed === undefined) return unexpectedToken();
+  const label = parsed["label"];
+  if (typeof label !== "string" || label.length === 0) return unexpectedToken();
+  return labelDecision(label.trim().toUpperCase() === "CORRECT");
+}
+
+function extractMem0Json(text: string): string {
+  const trimmed = text.trim();
+  const fenced = /```(?:json)?\s*(.*?)\s*```/s.exec(trimmed);
+  return fenced?.[1] ?? trimmed;
+}
+
+/** Mem0 extract_json behavior and exact label comparison. */
+export function parseBinaryMem0JsonLabelResponse(
+  bytes: Uint8Array,
+): BinaryJudgmentResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return invalidUtf8();
+  const parsed = parseObjectRoot(extractMem0Json(decoded));
+  if (parsed === undefined || !Object.hasOwn(parsed, "label")) return unexpectedToken();
+  return labelDecision(parsed["label"] === "CORRECT");
+}
+
+/** Project-declared strict-dial complete JSON contract. */
+export function parseBinaryStrictJsonLabelResponse(
+  bytes: Uint8Array,
+): BinaryJudgmentResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return invalidUtf8();
+  const parsed = parseObjectRoot(decoded);
+  if (parsed === undefined) return unexpectedToken();
+  const memberNames = rootObjectMemberNames(decoded);
+  if (
+    memberNames.length !== 2
+    || memberNames.filter((name) => name === "label").length !== 1
+    || memberNames.filter((name) => name === "reasoning").length !== 1
+  ) return unexpectedToken();
+  if (typeof parsed["label"] !== "string" || typeof parsed["reasoning"] !== "string") {
+    return unexpectedToken();
+  }
+  if (parsed["label"] === "CORRECT") return labelDecision(true);
+  if (parsed["label"] === "WRONG") return labelDecision(false);
+  return unexpectedToken();
+}
+
+function parseBinaryCompleteJsonLabelV2Response(
+  bytes: Uint8Array,
+): BinaryJudgmentResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return neutralInvalid(invalidUtf8());
+  const extracted = extractExactOptionalJsonFence(decoded);
+  if (extracted === undefined) return neutralInvalid(unexpectedToken());
+  return neutralInvalid(parseBinaryCompleteJsonLabelResponse(new TextEncoder().encode(extracted)));
+}
+
+function parseBinaryEvermemJsonLabelV2Response(
+  bytes: Uint8Array,
+): BinaryJudgmentResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return neutralInvalid(invalidUtf8());
+  const extracted = extractExactOptionalJsonFence(decoded);
+  if (extracted === undefined) return neutralInvalid(unexpectedToken());
+  const parsed = parseObjectRoot(extracted);
+  if (parsed === undefined) return neutralInvalid(unexpectedToken());
+  const label = parsed["label"];
+  if (typeof label !== "string" || label.length === 0) return neutralInvalid(unexpectedToken());
+  return labelDecision(label.trim().toUpperCase() === "CORRECT");
+}
+
+function parseBinaryMem0JsonLabelV2Response(
+  bytes: Uint8Array,
+): BinaryJudgmentResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return neutralInvalid(invalidUtf8());
+  const extracted = extractExactOptionalJsonFence(decoded);
+  if (extracted === undefined) return neutralInvalid(unexpectedToken());
+  const parsed = parseObjectRoot(extracted);
+  if (parsed === undefined || !Object.hasOwn(parsed, "label")) {
+    return neutralInvalid(unexpectedToken());
+  }
+  return labelDecision(parsed["label"] === "CORRECT");
+}
+
+function parseBinaryStrictJsonLabelV2Response(
+  bytes: Uint8Array,
+): BinaryJudgmentResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return neutralInvalid(invalidUtf8());
+  const extracted = extractExactOptionalJsonFence(decoded);
+  if (extracted === undefined) return neutralInvalid(unexpectedToken());
+  return neutralInvalid(parseBinaryStrictJsonLabelResponse(new TextEncoder().encode(extracted)));
+}
+
 function isAsciiWordCharCode(codeUnit: number): boolean {
   return (codeUnit >= 0x41 && codeUnit <= 0x5a) // A-Z
     || (codeUnit >= 0x61 && codeUnit <= 0x7a) // a-z
@@ -227,11 +388,24 @@ export const BINARY_JUDGMENT_RESPONSE_PARSERS: Record<
   (bytes: Uint8Array) => BinaryJudgmentResponseParse
 > = {
   [BINARY_ACCEPT_REJECT_PARSER_ID]: parseBinaryJudgmentResponse,
+  [BINARY_COMPLETE_JSON_LABEL_PARSER_ID]: parseBinaryCompleteJsonLabelResponse,
   [BINARY_CORRECT_WRONG_PARSER_ID]: parseBinaryCorrectWrongResponse,
+  [BINARY_EVERMEM_JSON_LABEL_PARSER_ID]: parseBinaryEvermemJsonLabelResponse,
   [BINARY_JSON_VERDICT_PARSER_ID]: parseBinaryJsonVerdictResponse,
   [BINARY_LABEL_IN_PROSE_PARSER_ID]: parseBinaryLabelInProseResponse,
+  [BINARY_MEM0_JSON_LABEL_PARSER_ID]: parseBinaryMem0JsonLabelResponse,
+  [BINARY_STRICT_JSON_LABEL_PARSER_ID]: parseBinaryStrictJsonLabelResponse,
   [BINARY_YES_NO_PARSER_ID]: parseBinaryYesNoResponse,
 };
+
+const BINARY_JUDGMENT_NEUTRAL_RESPONSE_PARSERS = new Map<string, (
+  bytes: Uint8Array,
+) => BinaryJudgmentResponseParse>([
+  [`${BINARY_COMPLETE_JSON_LABEL_PARSER_ID}@${BINARY_COMPLETE_JSON_LABEL_PARSER_V2_VERSION}`, parseBinaryCompleteJsonLabelV2Response],
+  [`${BINARY_EVERMEM_JSON_LABEL_PARSER_ID}@${BINARY_EVERMEM_JSON_LABEL_PARSER_V2_VERSION}`, parseBinaryEvermemJsonLabelV2Response],
+  [`${BINARY_MEM0_JSON_LABEL_PARSER_ID}@${BINARY_MEM0_JSON_LABEL_PARSER_V2_VERSION}`, parseBinaryMem0JsonLabelV2Response],
+  [`${BINARY_STRICT_JSON_LABEL_PARSER_ID}@${BINARY_STRICT_JSON_LABEL_PARSER_V2_VERSION}`, parseBinaryStrictJsonLabelV2Response],
+]);
 
 /**
  * The instrument's `response.parser.id` selects one registered response parser; this function
@@ -239,6 +413,10 @@ export const BINARY_JUDGMENT_RESPONSE_PARSERS: Record<
  */
 export function selectBinaryJudgmentResponseParser(
   id: BinaryJudgmentResponseParserId,
+  version = "1.0.0",
 ): (bytes: Uint8Array) => BinaryJudgmentResponseParse {
-  return BINARY_JUDGMENT_RESPONSE_PARSERS[id];
+  const neutral = BINARY_JUDGMENT_NEUTRAL_RESPONSE_PARSERS.get(`${id}@${version}`);
+  if (neutral !== undefined) return neutral;
+  if (version === "1.0.0") return BINARY_JUDGMENT_RESPONSE_PARSERS[id];
+  throw new TypeError(`unsupported binary judgment response parser ${id}@${version}`);
 }

@@ -204,6 +204,64 @@ describe("reduceBinaryInstrumentReplicates", () => {
     expect(result.items[1]!.calls.map((call) => call.replicate)).toEqual([1, 2, 3]);
   });
 
+  test("admits two matching valid votes when the third response is parser-invalid under abstain", () => {
+    const matrix = matrixFixture({ tasks: [TASK_A], arms: ["armA"] });
+    const invalid = cellKey(TASK_A, "armA", 3);
+    const cells = decisiveInputs(matrix).map((value) => value.cellKey === invalid
+      ? { ...value, verdict: "inconclusive" as const, judgeDecision: null, parseValid: false }
+      : value);
+    const result = reduceBinaryInstrumentReplicates({
+      ...reductionInput(matrix, cells),
+      parserInvalidPolicy: "abstain",
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ decision: "ACCEPT", accepted: 2, rejected: 0 });
+    expect(result.items[0]!.calls).toHaveLength(3);
+    expect(result.evaluatedCalls.find((call) => call.cellKey === invalid)).toMatchObject({
+      verdict: "inconclusive",
+      judgeDecision: null,
+      parseValid: false,
+    });
+    expect(result.excluded).toEqual([]);
+  });
+
+  test("excludes one ACCEPT, one REJECT, and one parser-invalid response for no valid majority", () => {
+    const matrix = matrixFixture({ tasks: [TASK_A], arms: ["armA"] });
+    const reject = cellKey(TASK_A, "armA", 2);
+    const invalid = cellKey(TASK_A, "armA", 3);
+    const cells = decisiveInputs(matrix).map((value) => {
+      if (value.cellKey === reject) return { ...value, verdict: "fail" as const, judgeDecision: "REJECT" as const };
+      if (value.cellKey === invalid) return { ...value, verdict: "inconclusive" as const, judgeDecision: null, parseValid: false };
+      return value;
+    });
+    const result = reduceBinaryInstrumentReplicates({
+      ...reductionInput(matrix, cells),
+      parserInvalidPolicy: "abstain",
+    });
+
+    expect(result.items).toEqual([]);
+    expect(result.excluded).toEqual([expect.objectContaining({
+      taskDigest: TASK_A,
+      armId: "armA",
+      reasons: [{ reason: "no-valid-majority", cellKeys: expect.any(Array) }],
+    })]);
+    expect(result.evaluatedCalls).toHaveLength(3);
+  });
+
+  test("preserves legacy parser-invalid-as-REJECT behavior when no abstain policy is selected", () => {
+    const matrix = matrixFixture({ tasks: [TASK_A], arms: ["armA"] });
+    const invalid = cellKey(TASK_A, "armA", 3);
+    const cells = decisiveInputs(matrix).map((value) => value.cellKey === invalid
+      ? { ...value, verdict: "fail" as const, judgeDecision: "REJECT" as const, parseValid: false }
+      : value);
+    const result = reduceBinaryInstrumentReplicates(reductionInput(matrix, cells));
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ decision: "ACCEPT", accepted: 2, rejected: 1, unstable: true });
+    expect(result.excluded).toEqual([]);
+  });
+
   test("sorts nonjudged, missing, inconclusive, and conflicted exclusions with exact cell keys", () => {
     const nonjudged = cellKey(TASK_A, "armA", 1);
     const conflict = cellKey(TASK_B, "armA", 2);

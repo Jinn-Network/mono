@@ -77,7 +77,7 @@ with an explicit shipped/deferred GUI disposition:
 | `publicationReport` | `colophon publication report` | Produce, verify, and publish the signed Report v2 envelope from the accounting closure. |
 | `runCancel` | `colophon cancel` | Durably request or finalize cancellation. |
 | `runCollect` | `colophon collect` | Seal the terminal Matrix. |
-| `runLaunch` | `colophon launch` | Drive the real local venue. |
+| `runLaunch` | `colophon launch` | Drive the real local venue, serially by default or with `--concurrency 1-32`. |
 | `runLock` | `colophon lock` | Seal the preregistered Run. |
 | `runAnchor` | `colophon anchor` | Obtain, verify, and store third-party time evidence over the sealed Run or Matrix digest. |
 | `runPreview` | `colophon preview` | Run a disclosed, non-official rehearsal. |
@@ -85,7 +85,7 @@ with an explicit shipped/deferred GUI disposition:
 | `runQuote` | `colophon quote` | Present size, coverage, cap, and honest estimates. |
 | `runReport` | `colophon report` | Produce the signed Report and claim package. |
 | `runResults` | `colophon results` | Read the sealed Matrix result projection. |
-| `runResume` | `colophon resume` | Resume only outstanding real-venue work. |
+| `runResume` | `colophon resume` | Resume only outstanding real-venue work with the same optional concurrency bound. |
 | `runStatus` | `colophon status` | Read durable per-cell and driver status. |
 | `runVerify` | `colophon verify` | Re-derive Matrix, Report, and claim consistency. |
 | `sampleInit` | `colophon sample init` | Attach the bundled three-task benchmark. |

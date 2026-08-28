@@ -23,18 +23,16 @@ node_modules/
 .claude/*
 !.claude/skills/
 
-# Beads / Dolt files (added by bd init)
-.beads
-.beads.pre-helm-*/
-.dolt/
 *.db
-.beads-credential-key
 
 # Per-operator dev helpers (not collaborative)
 operator/start-daemon.sh
 
 # Per-operator Claude context (personal profile, not collaborative)
 CLAUDE.local.md
+
+# Standalone Autopilot CLI operator config (<repo>/.autopilot/config.json) — per-machine, never committed
+.autopilot/
 
 # macOS
 .DS_Store

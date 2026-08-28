@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { loadoutPath } from "./planning.js";
+import { baseEnv, loadoutPath } from "./planning.js";
+import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 
 const paths = { input: "/attempt/input" } as WorkspacePaths;
@@ -25,4 +26,19 @@ describe("loadoutPath", () => {
       }), paths)).toThrow("contained");
     },
   );
+});
+
+describe("baseEnv", () => {
+  // `os.tmpdir()` reads TMPDIR on POSIX and TEMP/TMP on Windows, and Python's `tempfile` consults
+  // all three everywhere. Pinning only the POSIX name sends a child that reads either of the other
+  // two to the platform default, outside the attempt directory the backend collects and sweeps.
+  test("pins all three temp names at the attempt tmp directory", () => {
+    const env = baseEnv(
+      { input: "/attempt/input", out: "/attempt/out", logs: "/attempt/logs", meta: "/attempt/meta", tmp: "/attempt/tmp" } as WorkspacePaths,
+      { attemptUri: "urn:jinn:attempt:test", nonce: "n", attemptNumber: 1 } as unknown as AttemptIdentity,
+    );
+    expect(env.TMPDIR).toBe("/attempt/tmp");
+    expect(env.TMP).toBe("/attempt/tmp");
+    expect(env.TEMP).toBe("/attempt/tmp");
+  });
 });

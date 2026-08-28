@@ -10,6 +10,7 @@ import {
   BINARY_CORRECT_WRONG_PARSER,
   BINARY_JSON_VERDICT_PARSER,
   BINARY_JUDGMENT_PARSER,
+  BINARY_JUDGMENT_PARSER_V2,
   BINARY_LABEL_IN_PROSE_PARSER,
   BINARY_YES_NO_PARSER,
   evaluatorAdaptersParserAllowlist,
@@ -71,10 +72,11 @@ describe("parser identities", () => {
     },
   );
 
-  test("the deployment allowlist carries exactly the seven parser keys", () => {
+  test("the deployment allowlist carries exactly the supported parser keys", () => {
     expect([...evaluatorAdaptersParserAllowlist()].sort()).toEqual(
       [
         parserAllowlistKey(BINARY_JUDGMENT_PARSER),
+        parserAllowlistKey(BINARY_JUDGMENT_PARSER_V2),
         parserAllowlistKey(BINARY_YES_NO_PARSER),
         parserAllowlistKey(BINARY_CORRECT_WRONG_PARSER),
         parserAllowlistKey(BINARY_JSON_VERDICT_PARSER),

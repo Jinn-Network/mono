@@ -7,6 +7,7 @@ import {
   BINARY_CORRECT_WRONG_PARSER_IDENTITY,
   BINARY_JSON_VERDICT_PARSER_IDENTITY,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
+  BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY,
   BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
   BINARY_YES_NO_PARSER_IDENTITY,
   parserAllowlistKey,
@@ -46,6 +47,9 @@ export const PREDICTION_PARSER: ParserIdentity = Object.freeze({
 export const BINARY_JUDGMENT_PARSER: ParserIdentity = Object.freeze({
   ...BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
 });
+export const BINARY_JUDGMENT_PARSER_V2: ParserIdentity = Object.freeze({
+  ...BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY,
+});
 
 /**
  * These four identities are, like `BINARY_JUDGMENT_PARSER` above, generated and sealed by the
@@ -73,6 +77,7 @@ export const BINARY_LABEL_IN_PROSE_PARSER: ParserIdentity = Object.freeze({
 export function evaluatorAdaptersParserAllowlist(): ReadonlySet<string> {
   return new Set([
     parserAllowlistKey(BINARY_JUDGMENT_PARSER),
+    parserAllowlistKey(BINARY_JUDGMENT_PARSER_V2),
     parserAllowlistKey(BINARY_YES_NO_PARSER),
     parserAllowlistKey(BINARY_CORRECT_WRONG_PARSER),
     parserAllowlistKey(BINARY_JSON_VERDICT_PARSER),

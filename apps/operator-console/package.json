@@ -11,14 +11,15 @@
     "test": "node --import tsx --test lib/*.test.ts test/*.test.mjs",
     "e2e": "playwright test --config=playwright.config.ts",
     "e2e:app-flow": "playwright test --config=playwright.config.ts e2e/claim-policy-flow.e2e.ts e2e/posting-status.e2e.ts",
-    "e2e:funding-sequence": "playwright test --config=playwright.config.ts e2e/funding-sequence.e2e.ts"
+    "e2e:funding-sequence": "playwright test --config=playwright.config.ts e2e/funding-sequence.e2e.ts",
+    "e2e:live": "LIVE_OPERATOR_E2E=1 playwright test --config=playwright.live.config.ts"
   },
   "dependencies": {
     "@jinn-network/lifecycle-notifications": "portal:../../packages/lifecycle-notifications",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^1.27.0",
-    "next": "16.3.0",
+    "lucide-react": "^1.33.0",
+    "next": "16.3.2",
     "radix-ui": "^1.6.7",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

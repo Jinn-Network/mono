@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { parseBenchmark } from "@jinn-network/benchmarking-records";
 import {
   BINARY_JUDGMENT_PROFILE_URI,
+  BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY,
   canonicalJsonBytes,
   compareCodeUnitStrings,
   parseBinaryJudgmentAnalysisContext,
@@ -164,6 +165,7 @@ function convert(input: {
   readonly sourceManifestJsonl?: string;
   readonly admissionIndexJsonl?: string;
   readonly draftId?: string;
+  readonly parserInvalidPolicy?: "reject" | "abstain";
 }) {
   return convertBinaryItemBank({
     draftId: input.draftId ?? "draft-1",
@@ -174,6 +176,7 @@ function convert(input: {
     description: "No licensed source bytes.",
     version: "1.0.0",
     author: "did:key:z6Mksynthetic",
+    parserInvalidPolicy: input.parserInvalidPolicy,
     admissionVerificationPorts: input.evidence.admissionVerificationPorts,
   });
 }
@@ -235,6 +238,19 @@ describe("convertBinaryItemBank", () => {
       sourceManifestSha256: result.sourceManifest.digest,
       admissionManifestSha256: evidence.admissionManifestSha256,
     });
+  });
+
+  test("selects the neutral-invalid evaluation specification without changing admission evidence", () => {
+    const admitted = item(ITEM_A_ID, "admitted");
+    const evidence = seedEvidence({ admitted: [admitted] });
+    const result = convert({ itemRows: [admitted], evidence, parserInvalidPolicy: "abstain" });
+
+    const specification = parseEvaluationSpec(result.items[0]!.evaluationSpec.bytes);
+    expect((specification.grader as { digest: { sha256: string } }).digest.sha256).toBe(
+      BINARY_JUDGMENT_EVALUATION_PARSER_V2_IDENTITY.digest.slice("sha256:".length),
+    );
+    expect(result.items[0]!.itemSha256).toBe(evidence.admittedItemSha256s[0]);
+    expect(result.admissionManifestSha256).toBe(evidence.admissionManifestSha256);
   });
 
   // Spec §3.1 sites 18/19: the declared vocabulary is the observed set, not a registered pair.

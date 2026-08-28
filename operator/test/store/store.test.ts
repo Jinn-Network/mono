@@ -549,4 +549,30 @@ describe('Store balance_cache legacy-error migration (spec §14.2 item 2, issue 
       migratedStore.close();
     }
   });
+
+  it('sanitizes RPC secrets on write and on read of already-persisted rows (#642)', () => {
+    const store = new Store(':memory:');
+    const secret = 'SECRETKEY123';
+    const id = store.recordActivityEvent({
+      ts: '2026-08-24T00:00:00.000Z',
+      kind: 'tick_error',
+      detail: `HTTP request to https://user:${secret}@paid.example/v2/${secret} failed`,
+    });
+    const written = store.getActivityEventById(id);
+    expect(written?.detail).toBe('HTTP request to paid.example failed');
+    expect(written?.detail).not.toContain(secret);
+
+    store.db.prepare(
+      `INSERT INTO activity_events (ts, kind, detail) VALUES (@ts, @kind, @detail)`,
+    ).run({
+      ts: '2026-08-24T00:01:00.000Z',
+      kind: 'claim_failed',
+      detail: `URL: https://rpc.example/?apiKey=${secret}#token=${secret}`,
+    });
+    const persisted = store.getRecentActivityEvents(5).find((row) => row.kind === 'claim_failed');
+    expect(persisted?.detail).toContain('rpc.example');
+    expect(persisted?.detail).not.toContain(secret);
+    expect(persisted?.detail).not.toContain('apiKey=');
+    store.close();
+  });
 });

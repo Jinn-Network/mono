@@ -19,7 +19,57 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    # Push-lane dedup probe (#2996): a queue landing is the byte-identical
+    # commit its merge_group build verified, so a completed successful
+    # `stack-fixture-gate` check-run on this exact SHA proves the fixture jobs
+    # already executed against this tree. Probing the GATE name is sound HERE
+    # because this workflow has no merge-group selection: the gate only reports
+    # success after every worker ran (if selection is ever added to the
+    # merge_group lane, switch this probe to the worker names - see
+    # hermetic-gate.yml). This job is IDENTITY-ONLY: every event other than a
+    # push to next selects the full run, and it must never grow a diff arm -
+    # this required context carries no path filtering.
+    name: stack-fixture-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+    steps:
+      - name: Probe for a same-SHA merge-group verdict
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" != push ]; then
+            echo 'run=true' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [ "${GITHUB_REF:-}" = 'refs/heads/next' ] && [ "${GITHUB_RUN_ATTEMPT:-1}" = '1' ]; then
+            verified="$(gh api -X GET "repos/${GITHUB_REPOSITORY:-}/commits/${GITHUB_SHA:-}/check-runs" \
+              -f check_name='stack-fixture-gate' -f status=completed -f per_page=100 \
+              --jq '[.check_runs[] | select(.conclusion == "success")] | length' \
+              2>/dev/null || echo 0)"
+            case "${verified}" in
+              *[!0-9]*|'') verified=0 ;;
+            esac
+            if [ "${verified}" -gt 0 ]; then
+              echo "::notice::stack-fixture-gate already passed on this SHA in its merge_group build; deduplicating the push-lane run (#2996)"
+              echo 'run=false' >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            echo "::notice::no completed successful stack-fixture-gate check-run found on this SHA; running in full"
+          fi
+          echo 'run=true' >> "${GITHUB_OUTPUT}"
+
   fixtures:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -30,7 +80,9 @@ jobs:
         with:
           node-version: '22'
       - name: Verify the fixture manifests are current
-        run: node .github/scripts/fixture-manifest.mjs --check
+        run: |
+          node .github/scripts/fixture-manifest.mjs --check
+          node --test .github/scripts/fixture-manifest.test.mjs
       - name: Verify fixture immutability against the base
         env:
           BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.before }}
@@ -50,19 +102,38 @@ jobs:
             exit 1
           fi
           node .github/scripts/fixture-immutability.mjs --base "${BASE_REF}"
+          node --test .github/scripts/fixture-immutability.test.mjs
   stack-fixture-gate:
     # The check-run name GitHub reports is this job's display `name:` below, and that
     # string is the required-status-check context registered on the `next` ruleset
     # (DR-2026-08-18-b D3) — keep them in sync.
     name: stack-fixture-gate
-    needs: [fixtures]
+    needs: [changes, fixtures]
     if: always()
     runs-on: ubuntu-latest
-    # One `test` against an upstream result. The bound keeps a wedged runner from
-    # holding the required context open for the 360-minute default.
+    # The bound keeps a wedged runner from holding the required context open for
+    # the 360-minute default.
     timeout-minutes: 5
     steps:
-      - name: Require exact fixture-gate success
+      - name: Require exact fixture-gate success unless dedup unselected it
         env:
+          SELECTED: ${{ needs.changes.outputs.run }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
           FIXTURES_RESULT: ${{ needs.fixtures.result }}
-        run: test "${FIXTURES_RESULT}" = success
+        run: |
+          set -euo pipefail
+          test "${CHANGES_RESULT}" = success
+          # Empty must never be read as "unselected": a broken probe step would
+          # otherwise turn into a green gate over a skipped worker.
+          case "${SELECTED}" in
+            true|false) ;;
+            *)
+              echo "::error::unparseable selection output: '${SELECTED}'"
+              exit 1
+              ;;
+          esac
+          expected=success
+          if [ "${SELECTED}" != true ]; then
+            expected=skipped
+          fi
+          test "${FIXTURES_RESULT}" = "${expected}"

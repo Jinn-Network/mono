@@ -50,6 +50,9 @@ const INSPECT_LOG_MEDIA_TYPE = "application/vnd.inspect-ai.eval-log+json";
 const ANALYSIS_CONTEXT_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.analysis-context.v1+json";
 const LABEL_RESOLUTION_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.label-resolution.v1+json";
 const LABEL_RESOLUTION_NAME = "label-resolution.json";
+/** The abstain policy's `recorded-inconclusive` class, mirrored from the sealed EvaluationSpec
+ * this oracle re-derives (`task-execution-evaluator-adapters`'s binary-judgment spec builder). */
+const UNPARSEABLE_JUDGE_RESPONSE_CLASS = "unparseable-judge-response";
 
 // Mirrored from packages/task-execution/profiles/src/binary-judgment/contracts.ts, which is the
 // source of truth. `packages/benchmarking/aggregate` deliberately does not depend on
@@ -71,9 +74,11 @@ const JUDGE_MODEL_PROFILE_OBSERVATION_LIMITATIONS: Readonly<Record<JudgeModelPro
 
 const EVALUATION_PARSER_ID = "network.jinn.parser.binary-judgment-evaluation";
 const EVALUATION_PARSER_VERSION = "1.0.0";
-const EVALUATION_PARSER_SHA256 = "5a2c2d2f01c9154bb7000f3c3183d1fc27e9e9a1571445f248b56fa25f45ef0a";
+const EVALUATION_PARSER_SHA256 = "3568ee132ece234c15b7f9b6b4a7a954aefc2c417e17f2fde91729a7240bb343";
+const EVALUATION_PARSER_V2_VERSION = "2.0.0";
+const EVALUATION_PARSER_V2_SHA256 = "838a8e4d21893524cba10e5a282397b334a67fe9bc516d53ae20fd4f2b915038";
 interface FrozenResponseParse {
-  readonly decision: "ACCEPT" | "REJECT";
+  readonly decision: "ACCEPT" | "REJECT" | "INVALID";
   readonly parseValid: boolean;
 }
 
@@ -82,9 +87,10 @@ interface FrozenResponseParse {
  * `unexpected-token`) into one. That is the only behavioral liberty this mirror takes, and it is
  * forced: the signed measurements this oracle replays against carry `judgeDecision` and
  * `parseValid` and no reason field, so there is nothing here for a reason to be checked against.
- * Every other line of the five behaviors is a mechanical transcription of the source named above.
+ * Every other line of the nine behaviors is a mechanical transcription of the source named above.
  */
 const RESPONSE_PARSE_INVALID: FrozenResponseParse = { decision: "REJECT", parseValid: false };
+const RESPONSE_PARSE_NEUTRAL_INVALID: FrozenResponseParse = { decision: "INVALID", parseValid: false };
 
 /** Trims only U+0020, U+0009, U+000D, and U+000A, at the two edges. */
 function isAsciiEdgeWhitespace(codeUnit: number): boolean {
@@ -199,6 +205,126 @@ function parseJsonVerdictResponse(bytes: Uint8Array): FrozenResponseParse {
   return RESPONSE_PARSE_INVALID;
 }
 
+function parseObjectRoot(text: string): Record<string, unknown> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : undefined;
+}
+
+function extractExactOptionalJsonFence(text: string): string | undefined {
+  const trimmed = trimResponseEdges(text);
+  if (!trimmed.startsWith("```")) return trimmed;
+  return /^```(?:json)?\r?\n([\s\S]*)\r?\n```$/u.exec(trimmed)?.[1];
+}
+
+function labelDecision(accepted: boolean): FrozenResponseParse {
+  return { decision: accepted ? "ACCEPT" : "REJECT", parseValid: true };
+}
+
+function parseCompleteJsonLabelResponse(bytes: Uint8Array): FrozenResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return RESPONSE_PARSE_INVALID;
+  const parsed = parseObjectRoot(decoded);
+  if (parsed === undefined) return RESPONSE_PARSE_INVALID;
+  const label = Object.hasOwn(parsed, "label") ? parsed["label"] : "WRONG";
+  if (typeof label !== "string") return RESPONSE_PARSE_INVALID;
+  return labelDecision(label.toUpperCase() === "CORRECT");
+}
+
+function extractEvermemJson(text: string): string {
+  const fenced = /```(?:json)?\s*(\{[^`]*\})\s*```/s.exec(text);
+  if (fenced?.[1] !== undefined) return fenced[1];
+  const flat = /\{[^{}]*"label"\s*:\s*"[^"]*"[^{}]*\}/s.exec(text);
+  return flat?.[0] ?? text.trim();
+}
+
+function parseEvermemJsonLabelResponse(bytes: Uint8Array): FrozenResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return RESPONSE_PARSE_INVALID;
+  const parsed = parseObjectRoot(extractEvermemJson(decoded));
+  if (parsed === undefined) return RESPONSE_PARSE_INVALID;
+  const label = parsed["label"];
+  if (typeof label !== "string" || label.length === 0) return RESPONSE_PARSE_INVALID;
+  return labelDecision(label.trim().toUpperCase() === "CORRECT");
+}
+
+function extractMem0Json(text: string): string {
+  const trimmed = text.trim();
+  const fenced = /```(?:json)?\s*(.*?)\s*```/s.exec(trimmed);
+  return fenced?.[1] ?? trimmed;
+}
+
+function parseMem0JsonLabelResponse(bytes: Uint8Array): FrozenResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return RESPONSE_PARSE_INVALID;
+  const parsed = parseObjectRoot(extractMem0Json(decoded));
+  if (parsed === undefined || !Object.hasOwn(parsed, "label")) return RESPONSE_PARSE_INVALID;
+  return labelDecision(parsed["label"] === "CORRECT");
+}
+
+function parseStrictJsonLabelResponse(bytes: Uint8Array): FrozenResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return RESPONSE_PARSE_INVALID;
+  const parsed = parseObjectRoot(decoded);
+  if (parsed === undefined) return RESPONSE_PARSE_INVALID;
+  const memberNames = rootObjectMemberNames(decoded);
+  if (
+    memberNames.length !== 2
+    || memberNames.filter((name) => name === "label").length !== 1
+    || memberNames.filter((name) => name === "reasoning").length !== 1
+  ) return RESPONSE_PARSE_INVALID;
+  if (typeof parsed["label"] !== "string" || typeof parsed["reasoning"] !== "string") {
+    return RESPONSE_PARSE_INVALID;
+  }
+  if (parsed["label"] === "CORRECT") return labelDecision(true);
+  if (parsed["label"] === "WRONG") return labelDecision(false);
+  return RESPONSE_PARSE_INVALID;
+}
+
+function parseNeutralJsonLabelResponse(
+  bytes: Uint8Array,
+  family: "complete" | "evermem" | "mem0" | "strict",
+): FrozenResponseParse {
+  const decoded = decodeStrictUtf8(bytes);
+  if (decoded === undefined) return RESPONSE_PARSE_NEUTRAL_INVALID;
+  const extracted = extractExactOptionalJsonFence(decoded);
+  if (extracted === undefined) return RESPONSE_PARSE_NEUTRAL_INVALID;
+  const parsed = parseObjectRoot(extracted);
+  if (parsed === undefined) return RESPONSE_PARSE_NEUTRAL_INVALID;
+
+  if (family === "strict") {
+    const memberNames = rootObjectMemberNames(extracted);
+    if (
+      memberNames.length !== 2
+      || memberNames.filter((name) => name === "label").length !== 1
+      || memberNames.filter((name) => name === "reasoning").length !== 1
+      || typeof parsed["label"] !== "string"
+      || typeof parsed["reasoning"] !== "string"
+    ) return RESPONSE_PARSE_NEUTRAL_INVALID;
+    if (parsed["label"] === "CORRECT") return labelDecision(true);
+    if (parsed["label"] === "WRONG") return labelDecision(false);
+    return RESPONSE_PARSE_NEUTRAL_INVALID;
+  }
+  if (family === "complete") {
+    const label = Object.hasOwn(parsed, "label") ? parsed["label"] : "WRONG";
+    if (typeof label !== "string") return RESPONSE_PARSE_NEUTRAL_INVALID;
+    return labelDecision(label.toUpperCase() === "CORRECT");
+  }
+  if (family === "evermem") {
+    const label = parsed["label"];
+    if (typeof label !== "string" || label.length === 0) return RESPONSE_PARSE_NEUTRAL_INVALID;
+    return labelDecision(label.trim().toUpperCase() === "CORRECT");
+  }
+  if (!Object.hasOwn(parsed, "label")) return RESPONSE_PARSE_NEUTRAL_INVALID;
+  return labelDecision(parsed["label"] === "CORRECT");
+}
+
 function isAsciiWordCharCode(codeUnit: number): boolean {
   return (codeUnit >= 0x41 && codeUnit <= 0x5a) // A-Z
     || (codeUnit >= 0x61 && codeUnit <= 0x7a) // a-z
@@ -254,10 +380,20 @@ const RESPONSE_PARSER_REGISTRY: ReadonlyMap<string, {
     digest: "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073",
     parse: (bytes: Uint8Array) => parseWholeOutputToken(bytes, "ACCEPT", "REJECT"),
   }],
+  ["network.jinn.parser.binary-complete-json-label", {
+    version: "1.0.0",
+    digest: "sha256:db1215184eb98aec6fe26f5412e6e823fbd19f75c5c080fbb58ecd1968503f4b",
+    parse: parseCompleteJsonLabelResponse,
+  }],
   ["network.jinn.parser.binary-correct-wrong", {
     version: "1.0.0",
     digest: "sha256:2dd7e73c9ee063edb00fe7859821eee1122b483d4bd70568aebb046a6983ac4c",
     parse: (bytes: Uint8Array) => parseWholeOutputToken(bytes, "CORRECT", "WRONG"),
+  }],
+  ["network.jinn.parser.binary-evermem-json-label", {
+    version: "1.0.0",
+    digest: "sha256:4834ba3e6c817c560c72afb93a4a5b56c0cf654cf6ff1012843ea7675f507942",
+    parse: parseEvermemJsonLabelResponse,
   }],
   ["network.jinn.parser.binary-json-verdict", {
     version: "1.0.0",
@@ -269,12 +405,55 @@ const RESPONSE_PARSER_REGISTRY: ReadonlyMap<string, {
     digest: "sha256:d53d23afc8734090c8d54c39de8105ead37c3ecad0cf0f454e97a535e5937f10",
     parse: parseLabelInProseResponse,
   }],
+  ["network.jinn.parser.binary-mem0-json-label", {
+    version: "1.0.0",
+    digest: "sha256:7453de03b2614395b6cd223f6bfb104d924dfcbd05006d38328307bd7a1d825a",
+    parse: parseMem0JsonLabelResponse,
+  }],
+  ["network.jinn.parser.binary-strict-json-label", {
+    version: "1.0.0",
+    digest: "sha256:e5c723c97a55d631d26a8da2badea0df755943987cd679acf7bad7653f48dca6",
+    parse: parseStrictJsonLabelResponse,
+  }],
   ["network.jinn.parser.binary-yes-no", {
     version: "1.0.0",
     digest: "sha256:1b99469a195fee154c27d0c3b219da7778e1b8f4210bd773350d107c459b7949",
     parse: (bytes: Uint8Array) => parseWholeOutputToken(bytes, "YES", "NO"),
   }],
 ]);
+
+const NEUTRAL_RESPONSE_PARSER_REGISTRY: ReadonlyMap<string, {
+  readonly version: "2.0.0";
+  readonly digest: string;
+  readonly parse: (bytes: Uint8Array) => FrozenResponseParse;
+}> = new Map([
+  ["network.jinn.parser.binary-complete-json-label", {
+    version: "2.0.0",
+    digest: "sha256:88545378ce165666102edc22393bbe87950c3a48d325fe142fab0f1c319a1916",
+    parse: (bytes) => parseNeutralJsonLabelResponse(bytes, "complete"),
+  }],
+  ["network.jinn.parser.binary-evermem-json-label", {
+    version: "2.0.0",
+    digest: "sha256:f3d9ca6df8bfc263e64e25500c300d24124175c1c76596effc8be1c3780c1fb6",
+    parse: (bytes) => parseNeutralJsonLabelResponse(bytes, "evermem"),
+  }],
+  ["network.jinn.parser.binary-mem0-json-label", {
+    version: "2.0.0",
+    digest: "sha256:89e4d1037d2e80c47867ca867cafeb91ff9d6a16125c18062ffb3d23e477b406",
+    parse: (bytes) => parseNeutralJsonLabelResponse(bytes, "mem0"),
+  }],
+  ["network.jinn.parser.binary-strict-json-label", {
+    version: "2.0.0",
+    digest: "sha256:f43f988181ed8490fb85824b1c0ed7d991f5b050097a6874fccf750d815593ca",
+    parse: (bytes) => parseNeutralJsonLabelResponse(bytes, "strict"),
+  }],
+]);
+
+function registeredResponseParser(id: string, version: unknown) {
+  if (version === "1.0.0") return RESPONSE_PARSER_REGISTRY.get(id);
+  if (version === "2.0.0") return NEUTRAL_RESPONSE_PARSER_REGISTRY.get(id);
+  return undefined;
+}
 
 export const BINARY_INSTRUMENT_MEASUREMENT_PROFILE = "binary-instrument@1" as const;
 export const BINARY_INSTRUMENT_MEASUREMENTS = {
@@ -330,7 +509,11 @@ export const BINARY_INSTRUMENT_PARAMETER_SCHEMA: Method["parameterSchema"] = {
       uniqueItems: true,
       items: { type: "string", pattern: STRATUM_NAME.source },
     },
-    parserInvalidPolicy: { enum: ["reject"] },
+    // Widened for the neutral v2 response parsers: `abstain` joins `reject`. Compatible widening
+    // (§0.4): every parameter set valid today still carries `reject`, still validates, and still
+    // seals identically, so the frozen golden fixtures' bytes do not move. Only a run whose sealed
+    // Tasks and arms both select the v2 parsers can reach the new value.
+    parserInvalidPolicy: { enum: ["reject", "abstain"] },
     // Widened spec §6.7 (packet P6): a third admission mode, screened by a pinned model and
     // sampled/hand-checked by the operator. Compatible widening (§0.4): every parameter set valid
     // today still validates and seals identically.
@@ -359,7 +542,7 @@ export interface BinaryInstrumentParameters {
   readonly measurementProfile: typeof BINARY_INSTRUMENT_MEASUREMENT_PROFILE;
   readonly candidateClasses: readonly string[];
   readonly strata: readonly string[];
-  readonly parserInvalidPolicy: "reject";
+  readonly parserInvalidPolicy: "reject" | "abstain";
   readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
   readonly intervalAlpha: "0.05";
   /** Optional (spec §1.4): derived at lock from the arms' shared model.requested. Absent means
@@ -423,8 +606,11 @@ export function validateBinaryInstrumentParameters(
       issues.push('parameter "strata" must be unique and code-unit sorted');
     }
   }
-  if (parameters["parserInvalidPolicy"] !== "reject") {
-    issues.push('parameter "parserInvalidPolicy" must be "reject"');
+  if (
+    parameters["parserInvalidPolicy"] !== "reject"
+    && parameters["parserInvalidPolicy"] !== "abstain"
+  ) {
+    issues.push('parameter "parserInvalidPolicy" must be "reject" or "abstain"');
   }
   if (
     parameters["truthAdmission"] !== "two-human-unanimous"
@@ -837,7 +1023,11 @@ function requireEmptyObject(value: unknown, digest: string, label: string): void
   }
 }
 
-function validateEvaluationSpecShape(spec: Record<string, unknown>, digest: `sha256:${string}`): void {
+function validateEvaluationSpecShape(
+  spec: Record<string, unknown>,
+  digest: `sha256:${string}`,
+  parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"],
+): void {
   requireExactKeys(
     spec,
     ["protocol", "semanticsVersion", "family", "grader", "familyBlock", "measurements", "verdictRule", "unscorable", "evidenceConventions"],
@@ -851,8 +1041,23 @@ function validateEvaluationSpecShape(spec: Record<string, unknown>, digest: `sha
   ) {
     throw new MethodInputError("binary-binding-mismatch", digest, "EvaluationSpec identity is not the frozen deterministic binary profile");
   }
-  if (!Array.isArray(spec["unscorable"]) || spec["unscorable"].length !== 0) {
-    throw new MethodInputError("binary-binding-mismatch", digest, "EvaluationSpec.unscorable must be empty");
+  // Reject scores every response and declares no class. Abstain declares exactly one
+  // recorded-inconclusive class — without it the sealed spec cannot express the neutral outcome
+  // its own parser semantics promise, and the harness refuses the evaluator's delivery.
+  const expectedUnscorable = parserInvalidPolicy === "abstain"
+    ? [{ name: UNPARSEABLE_JUDGE_RESPONSE_CLASS, disposition: "recorded-inconclusive" }]
+    : [];
+  if (
+    !Array.isArray(spec["unscorable"])
+    || !bytesEqual(canonicalJsonBytes(spec["unscorable"]), canonicalJsonBytes(expectedUnscorable))
+  ) {
+    throw new MethodInputError(
+      "binary-binding-mismatch",
+      digest,
+      parserInvalidPolicy === "abstain"
+        ? `EvaluationSpec.unscorable must declare exactly ${UNPARSEABLE_JUDGE_RESPONSE_CLASS}`
+        : "EvaluationSpec.unscorable must be empty",
+    );
   }
   const evidence = spec["evidenceConventions"];
   if (!isObject(evidence)) {
@@ -873,7 +1078,14 @@ function resolveTaskBinding(
   input: Pick<MethodComputeInput, "resolveTaskBytes" | "resolveRecordBytes">,
   candidateClasses: readonly string[],
   truthAdmission: BinaryInstrumentParameters["truthAdmission"],
+  parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"],
 ): ExpectedTaskBinding {
+  const evaluationParserVersion = parserInvalidPolicy === "abstain"
+    ? EVALUATION_PARSER_V2_VERSION
+    : EVALUATION_PARSER_VERSION;
+  const evaluationParserSha256 = parserInvalidPolicy === "abstain"
+    ? EVALUATION_PARSER_V2_SHA256
+    : EVALUATION_PARSER_SHA256;
   const taskWire = `sha256:${taskDigest}` as const;
   const task = resolveExactJson(taskWire, input.resolveTaskBytes, "Task");
   requireExactKeys(
@@ -927,17 +1139,46 @@ function resolveTaskBinding(
   );
   const specWire = `sha256:${evaluationSpecSha256}` as const;
   const spec = resolveExactJson(specWire, input.resolveRecordBytes, "EvaluationSpec");
-  validateEvaluationSpecShape(spec, specWire);
+  validateEvaluationSpecShape(spec, specWire, parserInvalidPolicy);
   measurementDeclarations(spec, specWire);
+  // Reject: the bare agreement threshold. Abstain: the same threshold, guarded by the
+  // inconclusiveWhen node that records an unparseable response instead of scoring it.
   const verdictRule = spec["verdictRule"];
+  const scoringThreshold = parserInvalidPolicy === "abstain"
+    ? (Array.isArray((verdictRule as Record<string, unknown> | undefined)?.["all"])
+      ? ((verdictRule as Record<string, unknown>)["all"] as unknown[])[1]
+      : undefined)
+    : verdictRule;
+  const abstainGuard = parserInvalidPolicy === "abstain"
+    ? (Array.isArray((verdictRule as Record<string, unknown> | undefined)?.["all"])
+      ? ((verdictRule as Record<string, unknown>)["all"] as unknown[])[0]
+      : undefined)
+    : undefined;
   if (
-    !isObject(verdictRule)
-    || !isObject(verdictRule["threshold"])
-    || verdictRule["threshold"]["measurement"] !== BINARY_INSTRUMENT_MEASUREMENTS.agreement
-    || verdictRule["threshold"]["op"] !== "eq"
-    || verdictRule["threshold"]["value"] !== true
+    !isObject(scoringThreshold)
+    || !isObject(scoringThreshold["threshold"])
+    || scoringThreshold["threshold"]["measurement"] !== BINARY_INSTRUMENT_MEASUREMENTS.agreement
+    || scoringThreshold["threshold"]["op"] !== "eq"
+    || scoringThreshold["threshold"]["value"] !== true
   ) {
     throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec verdictRule must pass exactly on agreement=true");
+  }
+  if (parserInvalidPolicy === "abstain") {
+    const guard = isObject(abstainGuard) ? abstainGuard : undefined;
+    const predicate = isObject(guard?.["inconclusiveWhen"]) ? guard["inconclusiveWhen"] : undefined;
+    const threshold = isObject(predicate?.["threshold"]) ? predicate["threshold"] : undefined;
+    if (
+      guard?.["class"] !== UNPARSEABLE_JUDGE_RESPONSE_CLASS
+      || threshold?.["measurement"] !== BINARY_INSTRUMENT_MEASUREMENTS.parseValid
+      || threshold["op"] !== "eq"
+      || threshold["value"] !== false
+    ) {
+      throw new MethodInputError(
+        "binary-binding-mismatch",
+        specWire,
+        `EvaluationSpec verdictRule must record ${UNPARSEABLE_JUDGE_RESPONSE_CLASS} exactly on parseValid=false`,
+      );
+    }
   }
   const grader = spec["grader"];
   if (!isObject(grader)) {
@@ -948,7 +1189,7 @@ function resolveTaskBinding(
     throw new MethodInputError("binary-binding-mismatch", specWire, `EvaluationSpec grader must be ${EVALUATION_PARSER_ID}`);
   }
   const evaluationMethodSha256 = digestObjectSha256(grader["digest"], specWire, "EvaluationSpec.grader.digest");
-  if (evaluationMethodSha256 !== EVALUATION_PARSER_SHA256) {
+  if (evaluationMethodSha256 !== evaluationParserSha256) {
     throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec grader digest is not the frozen binary evaluator semantics");
   }
   const familyBlock = spec["familyBlock"];
@@ -989,8 +1230,8 @@ function resolveTaskBinding(
   if (
     !isObject(parser)
     || parser["id"] !== EVALUATION_PARSER_ID
-    || parser["version"] !== EVALUATION_PARSER_VERSION
-    || parser["digest"] !== `sha256:${EVALUATION_PARSER_SHA256}`
+    || parser["version"] !== evaluationParserVersion
+    || parser["digest"] !== `sha256:${evaluationParserSha256}`
     || bareSha256(parser["digest"], specWire, "EvaluationSpec.familyBlock.parser.digest") !== evaluationMethodSha256
   ) {
     throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec parser identity drifts from its grader");
@@ -1019,13 +1260,13 @@ function resolveTaskBinding(
     family: "deterministic-process",
     grader: {
       name: EVALUATION_PARSER_ID,
-      digest: { sha256: EVALUATION_PARSER_SHA256 },
+      digest: { sha256: evaluationParserSha256 },
       accessClass: "public",
     },
     familyBlock: {
       image: {
         name: "binary-judgment-evaluation-parser-semantics.json",
-        digest: { sha256: EVALUATION_PARSER_SHA256 },
+        digest: { sha256: evaluationParserSha256 },
       },
       platform: "linux/amd64",
       workspace: {},
@@ -1037,8 +1278,8 @@ function resolveTaskBinding(
       }],
       parser: {
         id: EVALUATION_PARSER_ID,
-        version: EVALUATION_PARSER_VERSION,
-        digest: `sha256:${EVALUATION_PARSER_SHA256}`,
+        version: evaluationParserVersion,
+        digest: `sha256:${evaluationParserSha256}`,
       },
       transitions: { failToPass: [], passToPass: [] },
       timeout: 60,
@@ -1053,8 +1294,31 @@ function resolveTaskBinding(
       { name: BINARY_INSTRUMENT_MEASUREMENTS.labelResolutionSha256, type: "string", required: true },
       { name: BINARY_INSTRUMENT_MEASUREMENTS.instrumentSha256, type: "string", required: true },
     ],
-    verdictRule: { threshold: { measurement: BINARY_INSTRUMENT_MEASUREMENTS.agreement, op: "eq", value: true } },
-    unscorable: [],
+    // The abstain policy declares, in the closed verdict-rule vocabulary, the one situation in
+    // which there is nothing to score. Without it `evaluateVerdictRule` recomputes `fail` for an
+    // unparseable response and the harness refuses the evaluator's `inconclusive` delivery
+    // outright — the shape this oracle already expects at `verdict === "inconclusive"` for
+    // `judgeDecision === "INVALID"` could never have been produced. Reject is unchanged.
+    // Clause ORDER is load-bearing: `all` short-circuits, a false clause returns `fail` before a
+    // later `inconclusiveWhen` can fire, and `agreement` is false whenever `parseValid` is false
+    // — guard at [0], threshold at [1], the same order the positional `all[0]`/`all[1]` reads
+    // where this spec is validated above enforce.
+    verdictRule: parserInvalidPolicy === "abstain"
+      ? {
+        all: [
+          {
+            class: UNPARSEABLE_JUDGE_RESPONSE_CLASS,
+            inconclusiveWhen: {
+              threshold: { measurement: BINARY_INSTRUMENT_MEASUREMENTS.parseValid, op: "eq", value: false },
+            },
+          },
+          { threshold: { measurement: BINARY_INSTRUMENT_MEASUREMENTS.agreement, op: "eq", value: true } },
+        ],
+      }
+      : { threshold: { measurement: BINARY_INSTRUMENT_MEASUREMENTS.agreement, op: "eq", value: true } },
+    unscorable: parserInvalidPolicy === "abstain"
+      ? [{ name: UNPARSEABLE_JUDGE_RESPONSE_CLASS, disposition: "recorded-inconclusive" }]
+      : [],
     evidenceConventions: { requiredRefs: [LABEL_RESOLUTION_NAME] },
   };
   if (!bytesEqual(canonicalJsonBytes(spec), canonicalJsonBytes(expectedSpec))) {
@@ -1202,6 +1466,7 @@ function validateInstrument(
   instrument: Record<string, unknown>,
   digest: `sha256:${string}`,
   armId: string,
+  parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"],
 ): void {
   requireExactKeys(
     instrument,
@@ -1281,7 +1546,11 @@ function validateInstrument(
     throw new MethodInputError("binary-record-malformed", digest, "instrument.response must be an object");
   }
   requireExactKeys(response, ["mediaType", "parser", "invalidOutputDecision"], digest, "instrument.response");
-  if (response["mediaType"] !== RESPONSE_MEDIA_TYPE || response["invalidOutputDecision"] !== "REJECT") {
+  const expectedInvalidOutputDecision = parserInvalidPolicy === "abstain" ? "INVALID" : "REJECT";
+  if (
+    response["mediaType"] !== RESPONSE_MEDIA_TYPE
+    || response["invalidOutputDecision"] !== expectedInvalidOutputDecision
+  ) {
     throw new MethodInputError("binary-binding-mismatch", digest, "instrument response contract is unsupported");
   }
   const parser = response["parser"];
@@ -1290,7 +1559,9 @@ function validateInstrument(
   }
   requireExactKeys(parser, ["id", "version", "digest"], digest, "instrument.response.parser");
   const parserId = parser["id"];
-  const registeredParser = typeof parserId === "string" ? RESPONSE_PARSER_REGISTRY.get(parserId) : undefined;
+  const registeredParser = typeof parserId === "string"
+    ? registeredResponseParser(parserId, parser["version"])
+    : undefined;
   if (
     registeredParser === undefined
     || parser["version"] !== registeredParser.version
@@ -1298,12 +1569,26 @@ function validateInstrument(
   ) {
     throw new MethodInputError("binary-binding-mismatch", digest, "instrument parser must be a member of the registered response-parser registry");
   }
+  // Mirrors the sealed profiles schema's own rule, which ties `invalidOutputDecision` to the
+  // selected PARSER PAIR rather than to the run-level parameter: a v2 pair means INVALID and a v1
+  // pair means REJECT, in both directions. Without this the check above would accept a document
+  // the profiles schema refuses -- under `abstain`, an instrument pinning a v1 parser and
+  // declaring INVALID, whose sealed bytes could never have been produced.
+  const neutralParser = typeof parserId === "string"
+    ? NEUTRAL_RESPONSE_PARSER_REGISTRY.get(parserId)
+    : undefined;
+  const parserPairInvalidOutputDecision =
+    neutralParser !== undefined && parser["version"] === neutralParser.version ? "INVALID" : "REJECT";
+  if (response["invalidOutputDecision"] !== parserPairInvalidOutputDecision) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "instrument invalidOutputDecision does not match its registered parser pair");
+  }
 }
 
 function resolveArmInstruments(
   matrix: MatrixRecord,
   input: Pick<MethodComputeInput, "resolveRunBytes" | "resolveRecordBytes">,
   k: number,
+  parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"],
 ): Map<string, ResolvedArmInstrument> {
   const run = resolveRun(matrixRunDigest(matrix), input);
   if (run.replicates !== k) {
@@ -1332,7 +1617,7 @@ function resolveArmInstruments(
       `Run arm ${arm.armId} instrument pin`,
     );
     const instrument = resolveExactJson(instrumentWire, input.resolveRecordBytes, `arm ${arm.armId} instrument`);
-    validateInstrument(instrument, instrumentWire, arm.armId);
+    validateInstrument(instrument, instrumentWire, arm.armId, parserInvalidPolicy);
     instruments.set(arm.armId, {
       digest: instrumentWire.slice("sha256:".length),
       document: instrument,
@@ -1426,19 +1711,26 @@ function renderSemanticRequest(
  * selected. `validateInstrument` has already refused any id outside the registry, so the lookup is
  * total; the guard is a compile-time-unreachable invariant, not a validation path.
  */
-function parseFrozenResponse(bytes: Uint8Array, parserId: string): FrozenResponseParse {
-  const registered = RESPONSE_PARSER_REGISTRY.get(parserId);
+function parseFrozenResponse(
+  bytes: Uint8Array,
+  parserIdentity: { readonly id: string; readonly version: string },
+): FrozenResponseParse {
+  const registered = registeredResponseParser(parserIdentity.id, parserIdentity.version);
   if (registered === undefined) {
-    throw new TypeError(`no mirrored response-parser behavior for ${parserId}`);
+    throw new TypeError(
+      `no mirrored response-parser behavior for ${parserIdentity.id}@${parserIdentity.version}`,
+    );
   }
   return registered.parse(bytes);
 }
 
-/** The parser id the arm's sealed instrument selected, already validated against the registry. */
-function instrumentResponseParserId(instrument: ResolvedArmInstrument): string {
+/** The parser pair the arm's sealed instrument selected, already validated against the registry. */
+function instrumentResponseParserIdentity(instrument: ResolvedArmInstrument) {
   const response = instrument.document["response"];
   const parser = isObject(response) ? response["parser"] : undefined;
-  return isObject(parser) && typeof parser["id"] === "string" ? parser["id"] : "";
+  return isObject(parser) && typeof parser["id"] === "string" && typeof parser["version"] === "string"
+    ? { id: parser["id"], version: parser["version"] }
+    : { id: "", version: "" };
 }
 
 function validateObservation(
@@ -1655,7 +1947,7 @@ function resolveCellInput(
   });
   const responseParse = parseFrozenResponse(
     responseMaterial.bytes,
-    instrumentResponseParserId(expectedInstrument),
+    instrumentResponseParserIdentity(expectedInstrument),
   );
   const evidence = predicate["evidence"];
   if (!Array.isArray(evidence) || evidence.length !== 1 || !isObject(evidence[0])) {
@@ -1686,7 +1978,7 @@ function resolveCellInput(
     verdictDigest,
     "measurement instrumentSha256",
   );
-  if (judgeDecision !== "ACCEPT" && judgeDecision !== "REJECT") {
+  if (judgeDecision !== "ACCEPT" && judgeDecision !== "REJECT" && judgeDecision !== "INVALID") {
     throw new MethodInputError("verdict-record-malformed", verdictDigest, "judgeDecision is unsupported");
   }
   if (truthLabel !== "CORRECT" && truthLabel !== "WRONG") {
@@ -1698,15 +1990,27 @@ function resolveCellInput(
   if (judgeDecision !== responseParse.decision || parseValid !== responseParse.parseValid) {
     throw new MethodInputError("binary-binding-mismatch", verdictDigest, "signed response measurements do not replay from exact judge-response bytes");
   }
-  if (parseValid === false && judgeDecision !== "REJECT") {
-    throw new MethodInputError("binary-binding-mismatch", verdictDigest, "parser-invalid output must deterministically map to REJECT");
+  const responseContract = expectedInstrument.document["response"];
+  const invalidOutputDecision = isObject(responseContract)
+    ? responseContract["invalidOutputDecision"]
+    : undefined;
+  if (
+    parseValid === false
+    && judgeDecision !== invalidOutputDecision
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", verdictDigest, "parser-invalid output does not match the sealed instrument policy");
+  }
+  if (parseValid === true && judgeDecision === "INVALID") {
+    throw new MethodInputError("binary-binding-mismatch", verdictDigest, "a valid parser result cannot carry INVALID");
   }
   const expectedAgreement = (judgeDecision === "ACCEPT" && truthLabel === "CORRECT")
     || (judgeDecision === "REJECT" && truthLabel === "WRONG");
   if (agreement !== expectedAgreement) {
     throw new MethodInputError("binary-binding-mismatch", verdictDigest, "signed agreement contradicts decision and truth");
   }
-  const verdict = agreement ? "pass" as const : "fail" as const;
+  const verdict = judgeDecision === "INVALID"
+    ? "inconclusive" as const
+    : agreement ? "pass" as const : "fail" as const;
   if (predicate["verdict"] !== verdict) {
     throw new MethodInputError("binary-binding-mismatch", verdictDigest, "Result Evaluation verdict contradicts signed agreement");
   }
@@ -1726,7 +2030,7 @@ function resolveCellInput(
     cellKey: cell.cellKey,
     verdictDigest,
     verdict,
-    judgeDecision,
+    judgeDecision: judgeDecision === "INVALID" ? null : judgeDecision,
     parseValid,
     instrumentSha256,
     context: { ...context },
@@ -1880,6 +2184,9 @@ export function validateBinaryInstrumentQualificationProjection(value: unknown):
   const k = isObject(configuration) && Number.isSafeInteger(configuration["k"])
     ? configuration["k"] as number
     : 0;
+  const parserInvalidPolicy = isObject(configuration) && configuration["parserInvalidPolicy"] === "abstain"
+    ? "abstain"
+    : "reject";
   const arms = value["arms"];
   if (!isObject(arms) || Object.keys(arms).length < 2) issues.push("qualification.arms must contain two or more arms");
   else for (const [armId, raw] of Object.entries(arms)) {
@@ -1910,17 +2217,28 @@ export function validateBinaryInstrumentQualificationProjection(value: unknown):
     if (!isObject(raw) || Object.keys(raw).sort(compareCodeUnitStrings).join("\0") !== ["taskDigest", "armId", "instrumentSha256", "context", "cellKeys", "accepted", "rejected", "decision", "unstable"].sort(compareCodeUnitStrings).join("\0")) { issues.push(`qualification.itemDecisions.${index} has an unsupported field set`); continue; }
     const accepted = raw["accepted"];
     const rejected = raw["rejected"];
+    const acceptedCount = Number.isSafeInteger(accepted) ? accepted as number : -1;
+    const rejectedCount = Number.isSafeInteger(rejected) ? rejected as number : -1;
+    const requiredMajority = Math.floor(k / 2) + 1;
+    const expectedDecision = acceptedCount >= requiredMajority
+      ? "ACCEPT"
+      : rejectedCount >= requiredMajority
+        ? "REJECT"
+        : undefined;
     if (typeof raw["taskDigest"] !== "string" || !SHA256.test(raw["taskDigest"] as string)
       || typeof raw["armId"] !== "string" || !armIds.includes(raw["armId"])
       || raw["instrumentSha256"] !== instrumentByArm.get(raw["armId"] as string)
       || !sortedUniqueStrings(raw["cellKeys"], k)
       || !Number.isSafeInteger(accepted) || (accepted as number) < 0
       || !Number.isSafeInteger(rejected) || (rejected as number) < 0
-      || (accepted as number) + (rejected as number) !== k
+      || (parserInvalidPolicy === "reject"
+        ? acceptedCount + rejectedCount !== k
+        : acceptedCount + rejectedCount > k)
       || (raw["decision"] !== "ACCEPT" && raw["decision"] !== "REJECT")
-      || raw["decision"] !== ((accepted as number) > (rejected as number) ? "ACCEPT" : "REJECT")
+      || expectedDecision === undefined
+      || raw["decision"] !== expectedDecision
       || typeof raw["unstable"] !== "boolean"
-      || raw["unstable"] !== ((accepted as number) !== 0 && (rejected as number) !== 0)) issues.push(`qualification.itemDecisions.${index} is invalid`);
+      || raw["unstable"] !== (acceptedCount !== 0 && rejectedCount !== 0)) issues.push(`qualification.itemDecisions.${index} is invalid`);
     contextIssues(raw["context"], `qualification.itemDecisions.${index}.context`, candidateClasses, strata, issues);
   }
   const excluded = value["excluded"];
@@ -1937,7 +2255,7 @@ export function validateBinaryInstrumentQualificationProjection(value: unknown):
     if (Array.isArray(raw["reasons"])) for (const [reasonIndex, reason] of raw["reasons"].entries()) {
       const reasonPath = `qualification.excluded.items.${index}.reasons.${reasonIndex}`;
       if (!isObject(reason) || !exactKeys(reason, ["reason", "cellKeys"])
-        || !["cell-not-judged", "conflicted-evaluations", "inconclusive-evaluation", "missing-evaluation"].includes(reason["reason"] as string)
+        || !["cell-not-judged", "conflicted-evaluations", "inconclusive-evaluation", "missing-evaluation", "no-valid-majority"].includes(reason["reason"] as string)
         || !sortedUniqueStrings(reason["cellKeys"]) || reason["cellKeys"].length === 0
         || reason["cellKeys"].some((cellKey) => !parentCellKeys.includes(cellKey))) issues.push(`${reasonPath} is invalid`);
       const previousReason = raw["reasons"][reasonIndex - 1];
@@ -2150,15 +2468,18 @@ export function projectBinaryInstrumentQualification(
 /**
  * The reduction-relevant parameters `resolveBinaryInstrumentReduction` reads. Deliberately not
  * `BinaryInstrumentParameters`: a caller whose own parameter set has no `intervalAlpha` (or no
- * `measurementProfile`/`parserInvalidPolicy`/`verdictRule`, which the resolve half never reads
- * either) can never satisfy `validateBinaryInstrumentParameters`, so the resolve half must not
- * re-run that validator — it takes exactly the four scalars it uses.
+ * `measurementProfile`/`verdictRule`, which the resolve half never reads either) can never satisfy
+ * `validateBinaryInstrumentParameters`, so the resolve half must not re-run that validator — it
+ * takes exactly the five scalars it uses. `parserInvalidPolicy` joined that set with the neutral
+ * v2 parsers: the resolve half now reads it to pick the expected evaluation-parser identity, the
+ * expected instrument `invalidOutputDecision`, and the majority rule the reduction applies.
  */
 export interface BinaryInstrumentReductionParameters {
   readonly k: number;
   readonly candidateClasses: readonly string[];
   readonly strata: readonly string[];
   readonly truthAdmission: BinaryInstrumentParameters["truthAdmission"];
+  readonly parserInvalidPolicy: BinaryInstrumentParameters["parserInvalidPolicy"];
 }
 
 export interface BinaryInstrumentReductionResolution {
@@ -2187,7 +2508,12 @@ export function resolveBinaryInstrumentReduction(
     );
   }
   const matrix = input.matrices[0];
-  const instruments = resolveArmInstruments(matrix, input, parameters.k);
+  const instruments = resolveArmInstruments(
+    matrix,
+    input,
+    parameters.k,
+    parameters.parserInvalidPolicy,
+  );
   const taskDigests = [...new Set(matrix.cells.map((cell) => cell.taskDigest))]
     .sort(compareCodeUnitStrings);
   const bindings = new Map(taskDigests.map((taskDigest) => [
@@ -2197,6 +2523,7 @@ export function resolveBinaryInstrumentReduction(
       input,
       parameters.candidateClasses,
       parameters.truthAdmission,
+      parameters.parserInvalidPolicy,
     ),
   ]));
   const cells: BinaryInstrumentParsedCellInput[] = [];
@@ -2234,6 +2561,7 @@ export function resolveBinaryInstrumentReduction(
       .sort((left, right) => compareCodeUnitStrings(left.armId, right.armId)),
     cells,
     strata: parameters.strata,
+    parserInvalidPolicy: parameters.parserInvalidPolicy,
   });
 
   return {
@@ -2258,6 +2586,7 @@ export function computeBinaryInstrumentQualification(
     candidateClasses: parameters.candidateClasses,
     strata: parameters.strata,
     truthAdmission: parameters.truthAdmission,
+    parserInvalidPolicy: parameters.parserInvalidPolicy,
   });
 
   return projectBinaryInstrumentQualification({

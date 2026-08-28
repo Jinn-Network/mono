@@ -30,6 +30,7 @@ import {
   type Demo1RuntimePolicyDecision,
   type Demo1RuntimeSelection,
 } from "../method/demo1-runtime-policy.js";
+import { inheritedTempEnv } from "../runtime/child-temp-env.js";
 
 export const DEMO1_CLAUDE_MODEL_ID = "claude-haiku-4-5-20251001";
 export const DEMO1_CLAUDE_EFFORT = "high";
@@ -190,6 +191,9 @@ function defaultCommand(
   return execFileAsync(executablePath, [...args], {
     encoding: "utf8",
     maxBuffer: 1024 * 1024,
+    // temp-env: delegated to the caller. This helper builds no allowlist of its own — it forwards
+    // whichever one the caller passed (`readinessEnvironment`, which names all three), and absent
+    // an `env` it hands the child nothing, so `execFile` gives it the parent's environment whole.
     ...(options?.env === undefined ? {} : { env: { ...options.env } }),
   });
 }
@@ -302,11 +306,13 @@ function readinessEnvironment(tokenFilePath: string, configDir: string): Record<
     CLAUDE_CONFIG_DIR: configDir,
     CLAUDE_FORCE_OAUTH: "1",
   };
-  for (const key of ["HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "SHELL"] as const) {
+  for (const key of ["HOME", "PATH", "LANG", "LC_ALL", "SHELL"] as const) {
     const value = process.env[key];
     if (value !== undefined) environment[key] = value;
   }
-  return environment;
+  // All three temp names rather than `TMPDIR` alone: the readiness probe runs the agent binary,
+  // which is free to consult whichever its own runtime reads.
+  return { ...environment, ...inheritedTempEnv() };
 }
 
 /** Product-owned, binary/auth/version readiness binding. No ambient executable-path discovery. */
@@ -515,6 +521,10 @@ export function makeDemo1ClaudeLauncher(runtime: Demo1ClaudeRuntimeBinding): Lau
       return {
         ...planned,
         argv,
+        // temp-env: delegated to the wrapped launcher. `planned.env` is the plan `makeClaudeCodeLauncher`
+        // produced, whose `baseEnv` pins all three names at `paths.tmp`; this adds one credential name
+        // and changes nothing else. That launcher lives in another package, so this scan — rooted at
+        // this package's `src` — cannot see it; the claim above is by reading, not by the scan.
         env: {
           ...planned.env,
           [DEMO1_CLAUDE_OAUTH_FILE_ENV]: `secrets/${runtime.credential.secretForward.target}`,

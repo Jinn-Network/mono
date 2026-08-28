@@ -1,5 +1,7 @@
 # Governance-surface audit — ready-to-file follow-ups + #222 comment
 
+> **Status (2026-06-30): superseded by DR-2026-06-30 (tokenless, OLAS-native).** Jinn drops the native token and the sovereign chain; OLAS is the economic layer. For the current direction read `spec/2026-06-30-tokenless-olas-native.md` and `log/decisions/2026-06-30-tokenless-olas-native-pivot.md`.
+
 Companion to [`2026-06-14-governance-surface-audit.md`](2026-06-14-governance-surface-audit.md) (spike [#223](https://github.com/Jinn-Network/mono/issues/223)).
 
 This file holds the deliverables the spike produced that require an **external publish** (filing GitHub issues, posting to Discussion #222). They are drafted here verbatim and ready to post; a human (or an approved session) files them. They were not auto-filed because creating public issues / posting to a public discussion is an outward-facing action that this autonomous session is gated from performing without sign-off.

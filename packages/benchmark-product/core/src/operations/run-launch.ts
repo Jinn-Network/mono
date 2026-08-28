@@ -25,14 +25,23 @@
  */
 
 import {
+  cellIdempotencyKey,
   expectedCellSet,
   parseBenchmark,
   parseRun,
+  submissionExtensionBlock,
   type BenchmarkRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
+import { sealJson } from "@jinn-network/record-discovery-protocol";
 import { randomUUID } from "node:crypto";
-import { launchAndWatch, resumeRun, type LaunchOptions } from "@jinn-network/benchmarking-run";
+import {
+  launchAndWatch,
+  MAX_CONCURRENT_CELLS,
+  resumeRun,
+  type LaunchOptions,
+} from "@jinn-network/benchmarking-run";
+import type { SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse, toErrorEnvelope } from "../errors.js";
@@ -57,7 +66,7 @@ import {
 } from "../run/journal.js";
 import { requireRunState, writeRunState, type PublicationState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
-import { getSealedBytes } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
 import { createRuntimeVenue } from "../runtime/adapter.js";
 import { APEX_SWE_DEV_ADAPTER_ID } from "../runtime/apex-swe-dev/manifest.js";
@@ -87,6 +96,7 @@ export interface RunLaunchDeps {
 
 export interface RunLaunchInput {
   readonly draftId: string;
+  readonly maxConcurrentCells?: number;
 }
 
 export interface RunLaunchResult {
@@ -111,6 +121,7 @@ function requireProspectiveRegistrationVerified(publication: PublicationState, d
 
 export interface RunResumeInput {
   readonly draftId: string;
+  readonly maxConcurrentCells?: number;
 }
 
 export interface RunResumeResult {
@@ -204,6 +215,7 @@ async function runDriverGeneration<T>(
   draftId: string,
   operation: "launch" | "resume",
   generation: string,
+  maxConcurrentCells: number,
   run: () => Promise<T>,
 ): Promise<T> {
   const startedAt = context.clock();
@@ -212,6 +224,7 @@ async function runDriverGeneration<T>(
     at: startedAt,
     operation,
     generation,
+    maxConcurrentCells,
   });
   try {
     const result = await run();
@@ -237,6 +250,18 @@ async function runDriverGeneration<T>(
     });
     throw cause;
   }
+}
+
+function requireMaxConcurrentCells(value: number | undefined): number {
+  const resolved = value ?? 1;
+  if (!Number.isSafeInteger(resolved) || resolved < 1 || resolved > MAX_CONCURRENT_CELLS) {
+    refuse(
+      "validation",
+      "maxConcurrentCells",
+      `maxConcurrentCells must be an integer between 1 and ${MAX_CONCURRENT_CELLS}`,
+    );
+  }
+  return resolved;
 }
 
 async function createRunLaunchCapture(
@@ -284,6 +309,169 @@ async function createRunLaunchCapture(
   });
 }
 
+/**
+ * The prospective source append intentionally precedes the local capture journal write. If the
+ * process stops between those two durable operations, reconstruct the missing local fact from the
+ * source's signed archive before `resume` decides which exact Submission bytes to reuse.
+ */
+async function recoverProspectiveSubmissionCaptures(
+  workspaceDir: string,
+  draftId: string,
+  run: RunRecord,
+  runSha256: string,
+): Promise<void> {
+  const runState = requireRunState(workspaceDir, draftId);
+  const publication = runState.publication;
+  if (publication?.mode !== "prospective" || publication.source.publicBaseUrl === undefined) return;
+
+  await withWorkspacePublicationSourceLock(workspaceDir, async () => {
+    const source = createWorkspacePublicationSource(workspaceDir, publication.source.name);
+    if (source.source.agent !== publication.source.agentKeyRef || run.owner !== source.source.agent) {
+      refuse("conflict", `runs.${draftId}.publication.source`, "Run owner and source agent must be the same stable workspace did:key");
+    }
+    await source.writer.recover();
+    const state = await source.writer.readState();
+    if (state === undefined) return;
+
+    const expectedByCell = new Map(expectedCellSet(
+      parseBenchmark(getSealedBytes(workspaceDir, run.benchmark.digest.sha256)),
+      run,
+    ).map((cell) => [cell.cellKey, cell] as const));
+    const existing = new Map<string, string>();
+    for (const entry of readRunJournalEntries(workspaceDir, draftId)) {
+      if (entry.kind !== "submission-captured") continue;
+      const key = `${entry.cellKey}::${entry.dispatch}`;
+      const prior = existing.get(key);
+      if (prior !== undefined && prior !== entry.submissionSha256) {
+        refuse("record-integrity", `runs.${draftId}.${entry.cellKey}.${entry.dispatch}`, "capture journal contains conflicting Submission bytes");
+      }
+      existing.set(key, entry.submissionSha256);
+    }
+
+    for (const [announcementId, announcement] of Object.entries(state.announcements)) {
+      const receipt = announcement.receipt;
+      const record = receipt.record;
+      if (
+        announcement.action !== "available"
+        || record === undefined
+        || record.contentType !== SUBMISSION_MEDIA_TYPE
+      ) continue;
+      const digest = record.digest;
+      if (announcementId !== `submission:${digest}`) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, "prospective Submission announcement identity conflicts with its record digest");
+      }
+      const bytes = await source.recordStore.getExact(digest);
+      if (bytes === undefined) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} is missing from the source record store`);
+      }
+      let submission: {
+        readonly nonce?: unknown;
+        readonly idempotencyKey?: unknown;
+        readonly annotations?: unknown;
+      };
+      try {
+        submission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as typeof submission;
+      } catch {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} is not valid UTF-8 JSON`);
+      }
+      const runDigest = `sha256:${runSha256}`;
+      const annotations = submission.annotations;
+      if (
+        annotations === null
+        || typeof annotations !== "object"
+        || !("run" in annotations)
+        || annotations.run !== runDigest
+      ) continue;
+      if (typeof submission.nonce !== "string") {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} for this Run has no valid nonce`);
+      }
+      const nonce = /^(.*):([1-9][0-9]*)$/u.exec(submission.nonce);
+      if (nonce === null) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} for this Run has an invalid nonce`);
+      }
+      const cellKey = nonce[1]!;
+      const dispatch = Number(nonce[2]);
+      const cell = expectedByCell.get(cellKey);
+      if (cell === undefined || !Number.isSafeInteger(dispatch)) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} names no cell in this Run`);
+      }
+      const expectedAnnotations = submissionExtensionBlock(runDigest, cellKey, cell.armId);
+      const annotationKeys = Object.keys(annotations).sort();
+      if (
+        annotationKeys.length !== 3
+        || annotationKeys[0] !== "armId"
+        || annotationKeys[1] !== "cellKey"
+        || annotationKeys[2] !== "run"
+        || !("cellKey" in annotations)
+        || !("armId" in annotations)
+        || annotations.cellKey !== expectedAnnotations.cellKey
+        || annotations.armId !== expectedAnnotations.armId
+        || submission.idempotencyKey !== cellIdempotencyKey(runDigest, cellKey, dispatch)
+      ) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} does not bind exactly to this Run dispatch`);
+      }
+      const coordinate = `${cellKey}::${dispatch}`;
+      const digestHex = digest.slice("sha256:".length);
+      const prior = existing.get(coordinate);
+      if (prior !== undefined) {
+        if (prior !== digestHex) {
+          refuse("record-integrity", `runs.${draftId}.${cellKey}.${dispatch}`, "prospective source and capture journal name different Submission bytes");
+        }
+        continue;
+      }
+
+      const pageBytes = await source.archiveStore.getExact(receipt.page);
+      if (pageBytes === undefined) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} has no signed archive page`);
+      }
+      let page: { readonly entries?: readonly { readonly entry?: {
+        readonly sequence?: unknown;
+        readonly timestamp?: unknown;
+        readonly announcements?: readonly { readonly announcementId?: unknown; readonly record?: { readonly digest?: unknown } }[];
+      } }[] };
+      try {
+        page = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(pageBytes)) as typeof page;
+      } catch {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} archive page is not valid UTF-8 JSON`);
+      }
+      const signed = page.entries?.find(({ entry }) =>
+        entry?.sequence === receipt.sequence
+        && sealJson(entry).digest === receipt.entryDigest
+        && entry.announcements?.some((row) => row.announcementId === announcementId && row.record?.digest === digest));
+      const timestamp = signed?.entry?.timestamp;
+      if (typeof timestamp !== "string") {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} archive binding is invalid`);
+      }
+
+      const observed = await fetch(publicArchiveUrl(publication.source.publicBaseUrl!, recordPath(digest)));
+      const observedBytes = observed.ok ? new Uint8Array(await observed.arrayBuffer()) : undefined;
+      if (
+        observedBytes === undefined
+        || observedBytes.length !== bytes.length
+        || !observedBytes.every((value, index) => value === bytes[index])
+      ) {
+        refuse("conflict", `runs.${draftId}.publication.source`, `prospective Submission ${digest} is not byte-exactly public`);
+      }
+      const stored = putSealedBytes(workspaceDir, bytes);
+      if (stored !== digestHex) {
+        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} failed local CAS reconstruction`);
+      }
+      appendRunJournalEntry(workspaceDir, draftId, {
+        kind: "submission-captured",
+        at: timestamp,
+        cellKey,
+        armId: cell.armId,
+        replicate: cell.replicate,
+        dispatch,
+        submissionSha256: digestHex,
+        publicationSourceSequence: receipt.sequence,
+        publicationEntrySha256: receipt.entryDigest.slice("sha256:".length),
+      });
+      existing.set(coordinate, digestHex);
+    }
+  });
+}
+
 export function runLaunch(
   context: OperationContext,
   input: RunLaunchInput,
@@ -297,6 +485,7 @@ export function runLaunch(
     subject: input.draftId,
     inputs: input,
     run: async () => {
+      const maxConcurrentCells = requireMaxConcurrentCells(input.maxConcurrentCells);
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "locked");
       assertLaunchableRuntime(loaded.document, input.draftId);
       const publicationIntent = requireRunState(clockedContext.workspaceDir, input.draftId).publication;
@@ -328,6 +517,7 @@ export function runLaunch(
           workspaceDir: clockedContext.workspaceDir,
           now: context.clock,
           evaluatorCount: minVerdicts,
+          maxConcurrentAttempts: maxConcurrentCells,
           agentProfileRequirements: loaded.runRecord.arms.map((arm) => arm.pinning as Readonly<Record<string, unknown>>),
           inspectEvaluationStrategy: deriveInspectEvaluationStrategy(loaded.runRecord.policy.evaluation),
           ...(deps.solveStartDelayMsForTesting !== undefined
@@ -351,6 +541,7 @@ export function runLaunch(
           input.draftId,
           "launch",
           deps.driverGenerationForTesting?.() ?? randomUUID(),
+          maxConcurrentCells,
           async () => {
             let cancellation: ReturnType<typeof createCancellationAwareBackend> | undefined;
             try {
@@ -394,6 +585,7 @@ export function runLaunch(
                 },
                 capture,
                 hostTerminalFacts: composeHostTerminalFacts(clockedContext.workspaceDir, deps.hostTerminalFacts),
+                maxConcurrentCells,
               });
               await driveCellEvents(driveDeps, events);
               return { draft };
@@ -430,6 +622,7 @@ export function runResume(
     subject: input.draftId,
     inputs: input,
     run: async () => {
+      const maxConcurrentCells = requireMaxConcurrentCells(input.maxConcurrentCells);
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "running");
       const createVenue: typeof createLocalVenue = deps.createVenue
         ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options, context.runtimeHost));
@@ -445,12 +638,25 @@ export function runResume(
         );
       }
 
+      await recoverProspectiveSubmissionCaptures(
+        clockedContext.workspaceDir,
+        input.draftId,
+        loaded.runRecord,
+        loaded.runSha256,
+      );
       const entries = readRunJournalEntries(clockedContext.workspaceDir, input.draftId);
       const fold = foldRunJournal(entries);
       const expected = expectedCellSet(loaded.benchRecord, loaded.runRecord);
       const outstanding = outstandingCells(expected, fold);
 
       const journaledSubmissions = new Map<string, string>();
+      // Same crash boundary, one leg down. An evaluation Submission the backend already accepted
+      // must be REPLAYED, never re-sealed: `dispatchEvaluation` stamps `liveClock() +
+      // cellWindow` as the deadline, so fresh bytes under the same idempotency key are refused
+      // ("already has different exact bytes") and terminal the leg could-not-grade forever.
+      // Keyed leg-distinctly (cellKey, dispatch, evalIndex, evaluationAttempt) to match the
+      // idempotency key `eval:<run>:e<evalIndex>[:r<attempt>]:<cellKey>:<dispatch>`.
+      const journaledEvaluationSubmissions = new Map<string, string>();
       for (const entry of entries) {
         // Pre-submit capture is the crash boundary. An interruption after backend acceptance but
         // before the accepted observation archive still resumes with these exact bytes rather
@@ -459,6 +665,11 @@ export function runResume(
           journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
         } else if (entry.kind === "submission-accepted" && entry.leg !== "evaluation") {
           journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
+        } else if (entry.kind === "submission-accepted" && entry.evalIndex !== undefined) {
+          journaledEvaluationSubmissions.set(
+            `${entry.cellKey}::${entry.dispatch}::e${entry.evalIndex}::a${entry.evaluationAttempt ?? 1}`,
+            entry.submissionSha256,
+          );
         }
       }
 
@@ -472,6 +683,7 @@ export function runResume(
           workspaceDir: clockedContext.workspaceDir,
           now: context.clock,
           evaluatorCount: minVerdicts,
+          maxConcurrentAttempts: maxConcurrentCells,
           agentProfileRequirements: loaded.runRecord.arms.map((arm) => arm.pinning as Readonly<Record<string, unknown>>),
           inspectEvaluationStrategy: deriveInspectEvaluationStrategy(loaded.runRecord.policy.evaluation),
           ...(deps.solveStartDelayMsForTesting !== undefined
@@ -495,6 +707,7 @@ export function runResume(
           input.draftId,
           "resume",
           deps.driverGenerationForTesting?.() ?? randomUUID(),
+          maxConcurrentCells,
           async () => {
             let cancellation: ReturnType<typeof createCancellationAwareBackend> | undefined;
             try {
@@ -517,10 +730,60 @@ export function runResume(
                 minVerdicts,
                 maxInfrastructureRetries,
                 liveClock: context.clock,
+                acceptedEvaluationSubmissionBytes: (cellKey, dispatch, evalIndex, evaluationAttempt) => {
+                  const sha256 = journaledEvaluationSubmissions.get(
+                    `${cellKey}::${dispatch}::e${evalIndex}::a${evaluationAttempt}`,
+                  );
+                  return sha256 === undefined
+                    ? undefined
+                    : getSealedBytes(clockedContext.workspaceDir, sha256);
+                },
                 onProgress: deps.onProgress,
               };
 
               if (outstanding.length > 0) {
+                // A crash can occur after the local supervisor has durably written outcome.json
+                // but before it harvests outputs and journals a terminal. Exact resubmission is
+                // intentionally idempotent at the backend, but it is not itself the backend's
+                // recovery operation. Reconcile each previously captured outstanding Submission
+                // first; "absent" simply means the crash preceded backend acceptance and
+                // resumeRun will submit those same bytes normally below.
+                for (const cell of outstanding) {
+                  const submissionSha256 = journaledSubmissions.get(
+                    `${cell.cellKey}::${cell.dispatch}`,
+                  );
+                  if (submissionSha256 === undefined) continue;
+                  const submissionBytes = getSealedBytes(
+                    clockedContext.workspaceDir,
+                    submissionSha256,
+                  );
+                  const submission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
+                    submissionBytes,
+                  )) as { readonly submission?: unknown };
+                  if (
+                    typeof submission.submission !== "string"
+                    || !submission.submission.startsWith("urn:uuid:")
+                  ) {
+                    refuse(
+                      "record-integrity",
+                      `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
+                      "captured outstanding Submission carries no valid Submission URI",
+                    );
+                  }
+                  const reconciliation = await backend.recover(
+                    submission.submission as SubmissionUri,
+                  );
+                  if (reconciliation.classification === "contradictory") {
+                    refuse(
+                      "record-integrity",
+                      `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
+                      `backend recovery contradicted the captured Submission${
+                        reconciliation.detail === undefined ? "" : `: ${reconciliation.detail}`
+                      }`,
+                    );
+                  }
+                }
+
                 cancellation = createCancellationAwareBackend(backend, {
                   workspaceDir: clockedContext.workspaceDir,
                   draftId: input.draftId,
@@ -546,6 +809,7 @@ export function runResume(
                   },
                   capture,
                   hostTerminalFacts: composeHostTerminalFacts(clockedContext.workspaceDir, deps.hostTerminalFacts),
+                  maxConcurrentCells,
                 });
                 await driveCellEvents(driveDeps, events);
               }
@@ -553,19 +817,24 @@ export function runResume(
               // Re-fold fresh: catches gaps left by THIS resume's own new deliveries as well as
               // any carried over from before it, without re-driving a solve dispatch for either.
               const freshFold = foldRunJournal(readRunJournalEntries(clockedContext.workspaceDir, input.draftId));
-              const gaps = (cancelRequested(clockedContext.workspaceDir, input.draftId)
+              // Never filtered (issue #3081): `../operations/run-collect.js` decides whether the
+              // run is terminal-accounted from this SAME unfiltered set, so dropping a gap here
+              // deadlocks the run — resume reports nothing to do while collect refuses until
+              // closeAt. A gap whose `deliverySha256` is missing is a cell killed between its
+              // `delivered` cell-event journal write and its `delivery` journal write; its
+              // Delivery is still durable in the attempt the cell-event named, and
+              // `driveEvaluationCatchUp` heals it from there.
+              const gaps = cancelRequested(clockedContext.workspaceDir, input.draftId)
                 ? []
-                : evaluationGaps(freshFold, minVerdicts, maxInfrastructureRetries)).filter(
-                (gap): gap is typeof gap & { cell: typeof gap.cell & { deliverySha256: string } } =>
-                  gap.cell.deliverySha256 !== undefined,
-              );
+                : evaluationGaps(freshFold, minVerdicts, maxInfrastructureRetries);
               if (gaps.length > 0) {
                 await driveEvaluationCatchUp(
                   driveDeps,
                   gaps.map((gap) => ({
                     cellKey: gap.cell.cellKey,
                     lastDispatch: gap.cell.lastDispatch,
-                    deliverySha256: gap.cell.deliverySha256,
+                    ...(gap.cell.deliverySha256 !== undefined ? { deliverySha256: gap.cell.deliverySha256 } : {}),
+                    ...(gap.cell.attempt !== undefined ? { attempt: gap.cell.attempt } : {}),
                     ...(gap.cell.deliveryOutputs !== undefined ? { deliveryOutputs: gap.cell.deliveryOutputs } : {}),
                     missingEvalIndexes: gap.missingEvalIndexes,
                     nextEvaluationAttempts: gap.nextEvaluationAttempts,

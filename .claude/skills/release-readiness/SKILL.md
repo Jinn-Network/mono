@@ -184,4 +184,4 @@ Skill release-readiness --candidateVersion v0.1.7 --mode human-invoked --forceSh
 - **Re-run a gate that is already green-for-the-candidate-SHA.** Verify, don't re-run.
 - **Hand-type the evidence marker.** The verdict is the projection of two SHA-bound check-runs; the marker is at most a human-readable artifact in the handoff.
 - **Block on infra-blocked.** Warm-operator / OAuth / RPC-429 failures are reported distinctly and routed to the warm-operator owner, never misclassified as a product red (spec §10/§11).
-- **Use bd.** All issue tracking via `gh issue`.
+- **Track issues on GitHub.** All issue tracking via `gh issue`.

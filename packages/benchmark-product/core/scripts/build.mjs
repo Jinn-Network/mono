@@ -24,6 +24,7 @@ await new Promise((resolve, reject) => {
 const runtimeAssetDir = join(dist, "runtime", "inspect");
 await mkdir(runtimeAssetDir, { recursive: true });
 await copyFile(join(packageRoot, "src", "runtime", "inspect", "worker.py"), join(runtimeAssetDir, "worker.py"));
+await copyFile(join(packageRoot, "src", "runtime", "inspect", "binary_judge_worker.py"), join(runtimeAssetDir, "binary_judge_worker.py"));
 await copyFile(join(packageRoot, "src", "runtime", "inspect", "Dockerfile"), join(runtimeAssetDir, "Dockerfile"));
 await copyFile(join(packageRoot, "src", "runtime", "inspect", "oci-runner.mjs"), join(runtimeAssetDir, "oci-runner.mjs"));
 await copyFile(join(packageRoot, "src", "runtime", "inspect", "broker.py"), join(runtimeAssetDir, "broker.py"));

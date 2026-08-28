@@ -40,10 +40,11 @@ Fail closed if that context is missing or contradictory. Do not:
 - publish branch changes;
 - mutate labels, Project state, comments, or draft state yourself.
 
-Resolve the package command once:
+Resolve Autopilot fail-closed (standalone only; never `packages/autopilot`):
 
 ```bash
-AUTOPILOT_PACKAGE_DIR="${JINN_AUTOPILOT_PACKAGE_DIR:-<repo-root>/packages/autopilot}"
+# shellcheck disable=SC1091
+. "$(git rev-parse --show-toplevel)/.github/scripts/resolve-autopilot.sh"
 SESSION_REPORT_DIR="$(dirname -- "$JINN_AUTOPILOT_SESSION_MANIFEST")/reports"
 mkdir -p -- "$SESSION_REPORT_DIR"
 chmod 700 -- "$SESSION_REPORT_DIR"
@@ -56,12 +57,12 @@ Every session payload file must use an absolute path below
 Shared mutations are restricted to:
 
 ```bash
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE \
+autopilot session review-verdict --state APPROVE \
   --body-file "$SESSION_REPORT_DIR/review-verdict.md" \
   --follow-ups-file "$SESSION_REPORT_DIR/review-follow-ups.json"
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE --body-file "$SESSION_REPORT_DIR/review-verdict.md"
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-findings --file "$SESSION_REPORT_DIR/review-findings.md"
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
+autopilot session review-verdict --state APPROVE --body-file "$SESSION_REPORT_DIR/review-verdict.md"
+autopilot session review-findings --file "$SESSION_REPORT_DIR/review-findings.md"
+autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
 ```
 
 Do **not** call the fix-publish session verb. Reviewers have no branch-push authority.
@@ -118,7 +119,7 @@ Then invoke APPROVE, with `--follow-ups-file` only when the JSON file is
 present and non-empty:
 
 ```bash
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE \
+autopilot session review-verdict --state APPROVE \
   --body-file "$SESSION_REPORT_DIR/review-verdict.md" \
   --follow-ups-file "$SESSION_REPORT_DIR/review-follow-ups.json"
 ```
@@ -126,7 +127,7 @@ yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APP
 or, with no follow-ups:
 
 ```bash
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE --body-file "$SESSION_REPORT_DIR/review-verdict.md"
+autopilot session review-verdict --state APPROVE --body-file "$SESSION_REPORT_DIR/review-verdict.md"
 ```
 
 Exit. Do not push. Do not re-draft. Follow-ups are ordinary triage-complete
@@ -138,7 +139,7 @@ Write `$SESSION_REPORT_DIR/review-findings.md` listing every blocking finding
 (markdown). Then:
 
 ```bash
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-findings --file "$SESSION_REPORT_DIR/review-findings.md"
+autopilot session review-findings --file "$SESSION_REPORT_DIR/review-findings.md"
 ```
 
 The session files one `review-finding` child, publishes native REQUEST_CHANGES,
@@ -151,7 +152,7 @@ If intent is undeterminable from the record, or the surface is CODEOWNER-
 reserved:
 
 ```bash
-yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
+autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
 ```
 
 ## Non-negotiables

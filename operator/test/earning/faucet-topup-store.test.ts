@@ -57,7 +57,7 @@ describe('faucet-topup-store', () => {
 
     it('no record → full quota, no cooldown, window inactive', () => {
       const q = computeTopupQuota({ record: undefined, dailyCap, cooldownMs, now: 5000 });
-      expect(q).toEqual({ callsRemaining: 10, cooldownExpiresAt: null, windowActive: false });
+      expect(q).toEqual({ callsRemaining: 10, cooldownExpiresAt: null, windowActive: false, rateLimited: false });
     });
 
     it('window elapsed → quota resets, window inactive', () => {
@@ -72,6 +72,7 @@ describe('faucet-topup-store', () => {
       expect(q.callsRemaining).toBe(10);
       expect(q.windowActive).toBe(false);
       expect(q.cooldownExpiresAt).toBe(batchStartedAt + cooldownMs);
+      expect(q.rateLimited).toBe(false);
     });
 
     it('within window, partial usage → remaining = cap - callsToday, window active', () => {
@@ -86,6 +87,7 @@ describe('faucet-topup-store', () => {
       expect(q.callsRemaining).toBe(6);
       expect(q.windowActive).toBe(true);
       expect(q.cooldownExpiresAt).toBe(batchStartedAt + cooldownMs);
+      expect(q.rateLimited).toBe(false);
     });
 
     it('within window, cap reached → remaining 0, window active', () => {
@@ -99,6 +101,44 @@ describe('faucet-topup-store', () => {
       });
       expect(q.callsRemaining).toBe(0);
       expect(q.windowActive).toBe(true);
+      expect(q.rateLimited).toBe(false);
+    });
+
+    it('CDP rate-limit window zeros remaining even with unused batch cap', () => {
+      const q = computeTopupQuota({
+        record: { callsToday: 0, batchStartedAt: 1000, rateLimitedUntil: 50_000 },
+        dailyCap,
+        cooldownMs,
+        now: 5000,
+      });
+      expect(q.callsRemaining).toBe(0);
+      expect(q.rateLimited).toBe(true);
+      expect(q.cooldownExpiresAt).toBe(50_000);
+    });
+
+    it('expired CDP rate-limit window restores batch remaining', () => {
+      const q = computeTopupQuota({
+        record: { callsToday: 2, batchStartedAt: 1000, rateLimitedUntil: 4000 },
+        dailyCap,
+        cooldownMs,
+        now: 4000,
+      });
+      expect(q.rateLimited).toBe(false);
+      expect(q.callsRemaining).toBe(8);
+    });
+  });
+
+  it('round-trips rateLimitedUntil', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-topup-rl-'));
+    writeFaucetTopupRecord(dir, ADDR, {
+      callsToday: 0,
+      batchStartedAt: 1_000,
+      rateLimitedUntil: 99_000,
+    });
+    expect(readFaucetTopupState(dir).byAddress[ADDR.toLowerCase()]).toEqual({
+      callsToday: 0,
+      batchStartedAt: 1_000,
+      rateLimitedUntil: 99_000,
     });
   });
 });

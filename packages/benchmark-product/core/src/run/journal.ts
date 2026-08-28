@@ -70,6 +70,7 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     at: Rfc3339Schema,
     operation: z.enum(["launch", "resume"]),
     generation: z.string().min(1),
+    maxConcurrentCells: z.number().int().min(1).max(32).optional(),
   }),
   z.object({
     kind: z.literal("driver-succeeded"),

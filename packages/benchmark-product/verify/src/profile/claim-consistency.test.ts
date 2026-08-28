@@ -23,7 +23,7 @@ import {
   type ReportRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
-import { assertClaimConsistency, type ClaimRecordIdentities } from "./claim-consistency.js";
+import { assertClaimConsistency, firstDifference, type ClaimRecordIdentities } from "./claim-consistency.js";
 import { buildClaimPackage, type ClaimPackage } from "./claim.js";
 import { BenchmarkProductError } from "./errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
@@ -143,6 +143,27 @@ function refusalFor(tamper: (claim: Record<string, unknown>) => void): Benchmark
   }
   throw new Error("expected assertClaimConsistency to refuse the tampered claim");
 }
+
+describe("firstDifference", () => {
+  test("equal objects report no difference even when later keys would sort first", () => {
+    expect(firstDifference({ assurance: "same", headline: "same" }, { assurance: "same", headline: "same" })).toBeUndefined();
+  });
+
+  test("names the edited leaf instead of the first key in sorted order", () => {
+    expect(firstDifference(
+      { assurance: { disclosure: "ok" }, headline: { armA: { passRate: "1" } } },
+      { assurance: { disclosure: "ok" }, headline: { armA: { passRate: "0.5" } } },
+    )).toBe("headline.armA.passRate");
+  });
+
+  test("indexes into the array element that differs", () => {
+    expect(firstDifference({ checks: ["a", "b"] }, { checks: ["a", "c"] })).toBe("checks.1");
+  });
+
+  test("a field present on only one side is itself the first difference", () => {
+    expect(firstDifference({ a: 1 }, { a: 1, b: 2 })).toBe("b");
+  });
+});
 
 describe("assertClaimConsistency", () => {
   test("accepts the claim its own sealed records project", () => {

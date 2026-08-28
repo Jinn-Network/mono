@@ -30,9 +30,22 @@ permissions:
 env:
   MARKETPLACE_ROOT: packages/marketplace
 
+# Consolidated per #2997 (pattern proven by the trust-ci pilot, PR #3001): the
+# previous shape ran one runner job per package, rebuilding the shared §7.8
+# portal set (up to nineteen packages) in up to five separate jobs. The
+# packages job below builds the same five packages with the same commands in
+# dependency order in ONE workspace, every portal built once. The
+# snapshot-backed Anvil kit stays a SEPARATE bounded job on purpose: it is the
+# lane's known flake surface (#2440/#2457), and a flake there must eject only
+# itself, not force a re-run of the whole consolidated lane.
+#
+# The per-job isolation this retires was a de-facto undeclared-dependency
+# guard; that invariant is owned by marketplace-source-boundaries.test.mjs in
+# the architecture job.
 jobs:
   architecture:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -49,15 +62,19 @@ jobs:
       - name: Custody boundaries (tripwire, marketplace-surfaces design §4.1)
         run: node --test .github/scripts/custody-boundaries.test.mjs
 
-  binding:
+  packages:
+    name: Marketplace packages
     runs-on: ubuntu-latest
+    # A hung step must not hold a runner slot for the 360-minute default nor
+    # burn the queue's 180-minute check-response budget.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.23.1
+          node-version: 22
       - name: Pin npm for packed-consumer smoke coverage
         run: npm install --global npm@11.19.0 --no-audit --no-fund
       - name: Enable Yarn 4.13.0
@@ -67,13 +84,101 @@ jobs:
       - name: Generate TaskCoordinator artifact from tracked contracts source
         run: |
           (cd contracts && yarn install --immutable && yarn compile)
-      - name: Build cross-tree portal dependencies from source (§7.8)
+      - name: Build cross-tree portal dependency from source (evidence-protocol, §7.8)
+        working-directory: packages/evidence/protocol
         run: |
-          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
-          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
-          (cd packages/trust/core && yarn install --immutable && yarn build)
-          (cd packages/trust/resolve && yarn install --immutable && yarn build)
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (evidence-repository, §7.8)
+        working-directory: packages/evidence/repository
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (evidence-discovery, §7.8)
+        working-directory: packages/evidence/discovery
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (execution-evidence-builder, §7.8)
+        working-directory: packages/evidence/execution-evidence-builder
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (execution-recorder, §7.8)
+        working-directory: packages/evidence/execution-recorder
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (task-execution-protocol, §7.8)
+        working-directory: packages/task-execution/protocol
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (task-execution-backend, §7.8)
+        working-directory: packages/task-execution/backend
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (task-execution-profiles, §7.8)
+        working-directory: packages/task-execution/profiles
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (backend-local-supervisor, §7.8)
+        working-directory: packages/task-execution/backend-local/supervisor
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (backend-local-workspace, §7.8)
+        working-directory: packages/task-execution/backend-local/workspace
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (backend-local-launchers, §7.8)
+        working-directory: packages/task-execution/backend-local/launchers
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (backend-local-assembly, §7.8)
+        working-directory: packages/task-execution/backend-local/assembly
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (task-execution-testing, §7.8)
+        working-directory: packages/task-execution/testing
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (trust-core, §7.8)
+        working-directory: packages/trust/core
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (trust-resolve, §7.8)
+        working-directory: packages/trust/resolve
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (record-discovery-protocol, §7.8)
+        working-directory: packages/discovery/protocol
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (record-discovery-serve, §7.8)
+        working-directory: packages/discovery/serve
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (record-discovery-testing, §7.8)
+        working-directory: packages/discovery/testing
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (trust-testing, §7.8)
+        working-directory: packages/trust/testing
+        run: |
+          yarn install --immutable
+          yarn build
       - name: Verify Marketplace Binding
         working-directory: packages/marketplace/binding
         run: |
@@ -82,49 +187,6 @@ jobs:
           yarn test
           yarn build
           yarn pack:smoke
-      - name: Upload Marketplace Binding distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: marketplace-binding-dist
-          path: packages/marketplace/binding/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  projector:
-    needs: [binding]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Build cross-tree portal dependencies from source (§7.8)
-        run: |
-          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
-          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
-          (cd packages/trust/core && yarn install --immutable && yarn build)
-          (cd packages/trust/resolve && yarn install --immutable && yarn build)
-          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
-          (cd packages/discovery/serve && yarn install --immutable && yarn build)
-          (cd packages/discovery/testing && yarn install --immutable && yarn build)
-      - name: Generate local Anvil fixture artifacts from tracked contracts source (M3.5)
-        run: |
-          (cd contracts && yarn install --immutable && yarn compile)
-      - name: Restore Marketplace Binding distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: marketplace-binding-dist
-          path: packages/marketplace/binding/dist
-      - name: Install Marketplace Binding toolchain (packed-smoke dependency)
-        working-directory: packages/marketplace/binding
-        run: yarn install --immutable
       - name: Verify Marketplace Projector
         working-directory: packages/marketplace/projector
         run: |
@@ -133,55 +195,6 @@ jobs:
           yarn test
           yarn build
           yarn pack:smoke
-      - name: Upload Marketplace Projector distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: marketplace-projector-dist
-          path: packages/marketplace/projector/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  pipeline:
-    needs: [binding]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Build cross-tree portal dependencies from source (§7.8)
-        run: |
-          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
-          (cd packages/evidence/repository && yarn install --immutable && yarn build)
-          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
-          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
-          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
-          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
-          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
-          (cd packages/task-execution/testing && yarn install --immutable && yarn build)
-          (cd packages/trust/core && yarn install --immutable && yarn build)
-          (cd packages/trust/resolve && yarn install --immutable && yarn build)
-          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
-          (cd packages/trust/testing && yarn install --immutable && yarn build)
-      - name: Restore Marketplace Binding distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: marketplace-binding-dist
-          path: packages/marketplace/binding/dist
-      - name: Install Marketplace Binding toolchain (packed-smoke dependency)
-        working-directory: packages/marketplace/binding
-        run: yarn install --immutable
       - name: Verify Marketplace Pipeline
         working-directory: packages/marketplace/pipeline
         run: |
@@ -190,53 +203,9 @@ jobs:
           yarn test
           yarn build
           yarn pack:smoke
-      - name: Upload Marketplace Pipeline distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: marketplace-pipeline-dist
-          path: packages/marketplace/pipeline/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  venue-base:
-    needs: [binding, projector]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Build cross-tree portal dependencies from source (§7.8)
-        run: |
-          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
-          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
-          (cd packages/trust/core && yarn install --immutable && yarn build)
-          (cd packages/trust/resolve && yarn install --immutable && yarn build)
-          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
-          (cd packages/discovery/serve && yarn install --immutable && yarn build)
-          (cd packages/discovery/testing && yarn install --immutable && yarn build)
-      - name: Restore Marketplace Binding distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: marketplace-binding-dist
-          path: packages/marketplace/binding/dist
-      - name: Restore Marketplace Projector distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: marketplace-projector-dist
-          path: packages/marketplace/projector/dist
-      - name: Install cross-marketplace toolchains (packed-smoke dependencies)
-        run: |
-          (cd packages/marketplace/binding && yarn install --immutable)
-          (cd packages/marketplace/projector && yarn install --immutable)
-          (cd packages/marketplace/testing && yarn install --immutable)
+      - name: Install Marketplace Testing toolchain (venue-base's kit tests import its source)
+        working-directory: packages/marketplace/testing
+        run: yarn install --immutable
       - name: Verify Marketplace Venue Base
         working-directory: packages/marketplace/venue-base
         run: |
@@ -245,69 +214,6 @@ jobs:
           yarn test
           yarn build
           yarn pack:smoke
-      - name: Upload Marketplace Venue Base distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: marketplace-venue-base-dist
-          path: packages/marketplace/venue-base/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  testing:
-    needs: [binding, projector, venue-base]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Build cross-tree portal dependencies from source (§7.8)
-        run: |
-          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
-          (cd packages/evidence/repository && yarn install --immutable && yarn build)
-          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
-          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
-          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
-          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
-          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
-          (cd packages/task-execution/testing && yarn install --immutable && yarn build)
-          (cd packages/trust/core && yarn install --immutable && yarn build)
-          (cd packages/trust/resolve && yarn install --immutable && yarn build)
-          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
-          (cd packages/discovery/serve && yarn install --immutable && yarn build)
-          (cd packages/discovery/testing && yarn install --immutable && yarn build)
-          (cd packages/trust/testing && yarn install --immutable && yarn build)
-      - name: Restore Marketplace Binding distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: marketplace-binding-dist
-          path: packages/marketplace/binding/dist
-      - name: Restore Marketplace Projector distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: marketplace-projector-dist
-          path: packages/marketplace/projector/dist
-      - name: Restore Marketplace Venue Base distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: marketplace-venue-base-dist
-          path: packages/marketplace/venue-base/dist
-      - name: Install cross-marketplace toolchains (packed-smoke dependencies)
-        run: |
-          (cd packages/marketplace/binding && yarn install --immutable)
-          (cd packages/marketplace/projector && yarn install --immutable)
-          (cd packages/marketplace/venue-base && yarn install --immutable)
       - name: Verify Marketplace Testing kit
         working-directory: packages/marketplace/testing
         run: |
@@ -316,18 +222,15 @@ jobs:
           yarn test
           yarn build
           yarn pack:smoke
-      - name: Upload Marketplace Testing distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: marketplace-testing-dist
-          path: packages/marketplace/testing/dist
-          if-no-files-found: error
-          retention-days: 1
+      - name: Compile packed public entrypoint consumers
+        run: node .github/scripts/marketplace-packed-types.test.mjs
 
   anvil-fork:
-    # Keep this historical job id stable for required-check compatibility. The implementation
-    # loads committed state and never forks a live chain.
-    needs: [binding, projector, venue-base]
+    # The snapshot-backed conformance and venue kits stay their own bounded job:
+    # this is the lane's known flake surface, and folding it into the packages
+    # job would burn a queue entry's single free re-enqueue on repeating the
+    # whole lane. Self-sufficient by design - it builds its own portal set and
+    # the three marketplace packages it exercises, with no artifact round-trips.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -346,8 +249,6 @@ jobs:
       - name: Install Foundry (Anvil)
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          # Anvil load-state behavior is not stable across Foundry releases. Keep this gate on
-          # the same snapshot-compatible build used by the repository's hermetic gate.
           version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
       - name: Build Hardhat contract artifacts used by the snapshot fixture
         working-directory: contracts
@@ -375,26 +276,11 @@ jobs:
           (cd packages/discovery/serve && yarn install --immutable && yarn build)
           (cd packages/discovery/testing && yarn install --immutable && yarn build)
           (cd packages/trust/testing && yarn install --immutable && yarn build)
-      - name: Restore Marketplace Binding distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: marketplace-binding-dist
-          path: packages/marketplace/binding/dist
-      - name: Restore Marketplace Projector distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: marketplace-projector-dist
-          path: packages/marketplace/projector/dist
-      - name: Restore Marketplace Venue Base distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: marketplace-venue-base-dist
-          path: packages/marketplace/venue-base/dist
-      - name: Install cross-marketplace toolchains (packed-smoke dependencies)
+      - name: Build the marketplace packages the kits exercise
         run: |
-          (cd packages/marketplace/binding && yarn install --immutable)
-          (cd packages/marketplace/projector && yarn install --immutable)
-          (cd packages/marketplace/venue-base && yarn install --immutable)
+          (cd packages/marketplace/binding && yarn install --immutable && yarn build)
+          (cd packages/marketplace/projector && yarn install --immutable && yarn build)
+          (cd packages/marketplace/venue-base && yarn install --immutable && yarn build)
       - name: Install Marketplace Testing toolchain
         working-directory: packages/marketplace/testing
         run: yarn install --immutable
@@ -404,72 +290,3 @@ jobs:
       - name: Run the snapshot-backed Anvil venue kit (§6.6)
         working-directory: packages/marketplace/testing
         run: yarn vitest run src/venue-conformance.test.ts src/venue-fork.test.ts
-
-  verify:
-    needs: [architecture, binding, projector, pipeline, venue-base, testing, anvil-fork]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require every Marketplace CI stage to succeed
-        env:
-          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
-          BINDING_RESULT: ${{ needs.binding.result }}
-          PROJECTOR_RESULT: ${{ needs.projector.result }}
-          PIPELINE_RESULT: ${{ needs.pipeline.result }}
-          VENUE_BASE_RESULT: ${{ needs.venue-base.result }}
-          TESTING_RESULT: ${{ needs.testing.result }}
-          ANVIL_FORK_RESULT: ${{ needs.anvil-fork.result }}
-        run: |
-          for result in \
-            "$ARCHITECTURE_RESULT" \
-            "$BINDING_RESULT" \
-            "$PROJECTOR_RESULT" \
-            "$PIPELINE_RESULT" \
-            "$VENUE_BASE_RESULT" \
-            "$TESTING_RESULT" \
-            "$ANVIL_FORK_RESULT"; do
-            test "$result" = "success"
-          done
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - name: Enable Yarn 4.13.0
-        run: |
-          corepack enable
-          corepack prepare yarn@4.13.0 --activate
-      - name: Restore all package distributions
-        uses: actions/download-artifact@v8
-        with:
-          pattern: marketplace-*-dist
-          path: .marketplace-dist
-      - name: Place package distributions
-        run: |
-          for package in binding projector pipeline venue-base testing; do
-            mkdir -p "packages/marketplace/${package}/dist"
-            cp -R ".marketplace-dist/marketplace-${package}-dist/." "packages/marketplace/${package}/dist/"
-          done
-      - name: Build cross-tree portal dependencies from source (§7.8)
-        run: |
-          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
-          (cd packages/evidence/repository && yarn install --immutable && yarn build)
-          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
-          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
-          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
-          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
-          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
-          (cd packages/task-execution/testing && yarn install --immutable && yarn build)
-          (cd packages/trust/core && yarn install --immutable && yarn build)
-          (cd packages/trust/resolve && yarn install --immutable && yarn build)
-          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
-          (cd packages/discovery/serve && yarn install --immutable && yarn build)
-          (cd packages/discovery/testing && yarn install --immutable && yarn build)
-      - name: Compile packed public entrypoint consumers
-        run: node .github/scripts/marketplace-packed-types.test.mjs

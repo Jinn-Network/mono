@@ -30,7 +30,9 @@ import type {
 import { TaskExecutionError } from "@jinn-network/task-execution-backend";
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_COMPLETE_JSON_LABEL_PARSER_IDENTITY,
   BINARY_CORRECT_WRONG_PARSER_IDENTITY,
+  BINARY_EVERMEM_JSON_LABEL_PARSER_IDENTITY,
   BINARY_JSON_VERDICT_PARSER_IDENTITY,
   BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
@@ -39,6 +41,8 @@ import {
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
   BINARY_JUDGMENT_SNAPSHOT_PROBE_FORMAT_URI,
   BINARY_LABEL_IN_PROSE_PARSER_IDENTITY,
+  BINARY_MEM0_JSON_LABEL_PARSER_IDENTITY,
+  BINARY_STRICT_JSON_LABEL_PARSER_IDENTITY,
   BINARY_YES_NO_PARSER_IDENTITY,
   VERDICT_DSSE_PAYLOAD_TYPE,
   binaryJudgmentPromptTemplateDigest,
@@ -342,6 +346,14 @@ function responseBytesFor(
       return encoder.encode(accept ? "YES" : "NO");
     case BINARY_CORRECT_WRONG_PARSER_IDENTITY.id:
       return encoder.encode(accept ? "CORRECT" : "WRONG");
+    case BINARY_COMPLETE_JSON_LABEL_PARSER_IDENTITY.id:
+    case BINARY_EVERMEM_JSON_LABEL_PARSER_IDENTITY.id:
+    case BINARY_MEM0_JSON_LABEL_PARSER_IDENTITY.id:
+      return encoder.encode(accept ? "{\"label\":\"CORRECT\"}" : "{\"label\":\"WRONG\"}");
+    case BINARY_STRICT_JSON_LABEL_PARSER_IDENTITY.id:
+      return encoder.encode(accept
+        ? "{\"label\":\"CORRECT\",\"reasoning\":\"synthetic rehearsal\"}"
+        : "{\"label\":\"WRONG\",\"reasoning\":\"synthetic rehearsal\"}");
     case BINARY_JSON_VERDICT_PARSER_IDENTITY.id:
       return encoder.encode(accept ? "{\"verdict\":\"ACCEPT\"}" : "{\"verdict\":\"REJECT\"}");
     case BINARY_LABEL_IN_PROSE_PARSER_IDENTITY.id:

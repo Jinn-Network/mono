@@ -26,6 +26,7 @@ import { randomBytes as cryptoRandomBytes, randomUUID as cryptoRandomUUID } from
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { writeConfigFileAtomic } from './config/atomic-write.js';
 import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
 import { startApiServer, type ApiServer } from './api/server.js';
@@ -164,6 +165,7 @@ import {
 } from './preflight/version-check.js';
 import { openBrowser } from './cli/open-browser.js';
 import { resolveDefaultStateDir } from './state-dir.js';
+import { sanitizeErrorText } from './rpc/transport.js';
 
 if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
   dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
@@ -812,7 +814,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             return {
               serviceIndex,
               status: 'reverted' as const,
-              detail: err instanceof Error ? err.message : String(err),
+              // #3036: walk `Error.cause` so a nested viem HttpRequestError's
+              // RPC URL is masked before it reaches the API response body.
+              detail: sanitizeErrorText(err),
             };
           }
         },
@@ -875,6 +879,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         markOnboardingComplete: () => {
           (config as { onboardingComplete?: boolean }).onboardingComplete = true;
         },
+      },
+      claimPolicy: {
+        configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+        readConfig: () => config,
+        writeConfig: writeConfigFileAtomic,
       },
       status: {
         earningDir: config.earningDir,

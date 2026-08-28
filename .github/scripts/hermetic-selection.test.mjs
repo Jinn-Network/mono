@@ -15,7 +15,6 @@ const CANNOT_AFFECT = [
   'growth/README.md',
   'legacy/jinn-cli-agents-reference/CLAUDE.md',
   '.agents/skills/example.md',
-  '.beads/README.md',
   '.claude/skills/eng-day/SKILL.md',
   '.codex/config.toml',
   '.cursor/rules/example.mdc',

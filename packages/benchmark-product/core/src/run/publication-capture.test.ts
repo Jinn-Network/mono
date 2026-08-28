@@ -43,4 +43,22 @@ describe("createProductLaunchCapture", () => {
     capture.captureSubmission({ ...input, bytes });
     expect(() => capture.captureObservation({ ...input, submission: "urn:uuid:00000000-0000-5000-8000-000000000001", submissionDigest: `sha256:${"c".repeat(64)}`, snapshot })).toThrow(/does not match/);
   });
+
+  test("replaying an accepted observation after restart does not duplicate publication facts", async () => {
+    const input = { runDigest: `sha256:${"f".repeat(64)}` as const, cellKey: `${"a".repeat(64)}/arm-a/1`, armId: "arm-a", replicate: 1, dispatch: 1 };
+    const digest = sha256Hex(bytes);
+    const first = createProductLaunchCapture({ workspaceDir, draftId: "draft-1", liveClock: () => "2026-08-13T00:00:00Z" });
+    await first.captureSubmission({ ...input, bytes });
+    first.captureObservation({ ...input, submission: "urn:uuid:00000000-0000-5000-8000-000000000001", submissionDigest: `sha256:${digest}`, snapshot });
+
+    const resumed = createProductLaunchCapture({ workspaceDir, draftId: "draft-1", liveClock: () => "2026-08-13T00:01:00Z" });
+    await resumed.captureSubmission({ ...input, bytes });
+    resumed.captureObservation({ ...input, submission: "urn:uuid:00000000-0000-5000-8000-000000000001", submissionDigest: `sha256:${digest}`, snapshot });
+
+    expect(readRunJournalEntries(workspaceDir, "draft-1").map((entry) => entry.kind)).toEqual([
+      "submission-captured",
+      "submission-accepted",
+      "observation-accepted",
+    ]);
+  });
 });
