@@ -42,7 +42,8 @@
  *      defaulted form `const portBase = opts.portBase ?? 45000`). The array
  *      form is matched against the whole file text rather than line by line,
  *      so a `ports: [\n  60001,\n]` spread over several lines is caught too.
- *   2. No randomly-guessed port — a `Math.random` call whose line, or whose
+ *   2. No randomly-guessed port — a `Math.random` or `randomInt(` call whose
+ *      line, or whose
  *      nearest enclosing `function <name>` / `const <name> =` declaration
  *      within 10 lines, is named something port-ish. Guessing is the same race
  *      as hard-coding, just with a wider blast radius and a lower reproduction
@@ -176,6 +177,14 @@
  *     optional prefix covers `??` and `||` only, which are how a default port
  *     is actually written in this tree.
  *   - A quoted object key — `{ 'port': 45000 }`. The key pattern is unquoted.
+ *   - An arithmetic expression whose literal does not lead — `{ apiPort: BASE +
+ *     45000 }`. Rule 1b needs the literal adjacent to the key, so the
+ *     order-flipped `{ apiPort: 45000 + BASE }` does fire and this one does not.
+ *   - A `listen(` with no receiver dot — rule 1a anchors on `.listen(`.
+ *   - A destructured declaration — `const { apiPort = 45000 } = opts`. Rule 1c
+ *     wants a plain binding name.
+ *   - A rule-3 pin that is not a literal in this file — imported or spread in
+ *     from another module, as well as the computed and CLI-flag forms below.
  *   - A computed or non-integer pin in rule 3 — `maxWorkers: process.env.CI ? 1
  *     : 4`, `maxThreads: 1.0`, or the same flag passed to vitest from the
  *     `test` script in `package.json` rather than written in the config. Rule 3
@@ -224,15 +233,20 @@ const PORT_KEY_LITERAL = new RegExp(`${PORT_KEY}${NUM}`, 'g');
 const PORT_KEY_ARRAY = new RegExp(`${PORT_KEY}\\[([^\\]]*)\\]`, 'g');
 const ARRAY_ELEMENT = new RegExp(NUM_FREE, 'g');
 // `const apiPort = 45000` — a bound-later port that PORT_KEY misses because it
-// is an assignment, not an object key. The optional middle group covers the
+// is an assignment, not an object key. The first optional group is the TS type
+// annotation (`const apiPort: number = 45000`), which is ordinary in a `.ts`
+// file and otherwise breaks the name-to-`=` adjacency; the second is the
 // defaulted form `const portBase = opts.portBase ?? 45000`, which is how a
 // helper's default port is actually written in this tree.
 const PORT_DECL_LITERAL = new RegExp(
-  `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:[^;\\n]*?(?:\\?\\?|\\|\\|)\\s*)?${NUM}`,
+  `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=;\\n]+)?\\s*=\\s*(?:[^;\\n]*?(?:\\?\\?|\\|\\|)\\s*)?${NUM}`,
   'g',
 );
 
-const RANDOM_CALL = /Math\.random/;
+// `randomInt` as well as `Math.random`: the failure text advertises this rule
+// as catching a "randomly guessed" port, and `crypto.randomInt(40000, 60000)`
+// is the same guess with a better RNG.
+const RANDOM_CALL = /Math\.random|\brandomInt\s*\(/;
 const DECLARATION = /\bfunction\s+([A-Za-z_$][\w$]*)|\bconst\s+([A-Za-z_$][\w$]*)\s*=/;
 /**
  * A `port` at a word or camelCase boundary — never a bare substring.

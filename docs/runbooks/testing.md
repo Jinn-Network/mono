@@ -355,10 +355,11 @@ Results:
   pass/fail evidence that proves a flake rather than a moving base).
 - **No broad serialization was added**, and none is warranted: nothing measured
   was cross-worker *state* leakage, so `isolate: true` is doing its job.
-- **Confirmed after the fixes, 2026-08-28.** Three further full-suite runs at
-  `--maxWorkers=3` on the same host: 841 files / 7512 tests passed on each, exit
-  0, zero `EADDRINUSE`, and the home stat manifest below unchanged across all
-  three.
+- **Confirmed 2026-08-28.** Five further full-suite runs at `--maxWorkers=3` on
+  the same host: 841 files / 7512 tests passed on each, exit 0, zero
+  `EADDRINUSE`. The home stat manifest below was taken once before the first
+  run and re-compared against that same baseline afterwards, so its unchanged
+  result covers the five runs cumulatively.
 
 Named but not fixed here, both load-sensitive budgets with CI evidence and no
 local reproduction: `test/cli/native-identity.test.ts` (18 real process boots
@@ -388,7 +389,7 @@ snap > before.txt && <the suite run> ; snap > after.txt && diff before.txt after
 git -C <checkout> status --porcelain   # and nothing written into the tree
 ```
 
-Across the five original runs and the three confirmation runs: no new entries,
+Across the five original runs and the five confirmation runs: no new entries,
 no mtime or size change, and nothing written into the checkout.
 
 ### Run `yarn test`, not a bare `vitest run`

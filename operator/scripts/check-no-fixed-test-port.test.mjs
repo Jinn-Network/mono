@@ -66,6 +66,16 @@ test('rule 1 catches the same literals written plainly', () => {
   assert.deepEqual(flagged('await isDailyDriverRunning({ ports: [60001, 60002] });'), [1]);
 });
 
+// A TS type annotation breaks the name-to-`=` adjacency rule 1c relied on, and
+// it is ordinary TypeScript in a `.ts` test file.
+test('rule 1c sees through a type annotation', () => {
+  assert.deepEqual(flagged('const apiPort: number = 45000;'), [1]);
+  assert.deepEqual(flagged('const apiPort: number = 45_000;'), [1]);
+  assert.deepEqual(flagged('const apiPort: number = opts.apiPort ?? 45000;'), [1]);
+  assert.deepEqual(flagged('const apiPort: number = 7331;'), [], 'sub-band is still fine');
+  assert.deepEqual(flagged('const makePort: () => number = () => 45000;'), [], 'not a binding');
+});
+
 test('rule 1c catches the defaulted-constant form', () => {
   assert.deepEqual(flagged('const portBase = opts.portBase ?? 45007;'), [1]);
   assert.deepEqual(flagged('const apiPort = opts.apiPort || 45_008;'), [1]);
@@ -80,6 +90,9 @@ test('rule 1d reports every element of a multi-line port array', () => {
 test('rule 2 catches a guessed port, by name, within the lookback', () => {
   assert.deepEqual(flagged('function pickPort() {\n  return 40000 + Math.floor(Math.random() * 20000);\n}'), [2]);
   assert.deepEqual(flagged('function pickColor() {\n  return Math.random();\n}'), [], 'not port-ish');
+  // The failure text advertises "randomly guessed"; a better RNG is the same guess.
+  assert.deepEqual(flagged('function pickPort() {\n  return randomInt(40000, 60000);\n}'), [2]);
+  assert.deepEqual(flagged('const apiPort = crypto.randomInt(40000, 60000);'), [1]);
 });
 
 test('a sub-band literal in a port position is the sanctioned form, not a violation', () => {
@@ -203,4 +216,15 @@ test('documented non-catches stay documented', () => {
     [],
     'computed pin',
   );
+  assert.deepEqual(flagged('const o = { apiPort: BASE + 45000 };'), [], 'literal does not lead');
+  assert.deepEqual(flagged('listen(45000);'), [], 'no receiver dot');
+  assert.deepEqual(flagged('const { apiPort = 45000 } = opts;'), [], 'destructured');
+  assert.deepEqual(
+    scanVitestConfig('exclude: [/a\\/\\//], isolate: false,'),
+    [],
+    'a regex literal containing / blanks the rest of its line',
+  );
+  // The order-flipped form DOES fire, which is what makes the one above a gap
+  // rather than a policy.
+  assert.deepEqual(flagged('const o = { apiPort: 45000 + BASE };'), [1]);
 });
