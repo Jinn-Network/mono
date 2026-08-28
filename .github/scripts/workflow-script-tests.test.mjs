@@ -202,12 +202,18 @@ const stringLiterals = (text) => [...text.matchAll(/'([^']*)'|"([^"]*)"/gu)]
 
 /**
  * Identifiers bound at module scope to the repository root. A `root` bound inside a helper is
- * almost always a tmpdir fixture root; only the module-level `resolve(import.meta.dirname, ...)`
- * form reaches into the live checkout.
+ * almost always a tmpdir fixture root; only a module-level `resolve(<this file's directory>, ...)`
+ * reaches into the live checkout.
+ *
+ * Both spellings of "this file's directory" that live in this tree are accepted -- the modern
+ * `import.meta.dirname` and the older `dirname(fileURLToPath(import.meta.url))`, which 17 suites
+ * still use -- with an optional `export`. Recognising only one of them made the gate skip every
+ * suite written in the other, silently: `findInCheckoutFixtureCalls` returns [] with no bindings,
+ * so the fail-closed null-prefix path is never reached.
  */
 export function findRepoRootBindings(source) {
-  return [...maskLiterals(source).matchAll(/^const\s+([A-Za-z_$][\w$]*)\s*=\s*resolve\(\s*import\.meta\.dirname/gmu)]
-    .map((match) => match[1]);
+  const binding = /^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*resolve\(\s*(?:import\.meta\.dirname|dirname\(\s*fileURLToPath\(\s*import\.meta\.url\s*\)\s*\))/gmu;
+  return [...maskLiterals(source).matchAll(binding)].map((match) => match[1]);
 }
 
 /**
@@ -216,9 +222,12 @@ export function findRepoRootBindings(source) {
  *
  * Known limits, accepted and matching the style of the tree's other regex-based guards: the
  * scanner resolves one level of `const x = join(root, ...)` indirection but not two, does not
- * follow a path through a function parameter or a template literal, and reads only the calls in
- * FIXTURE_CREATING_CALLS. A new in-checkout fixture built in a shape outside those bounds is
- * invisible to this gate, which is why the rule is documented at the fixture site as well.
+ * follow a path through a function parameter or a template literal, reads only the calls in
+ * FIXTURE_CREATING_CALLS, and sees only the two repo-root binding shapes findRepoRootBindings
+ * accepts -- a suite that binds a checkout directory some other way (`const scriptsDir =
+ * dirname(fileURLToPath(import.meta.url))`, with no repo root at all) is skipped. A new
+ * in-checkout fixture built in a shape outside those bounds is invisible to this gate, which is
+ * why the rule is documented at the fixture site as well.
  */
 export function findInCheckoutFixtureCalls(source) {
   const bindings = findRepoRootBindings(source);
@@ -413,6 +422,34 @@ test('the in-checkout fixture detector reads repo-root bindings, not tmpdir ones
     "cpSync(repoRoot, scratch, { recursive: true });",
   ].join('\n');
   assert.deepEqual(findInCheckoutFixtureCalls(copyOut), []);
+});
+
+test('both repo-root binding spellings are recognized', () => {
+  // 17 suites in this directory bind the root as `dirname(fileURLToPath(import.meta.url))` rather
+  // than `import.meta.dirname`. Reading only the latter made the gate skip all of them without
+  // reporting anything, so a fixture written from either template must be seen.
+  const viaFileUrl = [
+    "const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');",
+    "mkdtempSync(join(root, 'packages', 'tmp-new-fixture-'));",
+  ].join('\n');
+  assert.deepEqual(findRepoRootBindings(viaFileUrl), ['root']);
+  assert.deepEqual(findInCheckoutFixtureCalls(viaFileUrl), [
+    { call: 'mkdtempSync', segments: ['packages', 'tmp-new-fixture-'] },
+  ]);
+
+  // `export const root = …` is live at .github/scripts/plugin-tree-guard-common.mjs.
+  const exported = [
+    "export const root = resolve(import.meta.dirname, '../..');",
+    "mkdtempSync(join(root, 'packages', '.tmp-exported-'));",
+  ].join('\n');
+  assert.deepEqual(findRepoRootBindings(exported), ['root']);
+  assert.deepEqual(
+    findInCheckoutFixtureCalls(exported).map(({ segments }) => segments),
+    [['packages', '.tmp-exported-']],
+  );
+
+  // A tmpdir root written in either spelling still binds nothing.
+  assert.deepEqual(findRepoRootBindings("const dir = resolve(tmpdir(), 'x');"), []);
 });
 
 test('the mask survives quotes inside regex literals and comments', () => {
