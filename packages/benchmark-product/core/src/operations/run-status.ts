@@ -46,9 +46,10 @@ export interface RunStatusCell {
     readonly recovered: boolean;
     readonly exhausted: boolean;
   };
-  /** Present whenever this cell is in the UNFILTERED evaluation-gap set (`../run/journal.ts`'s
-   * `evaluationGaps`) — the same set `run.resume` drives (`./run-launch.ts`) and `run.collect`
-   * reads for terminal accounting (`./run-collect.ts`). Deliberately independent of
+  /** Present, while the run is `running`, whenever this cell is in the UNFILTERED
+   * evaluation-gap set (`../run/journal.ts`'s `evaluationGaps`) — the same set `run.resume`
+   * drives (`./run-launch.ts`) and `run.collect` reads for terminal accounting
+   * (`./run-collect.ts`). Deliberately independent of
    * `evaluationRecovery`, which reports only infrastructure-retry recovery and disappears
    * entirely when the run's policy allows no retries: a gap can exist with nothing having
    * failed at all (issue #3084). `deliveryJournaled: false` is exactly the issue #3081 shape —
@@ -68,7 +69,8 @@ export interface RunStatusCounts {
   readonly delivered: number;
   readonly judged: number;
   /** Cells carrying an `evaluationGap` — delivered, but with an evaluation leg `run.resume`
-   * would still act on. Non-zero while a run is `running` is the operator's cue to resume. */
+   * would still act on. Non-zero is the operator's cue to resume; zero outside `running`,
+   * where `resume` cannot act. */
   readonly awaitingEvaluation: number;
   /** Cells whose accounted terminal is a non-replaceable failure (excludes "expired"/"cancelled",
    * each visible on the per-cell `status` for callers who want that distinction). */
@@ -139,7 +141,12 @@ export function runStatus(
         runRecord.policy.evaluation?.minVerdicts ?? 1,
         maxInfrastructureRetries,
       );
-      const gapsByCellKey = new Map(gaps.map((gap) => [gap.cell.cellKey, gap]));
+      // Gated on `running` for the same reason `pendingEvaluationCells` below is: `run.resume`
+      // refuses outside `running` (`./run-launch.ts`'s `loadLockedOrRunningRun`), so reporting a
+      // gap on a closed run would be a permanent cue to an operation that cannot act on it.
+      const gapsByCellKey = document.state === "running"
+        ? new Map(gaps.map((gap) => [gap.cell.cellKey, gap]))
+        : new Map<string, typeof gaps[number]>();
       const pendingEvaluationCells = new Set(
         gaps.filter((gap) => document.state === "running"
           && gap.cell.evaluationLegs.some((leg) => leg.retryableFailures > 0))

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -8,7 +8,7 @@ import { atomicWriteFileSync } from "../fs/atomic.js";
 import { writeCancelMarker } from "../run/cancel-marker.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { appendRunJournalEntry, readRunJournalEntries } from "../run/journal.js";
-import { runCancelMarkerPath, runJournalPath } from "../workspace/layout.js";
+import { draftPath, runCancelMarkerPath, runJournalPath } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import type { LocalVenue } from "../venue/venue.js";
 import { armAdd } from "./arms.js";
@@ -475,6 +475,38 @@ describe("runStatus — evaluation gaps resume would act on (#3084)", () => {
     const cell = outcome.result.cells.find((candidate) => candidate.cellKey === gapCellKey);
     expect(cell?.evaluationGap).toEqual({ missingEvalIndexes: [1], deliveryJournaled: true });
     expect(outcome.result.counts.awaitingEvaluation).toBe(1);
+  }, 30_000);
+
+  test("a closed run reports no gap — `resume` cannot act outside `running`, so the cue would be false", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+    expect(launched.ok).toBe(true);
+
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const [gapCellKey] = fullEntries
+      .filter((entry) => entry.kind === "delivery")
+      .map((entry) => (entry.kind === "delivery" ? entry.cellKey : ""));
+    if (gapCellKey === undefined) throw new Error("unreachable: no journaled delivery");
+    const truncated = fullEntries.filter((entry) => {
+      if (entry.kind === "cell-event") return !(entry.event.cellKey === gapCellKey && entry.event.kind === "judged");
+      if (entry.kind === "evaluation") return entry.cellKey !== gapCellKey;
+      if (entry.kind === "submission-accepted") return !(entry.cellKey === gapCellKey && entry.leg === "evaluation");
+      return true;
+    });
+    atomicWriteFileSync(runJournalPath(workspaceDir, "draft-1"), `${truncated.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+    // The gap survives into `closed` — `run.collect` appends only a `closed` entry, which carries
+    // no per-cell accounting — so this is the state the report must not call actionable.
+    const document = JSON.parse(readFileSync(draftPath(workspaceDir, "draft-1"), "utf8")) as Record<string, unknown>;
+    atomicWriteFileSync(draftPath(workspaceDir, "draft-1"), `${JSON.stringify({ ...document, state: "closed" })}\n`);
+
+    const outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.state).toBe("closed");
+    expect(outcome.result.cells.every((cell) => cell.evaluationGap === undefined)).toBe(true);
+    expect(outcome.result.counts.awaitingEvaluation).toBe(0);
   }, 30_000);
 
   test("a fully judged run reports no evaluation gap on any cell", async () => {

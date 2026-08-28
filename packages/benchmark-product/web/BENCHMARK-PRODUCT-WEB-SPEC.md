@@ -224,10 +224,15 @@ Covers the design spec §4.6 Official-run row.
 - **State** — lifecycle state (`locked` / `running` / `closed`); cancellation
   phase when present (`requested` while the venue drains, `cancelled` once a
   terminal Matrix is sealed); Run record digest; per-cell live status
-  (dispatched / claimed / delivered / judged); spend against cap.
+  (dispatched / claimed / delivered / judged); spend against cap. A `running`
+  cell that reached a delivery but still has an evaluation leg `resume` would
+  act on is additionally marked "awaiting evaluation", and "awaiting evaluation
+  (delivery not journaled)" for the stranded shape whose `delivery` record
+  never reached the journal (issue #3084).
 - **State messages** — infra failures are shown as infra, never as a fail
   (`unscorable` is a named outcome value, not a failure — design spec §4.1,
-  §4.6); cap-approach warning; stall notice; "cancellation requested —
+  §4.6); cap-approach warning; stall notice — including a non-zero
+  `counts.awaitingEvaluation`, whose resolving action is `resume`; "cancellation requested —
   draining in-flight work" until the operation reaches its terminal
   `cancelled` result; a closed run with a valid marker says cancellation is
   finalized, never still draining. Venue/finalization contention retains the
