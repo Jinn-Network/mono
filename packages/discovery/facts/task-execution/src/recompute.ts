@@ -281,10 +281,38 @@ export const TASK_EXECUTION_FACTS_RECOMPUTE: FactsRecompute = {
 };
 
 /**
+ * The ABIs a state-predicate spec reads through, from every declarative call target its success
+ * predicates name -- a `callResult` predicate's own call, and a `reportedValue` predicate's
+ * ground-truth call. The read key a consumer derives is a function of the ABI digest, so two
+ * specs reading one function through different ABIs are different specs, and "which specs read
+ * against ABI sha256:X" is the question asked when an ABI turns out to be wrong. An
+ * `encodedCall` target names no ABI and contributes nothing.
+ */
+function abiRefDigests(predicates: readonly unknown[]): `sha256:${string}`[] {
+  const seen = new Set<string>();
+  const digests: `sha256:${string}`[] = [];
+  for (const predicate of predicates) {
+    if (typeof predicate !== "object" || predicate === null) continue;
+    const bag = predicate as { call?: unknown; groundTruth?: { call?: unknown } };
+    for (const target of [bag.call, bag.groundTruth?.call]) {
+      if (typeof target !== "object" || target === null) continue;
+      const digest = descriptorDigest((target as { abiRef?: unknown }).abiRef);
+      if (digest === undefined || seen.has(digest)) continue;
+      seen.add(digest);
+      digests.push(digest);
+    }
+  }
+  return digests;
+}
+
+/**
  * v1's `family` plus every component the spec pins by digest. Which of them a given spec carries
- * is decided by its family: only a state-predicate block names an environment record, only a
- * deterministic-process block names an image, test material and a parser, and so on. A field the
- * spec's family does not have is not announced, rather than announced empty.
+ * is decided by its family: only a state-predicate block names an environment record and the ABIs
+ * its predicates read through, only a deterministic-process block names an image, test material
+ * and a parser, and so on. A scalar edge the spec's family does not have is not announced at all;
+ * a list edge its family *does* have is announced even when empty, because "this spec pins no
+ * test material" is a true statement recomputed from the record, while an absent scalar is not a
+ * statement at all.
  *
  * `grader` is one descriptor or a list of them, and is the access-classified case the
  * completeness rule leads with: a private grader's bytes are exactly what a consumer cannot
@@ -306,6 +334,9 @@ export const evaluationSpecRecomputeV2: RecordFactRecompute = async (bytes, refs
     if (value !== undefined) edges[name] = value;
   };
   add("environmentRecordDigest", descriptorDigest(block.environmentRecord));
+  if (Array.isArray(block.successPredicates)) {
+    edges.abiRefDigests = abiRefDigests(block.successPredicates);
+  }
   add("imageDigest", descriptorDigest(block.image));
   if (Array.isArray(block.testMaterial)) {
     edges.testMaterialDigests = descriptorListDigests(block.testMaterial);

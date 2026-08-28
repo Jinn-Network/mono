@@ -29,6 +29,11 @@ export interface AnnouncementEdge {
  * A card plus the field names its facts profile declares reference-bearing, and the source that
  * announced it. The catalog reads the edges out of the card itself; it never fetches the record,
  * which is the whole point -- for a paid record, fetching to join is not possible at all.
+ *
+ * `sourceId` is the whole isolation boundary: it decides whose rows a write may replace. An
+ * ingest path MUST derive it from the verified identity of the feed the entry came from, never
+ * from anything inside the card. A card that could name its own source could delete another
+ * source's edges.
  */
 export interface AnnouncementEdgeIndexInput {
   readonly sourceId: string;

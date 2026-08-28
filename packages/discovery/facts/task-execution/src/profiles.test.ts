@@ -28,7 +28,7 @@ const EXPECTED_DIGESTS: Record<string, string> = {
   checkpoint: "sha256:44eda1daf7e0d69e470c4d494937b144a24a53ea1af29c945ae137c43a65a545",
   taskV2: "sha256:aee5adb65b09ff4ab44b71ae379dd077188e6f09874592b5bed56fe5c09af0a7",
   deliveryV2: "sha256:180f20a0fe236cadec98eb9d560d55dc9d164374f7d1369edb85d11b6ca9cfa3",
-  evaluationSpecV2: "sha256:d4a2f5efb6377a3a17016bf195f5d46d082cf34e7a6232f78c94559c211c43d2",
+  evaluationSpecV2: "sha256:63511e7d9e009c1af9fe06d2ced0f12c53c4e0482f59b56568815d8da4dd1f53",
 };
 
 function expectPinnedDigest(name: string, digest: string) {
@@ -159,6 +159,7 @@ describe("v2 profiles (join-edge completeness, design §12 amendment)", () => {
     expect(referenceBearingFields(evaluationSpecProfileV2)).toEqual([
       "graderDigests",
       "environmentRecordDigest",
+      "abiRefDigests",
       "imageDigest",
       "testMaterialDigests",
       "parserDigest",

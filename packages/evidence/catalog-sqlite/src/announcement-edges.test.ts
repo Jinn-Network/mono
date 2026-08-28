@@ -300,6 +300,51 @@ describe("paging a heavily referenced target", () => {
     })).rejects.toThrow(EvidenceCatalogError);
   });
 
+  test("pages through one multi-valued field, where only the ordinal separates the rows", async () => {
+    const wide = digest("ab");
+    const targets = Array.from(
+      { length: ANNOUNCEMENT_EDGE_MAX_LIMIT + 5 },
+      (_unused, index) => `sha256:${(index + 1).toString(16).padStart(64, "0")}` as Sha256Digest,
+    );
+    await catalog.indexAnnouncementEdges(announcement(
+      HOLDER, "ann-wide", EXECUTION_KIND, wide, ["resultDigests"], { resultDigests: targets },
+    ));
+    const walked: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await catalog.queryAnnouncementEdges({
+        recordDigest: wide,
+        field: "resultDigests",
+        limit: ANNOUNCEMENT_EDGE_MAX_LIMIT,
+        cursor,
+      });
+      walked.push(...page.items.map((edge) => edge.targetDigest));
+      cursor = page.nextCursor;
+    } while (cursor !== undefined);
+    // The break falls inside one field, so only the ordinal distinguishes the rows either side.
+    expect(walked).toEqual(targets);
+  });
+
+  test("reports a malformed query as a query problem, not as a malformed card", async () => {
+    await expect(catalog.queryAnnouncementEdges({ recordDigest: "garbage" as Sha256Digest }))
+      .rejects.toMatchObject({ code: "INVALID_QUERY" });
+    await expect(catalog.indexAnnouncementEdges(announcement(
+      HOLDER, "ann-bad", EXECUTION_KIND, "garbage" as Sha256Digest, ["taskDigest"], { taskDigest: TASK },
+    ))).rejects.toMatchObject({ code: "INVALID_PROJECTION" });
+  });
+
+  test("refuses a cursor that is not a cursor at all", async () => {
+    for (const cursor of [
+      Buffer.from("null", "utf8").toString("base64url"),
+      Buffer.from("[1,2,3]", "utf8").toString("base64url"),
+      Buffer.from("not json", "utf8").toString("base64url"),
+      Buffer.from(JSON.stringify({ version: 1, queryHash: "x", order: [], extra: 1 }), "utf8").toString("base64url"),
+    ]) {
+      await expect(catalog.queryAnnouncementEdges({ targetDigest: popular, cursor }))
+        .rejects.toMatchObject({ code: "INVALID_QUERY" });
+    }
+  });
+
   test("refuses a limit outside the supported range", async () => {
     await expect(catalog.queryAnnouncementEdges({
       targetDigest: popular,

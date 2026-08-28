@@ -868,8 +868,12 @@ never a *missing* one — a holder who suppresses a dispute edge publishes a car
 `consistent`. Completeness is a rule on the profile document, checked where profiles are
 authored: each `discovery/facts/*` leaf's tests pin its `referenceBearingFields` to the kind's
 whole outbound set, and that pin is what a reviewer reads. Requiring a card to carry every
-declared edge would be a stronger and different rule; it would make an absent optional
-component indistinguishable from a suppressed one at the card layer, and it is not adopted here.
+declared edge is a stronger and different rule, and is not adopted here: it would reinterpret
+§5.4's contract, under which a card is the subset of facts a holder chooses to publish; it would
+invalidate every card already published against a profile whose field set later grows; and
+`undefined` from a recompute is already spoken for as the unavailable-referenced-bytes signal
+that drives `indeterminate`, so the check has no spare state left to say "the record has this
+and the card hid it".
 
 The §5.4 caveat is unchanged and bounds what an edge is worth: a card is a holder-authored
 summary. Edges are for assembling a graph cheaply and for `referrers` inversion; a decision

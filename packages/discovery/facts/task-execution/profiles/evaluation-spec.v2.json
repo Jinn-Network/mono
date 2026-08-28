@@ -6,6 +6,7 @@
     { "name": "family", "class": "record", "cloudEvents": { "attribute": "family", "scalar": "string" } },
     { "name": "graderDigests", "class": "record", "referenceBearing": true },
     { "name": "environmentRecordDigest", "class": "record", "referenceBearing": true },
+    { "name": "abiRefDigests", "class": "record", "referenceBearing": true },
     { "name": "imageDigest", "class": "record", "referenceBearing": true },
     { "name": "testMaterialDigests", "class": "record", "referenceBearing": true },
     { "name": "parserDigest", "class": "record", "referenceBearing": true },

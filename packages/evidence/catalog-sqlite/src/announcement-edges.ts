@@ -46,17 +46,34 @@ function invalidQuery(message: string): never {
   throw new EvidenceCatalogError("INVALID_QUERY", message);
 }
 
-function digestOrThrow(value: unknown, where: string): Sha256Digest {
-  if (typeof value !== "string" || !SHA256_DIGEST.test(value)) {
-    invalidProjection(`${where} must be a sha256:<64 lowercase hex> digest.`);
-  }
-  return value as Sha256Digest;
+// A malformed card and a malformed query are different mistakes and this binding reports them
+// differently everywhere else, so each validator comes in both flavours rather than one serving
+// both paths.
+function isDigest(value: unknown): value is Sha256Digest {
+  return typeof value === "string" && SHA256_DIGEST.test(value);
 }
 
-function nonEmpty(value: unknown, where: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    invalidProjection(`${where} must be a non-empty string.`);
-  }
+function isNonEmpty(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function cardDigest(value: unknown, where: string): Sha256Digest {
+  if (!isDigest(value)) invalidProjection(`${where} must be a sha256:<64 lowercase hex> digest.`);
+  return value;
+}
+
+function cardString(value: unknown, where: string): string {
+  if (!isNonEmpty(value)) invalidProjection(`${where} must be a non-empty string.`);
+  return value;
+}
+
+function queryDigest(value: unknown, where: string): Sha256Digest {
+  if (!isDigest(value)) invalidQuery(`${where} must be a sha256:<64 lowercase hex> digest.`);
+  return value;
+}
+
+function queryString(value: unknown, where: string): string {
+  if (!isNonEmpty(value)) invalidQuery(`${where} must be a non-empty string.`);
   return value;
 }
 
@@ -72,10 +89,10 @@ function nonEmpty(value: unknown, where: string): string {
 export function announcementEdgesFromCard(
   input: AnnouncementEdgeIndexInput,
 ): readonly AnnouncementEdge[] {
-  const sourceId = nonEmpty(input.sourceId, "sourceId");
-  const announcementId = nonEmpty(input.announcementId, "announcementId");
-  const recordKind = nonEmpty(input.recordKind, "recordKind");
-  const recordDigest = digestOrThrow(input.recordDigest, "recordDigest");
+  const sourceId = cardString(input.sourceId, "sourceId");
+  const announcementId = cardString(input.announcementId, "announcementId");
+  const recordKind = cardString(input.recordKind, "recordKind");
+  const recordDigest = cardDigest(input.recordDigest, "recordDigest");
   const edges: AnnouncementEdge[] = [];
   for (const field of input.referenceFields) {
     if (!Object.prototype.hasOwnProperty.call(input.facts, field)) continue;
@@ -90,7 +107,7 @@ export function announcementEdgesFromCard(
         recordDigest,
         field,
         ordinal,
-        targetDigest: digestOrThrow(value, `facts.${field}`),
+        targetDigest: cardDigest(value, `facts.${field}`),
       });
     });
   }
@@ -182,23 +199,23 @@ export class SqliteAnnouncementEdgeIndex {
     const parameters: (string | number)[] = [];
     if (query.sourceId !== undefined) {
       clauses.push("source_id = ?");
-      parameters.push(nonEmpty(query.sourceId, "sourceId"));
+      parameters.push(queryString(query.sourceId, "sourceId"));
     }
     if (query.recordKind !== undefined) {
       clauses.push("record_kind = ?");
-      parameters.push(nonEmpty(query.recordKind, "recordKind"));
+      parameters.push(queryString(query.recordKind, "recordKind"));
     }
     if (query.recordDigest !== undefined) {
       clauses.push("record_digest = ?");
-      parameters.push(digestOrThrow(query.recordDigest, "recordDigest"));
+      parameters.push(queryDigest(query.recordDigest, "recordDigest"));
     }
     if (query.field !== undefined) {
       clauses.push("field = ?");
-      parameters.push(nonEmpty(query.field, "field"));
+      parameters.push(queryString(query.field, "field"));
     }
     if (query.targetDigest !== undefined) {
       clauses.push("target_digest = ?");
-      parameters.push(digestOrThrow(query.targetDigest, "targetDigest"));
+      parameters.push(queryDigest(query.targetDigest, "targetDigest"));
     }
     if (clauses.length === 0) {
       invalidQuery("An announcement-edge query requires at least one filter.");
@@ -283,20 +300,32 @@ function decodeCursor(encoded: string | undefined, expectedHash: string): EdgeOr
   if (typeof encoded !== "string" || encoded.length > 16_384 || !/^[A-Za-z0-9_-]+$/u.test(encoded)) {
     invalidQuery("Announcement-edge cursor is malformed.");
   }
-  let candidate: Record<string, unknown>;
+  let candidate: unknown;
   try {
-    candidate = JSON.parse(
-      Buffer.from(encoded, "base64url").toString("utf8"),
-    ) as Record<string, unknown>;
-  } catch {
+    const bytes = Buffer.from(encoded, "base64url");
+    // A cursor has exactly one spelling: reject any encoding that does not round-trip.
+    if (bytes.toString("base64url") !== encoded) invalidQuery("Announcement-edge cursor is malformed.");
+    candidate = JSON.parse(bytes.toString("utf8"));
+  } catch (error) {
+    if (error instanceof EvidenceCatalogError) throw error;
     invalidQuery("Announcement-edge cursor is malformed.");
   }
-  const order = candidate.order;
   if (
     typeof candidate !== "object"
     || candidate === null
-    || candidate.version !== 1
-    || candidate.queryHash !== expectedHash
+    || Array.isArray(candidate)
+    || Object.keys(candidate).sort().join(",") !== "order,queryHash,version"
+  ) {
+    invalidQuery("Announcement-edge cursor is malformed.");
+  }
+  const { version, queryHash, order } = candidate as {
+    version: unknown;
+    queryHash: unknown;
+    order: unknown;
+  };
+  if (
+    version !== 1
+    || queryHash !== expectedHash
     || !Array.isArray(order)
     || order.length !== 4
     || typeof order[0] !== "string"

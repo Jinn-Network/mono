@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { RECORD_KINDS, recordDigest } from "@jinn-network/record-discovery-protocol";
 import type { ReferencedBytes } from "@jinn-network/record-discovery-protocol";
 import { sealDelivery, sealSubmission, sealTask } from "@jinn-network/task-execution-protocol";
+import { sealEvaluationSpec } from "@jinn-network/task-execution-profiles";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -45,6 +46,12 @@ async function loadGoldenDeliveryBytes(): Promise<Uint8Array> {
 
 async function loadRepositoryWorkProfileBytes(): Promise<Uint8Array> {
   return fixtureBytes("@jinn-network/task-execution-profiles/profiles/task-profiles/repository-work/1.0/profile.json");
+}
+
+async function loadStatePredicateSpecBytes(): Promise<Uint8Array> {
+  return fixtureBytes(
+    "@jinn-network/task-execution-profiles/fixtures/evaluation-spec/golden/state-predicate-minimal.json",
+  );
 }
 
 async function loadSweRebenchEvaluationSpecBytes(): Promise<Uint8Array> {
@@ -258,6 +265,42 @@ describe("v2 recompute: the join edges v1 left out", () => {
     });
     expect(facts).not.toHaveProperty("environmentRecordDigest");
     expect(facts).not.toHaveProperty("rubricDigest");
+    expect(facts).not.toHaveProperty("abiRefDigests");
+  });
+
+  it("names the ABIs a state-predicate spec reads through, from both call sites, de-duplicated", async () => {
+    const abi = "e".repeat(64);
+    const otherAbi = "f".repeat(64);
+    const call = (digest: string) => ({
+      abiRef: { digest: { sha256: digest } },
+      function: "balanceOf(address)",
+      args: [{ type: "address", value: `0x${"1".repeat(40)}` }],
+    });
+    // The profiles package's own golden, with declarative call targets added: two predicates
+    // reading through one ABI, a third through another, and a fourth whose target is an encoded
+    // call and so names no ABI at all.
+    const golden = JSON.parse(
+      new TextDecoder().decode(await loadStatePredicateSpecBytes()),
+    ) as Record<string, unknown>;
+    const block = golden.familyBlock as Record<string, unknown>;
+    const spec = {
+      ...golden,
+      familyBlock: {
+        ...block,
+        successPredicates: [
+          ...(block.successPredicates as unknown[]),
+          { kind: "callResult", to: `0x${"2".repeat(40)}`, call: call(abi), decode: "uint256", cmp: "eq", value: "1" },
+          { kind: "reportedValue", name: "reported", cmp: "eq", value: "1", groundTruth: { to: `0x${"3".repeat(40)}`, call: call(abi), decode: "uint256" } },
+          { kind: "callResult", to: `0x${"4".repeat(40)}`, call: call(otherAbi), decode: "uint256", cmp: "eq", value: "1" },
+          { kind: "callResult", to: `0x${"5".repeat(40)}`, call: { encodedCall: "0xabcdef" }, decode: "uint256", cmp: "eq", value: "1" },
+        ],
+      },
+    };
+    const facts = await evaluationSpecRecomputeV2(sealEvaluationSpec(spec as never).bytes, noReferencedBytes);
+    expect(facts.abiRefDigests).toEqual([`sha256:${abi}`, `sha256:${otherAbi}`]);
+    expect(facts.environmentRecordDigest).toBe(`sha256:${"a".repeat(64)}`);
+    // The golden's grader is uri-only, so it pins nothing and contributes no edge.
+    expect(facts.graderDigests).toEqual([]);
   });
 
   it("emits no facts for bytes that are not an evaluation spec", async () => {
