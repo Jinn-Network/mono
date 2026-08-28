@@ -79,11 +79,18 @@ export interface FetchArtifactOptions {
 class TimeoutError extends Error {}
 class TooLargeError extends Error {}
 
-function envInteger(name: string, fallback: number): number {
+/**
+ * `minimum` is 0 where the bound reads `0` as "disabled" (the timeout, and a
+ * redirect cap of zero meaning "follow none"), and 1 for the byte cap, where
+ * zero would not disable anything — it would reject every artifact as
+ * `too_large`. A foot-gun that silently stops all acquisition is worse than
+ * ignoring the value, so an out-of-range setting falls back to the default.
+ */
+function envInteger(name: string, fallback: number, minimum = 0): number {
   const raw = process.env[name];
   if (raw === undefined || raw.trim() === '') return fallback;
   const parsed = Number(raw);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+  return Number.isInteger(parsed) && parsed >= minimum ? parsed : fallback;
 }
 
 function envFlag(name: string): boolean {
@@ -135,7 +142,8 @@ export async function fetchArtifactContent(
   options: FetchArtifactOptions = {},
 ): Promise<AcquireResult> {
   const fetchImpl = options.fetchImpl ?? pinnedFetch;
-  const maxBytes = options.maxBytes ?? envInteger('JINN_CORPUS_ARTIFACT_MAX_BYTES', DEFAULT_MAX_BYTES);
+  const maxBytes = options.maxBytes
+    ?? envInteger('JINN_CORPUS_ARTIFACT_MAX_BYTES', DEFAULT_MAX_BYTES, 1);
   const timeoutMs = options.timeoutMs
     ?? envInteger('JINN_CORPUS_ARTIFACT_FETCH_TIMEOUT_MS', DEFAULT_TIMEOUT_MS);
   const maxRedirects = options.maxRedirects
@@ -184,7 +192,6 @@ export async function fetchArtifactContent(
       const pin = await bounded(resolvePublicHttpDestination(target, guard));
 
       const response = await bounded(fetchImpl(target, {
-        redirect: 'manual',
         signal: controller.signal,
         ...(pin === null ? {} : { pinnedAddresses: pin.addresses }),
       }));
@@ -211,6 +218,7 @@ export async function fetchArtifactContent(
         try {
           next = new URL(location, target);
         } catch {
+          await response.body?.cancel().catch(() => {});
           return {
             ok: false,
             reason: 'blocked',

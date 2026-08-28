@@ -243,6 +243,21 @@ describe('fetchArtifactContent redirect handling (#1901)', () => {
     expect(cancelled).toBe(true);
   });
 
+  it('abandons the body of a redirect whose Location will not parse', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() { cancelled = true; },
+      pull(controller) { controller.enqueue(new Uint8Array(1024)); },
+    });
+    const result = await fetchArtifactContent('https://op.example.com', SHA, {
+      fetchImpl: async () =>
+        new Response(body, { status: 302, headers: { location: 'http://[oops' } }),
+      resolveHostname: publicResolver,
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'blocked' });
+    expect(cancelled).toBe(true);
+  });
+
   it('caps the redirect chain', async () => {
     let hop = 0;
     const fetchImpl = vi.fn(async () => redirectTo(`https://op.example.com/hop${hop++}`));
@@ -296,6 +311,37 @@ describe('fetchArtifactContent resource bounds (#1901)', () => {
     expect(pulls).toBeLessThanOrEqual(1);
   });
 
+  it('tears the real socket down when a live origin stalls', async () => {
+    // The sibling stall tests drive fake Responses, so they prove `readBounded`
+    // and the deadline but say nothing about the production transport. This one
+    // runs the whole thing over `node:http` and asserts the server saw its
+    // socket closed — the difference between abandoning a stalled peer and
+    // quietly holding a worker on it.
+    let closed = false;
+    const server = createServer((_req, res) => {
+      res.socket?.on('close', () => { closed = true; });
+      res.writeHead(200, { 'content-length': '64' });
+      // Headers, then silence: the body never arrives.
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const result = await fetchArtifactContent(`http://origin.example.com:${port}`, SHA, {
+        resolveHostname: async () => ['93.184.216.34'],
+        // The guard approves the public answer; the pin then sends the socket
+        // to the local server standing in for it.
+        fetchImpl: (url, init) => pinnedFetch(url, {
+          ...init, pinnedAddresses: [{ address: '127.0.0.1', family: 4 }],
+        }),
+        timeoutMs: 100,
+      });
+      expect(result).toMatchObject({ ok: false, reason: 'timeout' });
+      await vi.waitFor(() => expect(closed).toBe(true));
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('aborts a stalled response and persists nothing', async () => {
     const aborted = vi.fn();
     const fetchImpl = vi.fn(async (_url: string | URL, init?: RequestInit) => {
@@ -307,6 +353,25 @@ describe('fetchArtifactContent resource bounds (#1901)', () => {
     });
     expect(result).toMatchObject({ ok: false, reason: 'timeout' });
     expect(aborted).toHaveBeenCalled();
+  });
+
+  it('ignores a zero byte cap rather than refusing every artifact', async () => {
+    // `0` disables the timeout, so an operator may reasonably expect it to
+    // disable the byte cap too. It cannot — a cap of zero rejects everything —
+    // so the setting falls back to the default instead of silently killing
+    // all acquisition.
+    const body = Buffer.from('small enough', 'utf-8');
+    const previous = process.env['JINN_CORPUS_ARTIFACT_MAX_BYTES'];
+    process.env['JINN_CORPUS_ARTIFACT_MAX_BYTES'] = '0';
+    try {
+      const result = await fetchArtifactContent('https://op.example.com', SHA, {
+        fetchImpl: async () => jsonResponse(body), resolveHostname: publicResolver,
+      });
+      expect(result).toEqual({ ok: true, content: body });
+    } finally {
+      if (previous === undefined) delete process.env['JINN_CORPUS_ARTIFACT_MAX_BYTES'];
+      else process.env['JINN_CORPUS_ARTIFACT_MAX_BYTES'] = previous;
+    }
   });
 
   it('aborts a body that stalls mid-stream', async () => {

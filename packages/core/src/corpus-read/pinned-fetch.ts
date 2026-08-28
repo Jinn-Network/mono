@@ -16,6 +16,13 @@
  * that inject a plain `fetch` fake — see one shape either way. The body is
  * exposed as a stream, never buffered here, so the caller's byte cap still
  * governs.
+ *
+ * One deliberate difference from `fetch`: there is no transparent content
+ * decoding. We send no `Accept-Encoding`, so a compliant origin answers with
+ * identity bytes — and the bytes the byte cap counts are then exactly the
+ * bytes the caller hashes. An origin that compresses anyway delivers bytes
+ * that fail the SHA-256 check, which is the safe direction: nothing
+ * unverified is ever admitted.
  */
 
 import { request as httpRequest } from 'node:http';
@@ -40,8 +47,6 @@ export interface PinnedFetchInit {
    */
   readonly pinnedAddresses?: readonly PinnedAddress[];
   readonly signal?: AbortSignal;
-  /** Always `'manual'` here — redirects are the caller's to revalidate. */
-  readonly redirect?: 'manual' | 'follow' | 'error';
 }
 
 export type PinnedFetch = (url: URL, init?: PinnedFetchInit) => Promise<Response>;
