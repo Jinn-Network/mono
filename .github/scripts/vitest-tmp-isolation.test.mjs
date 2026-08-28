@@ -133,6 +133,8 @@ export function stripComments(source) {
  * them, and quote entries that contain a `]`. Every one of those shapes makes a first-match
  * non-greedy regex read a prefix of one list and call it the whole config. An unterminated literal
  * yields nothing rather than a truncated guess.
+ *
+ * Quotes follow `stripComments`' rule: a `'`/`"` span ends at a newline, a backtick span does not.
  */
 function enclosedLiterals(source, key, open, close) {
   const literals = [];
@@ -144,7 +146,12 @@ function enclosedLiterals(source, key, open, close) {
       const character = source[i];
       if (quote !== null) {
         if (character === '\\') i += 1;
-        else if (character === quote) quote = null;
+        // Same newline bound as `stripComments`, for the same reason and with the same backtick
+        // exemption: a `'`/`"` span that cannot be paired off must not swallow the rest of the
+        // scan. Comments are already stripped when this runs, so the exposure is an odd quote in
+        // live code inside the block — but there the unbounded scan runs past the intended close
+        // and the literal comes back truncated or missing.
+        else if (character === quote || (quote !== '`' && character === '\n')) quote = null;
         continue;
       }
       if (character === "'" || character === '"' || character === '`') quote = character;
@@ -343,6 +350,10 @@ test('fsAllowPaths reads every fs.allow list, and only those', () => {
   );
   // An unterminated list yields nothing rather than a truncated guess.
   assert.deepEqual(at(`fs: { allow: ['..'`), []);
+  // A quote the block scan cannot pair off — a regex literal in live code, which is not tokenized —
+  // is bounded at the newline, the same rule `stripComments` uses. Unbounded it runs past the
+  // block's own `}` and the allowance comes back missing.
+  assert.deepEqual(at(`fs: {\n  a: /['"]/u,\n  allow: ['../..'],\n}`), ['']);
 });
 
 test('wiredPaths reads every setupFiles and globalSetup list', () => {
