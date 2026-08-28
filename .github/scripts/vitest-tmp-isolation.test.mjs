@@ -126,7 +126,33 @@ export function stripComments(source) {
 }
 
 /**
- * The `open`…`close` literal that follows each `key:` in `source`, as raw inner text.
+ * The index of the `close` that balances an `open` already consumed at `start - 1`, or `-1` when
+ * the literal is never terminated. Quote-aware so a bracket inside a quoted entry does not close it.
+ */
+function balancedEnd(source, start, open, close) {
+  let depth = 1;
+  let quote = null;
+  for (let i = start; i < source.length; i += 1) {
+    const character = source[i];
+    if (quote !== null) {
+      if (character === '\\') i += 1;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "'" || character === '"' || character === '`') quote = character;
+    else if (character === open) depth += 1;
+    else if (character === close) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Each `open`…`close` literal that follows a `key:` in `source`, as `{ inner, start }` — the raw
+ * inner text and the offset it begins at. The offset is what lets the readers below place a literal
+ * inside or outside a `projects` entry.
  *
  * A balanced scan rather than `key:\s*\[([^\]]*)\]`, and global rather than first-match: configs
  * declare these keys more than once (a root list plus one per `projects` entry), nest arrays inside
@@ -138,27 +164,58 @@ function enclosedLiterals(source, key, open, close) {
   const literals = [];
   for (const opener of source.matchAll(new RegExp(`\\b${key}\\s*:\\s*\\${open}`, 'gu'))) {
     const start = opener.index + opener[0].length;
-    let depth = 1;
+    const end = balancedEnd(source, start, open, close);
+    if (end !== -1) literals.push({ inner: source.slice(start, end), start });
+  }
+  return literals;
+}
+
+/**
+ * The offset range of each object literal that is a direct element of a `projects` array.
+ *
+ * Vitest gives every `projects` entry its own Vite config, so `server.fs.allow` under one entry
+ * says nothing about a seam path named under another. These ranges are how the reachability check
+ * tells the two apart (issue #3123).
+ *
+ * An unterminated `projects: [` yields no ranges, which puts every allowance and seam path back in
+ * one scope and restores the cross-entry crediting this closes. That is the same fallback the other
+ * scanners take on an unterminated literal, and it is bounded the same way: a config that does not
+ * parse cannot load, so its own package job is red before this gate has an opinion.
+ */
+export function projectEntryRanges(source) {
+  const ranges = [];
+  for (const { inner, start } of arrayLiterals(source, 'projects')) {
     let quote = null;
-    for (let i = start; i < source.length; i += 1) {
-      const character = source[i];
+    for (let i = 0; i < inner.length; i += 1) {
+      const character = inner[i];
       if (quote !== null) {
         if (character === '\\') i += 1;
         else if (character === quote) quote = null;
         continue;
       }
       if (character === "'" || character === '"' || character === '`') quote = character;
-      else if (character === open) depth += 1;
-      else if (character === close) {
-        depth -= 1;
-        if (depth === 0) {
-          literals.push(source.slice(start, i));
-          break;
-        }
+      else if (character === '{') {
+        const end = balancedEnd(inner, i + 1, '{', '}');
+        if (end === -1) break;
+        ranges.push([start + i, start + end]);
+        i = end;
       }
     }
   }
-  return literals;
+  return ranges;
+}
+
+/**
+ * The scope `offset` sits in: `'root'`, or the innermost `projects` entry containing it, keyed by
+ * that entry's offset so two entries never compare equal.
+ */
+function scopeAt(offset, ranges) {
+  let innermost = null;
+  for (const [start, end] of ranges) {
+    if (offset < start || offset >= end) continue;
+    if (innermost === null || start > innermost) innermost = start;
+  }
+  return innermost === null ? 'root' : `projects@${innermost}`;
 }
 
 /** The array literal that follows each `key:` in `source`, as raw inner text. */
@@ -166,11 +223,15 @@ function arrayLiterals(source, key) {
   return enclosedLiterals(source, key, '[', ']');
 }
 
-/** The quoted entries of `literal`, resolved against `configDir` and made repo-relative. */
-function resolveQuoted(literal, configDir, base) {
-  return [...literal.matchAll(/['"]([^'"]+)['"]/gu)].map((quoted) =>
-    relative(base, resolve(configDir, quoted[1])).split('\\').join('/'),
-  );
+/**
+ * The quoted entries of `literal`, resolved against `configDir` and made repo-relative, each with
+ * the source offset it was read from so the caller can scope it.
+ */
+function resolveQuoted(literal, configDir, base, literalStart) {
+  return [...literal.matchAll(/['"]([^'"]+)['"]/gu)].map((quoted) => ({
+    resolved: relative(base, resolve(configDir, quoted[1])).split('\\').join('/'),
+    at: literalStart + quoted.index,
+  }));
 }
 
 /**
@@ -183,10 +244,13 @@ function resolveQuoted(literal, configDir, base) {
 export function wiredPaths(rawSource, configPath, base = root) {
   const configDir = dirname(resolve(base, configPath));
   const stripped = stripComments(rawSource);
+  const ranges = projectEntryRanges(stripped);
   const paths = [];
   for (const key of ['setupFiles', 'globalSetup']) {
     for (const literal of arrayLiterals(stripped, key)) {
-      for (const resolved of resolveQuoted(literal, configDir, base)) paths.push({ key, resolved });
+      for (const entry of resolveQuoted(literal.inner, configDir, base, literal.start)) {
+        paths.push({ key, resolved: entry.resolved, scope: scopeAt(entry.at, ranges) });
+      }
     }
   }
   return paths;
@@ -220,11 +284,13 @@ for (const seam of SEAMS) {
 }
 
 /**
- * The paths a config's `server.fs.allow` entries resolve to, as repo-relative strings.
+ * The paths a config's `server.fs.allow` entries resolve to, as `{ resolved, scope }` — repo-relative
+ * and tagged with the `projects` entry the allowance was declared in, or `'root'`.
  *
  * Same quoted-path scan as `wiredPaths`, and for the same reason: this gate runs on a checkout
- * with no dependencies installed, so it cannot import a config to ask. Every `fs.allow` list counts
- * — missing a later one reads a covered seam as unreachable.
+ * with no dependencies installed, so it cannot import a config to ask. Every `fs.allow` list is
+ * read — missing a later one reads a covered seam as unreachable — but the scope tag keeps each
+ * one applied where Vite would apply it, rather than to the whole file (issue #3123).
  *
  * Anchored to an enclosing `fs:` block rather than scanning for a bare `allow:` key. Coverage is
  * what turns the reachability finding OFF, so crediting an unrelated plugin's `allow:` option would
@@ -232,9 +298,17 @@ for (const seam of SEAMS) {
  */
 export function fsAllowPaths(rawSource, configPath, base = root) {
   const configDir = dirname(resolve(base, configPath));
-  return enclosedLiterals(stripComments(rawSource), 'fs', '{', '}')
-    .flatMap((block) => arrayLiterals(block, 'allow'))
-    .flatMap((literal) => resolveQuoted(literal, configDir, base));
+  const stripped = stripComments(rawSource);
+  const ranges = projectEntryRanges(stripped);
+  const allowed = [];
+  for (const block of enclosedLiterals(stripped, 'fs', '{', '}')) {
+    for (const literal of arrayLiterals(block.inner, 'allow')) {
+      for (const entry of resolveQuoted(literal.inner, configDir, base, block.start + literal.start)) {
+        allowed.push({ resolved: entry.resolved, scope: scopeAt(entry.at, ranges) });
+      }
+    }
+  }
+  return allowed;
 }
 
 /**
@@ -259,6 +333,32 @@ function contains(ancestor, path) {
   return rel === '' || (!rel.startsWith('..') && !rel.startsWith('/'));
 }
 
+/**
+ * The `setupFiles`/`globalSetup` entries of `source` that its own Vite root does not contain and no
+ * applicable `server.fs.allow` covers, as `{ key, resolved }`.
+ *
+ * Applicable means declared at root scope, or in the same `projects` entry as the seam path. Each
+ * entry is its own Vite config, so crediting a sibling entry's allowance would be fail-open for
+ * exactly the shape this check exists to close. Root-scope allowances count everywhere: they are
+ * the base config a `projects` entry extends, and reading them narrowly would red a config that
+ * loads fine.
+ */
+export function unreachableWirings(source, configPath, base = root) {
+  const configDir = relative(base, dirname(resolve(base, configPath))).split('\\').join('/');
+  const allowed = fsAllowPaths(source, configPath, base);
+  return wiredPaths(source, configPath, base)
+    .filter((entry) => !contains(configDir, entry.resolved))
+    .filter(
+      (entry) =>
+        !allowed.some(
+          (allow) =>
+            (allow.scope === 'root' || allow.scope === entry.scope) &&
+            contains(allow.resolved, entry.resolved),
+        ),
+    )
+    .map((entry) => ({ key: entry.key, resolved: entry.resolved }));
+}
+
 test('configs that cannot reach the seam they name', () => {
   const unreachable = [];
   for (const seam of SEAMS) {
@@ -270,10 +370,7 @@ test('configs that cannot reach the seam they name', () => {
       const environments = declaredEnvironments(source);
       if (environments.every((environment) => environment === 'node')) continue;
       const configDir = relative(root, dirname(resolve(root, config))).split('\\').join('/');
-      const allowed = fsAllowPaths(source, config);
-      for (const entry of wiredPaths(source, config)) {
-        if (contains(configDir, entry.resolved)) continue;
-        if (allowed.some((allow) => contains(allow, entry.resolved))) continue;
+      for (const entry of unreachableWirings(source, config)) {
         unreachable.push(
           `${config}: ${entry.key} names ${entry.resolved}, which is outside the Vite root ` +
             `(${configDir}) and is not covered by server.fs.allow`,
@@ -322,7 +419,8 @@ test('declaredEnvironments reads every declaration, not the first', () => {
 });
 
 test('fsAllowPaths reads every fs.allow list, and only those', () => {
-  const at = (source) => fsAllowPaths(source, 'packages/x/vitest.config.ts');
+  const at = (source) =>
+    fsAllowPaths(source, 'packages/x/vitest.config.ts').map((entry) => entry.resolved);
   assert.deepEqual(at('export default {}'), []);
   assert.deepEqual(at(`server: { fs: { allow: ['..'] } }`), ['packages']);
   // A second fs block — a root one plus a `projects` entry — is coverage too.
@@ -343,10 +441,24 @@ test('fsAllowPaths reads every fs.allow list, and only those', () => {
   );
   // An unterminated list yields nothing rather than a truncated guess.
   assert.deepEqual(at(`fs: { allow: ['..'`), []);
+
+  // Each allowance is tagged with the block it was declared in: root, or one `projects` entry.
+  const scoped = fsAllowPaths(
+    `server: { fs: { allow: ['.'] } }, projects: [{ server: { fs: { allow: ['..'] } } }, { server: { fs: { allow: ['../..'] } } }]`,
+    'packages/x/vitest.config.ts',
+  );
+  assert.deepEqual(
+    scoped.map((entry) => entry.resolved),
+    ['packages/x', 'packages', ''],
+  );
+  assert.equal(scoped[0].scope, 'root');
+  assert.notEqual(scoped[1].scope, 'root');
+  assert.notEqual(scoped[1].scope, scoped[2].scope);
 });
 
 test('wiredPaths reads every setupFiles and globalSetup list', () => {
-  const at = (source) => wiredPaths(source, 'packages/x/vitest.config.ts');
+  const at = (source) =>
+    wiredPaths(source, 'packages/x/vitest.config.ts').map(({ key, resolved }) => ({ key, resolved }));
   assert.deepEqual(
     at(`test: { setupFiles: ['./a.ts'], projects: [{ test: { setupFiles: ['./b.ts'] } }] }`),
     [
@@ -358,6 +470,15 @@ test('wiredPaths reads every setupFiles and globalSetup list', () => {
     { key: 'globalSetup', resolved: 'packages/x/g.ts' },
     { key: 'globalSetup', resolved: 'packages/x/h.ts' },
   ]);
+
+  // Each entry carries the `projects` entry it was named in, so coverage can be matched to it.
+  const scoped = wiredPaths(
+    `test: { setupFiles: ['./a.ts'], projects: [{ test: { setupFiles: ['./b.ts'] } }, { test: { setupFiles: ['./c.ts'] } }] }`,
+    'packages/x/vitest.config.ts',
+  );
+  assert.equal(scoped[0].scope, 'root');
+  assert.notEqual(scoped[1].scope, 'root');
+  assert.notEqual(scoped[1].scope, scoped[2].scope);
 });
 
 // Commenting a wiring line out while chasing a slow or flaky suite is an ordinary edit, and the one
@@ -421,4 +542,43 @@ test('stripComments leaves comment markers inside strings alone', () => {
   // A quote the scanner cannot pair off must not leak the next line's comments back as live source.
   const afterOddQuote = stripComments("const RE = /['\"]/u;\n// setupFiles: ['isolate-tmp.ts']");
   assert.ok(!afterOddQuote.includes('isolate-tmp'));
+});
+
+// A `projects` config gives each entry its own Vite root, so an `fs.allow` under one entry says
+// nothing about a seam path named under another. Reading both sides globally credited it anyway,
+// which is fail-open for exactly the shape the reachability check exists to close (issue #3123).
+test('fs.allow in one projects entry does not cover a seam path in another', () => {
+  const config = 'packages/x/vitest.config.ts';
+  const seam = '../../test-support/tmp-isolation/isolate-tmp.ts';
+  const resolved = 'test-support/tmp-isolation/isolate-tmp.ts';
+  const inProjects = (entries) =>
+    `export default { test: { environment: 'jsdom', projects: [${entries}] } }`;
+
+  // The allowance sits in the sibling entry, so the seam path stays unreachable.
+  assert.deepEqual(
+    unreachableWirings(
+      inProjects(`{ server: { fs: { allow: ['../..'] } } }, { test: { setupFiles: ['${seam}'] } }`),
+      config,
+    ),
+    [{ key: 'setupFiles', resolved }],
+  );
+
+  // Its own entry's allowance covers it.
+  assert.deepEqual(
+    unreachableWirings(
+      inProjects(`{ server: { fs: { allow: ['../..'] } }, test: { setupFiles: ['${seam}'] } }`),
+      config,
+    ),
+    [],
+  );
+
+  // So does a root-level one, which every project inherits as its base config.
+  assert.deepEqual(
+    unreachableWirings(
+      `export default { server: { fs: { allow: ['../..'] } }, test: { environment: 'jsdom', ` +
+        `projects: [{ test: { setupFiles: ['${seam}'] } }] } }`,
+      config,
+    ),
+    [],
+  );
 });
