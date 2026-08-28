@@ -128,6 +128,8 @@ export function stripComments(source) {
 /**
  * The index of the `close` that balances an `open` already consumed at `start - 1`, or `-1` when
  * the literal is never terminated. Quote-aware so a bracket inside a quoted entry does not close it.
+ *
+ * Quotes follow `stripComments`' rule: a `'`/`"` span ends at a newline, a backtick span does not.
  */
 function balancedEnd(source, start, open, close) {
   let depth = 1;
@@ -136,7 +138,12 @@ function balancedEnd(source, start, open, close) {
     const character = source[i];
     if (quote !== null) {
       if (character === '\\') i += 1;
-      else if (character === quote) quote = null;
+      // Same newline bound as `stripComments`, for the same reason and with the same backtick
+      // exemption: a `'`/`"` span that cannot be paired off must not swallow the rest of the
+      // scan. Comments are already stripped when this runs, so the exposure is an odd quote in
+      // live code inside the block — but there the unbounded scan runs past the intended close
+      // and the literal comes back truncated or missing.
+      else if (character === quote || (quote !== '`' && character === '\n')) quote = null;
       continue;
     }
     if (character === "'" || character === '"' || character === '`') quote = character;
@@ -206,7 +213,12 @@ export function projectEntryRanges(source) {
       const character = inner[i];
       if (quote !== null) {
         if (character === '\\') i += 1;
-        else if (character === quote) quote = null;
+        // Same newline bound as `stripComments`, for the same reason and with the same backtick
+        // exemption: a `'`/`"` span that cannot be paired off must not swallow the rest of the
+        // scan. Comments are already stripped when this runs, so the exposure is an odd quote in
+        // live code inside the block — but there the unbounded scan runs past the intended close
+        // and the literal comes back truncated or missing.
+        else if (character === quote || (quote !== '`' && character === '\n')) quote = null;
         continue;
       }
       if (character === "'" || character === '"' || character === '`') quote = character;
@@ -497,6 +509,10 @@ test('fsAllowPaths reads every fs.allow list, and only those', () => {
   );
   // An unterminated list yields nothing rather than a truncated guess.
   assert.deepEqual(at(`fs: { allow: ['..'`), []);
+  // A quote the block scan cannot pair off — a regex literal in live code, which is not tokenized —
+  // is bounded at the newline, the same rule `stripComments` uses. Unbounded it runs past the
+  // block's own `}` and the allowance comes back missing.
+  assert.deepEqual(at(`fs: {\n  a: /['"]/u,\n  allow: ['../..'],\n}`), ['']);
 
   // Each allowance is tagged with the block it was declared in: root, or one `projects` entry.
   const scoped = fsAllowPaths(
