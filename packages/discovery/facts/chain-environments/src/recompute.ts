@@ -159,14 +159,26 @@ export const cryptoEnvironmentRecomputeV2: RecordFactRecompute = async (bytes, r
   }
 };
 
-/** v1's card plus the re-capture lineage edge. */
+/**
+ * v1's card plus the two components this record pins by digest: the world it re-captures and the
+ * capturer that produced it. Its descriptors already carry the `sha256:` spelling.
+ *
+ * The corpus entries' response bodies are deliberately not edges. They are this record's own
+ * content, enumerated inside its bytes and unbounded in number; putting them on the card would
+ * defeat the card's filter-before-fetch purpose, and the record digest already covers them.
+ */
 export const informationWorldRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
   const facts = await informationWorldRecompute(bytes, refs);
   if (Object.keys(facts).length === 0) return {};
   try {
     const record = parseInformationWorldRecord(bytes);
-    const supersedes = descriptorDigest(record.supersedes);
-    return supersedes === undefined ? facts : { ...facts, supersedesDigest: supersedes };
+    return {
+      ...facts,
+      ...(record.supersedes === undefined ? {} : { supersedesDigest: record.supersedes.digest }),
+      ...(record.capture.capturer === undefined
+        ? {}
+        : { "capture.capturerDigest": record.capture.capturer.digest }),
+    };
   } catch {
     return {};
   }

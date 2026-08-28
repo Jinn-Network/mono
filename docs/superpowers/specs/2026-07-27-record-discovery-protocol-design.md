@@ -844,7 +844,11 @@ reason is the join verb: an index serves discover, join, judge and fetch from an
 cards alone, never by fetching records, and for access-classified records fetching-to-join is
 not possible at all. A profile that omits an edge makes that join unanswerable from the feed.
 An identity or labeling descriptor that pins nothing by digest is not an outbound reference
-and is not covered by this rule. Adding an edge to a published profile is a **profile
+and is not covered by this rule. Neither is a record's own enumerated content — the entries of
+a captured corpus, the outputs listed inside a report body — which the record digest already
+covers and which is unbounded in number; putting it on a card would defeat the card's
+filter-before-fetch purpose. What the rule reaches is the record's *dependencies and lineage*:
+the other records it composes, the artifacts it pins, and its supersession pointer. Adding an edge to a published profile is a **profile
 revision** under §15 — a new profile URI version, the previous version retained and still
 registered — never an in-place edit.
 

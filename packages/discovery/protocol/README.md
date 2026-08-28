@@ -27,7 +27,10 @@ declared, and marked `referenceBearing`.
 An index serves join from announcement cards alone. "This environment, its attempts, their
 verdicts" is a graph walk over card edges; for a paid record, fetching-to-join is not even
 possible. An omitted edge makes that walk unanswerable from the feed. A descriptor that pins
-nothing by digest is not an edge and is not covered.
+nothing by digest is not an edge, and neither is a record's own enumerated content (a captured
+corpus's entries, say) — unbounded in number and already covered by the record digest. The rule
+reaches the record's dependencies and lineage: the records it composes, the artifacts it pins,
+and its supersession pointer.
 
 Cards remain holder-authored summaries. `facts-consistency` re-checks an edge against the
 fetched record exactly as it re-checks any other record fact, and decision-grade use fails

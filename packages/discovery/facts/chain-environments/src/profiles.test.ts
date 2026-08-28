@@ -12,8 +12,11 @@ import {
 } from "./identifiers.js";
 import {
   chainEnvironmentFactsProfile,
+  chainEnvironmentFactsProfileV2,
   cryptoEnvironmentFactsProfile,
+  cryptoEnvironmentFactsProfileV2,
   informationWorldFactsProfile,
+  informationWorldFactsProfileV2,
 } from "./profiles.js";
 
 describe("chain-environment facts profile (CF4)", () => {
@@ -95,5 +98,59 @@ describe("information world facts profile", () => {
 
   it("no field is reference-bearing: a corpus body is not an announceable record", () => {
     expect(informationWorldFactsProfile.fields.some((field) => field.referenceBearing)).toBe(false);
+  });
+});
+
+describe("v2 profiles (join-edge completeness, design §12 amendment)", () => {
+  it("binds the same three kinds under the next profile version", () => {
+    expect(chainEnvironmentFactsProfileV2.kind).toBe(CHAIN_ENVIRONMENT_KIND);
+    expect(chainEnvironmentFactsProfileV2.profile).toBe("https://spec.jinn.network/facts/chain-environment/v2");
+    expect(cryptoEnvironmentFactsProfileV2.kind).toBe(CRYPTO_ENVIRONMENT_KIND);
+    expect(cryptoEnvironmentFactsProfileV2.profile).toBe("https://spec.jinn.network/facts/crypto-environment/v2");
+    expect(informationWorldFactsProfileV2.kind).toBe(INFORMATION_WORLD_KIND);
+    expect(informationWorldFactsProfileV2.profile).toBe("https://spec.jinn.network/facts/information-world/v2");
+  });
+
+  it("declares the chain environment's complete outbound-reference set", () => {
+    expect(referenceBearingFields(chainEnvironmentFactsProfileV2).sort()).toEqual([
+      "runtime.image.manifestDigest",
+      "stateMaterialization.stateArtifactDigest",
+      "supersedesDigest",
+    ]);
+  });
+
+  it("declares the composite's complete outbound-reference set", () => {
+    expect(referenceBearingFields(cryptoEnvironmentFactsProfileV2).sort()).toEqual([
+      "chainWorld.digest",
+      "informationWorldDigests",
+      "serviceRuntimeImageDigests",
+      "supersedesDigest",
+    ]);
+  });
+
+  it("declares the information world's pinned components: the capturer and its re-capture lineage", () => {
+    expect(referenceBearingFields(informationWorldFactsProfileV2).sort()).toEqual([
+      "capture.capturerDigest",
+      "supersedesDigest",
+    ]);
+  });
+
+  it("declares every added field a record fact", () => {
+    for (const profile of [
+      chainEnvironmentFactsProfileV2,
+      cryptoEnvironmentFactsProfileV2,
+      informationWorldFactsProfileV2,
+    ]) {
+      for (const field of profile.fields) expect(field.class).toBe("record");
+    }
+  });
+
+  it("leaves the v1 profiles untouched", () => {
+    expect(referenceBearingFields(cryptoEnvironmentFactsProfile)).toEqual(["chainWorld.digest"]);
+    expect(informationWorldFactsProfile.fields.some((field) => field.referenceBearing)).toBe(false);
+    expect(referenceBearingFields(chainEnvironmentFactsProfile).sort()).toEqual([
+      "runtime.image.manifestDigest",
+      "stateMaterialization.stateArtifactDigest",
+    ]);
   });
 });
