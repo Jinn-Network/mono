@@ -401,8 +401,9 @@ export function createCorpusCapability(
         remedy:
           refused.length === 0
             ? null
-            : "A refused archive is serving a chain this runtime cannot verify; check the " +
-              "archive's head signature and the signing keys this runtime resolves for it.",
+            : "A refused archive is serving a chain this runtime cannot verify; the reason above " +
+              "names which check failed — start from the archive's head signature, the signing " +
+              "keys this runtime resolves for it, and the entry linkage it served.",
       };
     }
     if (state.corpus.sources.length === 0) {

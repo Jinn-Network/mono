@@ -325,9 +325,10 @@ function envelopeHead(head: unknown): unknown {
 function buildArchiveTransport(
   source: MirrorSourceConfig,
   recordBytes: readonly Uint8Array[],
-  delayMs = 0,
-  signHead = false,
+  options: { readonly delayMs?: number; readonly signHead?: boolean } = {},
 ): Transport {
+  const delayMs = options.delayMs ?? 0;
+  const signHead = options.signHead ?? false;
   const announcements = recordBytes.map((bytes, index) => ({
     announcementId: `ann-${String(index + 1)}`,
     action: "available" as const,
@@ -398,10 +399,10 @@ export function buildFixtureArchive(
     digest: recordDigest(aliceBytes[0]!),
   };
   const signHead = options.signHead ?? false;
-  const transport = buildArchiveTransport(source, aliceBytes, 0, signHead);
+  const transport = buildArchiveTransport(source, aliceBytes, { signHead });
   return {
     transport,
-    slowTransport: buildArchiveTransport(source, aliceBytes, 50, signHead),
+    slowTransport: buildArchiveTransport(source, aliceBytes, { delayMs: 50, signHead }),
     policyVersions: [policy.envelopeBytes],
     genesisDigest: policy.digest,
     reference,
