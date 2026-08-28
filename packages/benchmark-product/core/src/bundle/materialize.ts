@@ -33,6 +33,7 @@ import { parseDraftDocument } from "../domain/draft.js";
 import { atomicWriteFileSync, fsyncDirectorySync } from "../fs/atomic.js";
 import {
   additionalClaimPackagePath,
+  ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ClaimPackageSchema,
 } from "../report/claim.js";
@@ -54,7 +55,7 @@ import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/sig
 import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { buildPublicAssets } from "./assets.js";
 import {
@@ -269,7 +270,8 @@ function recordClosure(input: MaterializeBundleInput): {
   readonly format:
     | "benchmark-product-public-bundle/2"
     | typeof BUNDLE_V4_FORMAT
-    | typeof BUNDLE_V6_FORMAT;
+    | typeof BUNDLE_V6_FORMAT
+    | typeof BUNDLE_V7_FORMAT;
 } {
   const { workspaceDir, draftId, benchmarkSha256, runState, reportSelector } = input;
   if (
@@ -336,7 +338,11 @@ function recordClosure(input: MaterializeBundleInput): {
   if (!Buffer.from(canonicalJsonBytes(claim)).equals(Buffer.from(claimBytes))) {
     refuse("record-integrity", "claim-package.json", "claim package is not in exact canonical JSON encoding");
   }
-  const binaryQualification = claim.claimSchema === BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID;
+  // Both binary allocations project the same qualification and carry the same `qualification.json`:
+  // claim-package/5 is /2 plus the anchors section (issue #3205). Whether the run is ALSO anchored
+  // is read below from the run's own recorded anchors, never from the claim's schema id.
+  const binaryQualification = claim.claimSchema === BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID
+    || claim.claimSchema === ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID;
   if (binaryQualification !== (report.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument)) {
     refuse("record-integrity", "claim-package.json", "claim schema and sealed Report method disagree on binary qualification");
   }
@@ -357,7 +363,7 @@ function recordClosure(input: MaterializeBundleInput): {
         Buffer.from(canonicalJsonBytes(claim.qualification as never)),
       )
     ) {
-      refuse("record-integrity", "claim-package.json", "claim-package/2 must exactly project the sealed binary-instrument@1 Report result");
+      refuse("record-integrity", "claim-package.json", `${claim.claimSchema} must exactly project the sealed binary-instrument@1 Report result`);
     }
   }
 
@@ -370,14 +376,6 @@ function recordClosure(input: MaterializeBundleInput): {
   // reader that its own carried evidence does not back.
   const anchorCarriage = readRunAnchorCarriage(workspaceDir, runState);
   const anchored = anchorCarriage.anchoredClosure;
-  if (anchored && binaryQualification) {
-    refuse(
-      "conflict",
-      "anchors",
-      "the anchored binary-qualification closure is a later allocation; this run carries both a"
-      + " binary qualification projection and an anchor, and no closure version expresses both",
-    );
-  }
   // Presence is compared, not only contents: an unanchored claim inside an anchored closure is
   // exactly as wrong as an anchored claim whose section drifted, and an omitted section is not an
   // empty one.
@@ -525,6 +523,9 @@ function recordClosure(input: MaterializeBundleInput): {
     }).sort((left, right) => compareCodeUnitStrings(left.armId, right.armId));
     const qualification = BundleQualificationSchema.parse({
       format: BUNDLE_QUALIFICATION_FORMAT,
+      // Stays claim-package/2 on every closure, including the anchored one (issue #3205): this
+      // names the projection SHAPE the qualification graph was built for, which claim-package/5
+      // reuses byte-identically. See `verify/src/schema.ts`'s own note on the same literal.
       claimSchema: BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
       sourceManifestSha256: extension.sourceManifestSha256,
       admissionManifestSha256: extension.admissionManifestSha256,
@@ -534,11 +535,20 @@ function recordClosure(input: MaterializeBundleInput): {
       strata: admission.strata,
       arms,
       items: qualificationItems,
-      exclusions: admission.excluded.map((entry) => ({
-        itemSha256: entry.itemSha256,
-        replacementItemSha256: entry.replacementItemSha256,
-        reason: entry.reason,
-      })),
+      // Sorted by `itemSha256`, like `items` and `arms` above, because
+      // `BundleQualificationSchema` requires this projection to be code-unit sorted and unique.
+      // The authenticated `admission.excluded` list is in REPLACEMENT-LEDGER order, which is the
+      // ledger's own authenticated order and carries no sortedness guarantee, so every admission
+      // whose ledger happened to be unsorted refused at the schema instead of publishing. No
+      // previously producible bundle moves: an unsorted projection never got past this parse, so
+      // the only lists this sort can reorder are ones that could not be published at all.
+      exclusions: admission.excluded
+        .map((entry) => ({
+          itemSha256: entry.itemSha256,
+          replacementItemSha256: entry.replacementItemSha256,
+          reason: entry.reason,
+        }))
+        .sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256)),
       admissionRecords: admission.reachableRecords,
       reachableSha256s: admission.reachableSha256s,
     });
@@ -1051,10 +1061,13 @@ function recordClosure(input: MaterializeBundleInput): {
   return {
     files,
     evidenceRecords,
-    // Carrying an anchor is what moves a bundle onto the anchored closure. Everything else emits
-    // exactly the version it emitted before this feature existed, byte for byte (§12).
+    // Two independent axes: carrying an anchor moves a bundle onto an anchored closure, and
+    // projecting a binary qualification moves it onto a qualification closure. Everything else
+    // emits exactly the version it emitted before either feature existed, byte for byte (§12).
     format: anchored
-      ? BUNDLE_V6_FORMAT
+      ? binaryQualification
+        ? BUNDLE_V7_FORMAT
+        : BUNDLE_V6_FORMAT
       : binaryQualification
         ? BUNDLE_V4_FORMAT
         : "benchmark-product-public-bundle/2",

@@ -153,7 +153,7 @@ test("claim-package/4 refuses an omitted anchors section", () => {
   assert.equal(ClaimPackageSchema.safeParse(withoutSection).success, false);
 });
 
-test("claim-package/4 refuses a qualification projection — that closure is a later allocation", () => {
+test("claim-package/4 refuses a qualification projection — that closure is claim-package/5", () => {
   assert.equal(ClaimPackageSchema.safeParse(validAnchoredClaim({ qualification: {} })).success, false);
 });
 
@@ -214,4 +214,92 @@ test("an anchor entry is strict: an extra key and a mixed fact shape are both re
     ClaimPackageSchema.safeParse(validAnchoredClaim({ anchors: [anchorEntry({ facts: { pending: true } })] })).success,
     true,
   );
+});
+
+// --- issue #3205: the anchored binary-qualification allocation, claim-package/5 ---
+
+const V7_COMMAND = "npx @colophon-claims/verify@0.2.1 <bundle-dir>";
+const V7_COMPATIBLE = "npx @colophon-claims/verify@0.2 <bundle-dir>";
+
+function validAnchoredBinaryClaim(overrides = {}) {
+  const base = validBinaryClaim();
+  return {
+    ...base,
+    claimSchema: "benchmark-product.claim-package/5",
+    verification: { ...base.verification, command: V7_COMMAND, compatibleCommand: V7_COMPATIBLE, checks: V6_CHECKS },
+    anchors: [anchorEntry()],
+    ...overrides,
+  };
+}
+
+test("claim-package/5 admits the qualification projection and the anchors section together", () => {
+  const parsed = ClaimPackageSchema.parse(validAnchoredBinaryClaim());
+  assert.equal(parsed.claimSchema, "benchmark-product.claim-package/5");
+  assert.deepEqual(parsed.anchors, validAnchoredBinaryClaim().anchors);
+  assert.deepEqual(parsed.qualification, validBinaryClaim().qualification);
+});
+
+test("claim-package/5 admits the empty section a declared-but-absent bundle carries", () => {
+  assert.deepEqual(ClaimPackageSchema.parse(validAnchoredBinaryClaim({ anchors: [] })).anchors, []);
+});
+
+test("claim-package/5 refuses an omitted anchors section and a dropped qualification", () => {
+  const { anchors: _omitted, ...withoutSection } = validAnchoredBinaryClaim();
+  assert.equal(ClaimPackageSchema.safeParse(withoutSection).success, false);
+  const { qualification: _dropped, ...withoutQualification } = validAnchoredBinaryClaim();
+  assert.equal(ClaimPackageSchema.safeParse(withoutQualification).success, false);
+});
+
+test("claim-package/5 refuses a sibling method projection alongside the qualification", () => {
+  assert.equal(ClaimPackageSchema.safeParse(validAnchoredBinaryClaim({ headline: {} })).success, false);
+  assert.equal(ClaimPackageSchema.safeParse(validAnchoredBinaryClaim({ comparison: {} })).success, false);
+});
+
+test("claim-package/5 refuses top-level and nested ranking conclusions, exactly as /2 does", () => {
+  const topLevel = validAnchoredBinaryClaim();
+  topLevel.ranking = ["arm-a"];
+  assert.equal(ClaimPackageSchema.safeParse(topLevel).success, false);
+
+  const nested = validAnchoredBinaryClaim();
+  nested.scope = { ...nested.scope, arms: [{ armId: "arm-a", pinning: {}, winner: true }] };
+  assert.equal(ClaimPackageSchema.safeParse(nested).success, false);
+
+  const ranked = structuredClone(validAnchoredBinaryClaim());
+  ranked.qualification.ranking = ["arm-a"];
+  ranked.results.perSubject[0].results.ranking = ["arm-a"];
+  assert.equal(ClaimPackageSchema.safeParse(ranked).success, false);
+});
+
+test("claim-package/5 refuses a drifted qualification that no longer equals the Report result", () => {
+  const drifted = structuredClone(validAnchoredBinaryClaim());
+  drifted.qualification.configuration.intervalAlpha = "0.01";
+  assert.equal(ClaimPackageSchema.safeParse(drifted).success, false);
+});
+
+test("claim-package/5 must pin verifier 0.2.1/@0.2 and the seven checks in order", () => {
+  assert.equal(
+    ClaimPackageSchema.safeParse(validAnchoredBinaryClaim({
+      verification: { command: V6_COMMAND, compatibleCommand: V6_COMPATIBLE, checks: V6_CHECKS, trustRoot: "self-run" },
+    })).success,
+    false,
+  );
+  assert.equal(
+    ClaimPackageSchema.safeParse(validAnchoredBinaryClaim({
+      verification: { command: V7_COMMAND, compatibleCommand: V7_COMPATIBLE, checks: V6_CHECKS.slice(0, 6), trustRoot: "self-run" },
+    })).success,
+    false,
+  );
+  assert.equal(
+    ClaimPackageSchema.safeParse(validAnchoredBinaryClaim({
+      verification: {
+        command: V7_COMMAND, compatibleCommand: V7_COMPATIBLE,
+        checks: ["integrity-anchors", ...V6_CHECKS.slice(0, 6)], trustRoot: "self-run",
+      },
+    })).success,
+    false,
+  );
+});
+
+test("claim-package/4 still refuses a qualification projection — that closure is /5", () => {
+  assert.equal(ClaimPackageSchema.safeParse(validAnchoredClaim({ qualification: {} })).success, false);
 });

@@ -196,6 +196,36 @@ covers and says nothing else about the run — not that results were produced
 after it, and not that the anchoring authority is independent of the bundle's
 owner.
 
+### Anchored binary qualification bundle v7
+
+A run that is both anchored and projecting a binary qualification emits
+`benchmark-product-public-bundle/7`. It is the intersection of the two closures
+above and nothing else: v4's complete member list, including
+`qualification.json`, plus v6's `anchors/<sha256>.bin` members and its
+`integrity-anchors` check. Every rule stated for either parent holds here
+unchanged, and v2, v4, and v6 bundles keep the versions, member lists, and bytes
+they already had.
+
+Its claim package is `benchmark-product.claim-package/5`: claim-package/2's
+exact per-subject F6 qualification projection plus claim-package/4's `anchors`
+section. Both parents' refusals are inherited. A ranking, selection, or any
+other conclusion smuggled into the claim is refused exactly as it is on
+claim-package/2, and an omitted anchors section is refused exactly as it is on
+claim-package/4. `qualification.json` keeps its frozen
+`benchmark-product.claim-package/2` literal on this closure: that field names
+which projection shape the qualification graph was built for, and that shape is
+byte-identical under both binary allocations.
+
+Unlike every earlier closure, v7 does not stamp the first public `@0.1` line. No
+released reader before `0.2.1` understands the format, so its claim pins:
+
+```bash
+npx @colophon-claims/verify@0.2.1 <bundle-dir>
+```
+
+with `@0.2` as the compatible line. It returns the same **seven checks** as v6,
+in the same order.
+
 ## Portable verification
 
 Verification with your own tools — no Jinn code at all — is specified in

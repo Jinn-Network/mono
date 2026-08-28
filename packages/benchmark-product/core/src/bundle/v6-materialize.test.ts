@@ -33,6 +33,7 @@ import {
   createFixtureAuthority,
 } from "@jinn-network/trust-testing";
 import {
+  ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
   CLAIM_PACKAGE_SCHEMA_ID,
   buildClaimPackage,
@@ -277,11 +278,14 @@ describe("anchored public bundle v6 — the producer's loud refusals", () => {
     })).toThrow(/anchors section is not the projection of the anchors this run records/);
   }, 180_000);
 
-  test("a binary-qualification run that carries an anchor refuses — no closure version expresses both", async () => {
+  test("an anchor appended to an already-reported binary run refuses rather than publishing past its claim", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "anchored-v6-binary-"));
     roots.push(workspaceDir);
     const binary = await createSyntheticV4BundleFixture({ workspaceDir, truthAdmission: "operator-only" });
     const state = readRunState(workspaceDir, binary.draftId)!;
+    // The fixture already sealed an UNANCHORED claim. The allocation for the anchored pairing now
+    // exists (issue #3205), so the surviving refusal is the ordinary drift one: an anchor obtained
+    // after the run was reported cannot be republished as though the sealed claim had stated it.
     recordAnchorDirectly(workspaceDir, binary.draftId, "lock", state.runSha256!, RUN_RECORD_KIND);
 
     expect(() => materializePublicBundle({
@@ -289,10 +293,10 @@ describe("anchored public bundle v6 — the producer's loud refusals", () => {
       draftId: binary.draftId,
       benchmarkSha256: binary.benchmarkSha256,
       runState: readRunState(workspaceDir, binary.draftId)!,
-    })).toThrow(/the anchored binary-qualification closure is a later allocation/);
+    })).toThrow(/anchors section is not the projection of the anchors this run records/);
   }, 300_000);
 
-  test("buildClaimPackage refuses the same combination at its own boundary", async () => {
+  test("buildClaimPackage allocates claim-package/5 for the same combination at its own boundary", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "anchored-v6-claim-"));
     roots.push(workspaceDir);
     const binary = await createSyntheticV4BundleFixture({ workspaceDir, truthAdmission: "operator-only" });
@@ -314,8 +318,8 @@ describe("anchored public bundle v6 — the producer's loud refusals", () => {
     };
     // Unanchored, this is the ordinary binary claim the fixture already published.
     expect(buildClaimPackage(inputs).claimSchema).toBe("benchmark-product.claim-package/2");
-    // Handed an anchors section, the builder refuses rather than inventing a closure for both.
-    expect(() => buildClaimPackage({
+    // Handed an anchors section, the same builder now allocates the fourth cell instead of throwing.
+    const anchored = buildClaimPackage({
       ...inputs,
       anchors: [{
         subject: "lock" as const,
@@ -324,7 +328,10 @@ describe("anchored public bundle v6 — the producer's loud refusals", () => {
         recordSha256: "1".repeat(64),
         facts: { genTime: "2026-01-01T12:00:00Z", policyOid: "2.999.1", serialNumber: "0a", signerCertificateSha256: "9".repeat(64) },
       }],
-    })).toThrow(/anchored binary-qualification closure is a later allocation/);
+    });
+    expect(anchored.claimSchema).toBe(ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(anchored.qualification).toEqual(buildClaimPackage(inputs).qualification);
+    expect(anchored.anchors).toHaveLength(1);
   }, 300_000);
 
   test("a Run whose sealed anchor-intent extension is malformed refuses as a record, not as a crash", async () => {
