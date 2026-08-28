@@ -336,6 +336,7 @@ test('the gate passes against a real socket serving the whole real profile root'
     ['a digest sidecar beside the manifest', /^\/sealed-platform-v1\/manifest\.json\.sha256$/u],
     ['an unpublished package manifest', /^\/@jinn-network\/not-a-published-package-[0-9a-f-]{36}\/package\.json$/u],
     ['a root manifest left by a stale single-group deployment', /^\/manifest\.json$/u],
+    ['a root signature sidecar left by the same stale deployment', /^\/manifest\.dsse\.json$/u],
   ]) {
     assert.ok([...refused].some((target) => shape.test(target)), `no anti-fallback probe for ${label} was refused`);
   }

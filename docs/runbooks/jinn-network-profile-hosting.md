@@ -79,7 +79,8 @@ operator's own provisioning work, which the gate can only check after it is done
       which byte-copies the attested bytes of every group and generates one merged host
       configuration next to them. `--root` repeats because the origin is one deploy, not one
       per group; a document path claimed by two groups is refused before anything is written.
-      `/manifest.json` is deliberately not served, and the gate probes it as a must-404.
+      `/manifest.json` and `/manifest.dsse.json` are deliberately not served, and the gate
+      probes both as must-404s.
 - [ ] *(gate)* `stable-live-host-verification` fetches `<release-group>/manifest.json` from the
       live domain, verifies its signature against the digest-pinned published key, and
       byte-compares every hosted document, media type and digest with the same-run attested

@@ -91,11 +91,21 @@ export function assertLiteralRoutePath(path, label = 'served path') {
  * two-segment namespace would put one group's manifest inside another group's directory
  * shape. The live-host gate builds the same segment into every URL it fetches, so it
  * imports this rule rather than restating it.
+ *
+ * Being a literal *path* is not enough to be a literal *URL segment*. The metacharacter
+ * class has no `%`, so `%2e%2e` and `.%2e` pass it -- and the URL parser then resolves
+ * them as dot-dot segments, collapsing `${origin}/${group}/manifest.json` back to
+ * `${origin}/manifest.json`, the one path the host must never answer. Requiring the
+ * segment to survive `encodeURIComponent` unchanged is what rules that out: anything
+ * carrying a percent-escape re-encodes and is refused.
  */
 export function assertReleaseGroupSegment(releaseGroup) {
   assertLiteralRoutePath(releaseGroup, 'release group');
   if (releaseGroup.includes('/')) {
     throw new Error(`release group must be a single path segment: ${releaseGroup}`);
+  }
+  if (encodeURIComponent(releaseGroup) !== releaseGroup) {
+    throw new Error(`release group must be a literal URL segment: ${releaseGroup}`);
   }
   return releaseGroup;
 }
@@ -269,6 +279,17 @@ function readProfileRoot(profileRoot, claimedBy) {
   ]);
   for (const path of walkFiles(root)) {
     if (!declared.has(path)) throw new Error(`profile root contains undeclared file ${path}`);
+  }
+
+  // The bundle root carries no manifest files at all: every group's inventory lives under
+  // its own name, and the live-host gate probes `${origin}/manifest.json` and its sidecar
+  // as must-404s. Before namespacing, hostConfig's root-collision check refused a document
+  // claiming either path; now the paths no longer collide, so the reservation is stated
+  // here instead of being lost.
+  for (const { path } of manifest.documents) {
+    if (path === MANIFEST_FILE_NAME || path === SIGNATURE_FILE_NAME) {
+      throw new Error(`the bundle root is reserved: ${namespace} declares a document at ${path}`);
+    }
   }
 
   // Groups sharing an origin must not also share a document path: the two bytes would be

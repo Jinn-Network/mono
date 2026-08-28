@@ -423,12 +423,30 @@ test('a host that also serves a root manifest is refused', async () => {
   await expectFailure(runArgs(fixture, { routes }), /manifest\.json answers 200; the origin root must serve no manifest/u);
 });
 
+test('a host that also serves a root signature sidecar is refused', async () => {
+  // The sidecar is half of the same stale root deployment, so it is probed like the
+  // manifest. Without this the gate accepted an origin the conformance suite refuses.
+  const fixture = realFixture();
+  const routes = clonedRoutes(fixture);
+  routes.set(`${ORIGIN}/${SIGNATURE_FILE_NAME}`, {
+    status: 200,
+    contentType: 'application/json',
+    bytes: fixture.signatureBytes,
+  });
+  await expectFailure(
+    runArgs(fixture, { routes }),
+    /manifest\.dsse\.json answers 200; the origin root must serve no signature sidecar/u,
+  );
+});
+
 test('a release group that is not a single literal path segment is refused', async () => {
   const fixture = realFixture();
   // Named as a malformed release group, not as a receipt mismatch: the guard runs first.
-  for (const bad of ['a/b', 'a*']) {
+  // `%2e%2e` and `.%2e` are the dangerous half: they pass a literal-path check and then
+  // resolve to `${origin}/manifest.json`, the one path the host must never answer.
+  for (const bad of ['a/b', 'a*', '%2e%2e', '.%2e']) {
     const args = runArgs(fixture, { releaseGroup: bad });
-    await expectFailure(args, /^release group (must be a single path segment|contains host route-pattern metacharacters)/u);
+    await expectFailure(args, /^release group/u);
     assert.equal(args.fetch.calls.length, 0, 'a malformed release group must be refused before any fetch');
   }
 });

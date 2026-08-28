@@ -539,9 +539,10 @@ export async function verifyLiveProfileHost({
 
   // --- 8. anti-fallback probes ---------------------------------------------
   // A catch-all that answers 200 for everything makes every check above vacuous. The last
-  // probe is not about catch-alls: the origin root carries no manifest because it would be
-  // one release group's inventory answering for every group, so a 200 there is a stale
-  // single-group deployment rather than a guessing host.
+  // two probes are not about catch-alls: the origin root carries neither manifest nor
+  // sidecar, because either would be one release group's inventory answering for every
+  // group, so a 200 there is a stale single-group deployment rather than a guessing host.
+  // Both halves are probed -- a deployment that left one behind left the other too.
   const catchAll = 'the host has a catch-all that makes byte verification vacuous';
   const probes = [
     { url: `${origin}/${randomUUID()}`, reason: catchAll },
@@ -550,6 +551,10 @@ export async function verifyLiveProfileHost({
     {
       url: `${origin}/${MANIFEST_FILE_NAME}`,
       reason: 'the origin root must serve no manifest; each release group serves its own',
+    },
+    {
+      url: `${origin}/${SIGNATURE_FILE_NAME}`,
+      reason: 'the origin root must serve no signature sidecar; each release group serves its own',
     },
   ];
   for (const { url, reason } of probes) {

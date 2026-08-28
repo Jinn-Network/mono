@@ -23,6 +23,7 @@ import {
   ROUTE_LIMIT,
   ROUTE_WARNING_THRESHOLD,
   assertLiteralRoutePath,
+  assertReleaseGroupSegment,
   buildProfileHostBundle,
   entityTag,
   hostConfig,
@@ -135,6 +136,26 @@ test('assertLiteralRoutePath rejects traversal, absolutes and pattern metacharac
   assert.equal(assertLiteralRoutePath('@jinn-network/x/fixtures/a.json'), '@jinn-network/x/fixtures/a.json');
   for (const bad of ['', '/leading', 'a/../b', 'a//b', 'a\\b', 'a/:id/b', 'a/(b)/c', 'a/*']) {
     assert.throws(() => assertLiteralRoutePath(bad), /served path/u, `expected ${JSON.stringify(bad)} to be rejected`);
+  }
+});
+
+test('assertReleaseGroupSegment refuses anything that is not one literal URL segment', () => {
+  assert.equal(assertReleaseGroupSegment('sealed-platform-v1'), 'sealed-platform-v1');
+  // The property that matters is what the segment resolves to once it is in a URL: a
+  // group that survives the guard must address itself, never the bundle root.
+  for (const bad of ['a/b', 'a*', '..', '', '%2e%2e', '.%2e', '%2E%2E', 'a%2Fb', '%2f']) {
+    assert.throws(
+      () => assertReleaseGroupSegment(bad),
+      /release group/u,
+      `expected release group ${JSON.stringify(bad)} to be refused`,
+    );
+  }
+  for (const traversal of ['%2e%2e', '.%2e', '%2E%2E']) {
+    assert.equal(
+      new URL(`https://spec.jinn.network/${traversal}/${MANIFEST_FILE_NAME}`).pathname,
+      `/${MANIFEST_FILE_NAME}`,
+      'this input must stay refused: it resolves to the forbidden root manifest',
+    );
   }
 });
 
@@ -384,7 +405,10 @@ test('a profile root whose manifest names no release group is refused', () => {
     }),
     /release group/u,
   );
-  for (const bad of ['a/b', 'a*', '..', '']) {
+  // `%2e%2e` and `.%2e` survive a literal-path check -- the metacharacter class has no
+  // `%` -- and the URL parser then resolves them as dot-dot segments, putting the group
+  // manifest back at the bundle root the namespacing exists to keep empty.
+  for (const bad of ['a/b', 'a*', '..', '', '%2e%2e', '.%2e', '%2E%2E', 'a%2Fb']) {
     const rejected = temporaryDirectory('jinn-host-bundle-badgroup-');
     writeFileSync(join(rejected, MANIFEST_FILE_NAME), `${JSON.stringify({
       version: 1,
@@ -448,6 +472,22 @@ test('two profile roots merge into one bundle, each manifest under its own group
   assert.equal(new Set(sources).size, sources.length, 'a repeated source is an ambiguous route');
   assert.deepEqual(routeWarnings(config.headers.length), [], 'the merged route count is still well under the cap');
   assert.deepEqual(result.warnings, []);
+});
+
+test('a document claiming a bundle-root manifest path is refused', () => {
+  // Before the root files were namespaced, hostConfig's root-collision check refused this.
+  // Now nothing else would: the paths no longer collide, and the gate's must-404 probe at
+  // the origin root depends on no group being able to put a manifest there.
+  for (const reserved of [MANIFEST_FILE_NAME, SIGNATURE_FILE_NAME]) {
+    const root = syntheticRoot(`group-reserving-${reserved.split('.')[1]}`, [[reserved, '{\n  "a": 1\n}\n']]);
+    const out = temporaryDirectory('jinn-host-bundle-reserved-out-');
+    assert.throws(
+      () => buildProfileHostBundle({ profileRoot: root, outDir: out }),
+      /bundle root is reserved/u,
+      `expected a document at ${reserved} to be refused`,
+    );
+    assert.deepEqual(readdirSync(out), [], 'a refused build must write nothing at all');
+  }
 });
 
 test('a document path claimed by two release groups is refused, naming both', () => {
