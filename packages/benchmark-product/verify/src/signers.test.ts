@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { sealEvidenceNativeClaimPackageV3 } from "@jinn-network/benchmarking-protocol";
 import { evidenceNativeBundleSigners, legacyBundleSigners } from "./signers.js";
-import type { BundleTrust, BundleV4Trust } from "./schema.js";
+import { BundleTrustSchema, BundleV4TrustSchema } from "./schema.js";
 
 const REPORT = {
   keyId: "did:key:zReport",
@@ -18,21 +18,21 @@ function evaluator(name: string, keyId: string) {
 
 describe("legacy bundle signers", () => {
   test("the report author is the publisher and every evaluator is an automated grader", () => {
-    const trust = {
+    const trust = BundleTrustSchema.parse({
       format: "benchmark-product-public-trust/2",
       selfRun: { custody: "workspace-minted", evaluatorDistinctness: "agent-distinctness-only", partyIndependence: "not-established" },
       report: REPORT,
       evaluators: [evaluator("one", "k1"), evaluator("two", "k2")],
-    } as unknown as BundleTrust;
-    expect(legacyBundleSigners(trust)).toEqual([
+    });
+    expect(legacyBundleSigners(trust, new Set(["urn:jinn:evaluator:one", "urn:jinn:evaluator:two"]))).toEqual([
       { role: "publisher", identity: "did:key:zReport", keyId: "did:key:zReport", custody: "same-operator" },
       { role: "automated-grader", identity: "urn:jinn:evaluator:one", keyId: "k1", custody: "same-operator" },
       { role: "automated-grader", identity: "urn:jinn:evaluator:two", keyId: "k2", custody: "same-operator" },
     ]);
   });
 
-  test("an admission reviewer is a human reviewer, and the authorities collapse onto one publisher key", () => {
-    const trust = {
+  test("grading and reviewing are read from their own sets, and the authorities are not a second key", () => {
+    const trust = BundleV4TrustSchema.parse({
       format: "benchmark-product-public-trust/4",
       selfRun: { custody: "workspace-minted", evaluatorDistinctness: "agent-distinctness-only", partyIndependence: "not-established" },
       report: REPORT,
@@ -41,12 +41,15 @@ describe("legacy bundle signers", () => {
         reviewers: [{ evaluator: "urn:jinn:evaluator:one", keyId: "k1" }, { evaluator: "urn:jinn:evaluator:two", keyId: "k2" }],
         authorities: [{ role: "roster-attestor", keyId: "did:key:zReport" }, { role: "truth-reveal-attestor", keyId: "did:key:zReport" }],
       },
-    } as unknown as BundleV4Trust;
-    expect(legacyBundleSigners(trust)).toEqual([
+    });
+    // Only `two` graded a Matrix cell. `one` reviewed and nothing else, so printing it as a grader
+    // would overstate the grading set; `two` did both, so it must appear under both roles. The
+    // admission authorities are the publisher's own key and are deliberately not listed again.
+    expect(legacyBundleSigners(trust, new Set(["urn:jinn:evaluator:two"]))).toEqual([
       { role: "publisher", identity: "did:key:zReport", keyId: "did:key:zReport", custody: "same-operator" },
       { role: "human-reviewer", identity: "urn:jinn:evaluator:one", keyId: "k1", custody: "same-operator" },
+      { role: "automated-grader", identity: "urn:jinn:evaluator:two", keyId: "k2", custody: "same-operator" },
       { role: "human-reviewer", identity: "urn:jinn:evaluator:two", keyId: "k2", custody: "same-operator" },
-      { role: "label-admission", identity: "did:key:zReport", keyId: "did:key:zReport", custody: "same-operator" },
     ]);
   });
 });

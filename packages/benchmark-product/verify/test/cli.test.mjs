@@ -451,3 +451,20 @@ test("the golden bundle's default output carries no identifier while --json carr
     },
   ]);
 });
+
+test("a refusal says what failed without printing the identifier it refused", async () => {
+  const tampered = fileURLToPath(
+    new URL("../fixtures/public-bundle-conformance-v1/tampered/report-payload-edited", import.meta.url),
+  );
+  const human = await invoke([tampered]);
+  assert.equal(human.code, 1);
+  assert.match(human.stderr, /report-authenticity: no valid signer binds to author\/scope\/time/);
+  assert.match(human.stderr, /envelope-signature-invalid/);
+  assert.match(human.stderr, /<identifier: see --json>/);
+  assert.doesNotMatch(human.stderr, /did:key/);
+  assert.doesNotMatch(human.stderr, /urn:/);
+
+  const json = await invoke([tampered, "--json"]);
+  assert.equal(json.code, 1);
+  assert.match(JSON.parse(json.stdout).message, /did:key:z[1-9A-HJ-NP-Za-km-z]+:envelope-signature-invalid/);
+});

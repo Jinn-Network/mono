@@ -1801,7 +1801,7 @@ export async function verifyPublicBundleSnapshot(
       format: checked.manifest.format,
       identity: checked.identity,
       checks,
-      signers: legacyBundleSigners(trust),
+      signers: legacyBundleSigners(trust, new Set(verdictCatalog.verdicts.map((verdict) => verdict.evaluator))),
       ...identities,
       ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
       ...(anchorReport === undefined ? {} : { anchors: anchorReport }),

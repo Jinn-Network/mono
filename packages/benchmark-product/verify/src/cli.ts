@@ -114,13 +114,6 @@ const SIGNER_ROLE_NAMES: Record<PublicBundleSignerRole, string> = {
   "label-admission": "label admission",
 };
 
-const SIGNER_ROLE_ORDER: readonly PublicBundleSignerRole[] = [
-  "publisher",
-  "automated-grader",
-  "human-reviewer",
-  "label-admission",
-];
-
 /** The role in plain words. `urn:`/`did:key` identifiers stay in `--json`, where they are the join
  * key a reader actually needs them for; on this surface they are noise a reader has to decode.
  * Undeclared custody is stated rather than left blank: a reader who has seen the same-operator
@@ -142,8 +135,10 @@ function renderSigners(signers: readonly PublicBundleSigner[]): string {
     if (group === undefined) counts.set(key, { role: signer.role, custody: signer.custody, count: 1 });
     else group.count += 1;
   }
+  // The role-name record's own key order is the print order; a second parallel list would drift.
+  const order = Object.keys(SIGNER_ROLE_NAMES) as PublicBundleSignerRole[];
   const groups = [...counts.values()]
-    .sort((left, right) => SIGNER_ROLE_ORDER.indexOf(left.role) - SIGNER_ROLE_ORDER.indexOf(right.role));
+    .sort((left, right) => order.indexOf(left.role) - order.indexOf(right.role));
   return `\nSigned by\n${groups.map((group) => renderSignerGroup(group.role, group.custody, group.count)).join("\n")}\n`;
 }
 
@@ -212,6 +207,18 @@ function readBlockHeaders(bytes: Uint8Array, path: string): readonly { height: n
       header: new Uint8Array(Buffer.from(match[2]!.toLowerCase(), "hex")),
     };
   });
+}
+
+/** `urn:…` and `did:key:z…` as they appear inside a refusal message. The base58btc class stops a
+ * `did:key` match before a trailing `:reason` suffix the message appended. */
+const RAW_IDENTIFIER = /urn:[^\s,;)"']+|did:key:z[1-9A-HJ-NP-Za-km-z]+/gu;
+
+/** A refusal names the signer it refused, and on the machine surface that identifier is the whole
+ * point. On the human surface it is a string a reader cannot act on, so the same rule as the
+ * verified report applies: the identifier lives in `--json` (issue #3024). What failed, and where,
+ * is untouched. */
+function withoutRawIdentifiers(message: string): string {
+  return message.replace(RAW_IDENTIFIER, "<identifier: see --json>");
 }
 
 interface ParsedArguments {
@@ -295,7 +302,7 @@ export async function runVerifierCli(
     const stdout = parsed.json
       ? `${JSON.stringify({ ok: false, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, code, message: error.message })}\n`
       : "";
-    const stderr = parsed.json ? "" : `colophon-verify: ${error.message}\n`;
+    const stderr = parsed.json ? "" : `colophon-verify: ${withoutRawIdentifiers(error.message)}\n`;
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };
   }
 }
