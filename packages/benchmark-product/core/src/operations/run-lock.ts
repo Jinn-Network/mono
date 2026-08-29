@@ -20,6 +20,7 @@ import {
   RUN_RECORD_KIND,
   sealRun,
   withRunAnchorIntentExtension,
+  withRunTaskSelectionExtension,
   withRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
@@ -214,7 +215,16 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         : withRunAnchorIntentExtension(runWithPublicationAuthorization, {
           providers: [...new Set(declaredProviders)].sort(),
         });
-      const sealed = sealRun(runWithDeclaredIntent);
+      // Declared task-selection provenance (#2980), sealed on exactly the same terms as the
+      // anchoring intent above: only when the draft declares it, so a draft that declares nothing
+      // produces byte-identical Run records to the ones this operation produced before the
+      // extension existed. Sealing is what makes the answer unforgeable after the lock; the cold
+      // verifier separately refuses a declaration the Benchmark and Run records contradict.
+      const declaredTaskSelection = document.spec.taskSelection;
+      const runWithTaskSelection = declaredTaskSelection === undefined
+        ? runWithDeclaredIntent
+        : withRunTaskSelectionExtension(runWithDeclaredIntent, { mode: declaredTaskSelection });
+      const sealed = sealRun(runWithTaskSelection);
       const runSha256 = putSealedBytes(clockedContext.workspaceDir, sealed.bytes);
       recordWorkspaceAuthorship({
         workspaceDir: clockedContext.workspaceDir,

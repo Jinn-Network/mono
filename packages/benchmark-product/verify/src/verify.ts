@@ -78,6 +78,7 @@ import {
   inspectLogVerifierMethod,
 } from "./profile/inspect-assurance.js";
 import { assertClaimConsistency } from "./profile/claim-consistency.js";
+import { assertTaskSelectionConsistency, declaredTaskSelectionMode } from "./profile/task-selection.js";
 import { buildPublicAssets } from "./assets.js";
 import { derivePublicComparison, type PublicComparisonView } from "./comparison.js";
 import {
@@ -1727,6 +1728,12 @@ export async function verifyPublicBundleSnapshot(
   if (!verifiedReport.ok) refuse("record-integrity", "report-verification", `${verifiedReport.check}: ${verifiedReport.detail}`);
   if (!equalBytes(canonicalJsonBytes(verifiedReport.record), reportBytes)) refuse("record-integrity", "report-verification", "verified Report payload does not match report.json");
   checks.push("report-verification");
+  // Task-selection provenance (#2980). Runs under the `claim-consistency` check because that is
+  // exactly the question it answers -- does the claim's declared selection survive contact with
+  // the records? -- and because the claim pins the check list byte-for-byte, so a new named check
+  // would be a bundle-format bump rather than an addition.
+  assertTaskSelectionConsistency({ benchmarkRecord: benchmark, runRecord: run });
+  const taskSelection = declaredTaskSelectionMode(run);
   assertClaimConsistency({
     claim,
     identities,
@@ -1770,6 +1777,9 @@ export async function verifyPublicBundleSnapshot(
       return match === null ? [] : [match[1]!];
     }),
     dissentCellKeys,
+    // #2980: a reader-supplied projection of the verified Run's sealed declaration. Absent when the
+    // Run declared nothing, which renders exactly the bytes every pre-existing bundle carries.
+    ...(taskSelection === undefined ? {} : { taskSelection }),
   };
   // Reader v1 remains able to authenticate bundles published before the
   // human comparison projection existed. A bundle must match one complete,

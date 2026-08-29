@@ -1,6 +1,6 @@
 import { BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import { validateBinaryInstrumentQualificationProjection } from "@jinn-network/benchmarking-aggregate";
-import type { MatrixRecord, ReportRecord } from "@jinn-network/benchmarking-records";
+import type { MatrixRecord, ReportRecord, TaskSelectionMode } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -21,6 +21,13 @@ export interface PublicAssetInput {
   readonly dissentCellKeys: readonly string[];
   /** Verifier-derived, authenticated human projection. Absent only for legacy bundle assets. */
   readonly comparison?: PublicComparisonView;
+  /**
+   * Task-selection provenance declared in the sealed Run (issue #2980). Absent means the Run
+   * declared nothing — which the face states out loud rather than omitting, because silence is
+   * exactly how selection provenance used to hide. It is a reader-supplied projection of a
+   * verified record, not a claim field: the claim package pins its own key set byte-for-byte.
+   */
+  readonly taskSelection?: TaskSelectionMode;
   /** Producer-verified binary admission/instrument facts. Required for claim-package/2 only. */
   readonly binaryQualification?: {
     readonly publicationGrade: boolean;
@@ -699,6 +706,41 @@ function neutralClaimHtml(facts: MethodFacts): string {
   return '<p class="neutral">Verified binary-instrument qualification. Facts are presented per instrument without comparative conclusions.</p>';
 }
 
+/**
+ * Task-selection provenance, in one sentence (issue #2980).
+ *
+ * Who chose the tasks changes what a headline number means as much as the number itself, so a
+ * declared mode renders at the headline-result tier rather than in prose further down the page.
+ *
+ * An undeclared run renders NOTHING here, and that is a bytes constraint rather than an editorial
+ * one: the verifier byte-compares every published asset against this builder, so a sentence added
+ * to the undeclared case would refuse every bundle published before this field existed. Those
+ * bundles are immutable artifacts; the honest place to state the absence is the run that produces
+ * the next one.
+ *
+ * Exhaustive over the vocabulary by construction — the parameter is the union, so a fourth mode
+ * added without a sentence here fails to compile rather than silently rendering nothing.
+ */
+function taskSelectionSentence(mode: TaskSelectionMode | undefined): string {
+  if (mode === undefined) return "";
+  switch (mode) {
+    case "claimant-chosen":
+      return "The claimant chose which tasks appear in this report.";
+    case "fixed-public-set":
+      return "Tasks are the complete, publicly declared set; the claimant chose none of them.";
+    case "drawn-post-lock":
+      return "Tasks were drawn by a fixed rule after the run was locked; the claimant chose none of them.";
+  }
+}
+
+/** The declared sentence at the headline-result tier (`.neutral`: the same class, therefore
+ * literally the same weight as the one neutral sentence the report leads with). Empty when
+ * undeclared, which keeps every pre-existing bundle's `index.html` byte-identical. */
+function taskSelectionHtml(mode: TaskSelectionMode | undefined): string {
+  const sentence = taskSelectionSentence(mode);
+  return sentence === "" ? "" : `\n<p class="neutral">${escapeMarkup(sentence)}</p>`;
+}
+
 function buildIndex(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {
   const outcome = input.matrix.completeness.runOutcome;
   const status = reportFacts.kind === "binary" ? qualificationOutcomeLabel(outcome) : outcomeLabel(outcome);
@@ -747,7 +789,7 @@ ${embeddedFontCss()}
 <p class="status" data-run-outcome="${outcome}">${escapeMarkup(status)}</p>
 <h1>Colophon report</h1>
 <p class="lede">${escapeMarkup(scopeLine(input))}</p>
-${neutralClaimHtml(reportFacts)}
+${neutralClaimHtml(reportFacts)}${taskSelectionHtml(input.taskSelection)}
 </header>
 <main>
 <section class="adverse" aria-labelledby="adverse-heading"><h2 id="adverse-heading">Prominent adverse facts</h2>${list(adverse, "No adverse facts stated.")}</section>${input.comparison === undefined ? "" : `\n${comparisonSectionHtml(input.comparison)}`}
@@ -926,6 +968,12 @@ function armResultsMarkdown(facts: MethodFacts): string {
   return binaryFactsMarkdown(facts);
 }
 
+/** README counterpart to `taskSelectionHtml`, with the same empty-when-undeclared contract. */
+function taskSelectionMarkdown(mode: TaskSelectionMode | undefined): string {
+  const sentence = taskSelectionSentence(mode);
+  return sentence === "" ? "" : `\n\n**${escapeMarkdown(sentence)}**`;
+}
+
 function buildReadme(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {
   const adverse = adverseFacts(input, reportFacts);
   const arms = input.claim.scope.arms.map((arm) =>
@@ -951,7 +999,7 @@ function buildReadme(input: PublicAssetInput, reportFacts: MethodFacts, claimFac
 
 **${documentStatus}**
 
-Scope: ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${escapeMarkdown(input.claim.scope.venue)}.
+Scope: ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${escapeMarkdown(input.claim.scope.venue)}.${taskSelectionMarkdown(input.taskSelection)}
 
 Report SHA-256: \`${input.reportSha256}\`
 
@@ -1074,15 +1122,21 @@ ${FONT_LICENSES.map(([name, path]) => `## ${name} font license\n\n\`\`\`text\n${
 `;
 }
 
+/** share.txt counterpart to `taskSelectionHtml`, with the same empty-when-undeclared contract. */
+function taskSelectionShare(mode: TaskSelectionMode | undefined): string {
+  const sentence = taskSelectionSentence(mode);
+  return sentence === "" ? "" : ` ${plainText(sentence)}`;
+}
+
 function buildShareText(input: PublicAssetInput, reportFacts: MethodFacts): string {
   if (reportFacts.kind === "binary") {
-    return `Colophon · verified qualification. ${plainText(scopeLine(input))}. Report ${input.reportSha256}. Full evidence: index.html; verify: index.html#verification with ${plainText(input.claim.verification.command)}.\n`;
+    return `Colophon · verified qualification. ${plainText(scopeLine(input))}.${taskSelectionShare(input.taskSelection)} Report ${input.reportSha256}. Full evidence: index.html; verify: index.html#verification with ${plainText(input.claim.verification.command)}.\n`;
   }
   // Paired branch only (P4b Task 6): empty string for wilson keeps this sentence byte-identical
   // to before this dispatch existed.
   const pairedFragment = pairedCompactFragment(reportFacts);
   const pairedClause = pairedFragment === "" ? "" : ` ${plainText(pairedFragment)}.`;
-  return `Colophon · ${outcomeLabel(input.matrix.completeness.runOutcome)}; no comparative winner stated. ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${plainText(input.claim.scope.venue)}. ${plainText(compactStatus(input, reportFacts))}. Report ${input.reportSha256}.${pairedClause} Full report: index.html; limitations: index.html#limitations; verify: index.html#verification with ${plainText(input.claim.verification.command)}. ${PRODUCT_BRANDING.attribution}\n`;
+  return `Colophon · ${outcomeLabel(input.matrix.completeness.runOutcome)}; no comparative winner stated. ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${plainText(input.claim.scope.venue)}.${taskSelectionShare(input.taskSelection)} ${plainText(compactStatus(input, reportFacts))}. Report ${input.reportSha256}.${pairedClause} Full report: index.html; limitations: index.html#limitations; verify: index.html#verification with ${plainText(input.claim.verification.command)}. ${PRODUCT_BRANDING.attribution}\n`;
 }
 
 /** Fixed, deterministic public-bundle/2 presentation bytes. The builder only projects already

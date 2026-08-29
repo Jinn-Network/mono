@@ -85,6 +85,17 @@ export {
 } from "./anchor-intent-extension.js";
 export type { RunAnchorIntentExtension } from "./anchor-intent-extension.js";
 
+export {
+  TASK_SELECTION_MODES,
+  RunTaskSelectionExtensionSchema,
+  TaskSelectionModeSchema,
+  readRunTaskSelectionExtension,
+  readTaskSelectionMode,
+  runTaskSelectionExtension,
+  withRunTaskSelectionExtension,
+} from "./task-selection.js";
+export type { RunTaskSelectionExtension, TaskSelectionMode } from "./task-selection.js";
+
 export type {
   MatrixPublicationExtension,
   RegistrationArtifact,

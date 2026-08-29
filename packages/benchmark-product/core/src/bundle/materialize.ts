@@ -17,6 +17,7 @@ import {
   parseMatrix,
   parseReport,
   parseRun,
+  readTaskSelectionMode,
   readRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
@@ -1032,6 +1033,7 @@ function recordClosure(input: MaterializeBundleInput): {
     })
     : BundleTrustSchema.parse({ format: BUNDLE_TRUST_FORMAT, ...trustBase });
   files.set("trust/public-keys.json", canonicalJsonBytes(trust));
+  const taskSelection = readTaskSelectionMode(run as unknown as Record<string, unknown>);
   const dissentCellKeys = assemblyCells
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
     .map((cell) => cell.cellKey)
@@ -1054,6 +1056,10 @@ function recordClosure(input: MaterializeBundleInput): {
     recordSha256s: evidenceCatalog.records.map((record) => record.sha256),
     dissentCellKeys,
     comparison,
+    // #2980: the sealed Run's declared task-selection provenance, projected onto the face. Absent
+    // when the Run declared nothing, which emits exactly the bytes this builder emitted before the
+    // declaration existed -- the same absence the cold verifier reconstructs from the same Run.
+    ...(taskSelection === undefined ? {} : { taskSelection }),
     ...(binaryAssetQualification === undefined ? {} : { binaryQualification: binaryAssetQualification }),
   }))) {
     files.set(path, bytes);
