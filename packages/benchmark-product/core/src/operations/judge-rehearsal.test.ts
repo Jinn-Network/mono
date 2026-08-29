@@ -23,6 +23,7 @@ import {
 } from "@colophon-claims/verify";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { BUNDLE_V4_FORMAT as CORE_BUNDLE_V4_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
+import { findBundleLeaks } from "../bundle/testing/leak-scan.js";
 import { createSyntheticV4BundleFixture } from "../bundle/testing/v4-synthetic-fixture.js";
 import {
   JUDGE_REHEARSAL_ARM_IDS,
@@ -181,13 +182,8 @@ function walkTextFiles(dir: string): string[] {
 }
 
 function licenseScan(bundleDir: string, workspaceDir: string): void {
-  for (const path of walkTextFiles(bundleDir)) {
-    const bytes = readFileSync(path);
-    if (bytes.includes(0)) continue;
-    const text = bytes.toString("utf8");
-    expect(text.includes(workspaceDir), path).toBe(false);
-    expect(text, path).not.toMatch(/LoCoMo|licensed benchmark|api[_-]?key/iu);
-  }
+  // #3063: scans the bundle's text, not its base64 alphabet -- see leak-scan.ts.
+  expect(findBundleLeaks(bundleDir, workspaceDir)).toEqual([]);
 }
 
 describe("packet P8 judge rehearsal (#2847)", () => {
