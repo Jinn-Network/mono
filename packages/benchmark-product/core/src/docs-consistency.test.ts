@@ -255,6 +255,7 @@ describe("product documentation consistency", () => {
     expect(verification).toContain("27 generated operations");
     expect(verification).toContain("six portable checks");
   });
+
   /**
    * Issue #3023. The checker publishes as `@colophon-claims/check` (binary `colophon-check`).
    * `@colophon-claims/verify` stays published forever as a passthrough alias, because bundles
@@ -268,7 +269,7 @@ describe("product documentation consistency", () => {
   const LEGACY_READER_NAMES = /@colophon-claims\/verify(?![-\w])|colophon-verify(?![-\w])/u;
 
   /**
-   * Modules whose whole job is to state the immutable command a already-sealed bundle format
+   * Modules whose whole job is to state the immutable command an already-sealed bundle format
    * pins. Their strings are claim bytes: `profile/claim.ts` REJECTS a bundle whose recorded
    * command differs, so editing one of these to the new name would fail every published bundle.
    * A new entry here is a deliberate, reviewed act; anything else in the product tree is not.
