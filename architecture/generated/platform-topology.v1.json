@@ -3,10 +3,10 @@
     "adjacentEntries": 6,
     "experimentalPolicy": 2,
     "implementationsV1": 60,
-    "inventory": 96,
+    "inventory": 97,
     "otherPackagesRootEntries": 15,
-    "packagesRootEntries": 90,
-    "sealedPlatformV1": 13
+    "packagesRootEntries": 91,
+    "sealedPlatformV1": 14
   },
   "graph": {
     "edgeSections": {
@@ -554,6 +554,11 @@
         "from": "@jinn-network/evidence-local-runtime",
         "kind": "runtime",
         "to": "@jinn-network/record-discovery-serve"
+      },
+      {
+        "from": "@jinn-network/evidence-offer",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
       },
       {
         "from": "@jinn-network/evidence-publication",
@@ -1583,6 +1588,7 @@
       "@jinn-network/evidence-derivation",
       "@jinn-network/evidence-discovery",
       "@jinn-network/evidence-local-runtime",
+      "@jinn-network/evidence-offer",
       "@jinn-network/evidence-protocol",
       "@jinn-network/evidence-publication",
       "@jinn-network/evidence-repository",
@@ -1967,6 +1973,9 @@
           ],
           "@jinn-network/chain-environment-record": [],
           "@jinn-network/environment-record": [],
+          "@jinn-network/evidence-offer": [
+            "@jinn-network/trust-core"
+          ],
           "@jinn-network/evidence-protocol": [],
           "@jinn-network/evidence-trace": [
             "@jinn-network/evidence-protocol",
@@ -1999,6 +2008,7 @@
           [
             "@jinn-network/benchmarking-protocol",
             "@jinn-network/benchmarking-records",
+            "@jinn-network/evidence-offer",
             "@jinn-network/evidence-trace",
             "@jinn-network/record-discovery-protocol",
             "@jinn-network/task-execution-profiles",
@@ -4173,6 +4183,49 @@
       "stability": "candidate",
       "supersedes": [],
       "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [
+          "vitest"
+        ],
+        "runtime": [
+          "@jinn-network/trust-core",
+          "zod"
+        ]
+      },
+      "domain": "evidence",
+      "name": "@jinn-network/evidence-offer",
+      "ownerGroup": "architecture-control",
+      "path": "packages/evidence/offer",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "sealed-platform-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "role": "offer record family",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 2,
       "transition": null,
       "version": "0.1.0"
     },
@@ -10142,6 +10195,189 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/free.document.json",
+        "relativeSource": "fixtures/offer/free.document.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/free.json",
+        "relativeSource": "fixtures/offer/free.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/free.sha256",
+        "relativeSource": "fixtures/offer/free.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-bare-extension-key.json",
+        "relativeSource": "fixtures/offer/invalid-bare-extension-key.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-bare-hex-subject.json",
+        "relativeSource": "fixtures/offer/invalid-bare-hex-subject.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-duplicate-rail.json",
+        "relativeSource": "fixtures/offer/invalid-duplicate-rail.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-leading-zero-amount.json",
+        "relativeSource": "fixtures/offer/invalid-leading-zero-amount.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-missing-rails.json",
+        "relativeSource": "fixtures/offer/invalid-missing-rails.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-relative-gate-uri.json",
+        "relativeSource": "fixtures/offer/invalid-relative-gate-uri.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-relative-rail-identifier.json",
+        "relativeSource": "fixtures/offer/invalid-relative-rail-identifier.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-signed-amount.json",
+        "relativeSource": "fixtures/offer/invalid-signed-amount.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-unsorted-rails.json",
+        "relativeSource": "fixtures/offer/invalid-unsorted-rails.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-zero-amount.json",
+        "relativeSource": "fixtures/offer/invalid-zero-amount.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/priced.document.json",
+        "relativeSource": "fixtures/offer/priced.document.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/priced.json",
+        "relativeSource": "fixtures/offer/priced.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/priced.sha256",
+        "relativeSource": "fixtures/offer/priced.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/superseding.document.json",
+        "relativeSource": "fixtures/offer/superseding.document.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/superseding.json",
+        "relativeSource": "fixtures/offer/superseding.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/superseding.sha256",
+        "relativeSource": "fixtures/offer/superseding.sha256"
+      },
+      {
+        "claim": null,
+        "export": "./testing",
+        "kind": "conformance",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [
+          "./dist/testing.d.ts",
+          "./dist/testing.js"
+        ],
+        "path": "packages/evidence/offer/src/testing.ts",
+        "relativeSource": "src/testing.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
         "package": "@jinn-network/evidence-protocol",
         "packedTargets": [],
         "path": "packages/evidence/protocol/fixtures/autopilot-issue-1697/artifacts/executor.observed.json",
@@ -15739,6 +15975,19 @@
         "schemas": []
       },
       {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "name": "@jinn-network/evidence-offer",
+        "path": "packages/evidence/offer",
+        "profiles": [],
+        "releaseGroup": "sealed-platform-v1",
+        "schemas": []
+      },
+      {
         "conformance": [],
         "fixtures": [
           "fixtures"
@@ -16841,6 +17090,7 @@
             "@jinn-network/benchmarking-testing",
             "@jinn-network/chain-environment-record",
             "@jinn-network/environment-record",
+            "@jinn-network/evidence-offer",
             "@jinn-network/evidence-protocol",
             "@jinn-network/evidence-trace",
             "@jinn-network/record-discovery-protocol",
@@ -16886,6 +17136,7 @@
         "@jinn-network/evidence-derivation",
         "@jinn-network/evidence-discovery",
         "@jinn-network/evidence-local-runtime",
+        "@jinn-network/evidence-offer",
         "@jinn-network/evidence-protocol",
         "@jinn-network/evidence-publication",
         "@jinn-network/evidence-repository",
@@ -17197,6 +17448,17 @@
           "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-local-runtime",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
+          "package": "@jinn-network/evidence-offer",
           "provider": "GitHub Actions",
           "repository": "mono",
           "workflow": "stack-npm-publish.yml"
@@ -17973,13 +18235,14 @@
         "sealed-platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 13,
+      "expectedPackageCount": 14,
       "packages": [
         "@jinn-network/benchmarking-protocol",
         "@jinn-network/benchmarking-records",
         "@jinn-network/benchmarking-testing",
         "@jinn-network/chain-environment-record",
         "@jinn-network/environment-record",
+        "@jinn-network/evidence-offer",
         "@jinn-network/evidence-protocol",
         "@jinn-network/evidence-trace",
         "@jinn-network/record-discovery-protocol",

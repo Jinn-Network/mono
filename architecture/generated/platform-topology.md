@@ -6,7 +6,7 @@ Source authority: [`architecture/platform-packages.v1.json`](../platform-package
 
 ## Inventory
 
-The catalog contains **96** entries: **13** `sealed-platform-v1` packages, **60** `implementations-v1` packages, **2** disabled `experimental-policy` packages, **15** other entries below `packages/**`, and **6** adjacent entries.
+The catalog contains **97** entries: **14** `sealed-platform-v1` packages, **60** `implementations-v1` packages, **2** disabled `experimental-policy` packages, **15** other entries below `packages/**`, and **6** adjacent entries.
 
 | Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -59,6 +59,7 @@ The catalog contains **96** entries: **13** `sealed-platform-v1` packages, **60*
 | @jinn-network/execution-recorder | packages/evidence/execution-recorder | evidence | 3 | platform | execution recording capability | candidate | implementations-v1 | canary-and-stable | @jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/execution-evidence-builder | — | vitest |
 | @jinn-network/execution-recorder-bridge | packages/evidence/execution-recorder-bridge | evidence | 3 | platform | execution-recorder integration bridge | candidate | implementations-v1 | canary-and-stable | @jinn-network/evidence-repository<br>@jinn-network/execution-recorder | — | — |
 | @jinn-network/evidence-local-runtime | packages/evidence/local-runtime | evidence | 3 | platform | local evidence composition | candidate | implementations-v1 | canary-and-stable | @jinn-network/evidence-catalog-sqlite<br>@jinn-network/evidence-discovery<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>better-sqlite3 | — | — |
+| @jinn-network/evidence-offer | packages/evidence/offer | evidence | 2 | platform | offer record family | candidate | sealed-platform-v1 | canary-and-stable | @jinn-network/trust-core<br>zod | — | vitest |
 | @jinn-network/evidence-protocol | packages/evidence/protocol | evidence | 1 | platform | execution-evidence protocol | candidate | sealed-platform-v1 | canary-and-stable | @noble/hashes<br>zod | — | — |
 | @jinn-network/evidence-publication | packages/evidence/publication | evidence | 3 | platform | evidence publication capability | candidate | implementations-v1 | canary-and-stable | @jinn-network/evidence-repository<br>@jinn-network/record-publication | — | vitest |
 | @jinn-network/evidence-repository | packages/evidence/repository | evidence | 3 | platform | evidence repository contract | candidate | implementations-v1 | canary-and-stable | @jinn-network/evidence-protocol | — | vitest |
@@ -221,6 +222,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/evidence-local-runtime | runtime | @jinn-network/evidence-repository |
 | @jinn-network/evidence-local-runtime | runtime | @jinn-network/record-discovery-protocol |
 | @jinn-network/evidence-local-runtime | runtime | @jinn-network/record-discovery-serve |
+| @jinn-network/evidence-offer | runtime | @jinn-network/trust-core |
 | @jinn-network/evidence-publication | runtime | @jinn-network/evidence-repository |
 | @jinn-network/evidence-publication | runtime | @jinn-network/record-publication |
 | @jinn-network/evidence-repository | runtime | @jinn-network/evidence-protocol |
@@ -425,7 +427,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 ### `sealed-platform-v1` runtime waves
 
 1. `@jinn-network/chain-environment-record`, `@jinn-network/environment-record`, `@jinn-network/evidence-protocol`, `@jinn-network/task-execution-protocol`, `@jinn-network/trust-core`
-2. `@jinn-network/benchmarking-protocol`, `@jinn-network/benchmarking-records`, `@jinn-network/evidence-trace`, `@jinn-network/record-discovery-protocol`, `@jinn-network/task-execution-profiles`, `@jinn-network/trust-authoring`
+2. `@jinn-network/benchmarking-protocol`, `@jinn-network/benchmarking-records`, `@jinn-network/evidence-offer`, `@jinn-network/evidence-trace`, `@jinn-network/record-discovery-protocol`, `@jinn-network/task-execution-profiles`, `@jinn-network/trust-authoring`
 3. `@jinn-network/benchmarking-testing`, `@jinn-network/record-discovery-testing`
 
 ### `sealed-platform-v1` transitive closure
@@ -437,6 +439,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/benchmarking-testing | @jinn-network/benchmarking-records<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core |
 | @jinn-network/chain-environment-record | — |
 | @jinn-network/environment-record | — |
+| @jinn-network/evidence-offer | @jinn-network/trust-core |
 | @jinn-network/evidence-protocol | — |
 | @jinn-network/evidence-trace | @jinn-network/evidence-protocol<br>@jinn-network/trust-core |
 | @jinn-network/record-discovery-protocol | @jinn-network/trust-core |
@@ -530,10 +533,10 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | experimental-read-plane | 1 | read-plane-ci | disabled | false | false | false |
 | implementations-v1 | 60 | benchmarking-ci<br>environments-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>task-supply-ci<br>trust-ci | canary-and-stable | true | true | true |
 | legacy-product-lines | 6 | client-ci<br>core-ci<br>layer-ci<br>marketplace-ci<br>plugin-ci<br>sdk-ci | independent | false | false | false |
-| sealed-platform-v1 | 13 | benchmarking-ci<br>environments-ci<br>evidence-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-and-stable | true | true | true |
+| sealed-platform-v1 | 14 | benchmarking-ci<br>environments-ci<br>evidence-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-and-stable | true | true | true |
 | transitional-or-private | 12 | benchmark-product-ci<br>broadcast-bot-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>operator-console-ci<br>plugin-tree-ci<br>policy-optimization-ci<br>task-supply-ci<br>website-ci | private<br>never | false | false | false |
 
-The exact 73-package trusted-publisher set is the union of stack-published groups. Receipt-gated canary publication is enabled for every stack-published group. **Stable publication is disabled until live `spec.jinn.network` profile hosting verification passes.** The 2 `experimental-policy` packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
+The exact 74-package trusted-publisher set is the union of stack-published groups. Receipt-gated canary publication is enabled for every stack-published group. **Stable publication is disabled until live `spec.jinn.network` profile hosting verification passes.** The 2 `experimental-policy` packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
 
 | Package | Workflow | Environment field |
 | --- | --- | --- |
@@ -561,6 +564,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | @jinn-network/evidence-derivation | stack-npm-publish.yml | npm-publish |
 | @jinn-network/evidence-discovery | stack-npm-publish.yml | npm-publish |
 | @jinn-network/evidence-local-runtime | stack-npm-publish.yml | npm-publish |
+| @jinn-network/evidence-offer | stack-npm-publish.yml | npm-publish |
 | @jinn-network/evidence-protocol | stack-npm-publish.yml | npm-publish |
 | @jinn-network/evidence-publication | stack-npm-publish.yml | npm-publish |
 | @jinn-network/evidence-repository | stack-npm-publish.yml | npm-publish |
@@ -664,6 +668,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | @jinn-network/execution-recorder | implementations-v1 | — | — | fixtures | ./testing |
 | @jinn-network/execution-recorder-bridge | implementations-v1 | — | — | — | — |
 | @jinn-network/evidence-local-runtime | implementations-v1 | — | — | — | — |
+| @jinn-network/evidence-offer | sealed-platform-v1 | — | — | fixtures | ./testing |
 | @jinn-network/evidence-protocol | sealed-platform-v1 | profiles/execution-evidence/v1/schemas | profiles | fixtures | — |
 | @jinn-network/evidence-publication | implementations-v1 | — | — | — | ./testing |
 | @jinn-network/evidence-repository | implementations-v1 | — | — | — | ./testing |
@@ -1130,6 +1135,26 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/execution-recorder | packages/evidence/execution-recorder/fixtures/producer-contract-v1/task.md | — | — | — |
 | fixtures | @jinn-network/execution-recorder | packages/evidence/execution-recorder/fixtures/producer-contract-v1/trace.jsonl | — | — | — |
 | conformance | @jinn-network/execution-recorder | packages/evidence/execution-recorder/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/free.document.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/free.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/free.sha256 | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-bare-extension-key.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-bare-hex-subject.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-duplicate-rail.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-leading-zero-amount.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-missing-rails.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-relative-gate-uri.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-relative-rail-identifier.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-signed-amount.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-unsorted-rails.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-zero-amount.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/priced.document.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/priced.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/priced.sha256 | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/superseding.document.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/superseding.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/superseding.sha256 | — | — | — |
+| conformance | @jinn-network/evidence-offer | packages/evidence/offer/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
 | fixtures | @jinn-network/evidence-protocol | packages/evidence/protocol/fixtures/autopilot-issue-1697/artifacts/executor.observed.json | — | — | — |
 | fixtures | @jinn-network/evidence-protocol | packages/evidence/protocol/fixtures/autopilot-issue-1697/artifacts/repository-input.observed.json | — | — | — |
 | fixtures | @jinn-network/evidence-protocol | packages/evidence/protocol/fixtures/autopilot-issue-1697/artifacts/result.patch | — | — | — |
