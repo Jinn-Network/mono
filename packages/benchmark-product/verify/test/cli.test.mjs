@@ -367,3 +367,104 @@ test("the anchored qualification closure counts its seven checks, not the unanch
   assert.match(output, /integrity-anchors\s+passed/);
   assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
 });
+
+const SIGNERS = [
+  { role: "publisher", identity: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX", keyId: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX", custody: "same-operator" },
+  { role: "automated-grader", identity: "urn:jinn:benchmark-product:local-venue:evaluator-1", keyId: "benchmark-product-verdict-dc8dbb6d84571890", custody: "same-operator" },
+  { role: "automated-grader", identity: "urn:jinn:benchmark-product:local-venue:evaluator-2", keyId: "benchmark-product-verdict-0f2ac1bb9e334410", custody: "same-operator" },
+  { role: "human-reviewer", identity: "urn:evaluator:reviewer-1", keyId: "benchmark-product-verdict-77aa11bb22cc33dd", custody: "same-operator" },
+  { role: "label-admission", identity: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX", keyId: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX", custody: "same-operator" },
+];
+
+test("the human surface names signer roles in plain words and prints no raw identifier", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/4",
+    identity: "a".repeat(64),
+    checks: ["manifest"],
+    ...V6_IDENTITIES,
+    signers: SIGNERS,
+  });
+  assert.match(output, /\nSigned by\n/);
+  assert.match(output, /^ {2}publisher · 1 key$/m);
+  assert.match(output, /^ {2}automated grader — same operator · 2 keys$/m);
+  assert.match(output, /^ {2}human reviewer — same operator · 1 key$/m);
+  assert.match(output, /^ {2}label admission — same operator · 1 key$/m);
+  assert.doesNotMatch(output, /urn:/);
+  assert.doesNotMatch(output, /did:key/);
+  // The publisher is the operator; "same operator" would say nothing about it.
+  assert.doesNotMatch(output, /publisher — same operator/);
+});
+
+test("an undeclared-custody signer set prints the role alone", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/5",
+    identity: `sha256:${"a".repeat(64)}`,
+    checks: ["manifest"],
+    signers: [
+      { role: "publisher", identity: "urn:report:1", keyId: "k1", custody: "undeclared" },
+      { role: "automated-grader", identity: "urn:evaluator:1", keyId: "k2", custody: "undeclared" },
+    ],
+  });
+  assert.match(output, /^ {2}automated grader — custody not declared · 1 key$/m);
+  // The publisher is the operator the others are measured against, so it takes no custody suffix.
+  assert.match(output, /^ {2}publisher · 1 key$/m);
+  assert.doesNotMatch(output, /same operator/);
+  assert.doesNotMatch(output, /urn:/);
+});
+
+test("a result without signers keeps the previous human surface", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/2",
+    identity: "a".repeat(64),
+    checks: ["manifest"],
+    ...V6_IDENTITIES,
+  });
+  assert.doesNotMatch(output, /Signed by/);
+});
+
+test("the golden bundle's default output carries no identifier while --json carries every one", async () => {
+  const golden = fileURLToPath(new URL("../fixtures/public-bundle-conformance-v1/golden", import.meta.url));
+  const human = await invoke([golden]);
+  assert.equal(human.code, undefined);
+  assert.doesNotMatch(human.stdout, /urn:/);
+  assert.doesNotMatch(human.stdout, /did:key/);
+  assert.match(human.stdout, /\nSigned by\n {2}publisher · 1 key\n {2}automated grader — same operator · 1 key\n/);
+
+  const json = await invoke([golden, "--json"]);
+  assert.equal(json.code, undefined);
+  const parsed = JSON.parse(json.stdout);
+  assert.deepEqual(parsed.signers, [
+    {
+      role: "publisher",
+      identity: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+      keyId: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+      custody: "same-operator",
+    },
+    {
+      role: "automated-grader",
+      identity: "urn:jinn:benchmark-product:local-venue:evaluator-1",
+      keyId: "benchmark-product-verdict-dc8dbb6d84571890",
+      custody: "same-operator",
+    },
+  ]);
+});
+
+test("a refusal says what failed without printing the identifier it refused", async () => {
+  const tampered = fileURLToPath(
+    new URL("../fixtures/public-bundle-conformance-v1/tampered/report-payload-edited", import.meta.url),
+  );
+  const human = await invoke([tampered]);
+  assert.equal(human.code, 1);
+  assert.match(human.stderr, /report-authenticity: no valid signer binds to author\/scope\/time/);
+  assert.match(human.stderr, /envelope-signature-invalid/);
+  assert.match(human.stderr, /<identifier: see --json>/);
+  assert.doesNotMatch(human.stderr, /did:key/);
+  assert.doesNotMatch(human.stderr, /urn:/);
+
+  const json = await invoke([tampered, "--json"]);
+  assert.equal(json.code, 1);
+  assert.match(JSON.parse(json.stdout).message, /did:key:z[1-9A-HJ-NP-Za-km-z]+:envelope-signature-invalid/);
+});

@@ -61,6 +61,13 @@ export interface EvidenceNativePortableBundleVerification {
   readonly reportDigest: `sha256:${string}`;
   readonly evidenceRecords: number;
   readonly artifacts: number;
+  /**
+   * The declared signer key ids that actually carried a signature this verification accepted,
+   * code-unit sorted. `claim.trust.signers` is a publisher-written declaration and a surplus entry
+   * there verifies nothing, so a reader-facing surface must key on this set rather than on the
+   * declaration.
+   */
+  readonly verifiedSignerKeyIds: readonly string[];
 }
 
 function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
@@ -181,11 +188,14 @@ export async function verifyEvidenceNativePortableBundle(
     signer,
     publicKeyBytes: read(input.files, `artifacts/${signer.publicKey.digest.sha256}.bin`),
   }]));
+  const verifiedSignerKeyIds = new Set<string>();
   const verifySignature = async (signature: DsseSignatureInput, identity: string, allowed: readonly string[]) => {
     if (signature.keyid === undefined) return false;
     const trust = signers.get(signature.keyid);
     if (trust === undefined || trust.signer.identity !== identity || !allowed.includes(trust.signer.purpose)) return false;
-    return input.verifySignature({ ...signature, identity, purpose: trust.signer.purpose, publicKeyBytes: trust.publicKeyBytes });
+    const verified = await input.verifySignature({ ...signature, identity, purpose: trust.signer.purpose, publicKeyBytes: trust.publicKeyBytes });
+    if (verified) verifiedSignerKeyIds.add(signature.keyid);
+    return verified;
   };
   const referencedArtifacts = new Set<string>();
   for (const reference of claim.records.evidence) {
@@ -281,5 +291,6 @@ export async function verifyEvidenceNativePortableBundle(
     reportDigest: documentDigest(reportEnvelopeBytes),
     evidenceRecords: claim.records.evidence.length,
     artifacts: claim.records.artifacts.length,
+    verifiedSignerKeyIds: [...verifiedSignerKeyIds].sort(),
   };
 }

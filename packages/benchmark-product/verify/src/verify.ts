@@ -34,6 +34,7 @@ import { ClaimPackageSchema } from "./profile/claim.js";
 import { buildMethodPortsFromResolver } from "./profile/ports.js";
 import { didKeyFromEd25519PublicKey } from "./profile/signing.js";
 import { buildPublicReportTrustDeps } from "./profile/trust.js";
+import { evidenceNativeBundleSigners, legacyBundleSigners, type PublicBundleSigner } from "./signers.js";
 import { buildAssemblyPortsFromFacts, type AssemblyPublicKeyRecord } from "./profile/assembly-ports.js";
 import {
   parseRunPinningEvidenceArtifact,
@@ -135,7 +136,7 @@ export type PublicBundleVerificationCheck =
    * never for any earlier one (anchor-evidence design §8, §12). */
   | "integrity-anchors";
 
-export interface LegacyPublicBundleVerificationResult {
+export interface LegacyPublicBundleVerificationResult extends PublicBundleSignerDisclosure {
   readonly format:
     | "benchmark-product-public-bundle/2"
     | "benchmark-product-public-bundle/4"
@@ -166,9 +167,14 @@ export interface LegacyPublicBundleVerificationResult {
   };
 }
 
+/** Who signed the bundle, with the identifiers the human surface deliberately does not print. */
+export interface PublicBundleSignerDisclosure {
+  readonly signers?: readonly PublicBundleSigner[];
+}
+
 export type PublicBundleVerificationResult =
   | LegacyPublicBundleVerificationResult
-  | EvidenceNativePortableBundleVerification;
+  | (EvidenceNativePortableBundleVerification & PublicBundleSignerDisclosure);
 
 export interface VerifyPublicBundleDeps extends VerifyBundleSnapshotDeps {
   /**
@@ -390,11 +396,17 @@ export async function verifyPublicBundleSnapshot(
   const checked = verifyBundleSnapshot(bundleDir, deps);
   if (checked.manifest.format === BUNDLE_V5_FORMAT) {
     try {
+      const claimPackageBytes = checked.fileBytes.get("claim-package.json");
+      if (claimPackageBytes === undefined) throw new TypeError("portable bundle is missing claim-package.json");
+      const verification = await verifyEvidenceNativePortableBundle({
+        files: checked.fileBytes,
+        verifySignature: verifyEvidenceNativeSignature,
+      });
       return {
-        verification: await verifyEvidenceNativePortableBundle({
-          files: checked.fileBytes,
-          verifySignature: verifyEvidenceNativeSignature,
-        }),
+        verification: {
+          ...verification,
+          signers: evidenceNativeBundleSigners(claimPackageBytes, verification.verifiedSignerKeyIds),
+        },
         snapshot: checked,
       };
     } catch (cause) {
@@ -1789,6 +1801,7 @@ export async function verifyPublicBundleSnapshot(
       format: checked.manifest.format,
       identity: checked.identity,
       checks,
+      signers: legacyBundleSigners(trust, new Set(verdictCatalog.verdicts.map((verdict) => verdict.evaluator))),
       ...identities,
       ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
       ...(anchorReport === undefined ? {} : { anchors: anchorReport }),
