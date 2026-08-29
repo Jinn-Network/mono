@@ -11,5 +11,5 @@
     { "path": "schemas/dispatch-context.schema.json", "mediaType": "application/schema+json" },
     { "path": "schemas/observation.schema.json", "mediaType": "application/schema+json" }
   ],
-  "digestAuthority": "https://spec.jinn.network/manifest.json"
+  "digestAuthority": "https://spec.jinn.network/sealed-platform-v1/manifest.json"
 }
