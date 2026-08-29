@@ -405,7 +405,7 @@ export async function verifyPublicBundleSnapshot(
       return {
         verification: {
           ...verification,
-          signers: evidenceNativeBundleSigners(claimPackageBytes),
+          signers: evidenceNativeBundleSigners(claimPackageBytes, verification.verifiedSignerKeyIds),
         },
         snapshot: checked,
       };

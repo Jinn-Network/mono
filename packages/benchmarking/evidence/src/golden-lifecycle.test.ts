@@ -786,6 +786,37 @@ describe("Harbor → Inspect → human evidence-first golden lifecycle", () => {
       evidenceRecords: 336,
     });
 
+    // `trust.signers` is a publisher-written lookup table: the closure never contradicts an entry
+    // no signature selects. A surplus declaration must therefore stay out of the verified set, or a
+    // reader-facing surface built on it would print a reviewer that signed nothing (issue #3024).
+    expect(portable.verifiedSignerKeyIds.length).toBeGreaterThan(0);
+    const surplusClaimDocument = JSON.parse(new TextDecoder().decode(claim.bytes)) as any;
+    surplusClaimDocument.trust.signers = [...surplusClaimDocument.trust.signers, {
+      ...surplusClaimDocument.trust.signers[0],
+      keyId: "zz-declared-but-never-used",
+      identity: "urn:evaluator:declared-but-never-used",
+      purpose: "human-reviewer",
+    }];
+    const surplusClaim = sealEvidenceNativeClaimPackageV3(surplusClaimDocument);
+    const surplusFiles = new Map(bundleFiles);
+    surplusFiles.delete("bundle.json");
+    surplusFiles.set("claim-package.json", surplusClaim.bytes);
+    surplusFiles.set("bundle.json", buildEvidenceNativeBundleManifestV5(surplusFiles).bytes);
+    const withSurplus = await verifyEvidenceNativePortableBundle({
+      files: surplusFiles,
+      verifySignature: ({ publicKeyBytes, preAuthEncoding, signature }) => {
+        const key = createPublicKey({ key: Buffer.from(publicKeyBytes), format: "der", type: "spki" });
+        return key.asymmetricKeyType === "ed25519" && verifyEd25519(
+          null,
+          Buffer.from(preAuthEncoding),
+          key,
+          Buffer.from(signature),
+        );
+      },
+    });
+    expect(withSurplus.verifiedSignerKeyIds).toEqual(portable.verifiedSignerKeyIds);
+    expect(withSurplus.verifiedSignerKeyIds).not.toContain("zz-declared-but-never-used");
+
     const unboundClaimDocument = JSON.parse(new TextDecoder().decode(claim.bytes)) as any;
     unboundClaimDocument.trust.signers[0].identity = "urn:evaluator:unbound-identity";
     const unboundClaim = sealEvidenceNativeClaimPackageV3(unboundClaimDocument);

@@ -52,7 +52,7 @@ describe("legacy bundle signers", () => {
 });
 
 describe("evidence-native bundle signers", () => {
-  test("every declared purpose maps to one reader-facing role and custody stays undeclared", () => {
+  test("only keys that carried an accepted signature are reported, each under its reader-facing role", () => {
     const digest = { name: "record", digest: { sha256: "b".repeat(64) }, mediaType: "application/octet-stream" };
     const claim = sealEvidenceNativeClaimPackageV3({
       claimSchema: "benchmark-product.claim-package/3",
@@ -79,11 +79,20 @@ describe("evidence-native bundle signers", () => {
       },
       issuedAt: "2026-08-18T11:41:56.880Z",
     });
-    expect(evidenceNativeBundleSigners(claim.bytes)).toEqual([
+    expect(evidenceNativeBundleSigners(claim.bytes, ["k1", "k2", "k3", "k4"])).toEqual([
       { role: "publisher", identity: "urn:report:1", keyId: "k1", custody: "undeclared" },
       { role: "automated-grader", identity: "urn:evaluator:1", keyId: "k2", custody: "undeclared" },
       { role: "human-reviewer", identity: "urn:evaluator:2", keyId: "k3", custody: "undeclared" },
       { role: "label-admission", identity: "urn:admission:1", keyId: "k4", custody: "undeclared" },
     ]);
+
+    // `trust.signers` is publisher-written and the closure only ever reads it as a lookup table, so
+    // a declared-but-never-used key must not reach the reader as a signer. A bundle that appended a
+    // "human reviewer" nobody signed as would otherwise print one.
+    expect(evidenceNativeBundleSigners(claim.bytes, ["k1", "k2"])).toEqual([
+      { role: "publisher", identity: "urn:report:1", keyId: "k1", custody: "undeclared" },
+      { role: "automated-grader", identity: "urn:evaluator:1", keyId: "k2", custody: "undeclared" },
+    ]);
+    expect(evidenceNativeBundleSigners(claim.bytes, [])).toEqual([]);
   });
 });

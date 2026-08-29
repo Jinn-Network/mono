@@ -123,10 +123,14 @@ const SIGNER_ROLE_ORDER: readonly PublicBundleSignerRole[] = [
 
 /** The role in plain words. `urn:`/`did:key` identifiers stay in `--json`, where they are the join
  * key a reader actually needs them for; on this surface they are noise a reader has to decode.
- * The custody suffix is omitted for the publisher, who *is* the operator the others are compared
- * against, and for a bundle that declares no custody at all. */
+ * Undeclared custody is stated rather than left blank: a reader who has seen the same-operator
+ * suffix elsewhere would otherwise read its absence as an independence claim, which no bundle
+ * format can establish. The publisher takes no suffix -- it *is* the operator the others are
+ * measured against. */
 function renderSignerGroup(role: PublicBundleSignerRole, custody: PublicBundleSigner["custody"], count: number): string {
-  const suffix = custody === "same-operator" && role !== "publisher" ? " \u2014 same operator" : "";
+  const suffix = role === "publisher"
+    ? ""
+    : custody === "same-operator" ? " \u2014 same operator" : " \u2014 custody not declared";
   return `  ${SIGNER_ROLE_NAMES[role]}${suffix} \u00b7 ${count} ${count === 1 ? "key" : "keys"}`;
 }
 

@@ -407,7 +407,9 @@ test("an undeclared-custody signer set prints the role alone", async () => {
       { role: "automated-grader", identity: "urn:evaluator:1", keyId: "k2", custody: "undeclared" },
     ],
   });
-  assert.match(output, /^ {2}automated grader · 1 key$/m);
+  assert.match(output, /^ {2}automated grader — custody not declared · 1 key$/m);
+  // The publisher is the operator the others are measured against, so it takes no custody suffix.
+  assert.match(output, /^ {2}publisher · 1 key$/m);
   assert.doesNotMatch(output, /same operator/);
   assert.doesNotMatch(output, /urn:/);
 });

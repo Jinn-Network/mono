@@ -6,8 +6,8 @@ export type {
   VerifyPublicBundleDeps,
 } from "./verify.js";
 // Signer roles in reader terms. The verifier's human surface prints these; the identifiers they
-// were derived from stay on the `--json` surface (issue #3024).
-export { evidenceNativeBundleSigners, legacyBundleSigners } from "./signers.js";
+// were derived from stay on the `--json` surface (issue #3024). The extractors themselves stay
+// internal: each has an authenticated-bytes precondition its signature cannot express.
 export type { PublicBundleSigner, PublicBundleSignerRole } from "./signers.js";
 export { derivePublicComparison } from "./comparison.js";
 export type {
