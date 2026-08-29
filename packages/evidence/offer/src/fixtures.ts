@@ -3,7 +3,7 @@
 // The only file in this package permitted to touch the filesystem. It belongs to the
 // testing region: `index.ts` never re-exports it, and it only ever opens artifacts this
 // package itself ships.
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 
 import type { Sha256Digest } from "@jinn-network/trust-core";
 
@@ -59,4 +59,17 @@ export async function loadGoldenDocument(name: GoldenOfferName): Promise<unknown
 
 export async function loadInvalidDocument(name: string): Promise<unknown> {
   return json(`offer/invalid-${name}.json`);
+}
+
+/**
+ * The refused cases actually present on disk. `INVALID_OFFERS` is what the conformance kit
+ * runs; this is what the generator wrote. A test pins them equal, so a case added to the
+ * generator and forgotten here cannot sit in the corpus untested.
+ */
+export async function listInvalidFixtureNames(): Promise<readonly string[]> {
+  const entries = await readdir(offerFixtureUrl("offer"));
+  return entries
+    .filter((entry) => entry.startsWith("invalid-") && entry.endsWith(".json"))
+    .map((entry) => entry.slice("invalid-".length, -".json".length))
+    .sort();
 }

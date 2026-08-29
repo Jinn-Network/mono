@@ -1,6 +1,13 @@
 import { describe, expect, test } from "vitest";
 
-import { GOLDEN_OFFERS, loadGoldenDocument, loadGoldenEnvelope, offerFixtureUrl } from "./fixtures.js";
+import {
+  GOLDEN_OFFERS,
+  INVALID_OFFERS,
+  listInvalidFixtureNames,
+  loadGoldenDocument,
+  loadGoldenEnvelope,
+  offerFixtureUrl,
+} from "./fixtures.js";
 import { parseOfferEnvelope } from "./seal.js";
 
 describe("the shipped fixture corpus", () => {
@@ -15,6 +22,11 @@ describe("the shipped fixture corpus", () => {
       expect(parseOfferEnvelope(await loadGoldenEnvelope(name)).offer)
         .toEqual(await loadGoldenDocument(name));
     }
+  });
+
+  // Without this the conformance kit could silently stop covering a shipped refusal case.
+  test("every refused case on disk is one the conformance kit runs, and vice versa", async () => {
+    expect(await listInvalidFixtureNames()).toEqual([...INVALID_OFFERS].sort());
   });
 
   test("the superseding fixture names the priced fixture it replaces", async () => {
