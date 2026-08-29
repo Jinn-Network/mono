@@ -10269,6 +10269,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/evidence-offer",
         "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-rail-spelled-twice.json",
+        "relativeSource": "fixtures/offer/invalid-rail-spelled-twice.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
         "path": "packages/evidence/offer/fixtures/offer/invalid-relative-gate-uri.json",
         "relativeSource": "fixtures/offer/invalid-relative-gate-uri.json"
       },
@@ -10289,6 +10298,15 @@
         "packedTargets": [],
         "path": "packages/evidence/offer/fixtures/offer/invalid-signed-amount.json",
         "relativeSource": "fixtures/offer/invalid-signed-amount.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-unnormalized-rail-identifier.json",
+        "relativeSource": "fixtures/offer/invalid-unnormalized-rail-identifier.json"
       },
       {
         "claim": null,
