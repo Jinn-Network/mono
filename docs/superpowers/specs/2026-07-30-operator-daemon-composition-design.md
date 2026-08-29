@@ -146,6 +146,24 @@ replaces the four that belong to the marketplace loop and keeps the rest untouch
 > in-executor signing was meant to give. The reversal is sound and not reopened by this note.
 > Same reversal, same reasoning, recorded in the
 > [local-execution-backend design §10.4](./2026-07-27-local-execution-backend-design.md#104-evaluation-runner-design-reconciliation).
+>
+> **Further amended 2026-08-12 (`688bf27ad`, PR #2601): the re-serialization half of the
+> note above is superseded; its conclusion stands.** The host does *not* re-serialize the
+> statement to canonical bytes and compare. That guard compared the harness's output against
+> trust-core's compact JCS encoding, while the harness writes the attestation family's pretty
+> spelling, so the two could never agree and every real evaluation threw. The host now checks
+> the producer's own spelling (`canonicalAttestationJsonBytes`, the encoder
+> `buildResultEvaluationPayload` writes with) and seals *the sandbox's exact bytes* via
+> `sealSignedPayload` — still fail-closed on mismatch. The integrity property is unchanged and
+> in fact strengthened: the DSSE payload is now the graded file itself rather than a
+> re-encoding of it. The Evaluator loop row's reversal — no signing key in the sandbox, host-side
+> sealing — is unchanged. Cite these by symbol, not by line: the file is now
+> `operator/src/daemon/native-evaluator-composition.ts` (renamed from `client/` in
+> `5a4b537cf`), the grant rejection is its `stateBackedProvisioner` `setup` guard
+> ("evaluator-sealed Submission must remain grant-free", formerly cited `:291-293`) and the
+> byte check is in the same provisioner's `harvest` path (formerly cited `:343-345`);
+> `secretForwards: []` is `evaluation-harness/src/launcher.ts` in `makeEvaluationLauncher`
+> (formerly cited `:94-95`).
 
 **Kept as-is:** reward-claim, checkpoint, eviction, balance-topup, harvest (corpus mining),
 watchdog + heartbeats.

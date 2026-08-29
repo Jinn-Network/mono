@@ -71,6 +71,17 @@ and the divergence is a reportable finding.
   `sealSignedRecord` + `VERDICT_DSSE_PAYLOAD_TYPE`
   (pattern: `client/src/daemon/native-evaluator-composition.ts:309-345`,
   which is marketplace-coupled and NOT reusable directly).
+
+  > **Amended 2026-08-12 (`688bf27ad`, PR #2601): the cited pattern moved and
+  > changed shape.** The file is now
+  > `operator/src/daemon/native-evaluator-composition.ts` (renamed from
+  > `client/` in `5a4b537cf`); cite it by symbol rather than by line, as the
+  > `:309-345` span above has drifted. The host no longer re-serializes the
+  > statement through `sealSignedRecord`'s compact trust-core canonical form:
+  > it checks the producer's own spelling (`canonicalAttestationJsonBytes`)
+  > and seals the sandbox's exact bytes with `sealSignedPayload`. G2's finding
+  > — the harness writes a bare unsigned statement and the product host must
+  > DSSE-wrap it — is unchanged.
 - **G3 — no existing test runs `prediction-v1-baseline` through the real
   backend.** M1 is the first real-backend benchmarking composition in the
   repository.
