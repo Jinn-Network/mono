@@ -6,13 +6,14 @@
  * ways a published tree can drift from the bundle it claims to be derived from.
  */
 
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
   FREEZE_REPO_MANIFEST_FILENAME,
   exportFreezeRepo,
+  runVerifierCli,
   verifyFreezeRepo,
 } from "@colophon-claims/verify";
 import { runCli } from "../cli/main.js";
@@ -107,6 +108,70 @@ describe("freeze-repository export against a real v4 bundle", () => {
     ]);
   });
 
+  test("reports the git-visible drift that leaves bytes untouched", async () => {
+    const bundleDir = licensedBundle;
+    const repoDir = join(tempDir("git-drift"), "tree");
+    await exportFreezeRepo(bundleDir, repoDir);
+
+    // Both change what git records for the path, and therefore the commit oid the announcement
+    // pins, while every byte reads back identical.
+    chmodSync(join(repoDir, "NOTICE"), 0o755);
+    const licenseBytes = readFileSync(join(repoDir, "LICENSE"));
+    rmSync(join(repoDir, "LICENSE"));
+    writeFileSync(join(repoDir, ".license-payload"), licenseBytes);
+    symlinkSync(join(repoDir, ".license-payload"), join(repoDir, "LICENSE"));
+
+    const checked = await verifyFreezeRepo(bundleDir, repoDir);
+    expect(checked.ok).toBe(false);
+    expect(checked.differences).toEqual(
+      expect.arrayContaining([
+        { path: "LICENSE", kind: "changed" },
+        { path: "NOTICE", kind: "changed" },
+        { path: ".license-payload", kind: "unexpected" },
+      ]),
+    );
+  });
+
+  test("a nested .git directory is content, not verifier-invisible metadata", async () => {
+    const bundleDir = licensedBundle;
+    const repoDir = join(tempDir("nested-git"), "tree");
+    await exportFreezeRepo(bundleDir, repoDir);
+
+    // Only the ROOT .git is git's own metadata; one at depth is ordinary content the check must see.
+    mkdirSync(join(repoDir, ".git"), { recursive: true });
+    writeFileSync(join(repoDir, ".git", "config"), "root metadata\n");
+    mkdirSync(join(repoDir, "artifacts", ".git"), { recursive: true });
+    writeFileSync(join(repoDir, "artifacts", ".git", "payload"), "smuggled\n");
+
+    const checked = await verifyFreezeRepo(bundleDir, repoDir);
+    expect(checked.ok).toBe(false);
+    expect(checked.differences).toEqual([{ path: "artifacts/.git/payload", kind: "unexpected" }]);
+  });
+
+  test("the standalone verifier package checks a published tree with no product install", async () => {
+    const bundleDir = licensedBundle;
+    const repoDir = join(tempDir("standalone"), "tree");
+    await exportFreezeRepo(bundleDir, repoDir);
+
+    const matched = await runVerifierCli([bundleDir, "--freeze-repo", repoDir, "--json"]);
+    expect(matched.exitCode).toBe(0);
+    expect((JSON.parse(matched.stdout) as { freezeRepo: { ok: boolean } }).freezeRepo.ok).toBe(true);
+
+    writeFileSync(join(repoDir, "README.md"), "rewritten by hand\n");
+    const drifted = await runVerifierCli([bundleDir, "--freeze-repo", repoDir]);
+    expect(drifted.exitCode).toBe(1);
+    expect(drifted.stdout).toContain("DOES NOT match this bundle");
+    expect(drifted.stdout).toContain("changed: README.md");
+  });
+
+  test("refuses to write into a directory that already holds files", async () => {
+    const repoDir = join(tempDir("occupied"), "tree");
+    mkdirSync(repoDir, { recursive: true });
+    writeFileSync(join(repoDir, "leftover.txt"), "from an earlier run\n");
+
+    await expect(exportFreezeRepo(licensedBundle, repoDir)).rejects.toThrow(/already contains files/);
+  });
+
   test("refuses a bundle whose Benchmark record declares no licence", async () => {
     await expect(exportFreezeRepo(unlicensedBundle, join(tempDir("out"), "repo")))
       .rejects.toThrow(/declares no licence/);
@@ -140,7 +205,7 @@ describe("freeze-repo CLI verbs", () => {
     expect(verifyEnvelope.result.commitId).toBe(exportEnvelope.result.commitId);
   });
 
-  test("a drifted tree is a reported result, not an invocation error", async () => {
+  test("a drifted tree exits non-zero and names every drifted member", async () => {
     const bundleDir = licensedBundle;
     const repoDir = join(tempDir("cli-drift"), "repo");
     await exportFreezeRepo(bundleDir, repoDir);
@@ -151,9 +216,14 @@ describe("freeze-repo CLI verbs", () => {
       { cwd: process.cwd(), clock: () => "2026-08-29T00:00:00.000Z" },
     );
 
-    expect(verified.exitCode).toBe(0);
-    const envelope = JSON.parse(verified.stdout) as { result: { ok: boolean; differences: { path: string }[] } };
-    expect(envelope.result.ok).toBe(false);
-    expect(envelope.result.differences.map((difference) => difference.path)).toEqual(["README.md"]);
+    // `freeze-repo verify && publish` must not publish a drifted tree, so this exits non-zero.
+    expect(verified.exitCode).toBe(1);
+    const envelope = JSON.parse(verified.stdout) as {
+      ok: boolean;
+      error: { code: string; detail: string; issues: { path: string; message: string }[] };
+    };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error.code).toBe("record-integrity");
+    expect(envelope.error.issues).toEqual([{ path: "README.md", message: "changed" }]);
   });
 });

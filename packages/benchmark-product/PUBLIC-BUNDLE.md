@@ -408,15 +408,35 @@ The layout:
   sealed Benchmark record declares; the per-source attribution and licence
   descriptors come from the sealed source-manifest rows. `LICENSE` states the
   identifier and its canonical SPDX URL rather than reproducing licence text the
-  bundle does not carry. `NOTICE` carries the modification notice: members under
-  `artifacts/source-item/` are the licensed source bytes unmodified, and every
-  other member is a Colophon-derived record over them.
+  bundle does not carry. `NOTICE` carries the modification notice, and it states the
+  fact rather than inverting it: the bundle carries no upstream source bytes at
+  all, so no member is an unmodified upstream copy. Every member under
+  `artifacts/` is a Colophon-authored or Colophon-derived sealed record over
+  sources the manifest names by URI and digest. The licence identifier must be an
+  SPDX short identifier; free text is a refusal, not a rendered
+  `SPDX-License-Identifier:` line and a dead spdx.org URL.
 - `README.md` — the doctrine, the layout, and the check.
 
 The tree's **git commit hash is the value a freeze announcement pins**. It is
 computed in-process from the rendered tree with a fixed identity and a zero
 timestamp, so it is a function of the bundle rather than of the machine that ran
-the export. Both verbs report it.
+the export. Both verbs report it, and the generated `README.md` carries the exact
+recipe that commits the tree to that oid:
+
+```sh
+export GIT_AUTHOR_NAME=Colophon GIT_AUTHOR_EMAIL=freeze@colophon.invalid
+export GIT_COMMITTER_NAME=Colophon GIT_COMMITTER_EMAIL=freeze@colophon.invalid
+export GIT_AUTHOR_DATE='@0 +0000' GIT_COMMITTER_DATE='@0 +0000'
+git init --quiet && git add -A && git commit --quiet -m 'Colophon freeze <identity>'
+```
+
+Every member is mode `100644`. An executable bit, or a member replaced by a
+symlink, changes what git records and therefore the pinned commit even though the
+bytes read back identical — so `freeze-repo verify` reports both as drift, and it
+treats a nested `.git` directory as ordinary content, skipping only the root one.
+
+The standalone verifier package checks a published tree with no product install:
+`colophon-verify <bundle> --freeze-repo <dir>`, exit `1` on drift.
 
 A bundle with no qualification graph has no freeze artifacts, and a Benchmark
 record that declares no licence has no licence data to generate scaffolding from.

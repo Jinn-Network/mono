@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 import { summarizeVerificationOutcome } from "./outcome.js";
 import { verifyPublicBundle, type PublicBundleVerificationResult, type VerifyPublicBundleDeps } from "./verify.js";
+import { verifyFreezeRepo, type FreezeRepoVerificationResult } from "./freeze-repo.js";
 import type {
   AnchorSubjectReport,
   AnchorVerificationEntry,
@@ -30,8 +31,12 @@ export interface VerifierCliDeps {
 
 function usage(): string {
   return "Usage: colophon-verify <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
+    + "                        [--freeze-repo <dir>]\n"
     + "  --tsa-root     RFC 3161 trust anchor, DER or PEM. Repeatable.\n"
     + "  --ots-headers  Bitcoin block headers, one \"<height>:<80-byte-hex>\" per line. Repeatable.\n"
+    + "  --freeze-repo  Also check that this published freeze-artifact repository is exactly what\n"
+    + "                 the bundle renders. The repository is a derived artifact, never the claim\n"
+    + "                 of record; a drifted tree exits 1.\n"
     + "Trust material is yours, not the bundle's: with none supplied a well-formed anchor reports\n"
     + "present rather than verified, and none ships with this tool.\n"
     + "Exit 0: valid bundle; 1: invalid bundle; 2: usage or operational failure.\n"
@@ -235,6 +240,8 @@ interface ParsedArguments {
   readonly json: boolean;
   readonly tsaRoots: readonly string[];
   readonly otsHeaders: readonly string[];
+  /** Present only when `--freeze-repo` was supplied (issue #2870). */
+  readonly freezeRepoDir?: string;
 }
 
 function parseArguments(args: readonly string[]): ParsedArguments | undefined {
@@ -242,6 +249,7 @@ function parseArguments(args: readonly string[]): ParsedArguments | undefined {
   const tsaRoots: string[] = [];
   const otsHeaders: string[] = [];
   let json = false;
+  let freezeRepoDir: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
     if (arg === "--json") {
@@ -251,6 +259,11 @@ function parseArguments(args: readonly string[]): ParsedArguments | undefined {
       if (value === undefined || value.startsWith("--")) return undefined;
       (arg === "--tsa-root" ? tsaRoots : otsHeaders).push(value);
       index += 1;
+    } else if (arg === "--freeze-repo") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("--") || freezeRepoDir !== undefined) return undefined;
+      freezeRepoDir = value;
+      index += 1;
     } else if (arg.startsWith("--")) {
       return undefined;
     } else {
@@ -258,7 +271,13 @@ function parseArguments(args: readonly string[]): ParsedArguments | undefined {
     }
   }
   if (positional.length !== 1) return undefined;
-  return { bundleDir: positional[0]!, json, tsaRoots, otsHeaders };
+  return {
+    bundleDir: positional[0]!,
+    json,
+    tsaRoots,
+    otsHeaders,
+    ...(freezeRepoDir === undefined ? {} : { freezeRepoDir }),
+  };
 }
 
 function buildAnchorTrust(
@@ -272,6 +291,16 @@ function buildAnchorTrust(
     ...(trustAnchorsDer.length === 0 ? {} : { rfc3161: { trustAnchorsDer } }),
     ...(blockHeaders.length === 0 ? {} : { opentimestamps: { blockHeaders } }),
   };
+}
+
+/** The freeze-repository block of the human report: the pin, then every drifted member. */
+function renderFreezeRepoCheck(check: FreezeRepoVerificationResult): string {
+  const head = check.ok
+    ? `\nfreeze repository: matches this bundle (${check.fileCount} files)`
+    : `\nfreeze repository: DOES NOT match this bundle (${check.differences.length} of ${check.fileCount} members)`;
+  const pin = `\n  commit ${check.commitId}`;
+  const drift = check.differences.map((difference) => `\n  ${difference.kind}: ${difference.path}`).join("");
+  return `${head}${pin}${drift}\n`;
 }
 
 export async function runVerifierCli(
@@ -300,10 +329,21 @@ export async function runVerifierCli(
       parsed.bundleDir,
       anchorTrust === undefined ? {} : { anchorTrust },
     );
+    // The freeze repository is checked only after the bundle itself verifies: a tree derived from
+    // records that do not verify has nothing to be consistent with.
+    const freezeRepo = parsed.freezeRepoDir === undefined
+      ? undefined
+      : await verifyFreezeRepo(parsed.bundleDir, parsed.freezeRepoDir);
     const stdout = parsed.json
-      ? `${JSON.stringify({ ok: true, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, ...result })}\n`
-      : renderVerifiedBundle(result);
-    return { exitCode: 0, stdout, stderr: "" };
+      ? `${JSON.stringify({
+        ok: freezeRepo?.ok ?? true,
+        verifierVersion: VERIFIER_VERSION,
+        supportedFormats: SUPPORTED_BUNDLE_FORMATS,
+        ...result,
+        ...(freezeRepo === undefined ? {} : { freezeRepo }),
+      })}\n`
+      : `${renderVerifiedBundle(result)}${freezeRepo === undefined ? "" : renderFreezeRepoCheck(freezeRepo)}`;
+    return { exitCode: freezeRepo !== undefined && !freezeRepo.ok ? 1 : 0, stdout, stderr: "" };
   } catch (cause) {
     const error = cause instanceof Error ? cause : new Error(String(cause));
     const code = (cause !== null && typeof cause === "object" && "code" in cause)

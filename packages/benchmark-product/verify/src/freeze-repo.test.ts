@@ -190,11 +190,18 @@ describe("freeze repository rendering", () => {
     expect(notice).toContain("https://example.test/LICENSE-one.txt");
     expect(notice).toContain(`sha256:${"b".repeat(64)}`);
     expect(notice).toContain("https://example.test/ATTRIBUTION-two.txt");
-    // The modification notice the licence brief asks for.
-    expect(notice).toContain("artifacts/source-item/");
-    expect(notice).toMatch(/unmodified/);
-    expect(notice).toMatch(/derived work/i);
+    // The modification notice the licence brief asks for, and it must not invert the fact: the
+    // bundle carries NO upstream source bytes, so no member is an unmodified upstream copy.
+    expect(notice).toContain("No member of this repository is an unmodified copy of an upstream source");
+    expect(notice).toContain("Colophon-authored or Colophon-derived sealed record");
+    expect(notice).not.toMatch(/artifacts\/source-item\/[^\n]*unmodified/);
 
+    expect(spdx["spdxVersion"]).toBe("SPDX-2.3");
+    expect(spdx["SPDXID"]).toBe("SPDXRef-DOCUMENT");
+    expect(spdx["dataLicense"]).toBe("CC0-1.0");
+    // Fixed instant, not a real one: a real creation time would make two renders differ.
+    expect(spdx["creationInfo"]["created"]).toBe("1970-01-01T00:00:00Z");
+    expect(spdx["documentDescribes"]).toEqual(["SPDXRef-Package-Freeze"]);
     expect(spdx["packages"][0]["licenseDeclared"]).toBe("CC-BY-NC-4.0");
     expect(spdx["packages"]).toHaveLength(3);
     expect(spdx["packages"].slice(1).map((entry: any) => entry.checksums[0].checksumValue).sort())
@@ -271,6 +278,9 @@ describe("freeze repository commit id agrees with git itself", () => {
         encoding: "utf8",
         env: {
           ...process.env,
+          // A contributor's global core.autocrlf / init.templateDir / core.hooksPath must not
+          // reach this comparison: the point is what git does with the rendered bytes, alone.
+          GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null",
           GIT_AUTHOR_NAME: "Colophon", GIT_AUTHOR_EMAIL: "freeze@colophon.invalid",
           GIT_AUTHOR_DATE: "@0 +0000",
           GIT_COMMITTER_NAME: "Colophon", GIT_COMMITTER_EMAIL: "freeze@colophon.invalid",
@@ -285,6 +295,7 @@ describe("freeze repository commit id agrees with git itself", () => {
       encoding: "utf8",
       env: {
         ...process.env,
+        GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null",
         GIT_AUTHOR_NAME: "Colophon", GIT_AUTHOR_EMAIL: "freeze@colophon.invalid",
         GIT_AUTHOR_DATE: "@0 +0000",
         GIT_COMMITTER_NAME: "Colophon", GIT_COMMITTER_EMAIL: "freeze@colophon.invalid",
@@ -293,5 +304,33 @@ describe("freeze repository commit id agrees with git itself", () => {
     }).trim();
 
     expect(tree.commitId).toBe(commitOid);
+  });
+});
+
+describe("freeze repository fail-closed rules", () => {
+  test("refuses a licence that is not an SPDX short identifier", () => {
+    const benchmark = {
+      protocol: "https://spec.jinn.network/benchmarking/v1",
+      name: "Free text", description: "", version: "1.0.0",
+      license: "internal use only",
+      items: [], reveal: { policy: "immediate" },
+    };
+    // Rendering it would put `SPDX-License-Identifier: internal use only` and a dead spdx.org URL
+    // into a licence-bearing file.
+    expect(() => renderFreezeRepo(snapshotOf({ benchmark }))).toThrow(/not an SPDX short identifier/);
+  });
+
+  test("carries every screening role the catalog can assign, including the transcript", () => {
+    // The screening branch's records are freeze artifacts; omitting one silently would drop
+    // evidence from the published tree with nothing in it saying so.
+    for (const role of ["screening-transcript", "screening-sampling-script", "screening-prompt", "screening-raw-outputs"]) {
+      expect(FREEZE_REPO_ROLES, role).toContain(role);
+    }
+  });
+
+  test("freeze.json does not restate the schema-parsed source rows", () => {
+    // They are carried byte-for-byte under artifacts/source-manifest/; re-serializing them would
+    // make these bytes a function of the verifier's schema shape as well as of the bundle.
+    expect(readManifest(renderFreezeRepo(snapshotOf()))["sources"]).toBeUndefined();
   });
 });

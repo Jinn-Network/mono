@@ -82,9 +82,8 @@ import {
   type SignHumanReviewResponseInput,
 } from "../operations/index.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
-import { summarizeVerificationOutcome } from "@colophon-claims/verify";
+import { exportFreezeRepo, summarizeVerificationOutcome, verifyFreezeRepo } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { exportFreezeRepo, verifyFreezeRepo } from "@colophon-claims/verify";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { DEFAULT_PUBLICATION_SOURCE_NAME, requireRunState } from "../run/state.js";
@@ -176,7 +175,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    (deterministic public-repository projection of the bundle's freeze
                    artifacts; a derived tree, never the claim of record)
   freeze-repo verify --bundle <dir> --repo <dir> [--json]
-                   (re-renders from the bundle and compares the published tree byte for byte)
+                   (re-renders from the bundle and compares the published tree byte for byte;
+                   a drifted tree exits 1 and names every drifted member)
   demo1 prereg verify --workspace <dir> --draft <draftId> --witness <witness.json>
                    --method-summary-sha256 <sha256> --grader-program-sha256 <sha256>
                    --source-commit <full-git-oid> [--json]
@@ -1403,16 +1403,30 @@ async function handleFreezeRepoVerify(args: ParsedArgs, context: CliContext, jso
     pathFrom(context.cwd, required(args, "bundle")),
     pathFrom(context.cwd, required(args, "repo")),
   );
-  // A failed comparison is a RESULT, not an invocation error: the caller asked whether the tree
-  // matches, and "it does not, here is where" is the answer. Exit code stays 0; `ok` carries it.
+  if (result.ok) {
+    return renderResult(
+      { ok: true, result },
+      jsonMode,
+      (value) => `freeze repository matches ${value.bundleIdentity}: ${value.fileCount} files, commit ${value.commitId}\n`,
+    );
+  }
+  // A drifted tree must not exit 0. `check && publish` is exactly how this verb gets used, and a
+  // zero exit there publishes the drift. The typed envelope still carries every difference, so a
+  // machine caller reads WHICH members drifted from `issues`, not from prose.
+  const detail = `freeze repository does not match ${result.bundleIdentity}: ${result.differences
+    .map((difference) => `${difference.path} (${difference.kind})`)
+    .join(", ")}`;
   return renderResult(
-    { ok: true, result },
+    {
+      ok: false,
+      error: {
+        code: "record-integrity",
+        detail,
+        issues: result.differences.map((difference) => ({ path: difference.path, message: difference.kind })),
+      },
+    } as OperationResult<never>,
     jsonMode,
-    (value) => value.ok
-      ? `freeze repository matches ${value.bundleIdentity}: ${value.fileCount} files, commit ${value.commitId}\n`
-      : `freeze repository does NOT match ${value.bundleIdentity}: ${value.differences
-        .map((difference) => `${difference.path} (${difference.kind})`)
-        .join(", ")}\n`,
+    () => "",
   );
 }
 

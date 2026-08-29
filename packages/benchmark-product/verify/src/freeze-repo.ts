@@ -71,6 +71,7 @@ export const FREEZE_REPO_ROLES: readonly BundleV4EvidenceRole[] = [
   "screening-procedure",
   "screening-pool",
   "screening-sample-commitment",
+  "screening-transcript",
 ] as const;
 
 /**
@@ -93,6 +94,18 @@ export const FREEZE_REPO_MANIFEST_FILENAME = "freeze.json" as const;
  * cannot take its identity or its time from the machine that rendered it.
  */
 const COMMIT_IDENTITY = "Colophon <freeze@colophon.invalid> 0 +0000";
+
+/** The same fixed instant the commit identity uses. An SPDX document requires a creation time and
+ * this renderer has no clock, so it states the epoch rather than inventing a real one; the README
+ * says so in as many words. */
+const FIXED_INSTANT = "1970-01-01T00:00:00Z";
+
+/**
+ * SPDX short-identifier grammar (SPDX 2.3 Annex A). Deliberately grammar, not the licence list: a
+ * list would date, and the failure this guards is a free-text string ("internal use only") being
+ * rendered into `SPDX-License-Identifier:` and a dead spdx.org URL as if it were an identifier.
+ */
+const SPDX_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9.+-]*$/u;
 
 export interface FreezeRepoSourceLicence {
   readonly provenanceSha256: string;
@@ -254,6 +267,13 @@ function readPublication(snapshot: VerifiedBundleSnapshot): FreezeRepoPublicatio
   }
   const record = benchmark as Record<string, unknown>;
   const license = record["license"];
+  if (typeof license === "string" && license.length > 0 && !SPDX_IDENTIFIER.test(license)) {
+    refuse(
+      "record-integrity",
+      "benchmark.json.license",
+      `the sealed Benchmark record's licence "${license}" is not an SPDX short identifier; a freeze repository renders it as one and will not present free text as a licence identifier`,
+    );
+  }
   if (typeof license !== "string" || license.length === 0) {
     // Licence scaffolding is generated from licence data or it is not generated at all. Inventing
     // a licence for a publication that never declared one is exactly the hand-assembly this
@@ -291,7 +311,10 @@ function readSourceLicences(sourceManifestBytes: readonly Uint8Array[]): readonl
       refuse("record-integrity", "source-manifest", "the sealed source manifest is not valid UTF-8");
     }
     for (const line of lines) {
-      const parsed = BinarySourceManifestEntrySchema.safeParse(JSON.parse(line) as unknown);
+      // Authenticated bytes are not automatically well-formed bytes: a malformed row must refuse
+      // with a typed error, not escape as a raw SyntaxError from JSON.parse.
+      const document = parseJsonOrUndefined(text(line));
+      const parsed = BinarySourceManifestEntrySchema.safeParse(document);
       if (!parsed.success) {
         refuse("record-integrity", "source-manifest", "a sealed source-manifest row does not match the pinned schema");
       }
@@ -318,16 +341,17 @@ function renderLicense(publication: FreezeRepoPublication, sources: readonly Fre
     "",
     `${publication.name} ${publication.version}`,
     "",
-    `The freeze artifacts in this repository are published under ${publication.license}.`,
+    `The Colophon-authored records in this repository are published under ${publication.license}.`,
     `Canonical licence text: ${spdxUrl(publication.license)}`,
     "",
-    "This file states the licence the sealed Benchmark record declares. It does not reproduce",
-    "the licence text: this repository is generated from a sealed bundle, and the bundle does",
-    "not carry those bytes, so reproducing them here would be an assertion no record backs.",
+    "That is the scope, exactly. Upstream sources keep their own licences, and source-derived text",
+    "quoted inside these records stays subject to them. NOTICE names every source row with the",
+    "digest of the licence document the sealed source manifest commits to;",
+    `${sources.length} source ${sources.length === 1 ? "row is" : "rows are"} listed there and in metadata/spdx.json.`,
     "",
-    `Upstream sources carry their own licences. ${sources.length} source ${sources.length === 1 ? "row is" : "rows are"}`,
-    "listed in NOTICE and in metadata/spdx.json, each with the digest of the licence document",
-    "the sealed source manifest names.",
+    "This file states the licence the sealed Benchmark record declares. It does not reproduce the",
+    "licence text: this repository is generated from a sealed bundle, and the bundle does not carry",
+    "those bytes, so reproducing them here would be an assertion no record backs.",
     "",
     ...(publication.citation === undefined ? [] : ["Citation:", publication.citation, ""]),
   ].join("\n"));
@@ -364,12 +388,15 @@ function renderNotice(
     "Modification notice",
     "-------------------",
     "",
-    "Members under artifacts/source-item/ are the licensed source bytes, unmodified.",
+    "No member of this repository is an unmodified copy of an upstream source. The sealed bundle",
+    "does not carry upstream source bytes at all: the source manifest names each source by URI and",
+    "digest, which is what the rows above list.",
     "",
-    "Every other member is a Colophon-derived record over those sources: item-bank entries,",
-    "admission decisions, label resolutions, analysis contexts, judge instruments, and the",
-    "human-review and screening material. They are derived works, sealed and digest-addressed;",
-    "each file is named by the SHA-256 of its own exact bytes.",
+    "Every member under artifacts/ is a Colophon-authored or Colophon-derived sealed record over",
+    "those sources — the item payloads, item-bank entries, admission decisions, label resolutions,",
+    "analysis contexts, judge instruments, and the human-review and screening material. The item",
+    "payloads quote source-derived question and answer text; the rest is Colophon's own. Each file",
+    "is named by the SHA-256 of its own exact bytes.",
     "",
     "Nothing in this repository has been edited by hand. It is regenerated from the bundle.",
     "",
@@ -383,11 +410,15 @@ function renderSpdxMetadata(
   sources: readonly FreezeRepoSourceLicence[],
 ): Uint8Array {
   return json({
-    format: FREEZE_REPO_FORMAT,
     spdxVersion: "SPDX-2.3",
+    SPDXID: "SPDXRef-DOCUMENT",
+    dataLicense: "CC0-1.0",
     name: `${publication.name} ${publication.version}`,
     documentNamespace: `https://colophon.invalid/freeze/${bundleIdentity}`,
-    creationInfo: { creators: ["Tool: colophon-freeze-repo"] },
+    // `created` is the fixed epoch, not a real instant: this document is a pure function of the
+    // bundle, and a real creation time would make two renders of the same bundle differ.
+    creationInfo: { created: FIXED_INSTANT, creators: [`Tool: ${FREEZE_REPO_FORMAT}`] },
+    documentDescribes: ["SPDXRef-Package-Freeze"],
     packages: [
       {
         SPDXID: "SPDXRef-Package-Freeze",
@@ -445,6 +476,25 @@ function renderReadme(
     "",
     "```",
     "colophon freeze-repo export --bundle <bundle-dir> --out <dir>",
+    "```",
+    "",
+    "## The commit a freeze announcement pins",
+    "",
+    "`freeze-repo export` and `freeze-repo verify` both report a git commit oid over exactly this",
+    "tree, computed from the bundle rather than from whatever machine rendered it — so an",
+    "announcement can pin it before the repository is pushed anywhere. It is not written into the",
+    "tree, because a file naming the hash of the tree containing it has no fixed point. Committing",
+    "this tree to that oid needs the same fixed identity and instant the renderer used, and the file",
+    "modes left alone (every member is mode 100644; making one executable, or replacing one with a",
+    "symlink, changes the commit — and `freeze-repo verify` reports both):",
+    "",
+    "```",
+    "export GIT_AUTHOR_NAME=Colophon GIT_AUTHOR_EMAIL=freeze@colophon.invalid",
+    "export GIT_COMMITTER_NAME=Colophon GIT_COMMITTER_EMAIL=freeze@colophon.invalid",
+    "export GIT_AUTHOR_DATE='@0 +0000' GIT_COMMITTER_DATE='@0 +0000'",
+    "git init --quiet && git add -A",
+    `git commit --quiet -m 'Colophon freeze ${bundleIdentity}'`,
+    "git rev-parse HEAD    # equals the reported oid",
     "```",
     "",
     "## Layout",
@@ -565,13 +615,10 @@ export function renderFreezeRepo(snapshot: VerifiedBundleSnapshot): FreezeRepoTr
       bundle: { identity: snapshot.identity, format: bundleFormat },
       publication,
       roles: roleGroups,
-      sources: sources.map((source) => ({
-        provenanceSha256: source.provenanceSha256,
-        source: source.source,
-        license: source.license,
-        attribution: source.attribution,
-        publishedAt: source.publishedAt,
-      })),
+      // The source rows are NOT restated here. They are already carried byte-for-byte under
+      // `artifacts/source-manifest/`, and re-serializing schema-parsed objects would make these
+      // bytes a function of the verifier's schema shape as well as of the bundle — which is
+      // exactly the tool-version dependence this format promises not to have.
       // `freeze.json` cannot list itself: its own digest is not knowable before it is written.
       // Every other rendered path is here, sorted.
       files: listed,
@@ -612,14 +659,14 @@ export async function exportFreezeRepo(
   // Never write into an occupied tree. Merging into leftovers would produce a directory that is
   // not the rendered tree, and the export's whole contract is that the directory IS the tree; a
   // recursive delete of a caller-named path is the wrong way to guarantee that.
-  let occupied: readonly string[] = [];
+  let occupied: readonly TreeEntry[] = [];
   try {
     occupied = listTree(repoDir);
   } catch {
     occupied = [];
   }
   if (occupied.length > 0) {
-    refuse("conflict", repoDir, `"${repoDir}" already contains files; export writes a complete tree and will not merge into one`);
+    refuse("conflict", repoDir, `"${repoDir}" already contains files; export writes a complete tree and will not merge into one — remove the directory and export again`);
   }
   for (const [path, bytes] of tree.files) {
     const target = join(repoDir, path);
@@ -652,23 +699,44 @@ export interface FreezeRepoVerificationResult {
   readonly differences: readonly FreezeRepoDifference[];
 }
 
-function listTree(repoDir: string): readonly string[] {
-  const found: string[] = [];
-  const walk = (dir: string): void => {
+interface TreeEntry {
+  readonly path: string;
+  /** False for a symlink, device, socket, or anything else git would not record as a blob at
+   * mode 100644. Such an entry is never treated as satisfying an expected member. */
+  readonly plainFile: boolean;
+  readonly executable: boolean;
+}
+
+/**
+ * Enumerate a published tree the way git sees it. Two rules earn their place:
+ *
+ * - `.git` is skipped ONLY at the root. A nested `.git` directory is ordinary content to the outer
+ *   repository, so skipping it at depth would let a tree carry files the check never looks at.
+ * - a symlink is not a file. Reporting it rather than skipping it is what stops
+ *   `LICENSE -> /etc/passwd` from reading as a matching member.
+ */
+function listTree(repoDir: string): readonly TreeEntry[] {
+  const found: TreeEntry[] = [];
+  const walk = (dir: string, atRoot: boolean): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const absolute = join(dir, entry.name);
-      // A published repository is a git repository; its own metadata is not part of the render.
       if (entry.isDirectory()) {
-        if (entry.name === ".git") continue;
-        walk(absolute);
+        if (atRoot && entry.name === ".git") continue;
+        walk(absolute, false);
         continue;
       }
-      if (!entry.isFile()) continue;
-      found.push(relative(repoDir, absolute).split(sep).join("/"));
+      const path = relative(repoDir, absolute).split(sep).join("/");
+      if (!entry.isFile()) {
+        found.push({ path, plainFile: false, executable: false });
+        continue;
+      }
+      // The exec bit is part of the git tree (mode 100755 rather than 100644), so it moves the
+      // commit oid the announcement pins even though the bytes are untouched.
+      found.push({ path, plainFile: true, executable: (statSync(absolute).mode & 0o111) !== 0 });
     }
   };
-  walk(repoDir);
-  return found.sort(compareStrings);
+  walk(repoDir, true);
+  return found.sort((left, right) => compareStrings(left.path, right.path));
 }
 
 /**
@@ -683,7 +751,7 @@ export async function verifyFreezeRepo(
   const tree = renderFreezeRepo((await verifyPublicBundleSnapshot(bundleDir, deps)).snapshot);
   const differences: FreezeRepoDifference[] = [];
 
-  let present: readonly string[];
+  let present: readonly TreeEntry[];
   try {
     if (!statSync(repoDir).isDirectory()) throw new Error("not a directory");
     present = listTree(repoDir);
@@ -691,17 +759,24 @@ export async function verifyFreezeRepo(
     refuse("not-found", repoDir, `"${repoDir}" is not a readable directory`);
   }
 
-  const presentSet = new Set(present);
+  const presentByPath = new Map(present.map((entry) => [entry.path, entry] as const));
   for (const [path, expected] of tree.files) {
-    if (!presentSet.has(path)) {
+    const entry = presentByPath.get(path);
+    if (entry === undefined) {
       differences.push({ path, kind: "missing" });
+      continue;
+    }
+    // A symlink or an executable bit changes what git records for this path, so the published
+    // tree no longer hashes to the pinned commit even when the bytes read back identical.
+    if (!entry.plainFile || entry.executable) {
+      differences.push({ path, kind: "changed" });
       continue;
     }
     const actual = readFileSync(join(repoDir, path));
     if (sha256Hex(actual) !== sha256Hex(expected)) differences.push({ path, kind: "changed" });
   }
-  for (const path of present) {
-    if (!tree.files.has(path)) differences.push({ path, kind: "unexpected" });
+  for (const entry of present) {
+    if (!tree.files.has(entry.path)) differences.push({ path: entry.path, kind: "unexpected" });
   }
 
   return {

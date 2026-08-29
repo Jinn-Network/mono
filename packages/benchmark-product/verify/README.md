@@ -34,6 +34,25 @@ nothing. It checks the bundle's integrity, evidence closure, calculations, repor
 consistency. It does not prove that the producing machine was honest or that the compared
 identities are independent parties.
 
+## Freeze-artifact repositories
+
+A qualification bundle (v4 or v7) can be projected into a public repository of its freeze
+artifacts — item bank, sources, admission decisions, labels, judge instruments, and the
+screening material. That repository is a **derived artifact, never the claim of record**:
+the sealed records stay the source of truth, and the tree is a pure function of the bundle,
+so anyone can regenerate it and diff it. To check a published one against its bundle:
+
+```sh
+npx @colophon-claims/verify@0.2 ./bundle --freeze-repo ./published-repo
+```
+
+Exit status is `1` when the tree does not match, and every missing, unexpected, or changed
+member is named. The check is byte-for-byte and also reports the git-visible drift that
+leaves bytes untouched — an executable bit, or a member replaced by a symlink — because
+those move the commit oid a freeze announcement pins. Rendering a repository from a bundle
+is `colophon freeze-repo export` in the product CLI; the layout and the licence scaffolding
+are specified in `../PUBLIC-BUNDLE.md`.
+
 Bundles are also verifiable without this package: `../EXTERNAL-VERIFICATION.md` specifies
 the external path (openssl plus a dependency-free script, shipped here as
 `scripts/external-verify.py`), the JSON Schemas under `schemas/`, and the conformance kit
