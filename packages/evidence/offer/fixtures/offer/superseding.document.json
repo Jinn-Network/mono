@@ -1,0 +1,18 @@
+{
+  "kind": "https://spec.jinn.network/records/offer/v1",
+  "subject": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "rails": [
+    {
+      "rail": "https://spec.jinn.network/rails/eip155-8453-erc20-usdc/v1",
+      "to": "0x2222222222222222222222222222222222222222",
+      "amount": "900000"
+    }
+  ],
+  "gate": {
+    "uri": "https://gate.example/offers"
+  },
+  "supersedes": "sha256:62b49fb4debfd4ffdb6416a2c8999bcb4aaf3ff2665b3feddcb3db017813bf1b",
+  "com.example.note": {
+    "campaign": "launch-week"
+  }
+}
