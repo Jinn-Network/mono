@@ -1190,9 +1190,22 @@ async function handlePublicationServe(args: ParsedArgs, context: CliContext, jso
     await server.close();
   }
   return renderResult(
-    { ok: true, result: { url: server.url, host: server.host, port: server.port, wellKnown: server.wellKnown } },
+    {
+      ok: true,
+      result: {
+        url: server.url,
+        host: server.host,
+        port: server.port,
+        wellKnown: server.wellKnown,
+        // The cause is what turns "may name a superseded archive page" into something an operator
+        // can act on; carried as its message so the envelope stays plain JSON.
+        ...(server.refreshFailure === undefined
+          ? {}
+          : { refreshFailure: server.refreshFailure instanceof Error ? server.refreshFailure.message : String(server.refreshFailure) }),
+      },
+    },
     jsonMode,
-    (value) => `served ${value.url} until shutdown; ${WELL_KNOWN_SUMMARY[value.wellKnown]}\n`,
+    (value) => `served ${value.url} until shutdown; ${WELL_KNOWN_SUMMARY[value.wellKnown]}${value.refreshFailure === undefined ? "" : ` (${value.refreshFailure})`}\n`,
   );
 }
 

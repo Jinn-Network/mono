@@ -144,7 +144,10 @@ export async function startPublicationArchiveServer(
   // exception, which would kill a process whose whole job is to stay up unattended. Reported
   // rather than swallowed: resource exhaustion that nobody is told about looks exactly like a
   // healthy idle server.
-  server.on("error", (cause) => options.onError?.(cause));
+  // The callback is guarded for the same reason the listener exists at all: a diagnostic sink
+  // that throws -- `process.stderr.write` raising EPIPE once the reader is gone, say -- must not
+  // become the uncaught exception this listener was added to prevent.
+  server.on("error", (cause) => { try { options.onError?.(cause); } catch { /* a sink that cannot report is not a reason to die */ } });
 
   const address = server.address() as AddressInfo;
   const authority = address.family === "IPv6" ? `[${address.address}]` : address.address;
