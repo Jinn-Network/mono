@@ -77,10 +77,14 @@ function rewriteAsLegacyPresentation(bundleDir: string): void {
   const changed = Object.entries(legacy).filter(([name, bytes]) =>
     createHash("sha256").update(bytes).digest("hex")
       !== createHash("sha256").update(readFileSync(join(bundleDir, name))).digest("hex"));
-  // Guards the guard: if the legacy rendering were byte-identical to the published one, the
-  // refusal below would prove nothing about which profile the verifier accepted.
+  // Guards the guard, twice over. If the legacy rendering were byte-identical to the published
+  // one, the refusal below would prove nothing about which profile the verifier accepted. And the
+  // set is pinned exactly, not merely searched: `comparison` reaches the bytes only through
+  // `index.html` and `README.md`, so if the facts reconstructed above ever drifted from the ones
+  // the verifier assembles internally, every asset would differ instead and this assertion would
+  // fail — rather than the refusal below passing for an unrelated reason.
   expect(changed.map(([name]) => name), "legacy rendering differs from the published profile")
-    .toContain("index.html");
+    .toEqual(["index.html", "README.md"]);
   for (const [name, bytes] of Object.entries(legacy)) writeFileSync(join(bundleDir, name), bytes);
   const manifest = JSON.parse(readFileSync(join(bundleDir, "bundle.json"), "utf8")) as {
     readonly format: "benchmark-product-public-bundle/2";
