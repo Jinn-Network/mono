@@ -1771,17 +1771,16 @@ export async function verifyPublicBundleSnapshot(
     }),
     dissentCellKeys,
   };
-  // Reader v1 remains able to authenticate bundles published before the
-  // human comparison projection existed. A bundle must match one complete,
-  // deterministic presentation profile; individual assets cannot be mixed.
-  const legacyAssets = qualification === undefined ? buildPublicAssets(assetFacts) : undefined;
-  const isLegacyPresentation = legacyAssets !== undefined
-    && Object.entries(legacyAssets).every(([path, bytes]) => equalBytes(read(path), bytes));
+  // The closure selects the presentation profile, and the bundle must byte-match that one
+  // profile completely -- individual assets cannot be mixed, and there is no second profile the
+  // verifier will fall back to (issue #2984). A qualification-projecting bundle (`/4`, `/7`)
+  // renders the instrument-qualification graph and carries no comparison; every other bundle
+  // renders the human comparison, which `derivePublicComparison` always produces. The
+  // comparison-absent, qualification-absent rendering a pre-comparison producer would have
+  // written is therefore not a profile any bundle can be in, and is no longer accepted.
   const expectedAssets = qualification !== undefined
     ? buildPublicAssets({ ...assetFacts, binaryQualification: binaryAssetQualification })
-    : isLegacyPresentation
-      ? legacyAssets!
-      : buildPublicAssets({ ...assetFacts, comparison });
+    : buildPublicAssets({ ...assetFacts, comparison });
   for (const [path, bytes] of Object.entries(expectedAssets)) {
     if (!equalBytes(read(path), bytes)) refuse("record-integrity", path, `${path} is not the exact projection of verified public facts`);
   }
