@@ -165,7 +165,7 @@ describe("verifyRunBinding", () => {
   test("accepts a census binding and returns the recomputed execution order", () => {
     const verified = verifyRunBinding(censusBinding());
     expect(verified.mode).toBe("census");
-    expect(verified.sample).toBeUndefined();
+    expect("sample" in verified).toBe(false);
     expect(verified.poolSize).toBe(POOL.length);
     expect(verified.order).toEqual(
       computeBeaconOrder({ sealDigest: SEAL, beaconValue: VALUE, itemSha256s: POOL }).order,
@@ -176,7 +176,7 @@ describe("verifyRunBinding", () => {
 
   test("accepts a sampled binding and returns the recomputed slate", () => {
     const verified = verifyRunBinding(sampledBinding());
-    expect(verified.mode).toBe("sampled");
+    if (verified.mode !== "sampled") throw new Error("expected a sampled binding");
     expect(verified.sample).toEqual(
       computeBeaconOrder({ sealDigest: SEAL, beaconValue: VALUE, itemSha256s: POOL }).order.slice(0, 2),
     );

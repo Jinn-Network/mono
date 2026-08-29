@@ -253,9 +253,9 @@ export function computeBeaconOrder(params: BeaconOrderParams): BeaconOrderResult
 /** Whether the beacon's postdating of the seal was proven here, or only asserted by its chain. */
 export type BeaconPostSealBasis = "proven-offline" | "attributive";
 
-export interface VerifiedRunBinding {
+/** What every verified binding carries, whichever mode produced it. */
+export interface VerifiedRunBindingBase {
   readonly procedure: typeof BEACON_BINDING_PROCEDURE;
-  readonly mode: RunBinding["mode"];
   readonly beacon: BeaconReference;
   readonly sealDigest: string;
   readonly sealedAt: string;
@@ -264,12 +264,19 @@ export interface VerifiedRunBinding {
   readonly poolSize: number;
   /** The recomputed full order. In census mode this is the execution order. */
   readonly order: readonly string[];
-  /** The recomputed slate. Present in `sampled` mode only. */
-  readonly sample?: readonly string[];
   readonly postSeal: BeaconPostSealBasis;
   /** The beacon's own publication instant, when its source's round index determines one. */
   readonly beaconInstant?: string;
 }
+
+/**
+ * Discriminated on `mode` so `sample` is present exactly when there was a draw. A single optional
+ * `sample` would make every reader of the stronger binding write a fallback for a case that cannot
+ * happen, and the fallback is where a "0 items" sentence gets shipped.
+ */
+export type VerifiedRunBinding =
+  | (VerifiedRunBindingBase & { readonly mode: "census" })
+  | (VerifiedRunBindingBase & { readonly mode: "sampled"; readonly sample: readonly string[] });
 
 /**
  * Verifies one binding record: the beacon postdates the seal, and the declared draw or order is
@@ -310,7 +317,6 @@ export function verifyRunBinding(candidate: unknown): VerifiedRunBinding {
 
   const common = {
     procedure: BEACON_BINDING_PROCEDURE,
-    mode: binding.mode,
     beacon: binding.beacon,
     sealDigest: binding.sealDigest,
     sealedAt: binding.sealedAt,
@@ -325,7 +331,7 @@ export function verifyRunBinding(candidate: unknown): VerifiedRunBinding {
     if (!sameSequence(binding.order, derived.order)) {
       fail("order", "declared execution order differs from the beacon-binding/1 recomputation");
     }
-    return common;
+    return { ...common, mode: "census" };
   }
 
   if (binding.sampleSize > pool.length) {
@@ -335,7 +341,7 @@ export function verifyRunBinding(candidate: unknown): VerifiedRunBinding {
   if (!sameSequence(binding.sample, sample)) {
     fail("sample", "declared sample differs from the beacon-binding/1 recomputation");
   }
-  return { ...common, sample };
+  return { ...common, mode: "sampled", sample };
 }
 
 function sameSequence(left: readonly string[], right: readonly string[]): boolean {

@@ -71,7 +71,7 @@ export function runBindingSentence(binding: VerifiedRunBinding | undefined): str
       + "nothing establishes that execution followed the seal rather than preceding it.";
   }
   if (binding.mode === "sampled") {
-    return `This run's slate was drawn, not chosen: its ${binding.sample?.length ?? 0} items were derived from a `
+    return `This run's slate was drawn, not chosen: its ${binding.sample.length} items were derived from a `
       + `declared pool of ${binding.poolSize} by procedure ${BEACON_BINDING_PROCEDURE}, keyed on this run's sealed `
       + `digest together with ${beaconName(binding)} — ${postSealClause(binding)}. Selecting the slate after the `
       + `fact would have required predicting that value. ${RECOMPUTE_CLAUSE}`;
