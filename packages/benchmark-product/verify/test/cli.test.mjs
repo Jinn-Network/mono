@@ -468,3 +468,74 @@ test("a refusal says what failed without printing the identifier it refused", as
   assert.equal(json.code, 1);
   assert.match(JSON.parse(json.stdout).message, /did:key:z[1-9A-HJ-NP-Za-km-z]+:envelope-signature-invalid/);
 });
+
+const V5_CHECKS = [
+  "manifest", "evidence-closure", "artifact-integrity", "signature-validity",
+  "matrix-rederivation", "report-verification", "claim-consistency",
+];
+
+const V5_RESULT = {
+  format: "benchmark-product-public-bundle/5",
+  identity: `sha256:${"a".repeat(64)}`,
+  checks: V5_CHECKS,
+  benchmarkDigest: `sha256:${"b".repeat(64)}`,
+  manifestDigest: `sha256:${"c".repeat(64)}`,
+  cohortDigest: `sha256:${"d".repeat(64)}`,
+  matrixDigest: `sha256:${"e".repeat(64)}`,
+  reportDigest: `sha256:${"f".repeat(64)}`,
+  evidenceRecords: 12,
+  artifacts: 5,
+  verifiedSignerKeyIds: [],
+};
+
+test("a full-evidence v5 bundle prints all seven checks as passed", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    ...V5_RESULT,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
+    artifactContent: { status: "verified", verified: 5, notFetched: 0, notFetchedDigests: [] },
+  });
+  assert.match(output, /^Verified: 7 of 7 checks passed$/m);
+  for (const check of V5_CHECKS) assert.match(output, new RegExp(`${check}\\s+passed`));
+  assert.doesNotMatch(output, /not fetched/);
+  assert.doesNotMatch(output, /Artifact content/);
+});
+
+test("a metadata-first v5 bundle discloses artifact-integrity as not fetched", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    ...V5_RESULT,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
+    artifactContent: {
+      status: "not-fetched",
+      verified: 2,
+      notFetched: 3,
+      notFetchedDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
+    },
+  });
+  // The deferred check is never printed as a pass and never folded into the passed total.
+  assert.match(output, /^Verified: 6 of 7 checks passed, 1 not fetched$/m);
+  assert.match(output, /artifact-integrity\s+not fetched/);
+  for (const check of V5_CHECKS.filter((check) => check !== "artifact-integrity")) {
+    assert.match(output, new RegExp(`${check}\\s+passed`));
+  }
+  assert.match(output, /Artifact content/);
+  assert.match(output, /3 artifact bodies were not fetched/);
+  assert.match(output, /artifacts\/<sha256>\.bin/);
+  assert.match(output, /artifact\s*\ncontents themselves were not read/);
+});
+
+test("a metadata-first bundle with one deferred body says body, not bodies", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    ...V5_RESULT,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
+    artifactContent: {
+      status: "not-fetched",
+      verified: 2,
+      notFetched: 1,
+      notFetchedDigests: ["1".repeat(64)],
+    },
+  });
+  assert.match(output, /1 artifact body was not fetched/);
+});

@@ -278,6 +278,11 @@ Under full evidence nothing changes. An unavailable artifact body is still a har
 every v5 bundle published before this profile existed keeps its exact bytes, its profile IRI, and
 its outcome.
 
+A reader keys on the declared profile, not on which members happen to be present. `bundle.json`'s
+`profile` is a closed set, so a reader that predates the metadata-first profile refuses such a
+bundle at manifest parse rather than misreading it as a full-evidence bundle with members missing.
+Read a metadata-first bundle with a reader that lists the profile among the ones it supports.
+
 ## Portable verification
 
 Verification with your own tools — no Jinn code at all — is specified in

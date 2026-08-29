@@ -17,6 +17,10 @@ evidence-native v5 and the two anchored formats, v6 and v7, run seven. The v7 fo
 the anchored binary-qualification closure — v4's members plus v6's anchors — and it
 exists only from this 0.2.1 release, so its bundles pin `@0.2.1` rather than the `@0.1`
 line every earlier closure stamps.
+The evidence-native v5 has two declared profiles, full-evidence and metadata-first;
+this reader supports both. A metadata-first bundle carries the artifact digests without
+the artifact bodies, so `artifact-integrity` reports `not fetched` rather than passing,
+and the verdict line counts it out of the passed total. Every other check is complete.
 Existing claim bundles retain their recorded verifier pins. Use this 0.2 reader
 for prompted-screening v2 support and the compatible `@0.2` line for this
 release.
