@@ -7,11 +7,19 @@
  * cells; an importer with an exclude flag would let them do it in one step. Neither exists here.
  */
 
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { expectedCellSet, type BenchmarkRecord, type RunRecord } from "@jinn-network/benchmarking-records";
 import { BenchmarkProductError } from "../errors.js";
 import type { ExternalRunRecord } from "../intake/external-run-records.js";
-import { validateExternalRunRecords } from "./external-import.js";
+import {
+  assertExternalRunImportSource,
+  EXTERNAL_RUN_IMPORT_SOURCE_MAX_LENGTH,
+  preflightExternalRunImport,
+  validateExternalRunRecords,
+} from "./external-import.js";
 
 const DIGEST_1 = "9f0a".padEnd(64, "0");
 const DIGEST_2 = "11cd".padEnd(64, "1");
@@ -28,7 +36,16 @@ const BENCHMARK = {
   ],
 } as unknown as BenchmarkRecord;
 
-const RUN = { arms: [{ armId: "alpha" }], replicates: 2 } as unknown as RunRecord;
+const RUN = {
+  arms: [{ armId: "alpha" }],
+  replicates: 2,
+  closeAt: "2030-01-01T00:00:00Z",
+} as unknown as RunRecord;
+
+/** Wide enough that every timestamp the other cases use falls inside it; the window cases below
+ * supply their own tight bounds. */
+const RUN_OPEN_AT = "2020-01-01T00:00:00Z";
+const IMPORTED_AT = "2029-01-01T00:00:00Z";
 
 const EXPECTED = expectedCellSet(BENCHMARK, RUN);
 
@@ -47,19 +64,27 @@ function completeRows(): ExternalRunRecord[] {
   return EXPECTED.map((_, index) => row(index));
 }
 
-function validate(records: readonly ExternalRunRecord[]) {
+function validate(
+  records: readonly ExternalRunRecord[],
+  window: { readonly runOpenAt?: string; readonly run?: RunRecord; readonly importedAt?: string } = {},
+) {
   return validateExternalRunRecords({
     records,
     benchmark: BENCHMARK,
-    run: RUN,
+    run: window.run ?? RUN,
     benchmarkSha256: BENCHMARK_SHA,
     runSha256: RUN_SHA,
+    runOpenAt: window.runOpenAt ?? RUN_OPEN_AT,
+    importedAt: window.importedAt ?? IMPORTED_AT,
   });
 }
 
-function refusal(records: readonly ExternalRunRecord[]): BenchmarkProductError {
+function refusal(
+  records: readonly ExternalRunRecord[],
+  window: Parameters<typeof validate>[1] = {},
+): BenchmarkProductError {
   try {
-    validate(records);
+    validate(records, window);
   } catch (error) {
     if (error instanceof BenchmarkProductError) return error;
     throw error;
@@ -257,5 +282,121 @@ describe("validateExternalRunRecords — the refusal message says what to do ins
 
   it("leads with the problem count", () => {
     expect(error.message).toMatch(/^external run import refused: 3 problems against the sealed slate\n/);
+  });
+});
+
+describe("validateExternalRunRecords — imported timestamps are bounded by the sealed run window", () => {
+  /** A run sealed on the 10th, closing on the 20th, imported on the 15th. */
+  const WINDOWED = { ...(RUN as unknown as Record<string, unknown>), closeAt: "2026-08-20T00:00:00Z" } as unknown as RunRecord;
+  const WINDOW = {
+    run: WINDOWED,
+    runOpenAt: "2026-08-10T00:00:00Z",
+    importedAt: "2026-08-15T00:00:00Z",
+  } as const;
+
+  function timed(startedAt: string, endedAt: string): ExternalRunRecord[] {
+    const rows = completeRows();
+    rows[0] = row(0, { startedAt, endedAt });
+    return rows;
+  }
+
+  it("accepts a pair inside the window, including both endpoints", () => {
+    expect(() => validate(timed("2026-08-10T00:00:00Z", "2026-08-15T00:00:00Z"), WINDOW)).not.toThrow();
+  });
+
+  it("refuses a timestamp before the run was sealed — a result cannot predate its own slate", () => {
+    const error = refusal(timed("2026-08-09T23:59:59Z", "2026-08-11T00:00:00Z"), WINDOW);
+    expect(error.issues.map((issue) => issue.path)).toContain("timestamp-outside-window");
+    expect(error.message).toContain('row 1: startedAt "2026-08-09T23:59:59Z" is outside the sealed run window');
+    expect(error.message).toContain("2026-08-10T00:00:00Z");
+  });
+
+  it("refuses a timestamp after the import instant, which no import could have observed", () => {
+    const error = refusal(timed("2026-08-11T00:00:00Z", "2026-08-15T00:00:01Z"), WINDOW);
+    expect(error.issues.map((issue) => issue.path)).toContain("timestamp-outside-window");
+    expect(error.message).toContain('row 1: endedAt "2026-08-15T00:00:01Z" is outside the sealed run window');
+  });
+
+  it("refuses a timestamp after the run's own close instant, even when the import is later still", () => {
+    const error = refusal(
+      timed("2026-08-11T00:00:00Z", "2026-08-21T00:00:00Z"),
+      { ...WINDOW, importedAt: "2026-08-30T00:00:00Z" },
+    );
+    expect(error.issues.map((issue) => issue.path)).toContain("timestamp-outside-window");
+    expect(error.message).toContain("2026-08-20T00:00:00Z");
+  });
+});
+
+describe("assertExternalRunImportSource — operator strings that are sealed verbatim", () => {
+  it("accepts an ordinary source", () => {
+    expect(() => assertExternalRunImportSource({ harness: "some-harness", version: "2.4.0", note: "nightly sweep" }))
+      .not.toThrow();
+  });
+
+  it("refuses a control character, which the dump readers already refuse everywhere else", () => {
+    expect(() => assertExternalRunImportSource({ harness: "some\u0007harness" })).toThrow(/control characters/u);
+    expect(() => assertExternalRunImportSource({ harness: "h", note: "line\u000bone" })).toThrow(/control characters/u);
+  });
+
+  it("refuses leading or trailing whitespace rather than trimming it silently", () => {
+    expect(() => assertExternalRunImportSource({ harness: " some-harness" })).toThrow(/whitespace/u);
+    expect(() => assertExternalRunImportSource({ harness: "h", version: "2.4.0 " })).toThrow(/whitespace/u);
+  });
+
+  it("refuses a string longer than the bound", () => {
+    expect(() => assertExternalRunImportSource({ harness: "h".repeat(EXTERNAL_RUN_IMPORT_SOURCE_MAX_LENGTH + 1) }))
+      .toThrow(/at most/u);
+  });
+
+  it("refuses an empty string, exactly as it always did", () => {
+    expect(() => assertExternalRunImportSource({ harness: "" })).toThrow();
+  });
+});
+
+describe("preflightExternalRunImport — evidence reads never follow a symlink", () => {
+  let evidenceRoot: string;
+
+  beforeEach(() => {
+    evidenceRoot = mkdtempSync(join(tmpdir(), "bp-import-evidence-"));
+  });
+
+  afterEach(() => {
+    rmSync(evidenceRoot, { recursive: true, force: true });
+  });
+
+  /** An `ungradeable` cell reads evidence and needs no sealed EvaluationSpec, so the preflight can
+   * be exercised without a workspace. */
+  function preflightWith(path: string): void {
+    const rows = completeRows();
+    rows[0] = row(0, { outcome: "ungradeable", reason: "grader crashed", evidence: [{ name: "log", path }] });
+    preflightExternalRunImport({
+      workspaceDir: evidenceRoot,
+      plan: validate(rows),
+      runRecord: RUN,
+      evidenceRoot,
+    });
+  }
+
+  it("reads an ordinary file", () => {
+    writeFileSync(join(evidenceRoot, "log.txt"), "ok\n");
+    expect(() => preflightWith("log.txt")).not.toThrow();
+  });
+
+  it("refuses a symlink, even one that stays inside the dump directory", () => {
+    const secret = join(evidenceRoot, "id_rsa");
+    writeFileSync(secret, "PRIVATE KEY\n");
+    symlinkSync(secret, join(evidenceRoot, "log.txt"));
+    expect(() => preflightWith("log.txt")).toThrow(/symbolic link/u);
+  });
+
+  it("refuses a symlink pointing outside the dump directory", () => {
+    const outside = mkdtempSync(join(tmpdir(), "bp-import-outside-"));
+    try {
+      writeFileSync(join(outside, "id_rsa"), "PRIVATE KEY\n");
+      symlinkSync(join(outside, "id_rsa"), join(evidenceRoot, "log.txt"));
+      expect(() => preflightWith("log.txt")).toThrow(/symbolic link/u);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });

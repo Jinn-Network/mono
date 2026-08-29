@@ -20,7 +20,7 @@
  * concern and lives elsewhere; on refusal nothing at all is written.
  */
 
-import { readFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { isAbsolute, relative as relativePath, resolve as resolvePath, sep } from "node:path";
 import { z } from "zod";
 import {
@@ -71,6 +71,17 @@ export interface ValidateExternalRunRecordsInput {
   /** The sealed coordinates, `sha256:`-prefixed, quoted verbatim in the refusal. */
   readonly benchmarkSha256: string;
   readonly runSha256: string;
+  /**
+   * The instant the Run was sealed — `RunState.lockedAt`, the pre-registration moment.
+   *
+   * The sealed Run record itself carries only `closeAt`; there is no `openAt` field on it, so the
+   * window's start is read from the product's own record of when the run was locked. Both bounds
+   * are supplied by the caller rather than re-derived here, because the validator must not be the
+   * thing that decides when this run began.
+   */
+  readonly runOpenAt: string;
+  /** The frozen import instant (the operation clock), the other half of the upper bound. */
+  readonly importedAt: string;
 }
 
 /** One accepted slot: the expected coordinate joined to the row that supplied it. */
@@ -105,6 +116,7 @@ export const EXTERNAL_RUN_IMPORT_PROBLEMS = [
   "missing-measurements",
   "forbidden-measurements",
   "inconsistent-timing",
+  "timestamp-outside-window",
 ] as const;
 
 export type ExternalRunImportProblemCode = (typeof EXTERNAL_RUN_IMPORT_PROBLEMS)[number];
@@ -140,6 +152,7 @@ export function validateExternalRunRecords(
 ): ExternalRunImportPlan {
   const { records, benchmark, run, benchmarkSha256, runSha256 } = input;
   const expected = expectedCellSet(benchmark, run);
+  const window = importWindow(input);
   const expectedByKey = new Map(expected.map((coord) => [coord.cellKey, coord]));
 
   const slotProblems: ProductIssue[] = [];
@@ -235,7 +248,7 @@ export function validateExternalRunRecords(
       }
     }
 
-    rowProblems.push(...timingProblems(record, at));
+    rowProblems.push(...timingProblems(record, at, window));
   }
 
   for (const coord of expected) {
@@ -286,12 +299,51 @@ export function validateExternalRunRecords(
 }
 
 /**
- * Timing consistency. `startedAt`/`endedAt` are both-or-neither, must be calendar-strict RFC 3339,
- * must not run backwards, and when `durationMs` is also given it must equal the interval — a
- * duration that disagrees with its own timestamps means one of the two is fabricated, and we
- * cannot tell which.
+ * The interval an imported timestamp is allowed to fall in, as parsed epoch milliseconds plus the
+ * literal spellings the refusal quotes back.
+ *
+ * The lower bound is the seal instant and the upper bound is `min(closeAt, the import instant)`.
+ * Both halves are load-bearing, and neither is hygiene: `startedAt`/`endedAt` become each journal
+ * entry's `at`, the sealed Delivery's `createdAt`, and — inside the DSSE-signed in-toto verdict —
+ * `evaluatedAt`. Unbounded, a dump could produce a SIGNED attestation dated before the Run record
+ * it is evidence for was ever sealed (a result predating its own pre-registration), or dated after
+ * the moment the signature was made (work no signer could have observed). Nothing downstream
+ * re-checks either: `evaluatedAt` is a non-empty string to the signing path and to the public
+ * reader alike. This is the only place the two can be bounded.
  */
-function timingProblems(record: ExternalRunRecord, at: string): ProductIssue[] {
+interface ImportWindow {
+  readonly openAtMs: number;
+  readonly openAt: string;
+  readonly closeAtMs: number;
+  readonly closeAt: string;
+}
+
+function importWindow(input: ValidateExternalRunRecordsInput): ImportWindow {
+  const openAtMs = Date.parse(input.runOpenAt);
+  const runCloseAtMs = Date.parse(input.run.closeAt);
+  const importedAtMs = Date.parse(input.importedAt);
+  if (!Number.isFinite(openAtMs) || !Number.isFinite(runCloseAtMs) || !Number.isFinite(importedAtMs)) {
+    refuse(
+      "record-integrity",
+      `runs.${input.runSha256}`,
+      "the sealed run window could not be read as timestamps "
+        + `(sealed at "${input.runOpenAt}", closes "${input.run.closeAt}", imported at "${input.importedAt}")`,
+    );
+  }
+  // The tighter of the two upper bounds wins: a run that closed before the import instant cannot
+  // gain results afterwards, and an import cannot carry results from after its own clock.
+  return importedAtMs <= runCloseAtMs
+    ? { openAtMs, openAt: input.runOpenAt, closeAtMs: importedAtMs, closeAt: input.importedAt }
+    : { openAtMs, openAt: input.runOpenAt, closeAtMs: runCloseAtMs, closeAt: input.run.closeAt };
+}
+
+/**
+ * Timing consistency. `startedAt`/`endedAt` are both-or-neither, must be calendar-strict RFC 3339,
+ * must not run backwards, must fall inside the sealed run window (above), and when `durationMs` is
+ * also given it must equal the interval — a duration that disagrees with its own timestamps means
+ * one of the two is fabricated, and we cannot tell which.
+ */
+function timingProblems(record: ExternalRunRecord, at: string, window: ImportWindow): ProductIssue[] {
   const problems: ProductIssue[] = [];
   const { startedAt, endedAt, durationMs } = record;
 
@@ -309,6 +361,19 @@ function timingProblems(record: ExternalRunRecord, at: string): ProductIssue[] {
       problems.push({
         path: "inconsistent-timing",
         message: `${at}: ${field} "${value}" is not a calendar-valid RFC 3339 timestamp`,
+      });
+    }
+  }
+  if (problems.length > 0) return problems;
+
+  for (const [field, value] of [["startedAt", startedAt], ["endedAt", endedAt]] as const) {
+    const valueMs = Date.parse(value);
+    if (valueMs < window.openAtMs || valueMs > window.closeAtMs) {
+      problems.push({
+        path: "timestamp-outside-window",
+        message: `${at}: ${field} "${value}" is outside the sealed run window `
+          + `[${window.openAt}, ${window.closeAt}] — an imported result cannot be dated before the `
+          + "Run record it is evidence for was sealed, nor after the run closed or the import ran",
       });
     }
   }
@@ -410,14 +475,21 @@ export function preflightExternalRunImport(
 
 /**
  * Reads one cell's evidence files, IN DUMP ORDER, refusing any path that leaves the dump
- * directory.
+ * directory and any path that is a symbolic link.
  *
  * Containment is not hygiene here, it is the publishing boundary: whatever these paths name is
  * sealed into the workspace CAS and travels inside the published bundle. Without the check,
  * `../../../.ssh/id_rsa` or `/etc/passwd` in a dump would be published as an external harness's
- * "evidence". The check is LEXICAL (resolve, then require the result to stay under the resolved
- * root) — it deliberately does not resolve symlinks, because the dump directory is the operator's
- * own tree and a symlink inside it is a path they chose, not one the record smuggled in.
+ * "evidence".
+ *
+ * The containment check is LEXICAL (resolve, then require the result to stay under the resolved
+ * root), so on its own it would still publish whatever a symlink INSIDE the tree pointed at. That
+ * is not a hypothetical here: the whole framing of this feature is that the dump and its evidence
+ * tree were produced by a different harness and may arrive as one archive, so
+ * `evidence/log.txt -> /home/op/.ssh/id_rsa` is a link the archive chose, not one the operator
+ * did. So the read is NO-FOLLOW, the same discipline the bundle manifest reader applies
+ * (`../bundle/manifest.ts`): `lstat` the path, refuse a link naming the row, then open with
+ * `O_NOFOLLOW` and read that descriptor.
  */
 function readImportedEvidence(
   evidenceRoot: string,
@@ -444,19 +516,54 @@ function readImportedEvidence(
           + `("${ref.path}") — evidence paths may not leave the directory the dump file lives in`,
       );
     }
-    let bytes: Uint8Array;
-    try {
-      bytes = new Uint8Array(readFileSync(path));
-    } catch (cause) {
-      refuse(
-        "validation",
-        at,
-        `evidence "${ref.name}" for ${cell.cellKey} could not be read at ${path}: `
-          + `${cause instanceof Error ? cause.message : String(cause)}`,
-      );
-    }
-    return { name: ref.name, bytes };
+    return { name: ref.name, bytes: readEvidenceFileNoFollow(path, ref.name, cell, at) };
   });
+}
+
+/** One evidence file, read without ever following a link: `lstat` first so a symlink is refused
+ * in its own words, then `O_NOFOLLOW` so the path cannot become one between the two calls. */
+function readEvidenceFileNoFollow(
+  path: string,
+  name: string,
+  cell: ExternalRunImportCell,
+  at: string,
+): Uint8Array {
+  const refuseFile = (why: string): never => refuse(
+    "validation",
+    at,
+    `${at}: evidence "${name}" for ${cell.cellKey} at ${path} ${why} — evidence is read from the `
+      + "dump's own tree and never through a link, because whatever it names is sealed and published",
+  );
+
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(path);
+  } catch (cause) {
+    return refuseFile(`could not be read (${cause instanceof Error ? cause.message : String(cause)})`);
+  }
+  if (stat.isSymbolicLink()) return refuseFile("is a symbolic link");
+  if (!stat.isFile()) return refuseFile("is not a regular file");
+
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch (cause) {
+    return refuseFile(`could not be opened without following links (${cause instanceof Error ? cause.message : String(cause)})`);
+  }
+  // The refusal is raised AFTER the descriptor is closed, so a refusal is never itself caught by
+  // the read's own error handling.
+  let bytes: Uint8Array | undefined;
+  let failure: string | undefined;
+  try {
+    if (fstatSync(fd).isFile()) bytes = new Uint8Array(readFileSync(fd));
+    else failure = "is not a regular file";
+  } catch (cause) {
+    failure = `could not be read (${cause instanceof Error ? cause.message : String(cause)})`;
+  } finally {
+    closeSync(fd);
+  }
+  if (bytes === undefined) return refuseFile(failure ?? "could not be read");
+  return bytes;
 }
 
 /** Resolves a `graded` cell's rule, types its measurements against that rule's own declarations,
@@ -643,13 +750,48 @@ export const EXTERNAL_RUN_IMPORT_DECLARATION_PROTOCOL =
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const Rfc3339Schema = z.string().min(1);
 
+/**
+ * The bound on every operator-supplied source string. There is no natural length for a harness
+ * name or a note, and an unbounded one is sealed verbatim into two annotations per cell and into
+ * the declaration — so it gets the same treatment every other operator string in this feature
+ * already gets, rather than being the one exception because it arrives by flag instead of by file.
+ */
+export const EXTERNAL_RUN_IMPORT_SOURCE_MAX_LENGTH = 256;
+
+/** The same class the dump readers refuse (`../intake/external-run-records.ts`): C0, C1, DEL. */
+const SOURCE_CONTROL_RE = /[\u0000-\u001F\u007F-\u009F]/u;
+const SOURCE_PADDED_RE = /^\s|\s$/u;
+
+const SourceStringSchema = z.string()
+  .min(1)
+  .max(EXTERNAL_RUN_IMPORT_SOURCE_MAX_LENGTH, `must be at most ${EXTERNAL_RUN_IMPORT_SOURCE_MAX_LENGTH} characters`)
+  .refine((value) => !SOURCE_CONTROL_RE.test(value), "must not contain control characters")
+  .refine((value) => !SOURCE_PADDED_RE.test(value), "must not have leading or trailing whitespace");
+
 export const ExternalRunImportSourceSchema = z.object({
-  harness: z.string().min(1),
-  version: z.string().min(1).optional(),
-  note: z.string().min(1).optional(),
+  harness: SourceStringSchema,
+  version: SourceStringSchema.optional(),
+  note: SourceStringSchema.optional(),
 });
 
 export type ExternalRunImportSource = z.infer<typeof ExternalRunImportSourceSchema>;
+
+/**
+ * Refuses a source the schema would reject, as a `validation` refusal naming the field.
+ *
+ * Called by the operation BEFORE it transitions the draft: the declaration parse at the end of the
+ * write path would catch the same thing, but by then the run is `running` with a partial journal
+ * and there is no way back.
+ */
+export function assertExternalRunImportSource(source: unknown): ExternalRunImportSource {
+  const parsed = ExternalRunImportSourceSchema.safeParse(source);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]!;
+    const field = issue.path.join(".") || "harness";
+    refuse("validation", `source.${field}`, `import source "${field}": ${issue.message}`);
+  }
+  return parsed.data;
+}
 
 /**
  * The durable home for every fact the dump carried that the protocol records have no field for —
@@ -710,9 +852,19 @@ interface ImportedEvidence {
 }
 
 /**
- * Writes the sealed records and run-journal entries for an accepted plan, then seals and records
- * the import declaration. Ordered per cell exactly as the live driver orders its own writes, so
- * a fold of the resulting journal is indistinguishable in shape from a driven run's.
+ * Writes the sealed records and run-journal entries for an accepted plan. The `external-import`
+ * marker entry, and the declaration it names, come FIRST; the per-cell entries then follow in
+ * exactly the order the live driver writes its own, so a fold of the resulting journal is
+ * indistinguishable in shape from a driven run's.
+ *
+ * The marker leads for one reason: it is the only durable statement that this run's evidence was
+ * imported rather than driven. Written last, a crash after the final cell but before that append
+ * (a full disk, a killed process) would leave a complete-looking journal with no marker and no
+ * `externalImportSha256` — a run that READS as driven. Written first, the same crash leaves a
+ * partial journal that is unmistakably an import, which is the honest failure. It costs nothing:
+ * the declaration's rows are derived from the accepted plan and the preflight, both of which are
+ * fully resolved before any cell is written, so the marker still names the exact declaration
+ * digest it always did.
  */
 export async function writeExternalRunImport(
   input: WriteExternalRunImportInput,
@@ -727,7 +879,39 @@ export async function writeExternalRunImport(
   ]);
   const signer = createVerdictDsseSigner(evaluatorKey!.key);
 
-  const rows: ExternalRunImportDeclaration["rows"] = [];
+  // Evidence is sealed into the CAS here rather than inside the loop, so the declaration's rows —
+  // digests included — are complete before the first journal entry exists. Sealed bytes nothing
+  // journals are inert, so this is not a claim about the run; the journal is what makes it one.
+  const sealedEvidence = new Map<string, ImportedEvidence[]>();
+  const rows: ExternalRunImportDeclaration["rows"] = preparedDeclarationRows(
+    workspaceDir, preflight, sealedEvidence,
+  );
+
+  const declaration: ExternalRunImportDeclaration = ExternalRunImportDeclarationSchema.parse({
+    protocol: EXTERNAL_RUN_IMPORT_DECLARATION_PROTOCOL,
+    runSha256: runSha256Hex,
+    benchmarkSha256: bareSha256Hex(plan.benchmarkSha256),
+    source: input.source,
+    importedAt: at,
+    rows,
+  });
+  const declarationSha256 = putSealedBytes(workspaceDir, canonicalJsonBytes(declaration));
+  // Authorship over the DECLARATION only. The workspace genuinely authored this record; it did
+  // not author the external harness's evidence bytes, and claiming otherwise would be exactly the
+  // kind of borrowed provenance the rest of this module exists to avoid.
+  recordWorkspaceAuthorship({
+    workspaceDir,
+    recordSha256: declarationSha256,
+    recordKind: EXTERNAL_RUN_IMPORT_DECLARATION_PROTOCOL,
+    authoredAt: at,
+  });
+  appendRunJournalEntry(workspaceDir, draftId, {
+    kind: "external-import",
+    at,
+    declarationSha256,
+    source: input.source,
+  });
+
   let judged = 0;
   let unscorable = 0;
   let expired = 0;
@@ -736,8 +920,6 @@ export async function writeExternalRunImport(
     const { cell } = prepared;
     const { cellKey, coord, record, outcome } = cell;
     const annotation = importAnnotation(input.source, record);
-    // The declaration's timing block, kept verbatim from the dump: absent members stay absent.
-    const timings = declarationTimings(record);
 
     if (outcome === "unrun") {
       // ONE entry, and no Submission: a slot the harness never dispatched has no attempt to
@@ -756,7 +938,6 @@ export async function writeExternalRunImport(
         },
       });
       expired += 1;
-      rows.push({ cellKey, outcome, ...(record.reason === undefined ? {} : { reason: record.reason }), ...(timings === undefined ? {} : { timings }) });
       continue;
     }
 
@@ -822,12 +1003,12 @@ export async function writeExternalRunImport(
         },
       });
       expired += 1;
-      rows.push({ cellKey, outcome, ...(record.reason === undefined ? {} : { reason: record.reason }), ...(timings === undefined ? {} : { timings }) });
       continue;
     }
 
     // --- evidence + solve Delivery (graded and ungradeable both delivered something) ----------
-    const evidence = sealPreparedEvidence(workspaceDir, prepared.evidence);
+    // Already sealed above, in dump order, when the declaration's rows were built.
+    const evidence = sealedEvidence.get(cellKey)!;
     const createdAt = record.endedAt ?? at;
     const attempt = deterministicUuidUri(`external-run-import:attempt:${runSha256Hex}:${cellKey}:1`);
     const deliveryBytes = sealDelivery({
@@ -864,14 +1045,6 @@ export async function writeExternalRunImport(
       outputs: evidence.map((file) => ({ name: file.name, sha256: file.sha256 })),
     });
 
-    const declarationRow = {
-      cellKey,
-      outcome,
-      ...(record.reason === undefined ? {} : { reason: record.reason }),
-      ...(timings === undefined ? {} : { timings }),
-      evidence: evidence.map((file) => ({ name: file.name, sha256: file.sha256 })),
-    };
-
     if (outcome === "ungradeable") {
       // The exact shape `journalCouldNotGrade` writes (`./drive.ts`): a terminal for leg 1 with no
       // evaluation Task, Submission, or Delivery — because none was ever prepared. `deriveOutcome`
@@ -892,7 +1065,6 @@ export async function writeExternalRunImport(
         evalIndex: 1,
       });
       unscorable += 1;
-      rows.push(declarationRow);
       continue;
     }
 
@@ -912,35 +1084,40 @@ export async function writeExternalRunImport(
       evaluatorId: EXTERNAL_RUN_IMPORT_EVALUATOR_ID,
     });
     judged += 1;
-    rows.push(declarationRow);
   }
 
-  const declaration: ExternalRunImportDeclaration = ExternalRunImportDeclarationSchema.parse({
-    protocol: EXTERNAL_RUN_IMPORT_DECLARATION_PROTOCOL,
-    runSha256: runSha256Hex,
-    benchmarkSha256: bareSha256Hex(plan.benchmarkSha256),
-    source: input.source,
-    importedAt: at,
-    rows,
-  });
-  const declarationSha256 = putSealedBytes(workspaceDir, canonicalJsonBytes(declaration));
-  // Authorship over the DECLARATION only. The workspace genuinely authored this record; it did
-  // not author the external harness's evidence bytes, and claiming otherwise would be exactly the
-  // kind of borrowed provenance the rest of this module exists to avoid.
-  recordWorkspaceAuthorship({
-    workspaceDir,
-    recordSha256: declarationSha256,
-    recordKind: EXTERNAL_RUN_IMPORT_DECLARATION_PROTOCOL,
-    authoredAt: at,
-  });
-  appendRunJournalEntry(workspaceDir, draftId, {
-    kind: "external-import",
-    at,
-    declarationSha256,
-    source: input.source,
-  });
-
   return { declarationSha256, judged, unscorable, expired };
+}
+
+/**
+ * Seals every cell's evidence and builds the declaration's rows, in expected-cell order, from the
+ * accepted plan and the preflight alone — nothing here reads or writes the journal. That is what
+ * lets the `external-import` marker be appended before the first per-cell entry while still naming
+ * the exact declaration the run ends up with. `sealed` is filled in as a side effect so the writer
+ * below consumes these digests rather than sealing the same bytes a second time.
+ */
+function preparedDeclarationRows(
+  workspaceDir: string,
+  preflight: ExternalRunImportPreflight,
+  sealed: Map<string, ImportedEvidence[]>,
+): ExternalRunImportDeclaration["rows"] {
+  return preflight.cells.map((prepared) => {
+    const { cellKey, outcome, record } = prepared.cell;
+    const evidence = sealPreparedEvidence(workspaceDir, prepared.evidence);
+    sealed.set(cellKey, evidence);
+    // The timing block is kept verbatim from the dump: absent members stay absent.
+    const timings = declarationTimings(record);
+    return {
+      cellKey,
+      outcome,
+      ...(record.reason === undefined ? {} : { reason: record.reason }),
+      ...(timings === undefined ? {} : { timings }),
+      // Absent, never empty, for every outcome that carries no evidence.
+      ...(evidence.length === 0
+        ? {}
+        : { evidence: evidence.map((file) => ({ name: file.name, sha256: file.sha256 })) }),
+    };
+  });
 }
 
 /** Strips the `sha256:` prefix the plan carries on its coordinates. */

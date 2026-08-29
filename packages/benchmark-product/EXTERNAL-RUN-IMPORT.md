@@ -44,10 +44,10 @@ so a JSONL dump and the equivalent CSV dump import identically.
 | `cellKey` | string | Required. One coordinate from the sealed slate, verbatim. |
 | `outcome` | string | Required. One of `graded`, `ungradeable`, `error`, `timeout`, `unrun`. |
 | `reason` | string | Required and non-blank on every outcome except `graded`; forbidden on `graded`. |
-| `startedAt` | RFC 3339 | Optional. Calendar-strict. Both-or-neither with `endedAt`. |
-| `endedAt` | RFC 3339 | Optional. Calendar-strict, not before `startedAt`. |
+| `startedAt` | RFC 3339 | Optional. Calendar-strict. Both-or-neither with `endedAt`. Inside the sealed run window (below). |
+| `endedAt` | RFC 3339 | Optional. Calendar-strict, not before `startedAt`. Inside the sealed run window (below). |
 | `durationMs` | non-negative integer | Optional. When timestamps are also given it must equal their interval. |
-| `evidence` | list of `{name, path}` | Required on `graded` and `ungradeable`; forbidden otherwise. Paths are relative and resolve against the dump file's own directory; an absolute path, or one that resolves outside that directory, is refused naming the row. Names match `[A-Za-z0-9._-]{1,64}` and are unique within a record. |
+| `evidence` | list of `{name, path}` | Required on `graded` and `ungradeable`; forbidden otherwise. Paths are relative and resolve against the dump file's own directory; an absolute path, one that resolves outside that directory, or one that is a symbolic link is refused naming the row. Names match `[A-Za-z0-9._-]{1,64}` and are unique within a record. |
 | `measurements` | map of name to string, finite number, or boolean | Required on `graded`; forbidden otherwise. Names match `[A-Za-z0-9._-]{1,64}` and must be declared by the subject task's sealed EvaluationSpec. Each value is typed against that declaration before the verdict rule reads it. |
 
 Measurement values are typed against the sealed EvaluationSpec's own
@@ -63,6 +63,24 @@ Evidence paths may not leave the dump file's own directory. An absolute path,
 or a relative one that climbs out of the tree, is refused: whatever a dump
 names is sealed into the workspace and travels inside the published bundle, so
 the boundary of what can be published is the directory you handed the importer.
+
+Evidence is read without following links. A dump and its evidence tree come
+from a different harness and often arrive as one archive, so a symbolic link
+inside that tree is a path the archive chose, not one you did — and
+`evidence/log.txt -> ~/.ssh/id_rsa` would otherwise be sealed and published.
+Every evidence entry must be a regular file; a symlink is refused naming the
+row. Copy what you mean to publish into the dump directory.
+
+**Imported timestamps are bounded by the sealed run window.** `startedAt` and
+`endedAt` must fall at or after the instant the run was locked, and at or
+before the earlier of the run's `closeAt` and the moment you run the import.
+They are not decoration: they become the run journal's own timestamps, the
+sealed delivery's `createdAt`, and the `evaluatedAt` inside the signed verdict.
+Unbounded, a dump could produce a signed attestation claiming a result was
+evaluated before the run record it is evidence for was sealed — a result dated
+before its own pre-registration — or after the moment the signature was made.
+Nothing downstream re-checks either bound, so import is where they are
+enforced.
 
 There is no pass/fail column, and adding one would be a mistake rather than a
 convenience. The verdict is computed from the subject task's own sealed
@@ -202,6 +220,18 @@ is fabricating the artifact a skeptic reads.
 - **An evidence path that is absolute or escapes the dump directory.** A dump
   names its own tree; it does not get to seal arbitrary host files into a
   published bundle.
+- **An evidence path that is a symbolic link.** The evidence tree arrives from
+  another harness, often as one archive, so a link inside it can name any file
+  the importing account can read. Evidence is read no-follow; copy the file in
+  instead.
+- **A `startedAt` or `endedAt` outside the sealed run window.** Before the run
+  was locked, after it closed, or after the import instant. An imported
+  timestamp is signed into the verdict, so it cannot claim a moment the run had
+  not reached.
+- **A `--source` string that is empty, longer than 256 characters, padded with
+  whitespace, or carrying a control character.** It is sealed verbatim into two
+  annotations per cell and into the import declaration, so it gets the same
+  discipline the dump's own strings get.
 
 Every one of these is resolved before anything is written. A dump refused for
 any reason leaves the draft exactly as it was — still locked, journal still

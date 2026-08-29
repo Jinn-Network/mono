@@ -62,6 +62,16 @@ function contextFor(clock: () => string, principal = "sponsor-1"): OperationCont
 
 const SOURCE = { harness: "some-external-harness", version: "2.4.0", note: "nightly sweep" } as const;
 
+/**
+ * The instant the run under test was sealed, captured by `lockedRun` below.
+ *
+ * Every imported timestamp must fall inside the sealed run window — at or after the seal instant,
+ * at or before the import instant — so a fixture cannot pick a date out of the air. These clocks
+ * seal and import within milliseconds of each other, so the rows are stamped at the seal instant
+ * itself, which is inside the window at both ends.
+ */
+let runOpenAt = "";
+
 const ERROR_REASON = "the container exited 137 before writing an output";
 const TIMEOUT_REASON = "exceeded the harness's own 30 minute wall clock";
 const UNRUN_REASON = "this slot was never scheduled: the sweep was cut short";
@@ -89,6 +99,7 @@ async function lockedRun(clock: () => string, draftId: string): Promise<readonly
   expect(locked.ok, JSON.stringify(locked)).toBe(true);
 
   const runState = readRunState(workspaceDir, draftId)!;
+  runOpenAt = runState.lockedAt!;
   const document = readDraftDocument(workspaceDir, draftId);
   if (document.spec.taskSet.kind !== "benchmark") throw new Error("unreachable");
   const cellKeys = expectedCellSet(
@@ -104,9 +115,9 @@ function gradedRow(row: number, cellKey: string, measurements: Record<string, bo
     row,
     cellKey,
     outcome: "graded",
-    startedAt: "2026-08-04T00:00:00Z",
-    endedAt: "2026-08-04T00:01:00Z",
-    durationMs: 60_000,
+    startedAt: runOpenAt,
+    endedAt: runOpenAt,
+    durationMs: 0,
     evidence: [{ name: "prediction", path: writeEvidence(cellKey, "prediction.json", `{"probabilityYes":"0.5","cell":"${cellKey}"}`) }],
     measurements,
   };

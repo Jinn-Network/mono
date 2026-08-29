@@ -67,6 +67,16 @@ function contextFor(clock: () => string, principal = "sponsor-1"): OperationCont
 
 const SOURCE = { harness: "some-external-harness", version: "2.4.0", note: "nightly sweep" } as const;
 
+/**
+ * The instant the run under test was sealed, captured by `lockedRun` below.
+ *
+ * Every imported timestamp must fall inside the sealed run window — at or after the seal instant,
+ * at or before the import instant — so a fixture cannot pick a date out of the air. These clocks
+ * seal and import within milliseconds of each other, so the rows are stamped at the seal instant
+ * itself, which is inside the window at both ends.
+ */
+let runOpenAt = "";
+
 /** Writes one evidence file into the dump directory and returns its dump-relative path. */
 function writeEvidence(cellKey: string, name: string, body: string): string {
   const dir = join(evidenceRoot, cellKey.replace(/[^A-Za-z0-9._-]/gu, "_"));
@@ -94,6 +104,7 @@ async function lockedRun(clock: () => string, draftId = "draft-1"): Promise<{
   expect(locked.ok, JSON.stringify(locked)).toBe(true);
 
   const runState = readRunState(workspaceDir, draftId)!;
+  runOpenAt = runState.lockedAt!;
   const document = readDraftDocument(workspaceDir, draftId);
   if (document.spec.taskSet.kind !== "benchmark") throw new Error("unreachable");
   const runRecord = parseRun(getSealedBytes(workspaceDir, runState.runSha256!));
@@ -110,9 +121,9 @@ function gradedRow(row: number, cellKey: string, measurements: Record<string, bo
     row,
     cellKey,
     outcome: "graded",
-    startedAt: "2026-08-04T00:00:00Z",
-    endedAt: "2026-08-04T00:01:00Z",
-    durationMs: 60_000,
+    startedAt: runOpenAt,
+    endedAt: runOpenAt,
+    durationMs: 0,
     evidence: [{ name: "prediction", path: writeEvidence(cellKey, "prediction.json", `{"probabilityYes":"0.5","cell":"${cellKey}"}`) }],
     measurements,
   };
@@ -326,10 +337,59 @@ describe("run.import — honesty invariants", () => {
     })).toThrow();
 
     expect(readRunState(workspaceDir, "draft-1")?.externalImportSha256).toBe(imported.result.declarationSha256);
-    const entry = readRunJournalEntries(workspaceDir, "draft-1")
-      .find((candidate) => candidate.kind === "external-import");
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    const entry = entries.find((candidate) => candidate.kind === "external-import");
     expect(entry).toMatchObject({ declarationSha256: imported.result.declarationSha256, source: SOURCE });
+    // FIRST, not last. A crash after the final cell but before a trailing marker would leave a
+    // complete-looking journal with no marker and no `externalImportSha256` — a run that reads as
+    // driven. Leading with it makes the same crash leave an unmistakably partial import instead.
+    expect(entries[0]).toBe(entry);
   });
+
+  test("an imported timestamp outside the sealed run window is refused, leaving the draft locked", async () => {
+    const clock = makeClock();
+    const { cellKeys } = await lockedRun(clock);
+    // A row dated a year before the Run record it is evidence for was sealed. Unbounded, this
+    // becomes the `evaluatedAt` inside a SIGNED verdict attesting to work evaluated before its own
+    // pre-registration; nothing downstream re-checks it.
+    const before = {
+      ...gradedRow(1, cellKeys[0]!),
+      startedAt: "2025-01-01T00:00:00Z",
+      endedAt: "2025-01-01T00:00:00Z",
+      durationMs: 0,
+    };
+    const refused = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1",
+      records: [
+        before,
+        ...cellKeys.slice(1).map((cellKey, index) => bareRow(2 + index, cellKey, "unrun", "not part of this test")),
+      ],
+      source: SOURCE,
+      evidenceRoot,
+    });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("validation");
+    expect((refused.error.issues ?? []).map((issue) => issue.path)).toContain("timestamp-outside-window");
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toHaveLength(0);
+  }, 60_000);
+
+  test("a source string carrying a control character is refused before anything is written", async () => {
+    const clock = makeClock();
+    const { cellKeys } = await lockedRun(clock);
+    const refused = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1",
+      records: mixedRows(cellKeys),
+      source: { harness: "some\u0007harness" },
+      evidenceRoot,
+    });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("validation");
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toHaveLength(0);
+  }, 60_000);
 });
 
 describe("run.import — completion does not shrink the denominator", () => {

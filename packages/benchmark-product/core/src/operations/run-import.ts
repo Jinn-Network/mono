@@ -49,6 +49,7 @@ import { atomicWriteFileSync } from "../fs/atomic.js";
 import type { ExternalRunRecord } from "../intake/external-run-records.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import {
+  assertExternalRunImportSource,
   preflightExternalRunImport,
   validateExternalRunRecords,
   writeExternalRunImport,
@@ -125,8 +126,13 @@ export function importRunRecords(
         );
       }
 
+      // The harness name, version, and note are sealed VERBATIM into two annotations per cell and
+      // into the import declaration, so they are checked here — before the transition below —
+      // exactly as the dump's own strings are checked before it.
+      assertExternalRunImportSource(input.source);
+
       const runState = requireRunState(workspaceDir, input.draftId);
-      if (runState.runSha256 === undefined || runState.closeAt === undefined) {
+      if (runState.runSha256 === undefined || runState.closeAt === undefined || runState.lockedAt === undefined) {
         refuse("conflict", `runs.${input.draftId}`, `draft ${input.draftId} has no sealed Run record yet — lock it first`);
       }
       const journal = readRunJournalEntries(workspaceDir, input.draftId);
@@ -159,6 +165,12 @@ export function importRunRecords(
         run: runRecord,
         benchmarkSha256: `sha256:${benchmarkSha256}`,
         runSha256: `sha256:${runState.runSha256}`,
+        // The window every imported timestamp must fall inside. `lockedAt` is the seal instant —
+        // the sealed Run record itself carries only `closeAt` — and `at` is this operation's own
+        // frozen clock. An imported timestamp becomes a journal `at`, a Delivery `createdAt`, and
+        // the `evaluatedAt` inside a SIGNED verdict, and nothing downstream bounds any of them.
+        runOpenAt: runState.lockedAt,
+        importedAt: at,
       });
       // Guards a slate/expected-set drift that would otherwise surface much later as a collect
       // refusal; the validator already proves the correspondence, so this can only fail on a bug.
