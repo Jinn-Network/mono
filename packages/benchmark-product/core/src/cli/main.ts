@@ -36,6 +36,7 @@ import {
   authorityRevoke,
   authorityShow,
   anchoringConfigure,
+  runBind,
   createDraft,
   getDraft,
   importBinaryItemBank,
@@ -82,6 +83,7 @@ import {
   type SignHumanReviewResponseInput,
 } from "../operations/index.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
+import type { BeaconReference } from "@colophon-claims/verify";
 import { summarizeVerificationOutcome } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
@@ -148,6 +150,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    [--ack-provider-network-costs] [--no-anchor]
   anchor           --workspace <dir> --principal <id> --draft <draftId>
                    --subject lock|matrix [--provider <profileUri>] [--endpoint <url>]
+  bind             --workspace <dir> --principal <id> --draft <draftId>
+                   --beacon-source <id> --beacon-round <n> --beacon-value <64 hex>
   anchoring configure --workspace <dir> --principal <id>
                    (--provider <profileUri> --endpoint <url> | --file <anchoring.json> | --clear)
   publication configure --workspace <dir> --principal <id> --draft <draftId> --public-base-url <url>
@@ -252,6 +256,7 @@ const QUOTE_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLA
 const NO_ANCHOR_FLAG = "no-anchor" as const;
 const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG, NO_ANCHOR_FLAG] as const;
 const ANCHOR_FLAGS = ["workspace", "principal", "json", "draft", "subject", "provider", "endpoint"] as const;
+const BIND_FLAGS = ["workspace", "principal", "json", "draft", "beacon-source", "beacon-round", "beacon-value"] as const;
 const ANCHORING_CONFIGURE_FLAGS = ["workspace", "principal", "json", "provider", "endpoint", "file", "clear"] as const;
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
@@ -1021,6 +1026,34 @@ function assertAnchorSubject(value: string): AnchorSubject {
   refuse("invalid-invocation", "--subject", `--subject must be "lock" or "matrix"`);
 }
 
+/**
+ * `bind` (issue #2976). The beacon reference is three flags rather than a file: it is three public
+ * values an operator reads off a beacon, and a reader checks the same three against it.
+ */
+function handleBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, BIND_FLAGS);
+  const round = Number(required(args, "beacon-round"));
+  if (!Number.isInteger(round)) {
+    refuse("invalid-invocation", "bind", "--beacon-round must be an integer round or block height");
+  }
+  const result = runBind(buildOperationContext(args, context), {
+    draftId: required(args, "draft"),
+    // Source and value are validated by the operation against the beacon registry and the hex
+    // shape, so an unknown source is refused by name there rather than guessed at here.
+    beacon: {
+      source: required(args, "beacon-source") as BeaconReference["source"],
+      round,
+      value: required(args, "beacon-value"),
+    },
+  });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `bound run ${value.binding.sealDigest} to ${value.binding.beacon.source} round `
+      + `${value.binding.beacon.round}: ${value.recordSha256}\n${value.statement}\n`,
+  );
+}
+
 async function handleAnchor(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, ANCHOR_FLAGS);
   const opContext = buildOperationContext(args, context);
@@ -1434,6 +1467,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["quote", handleQuote],
   ["lock", handleLock],
   ["anchor", handleAnchor],
+  ["bind", handleBind],
   ["anchoring configure", handleAnchoringConfigure],
   ["publication configure", handlePublicationConfigure],
   ["publication register", handlePublicationRegister],
