@@ -158,7 +158,11 @@ const CHECK_GLOSSES = new Map<string, string>([
   ["evidence-closure", "every record the results depend on is carried inside the bundle"],
   ["artifact-integrity", "each stored artifact hashes to the digest its record names"],
   ["signature-validity", "each signature verifies against the key its record names"],
-  ["trust", "each signature verifies against the key the bundle names for it"],
+  // Not "signatures verify": the `trust` check derives and cross-checks the declared key set and
+  // stops there. The verdict and report signatures are verified under `matrix-rederivation` and
+  // `report-verification`. Naming the wrong thing here would reintroduce the overclaim this
+  // surface just removed.
+  ["trust", "the declared keys are internally consistent and cover exactly the evaluators the results cite"],
   ["matrix-rederivation", "the per-cell outcomes recompute to the sealed matrix"],
   ["report-verification", "the report's numbers recompute from that sealed matrix"],
   ["claim-consistency", "the published claim repeats the report without drift"],

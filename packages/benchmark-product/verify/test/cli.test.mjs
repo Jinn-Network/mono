@@ -124,6 +124,30 @@ test("every named check prints a plain-language gloss beside its result", async 
   }
 });
 
+test("the evidence-native v5 pair prints glosses too", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const checks = [
+    "manifest",
+    "evidence-closure",
+    "artifact-integrity",
+    "signature-validity",
+    "matrix-rederivation",
+    "report-verification",
+    "claim-consistency",
+  ];
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/5",
+    identity: "a".repeat(64),
+    checks,
+    ...V6_IDENTITIES,
+  });
+  for (const check of checks) {
+    const line = output.split("\n").find((candidate) => candidate.startsWith(check));
+    assert.ok(line !== undefined, `${check} is missing from the human output`);
+    assert.match(line, new RegExp(`^${check}\\s+passed \\u2014 \\S`));
+  }
+});
+
 test("an unrecognised check name still renders its result rather than failing", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
   const output = renderVerifiedBundle({
