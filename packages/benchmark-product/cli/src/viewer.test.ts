@@ -157,7 +157,6 @@ describe("verified bundle viewer", () => {
     expect(page).toContain("colophon bundle verify --bundle");
   });
 
-
   test("serves every authenticated report link from the verified snapshot", async () => {
     const root = mkdtempSync(join(tmpdir(), "colophon-viewer-"));
     roots.push(root);
