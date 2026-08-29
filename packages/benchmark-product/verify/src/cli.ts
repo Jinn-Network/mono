@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { ANCHOR_PROFILE_NAMESPACE } from "@jinn-network/benchmarking-records";
 import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 import { summarizeVerificationOutcome } from "./outcome.js";
 import { verifyPublicBundle, type PublicBundleVerificationResult, type VerifyPublicBundleDeps } from "./verify.js";
@@ -88,10 +89,23 @@ function renderAnchor(entry: AnchorVerificationEntry): string {
   return `${head}\n    ${evaluationNote(entry)}\n    record ${entry.recordSha256}`;
 }
 
+/** A declared anchor profile named the way the rest of this surface names identifiers: by the part
+ * a reader can act on, never by its address. Every profile URI is namespaced under
+ * `ANCHOR_PROFILE_NAMESPACE`, so the namespace-relative name -- `rfc3161-tsa/v1` -- is the whole
+ * provider identity, and the origin it hangs off is not hosted (DR-2026-08-17-c Decision 5): printing
+ * it hands a reader a live-looking URL that resolves to nothing. A value outside the namespace cannot
+ * be shortened honestly, so it goes to `--json` whole rather than being printed raw. */
+function renderDeclaredProfile(profile: string): string {
+  return profile.startsWith(ANCHOR_PROFILE_NAMESPACE)
+    ? profile.slice(ANCHOR_PROFILE_NAMESPACE.length)
+    : "<profile: see --json>";
+}
+
 function renderSubject(subject: AnchorSubjectReport): string {
   if (subject.outcome === "declared-but-absent") {
+    const declared = subject.declaredProfiles?.map(renderDeclaredProfile).join(", ");
     return `  ${subject.subject}: declared-but-absent — this run declared `
-      + `${subject.declaredProfiles?.join(", ") ?? "an anchor provider"} and the bundle carries no matching anchor`;
+      + `${declared === undefined || declared === "" ? "an anchor provider" : declared} and the bundle carries no matching anchor`;
   }
   if (subject.outcome === "absent") return `  ${subject.subject}: absent — no anchor was carried and none was declared`;
   return `  ${subject.subject}: anchored`;

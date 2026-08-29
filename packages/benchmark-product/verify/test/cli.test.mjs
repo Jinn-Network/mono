@@ -292,8 +292,29 @@ test("the default human surface names an absent and a declared-but-absent subjec
     },
   });
   assert.match(output, /no anchor records carried/);
-  assert.match(output, /lock: declared-but-absent — this run declared .*rfc3161-tsa\/v1 and the bundle carries no matching anchor/);
+  assert.match(output, /lock: declared-but-absent — this run declared rfc3161-tsa\/v1 and the bundle carries no matching anchor/);
   assert.match(output, /matrix: absent — no anchor was carried and none was declared/);
+  // This branch renders on exit 0, stdout. The profile is named, its unhosted origin is not.
+  assert.doesNotMatch(output, /spec\.jinn\.network/);
+});
+
+test("a declared profile outside the anchor-profile namespace is deferred rather than printed raw", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/6",
+    identity: "a".repeat(64),
+    checks: V6_CHECKS,
+    ...V6_IDENTITIES,
+    anchors: {
+      anchors: [],
+      subjects: [
+        { subject: "lock", outcome: "declared-but-absent", declaredProfiles: ["https://example.invalid/made-up/v1"] },
+      ],
+      invalid: [],
+    },
+  });
+  assert.match(output, /lock: declared-but-absent — this run declared <profile: see --json>/);
+  assert.doesNotMatch(output, /example\.invalid/);
 });
 
 test("a pending anchor prints its own status and reason, never a completed one's", async () => {
