@@ -25,6 +25,12 @@ export interface CliContext {
    * per drive event, written as the run progresses. Distinct from the buffered `CliResult` the
    * verb eventually returns; optional, and absent in every verb that isn't long-running. */
   readonly progress?: (line: string) => void;
+  /**
+   * Shutdown request for a verb that runs until interrupted (`publication serve`). Supplied by
+   * the process-owning wrapper from SIGINT/SIGTERM; absent in tests that never invoke such a
+   * verb, and in embeddings with no process to signal.
+   */
+  readonly shutdownSignal?: AbortSignal;
   readonly runtimeHost?: BenchmarkRuntimeHost;
   /** OS user-data directory supplied only by the process-owning CLI wrapper. */
   readonly agentDataDir?: string;

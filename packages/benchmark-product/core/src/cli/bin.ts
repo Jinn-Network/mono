@@ -27,9 +27,15 @@ const runtimeHost = createDefaultBenchmarkRuntimeHost({
     : {}),
 });
 
+// One shutdown request for the verbs that run until interrupted (`publication serve`). Listening
+// unconditionally is harmless: every other verb returns without ever reading it.
+const shutdown = new AbortController();
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => shutdown.abort());
+
 const result = await runCli(process.argv.slice(2), {
   cwd: process.cwd(),
   clock: () => new Date().toISOString(),
+  shutdownSignal: shutdown.signal,
   runtimeHost,
   agentDataDir: agentDataDir(),
   // stderr, never stdout: --json mode's stdout must stay a single machine-parseable envelope,

@@ -85,7 +85,8 @@ import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../ope
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { readRunJournalEntries } from "../run/journal.js";
-import { requireRunState } from "../run/state.js";
+import { DEFAULT_PUBLICATION_SOURCE_NAME, requireRunState } from "../run/state.js";
+import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer } from "../run/publication-serve.js";
 import { readDraftDocument } from "../operations/drafts.js";
 import { listMethodCatalog } from "../operations/method-catalog.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, readTextFile, required, type ParsedArgs } from "./args.js";
@@ -153,6 +154,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   publication status     --workspace <dir> --principal <id> --draft <draftId>
   publication accounting --workspace <dir> --principal <id> --draft <draftId>
   publication report     --workspace <dir> --principal <id> --draft <draftId>
+  publication serve      --workspace <dir> --principal <id>
+                   [--source <name>] [--host <address>] [--port <n>]
   launch           --workspace <dir> --principal <id> --draft <draftId>
                    [--concurrency <1-32>] [--ack-provider-network-costs]
   resume           --workspace <dir> --principal <id> --draft <draftId>
@@ -252,6 +255,7 @@ const ANCHORING_CONFIGURE_FLAGS = ["workspace", "principal", "json", "provider",
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const PUBLICATION_SERVE_FLAGS = ["workspace", "principal", "json", "source", "host", "port"] as const;
 const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
@@ -1126,6 +1130,49 @@ async function handlePublicationReport(args: ParsedArgs, context: CliContext, js
     `published signed Report v2 ${value.reportRecordSha256} (payload ${value.reportPayloadSha256}) at ${value.source.agent}/${value.source.name}#${value.receipt.sourceSequence}\n`);
 }
 
+/**
+ * Serves this workspace's announcement source over plain HTTP until `context.shutdownSignal`
+ * aborts. Read-only: the archive is append-only and digest-addressed, and this verb publishes no
+ * new announcement -- it only refreshes the derived well-known document so a cold consumer can
+ * find the newest archive page.
+ *
+ * The signal is required rather than defaulted, because a verb that runs until interrupted needs
+ * a process that can interrupt it: `bin.ts` supplies one from SIGINT/SIGTERM, and an embedder
+ * that wants the server without the blocking verb should call `startPublicationArchiveServer`.
+ */
+async function handlePublicationServe(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, PUBLICATION_SERVE_FLAGS);
+  const { workspaceDir } = buildOperationContext(args, context);
+  const shutdownSignal = context.shutdownSignal;
+  if (shutdownSignal === undefined) {
+    refuse("invalid-invocation", "publication serve", "publication serve requires a process that can signal shutdown");
+  }
+  const portText = optional(args, "port");
+  const port = portText === undefined || portText === "" ? DEFAULT_PUBLICATION_SERVE_PORT : Number(portText);
+  if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
+    refuse("invalid-invocation", "--port", "--port must be an integer from 0 to 65535");
+  }
+  const server = await startPublicationArchiveServer({
+    workspaceDir,
+    sourceName: optional(args, "source") === undefined || optional(args, "source") === "" ? DEFAULT_PUBLICATION_SOURCE_NAME : optional(args, "source")!,
+    ...(optional(args, "host") === undefined || optional(args, "host") === "" ? {} : { host: optional(args, "host")! }),
+    port,
+  });
+  try {
+    context.progress?.(`serving ${server.url} (${server.announced ? "well-known published" : "no announcement yet — well-known withheld"}); press Ctrl-C to stop`);
+    if (!shutdownSignal.aborted) {
+      await new Promise<void>((resolve) => { shutdownSignal.addEventListener("abort", () => resolve(), { once: true }); });
+    }
+  } finally {
+    await server.close();
+  }
+  return renderResult(
+    { ok: true, result: { url: server.url, host: server.host, port: server.port, announced: server.announced } },
+    jsonMode,
+    (value) => `served ${value.url} until shutdown; ${value.announced ? "the well-known document names the current archive root" : "the source has not announced yet, so no well-known document was published"}\n`,
+  );
+}
+
 /** `launch`'s `RunLaunchDeps`: `onProgress` streams to `context.progress` in human mode only —
  * `--json` mode's stdout stays the single machine-parseable envelope (module header). */
 function launchDeps(context: CliContext, jsonMode: boolean): RunLaunchDeps {
@@ -1342,6 +1389,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["publication status", handlePublicationStatus],
   ["publication accounting", handlePublicationAccounting],
   ["publication report", handlePublicationReport],
+  ["publication serve", handlePublicationServe],
   ["launch", handleLaunch],
   ["resume", handleResume],
   ["cancel", handleCancel],

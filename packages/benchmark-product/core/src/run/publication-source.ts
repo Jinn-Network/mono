@@ -12,6 +12,7 @@ import { dirname, resolve, sep } from "node:path";
 import {
   DISCOVERY_SIGNING_SCOPE,
   MEDIA_HEAD,
+  RECORD_DISCOVERY_VERSION,
   archivePagePath,
   dssePreAuthEncoding,
   formatOrigin,
@@ -25,6 +26,7 @@ import {
 } from "@jinn-network/record-discovery-protocol";
 import {
   createDurableSourceWriter,
+  writeWellKnownDocument,
   type CasSnapshot,
   type CasWriteResult,
   type DurableSourceAppendIntent,
@@ -142,6 +144,39 @@ function sourceSigner(workspaceDir: string): DurableSourceSigner {
   };
 }
 
+/**
+ * Writes the well-known discovery document for this workspace's one source.
+ *
+ * The document is the only thing in the served layout a first-time consumer can read without
+ * already knowing the archive's page names: `coldSync` starts at `archiveRoot` and walks back to
+ * genesis through `prevArchive`. It is derived, not authoritative -- the head and the signed
+ * pages are -- so it is rewritten from the writer's committed position after every append rather
+ * than maintained as separate state, and `refreshWorkspacePublicationWellKnown` reconstructs it
+ * for a source that appended before this workspace ever served anything.
+ *
+ * `undefined` position means the source has never appended: there is no archive root to point a
+ * consumer at, and no document is written.
+ */
+async function writeSourceWellKnown(
+  blobs: { put(path: string, bytes: Uint8Array, contentType: string): Promise<void> },
+  source: SourceIdentity,
+  writer: Pick<ReturnType<typeof createDurableSourceWriter>, "readState">,
+): Promise<boolean> {
+  const state = await writer.readState();
+  const page = state?.last?.page;
+  if (page === undefined) return false;
+  await writeWellKnownDocument(blobs, {
+    protocol: RECORD_DISCOVERY_VERSION,
+    sources: [{
+      agent: source.agent,
+      name: source.name,
+      headPath: headPath(source.name),
+      archiveRoot: archivePagePath(source.name, page),
+    }],
+  });
+  return true;
+}
+
 export interface WorkspacePublicationSource {
   readonly source: SourceIdentity;
   readonly writer: ReturnType<typeof createDurableSourceWriter>;
@@ -185,9 +220,29 @@ export function createWorkspacePublicationSource(workspaceDir: string, sourceNam
     },
     compareAndSwap: (_id, expected, next) => intentCas.compareAndSwap(expected, next),
   };
+  const writer = createDurableSourceWriter({ source, signer, blobs, states, intents });
+  // Every durable position change refreshes the well-known document, so the served layout is
+  // consumable by a cold client the moment the append that made it public commits. Both entry
+  // points are wrapped because `recover` commits a pending intent -- the crash path advances the
+  // position exactly as `append` does. A failed refresh surfaces rather than silently serving a
+  // stale archive root; the underlying append is already durable and keyed by `announcementId`,
+  // so the caller's retry is idempotent.
+  const servedWriter: typeof writer = {
+    readState: () => writer.readState(),
+    append: async (command) => {
+      const receipt = await writer.append(command);
+      await writeSourceWellKnown(blobs, source, writer);
+      return receipt;
+    },
+    recover: async () => {
+      const report = await writer.recover();
+      await writeSourceWellKnown(blobs, source, writer);
+      return report;
+    },
+  };
   return {
     source,
-    writer: createDurableSourceWriter({ source, signer, blobs, states, intents }),
+    writer: servedWriter,
     artifactStore: {
       async putExact({ digest, bytes, mediaType }) {
         const path = `/publication-artifacts/sha256/${digest.slice("sha256:".length)}`;
@@ -242,6 +297,19 @@ export async function withWorkspacePublicationSourceLock<T>(
 ): Promise<T> {
   const lock = await acquirePublicationLock(workspaceDir, "__record-discovery-source__");
   try { return await run(); } finally { lock.release(); }
+}
+
+/**
+ * Rebuilds the well-known discovery document from the source's committed position. Idempotent,
+ * and a no-op returning `false` for a source that has never appended. Taken under the source lock
+ * so it never observes a position mid-append.
+ */
+export async function refreshWorkspacePublicationWellKnown(workspaceDir: string, sourceName: string): Promise<boolean> {
+  return withWorkspacePublicationSourceLock(workspaceDir, async () => {
+    const source = createWorkspacePublicationSource(workspaceDir, sourceName);
+    const blobs = createFsBlobStore(publicationServeRoot(workspaceDir));
+    return writeSourceWellKnown(blobs, source.source, source.writer);
+  });
 }
 
 /** Durable neutral-plan journal, CAS-shaped so record-publication owns retry semantics. */
