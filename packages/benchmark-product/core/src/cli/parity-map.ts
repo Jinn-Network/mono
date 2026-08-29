@@ -38,6 +38,7 @@ export const STANDALONE_CLI_VERBS: Readonly<Record<string, string>> = {
   "agent credentials": "copies an explicitly selected API-key file into protected Colophon machine storage",
   "agent login": "fails closed unless the exact harness version has a qualified isolated login-artifact flow",
   "doctor": "checks local agent identity and credential readiness without making a provider request",
+  "publication serve": "binds the already-published public archive tree to a socket and mutates no workspace record, so there is no operation to audit behind it",
 };
 
 /**

@@ -12,8 +12,18 @@ if (!Number.isInteger(nodeMajor) || nodeMajor < 22) {
   try {
     const { colophonDataDir } = await import("./data-dir.js");
     const { runColophonCli } = await import("./main.js");
+    // Shutdown for the verbs that run until interrupted (`publication serve`). Installed on
+    // demand, never at startup: a registered SIGINT listener replaces Node's default
+    // termination, so arming one unconditionally would swallow the first Ctrl-C of every other
+    // command.
+    const createShutdownSignal = () => {
+      const shutdown = new AbortController();
+      for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => shutdown.abort());
+      return shutdown.signal;
+    };
     const result = await runColophonCli(process.argv.slice(2), {
       cwd: process.cwd(),
+      createShutdownSignal,
       now: () => new Date(),
       progress: (line) => process.stderr.write(`${line}\n`),
       interactive: process.stdin.isTTY === true && process.stdout.isTTY === true,

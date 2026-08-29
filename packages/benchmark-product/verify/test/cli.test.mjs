@@ -146,6 +146,8 @@ test("the evidence-native v5 pair prints glosses too", async () => {
     format: "benchmark-product-public-bundle/5",
     identity: "a".repeat(64),
     checks,
+    // Required on a v5 result: full-evidence, so every check ran and every check is glossed.
+    artifactContent: { status: "verified", verified: 3, notFetched: 0, notFetchedDigests: [] },
     ...V6_IDENTITIES,
   });
   for (const check of checks) {
@@ -426,6 +428,8 @@ test("human summary names all seven evidence-native checks for bundle v5", async
     reportDigest: `sha256:${"f".repeat(64)}`,
     evidenceRecords: 336,
     artifacts: 300,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
+    artifactContent: { status: "verified", verified: 300, notFetched: 0, notFetchedDigests: [] },
   });
   assert.match(output, /^Checked: 7 of 7 checks passed/m);
   assert.match(output, new RegExp(`Bundle: sha256:${"a".repeat(64)}`));
@@ -502,6 +506,8 @@ test("an undeclared-custody signer set prints the role alone", async () => {
     format: "benchmark-product-public-bundle/5",
     identity: `sha256:${"a".repeat(64)}`,
     checks: ["manifest"],
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
+    artifactContent: { status: "verified", verified: 0, notFetched: 0, notFetchedDigests: [] },
     signers: [
       { role: "publisher", identity: "urn:report:1", keyId: "k1", custody: "undeclared" },
       { role: "automated-grader", identity: "urn:evaluator:1", keyId: "k2", custody: "undeclared" },
@@ -567,4 +573,80 @@ test("a refusal says what failed without printing the identifier it refused", as
   const json = await invoke([tampered, "--json"]);
   assert.equal(json.code, 1);
   assert.match(JSON.parse(json.stdout).message, /did:key:z[1-9A-HJ-NP-Za-km-z]+:envelope-signature-invalid/);
+});
+
+const V5_CHECKS = [
+  "manifest", "evidence-closure", "artifact-integrity", "signature-validity",
+  "matrix-rederivation", "report-verification", "claim-consistency",
+];
+
+const V5_RESULT = {
+  format: "benchmark-product-public-bundle/5",
+  identity: `sha256:${"a".repeat(64)}`,
+  checks: V5_CHECKS,
+  benchmarkDigest: `sha256:${"b".repeat(64)}`,
+  manifestDigest: `sha256:${"c".repeat(64)}`,
+  cohortDigest: `sha256:${"d".repeat(64)}`,
+  matrixDigest: `sha256:${"e".repeat(64)}`,
+  reportDigest: `sha256:${"f".repeat(64)}`,
+  evidenceRecords: 12,
+  artifacts: 5,
+  verifiedSignerKeyIds: [],
+};
+
+test("a full-evidence v5 bundle prints all seven checks as passed", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    ...V5_RESULT,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
+    artifactContent: { status: "verified", verified: 5, notFetched: 0, notFetchedDigests: [] },
+  });
+  assert.match(output, /^Checked: 7 of 7 checks passed$/m);
+  for (const check of V5_CHECKS) assert.match(output, new RegExp(`${check}\\s+passed`));
+  assert.doesNotMatch(output, /not fetched/);
+  assert.doesNotMatch(output, /Artifact content/);
+});
+
+test("a metadata-first v5 bundle discloses artifact-integrity as not fetched", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    ...V5_RESULT,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
+    artifactContent: {
+      status: "not-fetched",
+      verified: 2,
+      notFetched: 3,
+      notFetchedDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
+    },
+  });
+  // The deferred check is never printed as a pass and never folded into the passed total.
+  assert.match(output, /^Checked: 6 of 7 checks passed, 1 not fetched$/m);
+  assert.match(output, /artifact-integrity\s+not fetched/);
+  for (const check of V5_CHECKS.filter((check) => check !== "artifact-integrity")) {
+    assert.match(output, new RegExp(`${check}\\s+passed`));
+  }
+  assert.match(output, /Artifact content/);
+  assert.match(output, /3 artifact bodies were not fetched/);
+  // Naming the digests is what makes the deferred check completable.
+  assert.match(output, new RegExp(`sha256:${"1".repeat(64)}`));
+  assert.match(output, new RegExp(`sha256:${"3".repeat(64)}`));
+  // Adding a body to the directory breaks the manifest closure, so it must not be advised.
+  assert.doesNotMatch(output, /Fetch each one into/);
+  assert.match(output, /verify the\s*\n\s*full-evidence bundle/);
+  assert.match(output, /artifact\s*\ncontents themselves were not read/);
+});
+
+test("a metadata-first bundle with one deferred body says body, not bodies", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    ...V5_RESULT,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
+    artifactContent: {
+      status: "not-fetched",
+      verified: 2,
+      notFetched: 1,
+      notFetchedDigests: ["1".repeat(64)],
+    },
+  });
+  assert.match(output, /1 artifact body was not fetched/);
 });

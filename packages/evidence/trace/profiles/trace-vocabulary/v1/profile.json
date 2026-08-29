@@ -8,5 +8,5 @@
     { "path": "schemas/trace/v1", "mediaType": "application/schema+json" },
     { "path": "schemas/trace-derivation-statement/v1", "mediaType": "application/schema+json" }
   ],
-  "digestAuthority": "https://spec.jinn.network/manifest.json"
+  "digestAuthority": "https://spec.jinn.network/sealed-platform-v1/manifest.json"
 }

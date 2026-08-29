@@ -1,11 +1,6 @@
 import { readFileSync } from "node:fs";
 import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
-import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
-import {
-  PUBLIC_BUNDLE_VERIFICATION_CHECKS,
-  PUBLIC_BUNDLE_V6_CHECKS,
-  PUBLIC_BUNDLE_V7_CHECKS,
-} from "./reader-instructions.js";
+import { summarizeVerificationOutcome } from "./outcome.js";
 import { verifyPublicBundle, type PublicBundleVerificationResult, type VerifyPublicBundleDeps } from "./verify.js";
 import type {
   AnchorSubjectReport,
@@ -188,21 +183,24 @@ const EVIDENCE_NATIVE_CHECK_GLOSSES = new Map<string, string>([
 ]);
 
 export function renderVerifiedBundle(result: PublicBundleVerificationResult): string {
+  // A metadata-first bundle carries artifact digests without their bytes. Printing "passed" for a
+  // check that read nothing would be the one claim this format cannot afford, so the deferred check
+  // prints as not fetched and is counted out of the passed total.
+  const outcome = summarizeVerificationOutcome(result);
+  const artifactContent = outcome.artifactContent;
   const evidenceNative = result.format === "benchmark-product-public-bundle/5";
-  const checks = result.checks
-    .map((check) => {
+  const checks = outcome.outcomes
+    .map(({ check, state }) => {
+      // A gloss states what a check proved, so only a check that ran gets one. A deferred check
+      // read nothing, and printing what it would have proved beside "not fetched" would restate
+      // the overclaim the deferred state exists to refuse.
+      if (state !== "passed") return `${check.padEnd(24)}${state}`;
       const gloss = (evidenceNative ? EVIDENCE_NATIVE_CHECK_GLOSSES.get(check) : undefined)
         ?? CHECK_GLOSSES.get(check);
-      return `${check.padEnd(24)}passed${gloss === undefined ? "" : ` — ${gloss}`}`;
+      return `${check.padEnd(24)}${state}${gloss === undefined ? "" : ` — ${gloss}`}`;
     })
     .join("\n");
-  const totalChecks = evidenceNative
-    ? EVIDENCE_NATIVE_BUNDLE_V5_CHECKS.length
-    : result.format === "benchmark-product-public-bundle/6"
-      ? PUBLIC_BUNDLE_V6_CHECKS.length
-      : result.format === "benchmark-product-public-bundle/7"
-        ? PUBLIC_BUNDLE_V7_CHECKS.length
-        : PUBLIC_BUNDLE_VERIFICATION_CHECKS.length;
+  const totalChecks = outcome.total;
   const identity = result.identity.startsWith("sha256:") ? result.identity : `sha256:${result.identity}`;
   const anchors = "anchors" in result && result.anchors !== undefined
     ? renderAnchorReport(result.anchors)
@@ -210,20 +208,35 @@ export function renderVerifiedBundle(result: PublicBundleVerificationResult): st
   const signers = result.signers === undefined || result.signers.length === 0
     ? ""
     : renderSigners(result.signers);
+  // Naming the digests is what makes the deferred check completable: they are the addresses to
+  // fetch and the expectations to check the fetched bytes against. Adding a body to this directory
+  // is not the completion path -- it would break the manifest closure the bundle is identified by,
+  // so the reader is pointed at the full-evidence bundle instead.
+  const artifactContentReport = artifactContent === undefined
+    ? ""
+    : `\nArtifact content\n  ${artifactContent.notFetched} artifact ${artifactContent.notFetched === 1 ? "body was" : "bodies were"} not fetched. This bundle carries their\n  exact digests, not their bytes:\n${artifactContent.notFetchedDigests.map((digest) => `    sha256:${digest}`).join("\n")}\n  Check fetched bytes against those digests yourself, or verify the\n  full-evidence bundle, which carries them.\n`;
+  const artifactContentLimit = artifactContent === undefined
+    ? ""
+    : "\nEverything above was checked against the bytes this bundle carries. The artifact\ncontents themselves were not read, so nothing here says what they contain.";
   const anchorLimits = anchors === ""
     ? ""
     : "\nAn anchor dates the bytes it covers and says nothing else about the run: not\nthat results were produced after it, and not that the anchoring authority is\nindependent of the bundle's owner.";
-  return `Checked: ${result.checks.length} of ${totalChecks} checks passed
+  // "Checked", not "Verified" (#3022): the headline states what this tool did, and the passed
+  // count is what it found. A deferred check is disclosed beside that count, never inside it.
+  const verdictLine = outcome.notFetched === 0
+    ? `Checked: ${outcome.passed} of ${totalChecks} checks passed`
+    : `Checked: ${outcome.passed} of ${totalChecks} checks passed, ${outcome.notFetched} not fetched`;
+  return `${verdictLine}
 Bundle: ${identity}
 Format: ${result.format}
 
 ${checks}
-${signers}${anchors}
+${signers}${artifactContentReport}${anchors}
 Checking opens no network connection, reads no account or API credential, and
 uploads nothing. It checks the bundle's integrity, evidence closure,
 calculations, report, and claim consistency. It does not prove that the
 producing machine was honest or that the compared identities are independent
-parties.${anchorLimits}
+parties.${artifactContentLimit}${anchorLimits}
 `;
 }
 

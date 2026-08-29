@@ -19,6 +19,9 @@ import {
   sealEvidenceCohort,
   sealEvidenceNativeClaimPackageV3,
   sealHumanLabelResolutionPayload,
+  BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
+  BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE,
+  parseEvidenceNativeBundleManifestV5,
   type DigestBearingResourceDescriptor,
   type EvidenceRecordReference,
 } from "@jinn-network/benchmarking-protocol";
@@ -41,6 +44,7 @@ import { describe, expect, test } from "vitest";
 import {
   assembleEvidenceMatrix,
   buildEvidenceNativeBundleManifestV5,
+  projectMetadataFirstEvidenceNativeBundle,
   computeEvidenceBinaryInstrumentQualification,
   deriveDefaultEvidenceCell,
   issueEvidenceNativeReport,
@@ -828,5 +832,136 @@ describe("Harbor → Inspect → human evidence-first golden lifecycle", () => {
       files: unboundFiles,
       verifySignature: () => true,
     })).rejects.toThrow(/invalid or unbound/u);
+
+    // --- Metadata-first profile (issue #2986) -------------------------------------------------
+    // The same bundle minus its evidence artifact bodies: same records, same digests, same seven
+    // checks, with `artifact-integrity` disclosed as not fetched instead of passed or failed.
+    const verifyEd25519Signature = ({ publicKeyBytes, preAuthEncoding, signature }: {
+      publicKeyBytes: Uint8Array; preAuthEncoding: Uint8Array; signature: Uint8Array;
+    }) => {
+      const key = createPublicKey({ key: Buffer.from(publicKeyBytes), format: "der", type: "spki" });
+      return key.asymmetricKeyType === "ed25519" && verifyEd25519(
+        null,
+        Buffer.from(preAuthEncoding),
+        key,
+        Buffer.from(signature),
+      );
+    };
+
+    expect(parseEvidenceNativeBundleManifestV5(bundleFiles.get("bundle.json")!).profile)
+      .toBe(BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE);
+    expect(portable.profile).toBe(BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE);
+    expect(portable.artifactContent).toMatchObject({ status: "verified", notFetched: 0, notFetchedDigests: [] });
+    expect(portable.artifactContent.verified).toBe(portable.artifacts);
+
+    const metadataFirstFiles = projectMetadataFirstEvidenceNativeBundle(bundleFiles);
+    const signerPublicKeyDigests = new Set(
+      trustSigners.map((signer) => signer.publicKey.digest.sha256),
+    );
+    const droppedPaths = [...bundleFiles.keys()].filter((path) => !metadataFirstFiles.has(path));
+    expect(droppedPaths.length).toBeGreaterThan(0);
+    // Only artifact bodies are dropped, and never the trust material the signature check reads.
+    for (const path of droppedPaths) {
+      const match = /^artifacts\/([0-9a-f]{64})\.bin$/u.exec(path);
+      expect(match).not.toBeNull();
+      expect(signerPublicKeyDigests.has(match![1]!)).toBe(false);
+    }
+    // Every retained member keeps its exact bytes; only bundle.json differs.
+    for (const [path, bytes] of metadataFirstFiles) {
+      if (path === "bundle.json") continue;
+      expect(bytes).toBe(bundleFiles.get(path));
+    }
+    const metadataFirstManifest = parseEvidenceNativeBundleManifestV5(metadataFirstFiles.get("bundle.json")!);
+    expect(metadataFirstManifest.format).toBe("benchmark-product-public-bundle/5");
+    expect(metadataFirstManifest.profile).toBe(BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE);
+
+    const metadataFirst = await verifyEvidenceNativePortableBundle({
+      files: metadataFirstFiles,
+      verifySignature: verifyEd25519Signature,
+    });
+    expect(metadataFirst.checks).toEqual(portable.checks);
+    expect(metadataFirst.profile).toBe(BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE);
+    expect(metadataFirst.artifactContent.status).toBe("not-fetched");
+    expect(metadataFirst.artifactContent.notFetched).toBe(droppedPaths.length);
+    expect(metadataFirst.artifactContent.notFetchedDigests)
+      .toEqual([...metadataFirst.artifactContent.notFetchedDigests].sort());
+    // The digests the reader is handed are exactly the bodies it can fetch from the full form.
+    const declaredArtifactDigests = new Set(claimRecordsArtifactDigests(claim.bytes));
+    for (const digest of metadataFirst.artifactContent.notFetchedDigests) {
+      expect(declaredArtifactDigests.has(digest)).toBe(true);
+      expect(bundleFiles.has(`artifacts/${digest}.bin`)).toBe(true);
+    }
+    // Everything the profile still promises is fully checked.
+    expect(metadataFirst.evidenceRecords).toBe(portable.evidenceRecords);
+    expect(metadataFirst.artifacts).toBe(portable.artifacts);
+    expect(metadataFirst.matrixDigest).toBe(portable.matrixDigest);
+    expect(metadataFirst.reportDigest).toBe(portable.reportDigest);
+    expect(metadataFirst.verifiedSignerKeyIds).toEqual(portable.verifiedSignerKeyIds);
+    // Two forms, two identities: a reader can tell which one it holds without reading a filename.
+    expect(metadataFirst.identity).not.toBe(portable.identity);
+
+    // A metadata-first bundle that carries an omitted body is not the profile it declares.
+    const smuggledDigest = /^artifacts\/([0-9a-f]{64})\.bin$/u.exec(droppedPaths[0]!)![1]!;
+    const smuggledFiles = new Map(metadataFirstFiles);
+    smuggledFiles.delete("bundle.json");
+    smuggledFiles.set(`artifacts/${smuggledDigest}.bin`, bundleFiles.get(droppedPaths[0]!)!);
+    smuggledFiles.set("bundle.json", buildEvidenceNativeBundleManifestV5(smuggledFiles, {
+      profile: BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
+    }).bytes);
+    await expect(verifyEvidenceNativePortableBundle({
+      files: smuggledFiles,
+      verifySignature: verifyEd25519Signature,
+    })).rejects.toThrow(/carries the omitted artifact body/u);
+
+    // A retained body is still digest-checked: deferring evidence never relaxes trust material.
+    const retainedDigest = [...signerPublicKeyDigests][0]!;
+    const tamperedFiles = new Map(metadataFirstFiles);
+    tamperedFiles.delete("bundle.json");
+    tamperedFiles.set(`artifacts/${retainedDigest}.bin`, new Uint8Array([0, 1, 2, 3]));
+    tamperedFiles.set("bundle.json", buildEvidenceNativeBundleManifestV5(tamperedFiles, {
+      profile: BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
+    }).bytes);
+    await expect(verifyEvidenceNativePortableBundle({
+      files: tamperedFiles,
+      verifySignature: verifyEd25519Signature,
+    })).rejects.toThrow(/digest does not match its exact descriptor/u);
+
+    // The branch that keeps the relaxation fail-closed: metadata-first accepts a referenced
+    // artifact without bytes ONLY because the claim declares its digest. Undeclare it and the
+    // bundle is refused, exactly as the full-evidence profile refuses a missing body.
+    const undeclaredClaimDocument = JSON.parse(new TextDecoder().decode(claim.bytes)) as {
+      records: { artifacts: { digest: { sha256: string } }[] };
+    };
+    undeclaredClaimDocument.records.artifacts = undeclaredClaimDocument.records.artifacts
+      .filter((artifact) => artifact.digest.sha256 !== smuggledDigest);
+    expect(undeclaredClaimDocument.records.artifacts.length)
+      .toBe(claimRecordsArtifactDigests(claim.bytes).length - 1);
+    const undeclaredFiles = new Map(metadataFirstFiles);
+    undeclaredFiles.delete("bundle.json");
+    undeclaredFiles.set("claim-package.json", sealEvidenceNativeClaimPackageV3(undeclaredClaimDocument).bytes);
+    undeclaredFiles.set("bundle.json", buildEvidenceNativeBundleManifestV5(undeclaredFiles, {
+      profile: BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
+    }).bytes);
+    await expect(verifyEvidenceNativePortableBundle({
+      files: undeclaredFiles,
+      verifySignature: verifyEd25519Signature,
+    })).rejects.toThrow(/claim artifact closure omits sha256:/u);
+
+    // The full-evidence profile is unchanged: an omitted body is still a hard failure there.
+    const truncatedFullFiles = new Map(bundleFiles);
+    truncatedFullFiles.delete("bundle.json");
+    truncatedFullFiles.delete(droppedPaths[0]!);
+    truncatedFullFiles.set("bundle.json", buildEvidenceNativeBundleManifestV5(truncatedFullFiles).bytes);
+    await expect(verifyEvidenceNativePortableBundle({
+      files: truncatedFullFiles,
+      verifySignature: verifyEd25519Signature,
+    })).rejects.toThrow(/is missing artifacts\//u);
   });
 });
+
+function claimRecordsArtifactDigests(claimBytes: Uint8Array): readonly string[] {
+  const document = JSON.parse(new TextDecoder().decode(claimBytes)) as {
+    records: { artifacts: readonly { digest: { sha256: string } }[] };
+  };
+  return document.records.artifacts.map((artifact) => artifact.digest.sha256);
+}

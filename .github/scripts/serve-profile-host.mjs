@@ -10,7 +10,7 @@
 //
 // Its strictness is the product, not an implementation convenience:
 //
-//   * Only paths named by `manifest.json` are served, each with its manifest-declared
+//   * Only paths named by a group's `manifest.json` are served, each with its manifest-declared
 //     media type, the digest-derived strong ETag, and the cache lifetime the bundle
 //     generator pins. Nothing else exists.
 //   * Everything else is a hard 404. No directory index, no trailing-slash redirect, no
@@ -30,7 +30,7 @@
 // guarded so `import` is side-effect-free.
 
 import { X509Certificate, createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { join, resolve } from 'node:path';
@@ -110,25 +110,51 @@ export function documentHeaders({ mediaType, sha256, cacheControl, bytes }) {
 }
 
 /**
+ * Discover the release groups a deploy bundle carries.
+ *
+ * A bundle holds every stack-published group that shares the origin, and each group's
+ * inventory lives at `<group>/manifest.json`. So an immediate subdirectory is a group
+ * exactly when the manifest inside it names *that* directory: a document that happens to
+ * be served at `profiles/manifest.json` names something else, and stays a document.
+ * Nothing is discovered from `vercel.json` -- the host configuration is not the inventory.
+ */
+function discoverGroups(root) {
+  const groups = [];
+  const names = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  for (const name of names) {
+    const manifestPath = join(root, name, MANIFEST_FILE_NAME);
+    if (!existsSync(manifestPath)) continue;
+    const bytes = readFileSync(manifestPath);
+    let manifest;
+    try {
+      manifest = JSON.parse(bytes.toString('utf8'));
+    } catch {
+      continue;
+    }
+    if (manifest?.releaseGroup !== name) continue;
+    if (!Array.isArray(manifest.documents)) throw new Error('profile manifest documents must be an array');
+    groups.push({ name, manifest, bytes });
+  }
+  return groups;
+}
+
+/**
  * Load one bundle directory into the exact route table it may answer on.
  *
  * `kind` records why a path is served: `document` for a manifest-declared document,
- * `root` for the generated manifest and its signature sidecar, `key` for the published
+ * `root` for a group's manifest and its signature sidecar, `key` for the published
  * signing key. Faults only ever touch documents, so a fault cannot accidentally break the
  * step of the gate it was not written to exercise.
  */
 export function loadBundleRoutes(bundleDir, { publicKey = null } = {}) {
   const root = resolve(bundleDir);
-  const manifestPath = join(root, MANIFEST_FILE_NAME);
-  if (!existsSync(manifestPath)) throw new Error(`bundle has no ${MANIFEST_FILE_NAME}: ${bundleDir}`);
-  const manifestBytes = readFileSync(manifestPath);
-  let manifest;
-  try {
-    manifest = JSON.parse(manifestBytes.toString('utf8'));
-  } catch (error) {
-    throw new Error(`bundle ${MANIFEST_FILE_NAME} is not valid JSON: ${error?.message ?? String(error)}`);
+  const groups = discoverGroups(root);
+  if (groups.length === 0) {
+    throw new Error(`bundle has no ${MANIFEST_FILE_NAME} in any immediate subdirectory: ${bundleDir}`);
   }
-  if (!Array.isArray(manifest.documents)) throw new Error('profile manifest documents must be an array');
 
   const sha256Of = (bytes) => createHash('sha256').update(bytes).digest('hex');
   const routes = new Map();
@@ -138,37 +164,43 @@ export function loadBundleRoutes(bundleDir, { publicKey = null } = {}) {
     routes.set(path, { path, ...entry });
   };
 
-  add(MANIFEST_FILE_NAME, {
-    kind: 'root',
-    bytes: manifestBytes,
-    mediaType: MANIFEST_MEDIA_TYPE,
-    sha256: sha256Of(manifestBytes),
-    cacheControl: REVALIDATE_CACHE_CONTROL,
-  });
-  const signaturePath = join(root, SIGNATURE_FILE_NAME);
-  if (existsSync(signaturePath)) {
-    const bytes = readFileSync(signaturePath);
-    add(SIGNATURE_FILE_NAME, {
+  // Group inventories first, so a document claiming a group's own path trips `add`.
+  for (const { name, bytes } of groups) {
+    add(`${name}/${MANIFEST_FILE_NAME}`, {
       kind: 'root',
       bytes,
       mediaType: MANIFEST_MEDIA_TYPE,
       sha256: sha256Of(bytes),
       cacheControl: REVALIDATE_CACHE_CONTROL,
     });
+    const signaturePath = join(root, name, SIGNATURE_FILE_NAME);
+    if (existsSync(signaturePath)) {
+      const sidecar = readFileSync(signaturePath);
+      add(`${name}/${SIGNATURE_FILE_NAME}`, {
+        kind: 'root',
+        bytes: sidecar,
+        mediaType: MANIFEST_MEDIA_TYPE,
+        sha256: sha256Of(sidecar),
+        cacheControl: REVALIDATE_CACHE_CONTROL,
+      });
+    }
   }
-  for (const { path, mediaType, sha256 } of manifest.documents) {
-    const absolute = join(root, ...String(path).split('/'));
-    if (!existsSync(absolute)) throw new Error(`bundle is missing declared document ${path}`);
-    // The ETag is the manifest digest, not a digest of what is on disk. That is what the
-    // generated configuration pins, and modelling it faithfully is what lets the drift
-    // fault look exactly like real bit-rot behind an unchanged strong validator.
-    add(path, {
-      kind: 'document',
-      bytes: readFileSync(absolute),
-      mediaType,
-      sha256,
-      cacheControl: IMMUTABLE_CACHE_CONTROL,
-    });
+  for (const { manifest } of groups) {
+    for (const { path, mediaType, sha256 } of manifest.documents) {
+      // Documents keep their identifier paths, so they resolve from the bundle root.
+      const absolute = join(root, ...String(path).split('/'));
+      if (!existsSync(absolute)) throw new Error(`bundle is missing declared document ${path}`);
+      // The ETag is the manifest digest, not a digest of what is on disk. That is what the
+      // generated configuration pins, and modelling it faithfully is what lets the drift
+      // fault look exactly like real bit-rot behind an unchanged strong validator.
+      add(path, {
+        kind: 'document',
+        bytes: readFileSync(absolute),
+        mediaType,
+        sha256,
+        cacheControl: IMMUTABLE_CACHE_CONTROL,
+      });
+    }
   }
   if (publicKey) {
     const pem = Buffer.from(publicKey.pem, 'utf8');
@@ -180,7 +212,7 @@ export function loadBundleRoutes(bundleDir, { publicKey = null } = {}) {
       cacheControl: REVALIDATE_CACHE_CONTROL,
     });
   }
-  return { routes, manifest };
+  return { routes };
 }
 
 const isExtensionless = (path) => !path.split('/').pop().includes('.');

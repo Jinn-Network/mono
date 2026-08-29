@@ -441,6 +441,10 @@
     {
       "name": "doctor",
       "reason": "checks local agent identity and credential readiness without making a provider request"
+    },
+    {
+      "name": "publication serve",
+      "reason": "binds the already-published public archive tree to a socket and mutates no workspace record, so there is no operation to audit behind it"
     }
   ]
 }

@@ -27,9 +27,19 @@ const runtimeHost = createDefaultBenchmarkRuntimeHost({
     : {}),
 });
 
+// Shutdown for the verbs that run until interrupted (`publication serve`). Installed on demand,
+// never at startup: a registered SIGINT listener replaces Node's default termination, so arming
+// one unconditionally would swallow the first Ctrl-C of every other verb.
+function createShutdownSignal(): AbortSignal {
+  const shutdown = new AbortController();
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => shutdown.abort());
+  return shutdown.signal;
+}
+
 const result = await runCli(process.argv.slice(2), {
   cwd: process.cwd(),
   clock: () => new Date().toISOString(),
+  createShutdownSignal,
   runtimeHost,
   agentDataDir: agentDataDir(),
   // stderr, never stdout: --json mode's stdout must stay a single machine-parseable envelope,

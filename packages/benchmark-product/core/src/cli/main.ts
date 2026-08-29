@@ -82,10 +82,12 @@ import {
   type SignHumanReviewResponseInput,
 } from "../operations/index.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
+import { summarizeVerificationOutcome } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { readRunJournalEntries } from "../run/journal.js";
-import { requireRunState } from "../run/state.js";
+import { DEFAULT_PUBLICATION_SOURCE_NAME, requireRunState } from "../run/state.js";
+import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer, type PublicationWellKnownOutcome } from "../run/publication-serve.js";
 import { readDraftDocument } from "../operations/drafts.js";
 import { listMethodCatalog } from "../operations/method-catalog.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, readTextFile, required, type ParsedArgs } from "./args.js";
@@ -153,6 +155,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   publication status     --workspace <dir> --principal <id> --draft <draftId>
   publication accounting --workspace <dir> --principal <id> --draft <draftId>
   publication report     --workspace <dir> --principal <id> --draft <draftId>
+  publication serve      --workspace <dir> --principal <id>
+                   [--source <name>] [--host <address>] [--port <n>]
   launch           --workspace <dir> --principal <id> --draft <draftId>
                    [--concurrency <1-32>] [--ack-provider-network-costs]
   resume           --workspace <dir> --principal <id> --draft <draftId>
@@ -252,6 +256,7 @@ const ANCHORING_CONFIGURE_FLAGS = ["workspace", "principal", "json", "provider",
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const PUBLICATION_SERVE_FLAGS = ["workspace", "principal", "json", "source", "host", "port"] as const;
 const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
@@ -1126,6 +1131,85 @@ async function handlePublicationReport(args: ParsedArgs, context: CliContext, js
     `published signed Report v2 ${value.reportRecordSha256} (payload ${value.reportPayloadSha256}) at ${value.source.agent}/${value.source.name}#${value.receipt.sourceSequence}\n`);
 }
 
+/** How each start-time well-known outcome reads while the server is coming up. */
+const WELL_KNOWN_PROGRESS: Readonly<Record<PublicationWellKnownOutcome, string>> = {
+  published: "well-known published",
+  "not-announced": "no announcement yet — well-known withheld",
+  // Loud, because the document on disk may name a superseded archive page, and a cold consumer
+  // reading a superseded root silently misses every announcement after it.
+  "refresh-failed": "WARNING: the well-known document could not be refreshed and may be stale",
+};
+
+/** The same three outcomes in the terminal summary's past tense. */
+const WELL_KNOWN_SUMMARY: Readonly<Record<PublicationWellKnownOutcome, string>> = {
+  published: "the well-known document names the current archive root",
+  "not-announced": "the source has not announced yet, so no well-known document was published",
+  "refresh-failed": "the well-known document could not be refreshed, so what was served may name a superseded archive page",
+};
+
+/**
+ * Serves this workspace's announcement source over plain HTTP until `context.shutdownSignal`
+ * aborts. Read-only: the archive is append-only and digest-addressed, and this verb publishes no
+ * new announcement -- it only refreshes the derived well-known document so a cold consumer can
+ * find the newest archive page.
+ *
+ * The signal is required rather than defaulted, because a verb that runs until interrupted needs
+ * a process that can interrupt it: `bin.ts` supplies one from SIGINT/SIGTERM, and an embedder
+ * that wants the server without the blocking verb should call `startPublicationArchiveServer`.
+ */
+async function handlePublicationServe(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, PUBLICATION_SERVE_FLAGS);
+  const { workspaceDir } = buildOperationContext(args, context);
+  if (context.createShutdownSignal === undefined) {
+    refuse("invalid-invocation", "publication serve", "publication serve requires a process that can signal shutdown");
+  }
+  const portText = optional(args, "port");
+  const port = portText === undefined || portText === "" ? DEFAULT_PUBLICATION_SERVE_PORT : Number(portText);
+  if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
+    refuse("invalid-invocation", "--port", "--port must be an integer from 0 to 65535");
+  }
+  // Present-but-empty is a typo, not an omission, so it falls back to the default exactly as an
+  // absent flag does rather than binding to the empty string.
+  const sourceName = optional(args, "source");
+  const host = optional(args, "host");
+  const server = await startPublicationArchiveServer({
+    workspaceDir,
+    sourceName: sourceName === undefined || sourceName === "" ? DEFAULT_PUBLICATION_SOURCE_NAME : sourceName,
+    ...(host === undefined || host === "" ? {} : { host }),
+    port,
+    ...(context.progress === undefined ? {} : { onError: (cause: unknown) => context.progress?.(`server error: ${cause instanceof Error ? cause.message : String(cause)}`) }),
+  });
+  try {
+    // Taken after the bind so a failure to serve is not preceded by hijacking the process's
+    // signal handling.
+    const shutdownSignal = context.createShutdownSignal();
+    context.progress?.(`serving ${server.url} (${WELL_KNOWN_PROGRESS[server.wellKnown]}); press Ctrl-C to stop`);
+    if (!shutdownSignal.aborted) {
+      await new Promise<void>((resolve) => { shutdownSignal.addEventListener("abort", () => resolve(), { once: true }); });
+    }
+  } finally {
+    await server.close();
+  }
+  return renderResult(
+    {
+      ok: true,
+      result: {
+        url: server.url,
+        host: server.host,
+        port: server.port,
+        wellKnown: server.wellKnown,
+        // The cause is what turns "may name a superseded archive page" into something an operator
+        // can act on; carried as its message so the envelope stays plain JSON.
+        ...(server.refreshFailure === undefined
+          ? {}
+          : { refreshFailure: server.refreshFailure instanceof Error ? server.refreshFailure.message : String(server.refreshFailure) }),
+      },
+    },
+    jsonMode,
+    (value) => `served ${value.url} until shutdown; ${WELL_KNOWN_SUMMARY[value.wellKnown]}${value.refreshFailure === undefined ? "" : ` (${value.refreshFailure})`}\n`,
+  );
+}
+
 /** `launch`'s `RunLaunchDeps`: `onProgress` streams to `context.progress` in human mode only —
  * `--json` mode's stdout stays the single machine-parseable envelope (module header). */
 function launchDeps(context: CliContext, jsonMode: boolean): RunLaunchDeps {
@@ -1279,7 +1363,11 @@ async function handleBundleVerify(args: ParsedArgs, context: CliContext, jsonMod
   return renderResult(
     { ok: true, result },
     jsonMode,
-    (value) => `verified public bundle ${value.identity}: ${value.checks.join(", ")}\n`,
+    // A deferred check is never printed as a bare check name: a metadata-first bundle carries its
+    // artifact digests without their bytes (issue #2986).
+    (value) => `verified public bundle ${value.identity}: ${summarizeVerificationOutcome(value).outcomes
+      .map(({ check, state }) => (state === "passed" ? check : `${check} (${state})`))
+      .join(", ")}\n`,
   );
 }
 
@@ -1352,6 +1440,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["publication status", handlePublicationStatus],
   ["publication accounting", handlePublicationAccounting],
   ["publication report", handlePublicationReport],
+  ["publication serve", handlePublicationServe],
   ["launch", handleLaunch],
   ["resume", handleResume],
   ["cancel", handleCancel],
