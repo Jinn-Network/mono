@@ -241,21 +241,39 @@ from what happens to be present. Its member list is `benchmark.json`, `analysis-
 Its `bundle.json` is the exact canonical manifest, is not listed inside itself, and is the only
 member that differs in shape from every earlier closure: `format` is the exact string
 `benchmark-product-public-bundle/5`, `profile` is one of the two IRIs below, and `files` is a
-non-empty array whose entries each bind one normalized relative `path`, its lowercase `sha256`,
-and its `bytes` length, sorted and unique by path. The bundle identity is the lowercase SHA-256 of
-those exact manifest bytes. Missing, extra, reordered, duplicate, absolute, dot, parent, symlink,
-hardlink, special-file, or changed members fail closed exactly as they do on v2.
+non-empty array whose entries each bind one relative `path`, its lowercase hex `sha256`, and its
+`bytes` length. Entries are sorted and unique by path under UTF-16 code-unit comparison, and the
+manifest is serialized as canonical JSON; the bundle identity is `sha256:` followed by the
+lowercase hex SHA-256 of those exact bytes. A path is refused when it is empty, `.`, the reserved
+`bundle.json`, absolute, contains a backslash, or has any empty, `.`, or `..` segment.
+
+The v5 closure is **manifest-relative, not a fixed file list**. The set of files present must
+equal `bundle.json`'s declared paths plus `bundle.json` itself — an undeclared file present on
+disk, or a declared file that is missing, fails closed, as does any length or digest mismatch.
+Within that, the seven fixed members above are required, the `records/<sha256>.bin` set must match
+`benchmark-product.claim-package/3`'s evidence set exactly in both directions, and the
+`artifacts/<sha256>.bin` set is governed by the declared profile below. **Members beyond those are
+permitted** provided the manifest declares them: the bundle published on colophon.claims carries
+`presentation.json`, `README.md`, and a `source/` copy of the human-readable report and its sealed
+pre-run artifacts. A reader that rejects a member simply because this document does not name it
+will reject the real artifact.
 
 Its stored claim is `benchmark-product.claim-package/3`: the v5 evidence graph is addressed from
 `records.evidence` and `records.artifacts`, both sorted and unique, and its `verification.checks`
-is the exact seven-name tuple above rather than the six-name one every v2-derived closure carries.
-V5 carries no presentation assets — there is no `index.html`, `badge.svg`, `social-card.svg`,
-`README.md`, or `share.txt` in the member list, so the asset byte-compare below has nothing to
-compare and the citation rules about badges and cards do not apply to it.
+is the exact seven-name tuple above — neither the six-name tuple of public-bundle/2 and
+public-bundle/4 nor the anchored seven-name tuple of public-bundle/6 and public-bundle/7, which is
+those six plus `integrity-anchors`.
 
-A full-evidence v5 bundle stamps the same first public line as v2 and v4. Unlike the v2-derived
-claim packages, `claim-package/3` carries one `verification.command` and no separate compatible
-line, and what it pins is the compatible `@0.1` line:
+None of the five deterministic presentation assets is a v5 member, and the verifier runs no asset
+byte-compare for this format: there is no `index.html`, `badge.svg`, `social-card.svg`, or
+`share.txt` in its closure, so the citation rules about badges and cards do not apply to it. An
+extra member that happens to be human-readable — the published bundle's `README.md` and
+`presentation.json` — is manifest-integrity-checked like any other member and is not compared
+against the asset builder.
+
+V5 stamps the same first public line as v2 and v4. Unlike the v2-derived claim packages,
+`claim-package/3` carries one `verification.command` and no separate compatible line, and what it
+pins is the compatible `@0.1` line:
 
 ```bash
 npx @colophon-claims/verify@0.1 <bundle-dir>
@@ -332,12 +350,16 @@ Use the smaller reader package, without the product or source workspace:
 npx @colophon-claims/verify@0.1 <bundle-dir>
 ```
 
-Claim-package/1, claim-package/2, claim-package/3, public-bundle/2, public-bundle/4, and
-public-bundle/5 stamp the same first public line: `@0.1.0` / `@0.1`. Public-bundle/2 and
-public-bundle/4 return the same six top-level check names in the order below; v4 expands those
-checks internally rather than adding a seventh top-level result. The three closures that return
-a seventh top-level check name their own lists where they are defined: v5 above, v6 and v7 with
-`integrity-anchors`. V7 is the one format the `@0.1` line cannot read and pins `@0.2.1`.
+Claim-package/1, claim-package/2, and claim-package/4 — the claims of public-bundle/2,
+public-bundle/4, and public-bundle/6 — stamp the same first public line: `@0.1.0` / `@0.1`.
+Claim-package/3, the claim of public-bundle/5, reads on the same line but pins only `@0.1`,
+because it has a single `command` field and no compatible-line field. Claim-package/5, the claim
+of public-bundle/7, is the one that the `@0.1` line cannot read and pins `@0.2.1` / `@0.2`.
+
+Public-bundle/2 and public-bundle/4 return the same six top-level check names in the order below;
+v4 expands those checks internally rather than adding a seventh top-level result. The three
+closures that return a seventh top-level check name their own lists where they are defined: v5
+above, and v6 and v7 with `integrity-anchors`.
 
 The full installed product exposes the same implementation through:
 
@@ -366,8 +388,8 @@ check.
 ## Presentation and citation
 
 This section describes the five deterministic presentation assets of the v2-derived closures
-(v2, v4, v6, and v7). Public-bundle/5 carries none of them; its citation rules are the shared
-list below, minus every sentence about a badge, card, or share text.
+(v2, v4, v6, and v7). Public-bundle/5 has none of them in its closure; its citation rules are the
+shared list below, minus every sentence about a badge, card, or share text.
 
 `index.html` is the canonical self-contained human report. It uses inline CSS
 only and no JavaScript, remote resource, object, frame, embed, or active content.

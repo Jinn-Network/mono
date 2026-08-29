@@ -184,6 +184,11 @@ describe("product documentation consistency", () => {
     const exactReaderRelease = /verify(@[0-9][^\s]*)/u.exec(PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND)?.[1];
     expect(guide).toContain(`\`${exactReaderRelease}\``);
     expect(guide).toContain("`benchmark-product.claim-package/3`");
+    // v5 closure is manifest-relative: the published bundle declares members this document does
+    // not enumerate, so a reader told to expect a fixed list would reject the real artifact.
+    expect(guide).toMatch(/manifest-relative, not a fixed file list/i);
+    expect(guide).toContain("`presentation.json`");
+    expect(guide).toContain("`source/`");
   });
 
   it("documents the exact private web configuration and package commands", () => {
