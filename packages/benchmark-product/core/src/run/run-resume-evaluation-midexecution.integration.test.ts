@@ -316,7 +316,19 @@ describe("resume reconciles an evaluation attempt killed mid-execution", () => {
       if (!collected.ok) throw new Error("unreachable");
       const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
       for (const cell of matrix.cells) {
-        expect(cell.outcome, cell.cellKey).toBe("judged");
+        // The cell's own lineage, not just its outcome: `expired` is the outcome of a cell that
+        // was NEVER DISPATCHED (§8.2 requires exactly that pairing) as well as of one that
+        // dispatched and ran out its window, and the two have opposite causes. `dispatches`
+        // separates them, and the attempt/delivery/verdict lineage says how far a dispatched one
+        // got, so a failure here names its own diagnosis instead of only the outcome string.
+        expect(cell.outcome, `${cell.cellKey}: ${JSON.stringify({
+          dispatches: cell.dispatches,
+          accounted: cell.accounted,
+          attempt: cell.attempt,
+          delivery: cell.delivery,
+          verdicts: cell.verdicts.length,
+          validVerdicts: cell.validVerdicts.length,
+        })}`).toBe("judged");
       }
       expect(matrix.completeness).toMatchObject({
         expected: matrix.cells.length,
