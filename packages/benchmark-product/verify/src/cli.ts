@@ -40,7 +40,8 @@ function usage(): string {
     + "Trust material is yours, not the bundle's: with none supplied a well-formed anchor reports\n"
     + "present rather than verified, and none ships with this tool.\n"
     + "Exit 0: valid bundle; 1: invalid bundle; 2: usage or operational failure.\n"
-    + "Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet. Verification uses exact platform bytes from npm.\n";
+    + "Identifiers inside record files are internal names. Checking uses the exact code installed\n"
+    + "from npm and fetches nothing from the web.\n";
 }
 
 // ---------------------------------------------------------------------------
@@ -142,8 +143,33 @@ function renderSigners(signers: readonly PublicBundleSigner[]): string {
   return `\nSigned by\n${groups.map((group) => renderSignerGroup(group.role, group.custody, group.count)).join("\n")}\n`;
 }
 
+/**
+ * One plain-language line per named check, so a reader who has never read the bundle format can
+ * tell what each result covers. The names themselves stay -- they are the join key to `--json`,
+ * the report page's "Named checks" list, and every refusal message -- and the gloss is additive.
+ * The record spans both closure families: the six classic checks plus `integrity-anchors`, and
+ * the evidence-native v5 pair. A name with no entry renders bare rather than throwing: the
+ * renderer must never be the reason a valid bundle cannot be reported.
+ */
+const CHECK_GLOSSES: Readonly<Record<string, string>> = {
+  manifest: "every file the bundle lists is present and matches its recorded digest",
+  "evidence-closure": "every record the results depend on is carried inside the bundle",
+  "artifact-integrity": "each stored artifact hashes to the digest its record names",
+  "signature-validity": "each signature verifies against the key its record names",
+  trust: "each signature verifies against the key the bundle names for it",
+  "matrix-rederivation": "the per-cell outcomes recompute to the sealed matrix",
+  "report-verification": "the report's numbers recompute from that sealed matrix",
+  "claim-consistency": "the published claim repeats the report without drift",
+  "integrity-anchors": "each carried time anchor is well-formed and covers what it names",
+};
+
 export function renderVerifiedBundle(result: PublicBundleVerificationResult): string {
-  const checks = result.checks.map((check) => `${check.padEnd(24)}passed`).join("\n");
+  const checks = result.checks
+    .map((check) => {
+      const gloss = CHECK_GLOSSES[check];
+      return `${check.padEnd(24)}passed${gloss === undefined ? "" : ` — ${gloss}`}`;
+    })
+    .join("\n");
   const totalChecks = result.format === "benchmark-product-public-bundle/5"
     ? EVIDENCE_NATIVE_BUNDLE_V5_CHECKS.length
     : result.format === "benchmark-product-public-bundle/6"
@@ -161,18 +187,17 @@ export function renderVerifiedBundle(result: PublicBundleVerificationResult): st
   const anchorLimits = anchors === ""
     ? ""
     : "\nAn anchor dates the bytes it covers and says nothing else about the run: not\nthat results were produced after it, and not that the anchoring authority is\nindependent of the bundle's owner.";
-  return `Verified: ${result.checks.length} of ${totalChecks} checks passed
+  return `Checked: ${result.checks.length} of ${totalChecks} checks passed
 Bundle: ${identity}
 Format: ${result.format}
 
 ${checks}
 ${signers}${anchors}
-This checks the bundle's integrity, evidence closure, calculations, report,
-and claim consistency. It does not prove that the machine that produced the
-bundle was honest or that the compared identities are independent parties.${anchorLimits}
-No files were uploaded.
-Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.
-Verification uses the exact platform bytes installed from npm.
+Checking opens no network connection, reads no account or API credential, and
+uploads nothing. It checks the bundle's integrity, evidence closure,
+calculations, report, and claim consistency. It does not prove that the
+producing machine was honest or that the compared identities are independent
+parties.${anchorLimits}
 `;
 }
 

@@ -166,7 +166,7 @@ The reference verifier covers the remaining rows of the table:
 npx @colophon-claims/verify@1 <bundle-dir>
 ```
 
-Exit 0 with `Verified: 6 of 6 checks passed` (`manifest`, `evidence-closure`,
+Exit 0 with `Checked: 6 of 6 checks passed` (`manifest`, `evidence-closure`,
 `trust`, `matrix-rederivation`, `report-verification`, `claim-consistency`);
 exit 1 invalid; exit 2 usage. It opens no network connection and uploads
 nothing. Every bundle names its own compatible command in
