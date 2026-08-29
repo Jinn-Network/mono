@@ -160,9 +160,9 @@ onto `@colophon-claims/verify`, so
 is the single surface these rules bind to.
 
 - `scopeLine` renders `"<taskCount> tasks · <arms> arms · <replicates> replicates · <venue>"`.
-  It is the page lede, and the binary-instrument branch reuses it for the
-  badge, the social card, and the share text. The non-binary branch re-spells
-  the same four fields inline rather than calling it.
+  It is the page lede, and both branches of `badge.svg` and `social-card.svg`
+  call it. Only `share.txt`'s non-binary branch re-spells the same four fields
+  inline instead.
 - The "Benchmark and configuration scope" section renders the Benchmark
   digest, the task count, the replicates, and the venue.
 
@@ -484,12 +484,17 @@ the bundle already carries, so none of it waits on a format revision.
   format event.
 - **M3.** The tier-one statement of §4.1 appears on the face and in the
   Markdown and share-text projections, unconditionally.
-- **M4.** The task-set identity reaches every signpost. `scopeLine` is the
-  lede and the binary branch's badge, card, and share text; the non-binary
-  branch re-spells the same fields inline and must be changed with it.
+- **M4.** The task-set identity reaches every signpost. `scopeLine` carries
+  the lede and both branches of the badge and the social card, so one change
+  covers them; `share.txt`'s non-binary branch re-spells the four fields
+  inline and is the one site that must be changed alongside it.
 - **M5.** The refusals of §5.3 bind all present and future surfaces.
   `checkComparability` is the rule's canonical implementation and the one a
-  presentation surface calls. It has no production caller today, and
+  presentation surface calls — with no `versionRobust` option. That flag
+  returns `ok: true` unconditionally and describes the method that produced a
+  report, not the layout being rendered; passing it through from a report
+  would void §5.3 rule 1 for every version-robust bundle. It has no production
+  caller today, and
   `aggregate`'s `checkResolvedComparability` is a second implementation of the
   same rule (§2.4); converging them is in scope for this work rather than a
   separate cleanup, because two implementations of a refusal rule will drift.
@@ -518,7 +523,11 @@ the bundle already carries, so none of it waits on a format revision.
 - **D5.** Version-robust paired methods over shared Task digests. It is the
   sanctioned route to a genuine cross-version number, and naming it here is
   what keeps the refusals from reading as obstruction: this is how the
-  ratcheting maintainer eventually does get a comparable figure.
+  ratcheting maintainer eventually does get a comparable figure. It does not
+  reopen §5.3 rule 1. Such a figure is one report's own result over a shared
+  subset, computed under the disclosure `aggregate` already enforces within a
+  single report; a view placing two published runs' rates together is a
+  cross-run comparison and stays refused.
 - **D6.** The preview compilation's verbatim `version` and `supersedes` copy
   onto a truncated item list (§3). Preview bytes are never stored or
   published, so it is not a publication defect today; file it as a separate
