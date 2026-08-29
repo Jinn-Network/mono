@@ -5,6 +5,7 @@
 // --- pinned identifiers (protocol, media types, record-kind URIs, method URIs, scope) ---
 export {
   ANCHOR_INTENT_EXTENSION,
+  TASK_SELECTION_EXTENSION,
   ASSEMBLY_PROCEDURE,
   ASSEMBLY_PROCEDURE_VERSION,
   BENCHMARK_ACCOUNTING_MEDIA_TYPE,

@@ -22,6 +22,7 @@ function fixture(overrides: {
   readonly inconsistentClaimRate?: string;
   readonly inconsistentMirrors?: boolean;
   readonly longArmIds?: boolean;
+  readonly taskSelection?: NonNullable<PublicAssetInput["taskSelection"]>;
 } = {}): PublicAssetInput {
   const hostile = overrides.hostile === true;
   const baseline = overrides.longArmIds === true
@@ -74,6 +75,7 @@ function fixture(overrides: {
     },
   };
   return {
+    ...(overrides.taskSelection === undefined ? {} : { taskSelection: overrides.taskSelection }),
     reportSha256: SHA.report,
     matrixSha256: SHA.matrix,
     recordSha256s: [SHA.recordA, SHA.recordB],
@@ -755,6 +757,55 @@ describe("Task 6: paired-delta@1 bundle asset dispatch", () => {
       for (const resultNumber of forbidden) {
         expect(body, `${path} leaked result number ${resultNumber}`).not.toContain(resultNumber);
       }
+    }
+  });
+});
+
+/**
+ * Task-selection provenance on the report face (issue #2980).
+ *
+ * The point of the field is that it renders where a reader cannot miss it. `.neutral` is the
+ * headline-result tier -- the class the one neutral sentence the report leads with already
+ * carries -- so asserting the class is asserting the weight, not a proxy for it.
+ */
+describe("task-selection provenance", () => {
+  const decode = (assets: Readonly<Record<string, Uint8Array>>, path: string) =>
+    new TextDecoder().decode(assets[path]!);
+
+  test("renders the claimant's own admission plainly, at headline-result weight", () => {
+    const html = decode(buildPublicAssets(fixture({ taskSelection: "claimant-chosen" })), "index.html");
+    expect(html).toContain('<p class="neutral">The claimant chose which tasks appear in this report.</p>');
+    // Adjacent to the neutral headline sentence, in the header, not buried in a later section.
+    expect(html.indexOf('The claimant chose which tasks'))
+      .toBeLessThan(html.indexOf('<main>'));
+  });
+
+  test("renders each of the other two declared modes at the same weight", () => {
+    const fixedSet = decode(buildPublicAssets(fixture({ taskSelection: "fixed-public-set" })), "index.html");
+    expect(fixedSet).toContain('<p class="neutral">Tasks are the complete, publicly declared set; the claimant chose none of them.</p>');
+    const drawn = decode(buildPublicAssets(fixture({ taskSelection: "drawn-post-lock" })), "index.html");
+    expect(drawn).toContain('<p class="neutral">Tasks were drawn by a fixed rule after the run was locked; the claimant chose none of them.</p>');
+  });
+
+  test("carries the same sentence into the citation surfaces", () => {
+    const assets = buildPublicAssets(fixture({ taskSelection: "claimant-chosen" }));
+    expect(decode(assets, "README.md")).toContain("**The claimant chose which tasks appear in this report.**");
+    expect(decode(assets, "share.txt")).toContain("The claimant chose which tasks appear in this report.");
+  });
+
+  test("an undeclared run emits byte-identical assets to before the field existed", () => {
+    // Load-bearing, not incidental: the verifier byte-compares every published asset against this
+    // builder, so a sentence rendered for the undeclared case would refuse every bundle published
+    // before this field existed.
+    const declared = buildPublicAssets(fixture({ taskSelection: "claimant-chosen" }));
+    const undeclared = buildPublicAssets(fixture());
+    for (const path of ["index.html", "README.md", "share.txt"]) {
+      expect(new TextDecoder().decode(undeclared[path]!)).not.toContain("claimant chose");
+      expect(undeclared[path]).not.toEqual(declared[path]);
+    }
+    // The signpost assets deliberately do not carry the sentence.
+    for (const path of ["badge.svg", "social-card.svg"]) {
+      expect(undeclared[path]).toEqual(declared[path]);
     }
   });
 });

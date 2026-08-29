@@ -270,6 +270,44 @@ checks the stored claim, and byte-compares all five presentation assets with the
 deterministic asset builder. Asset comparison does not add a seventh returned
 check.
 
+## Task-selection provenance
+
+Who chose the tasks changes what a headline number means as much as the number
+itself, so the answer is a sealed field rather than prose. A Run record may carry
+the `https://spec.jinn.network/extensions/task-selection/v1` extension, whose
+`mode` is one of exactly three values:
+
+- `claimant-chosen` — the claimant picked the tasks;
+- `fixed-public-set` — the tasks are a complete set that was already public
+  before the lock;
+- `drawn-post-lock` — the tasks were fixed by rule only after the lock.
+
+Because the declaration is sealed into the Run, it is fixed at the lock and
+cannot be softened once results are known. Sealing does not make it true, so the
+verifier refuses a bundle whose other sealed records contradict it, under the
+`claim-consistency` check:
+
+- both stronger modes assert that someone other than the claimant chose the
+  tasks. The Benchmark record *is* the task selection, so a Benchmark whose
+  `author` is the Run's `owner` — or which names no author at all — cannot
+  support either;
+- `fixed-public-set` requires a set that was public no later than the Run's
+  `closeAt`: `reveal.policy` `immediate`, or `scheduled` with a `notBefore` at or
+  before the lock;
+- `drawn-post-lock` requires the opposite: items still withheld at the lock,
+  either `after-run` or a schedule opening strictly after it.
+
+`claimant-chosen` carries no structural obligation. It asserts nothing about
+anyone but the claimant, and constraining it would only make the honest answer
+the expensive one.
+
+A declared mode renders as one sentence at the report's headline-result weight,
+in `index.html`, `README.md`, and `share.txt`. The declaration is not a
+claim-package field: `claim-package.json` pins its own key set byte-for-byte, and
+the presentation is projected from the verified Run instead. A Run that declares
+nothing renders nothing, which is what keeps every bundle published before this
+field existed byte-identical and still verifying.
+
 ## Presentation and citation
 
 `index.html` is the canonical self-contained human report. It uses inline CSS
