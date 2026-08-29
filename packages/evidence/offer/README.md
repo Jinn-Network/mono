@@ -63,10 +63,12 @@ its normalized spelling — `new URL` round-trips it unchanged. Without that,
 and the offer would carry one rail at two prices. That guarantee reaches exactly as far as
 WHATWG URL normalization does: it case-folds scheme and host for the special schemes and drops
 default ports and dot segments, but opaque hosts and opaque paths round-trip verbatim, so a
-rail vocabulary minted under a scheme like `ipfs://` or `urn:` owes its own spelling rule. Sealing refuses an unsorted list rather than
-reordering it, because a canonicalizer that silently rewrites content is how one document
-quietly becomes another; `sortOfferRails` puts a producer's entries in the required order
-without every producer reimplementing locale-free ordering.
+rail vocabulary minted under a scheme like `ipfs://` or `urn:` owes its own spelling rule.
+
+Sealing refuses an unsorted list rather than reordering it, because a canonicalizer that
+silently rewrites content is how one document quietly becomes another; `sortOfferRails` puts a
+producer's entries in the required order without every producer reimplementing locale-free
+ordering.
 
 Top-level keys beyond the ones above must be namespaced (reverse-DNS or absolute URI, TEP
 §21.3). The same rule applies inside a rail entry and inside `gate`.
