@@ -108,13 +108,23 @@ export type BeaconSourceId = keyof typeof BEACON_SOURCES;
 export const BEACON_SOURCE_IDS = Object.keys(BEACON_SOURCES).sort() as readonly BeaconSourceId[];
 
 /**
- * The ceiling on a round index. Not a beacon limit -- it is what keeps `beaconRoundInstant`'s
- * arithmetic inside the range `Date` can represent, so an absurd round is a typed refusal at the
- * schema rather than an untyped `RangeError` from `toISOString` deep inside verification. At
- * quicknet's 3-second period this is some 95,000 years of rounds, and every real Bitcoin height is
- * eight orders of magnitude below it.
+ * A schema-level sanity ceiling on a round index. Not a beacon limit, and deliberately not the
+ * representability guarantee either: the ceiling that matters is per-source, because it falls out
+ * of each source's own period, and one shared number cannot be sound for all of them. Quicknet's
+ * 3-second period puts round 1,000,000,000,000 some 95,000 years out and inside what `Date`
+ * represents; the default chain's 30-second period puts the same round ten times further out and
+ * outside it. So this bound only rejects the absurd, and `beaconRoundInstant` -- not the schema --
+ * owns the guarantee that the arithmetic stays representable. Every real Bitcoin height is eight
+ * orders of magnitude below this.
  */
 export const MAX_BEACON_ROUND = 1_000_000_000_000;
+
+/**
+ * The widest instant `Date` represents, in milliseconds either side of the epoch (ECMA-262:
+ * 8.64e15). Beyond it `toISOString` throws an untyped `RangeError`, which is what
+ * `beaconRoundInstant` refuses on this module's own terms instead.
+ */
+const MAX_REPRESENTABLE_TIME_MS = 8_640_000_000_000_000;
 
 const HexValueSchema = z.string().regex(/^[0-9a-f]{64}$/, "must be 64 lowercase hex characters");
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/, "must match ^sha256:[0-9a-f]{64}$");
@@ -188,6 +198,14 @@ function fail(path: string, detail: string): never {
  * The instant a `deterministic-round-time` beacon published `round`, as an RFC 3339 UTC string, or
  * `undefined` for a source whose round index carries no offline time. The schedule is
  * `genesis + (round - 1) * period`: round 1 is published at genesis.
+ *
+ * Refuses (throws `RunBindingError`) when that instant falls outside the range `Date` represents.
+ * The check lives here rather than on the schema because the largest representable round is a
+ * function of the source's own period -- the default chain runs out ten times earlier than
+ * quicknet does -- so a single schema ceiling would leave the slower source's tail passing
+ * validation and then throwing an untyped `RangeError` from `toISOString` deep inside
+ * verification. Guarding the arithmetic where the arithmetic happens makes the typed refusal a
+ * property of this function, and therefore true for every source and every caller.
  */
 export function beaconRoundInstant(beacon: BeaconReference): string | undefined {
   const source = BEACON_SOURCES[beacon.source];
@@ -196,7 +214,15 @@ export function beaconRoundInstant(beacon: BeaconReference): string | undefined 
     readonly genesisTimeSeconds: number;
     readonly periodSeconds: number;
   };
-  return new Date((genesisTimeSeconds + (beacon.round - 1) * periodSeconds) * 1000).toISOString();
+  const instantMs = (genesisTimeSeconds + (beacon.round - 1) * periodSeconds) * 1000;
+  if (!Number.isFinite(instantMs) || Math.abs(instantMs) > MAX_REPRESENTABLE_TIME_MS) {
+    fail(
+      "beacon.round",
+      `${source.displayName} round ${beacon.round} is scheduled outside the range a timestamp can `
+      + "represent, so its publication instant cannot be computed",
+    );
+  }
+  return new Date(instantMs).toISOString();
 }
 
 export interface BeaconOrderParams {

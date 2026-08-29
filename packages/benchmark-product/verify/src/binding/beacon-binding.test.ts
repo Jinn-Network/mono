@@ -19,6 +19,7 @@ import {
   computeBeaconOrder,
   verifyRunBinding,
   type BeaconReference,
+  type BeaconSourceId,
   type RunBinding,
 } from "./beacon-binding.js";
 import { computeScreeningPoolDigest } from "../admission/screening-sample.js";
@@ -36,6 +37,19 @@ const beacon = (overrides: Partial<BeaconReference> = {}): BeaconReference => ({
   value: VALUE,
   ...overrides,
 });
+
+/**
+ * The largest round whose scheduled instant `Date` can represent, for a source whose rounds are
+ * scheduled. Derived from the source's own published parameters, the same way a reader would.
+ */
+const MAX_REPRESENTABLE_TIME_MS = 8_640_000_000_000_000;
+const lastRepresentableRound = (source: BeaconSourceId): number => {
+  const { genesisTimeSeconds, periodSeconds } = BEACON_SOURCES[source] as {
+    genesisTimeSeconds: number;
+    periodSeconds: number;
+  };
+  return Math.floor((MAX_REPRESENTABLE_TIME_MS / 1000 - genesisTimeSeconds) / periodSeconds) + 1;
+};
 
 const censusBinding = (overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> => {
   const base = {
@@ -237,12 +251,41 @@ describe("verifyRunBinding", () => {
     expect(() => verifyRunBinding(censusBinding(overrides))).toThrow(RunBindingError);
   });
 
-  test("refuses a round above the representable ceiling instead of throwing a RangeError", () => {
-    // Above MAX_BEACON_ROUND the schedule arithmetic leaves the range `Date` represents, and
-    // `toISOString` would throw an untyped RangeError from inside verification.
+  test("refuses a round above the schema ceiling", () => {
     expect(() => verifyRunBinding(censusBinding({ beacon: beacon({ round: MAX_BEACON_ROUND + 1 }) })))
       .toThrow(RunBindingError);
+  });
+
+  // The representable ceiling is per-source, not shared: it falls out of each source's period, so
+  // the assertion has to be about the procedure rather than about the fixture's default source.
+  // `drand/default`'s 30-second schedule runs out an order of magnitude earlier than quicknet's
+  // 3-second one -- and, unlike quicknet's, earlier than MAX_BEACON_ROUND, so its tail is exactly
+  // where a shared ceiling would let an untyped RangeError escape verification.
+  const SCHEDULED_SOURCE_IDS = BEACON_SOURCE_IDS
+    .filter((id) => BEACON_SOURCES[id].timeBasis === "deterministic-round-time");
+
+  test.each(SCHEDULED_SOURCE_IDS)(
+    "%s refuses the first unrepresentable round instead of throwing a RangeError",
+    (source) => {
+      const last = lastRepresentableRound(source);
+      expect(beaconRoundInstant(beacon({ source, round: last }))).toMatch(/^[+-]?\d{4,6}-/u);
+      expect(() => beaconRoundInstant(beacon({ source, round: last + 1 }))).toThrow(RunBindingError);
+      expect(() => beaconRoundInstant(beacon({ source, round: last + 1 })))
+        .toThrow(/^beacon\.round: /u);
+      if (last + 1 <= MAX_BEACON_ROUND) {
+        // Only then does the schema admit the round, so verification is what has to refuse it.
+        expect(() => verifyRunBinding(censusBinding({ beacon: beacon({ source, round: last + 1 }) })))
+          .toThrow(RunBindingError);
+      }
+    },
+  );
+
+  test("pins the two schedules' last representable rounds", () => {
+    expect(lastRepresentableRound("drand/quicknet")).toBe(2_879_435_732_212);
+    expect(lastRepresentableRound("drand/default")).toBe(287_946_818_966);
     expect(beaconRoundInstant(beacon({ round: MAX_BEACON_ROUND }))).toBe("+097089-11-09T20:29:24.000Z");
+    expect(beaconRoundInstant(beacon({ source: "drand/default", round: 287_946_818_966 })))
+      .toBe("+275760-09-13T00:00:00.000Z");
   });
 
   test("refuses an unknown extra key rather than ignoring it", () => {
