@@ -2400,7 +2400,7 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
               ? claim["pairwiseDisagreement"]
               : claim["pairedMajorityDelta"],
           ).toBeDefined();
-          // JS verifier is the C1 seam (`publish` / `colophon-verify` run this copy). Python is
+          // JS verifier is the C1 seam (`publish` / `colophon-check` run this copy). Python is
           // necessary and not sufficient: `claim-mirror` skips when there is no headline.
           const verified = await verifyPublicBundle(dir);
           expect(verified.identity).toBe(identity);

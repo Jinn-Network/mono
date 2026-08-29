@@ -436,7 +436,7 @@ describe("T1 provider-free binary qualification cold lifecycle", () => {
     expect([...new Set(installedFirstPartyNames)]).toEqual(VERIFY_FIRST_PARTY_CLOSURE);
 
     expect(existsSync(workspaceDir)).toBe(false);
-    const executable = join(coldReaderDir, "node_modules", ".bin", process.platform === "win32" ? "colophon-verify.cmd" : "colophon-verify");
+    const executable = join(coldReaderDir, "node_modules", ".bin", process.platform === "win32" ? "colophon-check.cmd" : "colophon-check");
     const replay = await run(executable, [copiedBundleDir, "--json"], {
       cwd: coldReaderDir,
       env: minimalEnv,

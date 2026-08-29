@@ -17,10 +17,10 @@ evidence-native v5 and the two anchored formats, v6 and v7, run seven. The v7 fo
 the anchored binary-qualification closure — v4's members plus v6's anchors — and it
 exists only from this 0.2.1 release, so its bundles pin `@0.2.1` rather than the `@0.1`
 line every earlier closure stamps.
-This package was published as `@colophon-claims/verify` through 0.2.1. That name stays
-published forever as a passthrough alias on the same `0.2` line, so
-`npx @colophon-claims/verify@0.1 ./bundle` and `npx @colophon-claims/verify@0.2 ./bundle`
-keep resolving and behaving exactly as before. New surfaces print the `check` name.
+This package was published as `@colophon-claims/verify` through 0.2.1. That name stays published
+forever as a passthrough alias on the same lines, so the reader command a bundle sealed before the
+rename already prints keeps resolving and behaving exactly as before. New surfaces print the
+`check` name.
 Existing claim bundles retain their recorded verifier pins. Use this 0.2 reader
 for prompted-screening v2 support and the compatible `@0.2` line for this
 release.

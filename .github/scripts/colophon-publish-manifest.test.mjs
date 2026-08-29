@@ -154,15 +154,15 @@ test('the receipt collection refuses added or duplicate rows and root-key drift'
   const receipts = JSON.parse(readFileSync(join(repoRoot, PRODUCT_RELEASE_PLATFORM_PINS_PATH), 'utf8')).receipts;
   assert.throws(
     () => validateProductReleasePlatformPins({ schemaVersion: 1, receipts: [...receipts, structuredClone(pin)] }, manifest),
-    /exact ordered immutable verifier 0\.2 receipts/u,
+    /exact ordered registered release receipts/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPins({ receipts: [pin], schemaVersion: 1 }, manifest),
-    /exact ordered immutable verifier 0\.2 receipts/u,
+    /exact ordered registered release receipts/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPins({ schemaVersion: 1, receipts: [...receipts].reverse() }, manifest),
-    /exact ordered immutable verifier 0\.2 receipts/u,
+    /exact ordered registered release receipts/u,
   );
   const duplicate = structuredClone(pin);
   duplicate.platformPackages[1] = structuredClone(duplicate.platformPackages[0]);
