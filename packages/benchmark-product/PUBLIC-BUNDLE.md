@@ -238,6 +238,31 @@ from what happens to be present. Its member list is `benchmark.json`, `analysis-
 `manifest`, `evidence-closure`, `artifact-integrity`, `signature-validity`,
 `matrix-rederivation`, `report-verification`, `claim-consistency`.
 
+Its `bundle.json` is the exact canonical manifest, is not listed inside itself, and is the only
+member that differs in shape from every earlier closure: `format` is the exact string
+`benchmark-product-public-bundle/5`, `profile` is one of the two IRIs below, and `files` is a
+non-empty array whose entries each bind one normalized relative `path`, its lowercase `sha256`,
+and its `bytes` length, sorted and unique by path. The bundle identity is the lowercase SHA-256 of
+those exact manifest bytes. Missing, extra, reordered, duplicate, absolute, dot, parent, symlink,
+hardlink, special-file, or changed members fail closed exactly as they do on v2.
+
+Its stored claim is `benchmark-product.claim-package/3`: the v5 evidence graph is addressed from
+`records.evidence` and `records.artifacts`, both sorted and unique, and its `verification.checks`
+is the exact seven-name tuple above rather than the six-name one every v2-derived closure carries.
+V5 carries no presentation assets — there is no `index.html`, `badge.svg`, `social-card.svg`,
+`README.md`, or `share.txt` in the member list, so the asset byte-compare below has nothing to
+compare and the citation rules about badges and cards do not apply to it.
+
+A full-evidence v5 bundle stamps the same first public line as v2 and v4. Unlike the v2-derived
+claim packages, `claim-package/3` carries one `verification.command` and no separate compatible
+line, and what it pins is the compatible `@0.1` line:
+
+```bash
+npx @colophon-claims/verify@0.1 <bundle-dir>
+```
+
+`@0.1.0` is the exact producer-side release inside that line, for byte-for-byte reproduction.
+
 Two profiles are defined. Both are the same format, the same grammar, and the same seven checks.
 
 - **Full evidence** — `https://spec.jinn.network/profiles/benchmark-product-public-bundle/5`.
@@ -307,10 +332,12 @@ Use the smaller reader package, without the product or source workspace:
 npx @colophon-claims/verify@0.1 <bundle-dir>
 ```
 
-Claim-package/1, claim-package/2, public-bundle/2, and public-bundle/4 stamp the
-same first public line: `@0.1.0` / `@0.1`. Both formats return the same six top-level check names in
-the order below; v4 expands those checks internally rather than adding a seventh
-top-level result.
+Claim-package/1, claim-package/2, claim-package/3, public-bundle/2, public-bundle/4, and
+public-bundle/5 stamp the same first public line: `@0.1.0` / `@0.1`. Public-bundle/2 and
+public-bundle/4 return the same six top-level check names in the order below; v4 expands those
+checks internally rather than adding a seventh top-level result. The three closures that return
+a seventh top-level check name their own lists where they are defined: v5 above, v6 and v7 with
+`integrity-anchors`. V7 is the one format the `@0.1` line cannot read and pins `@0.2.1`.
 
 The full installed product exposes the same implementation through:
 
@@ -318,8 +345,8 @@ The full installed product exposes the same implementation through:
 colophon bundle verify --bundle <bundle-dir> --json
 ```
 
-Success returns the bundle identity, record digests, an Inspect runtime-method
-summary when applicable, and exactly **six checks**
+For public-bundle/2 and public-bundle/4, success returns the bundle identity, record digests,
+an Inspect runtime-method summary when applicable, and exactly **six checks**
 in this order:
 
 1. `manifest`
@@ -337,6 +364,10 @@ deterministic asset builder. Asset comparison does not add a seventh returned
 check.
 
 ## Presentation and citation
+
+This section describes the five deterministic presentation assets of the v2-derived closures
+(v2, v4, v6, and v7). Public-bundle/5 carries none of them; its citation rules are the shared
+list below, minus every sentence about a badge, card, or share text.
 
 `index.html` is the canonical self-contained human report. It uses inline CSS
 only and no JavaScript, remote resource, object, frame, embed, or active content.

@@ -4,6 +4,16 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { GATED_OPERATIONS } from "./authority/policy.js";
 import { BUNDLE_FORMAT, BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
+import {
+  BUNDLE_V5_FORMAT,
+  PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
+} from "@colophon-claims/verify";
+import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
+import {
+  BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
+  BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE,
+} from "@jinn-network/benchmarking-protocol";
 import { PUBLIC_BUNDLE_FILES } from "./bundle/materialize.js";
 import { PRODUCT_ERROR_CODES } from "./errors.js";
 import { PRODUCT_BRANDING } from "./branding.js";
@@ -147,6 +157,33 @@ describe("product documentation consistency", () => {
     expect(guide).toContain("six checks");
     expect(guide).toMatch(/not confidential|non-confidential/i);
     expect(guide).toMatch(/local immutable emission.*not hosting/is);
+  });
+
+  it("pins the published evidence-native v5 closure, its two profiles, and its reader line", () => {
+    const guide = read(bundleReadmePath);
+    expect(guide).toContain(`\`${BUNDLE_V5_FORMAT}\``);
+    expect(guide).toContain(BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE);
+    expect(guide).toContain(BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE);
+    for (const path of [
+      "benchmark.json",
+      "analysis-manifest.json",
+      "cohort.json",
+      "matrix.json",
+      "report.json",
+      "report-envelope.json",
+      "claim-package.json",
+    ]) {
+      expect(guide, path).toContain(`\`${path}\``);
+    }
+    expect(guide).toContain("`artifacts/<sha256>.bin`");
+    for (const check of EVIDENCE_NATIVE_BUNDLE_V5_CHECKS) expect(guide, check).toContain(`\`${check}\``);
+    expect(guide).toContain("seven checks");
+    // A published format whose reader line the guide never states is an uncheckable promise
+    // (issue #2975): the pin and the claim-package version have to be readable here.
+    expect(guide).toContain(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND);
+    const exactReaderRelease = /verify(@[0-9][^\s]*)/u.exec(PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND)?.[1];
+    expect(guide).toContain(`\`${exactReaderRelease}\``);
+    expect(guide).toContain("`benchmark-product.claim-package/3`");
   });
 
   it("documents the exact private web configuration and package commands", () => {
