@@ -97,6 +97,11 @@ function validate(document: unknown): OfferRecord {
   return parsed.data;
 }
 
+/** Validated record to its one canonical encoding. The single canonicalization point. */
+function canonicalBytes(record: OfferRecord): Uint8Array {
+  return canonicalJsonBytes(withoutUndefinedMembers(record, ""));
+}
+
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
 }
@@ -106,7 +111,7 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
  * canonicalizer). These bytes are the offer's DSSE payload forever.
  */
 export function sealOfferPayload(document: unknown): Uint8Array {
-  return canonicalJsonBytes(withoutUndefinedMembers(validate(document), ""));
+  return canonicalBytes(validate(document));
 }
 
 /**
@@ -122,7 +127,7 @@ export function parseExactOfferPayload(bytes: Uint8Array): OfferRecord {
     invalid("", "payload bytes are not valid UTF-8 JSON");
   }
   const record = validate(json);
-  if (!bytesEqual(canonicalJsonBytes(withoutUndefinedMembers(record, "")), bytes)) {
+  if (!bytesEqual(canonicalBytes(record), bytes)) {
     invalid("", "payload bytes are not the exact canonical JSON encoding of this offer");
   }
   return record;
@@ -152,7 +157,7 @@ export interface SealOfferInput {
 /** Seals the canonical payload and DSSE-signs it under the offer media type (TEP §21.2). */
 export async function sealOffer(input: SealOfferInput): Promise<SealedOffer> {
   const offer = validate(input.offer);
-  const payloadBytes = canonicalJsonBytes(withoutUndefinedMembers(offer, ""));
+  const payloadBytes = canonicalBytes(offer);
   const sealed = await sealSignedPayload({
     payloadBytes,
     payloadType: OFFER_RECORD_MEDIA_TYPE,
