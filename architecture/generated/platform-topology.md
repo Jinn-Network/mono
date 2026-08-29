@@ -848,29 +848,46 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/ordering/transcripts.json | — | — | — |
 | conformance | @jinn-network/benchmarking-testing | packages/benchmarking/testing/src/index.ts | . | ./dist/index.d.ts<br>./dist/index.js | — |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json | — | — | https://spec.jinn.network/facts/benchmark-accounting/v1 |
+| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v2.json | — | — | https://spec.jinn.network/facts/benchmark-accounting/v2 |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.v1.json | — | — | https://spec.jinn.network/facts/benchmark/v1 |
+| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.v2.json | — | — | https://spec.jinn.network/facts/benchmark/v2 |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.v1.json | — | — | https://spec.jinn.network/facts/benchmark-matrix/v1 |
+| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.v2.json | — | — | https://spec.jinn.network/facts/benchmark-matrix/v2 |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v1.json | — | — | https://spec.jinn.network/facts/benchmark-report/v1 |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v2.json | — | — | https://spec.jinn.network/facts/benchmark-report/v2 |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.v1.json | — | — | https://spec.jinn.network/facts/benchmark-run/v1 |
+| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.v2.json | — | — | https://spec.jinn.network/facts/benchmark-run/v2 |
 | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.v1.json | — | — | https://spec.jinn.network/facts/chain-environment/v1 |
+| profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.v2.json | — | — | https://spec.jinn.network/facts/chain-environment/v2 |
 | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/crypto-environment.v1.json | — | — | https://spec.jinn.network/facts/crypto-environment/v1 |
+| profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/crypto-environment.v2.json | — | — | https://spec.jinn.network/facts/crypto-environment/v2 |
 | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/information-world.v1.json | — | — | https://spec.jinn.network/facts/information-world/v1 |
+| profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/information-world.v2.json | — | — | https://spec.jinn.network/facts/information-world/v2 |
 | profiles | @jinn-network/record-discovery-facts-environments | packages/discovery/facts/environments/profiles/environment.v1.json | — | — | https://spec.jinn.network/facts/environment/v1 |
+| profiles | @jinn-network/record-discovery-facts-environments | packages/discovery/facts/environments/profiles/environment.v2.json | — | — | https://spec.jinn.network/facts/environment/v2 |
 | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/execution-evidence.v1.json | — | — | https://spec.jinn.network/facts/execution-evidence/v1 |
 | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/execution-evidence.v2.json | — | — | https://spec.jinn.network/facts/execution-evidence/v2 |
+| profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/execution-evidence.v3.json | — | — | https://spec.jinn.network/facts/execution-evidence/v3 |
 | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/execution-verification.v1.json | — | — | https://spec.jinn.network/facts/execution-verification/v1 |
+| profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/execution-verification.v2.json | — | — | https://spec.jinn.network/facts/execution-verification/v2 |
 | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/result-evaluation.v1.json | — | — | https://spec.jinn.network/facts/result-evaluation/v1 |
 | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/result-evaluation.v2.json | — | — | https://spec.jinn.network/facts/result-evaluation/v2 |
+| profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/result-evaluation.v3.json | — | — | https://spec.jinn.network/facts/result-evaluation/v3 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/checkpoint.v1.json | — | — | https://spec.jinn.network/facts/checkpoint/v1 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/delivery.v1.json | — | — | https://spec.jinn.network/facts/delivery/v1 |
+| profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/delivery.v2.json | — | — | https://spec.jinn.network/facts/delivery/v2 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/evaluation-spec.v1.json | — | — | https://spec.jinn.network/facts/evaluation-spec/v1 |
+| profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/evaluation-spec.v2.json | — | — | https://spec.jinn.network/facts/evaluation-spec/v2 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/plugin.v1.json | — | — | https://spec.jinn.network/facts/plugin/v1 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/profile-document.v1.json | — | — | https://spec.jinn.network/facts/profile-document/v1 |
+| profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/profile-document.v2.json | — | — | https://spec.jinn.network/facts/profile-document/v2 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/submission.v1.json | — | — | https://spec.jinn.network/facts/submission/v1 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/task.v1.json | — | — | https://spec.jinn.network/facts/task/v1 |
+| profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/task.v2.json | — | — | https://spec.jinn.network/facts/task/v2 |
 | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/authorization.v1.json | — | — | https://spec.jinn.network/facts/authorization/v1 |
+| profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/authorization.v2.json | — | — | https://spec.jinn.network/facts/authorization/v2 |
 | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/key-binding.v1.json | — | — | https://spec.jinn.network/facts/key-binding/v1 |
+| profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/key-binding.v2.json | — | — | https://spec.jinn.network/facts/key-binding/v2 |
 | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/trust-policy.v1.json | — | — | https://spec.jinn.network/facts/trust-policy/v1 |
 | fixtures | @jinn-network/record-discovery-protocol | packages/discovery/protocol/fixtures/derivation-annotation-tolerance/annotation-with-registered-additions.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-protocol | packages/discovery/protocol/fixtures/equivalence/key-shuffled.json | — | — | — |
@@ -1670,29 +1687,46 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | Identifier | Field | Kind | Package | Source |
 | --- | --- | --- | --- | --- |
 | https://spec.jinn.network/facts/authorization/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/authorization.v1.json |
+| https://spec.jinn.network/facts/authorization/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/authorization.v2.json |
 | https://spec.jinn.network/facts/benchmark-accounting/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json |
+| https://spec.jinn.network/facts/benchmark-accounting/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v2.json |
 | https://spec.jinn.network/facts/benchmark-matrix/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.v1.json |
+| https://spec.jinn.network/facts/benchmark-matrix/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.v2.json |
 | https://spec.jinn.network/facts/benchmark-report/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v1.json |
 | https://spec.jinn.network/facts/benchmark-report/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v2.json |
 | https://spec.jinn.network/facts/benchmark-run/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.v1.json |
+| https://spec.jinn.network/facts/benchmark-run/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.v2.json |
 | https://spec.jinn.network/facts/benchmark/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.v1.json |
+| https://spec.jinn.network/facts/benchmark/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.v2.json |
 | https://spec.jinn.network/facts/chain-environment/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.v1.json |
+| https://spec.jinn.network/facts/chain-environment/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.v2.json |
 | https://spec.jinn.network/facts/checkpoint/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/checkpoint.v1.json |
 | https://spec.jinn.network/facts/crypto-environment/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/crypto-environment.v1.json |
+| https://spec.jinn.network/facts/crypto-environment/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/crypto-environment.v2.json |
 | https://spec.jinn.network/facts/delivery/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/delivery.v1.json |
+| https://spec.jinn.network/facts/delivery/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/delivery.v2.json |
 | https://spec.jinn.network/facts/environment/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-environments | packages/discovery/facts/environments/profiles/environment.v1.json |
+| https://spec.jinn.network/facts/environment/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-environments | packages/discovery/facts/environments/profiles/environment.v2.json |
 | https://spec.jinn.network/facts/evaluation-spec/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/evaluation-spec.v1.json |
+| https://spec.jinn.network/facts/evaluation-spec/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/evaluation-spec.v2.json |
 | https://spec.jinn.network/facts/execution-evidence/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/execution-evidence.v1.json |
 | https://spec.jinn.network/facts/execution-evidence/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/execution-evidence.v2.json |
+| https://spec.jinn.network/facts/execution-evidence/v3 | `profile` | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/execution-evidence.v3.json |
 | https://spec.jinn.network/facts/execution-verification/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/execution-verification.v1.json |
+| https://spec.jinn.network/facts/execution-verification/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/execution-verification.v2.json |
 | https://spec.jinn.network/facts/information-world/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/information-world.v1.json |
+| https://spec.jinn.network/facts/information-world/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/information-world.v2.json |
 | https://spec.jinn.network/facts/key-binding/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/key-binding.v1.json |
+| https://spec.jinn.network/facts/key-binding/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/key-binding.v2.json |
 | https://spec.jinn.network/facts/plugin/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/plugin.v1.json |
 | https://spec.jinn.network/facts/profile-document/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/profile-document.v1.json |
+| https://spec.jinn.network/facts/profile-document/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/profile-document.v2.json |
 | https://spec.jinn.network/facts/result-evaluation/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/result-evaluation.v1.json |
 | https://spec.jinn.network/facts/result-evaluation/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/result-evaluation.v2.json |
+| https://spec.jinn.network/facts/result-evaluation/v3 | `profile` | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/result-evaluation.v3.json |
 | https://spec.jinn.network/facts/submission/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/submission.v1.json |
 | https://spec.jinn.network/facts/task/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/task.v1.json |
+| https://spec.jinn.network/facts/task/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/task.v2.json |
 | https://spec.jinn.network/facts/trust-policy/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/trust-policy.v1.json |
 | https://spec.jinn.network/profiles/evidence-repository-ipfs-registration/v1/registration.schema.json | `$id` | profiles | @jinn-network/evidence-repository-ipfs | packages/evidence/repository-ipfs/profile/v1/registration.schema.json |
 | https://spec.jinn.network/profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json | `$id` | schemas | @jinn-network/evidence-repository-oci | packages/evidence/repository-oci/profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json |

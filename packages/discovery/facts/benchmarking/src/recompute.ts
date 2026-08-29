@@ -8,6 +8,8 @@ import {
   parseReport,
   parseRun,
   parseSignedReportRecord,
+  readMatrixPublicationExtension,
+  readRunPublicationExtension,
   serializeCanonicalJson,
 } from "@jinn-network/benchmarking-records";
 import { recordDigest } from "@jinn-network/record-discovery-protocol";
@@ -240,6 +242,101 @@ export const benchmarkAccountingRecompute: RecordFactRecompute = async (bytes, r
   }
 };
 
+// --- v2 revisions (join-edge completeness, protocol design §12 amendment 2026-08-28) --------
+//
+// The added fields point at records this tree cannot parse — Tasks, Submissions, Deliveries and
+// verdicts are owned by other trees, and this leaf's frozen dependency set is the benchmarking
+// tree plus discovery. So they cannot use the fail-closed `referencedKindOk` path the
+// same-tree digests above use; they are emitted directly from the record's own statement, the
+// posture the environment leaf documents for its image digest. Reference-bearing labels the
+// indexing relation; it does not by itself promise the target is retrievable.
+
+/** Ordered de-duplication: a matrix names the same Task once per cell that ran it. */
+function distinct(digests: readonly (`sha256:${string}` | undefined)[]): `sha256:${string}`[] {
+  const seen = new Set<string>();
+  const out: `sha256:${string}`[] = [];
+  for (const digest of digests) {
+    if (digest === undefined || seen.has(digest)) continue;
+    seen.add(digest);
+    out.push(digest);
+  }
+  return out;
+}
+
+/** v1's card plus the Tasks the benchmark is made of and its supersession pointer. */
+export const benchmarkRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await benchmarkRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const record = parseBenchmark(bytes);
+    const taskDigests = distinct(record.items.map((item) => asPrefixedDigest(item.task.digest.sha256)));
+    const supersedes = asPrefixedDigest(record.supersedes?.digest.sha256);
+    return {
+      ...facts,
+      taskDigests,
+      ...(supersedes === undefined ? {} : { supersedesDigest: supersedes }),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
+/**
+ * v1's card plus the per-cell references. A matrix is already the join table between a run's
+ * cells and the records that produced them; v1 stated only the run, so the join stopped there.
+ *
+ * `verdictDigests` carries every verdict the cells name. Validity is the matrix's own judgment
+ * about a verdict, not an edge to a different record, so it stays in the record.
+ */
+export const matrixRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await matrixRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const record = parseMatrix(bytes);
+    // Mandatory for assembly v2 and rejected outright for anything else, so an absent extension
+    // means an assembly-v1 matrix, which pins no accounting record and owes the card no edge.
+    const accounting = asPrefixedDigest(
+      readMatrixPublicationExtension(record)?.accounting.digest.sha256,
+    );
+    return {
+      ...facts,
+      taskDigests: distinct(record.cells.map((cell) => asPrefixedDigest(cell.taskDigest))),
+      submissionDigests: distinct(record.cells.map((cell) => cell.submission as `sha256:${string}` | undefined)),
+      deliveryDigests: distinct(record.cells.map((cell) => cell.delivery as `sha256:${string}` | undefined)),
+      verdictDigests: distinct(
+        record.cells.flatMap((cell) => cell.verdicts as `sha256:${string}`[]),
+      ),
+      ...(accounting === undefined ? {} : { accountingDigest: accounting }),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
+/**
+ * v1's card plus the registration artifacts the Run's publication extension pins. The extension
+ * is namespaced but its shape is closed and schema-validated, so `registrationArtifacts` is an
+ * enumerable field. An arm's `pinning` map stays outside the rule: its keys are not enumerated
+ * by the defining schema, so there is no field for a profile to declare.
+ */
+export const runRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await runRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const record = parseRun(bytes);
+    const extension = readRunPublicationExtension(record);
+    if (extension === undefined) return facts;
+    return {
+      ...facts,
+      registrationArtifactDigests: distinct(
+        extension.registrationArtifacts.map((entry) => asPrefixedDigest(entry.artifact.digest.sha256)),
+      ),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
 /** The leaf's `FactsRecompute` registry entry (program §7.13): the host
  * assembles the tree-wide registry by merging each leaf's export. Unknown
  * kinds return `undefined` (preserved unknown-kind behavior). */
@@ -260,6 +357,62 @@ export const BENCHMARKING_FACTS_RECOMPUTE: FactsRecompute = {
         return benchmarkAccountingRecompute;
       default:
         return undefined;
+    }
+  },
+};
+
+/**
+ * v1's card plus every record and artifact the cells' dispatches name. An accounting record is a
+ * closure claim over dispatches -- the same join-table shape as a Matrix -- so leaving those
+ * references off the card left the closure unwalkable from the feed.
+ *
+ * Cross-tree targets again: emitted from the record's own statement, deduplicated in record order.
+ * A native artifact whose availability is not `public` carries no descriptor and contributes no
+ * edge; its absence is the record's own statement, not a gap in the card.
+ */
+export const benchmarkAccountingRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await benchmarkAccountingRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const record = parseBenchmarkAccounting(bytes);
+    const dispatches = record.cells.flatMap((cell) => cell.dispatches);
+    return {
+      ...facts,
+      submissionDigests: distinct(dispatches.map((d) => asPrefixedDigest(d.submission.record.digest.sha256))),
+      deliveryDigests: distinct(dispatches.map((d) => asPrefixedDigest(d.delivery?.record.digest.sha256))),
+      evidenceDigests: distinct(
+        dispatches.flatMap((d) => d.evidence.map((reference) => asPrefixedDigest(reference.record.digest.sha256))),
+      ),
+      evaluationDigests: distinct(
+        dispatches.flatMap((d) => d.evaluations.map((reference) => asPrefixedDigest(reference.record.digest.sha256))),
+      ),
+      observationArchiveDigests: distinct(dispatches.map((d) => asPrefixedDigest(d.observations?.digest.sha256))),
+      correlationArtifactDigests: distinct(
+        dispatches.flatMap((d) => d.correlations.map((correlation) => asPrefixedDigest(correlation.artifact.digest.sha256))),
+      ),
+      nativeArtifactDigests: distinct(
+        dispatches.flatMap((d) => d.nativeArtifacts.map((native) => asPrefixedDigest(native.artifact?.digest.sha256))),
+      ),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
+/** Explicit registry for the coexisting Benchmarking facts v2 profiles. */
+export const BENCHMARKING_FACTS_RECOMPUTE_V2: FactsRecompute = {
+  get(kind: string): RecordFactRecompute | undefined {
+    switch (kind) {
+      case BENCHMARK_RECORD_KIND:
+        return benchmarkRecomputeV2;
+      case RUN_RECORD_KIND:
+        return runRecomputeV2;
+      case MATRIX_RECORD_KIND:
+        return matrixRecomputeV2;
+      case BENCHMARK_ACCOUNTING_RECORD_KIND:
+        return benchmarkAccountingRecomputeV2;
+      default:
+        return BENCHMARKING_FACTS_RECOMPUTE.get(kind);
     }
   },
 };

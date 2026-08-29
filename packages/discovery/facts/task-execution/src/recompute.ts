@@ -209,6 +209,66 @@ export const evaluationSpecRecompute: RecordFactRecompute = async (bytes) => {
 export const pluginRecompute: RecordFactRecompute = async () => noFacts();
 export const checkpointRecompute: RecordFactRecompute = async () => noFacts();
 
+// --- v2 revisions (join-edge completeness, protocol design §12 amendment 2026-08-28) --------
+//
+// A ResourceDescriptor is satisfiable by `uri` or inline `content` alone (§6.4). Only the
+// digest-bearing ones pin anything, so only those are edges; a uri-only input or output names a
+// location, not a record, and is not carried. Both fns keep v1's every field.
+
+/** A digest-bearing descriptor's `sha256`, in the prefixed spelling the cards carry. */
+function descriptorDigest(value: unknown): `sha256:${string}` | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const digest = (value as { digest?: Record<string, string> }).digest;
+  return prefixedSha256(digest);
+}
+
+/** The digest-bearing members of a descriptor list, in record order. */
+function descriptorListDigests(value: unknown): `sha256:${string}`[] {
+  if (!Array.isArray(value)) return [];
+  const digests: `sha256:${string}`[] = [];
+  for (const entry of value) {
+    const digest = descriptorDigest(entry);
+    if (digest !== undefined) digests.push(digest);
+  }
+  return digests;
+}
+
+/**
+ * v1's card plus the inputs the Task pins and the output JSON Schemas its slots pin. `outputs` is
+ * a closed array of a closed slot object, and a slot's `schema` is the same optional-digest
+ * descriptor `profile-document.v2` carries for `outputConventions.slots[].schema` -- so the two
+ * kinds answer "which records pin schema `sha256:X`" the same way rather than disagreeing about a
+ * structurally identical field. An embedded schema carries no digest and is not an edge, which
+ * `descriptorListDigests` already handles by skipping any entry without one.
+ */
+export const taskRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await taskRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  const result = TaskSpecificationSchema.safeParse(parseJson(bytes));
+  if (!result.success) return noFacts();
+  return {
+    ...facts,
+    inputDigests: descriptorListDigests(result.data.inputs),
+    outputSlotSchemaDigests: descriptorListDigests(
+      result.data.outputs.map((slot) => slot.schema),
+    ),
+  };
+};
+
+export const deliveryRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await deliveryRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  const result = DeliveryRecordSchema.safeParse(parseJson(bytes));
+  if (!result.success) return noFacts();
+  const delivery = result.data;
+  return {
+    ...facts,
+    resultDigests: descriptorListDigests(delivery.outputs),
+    evidenceDigests: (delivery.evidenceRecords ?? []).map((reference) => reference.digest),
+    ...(delivery.supersedes === undefined ? {} : { supersedesDigest: delivery.supersedes }),
+  };
+};
+
 /** The leaf's `FactsRecompute` registry entry (program §7.13): the host
  * assembles the tree-wide registry by merging each leaf's export. */
 export const TASK_EXECUTION_FACTS_RECOMPUTE: FactsRecompute = {
@@ -230,6 +290,123 @@ export const TASK_EXECUTION_FACTS_RECOMPUTE: FactsRecompute = {
         return checkpointRecompute;
       default:
         return undefined;
+    }
+  },
+};
+
+/**
+ * The ABIs a state-predicate spec reads through, from every declarative call target its success
+ * predicates name -- a `callResult` predicate's own call, and a `reportedValue` predicate's
+ * ground-truth call. The read key a consumer derives is a function of the ABI digest, so two
+ * specs reading one function through different ABIs are different specs, and "which specs read
+ * against ABI sha256:X" is the question asked when an ABI turns out to be wrong. An
+ * `encodedCall` target names no ABI and contributes nothing.
+ *
+ * `successPredicates` is the whole reachable set, not the first list that matched. A block's
+ * other two predicate lists cannot carry a call target: `safetyConstraints` is restricted by
+ * `SAFETY_CONSTRAINT_KINDS` to five kinds that read no state through an ABI, and the block's
+ * `measurements` use the observation vocabulary, whose `reportedValue` variant carries a name
+ * and nothing else. `recompute.test.ts` pins the first of those by construction.
+ */
+function abiRefDigests(predicates: readonly unknown[]): `sha256:${string}`[] {
+  const seen = new Set<string>();
+  const digests: `sha256:${string}`[] = [];
+  for (const predicate of predicates) {
+    if (typeof predicate !== "object" || predicate === null) continue;
+    const bag = predicate as { call?: unknown; groundTruth?: { call?: unknown } };
+    for (const target of [bag.call, bag.groundTruth?.call]) {
+      if (typeof target !== "object" || target === null) continue;
+      const digest = descriptorDigest((target as { abiRef?: unknown }).abiRef);
+      if (digest === undefined || seen.has(digest)) continue;
+      seen.add(digest);
+      digests.push(digest);
+    }
+  }
+  return digests;
+}
+
+/**
+ * v1's `family` plus every component the spec pins by digest. Which of them a given spec carries
+ * is decided by its family: only a state-predicate block names an environment record and the ABIs
+ * its predicates read through, only a deterministic-process block names an image, test material
+ * and a parser, and so on. A scalar edge the spec's family does not have is not announced at all;
+ * a list edge its family *does* have is announced even when empty, because "this spec pins no
+ * test material" is a true statement recomputed from the record, while an absent scalar is not a
+ * statement at all.
+ *
+ * `grader` is one descriptor or a list of them, and is the access-classified case the
+ * completeness rule leads with: a private grader's bytes are exactly what a consumer cannot
+ * retrieve, so if the card does not name it, nothing can join on it.
+ */
+export const evaluationSpecRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await evaluationSpecRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  const result = EvaluationSpecSchema.safeParse(parseJson(bytes));
+  if (!result.success) return noFacts();
+  const spec = result.data;
+  const block = (spec.familyBlock ?? {}) as Record<string, unknown>;
+  const graders = Array.isArray(spec.grader) ? spec.grader : [spec.grader];
+  const edges: Record<string, RecordFactValue> = {
+    ...facts,
+    graderDigests: descriptorListDigests(graders),
+  };
+  const add = (name: string, value: RecordFactValue | undefined): void => {
+    if (value !== undefined) edges[name] = value;
+  };
+  add("environmentRecordDigest", descriptorDigest(block.environmentRecord));
+  if (Array.isArray(block.successPredicates)) {
+    edges.abiRefDigests = abiRefDigests(block.successPredicates);
+  }
+  add("imageDigest", descriptorDigest(block.image));
+  if (Array.isArray(block.testMaterial)) {
+    edges.testMaterialDigests = descriptorListDigests(block.testMaterial);
+  }
+  add("parserDigest", (block.parser as { digest?: string } | undefined)?.digest);
+  add("rubricDigest", descriptorDigest(block.rubric));
+  add("judgeOutputSchemaDigest", descriptorDigest(block.judgeOutputSchema));
+  add("reviewFormDigest", descriptorDigest(block.reviewForm));
+  if (Array.isArray(block.subSpecs)) {
+    edges.subSpecDigests = descriptorListDigests(
+      block.subSpecs.map((sub) => (sub as { spec?: unknown }).spec),
+    );
+  }
+  return edges;
+};
+
+/**
+ * v1's card plus the output-slot schemas a profile pins. v1 declared only `extends`, but a slot's
+ * `schema` is the same optional-digest ResourceDescriptor this leaf already treats as an edge on
+ * an evaluation spec: satisfiable by a `uri` alone under §6.4, in which case it pins nothing and
+ * is not carried, and an edge when it does carry a digest. "Which profiles validate output
+ * against schema `sha256:X`" is the query a wrong schema makes someone ask.
+ */
+export const profileDocumentRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await profileDocumentRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  const result = TaskProfileDocumentSchema.safeParse(parseJson(bytes));
+  if (!result.success) return noFacts();
+  return {
+    ...facts,
+    outputSlotSchemaDigests: descriptorListDigests(
+      result.data.outputConventions.slots.map((slot) => (slot as { schema?: unknown }).schema),
+    ),
+  };
+};
+
+/** Explicit registry for the coexisting Task-Execution facts v2 profiles. */
+export const TASK_EXECUTION_FACTS_RECOMPUTE_V2: FactsRecompute = {
+  get(kind: string): RecordFactRecompute | undefined {
+    switch (kind) {
+      case RECORD_KINDS.task:
+        return taskRecomputeV2;
+      case RECORD_KINDS.delivery:
+        return deliveryRecomputeV2;
+      case RECORD_KINDS.evaluationSpec:
+        return evaluationSpecRecomputeV2;
+      case RECORD_KINDS.profileDocument:
+        return profileDocumentRecomputeV2;
+      default:
+        return TASK_EXECUTION_FACTS_RECOMPUTE.get(kind);
     }
   },
 };

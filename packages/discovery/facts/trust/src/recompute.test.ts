@@ -22,8 +22,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   TRUST_FACTS_RECOMPUTE,
+  TRUST_FACTS_RECOMPUTE_V2,
   authorizationRecompute,
+  authorizationRecomputeV2,
   keyBindingRecompute,
+  keyBindingRecomputeV2,
   trustPolicyRecompute,
 } from "./recompute.js";
 
@@ -161,5 +164,112 @@ describe("facts/trust recompute functions", () => {
     expect(TRUST_FACTS_RECOMPUTE.get(RECORD_KINDS.authorization)).toBe(authorizationRecompute);
     expect(TRUST_FACTS_RECOMPUTE.get(RECORD_KINDS.trustPolicy)).toBe(trustPolicyRecompute);
     expect(TRUST_FACTS_RECOMPUTE.get(RECORD_KINDS.task)).toBeUndefined();
+  });
+});
+
+describe("facts/trust v2 recompute: the join edges v1 left out", () => {
+  it("carries the ceremony evidence and every cited anchor, with real values", async () => {
+    const ceremony = fakeDigest("ceremony-v2");
+    const anchorOne = fakeDigest("anchor-1");
+    const anchorTwo = fakeDigest("anchor-2");
+    const binding: KeyBinding = {
+      protocol: TRUST_KEY_BINDING_FORMAT,
+      agent: "urn:uuid:66666666-6666-6666-6666-666666666666",
+      key: { publicKey: "fake-public-key-bytes", keyid: KEY_DID, algorithm: "Ed25519", didKey: KEY_DID },
+      voucher: { kind: "oidc-machine", subject: "repo:acme/example:ref:refs/heads/main" },
+      relationship: "controls",
+      scope: ["bindings"],
+      validFrom: "2026-07-28T00:00:00.000Z",
+      ceremony: { type: "oidc-machine", digest: ceremony },
+      strength: deriveStrength("oidc-machine"),
+      anchors: [{ digest: anchorOne }, { digest: anchorTwo }],
+    };
+    const sealed = await sealKeyBinding(binding, fakeSigner);
+
+    const v1 = await keyBindingRecompute(sealed.envelopeBytes, noReferencedBytes);
+    const v2 = await keyBindingRecomputeV2(sealed.envelopeBytes, noReferencedBytes);
+    expect(v2).toMatchObject(v1);
+    expect(v2["ceremony.digest"]).toBe(ceremony);
+    // Order is the record's own, so an ordinal in the edge index means the same anchor twice.
+    expect(v2.anchorDigests).toEqual([anchorOne, anchorTwo]);
+  });
+
+  it("states an empty anchor list rather than omitting it, since `anchors` is required", async () => {
+    const binding: KeyBinding = {
+      protocol: TRUST_KEY_BINDING_FORMAT,
+      agent: "urn:uuid:77777777-7777-7777-7777-777777777777",
+      key: { publicKey: "fake-public-key-bytes", keyid: KEY_DID, algorithm: "Ed25519", didKey: KEY_DID },
+      voucher: { kind: "github-human", profile: "https://github.com/example", id: 4242 },
+      relationship: "operates",
+      scope: ["bindings"],
+      validFrom: "2026-07-28T00:00:00.000Z",
+      ceremony: { type: "github-human", digest: fakeDigest("ceremony-weak") },
+      strength: deriveStrength("github-human"),
+      anchors: [],
+    };
+    const sealed = await sealKeyBinding(binding, fakeSigner);
+    const facts = await keyBindingRecomputeV2(sealed.envelopeBytes, noReferencedBytes);
+    expect(facts.anchorDigests).toEqual([]);
+    expect(facts["ceremony.digest"]).toBe(fakeDigest("ceremony-weak"));
+  });
+
+  it("carries the delegation chain and the statement's subjects, lifted into the sha256: spelling", async () => {
+    const parentOne = fakeDigest("parent-authorization-1");
+    const parentTwo = fakeDigest("parent-authorization-2");
+    const statement: AuthorizationStatement = {
+      _type: IN_TOTO_STATEMENT_TYPE,
+      subject: [
+        { name: "task", digest: { sha256: "c".repeat(64) } },
+        { name: "delivery", digest: { sha256: "d".repeat(64) } },
+      ],
+      predicateType: AUTHORIZATION_PREDICATE_TYPE,
+      predicate: {
+        issuer: "urn:uuid:88888888-8888-8888-8888-888888888888",
+        capabilities: ["deliveries"],
+        expiry: "2026-08-28T00:00:00.000Z",
+        nonce: "nonce-v2",
+        proofs: [parentOne, parentTwo],
+        revocation: fakeDigest("revocation-v2"),
+      },
+    };
+    const sealed = await sealAuthorization(statement, fakeSigner);
+
+    const v1 = await authorizationRecompute(sealed.envelopeBytes, noReferencedBytes);
+    const v2 = await authorizationRecomputeV2(sealed.envelopeBytes, noReferencedBytes);
+    expect(v2).toMatchObject(v1);
+    expect(v2.proofs).toEqual([parentOne, parentTwo]);
+    // A subject descriptor carries bare hex; every digest fact on these cards carries `sha256:`.
+    expect(v2.subjectDigests).toEqual([`sha256:${"c".repeat(64)}`, `sha256:${"d".repeat(64)}`]);
+  });
+
+  it("omits the delegation chain on a root authorization but still states its subjects", async () => {
+    const statement: AuthorizationStatement = {
+      _type: IN_TOTO_STATEMENT_TYPE,
+      subject: [{ name: "task", digest: { sha256: "e".repeat(64) } }],
+      predicateType: AUTHORIZATION_PREDICATE_TYPE,
+      predicate: {
+        issuer: "urn:uuid:99999999-9999-9999-9999-999999999999",
+        capabilities: ["deliveries"],
+        expiry: "2026-08-28T00:00:00.000Z",
+        nonce: "nonce-root",
+      },
+    };
+    const sealed = await sealAuthorization(statement, fakeSigner);
+    const facts = await authorizationRecomputeV2(sealed.envelopeBytes, noReferencedBytes);
+    expect(facts).not.toHaveProperty("proofs");
+    expect(facts.subjectDigests).toEqual([`sha256:${"e".repeat(64)}`]);
+  });
+
+  it("recomputes to no facts for bytes that do not conform", async () => {
+    const bytes = new TextEncoder().encode("{");
+    expect(await keyBindingRecomputeV2(bytes, noReferencedBytes)).toEqual({});
+    expect(await authorizationRecomputeV2(bytes, noReferencedBytes)).toEqual({});
+  });
+
+  it("the v2 registry revises two kinds and falls through to v1 for the trust policy", () => {
+    expect(TRUST_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.keyBinding)).toBe(keyBindingRecomputeV2);
+    expect(TRUST_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.authorization)).toBe(authorizationRecomputeV2);
+    expect(TRUST_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.trustPolicy)).toBe(trustPolicyRecompute);
+    expect(TRUST_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.task)).toBeUndefined();
   });
 });

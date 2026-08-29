@@ -72,6 +72,51 @@ export const trustPolicyRecompute: RecordFactRecompute = async (bytes) => {
   }
 };
 
+// --- v2 revisions (join-edge completeness, protocol design §12 amendment 2026-08-28) --------
+//
+// Every added field is a digest the record states in its own sealed bytes, read through the same
+// structural `validate*` path v1 uses, so `refs` stays unused. A subject descriptor and a
+// ceremony reference carry bare-hex `digest.sha256`; they are lifted into the `sha256:` spelling
+// every other digest fact on these cards already carries, so one card never mixes two spellings.
+// Reference-bearing labels the indexing relation; it does not by itself promise the target is a
+// retrievable announceable record (ceremony evidence and time anchors are artifacts, not records).
+
+/** v1's card plus the ceremony evidence the binding rests on and the anchors it cites. */
+export const keyBindingRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await keyBindingRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const report = validateKeyBinding(bytes);
+    if (!report.conforms || report.value === undefined) return noFacts();
+    const { value } = report;
+    return {
+      ...facts,
+      "ceremony.digest": value.ceremony.digest,
+      anchorDigests: value.anchors.map((anchor) => anchor.digest),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
+/** v1's card plus the delegation chain it attenuates and the subjects it authorizes over. */
+export const authorizationRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await authorizationRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return noFacts();
+  try {
+    const report = validateAuthorization(bytes);
+    if (!report.conforms || report.value === undefined) return noFacts();
+    const { subject, predicate } = report.value;
+    return {
+      ...facts,
+      subjectDigests: subject.map((descriptor) => `sha256:${descriptor.digest.sha256}` as const),
+      ...(predicate.proofs !== undefined ? { proofs: predicate.proofs } : {}),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
 /** The leaf's `FactsRecompute` registry entry (program §7.13): the host
  * assembles the tree-wide registry by merging each leaf's export. */
 export const TRUST_FACTS_RECOMPUTE: FactsRecompute = {
@@ -85,6 +130,23 @@ export const TRUST_FACTS_RECOMPUTE: FactsRecompute = {
         return trustPolicyRecompute;
       default:
         return undefined;
+    }
+  },
+};
+
+/**
+ * Explicit registry for the coexisting Trust facts v2 profiles. `trust-policy` has no v2 — its
+ * v1 outbound set was already complete — so it falls through to the v1 recompute.
+ */
+export const TRUST_FACTS_RECOMPUTE_V2: FactsRecompute = {
+  get(kind: string): RecordFactRecompute | undefined {
+    switch (kind) {
+      case RECORD_KINDS.keyBinding:
+        return keyBindingRecomputeV2;
+      case RECORD_KINDS.authorization:
+        return authorizationRecomputeV2;
+      default:
+        return TRUST_FACTS_RECOMPUTE.get(kind);
     }
   },
 };

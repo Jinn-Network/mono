@@ -2,16 +2,22 @@ import { readFile } from "node:fs/promises";
 
 import { RECORD_KINDS, recordDigest } from "@jinn-network/record-discovery-protocol";
 import type { ReferencedBytes } from "@jinn-network/record-discovery-protocol";
-import { sealDelivery, sealSubmission } from "@jinn-network/task-execution-protocol";
+import { sealDelivery, sealSubmission, sealTask } from "@jinn-network/task-execution-protocol";
+import { sealEvaluationSpec } from "@jinn-network/task-execution-profiles";
 import { describe, expect, it } from "vitest";
 
 import {
   TASK_EXECUTION_FACTS_RECOMPUTE,
+  TASK_EXECUTION_FACTS_RECOMPUTE_V2,
   checkpointRecompute,
   deliveryRecompute,
+  deliveryRecomputeV2,
+  taskRecomputeV2,
   evaluationSpecRecompute,
+  evaluationSpecRecomputeV2,
   pluginRecompute,
   profileDocumentRecompute,
+  profileDocumentRecomputeV2,
   submissionRecompute,
   taskRecompute,
 } from "./recompute.js";
@@ -41,6 +47,18 @@ async function loadGoldenDeliveryBytes(): Promise<Uint8Array> {
 
 async function loadRepositoryWorkProfileBytes(): Promise<Uint8Array> {
   return fixtureBytes("@jinn-network/task-execution-profiles/profiles/task-profiles/repository-work/1.0/profile.json");
+}
+
+async function loadDeterministicEvaluationSpecBytes(): Promise<Uint8Array> {
+  return fixtureBytes(
+    "@jinn-network/task-execution-profiles/fixtures/evaluation-spec/golden/deterministic-minimal.json",
+  );
+}
+
+async function loadStatePredicateSpecBytes(): Promise<Uint8Array> {
+  return fixtureBytes(
+    "@jinn-network/task-execution-profiles/fixtures/evaluation-spec/golden/state-predicate-minimal.json",
+  );
 }
 
 async function loadSweRebenchEvaluationSpecBytes(): Promise<Uint8Array> {
@@ -186,5 +204,245 @@ describe("facts/task-execution recompute functions", () => {
     expect(TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.plugin)).toBe(pluginRecompute);
     expect(TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.checkpoint)).toBe(checkpointRecompute);
     expect(TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.executionEvidence)).toBeUndefined();
+  });
+});
+
+describe("v2 recompute: the join edges v1 left out", () => {
+  it("states an empty input list for a Task that supplies none, keeping every v1 fact", async () => {
+    const bytes = await loadGoldenTaskBytes();
+    const v1 = await taskRecompute(bytes, noReferencedBytes);
+    expect(await taskRecomputeV2(bytes, noReferencedBytes)).toEqual({
+      ...v1,
+      inputDigests: [],
+      outputSlotSchemaDigests: [],
+    });
+  });
+
+  it("names a Task's digest-pinned inputs and skips the ones that pin nothing", async () => {
+    const golden = JSON.parse(new TextDecoder().decode(await loadGoldenTaskBytes())) as Record<string, unknown>;
+    const bytes = sealTask({
+      ...golden,
+      inputs: [
+        { name: "seed", digest: { sha256: "d".repeat(64) } },
+        { name: "docs", uri: "https://example.test/docs" },
+      ],
+    });
+    const facts = await taskRecomputeV2(bytes, noReferencedBytes);
+    expect(facts.inputDigests).toEqual([`sha256:${"d".repeat(64)}`]);
+  });
+
+  it("names a Task's digest-pinned output slot schemas and skips an embedded one", async () => {
+    const golden = JSON.parse(new TextDecoder().decode(await loadGoldenTaskBytes())) as Record<string, unknown>;
+    const slots = golden.outputs as Record<string, unknown>[];
+    const bytes = sealTask({
+      ...golden,
+      outputs: [
+        { ...slots[0], schema: { name: "patch-schema", digest: { sha256: "e".repeat(64) } } },
+        { ...slots[0], name: "inline", schema: { type: "object" } },
+      ],
+    });
+    const facts = await taskRecomputeV2(bytes, noReferencedBytes);
+    expect(facts.outputSlotSchemaDigests).toEqual([`sha256:${"e".repeat(64)}`]);
+  });
+
+  it("names the outputs a Delivery produced", async () => {
+    const bytes = await loadGoldenDeliveryBytes();
+    const facts = await deliveryRecomputeV2(bytes, noReferencedBytes);
+    expect(facts.resultDigests).toEqual([
+      "sha256:dc8231acfaa265ffcb0853fdb6716718e4e75c68f372e73ccea21e7a6f44a0de",
+    ]);
+    expect(facts.evidenceDigests).toEqual([]);
+    expect(facts).not.toHaveProperty("supersedesDigest");
+  });
+
+  it("names the evidence records and the Delivery it replaces", async () => {
+    const bytes = sealDelivery({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      attempt: "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
+      task: `sha256:${"1".repeat(64)}`,
+      outputs: [],
+      outcome: "fulfilled",
+      evidenceRecords: [{ family: "execution-evidence", digest: `sha256:${"2".repeat(64)}` }],
+      supersedes: `sha256:${"3".repeat(64)}`,
+      createdAt: "2026-08-01T00:05:00Z",
+    });
+    const facts = await deliveryRecomputeV2(bytes, noReferencedBytes);
+    expect(facts.evidenceDigests).toEqual([`sha256:${"2".repeat(64)}`]);
+    expect(facts.supersedesDigest).toBe(`sha256:${"3".repeat(64)}`);
+  });
+
+  it("emits no facts for bytes that are not the record kind", async () => {
+    const junk = new TextEncoder().encode("not json at all");
+    expect(await taskRecomputeV2(junk, noReferencedBytes)).toEqual({});
+    expect(await deliveryRecomputeV2(junk, noReferencedBytes)).toEqual({});
+  });
+
+  it("names an evaluation spec's graders and the components its family block pins", async () => {
+    const bytes = await loadSweRebenchEvaluationSpecBytes();
+    const facts = await evaluationSpecRecomputeV2(bytes, noReferencedBytes);
+    expect(facts).toEqual({
+      family: "deterministic-process",
+      graderDigests: ["sha256:d2136b44c86f551b2494d616a8ee7afd58e6f90681f1beb84441113154a13897"],
+      imageDigest: "sha256:e8d6cfe4f52e87a1292f3897bf0bea28e4bde32703e6792bb9b1bc60d3024817",
+      parserDigest: "sha256:d2136b44c86f551b2494d616a8ee7afd58e6f90681f1beb84441113154a13897",
+      // The golden's one test-material entry is uri-only, so it pins nothing and is no edge.
+      testMaterialDigests: [],
+    });
+    expect(facts).not.toHaveProperty("environmentRecordDigest");
+    expect(facts).not.toHaveProperty("rubricDigest");
+    expect(facts).not.toHaveProperty("abiRefDigests");
+  });
+
+  it("names the ABIs a state-predicate spec reads through, from both call sites, de-duplicated", async () => {
+    const abi = "e".repeat(64);
+    const otherAbi = "f".repeat(64);
+    const call = (digest: string) => ({
+      abiRef: { digest: { sha256: digest } },
+      function: "balanceOf(address)",
+      args: [{ type: "address", value: `0x${"1".repeat(40)}` }],
+    });
+    // The profiles package's own golden, with declarative call targets added: two predicates
+    // reading through one ABI, a third through another, and a fourth whose target is an encoded
+    // call and so names no ABI at all.
+    const golden = JSON.parse(
+      new TextDecoder().decode(await loadStatePredicateSpecBytes()),
+    ) as Record<string, unknown>;
+    const block = golden.familyBlock as Record<string, unknown>;
+    const spec = {
+      ...golden,
+      familyBlock: {
+        ...block,
+        successPredicates: [
+          ...(block.successPredicates as unknown[]),
+          { kind: "callResult", to: `0x${"2".repeat(40)}`, call: call(abi), decode: "uint256", cmp: "eq", value: "1" },
+          { kind: "reportedValue", name: "reported", cmp: "eq", value: "1", groundTruth: { to: `0x${"3".repeat(40)}`, call: call(abi), decode: "uint256" } },
+          { kind: "callResult", to: `0x${"4".repeat(40)}`, call: call(otherAbi), decode: "uint256", cmp: "eq", value: "1" },
+          { kind: "callResult", to: `0x${"5".repeat(40)}`, call: { encodedCall: "0xabcdef" }, decode: "uint256", cmp: "eq", value: "1" },
+        ],
+      },
+    };
+    const facts = await evaluationSpecRecomputeV2(sealEvaluationSpec(spec as never).bytes, noReferencedBytes);
+    expect(facts.abiRefDigests).toEqual([`sha256:${abi}`, `sha256:${otherAbi}`]);
+    expect(facts.environmentRecordDigest).toBe(`sha256:${"a".repeat(64)}`);
+    // The golden's grader is uri-only, so it pins nothing and contributes no edge.
+    expect(facts.graderDigests).toEqual([]);
+  });
+
+  it("names what a model-graded, a human-review and a composite spec pin", async () => {
+    // Three families the goldens do not cover. Each has exactly one class of pinned component,
+    // and none of them was exercised by a value before — only by `not.toHaveProperty`.
+    const base = JSON.parse(
+      new TextDecoder().decode(await loadDeterministicEvaluationSpecBytes()),
+    ) as Record<string, unknown>;
+    const descriptor = (seed: string) => ({ name: seed, digest: { sha256: seed.repeat(64).slice(0, 64) } });
+    const digestOf = (seed: string) => `sha256:${seed.repeat(64).slice(0, 64)}`;
+
+    const modelGraded = await evaluationSpecRecomputeV2(sealEvaluationSpec({
+      ...base,
+      family: "model-graded",
+      familyBlock: {
+        rubric: descriptor("1"),
+        judgeModel: { provider: "example", modelId: "judge-1" },
+        judgeOutputSchema: descriptor("2"),
+        structuralGates: {},
+      },
+    } as never).bytes, noReferencedBytes);
+    expect(modelGraded.rubricDigest).toBe(digestOf("1"));
+    expect(modelGraded.judgeOutputSchemaDigest).toBe(digestOf("2"));
+
+    const humanReview = await evaluationSpecRecomputeV2(sealEvaluationSpec({
+      ...base,
+      family: "human-review",
+      familyBlock: {
+        reviewForm: descriptor("3"),
+        reviewerQualifications: {},
+        attestationShape: {},
+      },
+    } as never).bytes, noReferencedBytes);
+    expect(humanReview.reviewFormDigest).toBe(digestOf("3"));
+
+    const composite = await evaluationSpecRecomputeV2(sealEvaluationSpec({
+      ...base,
+      family: "composite",
+      familyBlock: {
+        subSpecs: [
+          { spec: descriptor("4"), weight: "0.5" },
+          { spec: { name: "uri-only", uri: "https://example.test/sub-spec" }, weight: "0.5" },
+        ],
+      },
+    } as never).bytes, noReferencedBytes);
+    // The second sub-spec is uri-only: it pins nothing, so it is not an edge.
+    expect(composite.subSpecDigests).toEqual([digestOf("4")]);
+  });
+
+  it("reads every list that can carry an ABI: a safety constraint cannot, and the schema says so", async () => {
+    // The completeness claim rests on successPredicates being the only reachable call site, so
+    // pin it against the schema rather than against a reading of it: a call-bearing predicate is
+    // not a legal safety constraint, and a spec that puts one there does not seal at all.
+    const golden = JSON.parse(
+      new TextDecoder().decode(await loadStatePredicateSpecBytes()),
+    ) as Record<string, unknown>;
+    const block = golden.familyBlock as Record<string, unknown>;
+    expect(() => sealEvaluationSpec({
+      ...golden,
+      familyBlock: {
+        ...block,
+        safetyConstraints: [{
+          kind: "callResult",
+          to: `0x${"2".repeat(40)}`,
+          call: {
+            abiRef: { digest: { sha256: "e".repeat(64) } },
+            function: "balanceOf(address)",
+            args: [{ type: "address", value: `0x${"1".repeat(40)}` }],
+          },
+          decode: "uint256",
+          cmp: "eq",
+          value: "1",
+        }],
+      },
+      // Bound to the actual refusal, so a golden that drifts cannot keep this green by
+      // failing for some other reason.
+    } as never)).toThrow(/safetyConstraints are bounded to log- and transaction-observable kinds/);
+  });
+
+  it("names the output-slot schemas a profile pins, skipping slots that pin nothing", async () => {
+    const bytes = await loadRepositoryWorkProfileBytes();
+    const document = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    const slots = (document.outputConventions as { slots: Record<string, unknown>[] }).slots;
+    // The published profile's three slots carry no schema at all, so v2's card states an empty
+    // list — a true recomputed statement, not an omission.
+    expect((await profileDocumentRecomputeV2(bytes, noReferencedBytes)).outputSlotSchemaDigests).toEqual([]);
+
+    // Give two of them a schema: one digest-pinned, one satisfied by a uri alone. Only the
+    // first is an edge (§6.4), which is the same line the evaluation-spec card draws.
+    const withSchemas = new TextEncoder().encode(JSON.stringify({
+      ...document,
+      outputConventions: {
+        slots: [
+          { ...slots[0], schema: { name: "patch-schema", digest: { sha256: "a".repeat(64) } } },
+          { ...slots[1], schema: { name: "summary-schema", uri: "https://example.test/summary.json" } },
+          slots[2],
+        ],
+      },
+    }));
+    const facts = await profileDocumentRecomputeV2(withSchemas, noReferencedBytes);
+    expect(facts.outputSlotSchemaDigests).toEqual([`sha256:${"a".repeat(64)}`]);
+    expect(facts.profile).toBe(document.profile);
+  });
+
+  it("emits no facts for bytes that are not an evaluation spec or a profile document", async () => {
+    expect(await evaluationSpecRecomputeV2(new TextEncoder().encode("{"), noReferencedBytes)).toEqual({});
+    expect(await profileDocumentRecomputeV2(new TextEncoder().encode("{"), noReferencedBytes)).toEqual({});
+  });
+
+  it("routes the four revised kinds to v2 and every other kind to its unrevised fn", () => {
+    expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.task)).toBe(taskRecomputeV2);
+    expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.delivery)).toBe(deliveryRecomputeV2);
+    expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.evaluationSpec)).toBe(evaluationSpecRecomputeV2);
+    expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.profileDocument)).toBe(profileDocumentRecomputeV2);
+    expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.submission)).toBe(
+      TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.submission),
+    );
+    expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get("https://spec.jinn.network/records/nope/v1")).toBeUndefined();
   });
 });

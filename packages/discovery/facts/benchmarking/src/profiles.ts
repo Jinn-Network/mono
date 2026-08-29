@@ -22,3 +22,34 @@ export const reportProfile: FactsProfileDocument = loadProfile("report.v1.json")
 /** Legacy raw Report v1 facts remain immutable; signed envelopes use this separate profile. */
 export const signedReportProfile: FactsProfileDocument = loadProfile("report.v2.json");
 export const benchmarkAccountingProfile: FactsProfileDocument = loadProfile("benchmark-accounting.v1.json");
+
+// The v2 revisions close the join-edge gap the completeness rule names (protocol design §12,
+// amendment 2026-08-28). Each coexists with its v1; v1 bytes and meaning stay frozen.
+
+/** Adds the Tasks the benchmark is made of, and its supersession pointer. */
+export const benchmarkProfileV2: FactsProfileDocument = loadProfile("benchmark.v2.json");
+
+/**
+ * Adds the per-cell record references — Tasks, Submissions, Deliveries, verdicts — that make a
+ * matrix the join table it already is in substance, plus the accounting record its mandatory
+ * assembly-v2 publication extension pins. Without them, "this environment, its attempts, their
+ * verdicts" is unanswerable from the card, and `matrix -> accounting -> dispatches` — the hop
+ * `benchmark-accounting.v2` exists to make walkable — cannot be entered from one at all.
+ */
+export const matrixProfileV2: FactsProfileDocument = loadProfile("matrix.v2.json");
+
+/**
+ * Adds the registration artifacts a Run's publication extension pins. That extension's shape is
+ * closed and schema-validated, so its members are enumerable fields and the open-map limit the
+ * §12 amendment states does not reach them — unlike an arm's `pinning`, which stays outside.
+ */
+export const runProfileV2: FactsProfileDocument = loadProfile("run.v2.json");
+
+/**
+ * Adds the dispatch-level references an accounting record already carries in substance: the
+ * Submissions, Deliveries, evidence and evaluation records, observation archives, correlation
+ * artifacts and native artifacts each cell's dispatches name. v1 stated the run and the
+ * publisher's authorization and stopped there.
+ */
+export const benchmarkAccountingProfileV2: FactsProfileDocument =
+  loadProfile("benchmark-accounting.v2.json");

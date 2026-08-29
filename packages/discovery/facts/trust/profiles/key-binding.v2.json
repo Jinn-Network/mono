@@ -1,0 +1,17 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/key-binding/v1",
+  "profile": "https://spec.jinn.network/facts/key-binding/v2",
+  "fields": [
+    { "name": "agent", "class": "record", "cloudEvents": { "attribute": "agent", "scalar": "string" } },
+    { "name": "keyid", "class": "record" },
+    { "name": "algorithm", "class": "record" },
+    { "name": "relationship", "class": "record", "cloudEvents": { "attribute": "relationship", "scalar": "string" } },
+    { "name": "strength", "class": "record", "cloudEvents": { "attribute": "strength", "scalar": "string" } },
+    { "name": "validFrom", "class": "record" },
+    { "name": "expiresAt", "class": "record" },
+    { "name": "ceremony.digest", "class": "record", "referenceBearing": true },
+    { "name": "anchorDigests", "class": "record", "referenceBearing": true },
+    { "name": "supersedes", "class": "record", "referenceBearing": true }
+  ]
+}
