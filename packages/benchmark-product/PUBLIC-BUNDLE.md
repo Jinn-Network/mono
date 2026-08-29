@@ -306,6 +306,12 @@ only, a contradiction would surface after the run had been locked, executed,
 reported, and materialized — a bundle the workspace can never verify, with no way
 back.
 
+`drawn-post-lock` therefore needs a Benchmark whose reveal is withheld, and no
+task-set intake in this product mints one yet — every intake reveals `immediate`.
+Declaring it today is refused at the lock, by name; the value is reachable as soon
+as an intake supports a withheld reveal, and it stays in the vocabulary because
+that vocabulary lives in the shared protocol package, not in this product.
+
 Two limits are worth stating plainly rather than leaving a reader to assume more.
 
 **These checks refuse; they never endorse.** No check can establish that a

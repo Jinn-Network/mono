@@ -20,6 +20,7 @@
  */
 
 import {
+  compareCalendarStrictRfc3339Instants,
   readTaskSelectionMode,
   type BenchmarkRecord,
   type RunRecord,
@@ -37,10 +38,6 @@ export interface TaskSelectionConsistencyInput {
   readonly runRecord: RunRecord;
 }
 
-function instant(value: string): number {
-  return Date.parse(value);
-}
-
 /**
  * Whether the Benchmark's items were PROVABLY still withheld when the Run sealed against them.
  *
@@ -51,12 +48,22 @@ function instant(value: string): number {
  * establishes nothing about the lock: a schedule opening twelve hours into a twenty-four-hour run
  * satisfies it while the items were plainly withheld at the lock. Only the far side is safe —
  * `notBefore >= closeAt > lockedAt` proves withholding — so that is the only comparison made.
+ *
+ * The comparator is the records package's own, not `Date.parse`, and that is a correctness
+ * requirement rather than a preference. These fields are validated by `isCalendarStrictRfc3339`,
+ * which accepts leap seconds; V8's `Date.parse` returns `NaN` for exactly those spellings, and
+ * `NaN >= x` is `false`. Left on `Date.parse`, a claimant could seal
+ * `notBefore: "2026-12-31T23:59:60Z"` — items withheld past the run's end — declare
+ * `fixed-public-set`, and have both this check and the producer's pre-lock gate wave it through.
+ * An uncomparable pair fails CLOSED for the same reason: it cannot arise from schema-valid records,
+ * so treating it as proof of withholding costs nothing and removes the fail-open shape entirely.
  */
 function withheldAtLock(benchmark: BenchmarkRecord, closeAt: string): boolean {
   const { policy, notBefore } = benchmark.reveal;
   if (policy === "after-run") return true;
   if (policy !== "scheduled" || notBefore === undefined) return false;
-  return instant(notBefore) >= instant(closeAt);
+  const order = compareCalendarStrictRfc3339Instants(notBefore, closeAt);
+  return order === undefined || order >= 0;
 }
 
 /**

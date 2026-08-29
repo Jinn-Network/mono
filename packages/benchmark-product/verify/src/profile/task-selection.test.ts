@@ -139,6 +139,17 @@ describe("fixed-public-set", () => {
     }
   });
 
+  test("refuses a leap-second notBefore rather than failing open on an unparseable date", () => {
+    // `isCalendarStrictRfc3339` accepts leap seconds and `Date.parse` returns NaN for them, so a
+    // naive `>=` would return false and wave this through. The claimant controls `notBefore`, so
+    // that would have been a one-spelling bypass of the only check that makes fixed-public-set a
+    // claim rather than a label.
+    expect(refusal(
+      benchmark({ policy: "scheduled", notBefore: "2026-12-31T23:59:60Z" }, CURATOR),
+      run({ mode: "fixed-public-set" }),
+    ).message).toContain("withholds its items past the end of the run");
+  });
+
   test("compares instants, not strings, so a differing UTC offset does not decide the check", () => {
     // 2026-08-19T20:00:00-05:00 is 2026-08-20T01:00:00Z — at or after closeAt, though it sorts before.
     expect(refusal(

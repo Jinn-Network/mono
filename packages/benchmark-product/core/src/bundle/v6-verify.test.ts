@@ -306,7 +306,10 @@ describe("task-selection provenance round trip", () => {
     // SWE-bench intake reveals its items immediately, so `drawn-post-lock` is genuinely false for
     // it. The claimant must learn that while the draft is still editable — refusing this at publish
     // would strand a locked, executed, reported run in a bundle nothing can ever verify.
-    await expect(declaringFixture("drawn-post-lock")).rejects.toThrow(/reveals its items immediately/);
+    // `requireOk` prefixes the stage label, so the `lock:` prefix is what proves the refusal came
+    // from the lock rather than from materialization further downstream.
+    await expect(declaringFixture("drawn-post-lock"))
+      .rejects.toThrow(/^lock: .*reveals its items immediately/);
   }, 120_000);
 
   test("the declared sentence reaches the published face", async () => {

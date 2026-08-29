@@ -19,7 +19,6 @@
 import { taskSelectionContradiction } from "@colophon-claims/verify";
 import {
   RUN_RECORD_KIND,
-  parseBenchmark,
   parseRun,
   sealRun,
   withRunAnchorIntentExtension,
@@ -231,15 +230,17 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       // rule the cold verifier applies afterwards. Left to publish time, a contradiction would
       // surface only once the run had been locked, executed, reported, and materialized -- a
       // bundle the workspace can never verify, and no way back. Same rule, earlier and cheaper.
-      if (declaredTaskSelection !== undefined && document.spec.taskSet.kind === "benchmark") {
+      const sealed = sealRun(runWithTaskSelection);
+      if (declaredTaskSelection !== undefined) {
+        // Judged on the exact bytes just sealed, so the rule cannot be shown a different Run from
+        // the one that gets stored. This is the only refusal after `sealRun`, and it is safe there
+        // because sealing is pure — the first side effect is the `putSealedBytes` below.
         const contradiction = taskSelectionContradiction({
-          benchmarkRecord: parseBenchmark(getSealedBytes(clockedContext.workspaceDir, document.spec.taskSet.benchmarkSha256)),
-          runRecord: parseRun(sealRun(runWithTaskSelection).bytes),
+          benchmarkRecord: compiled.benchmarkRecord,
+          runRecord: parseRun(sealed.bytes),
         });
         if (contradiction !== undefined) refuse("validation", "spec.taskSelection", contradiction);
       }
-
-      const sealed = sealRun(runWithTaskSelection);
       const runSha256 = putSealedBytes(clockedContext.workspaceDir, sealed.bytes);
       recordWorkspaceAuthorship({
         workspaceDir: clockedContext.workspaceDir,
