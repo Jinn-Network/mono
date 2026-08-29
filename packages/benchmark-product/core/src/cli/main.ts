@@ -82,6 +82,7 @@ import {
   type SignHumanReviewResponseInput,
 } from "../operations/index.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
+import { summarizeVerificationOutcome } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { readRunJournalEntries } from "../run/journal.js";
@@ -1362,7 +1363,11 @@ async function handleBundleVerify(args: ParsedArgs, context: CliContext, jsonMod
   return renderResult(
     { ok: true, result },
     jsonMode,
-    (value) => `verified public bundle ${value.identity}: ${value.checks.join(", ")}\n`,
+    // A deferred check is never printed as a bare check name: a metadata-first bundle carries its
+    // artifact digests without their bytes (issue #2986).
+    (value) => `verified public bundle ${value.identity}: ${summarizeVerificationOutcome(value).outcomes
+      .map(({ check, state }) => (state === "passed" ? check : `${check} (${state})`))
+      .join(", ")}\n`,
   );
 }
 
