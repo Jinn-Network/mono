@@ -26,11 +26,13 @@ export interface CliContext {
    * verb eventually returns; optional, and absent in every verb that isn't long-running. */
   readonly progress?: (line: string) => void;
   /**
-   * Shutdown request for a verb that runs until interrupted (`publication serve`). Supplied by
-   * the process-owning wrapper from SIGINT/SIGTERM; absent in tests that never invoke such a
-   * verb, and in embeddings with no process to signal.
+   * Installs and returns a shutdown request for a verb that runs until interrupted
+   * (`publication serve`). A factory rather than a signal because registering a `SIGINT` listener
+   * suppresses Node's default termination for the whole process: a wrapper that armed one at
+   * startup would make Ctrl-C do nothing during every other verb. Only the verb that reads it
+   * calls this, so only that verb takes the signals over.
    */
-  readonly shutdownSignal?: AbortSignal;
+  readonly createShutdownSignal?: () => AbortSignal;
   readonly runtimeHost?: BenchmarkRuntimeHost;
   /** OS user-data directory supplied only by the process-owning CLI wrapper. */
   readonly agentDataDir?: string;

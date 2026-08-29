@@ -39,7 +39,11 @@ export interface PublicationArchiveServer {
   readonly port: number;
   /** Origin the archive is mounted at, with no trailing slash. */
   readonly url: string;
-  /** Whether a well-known document was published; `false` when the source has never announced. */
+  /**
+   * Whether a well-known document naming the current archive root was written at start. `false`
+   * when the source has never announced, and also when the refresh could not run -- serving the
+   * tree that is already on disk beats refusing to serve over a derived document.
+   */
   readonly announced: boolean;
   close(): Promise<void>;
 }
@@ -62,11 +66,14 @@ function requestUrl(message: IncomingMessage): string {
 }
 
 async function respond(response: ServerResponse, produced: Response, method: string): Promise<void> {
+  // Read the body BEFORE committing the status line: once headers are sent, a body that fails to
+  // materialize can only be signalled by destroying the connection, and a client that saw 200 has
+  // no way to tell a short body from a complete one.
+  const body = method === "HEAD" || produced.body === null ? undefined : Buffer.from(await produced.arrayBuffer());
   const headers: Record<string, string> = {};
   produced.headers.forEach((value, name) => { headers[name] = value; });
   response.writeHead(produced.status, headers);
-  if (method === "HEAD" || produced.body === null) { response.end(); return; }
-  response.end(Buffer.from(await produced.arrayBuffer()));
+  response.end(body);
 }
 
 /**
@@ -83,7 +90,13 @@ export async function startPublicationArchiveServer(
   const port = options.port ?? DEFAULT_PUBLICATION_SERVE_PORT;
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) throw new TypeError("port must be an integer from 0 to 65535");
 
-  const announced = await refreshWorkspacePublicationWellKnown(options.workspaceDir, options.sourceName);
+  // A serve that cannot refresh the derived document still serves the signed chain: the common
+  // cause is another product process holding the source lock mid-announce, and refusing to serve
+  // a readable tree over that would be the wrong trade.
+  let announced = false;
+  try {
+    announced = await refreshWorkspacePublicationWellKnown(options.workspaceDir, options.sourceName);
+  } catch { /* served as found */ }
   const handler = createWorkspacePublicationHttpHandler(options.workspaceDir);
 
   const server = createServer((request, response) => {
@@ -92,8 +105,11 @@ export async function startPublicationArchiveServer(
       try {
         await respond(response, await handler(new Request(requestUrl(request), { method, headers: requestHeaders(request) })), method);
       } catch {
-        // Indistinguishable from absence, exactly as the handler's own confinement failures are.
-        if (!response.headersSent) response.writeHead(404);
+        // Indistinguishable from absence, exactly as the handler's own confinement failures are --
+        // unless the status line is already out, in which case a truncated body must not be
+        // presentable as a complete one.
+        if (response.headersSent) { response.destroy(); return; }
+        response.writeHead(404);
         response.end();
       }
     })();
@@ -103,6 +119,9 @@ export async function startPublicationArchiveServer(
     server.once("error", reject);
     server.listen(port, host, () => { server.removeListener("error", reject); resolve(); });
   });
+  // A listening server with no `error` listener turns any later emission into an uncaught
+  // exception, which would kill a process whose whole job is to stay up unattended.
+  server.on("error", () => undefined);
 
   const address = server.address() as AddressInfo;
   const authority = address.family === "IPv6" ? `[${address.address}]` : address.address;
@@ -112,6 +131,9 @@ export async function startPublicationArchiveServer(
     url: `http://${authority}:${address.port}`,
     announced,
     close: () => new Promise<void>((resolve, reject) => {
+      // Idempotent: a second close is the caller's `finally` running after an explicit stop, not
+      // an error worth rejecting on.
+      if (!server.listening) { resolve(); return; }
       server.close((cause) => (cause === undefined ? resolve() : reject(cause)));
       server.closeAllConnections();
     }),

@@ -14,7 +14,7 @@ Record Discovery serving layout:
 |------|------------|------------|
 | `/.well-known/record-discovery` | names this workspace's source, its head path, and its newest archive page | rewritten after every announcement |
 | `/sources/<name>/head` | the signed source head — current sequence, entry digest, `refreshBy` | rewritten after every announcement |
-| `/sources/<name>/entries/<page>` | a signed archive page; each links to its predecessor via `prevArchive` | append-only; the newest page is rewritten until it seals |
+| `/sources/<name>/entries/<page>` | a signed archive page, one entry per page, linked to its predecessor via `prevArchive` | immutable once written |
 | `/records/<sha256>` | the exact announced record bytes | immutable |
 | `/publication-artifacts/sha256/<sha256>` | exact publication artifact bytes | immutable |
 
@@ -28,11 +28,7 @@ consumer can find the newest archive page without being told its name —
 from the writer's committed position after every append, and rebuilt at serve
 time for any workspace whose announcements predate this serving path.
 
-## Before you announce: fix the public URL first
-
-Announced records carry their locations. Those locations are the base URL
-configured *at announcement time*, and the chain is append-only — you cannot
-rewrite them later.
+## Before you announce: the public URL must already serve
 
 ```bash
 colophon publication configure \
@@ -40,9 +36,20 @@ colophon publication configure \
   --public-base-url https://records.example.org/publication
 ```
 
-Set this to the exact mount the archive will finally be served from, including
-any path prefix, before `publication register`. A workspace that announced
-against `http://127.0.0.1:8787` has locations naming loopback for good.
+This is a **locator, not identity**. Source identity is the workspace key's
+`did:key` plus the source name, both frozen once any append receipt is durable;
+the base URL is deliberately mutable and can be re-pointed later with another
+`publication configure`. Nothing in the announcement entries names it —
+Colophon announces records by digest and never writes a `locations` array — so
+moving the archive to a new domain does not invalidate a single published
+record.
+
+What it must be is *reachable at announce time*. `publication register`,
+`publication report`, and `launch` each probe this base URL for the exact bytes
+they are about to announce and refuse the stage if the probe does not return
+them. So the ordering is: serve (or mirror) first, configure second, announce
+third — not because the URL is permanent, but because the announce path checks
+it.
 
 ## Option A — run the server
 
@@ -78,17 +85,20 @@ Three things the static host must get right:
 1. **Content types.** The product stores each object's declared type in a
    `<path>.content-type` sidecar, which the HTTP handler reads and the archive
    path grammar never serves. A static host does neither: exclude the sidecars
-   from what you publish (as above) and configure the media types yourself —
-   `application/vnd.jinn.record-discovery.head+json` for the head,
-   `application/vnd.jinn.record-discovery.archive+json` for archive pages,
-   `application/vnd.jinn.record-discovery.well-known+json` for the well-known
-   document. Cold sync and returning sync do not check the declared type, but
-   consumers that stream the live tail do.
-2. **Re-sync after every announcement.** The head and the newest archive page
-   are rewritten in place. A stale head against fresh pages is a chain a
-   consumer will read as behind, not broken; a stale well-known document points
-   at an archive page that is no longer newest, and a cold-syncing consumer
-   silently misses everything after it.
+   from what you publish (as above) and configure the media types yourself:
+   `application/vnd.jinn.record-discovery.head.v1+json` for the head,
+   `application/vnd.jinn.record-discovery.well-known.v1+json` for the
+   well-known document, `application/json` for archive pages, and each record's
+   own announced media type for its digest path. Cold sync and returning sync
+   do not check the declared type, but consumers that stream the live tail do —
+   and a mirror that serves everything as `text/plain` is a mirror nobody can
+   build a typed reader against.
+2. **Re-sync after every announcement.** Archive pages and record bytes only
+   ever appear; the head and the well-known document are rewritten in place. A
+   stale head against fresh pages is a chain a consumer reads as behind, not
+   broken — but a stale well-known document points at an archive page that is no
+   longer the newest, and a cold-syncing consumer silently misses everything
+   after it.
 3. **Do not serve anything else from the mount.** Publish the archive subtree at
    its own path or origin. The product's handler enforces a closed path grammar;
    a static host enforces whatever directory you point it at.
@@ -110,8 +120,10 @@ this source, on a machine that is not the producer:
    `prevArchive` to genesis, then run `source-chain-verification` over the head
    plus the entries oldest-first. `coldSync` in
    `@jinn-network/record-discovery-client` performs exactly this walk.
-4. For each announcement, `GET` every location it names and confirm the returned
-   bytes hash to the announced digest.
+4. For each announcement, `GET` `<base>/records/<sha256>` — the digest path is
+   this producer's location — and confirm the returned bytes hash to the
+   announced digest. Signed Report payloads and other publication artifacts live
+   at `<base>/publication-artifacts/sha256/<sha256>`.
 
 Steps 1–4 are what `publication-serve.test.ts` performs against a real socket in
 CI, so a failure here is an environment or hosting fault rather than a product

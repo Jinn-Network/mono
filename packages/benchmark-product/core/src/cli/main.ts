@@ -1143,8 +1143,7 @@ async function handlePublicationReport(args: ParsedArgs, context: CliContext, js
 async function handlePublicationServe(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, PUBLICATION_SERVE_FLAGS);
   const { workspaceDir } = buildOperationContext(args, context);
-  const shutdownSignal = context.shutdownSignal;
-  if (shutdownSignal === undefined) {
+  if (context.createShutdownSignal === undefined) {
     refuse("invalid-invocation", "publication serve", "publication serve requires a process that can signal shutdown");
   }
   const portText = optional(args, "port");
@@ -1152,13 +1151,20 @@ async function handlePublicationServe(args: ParsedArgs, context: CliContext, jso
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
     refuse("invalid-invocation", "--port", "--port must be an integer from 0 to 65535");
   }
+  // Present-but-empty is a typo, not an omission, so it falls back to the default exactly as an
+  // absent flag does rather than binding to the empty string.
+  const sourceName = optional(args, "source");
+  const host = optional(args, "host");
   const server = await startPublicationArchiveServer({
     workspaceDir,
-    sourceName: optional(args, "source") === undefined || optional(args, "source") === "" ? DEFAULT_PUBLICATION_SOURCE_NAME : optional(args, "source")!,
-    ...(optional(args, "host") === undefined || optional(args, "host") === "" ? {} : { host: optional(args, "host")! }),
+    sourceName: sourceName === undefined || sourceName === "" ? DEFAULT_PUBLICATION_SOURCE_NAME : sourceName,
+    ...(host === undefined || host === "" ? {} : { host }),
     port,
   });
   try {
+    // Taken after the bind so a failure to serve is not preceded by hijacking the process's
+    // signal handling.
+    const shutdownSignal = context.createShutdownSignal();
     context.progress?.(`serving ${server.url} (${server.announced ? "well-known published" : "no announcement yet — well-known withheld"}); press Ctrl-C to stop`);
     if (!shutdownSignal.aborted) {
       await new Promise<void>((resolve) => { shutdownSignal.addEventListener("abort", () => resolve(), { once: true }); });

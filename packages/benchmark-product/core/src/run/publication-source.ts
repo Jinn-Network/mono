@@ -224,19 +224,27 @@ export function createWorkspacePublicationSource(workspaceDir: string, sourceNam
   // Every durable position change refreshes the well-known document, so the served layout is
   // consumable by a cold client the moment the append that made it public commits. Both entry
   // points are wrapped because `recover` commits a pending intent -- the crash path advances the
-  // position exactly as `append` does. A failed refresh surfaces rather than silently serving a
-  // stale archive root; the underlying append is already durable and keyed by `announcementId`,
-  // so the caller's retry is idempotent.
+  // position exactly as `append` does.
+  //
+  // The refresh cannot fail the append that triggered it. The append is already durable at this
+  // point and its idempotency key is the announcementId PLUS a fingerprint over the exact input
+  // (timestamp included), so a caller that replays after a rethrow with a freshly computed
+  // timestamp gets a conflict, not a resumption -- a full-disk moment while writing a DERIVED
+  // file would wedge the draft. It is derived, and `startPublicationArchiveServer` rebuilds it on
+  // every start, so a failure here is left for that rebuild to heal.
+  const refreshWellKnown = async (): Promise<void> => {
+    try { await writeSourceWellKnown(blobs, source, writer); } catch { /* healed at serve time */ }
+  };
   const servedWriter: typeof writer = {
     readState: () => writer.readState(),
     append: async (command) => {
       const receipt = await writer.append(command);
-      await writeSourceWellKnown(blobs, source, writer);
+      await refreshWellKnown();
       return receipt;
     },
     recover: async () => {
       const report = await writer.recover();
-      await writeSourceWellKnown(blobs, source, writer);
+      await refreshWellKnown();
       return report;
     },
   };

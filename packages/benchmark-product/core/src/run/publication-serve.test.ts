@@ -171,16 +171,17 @@ describe("public archive server", () => {
       expect(outcome.status).toBe("ok");
 
       // 4. Every announced record resolves, byte for byte, at the location its digest implies.
+      //    This producer announces no `locations` array -- the digest path IS the location, which
+      //    is what lets the archive move hosts without invalidating a published record -- so the
+      //    absence is asserted rather than looped over, since an empty loop would prove nothing.
       for (const signed of entries) {
         for (const announcement of signed.entry.announcements) {
           expect(announcement.action).toBe("available");
           if (announcement.action !== "available") continue;
+          expect(announcement.locations).toBeUndefined();
           const bytes = await getBytes(`${server.url}${recordPath(announcement.record.digest)}`);
           expect(`sha256:${sha256Hex(bytes)}`).toBe(announcement.record.digest);
           expect(bytes).toEqual(announced.get(announcement.announcementId));
-          for (const location of announcement.locations ?? []) {
-            expect(await getBytes(location.locator)).toEqual(bytes);
-          }
         }
       }
     } finally {
