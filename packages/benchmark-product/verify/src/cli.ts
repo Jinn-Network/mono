@@ -40,8 +40,9 @@ function usage(): string {
     + "Trust material is yours, not the bundle's: with none supplied a well-formed anchor reports\n"
     + "present rather than verified, and none ships with this tool.\n"
     + "Exit 0: valid bundle; 1: invalid bundle; 2: usage or operational failure.\n"
-    + "Identifiers inside record files are internal names. Checking uses the exact code installed\n"
-    + "from npm and fetches nothing from the web.\n";
+    + "Identifiers inside record files are internal names: they name https://spec.jinn.network/\u2026,\n"
+    + "and that origin is not hosted yet. Checking uses the exact code installed from npm and\n"
+    + "fetches nothing from the web.\n";
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +158,11 @@ const CHECK_GLOSSES = new Map<string, string>([
   ["manifest", "every file the bundle lists is present and matches its recorded digest"],
   ["evidence-closure", "every record the results depend on is carried inside the bundle"],
   ["artifact-integrity", "each stored artifact hashes to the digest its record names"],
-  ["signature-validity", "each signature verifies against the key its record names"],
+  // "the signatures verify", not "each signature verifies": the result-evaluation and
+  // execution-verification families require every listed signature (`verifyDsseSignatures`), but
+  // a HumanLabelResolution record is accepted on `signatures.some(Boolean)`. A per-signature
+  // quantifier would overclaim on that third family.
+  ["signature-validity", "the signatures verify against the keys their records name"],
   // Not "signatures verify": the `trust` check derives and cross-checks the declared key set and
   // stops there. The verdict and report signatures are verified under `matrix-rederivation` and
   // `report-verification`. Naming the wrong thing here would reintroduce the overclaim this
@@ -169,14 +174,29 @@ const CHECK_GLOSSES = new Map<string, string>([
   ["integrity-anchors", "each carried time anchor is well-formed and covers what it names"],
 ]);
 
+/**
+ * Format-specific corrections to {@link CHECK_GLOSSES}. A check name can be produced by more than
+ * one implementation, and a single format-independent sentence would then be true of only some of
+ * them. Bundle format v5 is evidence-native: `verifyEvidenceNativeReport` parses the DSSE
+ * envelope, checks the payload type, and asserts the report names the sealed matrix as its
+ * subject. It consults no method registry and recomputes nothing — `report.results` is an opaque
+ * JSON value there — so the legacy recompute sentence would state a proof this path never
+ * performed. Legacy formats keep it because `verifyReport` really does recompute and compare.
+ */
+const EVIDENCE_NATIVE_CHECK_GLOSSES = new Map<string, string>([
+  ["report-verification", "the sealed report is signed and bound to that sealed matrix"],
+]);
+
 export function renderVerifiedBundle(result: PublicBundleVerificationResult): string {
+  const evidenceNative = result.format === "benchmark-product-public-bundle/5";
   const checks = result.checks
     .map((check) => {
-      const gloss = CHECK_GLOSSES.get(check);
+      const gloss = (evidenceNative ? EVIDENCE_NATIVE_CHECK_GLOSSES.get(check) : undefined)
+        ?? CHECK_GLOSSES.get(check);
       return `${check.padEnd(24)}passed${gloss === undefined ? "" : ` — ${gloss}`}`;
     })
     .join("\n");
-  const totalChecks = result.format === "benchmark-product-public-bundle/5"
+  const totalChecks = evidenceNative
     ? EVIDENCE_NATIVE_BUNDLE_V5_CHECKS.length
     : result.format === "benchmark-product-public-bundle/6"
       ? PUBLIC_BUNDLE_V6_CHECKS.length

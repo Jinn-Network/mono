@@ -22,8 +22,12 @@ test("usage exits 2 and states the exit contract", async () => {
   const result = await invoke([]);
   assert.equal(result.code, 2);
   assert.match(result.stderr, /Exit 0: valid bundle; 1: invalid bundle; 2: usage or operational failure/);
-  assert.doesNotMatch(result.stderr, /spec\.jinn\.network/);
   assert.match(result.stderr, /Identifiers inside record files are internal names/);
+  // DR-2026-08-17-c Decision 5: `npx` help is a named first-cut surface and must state that
+  // protocol identifiers name `https://spec.jinn.network/…` and that origin is not hosted yet.
+  // #3022 AC-1 scopes its removal to default stdout; usage() is stderr on exit 2, so both hold.
+  assert.match(result.stderr, /https:\/\/spec\.jinn\.network\/\u2026/);
+  assert.match(result.stderr, /not hosted yet/);
   assert.match(result.stderr, /fetches nothing from the web/);
 });
 
@@ -76,7 +80,7 @@ test("human success names all six checks and states the verification limit", asy
   assert.match(output, /uploads nothing/);
 });
 
-test("the verdict word does not overclaim and the unhosted origin stays off stdout", async () => {
+test("the verdict word does not overclaim and the caveat block carries no unhosted origin", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
   const output = renderVerifiedBundle({
     format: "benchmark-product-public-bundle/4",
@@ -122,6 +126,9 @@ test("every named check prints a plain-language gloss beside its result", async 
     assert.ok(line !== undefined, `${check} is missing from the human output`);
     assert.match(line, new RegExp(`^${check}\\s+passed \\u2014 \\S`));
   }
+  // Pinned, not merely non-empty: a gloss states what a check proved, so its wording is the
+  // claim. On the legacy formats `verifyReport` really does recompute and compare.
+  assert.match(output, /report-verification\s+passed \u2014 the report's numbers recompute from that sealed matrix$/mu);
 });
 
 test("the evidence-native v5 pair prints glosses too", async () => {
@@ -146,6 +153,14 @@ test("the evidence-native v5 pair prints glosses too", async () => {
     assert.ok(line !== undefined, `${check} is missing from the human output`);
     assert.match(line, new RegExp(`^${check}\\s+passed \\u2014 \\S`));
   }
+  // The v5 report path parses the DSSE envelope, checks the payload type, and asserts the report
+  // subjects the exact sealed matrix bytes. It consults no method registry and recomputes
+  // nothing, so the legacy sentence must not appear here.
+  assert.match(output, /report-verification\s+passed \u2014 the sealed report is signed and bound to that sealed matrix$/mu);
+  assert.doesNotMatch(output, /numbers recompute from that sealed matrix/u);
+  // HumanLabelResolution records are accepted on `signatures.some(Boolean)`, so the gloss states
+  // no per-signature quantifier.
+  assert.match(output, /signature-validity\s+passed \u2014 the signatures verify against the keys their records name$/mu);
 });
 
 test("an unrecognised check name still renders its result rather than failing", async () => {
