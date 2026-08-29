@@ -150,6 +150,38 @@ describe("bundle leak scan (#3063)", () => {
     expect(findLeaks(binary("samples/clean_qa_001.json"), { path: "native/inspect/a.eval" })).toEqual([]);
   });
 
+  test.each(["apikey", "LoCoMo"])("an embedded font whose base64 spells %s is not a finding", (word) => {
+    // The dominant base64 carrier in a published bundle is not a record: it is
+    // the woff2 fonts `index.html`, `badge.svg`, and `social-card.svg` each
+    // inline as a data URI (~398KB of base64 per bundle).
+    const html = `<style>@font-face{font-family:"Newsreader";src:url(data:font/woff2;base64,${
+      base64Spelling(word)}) format("woff2")}</style><h1>Colophon</h1>`;
+    expect(BUNDLE_LEAK_PATTERN.test(html), "the raw asset text must contain the word").toBe(true);
+    expect(findLeaks(utf8(html), { path: "index.html" })).toEqual([]);
+  });
+
+  test("a plain-text leak beside an exempted data URI is still a finding", () => {
+    const svg = `<svg><image href="data:image/svg+xml;base64,${base64Spelling("LoCoMo")}"/>`
+      + `<desc>sourced from a licensed benchmark</desc></svg>`;
+    expect(findLeaks(utf8(svg), { path: "badge.svg" })).toEqual([
+      { path: "badge.svg", kind: "pattern", where: "raw", match: "licensed benchmark" },
+    ]);
+  });
+
+  test("a leak inside a decoded data URI is a finding", () => {
+    const mark = Buffer.from("<svg><title>LoCoMo</title></svg>", "utf8").toString("base64");
+    const findings = findLeaks(utf8(`<img src="data:image/svg+xml;base64,${mark}">`), { path: "social-card.svg" });
+    expect(findings).toEqual([expect.objectContaining({ kind: "pattern", match: "LoCoMo" })]);
+    expect(findings[0].where).toBe("raw (data URI 0) base64");
+  });
+
+  test("the workspace path inside a decoded data URI is still refused", () => {
+    const workspaceDir = "/tmp/judge-p8-rehearsal-abc123";
+    const mark = Buffer.from(`<svg><desc>${workspaceDir}/run</desc></svg>`, "utf8").toString("base64");
+    expect(findLeaks(utf8(`<img src="data:image/png;base64,${mark}">`), { path: "index.html", workspaceDir }))
+      .toEqual([expect.objectContaining({ kind: "workspace-path", match: workspaceDir })]);
+  });
+
   test("an unpadded base64 payload is decoded too", () => {
     // trust-core's decodeBase64Strict accepts unpadded base64, so a record it
     // verifies must not fall back to scanning its own alphabet here.

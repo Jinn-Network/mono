@@ -19,14 +19,23 @@
  *   payload is usually itself JSON -- as is any `*Base64`-suffixed field;
  * - a DSSE signature (`sig`) decodes to random bytes and carries no text.
  *
- * Only those *named* fields are exempted from the text scan, and every base64
- * carrier a published bundle has today is one of them. A schema that adds a
- * carrier under some other name does not become unsafe -- it merely scans that
- * carrier's alphabet again, and can regain the exemption by taking the
- * `*Base64` suffix. Everything else -- object keys,
- * ordinary string values, non-JSON files -- is scanned as text exactly as
- * before, so no plain-text leak escapes: a value is never skipped on the
- * strength of merely looking like base64.
+ * A published bundle also carries base64 outside JSON, and more of it than the
+ * records carry: `index.html`, `badge.svg`, and `social-card.svg` each inline
+ * three woff2 fonts as `data:font/woff2;base64,...` -- ~132KB of base64 per
+ * asset file, ~398KB per bundle -- and the Colophon mark rides a
+ * `data:image/svg+xml;base64,` URI. A base64 data URI is therefore treated the
+ * way a named field is, wherever it appears: its blob is decoded and the
+ * decoding rescanned, while its `data:<media-type>;base64,` prefix and every
+ * surrounding byte still read as text.
+ *
+ * Those two carriers -- the named field and the base64 data URI -- are the whole
+ * of what is exempted from the text scan. A schema or asset that adds a carrier
+ * some other way does not become unsafe: it merely scans that carrier's
+ * alphabet again, and can regain the exemption by taking the `*Base64` suffix
+ * or the data-URI spelling. Everything else -- object keys, ordinary string
+ * values, non-JSON files -- is scanned as text exactly as before, so no
+ * plain-text leak escapes: a value is never skipped on the strength of merely
+ * looking like base64.
  *
  * A binary file -- one containing a NUL byte -- is not structured text to walk,
  * but it still carries plain text: a `.eval` Inspect log is a ZIP, and a ZIP
@@ -83,6 +92,13 @@ function readText(bytes: Uint8Array): string | undefined {
   return Buffer.from(bytes).toString("utf8");
 }
 
+/**
+ * A `data:<media-type>[;parameter=value...];base64,<blob>` run. The blob's
+ * character class stops at the delimiters a data URI is embedded behind -- `)`
+ * in a CSS `url(...)`, a quote in markup -- so only the blob is captured.
+ */
+const DATA_URI_BASE64 = /(data:[\w.+-]+\/[\w.+-]+(?:;[\w.+-]+=[^;,]*)*;base64,)([A-Za-z0-9+/=_-]+)/gu;
+
 function isBase64Field(key: string | undefined, isDsseEnvelope: boolean): boolean {
   if (key === undefined) return false;
   if (/base64$/i.test(key)) return true;
@@ -97,10 +113,35 @@ class Scanner {
     private readonly workspaceDir: string | undefined,
   ) {}
 
-  /** Pattern-scans one piece of plain text. Workspace paths are checked per document, not here. */
+  /**
+   * Pattern-scans one piece of plain text. A base64 data URI in it is decoded
+   * and its decoding rescanned, exactly as a named base64 field is; only the
+   * blob is withheld from the text scan, so the URI's own media type and every
+   * surrounding byte still read. Workspace paths are checked per document, not
+   * here -- and against the raw document, before any blob is withheld.
+   */
   text(value: string, where: string): void {
-    const match = BUNDLE_LEAK_PATTERN.exec(value);
+    const blobs: string[] = [];
+    const scannable = value.replace(DATA_URI_BASE64, (_match, prefix: string, blob: string) => {
+      blobs.push(blob);
+      return prefix;
+    });
+    const match = BUNDLE_LEAK_PATTERN.exec(scannable);
     if (match !== null) this.findings.push({ path: this.path, kind: "pattern", where, match: match[0] });
+    for (const [index, blob] of blobs.entries()) {
+      const trail = `${where} (data URI ${index})`;
+      const decoded = decodeCanonicalBase64(blob);
+      // Not canonical base64 after all -- scan the blob as text, as any other
+      // value that fails to decode is. Its `data:` prefix is already consumed,
+      // so this cannot re-enter the data-URI branch.
+      if (decoded === undefined) {
+        this.text(blob, trail);
+        continue;
+      }
+      const text = readText(decoded);
+      // Binary decodings -- a woff2 font, a PNG -- carry no scannable text.
+      if (text !== undefined) this.document(text, `${trail} base64`);
+    }
   }
 
   /** Scans a text blob: structurally when it is JSON, as plain text otherwise. */
