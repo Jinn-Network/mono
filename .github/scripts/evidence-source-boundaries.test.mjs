@@ -726,6 +726,10 @@ test('IPFS production boundary configuration catches application and legacy esca
   // transient directory is invisible to it however briefly it exists
   // (regression: run 32982011618 failed that walk with ENOENT when the walk
   // still descended into it).
+  // The dot is not sufficient on its own: a walk that compares the tree against `git ls-files`
+  // would still see this as untracked, so it is also gitignored. Both limbs are gated by
+  // LIVE_TREE_FIXTURES in .github/scripts/workflow-script-tests.test.mjs, which this prefix is
+  // declared in; renaming or moving it means updating that declaration and .gitignore (#3177).
   const fixture = mkdtempSync(join(
     packages,
     'repository-ipfs',
