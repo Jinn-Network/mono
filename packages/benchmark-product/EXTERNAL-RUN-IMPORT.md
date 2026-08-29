@@ -47,8 +47,22 @@ so a JSONL dump and the equivalent CSV dump import identically.
 | `startedAt` | RFC 3339 | Optional. Calendar-strict. Both-or-neither with `endedAt`. |
 | `endedAt` | RFC 3339 | Optional. Calendar-strict, not before `startedAt`. |
 | `durationMs` | non-negative integer | Optional. When timestamps are also given it must equal their interval. |
-| `evidence` | list of `{name, path}` | Required on `graded` and `ungradeable`; forbidden otherwise. Paths resolve against the dump file's own directory. Names match `[A-Za-z0-9._-]{1,64}` and are unique within a record. |
-| `measurements` | map of name to string, finite number, or boolean | Required on `graded`; forbidden otherwise. Names match `[A-Za-z0-9._-]{1,64}`. |
+| `evidence` | list of `{name, path}` | Required on `graded` and `ungradeable`; forbidden otherwise. Paths are relative and resolve against the dump file's own directory; an absolute path, or one that resolves outside that directory, is refused naming the row. Names match `[A-Za-z0-9._-]{1,64}` and are unique within a record. |
+| `measurements` | map of name to string, finite number, or boolean | Required on `graded`; forbidden otherwise. Names match `[A-Za-z0-9._-]{1,64}` and must be declared by the subject task's sealed EvaluationSpec. Each value is typed against that declaration before the verdict rule reads it. |
+
+Measurement values are typed against the sealed EvaluationSpec's own
+declarations, so the two dialects genuinely produce one record. A measurement
+declared `boolean` accepts `true`/`false` in either dialect and the strings
+`"true"`/`"false"` — nothing else, because `1` and `yes` are guesses. One
+declared `number` accepts a number or a decimal string; a decimal a JS number
+cannot hold exactly stays the string it was, which the verdict rule compares as
+an exact decimal anyway. One declared `string` accepts only a string. Anything
+else is refused, naming the measurement, the row, and the declared type.
+
+Evidence paths may not leave the dump file's own directory. An absolute path,
+or a relative one that climbs out of the tree, is refused: whatever a dump
+names is sealed into the workspace and travels inside the published bundle, so
+the boundary of what can be published is the directory you handed the importer.
 
 There is no pass/fail column, and adding one would be a mistake rather than a
 convenience. The verdict is computed from the subject task's own sealed
@@ -124,9 +138,11 @@ cellKey,outcome,reason,evidence,m.integrity,m.resolved
 ```
 
 `evidence` is `name=path` pairs separated by `;`, so a path may contain neither
-`;` nor `=`. CSV carries no type information, so every CSV measurement imports
-as a string; a dump that needs numeric or boolean measurement values uses
-JSONL.
+`;` nor `=`. CSV carries no type information at the file level, but a CSV
+measurement column is not stuck as a string: each value is typed against the
+sealed EvaluationSpec declaration for that measurement, so `true` in an
+`m.integrity` column of a `boolean`-declared measurement imports as the boolean
+`true` and produces the same verdict as the equivalent JSONL row.
 
 ## The `--template` workflow
 
@@ -138,7 +154,10 @@ colophon run import --template \
 ```
 
 That emits one blank row per expected coordinate, with the fixed columns and
-the `m.<name>` columns each task's sealed EvaluationSpec declares. Fill in the
+the `m.<name>` columns each task's sealed EvaluationSpec declares. The JSONL
+template leaves `outcome` blank — it is the one field you must choose — and
+emits no `reason` key, because `reason` is forbidden on `graded`; add it on the
+rows whose outcome requires one. Fill in the
 outcomes, reasons, evidence paths, and measurements, then import:
 
 ```bash
@@ -176,6 +195,17 @@ is fabricating the artifact a skeptic reads.
   one. Import it as `ungradeable` with a reason.
 - **A `graded` row whose measurements the sealed verdict rule cannot read.**
   The refusal names the missing measurement.
+- **A measurement name the sealed EvaluationSpec does not declare, or a value
+  its declared type cannot accept.** The rule can read only declared names, so
+  an undeclared one is a typo or a column with nowhere to land; a value with no
+  unambiguous reading under the declared type is refused rather than guessed at.
+- **An evidence path that is absolute or escapes the dump directory.** A dump
+  names its own tree; it does not get to seal arbitrary host files into a
+  published bundle.
+
+Every one of these is resolved before anything is written. A dump refused for
+any reason leaves the draft exactly as it was — still locked, journal still
+empty — so you fix the dump and import again.
 
 ## Where the imported facts live afterwards
 

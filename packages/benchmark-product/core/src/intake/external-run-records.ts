@@ -398,8 +398,12 @@ function readCsvRow(line: string, row: number, columns: CsvColumns): ExternalRun
   const measurements: Record<string, string | number | boolean> = {};
   for (const [name, index] of columns.measurements) {
     const value = readCsvField(fields[index]!, row, `m.${name}`);
-    // CSV carries no type information, so every measurement read from CSV is a string. A JSONL
-    // dump wanting numeric or boolean measurements says so in its own types.
+    // CSV carries no type information, so every measurement read from CSV arrives here as a
+    // string. That is NOT where it ends: the import preflight (`../run/external-import.ts`) types
+    // every measurement against the subject Task's sealed EvaluationSpec declaration before the
+    // verdict rule sees it, so `"true"` for a `type: "boolean"` measurement becomes `true` in both
+    // dialects. The reader cannot do it — it has no spec — but it must not pretend the string is
+    // the final value either.
     if (value !== undefined) measurements[name] = value;
   }
   if (Object.keys(measurements).length > 0) record.measurements = measurements;

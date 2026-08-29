@@ -109,7 +109,10 @@ describe("run import — the slate template", () => {
     const rows = (await templateLines("jsonl")).map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(rows).toHaveLength(6);
     for (const row of rows) {
-      expect(row).toMatchObject({ outcome: "", reason: "" });
+      // `reason` is forbidden on a `graded` row, so the template does not emit a blank one; the
+      // operator adds the key on the rows whose outcome requires it.
+      expect(row).toMatchObject({ outcome: "" });
+      expect(row).not.toHaveProperty("reason");
       expect(Object.keys(row["measurements"] as Record<string, string>)).toEqual([...SAMPLE_MEASUREMENTS]);
     }
     expect(new Set(rows.map((row) => row["cellKey"])).size).toBe(6);
@@ -208,6 +211,43 @@ describe("run import — importing a dump", () => {
     // The remedy names the only sanctioned way to not have a result for a slot.
     expect(envelope.error.detail).toContain("There is no exclude flag.");
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+  }, 60_000);
+
+  test("a filled JSONL template row imports without the operator deleting a key", async () => {
+    await lockedDraft();
+    const rows = (await templateLines("jsonl")).map((line) => JSON.parse(line) as Record<string, unknown>);
+    // The graded row is filled IN PLACE: every key the template emitted stays, and every
+    // measurement placeholder gets a value the sealed declaration accepts. A template that needed
+    // a key removed before it would import is not a template.
+    const graded = {
+      ...rows[0]!,
+      outcome: "graded",
+      evidence: [{ name: "prediction", path: "prediction.json" }],
+      measurements: {
+        integrity: "true", resolved: "true", outcomeYes: "true",
+        solverBrier: "0.25", consensusBrier: "0.30", brierSpread: "0.05",
+      },
+    };
+    // The remaining slots are honestly unrun; `measurements` is dropped because the outcome
+    // forbids it, which is the operator's own choice of outcome, not a template defect.
+    const rest = rows.slice(1).map((row) => {
+      const { measurements: _dropped, ...kept } = row;
+      return { ...kept, outcome: "unrun", reason: "the sweep was cut short" };
+    });
+    writeFileSync(join(dumpDir, "prediction.json"), '{"probabilityYes":"0.5"}');
+    const file = join(dumpDir, "records.jsonl");
+    writeFileSync(file, `${[graded, ...rest].map((row) => JSON.stringify(row)).join("\n")}\n`);
+
+    const imported = await runCli(
+      ["run", "import", "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1",
+        "--file", file, "--source", "some-external-harness", "--json"],
+      cliContext(),
+    );
+    expect(imported.exitCode, imported.stdout + imported.stderr).toBe(0);
+    expect(JSON.parse(imported.stdout)).toMatchObject({
+      ok: true,
+      result: { importedCellCount: 6, written: { graded: 1, ungradeable: 0, notDelivered: 5 } },
+    });
   }, 60_000);
 
   test("refuses a --format outside the two dialects", async () => {

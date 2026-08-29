@@ -1301,10 +1301,13 @@ function renderImportTemplate(
     const lines = [header, ...coords.map((coord) => `${coord.cellKey}${blanks}`)];
     return { template: `${lines.join("\n")}\n`, rows: coords.length, measurements: union };
   }
+  // No `reason` key: it is FORBIDDEN on `graded`, the most common row type, so emitting a blank
+  // one made the template refuse itself unless the operator deleted a key first. `outcome` stays
+  // blank on purpose — it is the one field the operator must choose, and the reader refuses an
+  // unfilled row rather than guessing an outcome for it.
   const lines = coords.map((coord, index) => JSON.stringify({
     cellKey: coord.cellKey,
     outcome: "",
-    reason: "",
     ...(perCoordMeasurements[index]!.length === 0
       ? {}
       // Sorted, so the two dialects present the same measurement inventory in the same order.

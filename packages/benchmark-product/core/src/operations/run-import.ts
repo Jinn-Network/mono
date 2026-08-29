@@ -49,6 +49,7 @@ import { atomicWriteFileSync } from "../fs/atomic.js";
 import type { ExternalRunRecord } from "../intake/external-run-records.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import {
+  preflightExternalRunImport,
   validateExternalRunRecords,
   writeExternalRunImport,
   type ExternalRunImportSource,
@@ -165,6 +166,20 @@ export function importRunRecords(
         refuse("record-integrity", `runs.${input.draftId}`, "accepted import plan does not cover the expected cell set");
       }
 
+      // Every fallible resolution — the subject EvaluationSpec behind each graded row, the typing
+      // of its measurements, the verdict rule over them, every evidence file, and the arm behind
+      // every dispatched cell — happens HERE, before the transition below. `operateAsync` has no
+      // rollback, so a refusal raised after the transition would leave the draft stranded in
+      // `running` with a partial journal and no way back: re-import is refused twice over, there
+      // is no `running -> locked` edge, and collect refuses on the outstanding cells. What is left
+      // to fail below is genuine I/O.
+      const preflight = preflightExternalRunImport({
+        workspaceDir,
+        plan,
+        runRecord,
+        evidenceRoot: input.evidenceRoot,
+      });
+
       const transitioned = transition("locked", "launch");
       if (!transitioned.ok) {
         refuse("illegal-transition", `drafts.${input.draftId}.state`, transitioned.error.detail);
@@ -180,7 +195,7 @@ export function importRunRecords(
         runRecord,
         owner: runState.owner,
         source: input.source,
-        evidenceRoot: input.evidenceRoot,
+        preflight,
         at,
       });
 

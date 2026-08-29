@@ -21,7 +21,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { isAbsolute, relative as relativePath, resolve as resolvePath, sep } from "node:path";
 import { z } from "zod";
 import {
   cellIdempotencyKey,
@@ -34,9 +34,14 @@ import {
 } from "@jinn-network/benchmarking-records";
 import { sealDelivery, sealSubmission } from "@jinn-network/task-execution-protocol";
 import {
+  DECIMAL_STRING_PATTERN,
   deriveEvaluationTask,
   evaluateVerdictRule,
   parseEvaluationSpec,
+  type EvaluationSpec,
+  type MeasurementDeclaration,
+  type MeasurementMap,
+  type VerdictOutcome,
 } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { BenchmarkProductError, refuse, type ProductIssue } from "../errors.js";
@@ -326,6 +331,255 @@ function timingProblems(record: ExternalRunRecord, at: string): ProductIssue[] {
   return problems;
 }
 
+// ── preflight: every fallible resolution, performed BEFORE anything is written ───────────────
+//
+// The synthesis below is a WRITE path: it transitions the draft `locked -> running`, stamps
+// `launchedAt`, and appends journal entries cell by cell. `operateAsync` has no rollback, so a
+// refusal raised part-way through leaves a draft nothing can rescue — re-import is refused twice
+// over (the state is no longer `locked`, and the journal is no longer empty), there is no
+// `running -> locked` edge, and `runCollect` refuses on the outstanding cells. One typo in an
+// evidence path on row 40 of 200 would kill the run permanently.
+//
+// So every resolution that CAN fail happens here, up front, over the whole plan: the subject
+// EvaluationSpec for each graded row, the typing of its measurements, the verdict rule over them,
+// every evidence file (resolved, contained, and read), and the arm behind every dispatched cell.
+// The writer then CONSUMES what this produced rather than re-resolving it — which is also what
+// keeps the two from drifting apart, since a second resolution is a second chance to disagree.
+// What remains in the write path is genuine I/O: a full disk, a revoked permission.
+
+/** One evidence file, resolved and read but not yet sealed — sealing is a write. */
+export interface PreparedEvidence {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+}
+
+/** Everything a `graded` cell needs, resolved once: the rule it is judged by, the measurements
+ * typed against that rule's own declarations, and the verdict those two produce. */
+export interface PreparedGrading {
+  readonly evaluationSpecSha256: string;
+  readonly measurements: MeasurementMap;
+  readonly outcome: VerdictOutcome;
+}
+
+/** One planned cell with every fallible resolution already performed. */
+export interface PreparedImportCell {
+  readonly cell: ExternalRunImportCell;
+  /** Absent only for `unrun`, the one outcome that journals no dispatch. */
+  readonly arm?: RunRecord["arms"][number];
+  /** Empty for every outcome that carries no evidence. */
+  readonly evidence: readonly PreparedEvidence[];
+  /** Present exactly for `graded`. */
+  readonly grading?: PreparedGrading;
+}
+
+/** The resolved plan, in expected-cell order — one entry per `plan.cells` entry. */
+export interface ExternalRunImportPreflight {
+  readonly cells: readonly PreparedImportCell[];
+}
+
+export interface PreflightExternalRunImportInput {
+  readonly workspaceDir: string;
+  readonly plan: ExternalRunImportPlan;
+  readonly runRecord: RunRecord;
+  /** Directory a relative `evidence[].path` resolves against, and may not escape. */
+  readonly evidenceRoot: string;
+}
+
+/** Resolves everything the write path would otherwise resolve mid-write. Writes nothing. */
+export function preflightExternalRunImport(
+  input: PreflightExternalRunImportInput,
+): ExternalRunImportPreflight {
+  const { workspaceDir, plan, runRecord, evidenceRoot } = input;
+  const cells = plan.cells.map((cell): PreparedImportCell => {
+    const { coord, cellKey, outcome } = cell;
+    // `unrun` claims no attempt at all, so it needs neither an arm nor evidence.
+    if (outcome === "unrun") return { cell, evidence: [] };
+
+    const arm = runRecord.arms.find((candidate) => candidate.armId === coord.armId);
+    if (arm === undefined) {
+      refuse("record-integrity", `cells.${cellKey}`, `sealed Run has no arm "${coord.armId}"`);
+    }
+    if (outcome === "error" || outcome === "timeout") return { cell, arm, evidence: [] };
+
+    const evidence = readImportedEvidence(evidenceRoot, cell);
+    if (outcome === "ungradeable") return { cell, arm, evidence };
+    return { cell, arm, evidence, grading: prepareGrading(workspaceDir, cell) };
+  });
+  return { cells };
+}
+
+/**
+ * Reads one cell's evidence files, IN DUMP ORDER, refusing any path that leaves the dump
+ * directory.
+ *
+ * Containment is not hygiene here, it is the publishing boundary: whatever these paths name is
+ * sealed into the workspace CAS and travels inside the published bundle. Without the check,
+ * `../../../.ssh/id_rsa` or `/etc/passwd` in a dump would be published as an external harness's
+ * "evidence". The check is LEXICAL (resolve, then require the result to stay under the resolved
+ * root) — it deliberately does not resolve symlinks, because the dump directory is the operator's
+ * own tree and a symlink inside it is a path they chose, not one the record smuggled in.
+ */
+function readImportedEvidence(
+  evidenceRoot: string,
+  cell: ExternalRunImportCell,
+): PreparedEvidence[] {
+  const root = resolvePath(evidenceRoot);
+  const at = `row ${cell.record.row}`;
+  return (cell.record.evidence ?? []).map((ref) => {
+    if (isAbsolute(ref.path)) {
+      refuse(
+        "validation",
+        at,
+        `${at}: evidence "${ref.name}" for ${cell.cellKey} has the absolute path "${ref.path}" — `
+          + "evidence paths are relative to the dump file's own directory and may not leave it",
+      );
+    }
+    const path = resolvePath(root, ref.path);
+    const inside = relativePath(root, path);
+    if (inside.length === 0 || inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
+      refuse(
+        "validation",
+        at,
+        `${at}: evidence "${ref.name}" for ${cell.cellKey} resolves outside the dump directory `
+          + `("${ref.path}") — evidence paths may not leave the directory the dump file lives in`,
+      );
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(readFileSync(path));
+    } catch (cause) {
+      refuse(
+        "validation",
+        at,
+        `evidence "${ref.name}" for ${cell.cellKey} could not be read at ${path}: `
+          + `${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    }
+    return { name: ref.name, bytes };
+  });
+}
+
+/** Resolves a `graded` cell's rule, types its measurements against that rule's own declarations,
+ * and computes the verdict — the one place a verdict can come from. */
+function prepareGrading(workspaceDir: string, cell: ExternalRunImportCell): PreparedGrading {
+  const evaluationSpecSha256 = subjectEvaluationSpecSha256(
+    workspaceDir,
+    cell.coord.taskDigest,
+    cell.cellKey,
+  );
+  const spec = parseEvaluationSpec(getSealedBytes(workspaceDir, evaluationSpecSha256));
+  const measurements = typeImportedMeasurements(spec, cell);
+  // The verdict is COMPUTED, never imported. There is no pass/fail column in the dump precisely so
+  // that this line is the only place a verdict can come from; `checkVerdictRuleConsistency`
+  // recomputes it at assembly from the same spec and the same measurements.
+  try {
+    return {
+      evaluationSpecSha256,
+      measurements,
+      outcome: evaluateVerdictRule(
+        spec.verdictRule as Parameters<typeof evaluateVerdictRule>[0],
+        measurements,
+      ),
+    };
+  } catch (cause) {
+    refuse(
+      "validation",
+      `row ${cell.record.row}`,
+      `${cell.cellKey}: the sealed EvaluationSpec's verdict rule could not be evaluated over the `
+        + `imported measurements — ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+}
+
+/**
+ * Types one graded row's measurements against the sealed EvaluationSpec's own declarations.
+ *
+ * This is what makes the two dialects genuinely one record. CSV carries no type information, so
+ * every CSV measurement arrives as a string; `compare()` in the profiles package is decimal-aware
+ * for numeric operands but falls back to strict `===` otherwise, so an untyped `"true"` compared
+ * against a declared `true` is FALSE. A CSV dump would therefore seal the opposite verdict from
+ * the identical JSONL dump — and every downstream guard, re-deriving from the same untyped map,
+ * would agree with it. Typing here, before the rule ever runs, is the only place that can be
+ * fixed once for both dialects and for every consumer of the map.
+ *
+ * A name the spec does not declare is refused rather than passed through: the rule can only read
+ * declared names, so an undeclared one is either a typo or a column with nowhere to land.
+ */
+function typeImportedMeasurements(
+  spec: EvaluationSpec,
+  cell: ExternalRunImportCell,
+): MeasurementMap {
+  const declarations = new Map<string, MeasurementDeclaration>(
+    spec.measurements.map((declaration) => [declaration.name, declaration]),
+  );
+  const at = `row ${cell.record.row}`;
+  const typed: MeasurementMap = {};
+  for (const [name, value] of Object.entries(cell.record.measurements ?? {})) {
+    const declaration = declarations.get(name);
+    if (declaration === undefined) {
+      refuse(
+        "validation",
+        at,
+        `${at}: measurement "${name}" for ${cell.cellKey} is not declared by the sealed `
+          + `EvaluationSpec (declared: ${[...declarations.keys()].sort().join(", ") || "none"})`,
+      );
+    }
+    typed[name] = coerceMeasurement(value, declaration, name, cell, at);
+  }
+  return typed;
+}
+
+/** The declared-type coercion, one measurement at a time. Deliberately narrow: a value with no
+ * unambiguous reading under the declared type is refused, never guessed at. */
+function coerceMeasurement(
+  value: string | number | boolean,
+  declaration: MeasurementDeclaration,
+  name: string,
+  cell: ExternalRunImportCell,
+  at: string,
+): string | number | boolean {
+  const refuseValue = (): never => refuse(
+    "validation",
+    at,
+    `${at}: measurement "${name}" for ${cell.cellKey} is declared `
+      + `type "${declaration.type}", but the dump supplied ${JSON.stringify(value)}`,
+  );
+
+  if (declaration.type === "boolean") {
+    if (typeof value === "boolean") return value;
+    // Exactly the two spellings the CSV dialect can carry; "1"/"yes"/"TRUE" are guesses.
+    if (value === "true") return true;
+    if (value === "false") return false;
+    return refuseValue();
+  }
+  if (declaration.type === "number") {
+    if (typeof value === "number") return Number.isFinite(value) ? value : refuseValue();
+    if (typeof value !== "string" || !DECIMAL_STRING_PATTERN.test(value)) return refuseValue();
+    // A decimal string that a JS number cannot hold EXACTLY stays the string it already was:
+    // `compare()` parses decimal strings as exact decimals via BigInt, so leaving it alone is
+    // strictly more faithful than rounding it into a float that means something else.
+    const asNumber = Number(value);
+    const roundTrip = String(asNumber);
+    if (!DECIMAL_STRING_PATTERN.test(roundTrip) || normalizeDecimal(roundTrip) !== normalizeDecimal(value)) {
+      return value;
+    }
+    return asNumber;
+  }
+  // `string`: a JSONL boolean or number for a string-declared measurement is a shape disagreement
+  // with the sealed spec, not something to stringify on the operator's behalf.
+  return typeof value === "string" ? value : refuseValue();
+}
+
+/** Canonical form of a decimal-grammar string, so "0.50", "0.5", and "00.5" compare equal. */
+function normalizeDecimal(text: string): string {
+  const negative = text.startsWith("-");
+  const [intDigits = "", fracDigits = ""] = (negative ? text.slice(1) : text).split(".");
+  const integer = intDigits.replace(/^0+(?=\d)/u, "");
+  const fraction = fracDigits.replace(/0+$/u, "");
+  const magnitude = fraction.length === 0 ? integer : `${integer}.${fraction}`;
+  return magnitude === "0" ? "0" : `${negative ? "-" : ""}${magnitude}`;
+}
+
 // ── synthesis: sealed records + run-journal entries for an accepted plan ─────────────────────
 //
 // Everything below turns an accepted `ExternalRunImportPlan` into exactly the durable evidence a
@@ -434,8 +688,10 @@ export interface WriteExternalRunImportInput {
   /** `RunState.owner` — the solver identity every synthesized Submission requests under. */
   readonly owner: string;
   readonly source: ExternalRunImportSource;
-  /** Directory a relative `evidence[].path` resolves against. */
-  readonly evidenceRoot: string;
+  /** Everything fallible, already resolved (`preflightExternalRunImport`). The writer CONSUMES
+   * this rather than re-resolving: a second resolution is a second chance to disagree, and a
+   * refusal raised from here would land mid-write with no rollback. */
+  readonly preflight: ExternalRunImportPreflight;
   /** Frozen operation clock; every synthesized `at` that has no imported timestamp uses it. */
   readonly at: string;
 }
@@ -461,7 +717,7 @@ interface ImportedEvidence {
 export async function writeExternalRunImport(
   input: WriteExternalRunImportInput,
 ): Promise<WriteExternalRunImportResult> {
-  const { workspaceDir, draftId, plan, runRecord, owner, evidenceRoot, at } = input;
+  const { workspaceDir, draftId, plan, runRecord, owner, preflight, at } = input;
   // The plan carries the `sha256:`-PREFIXED coordinates (it quotes them verbatim in refusals);
   // idempotency keys want that form and evaluation nonces want the bare hex. Derive both once.
   const runSha256Hex = bareSha256Hex(plan.runSha256);
@@ -476,7 +732,8 @@ export async function writeExternalRunImport(
   let unscorable = 0;
   let expired = 0;
 
-  for (const cell of plan.cells) {
+  for (const prepared of preflight.cells) {
+    const { cell } = prepared;
     const { cellKey, coord, record, outcome } = cell;
     const annotation = importAnnotation(input.source, record);
     // The declaration's timing block, kept verbatim from the dump: absent members stay absent.
@@ -517,10 +774,9 @@ export async function writeExternalRunImport(
     });
 
     const idempotencyKey = cellIdempotencyKey(runDigest, cellKey, 1);
-    const arm = runRecord.arms.find((candidate) => candidate.armId === coord.armId);
-    if (arm === undefined) {
-      refuse("record-integrity", `runs.${draftId}.${cellKey}`, `sealed Run has no arm "${coord.armId}"`);
-    }
+    // Resolved by the preflight, which refuses a missing arm before anything is written; every
+    // outcome that reaches this line is a dispatched one, so the arm is present by construction.
+    const arm = prepared.arm!;
     const submissionBytes = sealSubmission({
       protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: deterministicUuidUri(idempotencyKey),
@@ -571,7 +827,7 @@ export async function writeExternalRunImport(
     }
 
     // --- evidence + solve Delivery (graded and ungradeable both delivered something) ----------
-    const evidence = sealEvidence(workspaceDir, evidenceRoot, cell);
+    const evidence = sealPreparedEvidence(workspaceDir, prepared.evidence);
     const createdAt = record.endedAt ?? at;
     const attempt = deterministicUuidUri(`external-run-import:attempt:${runSha256Hex}:${cellKey}:1`);
     const deliveryBytes = sealDelivery({
@@ -645,6 +901,7 @@ export async function writeExternalRunImport(
       draftId,
       plan,
       cell,
+      grading: prepared.grading!,
       evidence,
       deliverySha256,
       createdAt,
@@ -720,30 +977,18 @@ function declarationTimings(
 }
 
 /**
- * Reads and seals every evidence file of one cell, IN DUMP ORDER. Order is load-bearing twice
+ * Seals the preflight's already-read evidence bytes, IN DUMP ORDER. Order is load-bearing twice
  * over: it fixes the Delivery's `outputs` array, and the public reader re-derives the evaluation
  * Task from exactly those outputs and byte-compares the result.
  */
-function sealEvidence(
+function sealPreparedEvidence(
   workspaceDir: string,
-  evidenceRoot: string,
-  cell: ExternalRunImportCell,
+  evidence: readonly PreparedEvidence[],
 ): ImportedEvidence[] {
-  return (cell.record.evidence ?? []).map((ref) => {
-    const path = resolvePath(evidenceRoot, ref.path);
-    let bytes: Uint8Array;
-    try {
-      bytes = new Uint8Array(readFileSync(path));
-    } catch (cause) {
-      refuse(
-        "validation",
-        `row ${cell.record.row}`,
-        `evidence "${ref.name}" for ${cell.cellKey} could not be read at ${path}: `
-          + `${cause instanceof Error ? cause.message : String(cause)}`,
-      );
-    }
-    return { name: ref.name, sha256: putSealedBytes(workspaceDir, bytes) };
-  });
+  return evidence.map((file) => ({
+    name: file.name,
+    sha256: putSealedBytes(workspaceDir, file.bytes),
+  }));
 }
 
 interface WriteGradedEvaluationInput {
@@ -751,6 +996,8 @@ interface WriteGradedEvaluationInput {
   readonly draftId: string;
   readonly plan: ExternalRunImportPlan;
   readonly cell: ExternalRunImportCell;
+  /** The rule, the typed measurements, and the verdict — all resolved by the preflight. */
+  readonly grading: PreparedGrading;
   readonly evidence: readonly ImportedEvidence[];
   readonly deliverySha256: string;
   readonly createdAt: string;
@@ -771,10 +1018,10 @@ interface WriteGradedEvaluationInput {
  * which is why the evidence names and their order above are not cosmetic.
  */
 async function writeGradedEvaluation(input: WriteGradedEvaluationInput): Promise<void> {
-  const { workspaceDir, draftId, plan, cell, evidence, deliverySha256, createdAt } = input;
-  const { cellKey, coord, record } = cell;
+  const { workspaceDir, draftId, plan, cell, grading, evidence, deliverySha256, createdAt } = input;
+  const { cellKey, coord } = cell;
 
-  const evaluationSpecSha256 = subjectEvaluationSpecSha256(workspaceDir, coord.taskDigest, cellKey);
+  const { evaluationSpecSha256, measurements, outcome } = grading;
   const derived = deriveEvaluationTask({
     subjectTask: { name: "subject-task.json", digest: `sha256:${coord.taskDigest}` },
     subjectDelivery: { name: "subject-delivery.json", digest: `sha256:${deliverySha256}` },
@@ -808,23 +1055,6 @@ async function writeGradedEvaluation(input: WriteGradedEvaluationInput): Promise
     leg: "evaluation",
     evalIndex: 1,
   });
-
-  const measurements = { ...record.measurements } as Record<string, string | number | boolean>;
-  const spec = parseEvaluationSpec(getSealedBytes(workspaceDir, evaluationSpecSha256));
-  // The verdict is COMPUTED, never imported. There is no pass/fail column in the dump precisely so
-  // that this line is the only place a verdict can come from; `checkVerdictRuleConsistency`
-  // recomputes it at assembly from the same spec and the same measurements.
-  let outcome: ReturnType<typeof evaluateVerdictRule>;
-  try {
-    outcome = evaluateVerdictRule(spec.verdictRule as Parameters<typeof evaluateVerdictRule>[0], measurements);
-  } catch (cause) {
-    refuse(
-      "validation",
-      `row ${record.row}`,
-      `${cellKey}: the sealed EvaluationSpec's verdict rule could not be evaluated over the `
-        + `imported measurements — ${cause instanceof Error ? cause.message : String(cause)}`,
-    );
-  }
 
   const statement = {
     _type: "https://in-toto.io/Statement/v1",

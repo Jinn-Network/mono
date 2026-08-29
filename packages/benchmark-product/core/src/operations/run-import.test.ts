@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { expectedCellSet, parseBenchmark, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
 import { deriveEvaluationTask } from "@jinn-network/task-execution-profiles";
 import { EVALUATOR_REQUIREMENT_KEY } from "../venue/provisioner.js";
-import type { ExternalRunRecord } from "../intake/external-run-records.js";
+import { readExternalRunRecordsCsv, type ExternalRunRecord } from "../intake/external-run-records.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { requireWorkspaceAuthorship } from "../run/publication-authority.js";
 import { readRunState } from "../run/state.js";
@@ -476,4 +476,120 @@ describe("run.import — refusals", () => {
     expect(outcome.error.code).toBe("validation");
     expect(outcome.error.detail).toMatch(/resolved/u);
   });
+});
+
+describe("run.import — imported measurements are typed against the sealed spec", () => {
+  /** The one verdict every downstream guard re-derives from the same map; if the imported values
+   * reach the rule untyped, every one of those guards agrees on the same WRONG answer. */
+  function verdictFor(matrix: ReturnType<typeof parseMatrix>, cellKey: string): string {
+    const cell = matrix.cells.find((candidate) => candidate.cellKey === cellKey)!;
+    return readVerdictEnvelope(getSealedBytes(workspaceDir, cell.verdicts[0]!.slice("sha256:".length))).verdict;
+  }
+
+  test("a CSV dump's boolean columns reach the verdict rule as booleans, not as strings", async () => {
+    const clock = makeClock();
+    const { cellKeys } = await lockedRun(clock);
+    const evidence = cellKeys.slice(0, 2).map((cellKey) =>
+      writeEvidence(cellKey, "prediction.json", `{"probabilityYes":"0.5","cell":"${cellKey}"}`));
+    // The dialect the document publishes, read by the real CSV reader: every field is a string.
+    const csv = [
+      "cellKey,outcome,reason,evidence,m.integrity,m.resolved",
+      `${cellKeys[0]!},graded,,prediction=${evidence[0]!},true,true`,
+      `${cellKeys[1]!},graded,,prediction=${evidence[1]!},true,false`,
+      ...cellKeys.slice(2).map((cellKey) => `${cellKey},unrun,not part of this test,,,`),
+    ].join("\n");
+    const matrix = await importAndCollect(clock, readExternalRunRecordsCsv(`${csv}\n`));
+
+    // integrity=true, resolved=true -> the sealed rule passes. Read as the STRING "true" it would
+    // fail, because `compare()` falls back to `===` for a non-numeric operand.
+    expect(verdictFor(matrix, cellKeys[0]!)).toBe("pass");
+    // resolved=false -> the rule's declared inconclusive class fires. As "false" it never would.
+    expect(verdictFor(matrix, cellKeys[1]!)).toBe("inconclusive");
+  }, 120_000);
+
+  test("a measurement value the declared type cannot accept is refused, naming both", async () => {
+    const clock = makeClock();
+    const { cellKeys } = await lockedRun(clock);
+    const outcome = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1",
+      records: [
+        // `integrity` is declared `type: "boolean"`; "yes" has no honest boolean reading.
+        { ...gradedRow(1, cellKeys[0]!), measurements: { integrity: "yes", resolved: true } },
+        ...cellKeys.slice(1).map((cellKey, index) => bareRow(2 + index, cellKey, "unrun", "not part of this test")),
+      ],
+      source: SOURCE,
+      evidenceRoot,
+    });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.detail).toMatch(/integrity/u);
+    expect(outcome.error.detail).toMatch(/boolean/u);
+  }, 60_000);
+
+  test("a measurement the sealed spec does not declare is refused rather than flowing untyped", async () => {
+    const clock = makeClock();
+    const { cellKeys } = await lockedRun(clock);
+    const outcome = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1",
+      records: [
+        { ...gradedRow(1, cellKeys[0]!), measurements: { integrity: true, resolved: true, madeUp: 3 } },
+        ...cellKeys.slice(1).map((cellKey, index) => bareRow(2 + index, cellKey, "unrun", "not part of this test")),
+      ],
+      source: SOURCE,
+      evidenceRoot,
+    });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.detail).toMatch(/madeUp/u);
+  }, 60_000);
+});
+
+describe("run.import — a refused dump leaves the draft importable", () => {
+  test("a bad evidence path on a LATER row leaves the draft locked, the journal empty, and re-import possible", async () => {
+    const clock = makeClock();
+    const { cellKeys } = await lockedRun(clock);
+    const broken: ExternalRunRecord[] = [
+      gradedRow(1, cellKeys[0]!),
+      { ...gradedRow(2, cellKeys[1]!), evidence: [{ name: "prediction", path: "typo/prediction.json" }] },
+      ...cellKeys.slice(2).map((cellKey, index) => bareRow(3 + index, cellKey, "unrun", "not part of this test")),
+    ];
+    const refused = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1", records: broken, source: SOURCE, evidenceRoot,
+    });
+    expect(refused.ok).toBe(false);
+
+    // The draft must survive the refusal: nothing transitioned, nothing was journaled, and no
+    // launch was stamped. Otherwise one typo on row 2 of 200 kills the run permanently.
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toHaveLength(0);
+    expect(readRunState(workspaceDir, "draft-1")?.launchedAt).toBeUndefined();
+
+    const fixed = [...broken];
+    fixed[1] = gradedRow(2, cellKeys[1]!);
+    const imported = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1", records: fixed, source: SOURCE, evidenceRoot,
+    });
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("running");
+  }, 120_000);
+
+  test("an evidence path that escapes the dump directory is refused, naming the row", async () => {
+    const clock = makeClock();
+    const { cellKeys } = await lockedRun(clock);
+    for (const path of ["../../etc/passwd", "/etc/passwd"]) {
+      const outcome = await importRunRecords(contextFor(clock), {
+        draftId: "draft-1",
+        records: [
+          { ...gradedRow(1, cellKeys[0]!), evidence: [{ name: "prediction", path }] },
+          ...cellKeys.slice(1).map((cellKey, index) => bareRow(2 + index, cellKey, "unrun", "not part of this test")),
+        ],
+        source: SOURCE,
+        evidenceRoot,
+      });
+      expect(outcome.ok, path).toBe(false);
+      if (outcome.ok) return;
+      expect(outcome.error.detail, path).toMatch(/row 1/u);
+      expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    }
+  }, 120_000);
 });
