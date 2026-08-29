@@ -69,7 +69,15 @@ function viewerHtml(
   canStartWorkspace: boolean,
   availablePaths: ReadonlySet<string>,
 ): string {
-  const checks = verification.checks.map((check) => `<li><strong>${escapeMarkup(check)}</strong> <span>passed</span></li>`).join("");
+  // A metadata-first evidence-native bundle defers `artifact-integrity` (issue #2986): it carries
+  // the artifact digests without their bytes. The viewer must say so rather than print a pass over
+  // bytes nobody read.
+  const artifactContent = "artifactContent" in verification ? verification.artifactContent : undefined;
+  const artifactContentNotFetched = artifactContent !== undefined && artifactContent.status === "not-fetched";
+  const checks = verification.checks.map((check) => {
+    const state = artifactContentNotFetched && check === "artifact-integrity" ? "not fetched" : "passed";
+    return `<li><strong>${escapeMarkup(check)}</strong> <span>${state}</span></li>`;
+  }).join("");
   // The anchored binary-qualification closure is the one format the @0.1 line cannot read
   // (issue #3205), so it is named before the fall-through rather than inheriting it.
   const verificationCommand = verification.format === "benchmark-product-public-bundle/5"

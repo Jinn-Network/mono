@@ -142,8 +142,19 @@ function renderSigners(signers: readonly PublicBundleSigner[]): string {
   return `\nSigned by\n${groups.map((group) => renderSignerGroup(group.role, group.custody, group.count)).join("\n")}\n`;
 }
 
+/** The one check a metadata-first bundle defers (issue #2986). Naming it here keeps the render
+ * from having to know anything else about which profile it is printing. */
+const NOT_FETCHED_CHECK = "artifact-integrity";
+
 export function renderVerifiedBundle(result: PublicBundleVerificationResult): string {
-  const checks = result.checks.map((check) => `${check.padEnd(24)}passed`).join("\n");
+  // A metadata-first bundle carries artifact digests without their bytes. Printing "passed" for a
+  // check that read nothing would be the one claim this format cannot afford, so the deferred check
+  // prints as not fetched and is counted out of the passed total.
+  const artifactContent = "artifactContent" in result ? result.artifactContent : undefined;
+  const notFetched = artifactContent !== undefined && artifactContent.status === "not-fetched";
+  const checks = result.checks
+    .map((check) => `${check.padEnd(24)}${notFetched && check === NOT_FETCHED_CHECK ? "not fetched" : "passed"}`)
+    .join("\n");
   const totalChecks = result.format === "benchmark-product-public-bundle/5"
     ? EVIDENCE_NATIVE_BUNDLE_V5_CHECKS.length
     : result.format === "benchmark-product-public-bundle/6"
@@ -158,18 +169,28 @@ export function renderVerifiedBundle(result: PublicBundleVerificationResult): st
   const signers = result.signers === undefined || result.signers.length === 0
     ? ""
     : renderSigners(result.signers);
+  const passedChecks = result.checks.length - (notFetched ? 1 : 0);
+  const artifactContentReport = artifactContent === undefined || !notFetched
+    ? ""
+    : `\nArtifact content\n  ${artifactContent.notFetched} artifact ${artifactContent.notFetched === 1 ? "body was" : "bodies were"} not fetched: this bundle carries their exact digests, not their bytes.\n  Fetch each one into artifacts/<sha256>.bin from any copy of the full-evidence bundle and re-run to complete this check.\n`;
+  const artifactContentLimit = artifactContent === undefined || !notFetched
+    ? ""
+    : "\nEverything above was checked against the bytes this bundle carries. The artifact\ncontents themselves were not read, so nothing here says what they contain.";
   const anchorLimits = anchors === ""
     ? ""
     : "\nAn anchor dates the bytes it covers and says nothing else about the run: not\nthat results were produced after it, and not that the anchoring authority is\nindependent of the bundle's owner.";
-  return `Verified: ${result.checks.length} of ${totalChecks} checks passed
+  const verdictLine = notFetched
+    ? `Verified: ${passedChecks} of ${totalChecks} checks passed, 1 not fetched`
+    : `Verified: ${result.checks.length} of ${totalChecks} checks passed`;
+  return `${verdictLine}
 Bundle: ${identity}
 Format: ${result.format}
 
 ${checks}
-${signers}${anchors}
+${signers}${artifactContentReport}${anchors}
 This checks the bundle's integrity, evidence closure, calculations, report,
 and claim consistency. It does not prove that the machine that produced the
-bundle was honest or that the compared identities are independent parties.${anchorLimits}
+bundle was honest or that the compared identities are independent parties.${artifactContentLimit}${anchorLimits}
 No files were uploaded.
 Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.
 Verification uses the exact platform bytes installed from npm.

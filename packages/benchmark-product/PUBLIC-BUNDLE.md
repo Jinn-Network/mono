@@ -226,6 +226,58 @@ npx @colophon-claims/verify@0.2.1 <bundle-dir>
 with `@0.2` as the compatible line. It returns the same **seven checks** as v6,
 in the same order.
 
+### Evidence-native bundle v5 and its two profiles
+
+`benchmark-product-public-bundle/5` is the evidence-native closure. Unlike every format above it
+declares a `profile` IRI in its own `bundle.json`, and that declaration is part of the frozen
+contract: which members a reader must find is a fact the bundle states, never one the reader infers
+from what happens to be present. Its member list is `benchmark.json`, `analysis-manifest.json`,
+`cohort.json`, `matrix.json`, `report.json`, `report-envelope.json`, `claim-package.json`, one
+`records/<sha256>.bin` per evidence reference in `benchmark-product.claim-package/3`, and one
+`artifacts/<sha256>.bin` per artifact that package declares. It returns **seven checks**:
+`manifest`, `evidence-closure`, `artifact-integrity`, `signature-validity`,
+`matrix-rederivation`, `report-verification`, `claim-consistency`.
+
+Two profiles are defined. Both are the same format, the same grammar, and the same seven checks.
+
+- **Full evidence** — `https://spec.jinn.network/profiles/benchmark-product-public-bundle/5`.
+  Every declared artifact body is carried. `artifact-integrity` reads every one of them. An
+  artifact the evidence graph references but the bundle does not carry is a closure failure.
+- **Metadata first** —
+  `https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first`.
+  Exactly the full-evidence bundle minus the evidence artifact bodies. It carries every record,
+  every fixed member, and the artifact bodies that are declared signer public keys — those are
+  trust material `signature-validity` reads, not evidence a reader can fetch later. A reader who
+  only wants to recheck the arithmetic, the closure, the signatures, and the claim downloads the
+  records and the digests instead of the evidence.
+
+Every retained member of a metadata-first bundle is byte-identical to its full-evidence
+counterpart, `claim-package.json` included. That is how the two forms cross-reference:
+`claim-package/3`'s `records.artifacts` names every omitted body by exact digest, so a reader
+holding the metadata-first form has both the address to fetch and the exact expectation to check
+against, and the full form reduces to the metadata-first form by dropping those members and
+rebuilding `bundle.json`. Only `bundle.json` and the set of `artifacts/` members differ.
+
+Under metadata first, `manifest`, `evidence-closure`, `signature-validity`,
+`matrix-rederivation`, `report-verification`, and `claim-consistency` are unchanged and complete:
+they read records and fixed members, never artifact bodies. `artifact-integrity` reports
+**not fetched** rather than passing or failing. An absent body is a disclosed fact, not a closure
+failure; a body that *is* carried is still digest-checked, and a mismatch still fails the whole
+verification; the closure rule narrows from "every referenced artifact has bytes here" to "every
+referenced artifact is declared by digest in the claim package", so an evidence reference the claim
+never declared is still refused. The carried artifact set must be exactly the declared signer
+public keys — a metadata-first bundle carrying some other body is not the profile it declares and
+is refused, because a profile that admits any partial fetch names a family rather than one exact
+projection.
+
+The reader prints the deferred check as `not fetched`, counts it out of the passed total, and
+states what was not read. Nothing folds a deferred check into a pass: a bundle that reports seven
+of seven over bytes nobody read would be the one claim this format cannot afford.
+
+Under full evidence nothing changes. An unavailable artifact body is still a hard failure, and
+every v5 bundle published before this profile existed keeps its exact bytes, its profile IRI, and
+its outcome.
+
 ## Portable verification
 
 Verification with your own tools — no Jinn code at all — is specified in
