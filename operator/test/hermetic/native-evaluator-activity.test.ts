@@ -24,19 +24,28 @@
  *  - The production `Daemon` drives the whole solution leg: discover -> claim -> deterministic
  *    `prediction-v1-baseline` harness -> envelope upload -> on-chain deliver ->
  *    `SolutionDeliveryClaimed` on the locally-deployed V3 router.
- *  - The native evaluator's REAL settlement state machine (`NativeEvaluatorCoordinator`) driven by
- *    the REAL `EvaluatorLoop`, over:
+ *  - The REAL native evaluator composition (`buildNativeEvaluatorComposition`) driven by the REAL
+ *    `EvaluatorLoop`, over:
+ *      * REAL native identity stores (`openRoleIdentitySet`, the `evaluator-*` role family) backed
+ *        by a real encrypted keystore on disk;
+ *      * the REAL committed prediction-evaluator deployment registration — the composition loads
+ *        `deployments/evaluator/prediction-market-deployment.mjs`, re-hashes its bytes, and refuses
+ *        any disagreement between the configured agent / signer handle / evaluation-method digest
+ *        and what the registration declares;
+ *      * the REAL local task-execution backend, which spawns the real evaluation-harness child to
+ *        grade the subject material and seals its Delivery with the evaluator-verdict role key;
+ *      * the REAL signed-source publisher, signing the six announced records with the
+ *        evaluator-discovery role key;
  *      * REAL production `VerdictPorts` (`createVerdictPorts` over a real `createSafeBroadcaster`)
  *        bound to the evaluator's Safe, its own mech, and the locally-deployed router — so
  *        `claimEvaluation` / `deliverToMarketplace` / `claimVerdictDelivery` are real Safe-executed
  *        transactions, not fakes;
- *      * REAL native identity stores (`openRoleIdentitySet`, the `evaluator-*` role family) backed
- *        by a real encrypted keystore on disk;
- *      * the REAL committed prediction-evaluator deployment registration, pinned by its committed
- *        module + evaluation-method digests;
- *      * the REAL signed-source publisher (`openNativeEvaluatorPublisher`) signing with the
- *        evaluator-discovery role key;
  *      * REAL chain reads for finality/transaction reconciliation against the loaded snapshot.
+ *
+ *    The market is unresolved by construction (`native-evaluation-context.ts` stamps every native
+ *    prediction context `unresolved`), so the honest verdict is `inconclusive`. That is the full
+ *    proof of the reward path regardless: `claimVerdictDelivery` credits activity on attempt
+ *    finalization for ANY verdict code — the loop-completion gate, not a verdict-quality gate.
  *  - The assertion: `TaskActivityCheckerV3.eligibleActivityWeight` increments for BOTH Safes —
  *    the solver's (credited at attempt finalization inside `claimVerdictDelivery`) and the
  *    evaluator's (credited by `recordVerdictDelivery`).
@@ -47,17 +56,19 @@
  * by the solver and requester, and its subject-authority / verdict-verification gates verify the
  * DSSE ceremony behind them. A hermetic rig cannot self-provide that serving plane — the same
  * boundary `test/e2e/native-fleet-loop.ts` draws when it labels LEG 2-7 SEEDED / DEPLOY-TIME. So
- * this rig seeds the durable evaluation aggregate directly from the REAL on-chain
- * `SolutionDeliveryClaimed` facts and supplies deterministic stand-ins for the subject-authority
- * claim, the verdict gate, and the grading backend. Everything downstream of that — claim,
- * publication, marketplace delivery, settlement, activity credit — is the real code on a real
- * chain. Restoring the ingestion half hermetically is the native G-loop's own program, not this
- * gate's.
+ * this rig admits the evaluation directly from the REAL on-chain `SolutionDeliveryClaimed` facts
+ * over a rig-sealed subject document graph, and stands in for the subject-authority claim and the
+ * decision-grade NAMED verdict gate. `verifyExactGraph` — the exact delivery/verdict/evidence join
+ * around that gate — is not stood in and runs on every phase. Everything downstream — derivation,
+ * claim, grading, publication, marketplace delivery, settlement, activity credit — is the real
+ * code on a real chain. Restoring the ingestion half hermetically is the native G-loop's own
+ * program, not this gate's.
  *
  * SKIP-CLEAN when the committed fixture is absent (the gate asserts its presence separately).
  */
 
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -72,7 +83,22 @@ import {
   documentDigest,
   sealDelivery,
   sealSubmission,
+  sealTask,
 } from '@jinn-network/task-execution-protocol';
+import {
+  EVALUATION_SPEC_FORMAT_URI,
+  EVAL_SEMANTICS_VERSION,
+  buildEvaluationTaskProfile,
+  sealEvaluationSpec,
+  sealTaskProfile,
+  type EvaluationSpec,
+} from '@jinn-network/task-execution-profiles';
+import {
+  PREDICTION_PARSER,
+  predictionEvaluationSpecMeasurements,
+  predictionEvaluationSpecVerdictRule,
+} from '@jinn-network/task-execution-evaluator-adapters';
+import { ADMISSION_RECEIPT_ANNOTATION_URI } from '@jinn-network/marketplace-binding';
 import {
   createBroadcastLock,
   createSafeBroadcaster,
@@ -82,13 +108,20 @@ import {
 } from '@jinn-network/marketplace-venue-base';
 import { Store } from '../../src/store/store.js';
 import { EvaluatorLoop } from '../../src/daemon/evaluator-loop.js';
-import { NativeEvaluatorCoordinator } from '../../src/daemon/native-evaluator-coordinator.js';
+import { buildNativeEvaluatorComposition } from '../../src/daemon/native-evaluator-composition.js';
 import { NativeEvaluatorStateRepository } from '../../src/daemon/native-evaluator-state.js';
-import { openNativeEvaluatorPublisher } from '../../src/daemon/native-evaluator-publisher.js';
+import {
+  buildNativeWorkspaceRuntime,
+  buildPinnedNodeLauncherDeployment,
+} from '../../src/daemon/native-solver-backend.js';
+import { openOperatorEvidence } from '../../src/daemon/evidence-join.js';
 import { openRoleIdentitySet } from '../../src/daemon/role-identities.js';
 import {
+  PREDICTION_EVALUATOR_DEPLOYMENT_MODULE_PATH,
+  PREDICTION_EVALUATOR_DEPLOYMENT_SIDECAR_PATH,
   predictionEvaluatorMethodDigest,
   predictionEvaluatorModuleDigest,
+  writePredictionEvaluatorSidecar,
 } from '../../src/native-evaluator/deployment-paths.js';
 import {
   setupAnvilFixtureFromState,
@@ -165,6 +198,11 @@ function utf8(value: string): Uint8Array {
   return new TextEncoder().encode(value);
 }
 
+/** The launcher's Node pin. The fleet path computes it the same way (`native-fleet-evaluator.ts`). */
+function runningNodeDigest(): `sha256:${string}` {
+  return `sha256:${createHash('sha256').update(readFileSync(process.execPath)).digest('hex')}`;
+}
+
 /** Durable evaluation rows carry bigint chain fields, which `JSON.stringify` refuses outright. */
 function describeRow(row: unknown): string {
   return JSON.stringify(row, (_key, value) =>
@@ -179,8 +217,10 @@ function printLegTable(): void {
     ['LEG 1  two staked operators (real FleetBootstrapper)', 'PROVEN-hermetic'],
     ['LEG 2  solution leg via the production Daemon (claim -> deliver -> settle)', 'PROVEN-hermetic'],
     ['LEG 3  native evaluator identity stores (openRoleIdentitySet)', 'PROVEN-hermetic'],
-    ['LEG 4  committed prediction-evaluator deployment registration digests', 'PROVEN-hermetic'],
-    ['LEG 5  NativeEvaluatorCoordinator + EvaluatorLoop settlement state machine', 'PROVEN-hermetic'],
+    ['LEG 4  committed prediction-evaluator deployment registration, loaded + digest-pinned', 'PROVEN-hermetic'],
+    ['LEG 5  real local backend: spawned evaluation-harness child produces the verdict', 'PROVEN-hermetic'],
+    ['LEG 5b signed-source publisher announces the six evaluation records', 'PROVEN-hermetic'],
+    ['LEG 5c NativeEvaluatorCoordinator + EvaluatorLoop settlement state machine', 'PROVEN-hermetic'],
     ['LEG 6  real VerdictPorts: claimEvaluation -> deliver -> claimVerdictDelivery', 'PROVEN-hermetic'],
     ['LEG 7  eligibleActivityWeight credit for solver + evaluator Safes', 'PROVEN-hermetic'],
     ['LEG 8  signed .well-known record-source ingestion (opportunity discovery)', 'SEEDED (deploy-time serves it live)'],
@@ -201,9 +241,7 @@ describeMaybe('hermetic native-evaluator verdict settlement credits staking acti
       const mockIpfs = await startMockIpfsServer();
       const rigRoot = await mkdtemp(join(tmpdir(), 'jinn-native-evaluator-activity-'));
       let running: Awaited<ReturnType<typeof startDaemon>> | undefined;
-      let evaluatorStore: Store | undefined;
-      let venueState: ReturnType<typeof openVenueState> | undefined;
-      let publisher: Awaited<ReturnType<typeof openNativeEvaluatorPublisher>> | undefined;
+      let closeRig: (() => Promise<void>) | undefined;
 
       try {
         // ── LEG 1: two staked operators on the loaded snapshot state ──────────────────────
@@ -272,6 +310,7 @@ describeMaybe('hermetic native-evaluator verdict settlement credits staking acti
           evaluator,
           rigRoot,
           routerAddress: v3Env.routerAddress,
+          coordinatorAddress: v3Env.coordinatorAddress,
           mechAddress: evaluatorV3.mockMechAddress,
           solutionSettlementTxHash: settlement.txHash,
           solverSafeAddress: solver.safeAddress,
@@ -279,19 +318,21 @@ describeMaybe('hermetic native-evaluator verdict settlement credits staking acti
           taskId: settlement.taskId,
           attemptIndex: settlement.attemptIndex,
         });
-        evaluatorStore = rig.store;
-        venueState = rig.venueState;
-        publisher = rig.publisher;
+        closeRig = () => rig.close();
 
-        // The REAL loop drives the REAL coordinator. Each pass advances one phase and needs the
+        // The REAL loop drives the REAL composition. Each pass advances one phase and needs the
         // preceding transaction buried past the rig's finality depth, so the rig mines between
         // ticks exactly as wall-clock block production would.
         const loop = new EvaluatorLoop({
           composition: rig.composition,
           store: rig.store,
           pollIntervalMs: 50,
+          // The coordinator's only durable diagnostic is the reason it records; surface it so a
+          // stalled phase names itself instead of needing DB spelunking.
+          // eslint-disable-next-line no-console
+          logger: { info: (m) => console.log(m), warn: (m) => console.warn(m) },
         });
-        const deadline = Date.now() + 180_000;
+        const deadline = Date.now() + 300_000;
         let complete = false;
         while (Date.now() < deadline && !complete) {
           await loop.tick();
@@ -324,23 +365,24 @@ describeMaybe('hermetic native-evaluator verdict settlement credits staking acti
         printLegTable();
       } finally {
         if (running) { try { await running.stop(); } catch { /* best-effort */ } }
-        if (publisher) { try { await publisher.close(); } catch { /* best-effort */ } }
-        if (evaluatorStore) { try { evaluatorStore.close(); } catch { /* best-effort */ } }
-        if (venueState) { try { venueState.close(); } catch { /* best-effort */ } }
+        if (closeRig) { try { await closeRig(); } catch { /* best-effort */ } }
         try { await mockIpfs.close(); } catch { /* best-effort */ }
         try { await fixture.teardown(); } catch { /* best-effort */ }
         try { await rm(rigRoot, { recursive: true, force: true }); } catch { /* best-effort */ }
       }
     },
-    240_000,
+    // The solution leg plus the evaluator's four finality-gated phases (claim, grade, marketplace
+    // delivery, settlement) each need blocks mined past the rig's finality depth; the spawned
+    // evaluation-harness child adds a real process launch on top.
+    480_000,
   );
 });
-
 interface NativeEvaluatorRigInput {
   readonly fixture: DaemonHarnessFixture;
   readonly evaluator: BootstrappedOperator;
   readonly rigRoot: string;
   readonly routerAddress: Address;
+  readonly coordinatorAddress: Address;
   readonly mechAddress: Address;
   readonly solutionSettlementTxHash: Hex;
   readonly solverSafeAddress: Address;
@@ -350,12 +392,134 @@ interface NativeEvaluatorRigInput {
 }
 
 /**
- * Assembles the native evaluator over the locally-deployed V3 stack.
+ * The exact EvaluationSpec shape the committed prediction registration grades against — the same
+ * sealed-spec fixture `test/native-evaluator/prediction-deployment.test.ts` drives its spawn proof
+ * with, so the deployment module under test here is exercised on its real input shape.
+ */
+function predictionSpec(): EvaluationSpec {
+  return {
+    protocol: EVALUATION_SPEC_FORMAT_URI,
+    semanticsVersion: EVAL_SEMANTICS_VERSION,
+    family: 'deterministic-process',
+    grader: {
+      name: PREDICTION_PARSER.id,
+      digest: { sha256: PREDICTION_PARSER.digest.slice('sha256:'.length) },
+      accessClass: 'public',
+    },
+    familyBlock: {
+      image: { name: 'hermetic-native-activity-rig', digest: { sha256: 'b'.repeat(64) } },
+      platform: 'linux/amd64',
+      workspace: {},
+      testMaterial: [],
+      parser: PREDICTION_PARSER,
+      transitions: { failToPass: [], passToPass: [] },
+      timeout: 60,
+    },
+    measurements: predictionEvaluationSpecMeasurements(),
+    verdictRule: predictionEvaluationSpecVerdictRule(),
+    unscorable: [],
+    evidenceConventions: { requiredRefs: [] },
+  } as EvaluationSpec;
+}
+
+/**
+ * The subject document graph the evaluator grades. Sealed with the real protocol sealers so
+ * `deriveNativeEvaluation`'s graph verification, `deriveEvaluationTask`, and the deployment
+ * module's own provisioner all run on records they would accept from a live solver.
  *
- * Real: the identity store, the committed deployment-registration digests, the signed-source
- * publisher, the venue Safe broadcaster + `VerdictPorts`, the chain reads, and the coordinator.
- * Seeded: the opportunity (from the REAL on-chain settlement facts), the subject material, the
- * subject-authority claim, the verdict gate, and the grading backend — see the file header.
+ * The forecast window brackets the result's `submittedAt`, and the market is deliberately
+ * unresolved: `native-evaluation-context.ts` stamps every native prediction context `unresolved`
+ * by construction, so an honest native verdict here is `inconclusive`. That is not a weaker proof
+ * of the reward path — `JinnRouterV3.claimVerdictDelivery` credits activity on attempt
+ * finalization for ANY verdict code, which is exactly the loop-completion gate under test.
+ */
+function predictionSubjectGraph() {
+  const sealedSpecification = sealEvaluationSpec(predictionSpec());
+  const subjectTask = sealTask({
+    protocol: TASK_EXECUTION_PROTOCOL_URI,
+    profile: {
+      uri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
+      digest: { sha256: '4'.repeat(64) },
+    },
+    payload: {
+      forecast: {
+        marketId: 'hermetic-native-activity-rig',
+        question: 'Will the hermetic native-evaluator activity rig settle a verdict?',
+        consensusProbabilityYes: '0.500000',
+        observedAt: '2026-01-01T12:00:00Z',
+        resolvesAt: '2026-01-01T12:01:00Z',
+      },
+    },
+    instructions: 'Submit a prediction.',
+    outputs: [{ name: 'result.json', mediaType: 'application/json', required: true }],
+    evaluation: {
+      name: 'evaluation-spec.json',
+      digest: { sha256: sealedSpecification.digest.slice('sha256:'.length) },
+    },
+  });
+  const subjectResult = utf8(JSON.stringify({
+    probabilityYes: '0.750000',
+    submittedAt: '2026-01-01T12:00:30.000Z',
+  }));
+  // The admission receipt the requester's Submission must annotate (§7.39). `deriveNativeEvaluation`
+  // reads it off the Submission, so the receipt artifact and the annotation descriptor have to name
+  // the same exact bytes.
+  const admissionReceipt = utf8('hermetic-rig-admission-receipt');
+  const subjectSubmission = sealSubmission({
+    protocol: TASK_EXECUTION_PROTOCOL_URI,
+    submission: 'urn:uuid:11111111-1111-4111-8111-111111111111',
+    task: { digest: { sha256: documentDigest(subjectTask).slice('sha256:'.length) } },
+    requester: 'urn:jinn:requester:hermetic-native-activity-rig',
+    idempotencyKey: 'hermetic-native-activity-rig',
+    nonce: 'hermetic-native-activity-rig',
+    deadline: '2099-01-01T00:00:00.000Z',
+    annotations: {
+      [ADMISSION_RECEIPT_ANNOTATION_URI]: {
+        name: 'admission-receipt',
+        mediaType: 'application/vnd.in-toto+json',
+        digest: { sha256: documentDigest(admissionReceipt).slice('sha256:'.length) },
+      },
+    },
+  });
+  // `verifyExactGraph` requires the Delivery's evidence set to equal the material's exactly.
+  const solutionEvidence = utf8('hermetic-rig-solution-evidence');
+  const subjectDelivery = sealDelivery({
+    protocol: TASK_EXECUTION_PROTOCOL_URI,
+    attempt: 'urn:uuid:11111111-1111-4111-8111-111111111112',
+    task: documentDigest(subjectTask),
+    outputs: [{
+      name: 'result.json',
+      mediaType: 'application/json',
+      digest: { sha256: documentDigest(subjectResult).slice('sha256:'.length) },
+    }],
+    evidenceRecords: [{ family: 'execution-evidence', digest: documentDigest(solutionEvidence) }],
+    outcome: 'fulfilled',
+    createdAt: '2026-01-01T12:00:00.000Z',
+  });
+  return {
+    task: artifactOf('subject-task.json', subjectTask),
+    submission: artifactOf('submission', subjectSubmission),
+    requesterEnvelope: artifactOf('requester-envelope', utf8('hermetic-rig-requester-envelope')),
+    admissionReceipt: artifactOf('admission-receipt', admissionReceipt),
+    delivery: artifactOf('subject-delivery.json', subjectDelivery),
+    deliveryEnvelope: artifactOf('delivery-envelope', utf8('hermetic-rig-delivery-envelope')),
+    evidenceRecords: [artifactOf('solution-evidence', solutionEvidence)],
+    results: [artifactOf('result.json', subjectResult)],
+    evaluationSpec: artifactOf('evaluation-spec.json', sealedSpecification.bytes),
+  };
+}
+
+/**
+ * Assembles the REAL native evaluator composition over the locally-deployed V3 stack.
+ *
+ * Real: the identity store, the committed deployment module + its registration (loaded and
+ * digest-checked by `buildNativeEvaluatorComposition` itself), the local task-execution backend
+ * and its spawned evaluation-harness child, the signed-source publisher, filesystem evidence, the
+ * venue Safe broadcaster + `VerdictPorts`, the chain reads, and the coordinator.
+ *
+ * Seeded: the opportunity (admitted directly from the REAL on-chain settlement facts rather than
+ * read from a signed source), the subject-authority claim, and the decision-grade verdict gate —
+ * see the file header.
  */
 async function buildNativeEvaluatorRig(input: NativeEvaluatorRigInput) {
   const { fixture, evaluator, rigRoot } = input;
@@ -371,13 +535,17 @@ async function buildNativeEvaluatorRig(input: NativeEvaluatorRigInput) {
     bindingResolver,
   });
 
-  // ── LEG 4: the committed prediction-evaluator deployment registration, pinned by digest ──
-  // The rig does not spawn the grading child (LEG 9/10 are seeded), but the deployment identity
-  // this operator would settle under is the real committed one, read from the real bytes.
+  // ── LEG 4: the committed prediction-evaluator deployment registration ───────────────────
+  // `buildNativeEvaluatorComposition` re-reads the module bytes, refuses a digest mismatch, and
+  // refuses a registration whose declared agent / signer handle / method digest disagree with
+  // what is configured here — so this is the real registration, not a name.
   const deploymentModuleDigest = await predictionEvaluatorModuleDigest();
   const evaluationMethodDigest = await predictionEvaluatorMethodDigest();
-  expect(deploymentModuleDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
-  expect(evaluationMethodDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+  // The module reads its per-operator identity from an on-disk sidecar at import time.
+  await writePredictionEvaluatorSidecar({
+    agent: EVALUATOR_AGENT,
+    claimEvidenceDir: join(rigRoot, 'claim-evidence'),
+  });
 
   // ── LEG 6: REAL production verdict ports over a REAL Safe broadcaster ──────────────────
   const venueState = openVenueState(join(rigRoot, 'venue-state.sqlite'));
@@ -408,21 +576,7 @@ async function buildNativeEvaluatorRig(input: NativeEvaluatorRigInput) {
   const settlementReceipt = await publicClient.getTransactionReceipt({
     hash: input.solutionSettlementTxHash,
   });
-
-  const subjectResult = utf8(JSON.stringify({ probabilityYes: '0.750000' }));
-  const subjectTask = utf8(JSON.stringify({ marketId: 'hermetic-native-activity-rig' }));
-  const subjectDelivery = utf8('hermetic-rig-solution-delivery');
-  const material = {
-    task: artifactOf('task', subjectTask),
-    submission: artifactOf('submission', utf8('hermetic-rig-subject-submission')),
-    requesterEnvelope: artifactOf('requester-envelope', utf8('hermetic-rig-requester-envelope')),
-    admissionReceipt: artifactOf('admission-receipt', utf8('hermetic-rig-admission-receipt')),
-    delivery: artifactOf('delivery', subjectDelivery),
-    deliveryEnvelope: artifactOf('delivery-envelope', utf8('hermetic-rig-delivery-envelope')),
-    evidenceRecords: [artifactOf('solution-evidence', utf8('hermetic-rig-solution-evidence'))],
-    results: [artifactOf('result.json', subjectResult)],
-    evaluationSpec: artifactOf('evaluation-spec', utf8('hermetic-rig-evaluation-spec')),
-  };
+  const material = predictionSubjectGraph();
 
   const admitted = state.admitOpportunity({
     opportunity: {
@@ -445,11 +599,13 @@ async function buildNativeEvaluatorRig(input: NativeEvaluatorRigInput) {
       canonicalEventIdentity: `${base.id}:${settlementReceipt.blockHash}:0`,
     },
     evaluatorAgent: EVALUATOR_AGENT,
-    coordinator: input.routerAddress,
+    coordinator: input.coordinatorAddress,
     material,
   });
 
-  // The subject-authority claim a live trust catalog would produce (LEG 9, seeded).
+  // The subject-authority claim a live trust catalog would produce (LEG 9, seeded). Recording it
+  // here is what makes `prepareClaim` skip `authority.claim`; everything it guards downstream —
+  // including the REAL `deriveNativeEvaluation` of the evaluation Task — still runs.
   state.recordAdmissionVerified(admitted.evaluationId, {
     requester: { signerKey: 'did:key:hermetic-rig-requester', sealingTime: '2026-01-01T00:00:00.000Z' },
     admission: { signerKey: 'did:key:hermetic-rig-admission', effectiveTime: '2026-01-01T00:00:00.000Z' },
@@ -469,78 +625,71 @@ async function buildNativeEvaluatorRig(input: NativeEvaluatorRigInput) {
     verificationDigest: documentDigest(utf8('hermetic-rig-subject-authority-verification')),
   });
 
-  const evaluationTaskBytes = utf8(JSON.stringify({
-    evaluation: 'hermetic-native-activity-rig',
-    subjectTask: material.task.digest,
-    subjectDelivery: material.delivery.digest,
-    evaluationMethodDigest,
-  }));
-  const evaluationTaskDigest = documentDigest(evaluationTaskBytes);
-  const submissionUri = `urn:uuid:${'0'.repeat(8)}-0000-4000-8000-${'0'.repeat(12)}` as const;
-  const submissionBytes = sealSubmission({
-    protocol: TASK_EXECUTION_PROTOCOL_URI,
-    submission: submissionUri,
-    task: { digest: { sha256: evaluationTaskDigest.slice('sha256:'.length) } },
-    requester: EVALUATOR_AGENT,
-    idempotencyKey: admitted.evaluationId,
-    nonce: admitted.evaluationId,
-    deadline: '2099-01-01T00:00:00.000Z',
-  });
-  state.recordDerivedEvaluation(admitted.evaluationId, {
-    taskBytes: evaluationTaskBytes,
-    taskDigest: evaluationTaskDigest,
-    submissionBytes,
-    submissionDigest: documentDigest(submissionBytes),
-    submissionUri,
-  });
+  // ── The real local backend's dependencies ───────────────────────────────────────────────
+  const evidence = await openOperatorEvidence({ rootDir: join(rigRoot, 'evidence') });
+  const launcherDeployment = await buildPinnedNodeLauncherDeployment(runningNodeDigest());
+  const evaluationProfile = buildEvaluationTaskProfile();
+  const evaluationProfileDigest = sealTaskProfile(evaluationProfile).digest;
+  const subjectBytesByDigest = new Map<string, Uint8Array>(
+    [material.task, material.submission, material.requesterEnvelope, material.admissionReceipt,
+      material.delivery, material.deliveryEnvelope, material.evaluationSpec,
+      ...material.evidenceRecords, ...material.results]
+      .map((entry) => [entry.digest, entry.bytes]),
+  );
 
-  // ── The seeded grading backend (LEG 9/10): a deterministic verdict, sealed the real way ──
-  const verdictBytes = utf8(JSON.stringify({
-    predicate: { verdict: 'pass', evaluator: { id: EVALUATOR_AGENT }, signerHandle: EVALUATOR_SIGNER_HANDLE },
-  }));
-  const evidenceBytes = utf8('hermetic-rig-evaluation-evidence');
-  let deliveryBytes = new Uint8Array();
-  const backend = {
-    recover: async () => ({ classification: 'absent' as const }),
-    submit: async (_task: Uint8Array, _submission: Uint8Array, engagement?: { attemptUri: string }) => {
-      deliveryBytes = sealDelivery({
-        protocol: TASK_EXECUTION_PROTOCOL_URI,
-        attempt: engagement!.attemptUri as `urn:uuid:${string}`,
-        task: evaluationTaskDigest,
-        outputs: [{ name: 'verdict', digest: { sha256: documentDigest(verdictBytes).slice('sha256:'.length) } }],
-        evidenceRecords: [{ family: 'execution-evidence', digest: documentDigest(evidenceBytes) }],
-        outcome: 'fulfilled',
-        createdAt: '2026-01-01T00:00:00.000Z',
-      });
-      return { accepted: true } as never;
-    },
-    observe: async () => ({ descriptor: { derived: { terminal: true, state: 'delivered' } } }) as never,
-    deliveries: async () => [{ digest: documentDigest(deliveryBytes), uri: 'memory:delivery' }] as never,
-    fetchDelivery: async () => deliveryBytes,
-    fetchArtifact: async () => verdictBytes,
-    capabilities: async () => ({}) as never,
-  };
-
-  // ── LEG 3: the REAL signed-source publisher, signing with the evaluator-discovery key ────
-  const publisher = await openNativeEvaluatorPublisher({
-    rootDir: join(rigRoot, 'public', 'evaluator'),
-    publicBaseUrl: 'https://evaluator.hermetic.invalid/native',
-    source: { agent: EVALUATOR_AGENT, name: 'evaluator-records' },
-    signer: roles.get('evaluator-discovery'),
-  });
-
-  const coordinator = new NativeEvaluatorCoordinator({
+  const composition = await buildNativeEvaluatorComposition({
+    roles,
     state,
-    backend: backend as never,
-    // Persisted above by `recordAdmissionVerified`, so this is never reached on the happy path.
+    coordinatorAddress: input.coordinatorAddress,
+    evaluatorAddress: evaluator.safeAddress as `0x${string}`,
+    operatorIdentity: {
+      safeAddress: evaluator.safeAddress,
+      agentEoa: evaluator.agentAddress,
+      agentIri: EVALUATOR_AGENT,
+    },
+    deployment: {
+      module: PREDICTION_EVALUATOR_DEPLOYMENT_MODULE_PATH,
+      moduleDigest: deploymentModuleDigest,
+      signerHandle: EVALUATOR_SIGNER_HANDLE,
+      evaluationMethodDigest,
+    },
+    backend: {
+      stateRoot: join(rigRoot, 'evaluator-backend'),
+      source: EVALUATOR_AGENT,
+      executor: 'urn:jinn:operator-runtime:hermetic-native-activity-rig',
+      profileStore: {
+        get: (digest) => digest === evaluationProfileDigest ? evaluationProfile : undefined,
+      },
+      launcherDeployment,
+      workspaceRuntime: buildNativeWorkspaceRuntime(),
+      evidence: evidence.ports,
+      maxConcurrentAttempts: 1,
+    },
+    publisher: {
+      rootDir: join(rigRoot, 'public', 'evaluator'),
+      publicBaseUrl: 'https://evaluator.hermetic.invalid/native',
+    },
+    // LEG 8 (seeded): the signed-source read. The opportunity is already admitted, so every tick
+    // is exactly the recovery/advance pass the live loop runs alongside its source read.
+    opportunities: {
+      sourceId: 'urn:jinn:solver:hermetic-native-activity-rig/solver-records',
+      read: async () => [],
+    },
+    subject: {
+      fetcher: {
+        byCid: async () => undefined,
+        byDigest: async (digest: string) => subjectBytesByDigest.get(digest),
+      },
+    },
+    // Persisted above, so this is never reached on the happy path.
     authority: {
       claim: async () => { throw new Error('subject authority was already persisted by the rig'); },
       dependencies: {} as never,
     },
     deadline: () => new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
-    evaluatorAddress: evaluator.safeAddress as `0x${string}`,
     verdictPorts,
-    // REAL chain reads against the loaded snapshot.
+    // REAL chain reads against the loaded snapshot. An Anvil state fixture leaves the `finalized`
+    // tag pinned at the loaded tip, so a depth rule over `latest` is the only honest local reading.
     chain: {
       isFinalized: async (transaction) =>
         (await publicClient.getBlockNumber()) >= transaction.blockNumber + LOCAL_FINALITY_DEPTH,
@@ -551,31 +700,34 @@ async function buildNativeEvaluatorRig(input: NativeEvaluatorRigInput) {
         return receipt === undefined ? { kind: 'pending' as const } : { kind: 'canonical' as const };
       },
     },
-    deliverySignature: { get: () => utf8('hermetic-rig-evaluation-delivery-envelope') },
-    evidence: {
-      awaitIndexed: async () => ({ status: 'indexed' }),
-      getRecord: async () => evidenceBytes,
+    // LEG 9 (seeded): a live catalog's decision-grade named gate. `verifyExactGraph` — the exact
+    // delivery/verdict/evidence join `buildNativeEvaluatorVerdictVerification` runs around this
+    // port — is NOT stood in, and still runs on every phase.
+    verification: {
+      gate: { gate: async () => ({ decisionGrade: true, failures: [] }) as never },
+      solutionDeliveryAuthority: { verify: async () => ({ ok: true }) } as never,
+      evaluationDeliveryAuthority: { verify: async () => ({ ok: true }) } as never,
+      preSettlementClaimTime: async () => new Date().toISOString(),
+      blockTime: async (blockNumber: bigint) => {
+        const block = await publicClient.getBlock({ blockNumber });
+        return new Date(Number(block.timestamp) * 1000).toISOString();
+      },
     },
-    publisher,
-    // LEG 9 (seeded): a live catalog's decision-grade gate. Pass(1) so the settled verdict code is
-    // the one a resolved market would produce.
-    verification: { verify: async () => ({ ok: true as const, verdictCode: 1 as const }) },
-    retry: { delayMs: 10, maxDelayMs: 100 },
   });
 
   return {
     store,
     state,
     venueState,
-    publisher,
+    evidence,
+    composition,
     evaluationId: admitted.evaluationId,
-    /**
-     * The `NativeEvaluatorComposition` surface `EvaluatorLoop` drives. The loop is the real one;
-     * the ingestion half of `tick()` (the signed-source read) is LEG 8, seeded — the rig admitted
-     * the opportunity directly, so a tick is exactly the recovery/advance pass.
-     */
-    composition: {
-      tick: async () => ({ sourceEvents: 0, coordinator: await coordinator.reconcileStartup() }),
-    } as never,
+    async close() {
+      try { await composition.close(); } catch { /* best-effort */ }
+      try { await evidence.close(); } catch { /* best-effort */ }
+      try { store.close(); } catch { /* best-effort */ }
+      try { venueState.close(); } catch { /* best-effort */ }
+      try { await rm(PREDICTION_EVALUATOR_DEPLOYMENT_SIDECAR_PATH, { force: true }); } catch { /* best-effort */ }
+    },
   };
 }
