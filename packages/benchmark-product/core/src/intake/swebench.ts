@@ -17,6 +17,10 @@
  * throws:
  *  - `benchmark-judgeability` — the platform's own named check, run inside
  *    `importSweBench`; its throw message is passed through as the issue message.
+ *    A malformed `provenanceTimestamp`/`provenanceTimestamps` value no longer
+ *    reaches it: the platform converts and refuses both at its own edge, so a bad
+ *    timestamp surfaces through the generic `rows` path naming the offending value
+ *    rather than as `invalid-provenance` against a task digest.
  *  - `benchmark-item-distinctness` — `checkItemDistinctness`, run here explicitly.
  *    The Benchmark schema itself does not refuse duplicate items, so this product
  *    surfaces the platform's named check as a typed refusal instead of silently
@@ -102,9 +106,11 @@ export function convertSweBenchRows(rowsInput: unknown, opts: ConvertSweBenchRow
     // Fragile-by-necessity coupling: the importer throws a plain Error on a
     // judgeability failure, so the named check is recovered by matching its
     // message. If the platform ever rewords that message, this degrades to
-    // the generic `rows` path below — and the golden-row test for this
-    // mapping goes red on that drift, so the coupling is self-detecting,
-    // never silent.
+    // the generic `rows` path below. No public option reaches the judgeability
+    // throw any more — the platform validates both provenance-timestamp options
+    // at its own edge — so the mapping is pinned against a stubbed platform
+    // throw in swebench.judgeability-mapping.test.ts, which carries a verbatim
+    // copy of the platform template and must be updated with it.
     if (message.includes("checkJudgeability")) {
       refuseWithIssues("validation", [{ path: "benchmark-judgeability", message }]);
     }

@@ -91,6 +91,40 @@ describe("SWE-bench import — per-instance provenance timestamps", () => {
   });
 });
 
+describe("SWE-bench import — the batch timestamp is validated at the same edge", () => {
+  test("repairs the timestamp shapes upstream datasets actually ship", () => {
+    // A bare date is what upstream datasets emit; the per-instance path already repaired it, so
+    // the batch option carrying the identical value must not fail instead.
+    const bareDate = importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "2026-01-03" });
+    const spaced = importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "2026-01-03 00:00:00" });
+    const explicit = importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "2026-01-03T00:00:00Z" });
+    // Digest equality, not just a resolved string: the repair must produce the SAME sealed bytes
+    // the already-normalized value produces, or content addressing forks on input formatting.
+    expect(bareDate.benchmark.digest).toBe(explicit.benchmark.digest);
+    expect(spaced.benchmark.digest).toBe(explicit.benchmark.digest);
+  });
+
+  test("a malformed batch timestamp names the offending value, not a task digest", () => {
+    // Left to checkJudgeability, this surfaces as `invalid-provenance` against a digest, naming
+    // neither the option nor the bad value — the digest-hunt the per-instance path was fixed to
+    // avoid.
+    expect(() => importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "2026-02-30" }))
+      .toThrow(/^provenanceTimestamp: timestamp "2026-02-30" cannot be converted/u);
+    expect(() => importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "not-a-timestamp" }))
+      .toThrow(/^provenanceTimestamp: .*cannot be converted/u);
+  });
+
+  test("a malformed ROW is not mis-attributed to the batch timestamp", () => {
+    // Same discipline as the per-instance path: the try wraps only the conversion, so a row-shape
+    // failure keeps its own message even though every row carries the batch value.
+    const badRow = { ...ROWS[1]!, image: {} };
+    const withBatch = () =>
+      importSweBench([ROWS[0]!, badRow], { ...OPTS, provenanceTimestamp: "2026-01-03" });
+    expect(withBatch).toThrow();
+    expect(withBatch).not.toThrow(/provenanceTimestamp/u);
+  });
+});
+
 describe("SWE-bench import — per-instance timestamps are validated at the edge", () => {
   test("repairs the timestamp shapes upstream datasets actually ship", () => {
     const imported = importSweBench(ROWS, {
