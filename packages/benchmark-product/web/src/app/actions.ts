@@ -50,7 +50,7 @@ import {
   summarizeVerificationOutcome,
   verifyPublicBundle,
 } from "@colophon-claims/core";
-import type { BeaconReference } from "@colophon-claims/verify";
+import type { BeaconReference } from "@colophon-claims/core";
 import type { GuiActionState } from "@/lib/action-state";
 import {
   executeOperation,

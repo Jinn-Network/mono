@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
 import { loadRunView } from "@/lib/server/view-models";
-import { BEACON_SOURCE_IDS } from "@colophon-claims/verify";
 
 function HiddenDraft({ draftId }: { readonly draftId: string }) {
   return <input type="hidden" name="draftId" value={draftId} />;
@@ -21,6 +20,7 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
   const state = status?.state;
   const publication = view.ok && view.publication?.ok ? view.publication.result : undefined;
   const publicationConfiguration = view.ok ? view.publicationConfiguration : undefined;
+  const beaconSources = view.ok ? view.beaconSources : [];
   const postHoc = state === "closed" || state === "reported" || state === "published-bundle";
   const reportStage = publication?.stages.find((stage) => stage.name === "report");
   const accountingStage = publication?.stages.find((stage) => stage.name === "accounting");
@@ -78,7 +78,7 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
               <HiddenDraft draftId={draftId} />
               <p className="text-sm text-muted-foreground">Read a round from a public beacon that has already been published, and bind this sealed run to it. A round published before the seal is refused. A run binds once.</p>
               <Label htmlFor="beacon-source">Beacon</Label>
-              <select id="beacon-source" name="beaconSource" required disabled={state !== "locked"} className="h-10 rounded-md border border-input bg-background px-3 text-sm">{BEACON_SOURCE_IDS.map((id) => <option key={id} value={id}>{id}</option>)}</select>
+              <select id="beacon-source" name="beaconSource" required disabled={state !== "locked"} className="h-10 rounded-md border border-input bg-background px-3 text-sm">{beaconSources.map((id) => <option key={id} value={id}>{id}</option>)}</select>
               <Label htmlFor="beacon-round">Round or block height</Label>
               <Input className="font-mono" id="beacon-round" name="beaconRound" required disabled={state !== "locked"} />
               <Label htmlFor="beacon-value">Published value</Label>

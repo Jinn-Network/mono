@@ -22,7 +22,7 @@
  *   sealed.
  * - **Bind once.** Re-binding is re-drawing, which is precisely the post-hoc selection this
  *   procedure exists to make impossible. The operation refuses a second bind and `writeRunState`
- *   refuses it again for any writer.
+ *   refuses it again for any writer, whatever the interleaving of two concurrent calls.
  * - **The beacon reference is operator-supplied, and that is sound.** This operation does no
  *   network I/O: a public beacon's `(round, value)` pair is published, so a reader checks the pair
  *   against the beacon itself and recomputes the derivation from it. Fetching the value here would

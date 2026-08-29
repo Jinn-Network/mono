@@ -457,10 +457,10 @@ export function writeRunState(workspaceDir: string, draftId: string, state: RunS
         }
       }
     }
-    // Write-once (issue #2976). The operation checks this too, but its check necessarily runs
-    // against a snapshot: `run bind` may resolve a beacon over the network, so two concurrent calls
-    // can both pass it. This is what makes the second one impossible whatever the interleaving, and
-    // it holds for any writer rather than only for `runBind`.
+    // Write-once (issue #2976). The operation checks this too, but its check reads a snapshot and
+    // writes later, so two concurrent `bind` calls can both pass it. This is what makes the second
+    // one impossible whatever the interleaving, and it holds for any writer rather than only for
+    // `runBind`.
     if (current?.binding !== undefined) {
       const proposed = result.data.binding;
       if (proposed === undefined) {
