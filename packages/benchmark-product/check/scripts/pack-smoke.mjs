@@ -8,9 +8,9 @@ const run = promisify(execFile);
 const root = new URL("..", import.meta.url).pathname;
 const scratch = await mkdtemp(join(tmpdir(), "colophon-check-pack-"));
 try {
-  const { stdout } = await run("yarn", ["pack", "--out", join(scratch, "verify.tgz")], { cwd: root });
-  if (!stdout.includes("verify.tgz")) throw new Error("yarn pack did not create the requested tarball");
-  const archive = join(scratch, "verify.tgz");
+  const { stdout } = await run("yarn", ["pack", "--out", join(scratch, "check.tgz")], { cwd: root });
+  if (!stdout.includes("check.tgz")) throw new Error("yarn pack did not create the requested tarball");
+  const archive = join(scratch, "check.tgz");
   const listing = (await run("tar", ["-tzf", archive])).stdout.split("\n");
   for (const required of [
     "package/dist/admission/index.js",
@@ -23,10 +23,10 @@ try {
     "package/schemas/dsse-envelope.schema.json",
     "package/scripts/external-verify.py",
   ]) {
-    if (!listing.includes(required)) throw new Error(`packed verifier is missing ${required}`);
+    if (!listing.includes(required)) throw new Error(`packed checker is missing ${required}`);
   }
   if (!listing.includes("package/dist/anchor/ports.js")) {
-    throw new Error("packed verifier is missing the RFC 3161 anchor ports");
+    throw new Error("packed checker is missing the RFC 3161 anchor ports");
   }
   // The anchor conformance suite and the port unit tests live in
   // `src/**/*.test.ts` and import the Trust conformance kit, a devDependency.
@@ -36,14 +36,14 @@ try {
   // depend on.
   const packedTests = listing.filter((entry) => /^package\/dist\/.*\.test\.[cm]?js$/.test(entry));
   if (packedTests.length > 0) {
-    throw new Error(`packed verifier carries test modules: ${packedTests.join(", ")}`);
+    throw new Error(`packed checker carries test modules: ${packedTests.join(", ")}`);
   }
   const manifest = JSON.parse((await run("tar", ["-xOzf", archive, "package/package.json"])).stdout);
   if (manifest.name !== "@colophon-claims/check" || manifest.version !== "0.2.1") {
-    throw new Error("packed verifier identity/version drifted");
+    throw new Error("packed checker identity/version drifted");
   }
   if (manifest.exports?.["./admission"] === undefined) {
-    throw new Error("packed verifier omits the portable admission export");
+    throw new Error("packed checker omits the portable admission export");
   }
 } finally {
   await rm(scratch, { recursive: true, force: true });

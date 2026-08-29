@@ -14,16 +14,25 @@
     "directory": "packages/benchmark-product/verify"
   },
   "main": "./index.js",
+  "types": "./index.d.ts",
   "exports": {
-    ".": "./index.js",
-    "./admission": "./admission.js"
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./admission": {
+      "types": "./admission.d.ts",
+      "import": "./admission.js"
+    }
   },
   "bin": {
     "colophon-verify": "./bin.js"
   },
   "files": [
     "index.js",
+    "index.d.ts",
     "admission.js",
+    "admission.d.ts",
     "bin.js",
     "README.md"
   ],

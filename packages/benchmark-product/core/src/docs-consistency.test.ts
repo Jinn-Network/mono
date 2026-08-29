@@ -89,6 +89,29 @@ function productSourceFiles(): readonly string[] {
   return found.sort();
 }
 
+/**
+ * Every Markdown surface the product tree ships, so a reader instruction added to a package
+ * README or a new guide is swept the same way source is. Package fixtures are excluded: their
+ * Markdown is sealed bundle bytes, not a template.
+ */
+function productMarkdownFiles(): readonly string[] {
+  const found: string[] = [];
+  const walk = (dir: string): void => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = resolve(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (["node_modules", "dist", ".next", "__fixtures__", "fixtures"].includes(entry.name)) continue;
+        walk(path);
+        continue;
+      }
+      if (entry.name.endsWith(".md")) found.push(path);
+    }
+  };
+  walk(productRoot);
+  return found.sort();
+}
+
 describe("product documentation consistency", () => {
   it("ships the complete product-local documentation set with no broken local links", () => {
     for (const path of requiredDocs) expect(existsSync(path), path).toBe(true);
@@ -280,21 +303,39 @@ describe("product documentation consistency", () => {
     resolve(coreRoot, "src/report/claim.ts"),
   ] as const;
 
-  /** Surfaces that emit a fresh instruction for a reader to run. */
-  const READER_INSTRUCTION_SURFACES = [
+  /**
+   * Code that emits a fresh instruction for a reader to run. `check/src/assets.ts` reads the
+   * command out of the claim rather than hard-coding one, so it is listed to keep a future
+   * hard-coded literal out, not because it carries one today.
+   */
+  const READER_INSTRUCTION_SOURCES = [
     resolve(productRoot, "check/src/assets.ts"),
-    resolve(productRoot, "check/README.md"),
     resolve(productRoot, "cli/src/main.ts"),
     resolve(coreRoot, "scripts/demo1-export-public-bundle.mjs"),
-    productReadmePath,
-    resolve(productRoot, "EXTERNAL-VERIFICATION.md"),
+  ] as const;
+
+  /**
+   * Markdown allowed to print the retired command. `PUBLIC-BUNDLE.md` quotes the per-format pins
+   * a sealed bundle carries — quoting a sealed byte is not issuing an instruction — and the alias
+   * package's own README exists to tell its readers that exact command still resolves. Every
+   * other Markdown file in the product tree is swept.
+   */
+  const LEGACY_COMMAND_MARKDOWN = [
+    resolve(productRoot, "PUBLIC-BUNDLE.md"),
+    resolve(productRoot, "verify/README.md"),
   ] as const;
 
   it("prints only the current reader name in every freshly emitted instruction", () => {
-    for (const path of READER_INSTRUCTION_SURFACES) {
+    for (const path of READER_INSTRUCTION_SOURCES) {
       expect(existsSync(path), path).toBe(true);
       expect(read(path), path).not.toMatch(LEGACY_READER_COMMAND);
     }
+    const allowed = new Set<string>(LEGACY_COMMAND_MARKDOWN);
+    for (const path of allowed) expect(existsSync(path), path).toBe(true);
+    const offenders = productMarkdownFiles()
+      .filter((path) => !allowed.has(path))
+      .filter((path) => LEGACY_READER_COMMAND.test(read(path)));
+    expect(offenders.map((path) => relative(repoRoot, path))).toEqual([]);
   });
 
   it("confines the retired reader name to the frozen per-format command constants", () => {
