@@ -254,6 +254,22 @@ test('Colophon trusted publishing is a separate workflow and never joins the sta
   // Issue #3023: both published names ship from this one trusted-publisher workflow.
   assert.match(workflow, /packages\/benchmark-product\/check/u);
   assert.match(workflow, /packages\/benchmark-product\/verify/u);
+  // Issue #3306: the alias may not publish ahead of the checker version it pins. npm versions are
+  // immutable, so an alias released against a missing checker permanently breaks the
+  // `npx @colophon-claims/verify@<line>` command sealed into every published bundle.
+  assert.match(workflow, /npm view "@colophon-claims\/check@\$\{pinned\}" version/u);
+});
+
+test('the alias pins an exact checker version that the publish preflight can resolve', () => {
+  const alias = JSON.parse(
+    readFileSync(join(repoRoot, 'packages/benchmark-product/verify/package.json'), 'utf8'),
+  );
+  const pinned = alias.dependencies?.['@colophon-claims/check'];
+  assert.match(pinned ?? '', /^\d+\.\d+\.\d+$/u);
+  const checker = JSON.parse(
+    readFileSync(join(repoRoot, 'packages/benchmark-product/check/package.json'), 'utf8'),
+  );
+  assert.equal(pinned, checker.version);
 });
 
 test('first-cut public surfaces disclose that spec.jinn.network is not hosted', () => {

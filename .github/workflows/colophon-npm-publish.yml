@@ -75,6 +75,35 @@ jobs:
           npm run build
           npm publish --access public
 
+      # The alias's one precondition: the checker version it pins must already resolve on the
+      # registry. npm versions are immutable, so publishing the alias ahead of its checker
+      # permanently breaks `npx @colophon-claims/verify@<line>` — the exact command sealed into
+      # every published bundle's claim-package.json. Fail closed here, like every other
+      # publication path in this file.
+      - name: Refuse the alias until the checker version it pins is published
+        if: ${{ github.event.inputs.package == 'verify' }}
+        working-directory: packages/benchmark-product/verify
+        run: |
+          set -euo pipefail
+          pinned="$(node -p "require('./package.json').dependencies['@colophon-claims/check'] ?? ''")"
+          if [ -z "$pinned" ]; then
+            echo "The alias does not depend on @colophon-claims/check. Refusing to publish."
+            exit 1
+          fi
+          case "$pinned" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "The alias must pin an exact checker version, got '$pinned'. Refusing to publish."
+              exit 1
+              ;;
+          esac
+          resolved="$(npm view "@colophon-claims/check@${pinned}" version)"
+          if [ "$resolved" != "$pinned" ]; then
+            echo "@colophon-claims/check@${pinned} does not resolve on the registry. Publish the checker first."
+            exit 1
+          fi
+          echo "@colophon-claims/check@${pinned} resolves. The alias is safe to publish."
+
       # The alias has no build and no platform closure: three forwarding files and a dependency on
       # the exact checker version it aliases.
       - name: Publish the retired name as a passthrough alias
