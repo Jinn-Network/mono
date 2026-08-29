@@ -385,6 +385,14 @@ checks the stored claim, and byte-compares all five presentation assets with the
 deterministic asset builder. Asset comparison does not add a seventh returned
 check.
 
+The bundle's closure selects exactly one presentation profile, and all five assets
+must byte-match that profile completely. A qualification-projecting bundle
+(`benchmark-product-public-bundle/4` and `/7`) renders the binary
+instrument-qualification graph and carries no comparison section; every other
+bundle that carries these five assets renders the human comparison. There is no
+fallback profile: an asset set that is not the projection the closure selects is
+refused, whichever profile it happens to resemble.
+
 ## Presentation and citation
 
 This section describes the five deterministic presentation assets of the v2-derived closures
