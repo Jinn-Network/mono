@@ -19,17 +19,23 @@
  *   payload is usually itself JSON -- as is any `*Base64`-suffixed field;
  * - a DSSE signature (`sig`) decodes to random bytes and carries no text.
  *
- * Only those *named* fields are exempted from the text scan; every base64
- * carrier a bundle actually has is one of them. Everything else -- object keys,
+ * Only those *named* fields are exempted from the text scan, and every base64
+ * carrier a published bundle has today is one of them. A schema that adds a
+ * carrier under some other name does not become unsafe -- it merely scans that
+ * carrier's alphabet again, and can regain the exemption by taking the
+ * `*Base64` suffix. Everything else -- object keys,
  * ordinary string values, non-JSON files -- is scanned as text exactly as
  * before, so no plain-text leak escapes: a value is never skipped on the
  * strength of merely looking like base64.
  *
- * Binary files -- those containing a NUL byte -- carry no text to pattern-scan,
- * exactly as the previous rehearsal scan treated them; every other file is read
- * as text and scanned. A base64 field that decodes to binary is likewise not
- * text to scan. The workspace-path check still reads a binary file's raw bytes,
- * so the v4 producer closure loses none of its containment coverage.
+ * A binary file -- one containing a NUL byte -- is not structured text to walk,
+ * but it still carries plain text: a `.eval` Inspect log is a ZIP, and a ZIP
+ * stores its entry names uncompressed, so `samples/LoCoMo_qa_001.json` is
+ * readable in its raw bytes. Such a file is therefore decoded lossily and
+ * pattern-scanned whole, exactly as the v4 producer closure scanned every
+ * published byte. Chance matches are not the concern there that they are in
+ * base64: over uniform bytes a six-letter case-insensitive pattern fires on the
+ * order of 1e-14, against 1e-4 over the 64-character base64 alphabet.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -50,20 +56,20 @@ export interface LeakFinding {
 }
 
 /**
- * Decodes canonical padded base64 in either the standard or the URL-safe
- * alphabet -- both spellings a DSSE envelope may carry, per `trust-core`'s
- * `decodeBase64Strict` -- or returns undefined. Deliberately strict, and
- * deliberately not a mixture of the two alphabets: `Buffer`'s own decoder is
- * lenient, and a value that does not re-encode to itself is not base64 to
- * decode. A payload this rejects falls back to the text scan, so the strictness
- * costs sensitivity nowhere.
+ * Decodes base64 in either the standard or the URL-safe alphabet, padded or
+ * not -- every spelling a DSSE envelope may carry, per `trust-core`'s
+ * `decodeBase64Strict` -- or returns undefined. It goes one step beyond that
+ * decoder in also requiring the value to re-encode to itself, because `Buffer`'s
+ * own decoder is lenient about trailing bits. That extra strictness costs no
+ * sensitivity: a value it rejects is text-scanned instead, which is what a
+ * non-base64 value deserves anyway.
  */
 function decodeCanonicalBase64(value: string): Uint8Array | undefined {
-  if (value.length === 0 || value.length % 4 !== 0) return undefined;
   if (!/^(?:[A-Za-z0-9+/]+|[A-Za-z0-9_-]+)={0,2}$/.test(value)) return undefined;
-  const standard = value.replaceAll("-", "+").replaceAll("_", "/");
+  const standard = value.replaceAll("-", "+").replaceAll("_", "/").replace(/=+$/, "");
+  if (standard.length % 4 === 1) return undefined;
   const buffer = Buffer.from(standard, "base64");
-  if (buffer.toString("base64") !== standard) return undefined;
+  if (buffer.toString("base64").replace(/=+$/, "") !== standard) return undefined;
   return new Uint8Array(buffer);
 }
 
@@ -154,18 +160,10 @@ export function findLeaks(
   options: { readonly path: string; readonly workspaceDir?: string },
 ): LeakFinding[] {
   const text = readText(bytes);
-  if (text === undefined) {
-    // A binary file carries no text to pattern-scan -- and the previous
-    // rehearsal scan skipped it outright -- but the workspace path is still
-    // refused byte for byte, as the v4 producer closure refused it.
-    const workspaceDir = options.workspaceDir;
-    if (workspaceDir !== undefined && Buffer.from(bytes).includes(Buffer.from(workspaceDir, "utf8"))) {
-      return [{ path: options.path, kind: "workspace-path", where: "raw (binary)", match: workspaceDir }];
-    }
-    return [];
-  }
   const scanner = new Scanner(options.path, options.workspaceDir);
-  scanner.document(text, "");
+  // A lossy decode never absorbs an ASCII run -- no continuation byte is ASCII
+  // -- so a plain-text marker or workspace path in a binary file still reads.
+  scanner.document(text ?? Buffer.from(bytes).toString("utf8"), text === undefined ? "raw (binary)" : "");
   return scanner.findings;
 }
 

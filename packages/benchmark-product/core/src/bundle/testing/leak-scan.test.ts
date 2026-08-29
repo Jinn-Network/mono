@@ -132,18 +132,31 @@ describe("bundle leak scan (#3063)", () => {
       .toEqual([expect.objectContaining({ kind: "pattern", match: "LoCoMo" })]);
   });
 
-  test("a binary file still fails the workspace-path check", () => {
+  test("plain text inside a binary file is still scanned", () => {
+    // A `.eval` Inspect log is a ZIP, and a ZIP stores its entry names
+    // uncompressed -- the v4 producer closure caught those, so this must too.
     const workspaceDir = "/tmp/judge-p8-rehearsal-abc123";
-    const binary = new Uint8Array(Buffer.concat([
-      Buffer.from([0, 1, 2]),
-      Buffer.from(`${workspaceDir}/run`, "utf8"),
-      Buffer.from([0]),
+    const binary = (text: string) => new Uint8Array(Buffer.concat([
+      Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0]),
+      Buffer.from(text, "utf8"),
+      Buffer.from([0xff, 0xfe, 0]),
     ]));
-    expect(findLeaks(binary, { path: "opaque.bin", workspaceDir })).toEqual([
+    expect(findLeaks(binary(`${workspaceDir}/run`), { path: "opaque.bin", workspaceDir })).toEqual([
       { path: "opaque.bin", kind: "workspace-path", where: "raw (binary)", match: workspaceDir },
     ]);
-    // Without a workspace path it stays skipped: binary is not text to scan.
-    expect(findLeaks(binary, { path: "opaque.bin" })).toEqual([]);
+    expect(findLeaks(binary("samples/LoCoMo_qa_001.json"), { path: "native/inspect/a.eval" })).toEqual([
+      { path: "native/inspect/a.eval", kind: "pattern", where: "raw (binary)", match: "LoCoMo" },
+    ]);
+    expect(findLeaks(binary("samples/clean_qa_001.json"), { path: "native/inspect/a.eval" })).toEqual([]);
+  });
+
+  test("an unpadded base64 payload is decoded too", () => {
+    // trust-core's decodeBase64Strict accepts unpadded base64, so a record it
+    // verifies must not fall back to scanning its own alphabet here.
+    const unpadded = (standard: string): string => standard.replace(/=+$/u, "");
+    const leaky = envelope(unpadded(payloadOf({ datasetId: "LoCoMo-v1" })), CLEAN_SIGNATURE);
+    expect(findLeaks(utf8(leaky), { path: "records/a.bin" }))
+      .toEqual([expect.objectContaining({ kind: "pattern", match: "LoCoMo" })]);
   });
 
   test("binary files are skipped and a bundle directory is walked whole", () => {
