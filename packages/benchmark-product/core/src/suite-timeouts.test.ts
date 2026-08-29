@@ -1,11 +1,13 @@
 // Guards the per-test bound this suite runs under (issue #2766). Vitest's 5000ms default is wall
-// clock, so a worker that is descheduled spends it without doing work -- and this suite
+// clock, so a worker that is descheduled spends it without doing work — and this suite
 // deliberately co-schedules sub-millisecond cases with files that write and spawn real executables
 // and with one case that held a worker for 2,165,911ms of a 2,690s CI run. Under that load the
 // default produced false reds that wandered across unrelated files with no code change.
 //
-// `task.timeout` is what actually governs the running test, so that is what is asserted; the
-// config text is read only for `hookTimeout`, which has no runtime equivalent to read back.
+// `task.timeout` is what actually governs the running test, so that is what is asserted.
+// `hookTimeout` has no runtime equivalent to read back and the config cannot be imported from
+// here (it sits outside this package's `rootDir`), so it is read out of the config source — as a
+// declaration line, not as a token, so a commented-out setting cannot satisfy this.
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +24,7 @@ describe("suite timeouts (#2766)", () => {
   });
 
   test("hooks carry the same bound", () => {
-    const declared = /hookTimeout:\s*([0-9_]+)/u.exec(readFileSync(configPath, "utf8"))?.[1];
+    const declared = /^\s*hookTimeout:\s*([0-9_]+),$/mu.exec(readFileSync(configPath, "utf8"))?.[1];
     expect(declared).toBeDefined();
     expect(Number(declared?.replaceAll("_", ""))).toBeGreaterThanOrEqual(SUITE_TIMEOUT_FLOOR_MS);
   });
