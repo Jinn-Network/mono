@@ -184,6 +184,10 @@ export const RunStateSchema = z.object({
   lockedAt: Rfc3339Schema.optional(),
   launchedAt: Rfc3339Schema.optional(),
   closedAt: Rfc3339Schema.optional(),
+  /** sha256 hex of the sealed `ExternalRunImportDeclaration`, set at `run.import` (#2979). Its
+   * presence is the durable fact that this run's evidence was imported from an external harness's
+   * dump rather than driven on a venue; absent on every driven run. */
+  externalImportSha256: Sha256HexSchema.optional(),
   /** sha256 hex of the sealed Matrix record's exact bytes, set at `run.collect`. */
   matrixSha256: Sha256HexSchema.optional(),
   /** sha256 hex of the accounting-bound Matrix v2; never replaces the legacy Matrix v1 field. */

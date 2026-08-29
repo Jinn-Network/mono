@@ -20,7 +20,11 @@
  * concern and lives elsewhere; on refusal nothing at all is written.
  */
 
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
+import { z } from "zod";
 import {
+  cellIdempotencyKey,
   expectedCellSet,
   isCalendarStrictRfc3339,
   parseCellKey,
@@ -28,12 +32,30 @@ import {
   type CellCoord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
-import { BenchmarkProductError, type ProductIssue } from "../errors.js";
+import { sealDelivery, sealSubmission } from "@jinn-network/task-execution-protocol";
+import {
+  deriveEvaluationTask,
+  evaluateVerdictRule,
+  parseEvaluationSpec,
+} from "@jinn-network/task-execution-profiles";
+import { canonicalJsonBytes } from "@jinn-network/trust-core";
+import { BenchmarkProductError, refuse, type ProductIssue } from "../errors.js";
 import {
   EXTERNAL_RUN_IMPORT_OUTCOMES,
   type ExternalRunImportOutcome,
   type ExternalRunRecord,
 } from "../intake/external-run-records.js";
+import { EVALUATOR_REQUIREMENT_KEY } from "../venue/provisioner.js";
+import {
+  createVerdictDsseSigner,
+  loadOrCreateEvaluatorSigningKeys,
+  sealVerdictStatement,
+} from "../venue/signing.js";
+import { EVALUATION_HARNESS_PIN } from "../venue/venue.js";
+import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
+import { appendRunJournalEntry } from "./journal.js";
+import { recordWorkspaceAuthorship } from "./publication-authority.js";
+import { deterministicUuidUri } from "./state.js";
 
 export interface ValidateExternalRunRecordsInput {
   /** The normalized rows, in dump order, from `readExternalRunRecords`. */
@@ -302,4 +324,574 @@ function timingProblems(record: ExternalRunRecord, at: string): ProductIssue[] {
     });
   }
   return problems;
+}
+
+// ── synthesis: sealed records + run-journal entries for an accepted plan ─────────────────────
+//
+// Everything below turns an accepted `ExternalRunImportPlan` into exactly the durable evidence a
+// live run would have left behind: sealed Submission/Delivery/evaluation records in the workspace
+// CAS, plus the run-journal entries that name them. Nothing downstream is import-aware — the
+// UNMODIFIED `runCollect` → `runReport` → `materializePublicBundle` chain reads this journal the
+// way it reads any other. That non-change is the whole design, and it is why the shapes here are
+// derived from the live driver (`./drive.ts`) rather than invented.
+//
+// Two rules govern every line:
+//
+//  1. **The matrix outcome is never asserted, only derived.** `deriveOutcome`
+//     (`@jinn-network/benchmarking-run`'s `assemble.ts`) reads the evidence and decides. So the
+//     writer's job is to journal what actually happened and let the outcome fall out:
+//     `graded` → a delivery plus a verdict → `judged`; `ungradeable` → a delivery plus a
+//     could-not-grade terminal → `unscorable`; `error`/`timeout` → a dispatch that never
+//     delivered → `expired`; `unrun` → no dispatch at all → `expired` with `dispatches: 0`.
+//     Notably we NEVER journal `replaceableReason: "expired"`: `outstandingCells` does not treat
+//     the resulting `"expired"` status as terminal, so `runCollect` would refuse the whole run.
+//     A bare `error` cell-event maps to `"failed"`, which IS terminal, and still derives
+//     `expired` because no delivery exists.
+//
+//  2. **Nothing is claimed that was not observed.** The verdict is COMPUTED from the subject
+//     Task's own sealed EvaluationSpec verdict rule over the imported measurements — there is no
+//     pass/fail column in the dump, and `checkVerdictRuleConsistency` re-checks the computation
+//     at assembly, so a laundered verdict is structurally impossible. `blame` is never set (we
+//     cannot observe task-vs-infrastructure attribution for someone else's harness). No
+//     `pinningEvidenceSha256` is journaled, so every pinning axis reports `unverifiable` rather
+//     than a `match` nobody checked. And workspace authorship is recorded over the import
+//     declaration ONLY — the workspace genuinely authored that; it did not author the external
+//     harness's evidence bytes.
+
+/**
+ * The evaluator identity every imported verdict is signed under. Deliberately unmistakable: this
+ * agent transcribed an external harness's measurements into the protocol's verdict shape and
+ * performed no evaluation of its own. It is a DISTINCT identity from any venue evaluator, which
+ * is exactly what `checkEvaluatorIndependence` needs to see against the run owner (the solver).
+ */
+export const EXTERNAL_RUN_IMPORT_EVALUATOR_ID =
+  "urn:jinn:colophon:external-import-transcriber/v1";
+
+/** Said in the verdict itself, in plain words, so a reader of the bundle cannot miss it. */
+export const EXTERNAL_RUN_IMPORT_LIMITATIONS = [
+  "This evaluator transcribed measurements produced by an external harness outside this "
+  + "workspace. It executed no grader, observed no attempt, and performed no evaluation of its "
+  + "own; the verdict is the sealed EvaluationSpec's verdict rule applied to the transcribed "
+  + "measurements.",
+  "Run pinning was not observed for the imported attempt, so every pinning axis is reported "
+  + "unverifiable rather than matched.",
+] as const;
+
+/** The namespaced annotation block that carries the import's own reason/timing facts onto the
+ * sealed Submission and Delivery. `SubmissionRecordSchema`/`DeliveryRecordSchema` are `.loose()`
+ * and open to namespaced extensions (TEP §21.3), so this rides along without reshaping them. */
+export const EXTERNAL_RUN_IMPORT_ANNOTATION_KEY = "network.jinn.colophon.external-run-import/v1";
+
+/** The declaration's own protocol URI, doubling as its authorship `recordKind`. */
+export const EXTERNAL_RUN_IMPORT_DECLARATION_PROTOCOL =
+  "https://spec.jinn.network/benchmark-product/external-run-import-declaration/v1";
+
+const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/);
+const Rfc3339Schema = z.string().min(1);
+
+export const ExternalRunImportSourceSchema = z.object({
+  harness: z.string().min(1),
+  version: z.string().min(1).optional(),
+  note: z.string().min(1).optional(),
+});
+
+export type ExternalRunImportSource = z.infer<typeof ExternalRunImportSourceSchema>;
+
+/**
+ * The durable home for every fact the dump carried that the protocol records have no field for —
+ * above all the `reason` behind each non-graded slot. Without this the honest "we could not run
+ * this slot, and here is why" would survive only as a journal `detail` string; sealed into the
+ * CAS and bound to the workspace by `recordWorkspaceAuthorship`, it is a record a reader can
+ * fetch by digest and check.
+ */
+export const ExternalRunImportDeclarationSchema = z.object({
+  protocol: z.literal(EXTERNAL_RUN_IMPORT_DECLARATION_PROTOCOL),
+  runSha256: Sha256HexSchema,
+  benchmarkSha256: Sha256HexSchema,
+  source: ExternalRunImportSourceSchema,
+  importedAt: Rfc3339Schema,
+  rows: z.array(z.object({
+    cellKey: z.string().min(1),
+    outcome: z.enum(EXTERNAL_RUN_IMPORT_OUTCOMES),
+    reason: z.string().min(1).optional(),
+    timings: z.object({
+      startedAt: z.string().min(1).optional(),
+      endedAt: z.string().min(1).optional(),
+      durationMs: z.number().int().nonnegative().optional(),
+    }).optional(),
+    evidence: z.array(z.object({ name: z.string().min(1), sha256: Sha256HexSchema })).optional(),
+  })),
+});
+
+export type ExternalRunImportDeclaration = z.infer<typeof ExternalRunImportDeclarationSchema>;
+
+export interface WriteExternalRunImportInput {
+  readonly workspaceDir: string;
+  readonly draftId: string;
+  /** The accepted plan — every expected slot, exactly once, in expected-cell order. */
+  readonly plan: ExternalRunImportPlan;
+  readonly runRecord: RunRecord;
+  /** `RunState.owner` — the solver identity every synthesized Submission requests under. */
+  readonly owner: string;
+  readonly source: ExternalRunImportSource;
+  /** Directory a relative `evidence[].path` resolves against. */
+  readonly evidenceRoot: string;
+  /** Frozen operation clock; every synthesized `at` that has no imported timestamp uses it. */
+  readonly at: string;
+}
+
+export interface WriteExternalRunImportResult {
+  readonly declarationSha256: string;
+  readonly judged: number;
+  readonly unscorable: number;
+  readonly expired: number;
+}
+
+/** One evidence file, read once and sealed into the workspace CAS. */
+interface ImportedEvidence {
+  readonly name: string;
+  readonly sha256: string;
+}
+
+/**
+ * Writes the sealed records and run-journal entries for an accepted plan, then seals and records
+ * the import declaration. Ordered per cell exactly as the live driver orders its own writes, so
+ * a fold of the resulting journal is indistinguishable in shape from a driven run's.
+ */
+export async function writeExternalRunImport(
+  input: WriteExternalRunImportInput,
+): Promise<WriteExternalRunImportResult> {
+  const { workspaceDir, draftId, plan, runRecord, owner, evidenceRoot, at } = input;
+  // The plan carries the `sha256:`-PREFIXED coordinates (it quotes them verbatim in refusals);
+  // idempotency keys want that form and evaluation nonces want the bare hex. Derive both once.
+  const runSha256Hex = bareSha256Hex(plan.runSha256);
+  const runDigest = `sha256:${runSha256Hex}` as const;
+  const [evaluatorKey] = loadOrCreateEvaluatorSigningKeys(workspaceDir, [
+    { id: EXTERNAL_RUN_IMPORT_EVALUATOR_ID },
+  ]);
+  const signer = createVerdictDsseSigner(evaluatorKey!.key);
+
+  const rows: ExternalRunImportDeclaration["rows"] = [];
+  let judged = 0;
+  let unscorable = 0;
+  let expired = 0;
+
+  for (const cell of plan.cells) {
+    const { cellKey, coord, record, outcome } = cell;
+    const annotation = importAnnotation(input.source, record);
+    // The declaration's timing block, kept verbatim from the dump: absent members stay absent.
+    const timings = declarationTimings(record);
+
+    if (outcome === "unrun") {
+      // ONE entry, and no Submission: a slot the harness never dispatched has no attempt to
+      // describe. Minting a Submission here would assert a dispatch that never happened, and the
+      // fold would count it — `dispatches` must stay 0.
+      appendRunJournalEntry(workspaceDir, draftId, {
+        kind: "cell-event",
+        at,
+        event: {
+          cellKey,
+          armId: coord.armId,
+          replicate: coord.replicate,
+          dispatch: 1,
+          kind: "error",
+          detail: record.reason!,
+        },
+      });
+      expired += 1;
+      rows.push({ cellKey, outcome, ...(record.reason === undefined ? {} : { reason: record.reason }), ...(timings === undefined ? {} : { timings }) });
+      continue;
+    }
+
+    // --- dispatch + solve Submission (every remaining outcome was genuinely attempted) --------
+    appendRunJournalEntry(workspaceDir, draftId, {
+      kind: "cell-event",
+      at: record.startedAt ?? at,
+      event: {
+        cellKey,
+        armId: coord.armId,
+        replicate: coord.replicate,
+        dispatch: 1,
+        kind: "dispatch",
+      },
+    });
+
+    const idempotencyKey = cellIdempotencyKey(runDigest, cellKey, 1);
+    const arm = runRecord.arms.find((candidate) => candidate.armId === coord.armId);
+    if (arm === undefined) {
+      refuse("record-integrity", `runs.${draftId}.${cellKey}`, `sealed Run has no arm "${coord.armId}"`);
+    }
+    const submissionBytes = sealSubmission({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      submission: deterministicUuidUri(idempotencyKey),
+      task: { digest: { sha256: coord.taskDigest } },
+      requester: owner,
+      nonce: `${cellKey}:1`,
+      idempotencyKey,
+      deadline: runRecord.closeAt,
+      attempts: { maxTotal: 1, maxConcurrent: 1 },
+      requirements: {
+        ...(arm.pinning as Record<string, unknown>),
+        ...(runRecord.policy.submissionBaseline as Record<string, unknown>),
+      },
+      annotations: { run: runDigest, cellKey, armId: coord.armId, [EXTERNAL_RUN_IMPORT_ANNOTATION_KEY]: annotation },
+    });
+    const submissionSha256 = putSealedBytes(workspaceDir, submissionBytes);
+    // No `pinningEvidenceSha256`, deliberately and permanently: nothing about the external
+    // harness's run was verified against the sealed pinning map, so the axes must stay
+    // `unverifiable`. Omission is the honest encoding — there is no "unchecked" evidence value.
+    appendRunJournalEntry(workspaceDir, draftId, {
+      kind: "submission-accepted",
+      at: record.startedAt ?? at,
+      cellKey,
+      dispatch: 1,
+      submissionSha256,
+      leg: "solve",
+    });
+
+    if (outcome === "error" || outcome === "timeout") {
+      // Dispatched, never delivered. NO `replaceableReason` — `"expired"` there is not a terminal
+      // status for `outstandingCells`, and collect would refuse the run. NO `blame` — we cannot
+      // honestly observe task-vs-infrastructure attribution for another harness's failure.
+      appendRunJournalEntry(workspaceDir, draftId, {
+        kind: "cell-event",
+        at: record.endedAt ?? at,
+        event: {
+          cellKey,
+          armId: coord.armId,
+          replicate: coord.replicate,
+          dispatch: 1,
+          kind: "error",
+          detail: record.reason!,
+        },
+      });
+      expired += 1;
+      rows.push({ cellKey, outcome, ...(record.reason === undefined ? {} : { reason: record.reason }), ...(timings === undefined ? {} : { timings }) });
+      continue;
+    }
+
+    // --- evidence + solve Delivery (graded and ungradeable both delivered something) ----------
+    const evidence = sealEvidence(workspaceDir, evidenceRoot, cell);
+    const createdAt = record.endedAt ?? at;
+    const attempt = deterministicUuidUri(`external-run-import:attempt:${runSha256Hex}:${cellKey}:1`);
+    const deliveryBytes = sealDelivery({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      attempt,
+      task: `sha256:${coord.taskDigest}`,
+      outputs: evidence.map((file) => ({ name: file.name, digest: { sha256: file.sha256 } })),
+      outcome: "fulfilled",
+      createdAt,
+      annotations: { [EXTERNAL_RUN_IMPORT_ANNOTATION_KEY]: annotation },
+    });
+    const deliverySha256 = putSealedBytes(workspaceDir, deliveryBytes);
+    appendRunJournalEntry(workspaceDir, draftId, {
+      kind: "cell-event",
+      at: createdAt,
+      event: {
+        cellKey,
+        armId: coord.armId,
+        replicate: coord.replicate,
+        dispatch: 1,
+        kind: "delivered",
+        attempt,
+      },
+    });
+    // `outputs` must equal the Delivery's own digest-bearing outputs byte-for-byte: the public
+    // reader recomputes them from the sealed Delivery and canonical-compares the two.
+    appendRunJournalEntry(workspaceDir, draftId, {
+      kind: "delivery",
+      at: createdAt,
+      cellKey,
+      dispatch: 1,
+      attempt,
+      deliverySha256,
+      outputs: evidence.map((file) => ({ name: file.name, sha256: file.sha256 })),
+    });
+
+    const declarationRow = {
+      cellKey,
+      outcome,
+      ...(record.reason === undefined ? {} : { reason: record.reason }),
+      ...(timings === undefined ? {} : { timings }),
+      evidence: evidence.map((file) => ({ name: file.name, sha256: file.sha256 })),
+    };
+
+    if (outcome === "ungradeable") {
+      // The exact shape `journalCouldNotGrade` writes (`./drive.ts`): a terminal for leg 1 with no
+      // evaluation Task, Submission, or Delivery — because none was ever prepared. `deriveOutcome`
+      // reads the delivery + this terminal as `unscorable`.
+      appendRunJournalEntry(workspaceDir, draftId, {
+        kind: "evaluation",
+        at: createdAt,
+        cellKey,
+        evaluationTerminal: "could-not-grade",
+        detail: record.reason!,
+        evaluator: EXTERNAL_RUN_IMPORT_EVALUATOR_ID,
+        evalIndex: 1,
+      });
+      unscorable += 1;
+      rows.push(declarationRow);
+      continue;
+    }
+
+    await writeGradedEvaluation({
+      workspaceDir,
+      draftId,
+      plan,
+      cell,
+      evidence,
+      deliverySha256,
+      createdAt,
+      annotation,
+      owner,
+      runRecord,
+      signer,
+      evaluatorId: EXTERNAL_RUN_IMPORT_EVALUATOR_ID,
+    });
+    judged += 1;
+    rows.push(declarationRow);
+  }
+
+  const declaration: ExternalRunImportDeclaration = ExternalRunImportDeclarationSchema.parse({
+    protocol: EXTERNAL_RUN_IMPORT_DECLARATION_PROTOCOL,
+    runSha256: runSha256Hex,
+    benchmarkSha256: bareSha256Hex(plan.benchmarkSha256),
+    source: input.source,
+    importedAt: at,
+    rows,
+  });
+  const declarationSha256 = putSealedBytes(workspaceDir, canonicalJsonBytes(declaration));
+  // Authorship over the DECLARATION only. The workspace genuinely authored this record; it did
+  // not author the external harness's evidence bytes, and claiming otherwise would be exactly the
+  // kind of borrowed provenance the rest of this module exists to avoid.
+  recordWorkspaceAuthorship({
+    workspaceDir,
+    recordSha256: declarationSha256,
+    recordKind: EXTERNAL_RUN_IMPORT_DECLARATION_PROTOCOL,
+    authoredAt: at,
+  });
+  appendRunJournalEntry(workspaceDir, draftId, {
+    kind: "external-import",
+    at,
+    declarationSha256,
+    source: input.source,
+  });
+
+  return { declarationSha256, judged, unscorable, expired };
+}
+
+/** Strips the `sha256:` prefix the plan carries on its coordinates. */
+function bareSha256Hex(digest: string): string {
+  return digest.startsWith("sha256:") ? digest.slice("sha256:".length) : digest;
+}
+
+/** The namespaced block carried on both sealed records: what this cell's evidence actually is. */
+function importAnnotation(
+  source: ExternalRunImportSource,
+  record: ExternalRunRecord,
+): Record<string, unknown> {
+  return {
+    source,
+    outcome: record.outcome,
+    ...(record.reason === undefined ? {} : { reason: record.reason }),
+    ...(record.startedAt === undefined ? {} : { startedAt: record.startedAt }),
+    ...(record.endedAt === undefined ? {} : { endedAt: record.endedAt }),
+    ...(record.durationMs === undefined ? {} : { durationMs: record.durationMs }),
+  };
+}
+
+function declarationTimings(
+  record: ExternalRunRecord,
+): ExternalRunImportDeclaration["rows"][number]["timings"] {
+  if (record.startedAt === undefined && record.endedAt === undefined && record.durationMs === undefined) {
+    return undefined;
+  }
+  return {
+    ...(record.startedAt === undefined ? {} : { startedAt: record.startedAt }),
+    ...(record.endedAt === undefined ? {} : { endedAt: record.endedAt }),
+    ...(record.durationMs === undefined ? {} : { durationMs: record.durationMs }),
+  };
+}
+
+/**
+ * Reads and seals every evidence file of one cell, IN DUMP ORDER. Order is load-bearing twice
+ * over: it fixes the Delivery's `outputs` array, and the public reader re-derives the evaluation
+ * Task from exactly those outputs and byte-compares the result.
+ */
+function sealEvidence(
+  workspaceDir: string,
+  evidenceRoot: string,
+  cell: ExternalRunImportCell,
+): ImportedEvidence[] {
+  return (cell.record.evidence ?? []).map((ref) => {
+    const path = resolvePath(evidenceRoot, ref.path);
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(readFileSync(path));
+    } catch (cause) {
+      refuse(
+        "validation",
+        `row ${cell.record.row}`,
+        `evidence "${ref.name}" for ${cell.cellKey} could not be read at ${path}: `
+          + `${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    }
+    return { name: ref.name, sha256: putSealedBytes(workspaceDir, bytes) };
+  });
+}
+
+interface WriteGradedEvaluationInput {
+  readonly workspaceDir: string;
+  readonly draftId: string;
+  readonly plan: ExternalRunImportPlan;
+  readonly cell: ExternalRunImportCell;
+  readonly evidence: readonly ImportedEvidence[];
+  readonly deliverySha256: string;
+  readonly createdAt: string;
+  readonly annotation: Record<string, unknown>;
+  readonly owner: string;
+  readonly runRecord: RunRecord;
+  readonly signer: ReturnType<typeof createVerdictDsseSigner>;
+  readonly evaluatorId: string;
+}
+
+/**
+ * The full separate-evaluator lineage for one graded cell: derived evaluation Task → evaluation
+ * Submission → signed verdict → evaluation Delivery → the journal entry naming all four.
+ *
+ * `materialize.ts` accepts only `hasSeparateLineage` (the Inspect same-execution shape is gated on
+ * an Inspect adapter, which import refuses), and the public reader RE-DERIVES the evaluation Task
+ * from the solve Delivery's outputs and the subject Task's EvaluationSpec and byte-compares it —
+ * which is why the evidence names and their order above are not cosmetic.
+ */
+async function writeGradedEvaluation(input: WriteGradedEvaluationInput): Promise<void> {
+  const { workspaceDir, draftId, plan, cell, evidence, deliverySha256, createdAt } = input;
+  const { cellKey, coord, record } = cell;
+
+  const evaluationSpecSha256 = subjectEvaluationSpecSha256(workspaceDir, coord.taskDigest, cellKey);
+  const derived = deriveEvaluationTask({
+    subjectTask: { name: "subject-task.json", digest: `sha256:${coord.taskDigest}` },
+    subjectDelivery: { name: "subject-delivery.json", digest: `sha256:${deliverySha256}` },
+    subjectResults: evidence.map((file) => ({ name: file.name, digest: `sha256:${file.sha256}` as const })),
+    evaluationSpecDigest: `sha256:${evaluationSpecSha256}`,
+  });
+  const evalTaskSha256 = putSealedBytes(workspaceDir, derived.bytes);
+
+  // The nonce shape is re-parsed by `materialize.ts` and re-asserted by the public reader, so it
+  // is a contract, not a label: `eval:<runSha256>:e<evalIndex>:<cellKey>:<dispatch>`.
+  const runSha256Hex = bareSha256Hex(plan.runSha256);
+  const evalNonce = `eval:${runSha256Hex}:e1:${cellKey}:1`;
+  const evalSubmissionBytes = sealSubmission({
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+    submission: deterministicUuidUri(evalNonce),
+    task: { digest: { sha256: evalTaskSha256 } },
+    requester: input.owner,
+    nonce: evalNonce,
+    idempotencyKey: evalNonce,
+    deadline: input.runRecord.closeAt,
+    requirements: { harness: EVALUATION_HARNESS_PIN, [EVALUATOR_REQUIREMENT_KEY]: input.evaluatorId },
+    annotations: { [EXTERNAL_RUN_IMPORT_ANNOTATION_KEY]: input.annotation },
+  });
+  const evalSubmissionSha256 = putSealedBytes(workspaceDir, evalSubmissionBytes);
+  appendRunJournalEntry(workspaceDir, draftId, {
+    kind: "submission-accepted",
+    at: createdAt,
+    cellKey,
+    dispatch: 1,
+    submissionSha256: evalSubmissionSha256,
+    leg: "evaluation",
+    evalIndex: 1,
+  });
+
+  const measurements = { ...record.measurements } as Record<string, string | number | boolean>;
+  const spec = parseEvaluationSpec(getSealedBytes(workspaceDir, evaluationSpecSha256));
+  // The verdict is COMPUTED, never imported. There is no pass/fail column in the dump precisely so
+  // that this line is the only place a verdict can come from; `checkVerdictRuleConsistency`
+  // recomputes it at assembly from the same spec and the same measurements.
+  let outcome: ReturnType<typeof evaluateVerdictRule>;
+  try {
+    outcome = evaluateVerdictRule(spec.verdictRule as Parameters<typeof evaluateVerdictRule>[0], measurements);
+  } catch (cause) {
+    refuse(
+      "validation",
+      `row ${record.row}`,
+      `${cellKey}: the sealed EvaluationSpec's verdict rule could not be evaluated over the `
+        + `imported measurements — ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+
+  const statement = {
+    _type: "https://in-toto.io/Statement/v1",
+    subject: [
+      { name: "subject-task.json", digest: { sha256: coord.taskDigest } },
+      ...evidence.map((file) => ({ name: file.name, digest: { sha256: file.sha256 } })),
+    ],
+    predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
+    predicate: {
+      evaluator: { id: input.evaluatorId },
+      verdict: outcome.verdict,
+      evaluationSpecification: { digest: { sha256: evaluationSpecSha256 } },
+      taskSubject: "subject-task.json",
+      resultSubjects: evidence.map((file) => file.name),
+      measurements: Object.keys(measurements)
+        .sort()
+        .map((name) => ({ name, value: measurements[name]! })),
+      evaluatedAt: createdAt,
+      limitations: [...EXTERNAL_RUN_IMPORT_LIMITATIONS],
+    },
+  };
+  const verdictBytes = await sealVerdictStatement({
+    statementBytes: canonicalJsonBytes(statement),
+    evaluatorId: input.evaluatorId,
+    expectedEvaluationSpecificationSha256: evaluationSpecSha256,
+    signer: input.signer,
+  });
+  const verdictSha256 = putSealedBytes(workspaceDir, verdictBytes);
+
+  const evalAttempt = deterministicUuidUri(`external-run-import:eval-attempt:${runSha256Hex}:${cellKey}:1`);
+  const evalDeliveryBytes = sealDelivery({
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+    attempt: evalAttempt,
+    task: `sha256:${evalTaskSha256}`,
+    outputs: [{ name: "verdict", digest: { sha256: verdictSha256 } }],
+    outcome: "fulfilled",
+    createdAt,
+    annotations: { [EXTERNAL_RUN_IMPORT_ANNOTATION_KEY]: input.annotation },
+  });
+  const evalDeliverySha256 = putSealedBytes(workspaceDir, evalDeliveryBytes);
+
+  appendRunJournalEntry(workspaceDir, draftId, {
+    kind: "evaluation",
+    at: createdAt,
+    cellKey,
+    evalTaskSha256,
+    evalDeliverySha256,
+    evalAttempt,
+    verdictSha256,
+    evaluator: input.evaluatorId,
+    evalIndex: 1,
+  });
+}
+
+/** The subject Task's bound EvaluationSpec digest (bare hex). A Task with none cannot be graded
+ * from a dump: there is no rule to evaluate the measurements against, and the importer has no
+ * standing to supply one. */
+function subjectEvaluationSpecSha256(
+  workspaceDir: string,
+  taskDigestHex: string,
+  cellKey: string,
+): string {
+  const doc = JSON.parse(
+    new TextDecoder("utf-8", { fatal: true }).decode(getSealedBytes(workspaceDir, taskDigestHex)),
+  ) as { readonly evaluation?: { readonly digest?: { readonly sha256?: string } } };
+  const sha256 = doc.evaluation?.digest?.sha256;
+  if (sha256 === undefined) {
+    refuse(
+      "conflict",
+      `cells.${cellKey}`,
+      `Task ${taskDigestHex} binds no EvaluationSpec, so an imported "graded" row has no verdict `
+        + "rule to be checked against — import it as \"ungradeable\" with a reason instead",
+    );
+  }
+  return sha256;
 }
