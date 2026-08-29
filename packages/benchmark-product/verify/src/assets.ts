@@ -23,9 +23,12 @@ export interface PublicAssetInput {
   readonly comparison?: PublicComparisonView;
   /**
    * Task-selection provenance declared in the sealed Run (issue #2980). Absent means the Run
-   * declared nothing — which the face states out loud rather than omitting, because silence is
-   * exactly how selection provenance used to hide. It is a reader-supplied projection of a
-   * verified record, not a claim field: the claim package pins its own key set byte-for-byte.
+   * declared nothing, and the face then renders NOTHING here — not a "declared nothing" line.
+   * That omission is forced rather than chosen: the verifier byte-compares every published asset
+   * against this builder, so any sentence in the undeclared case would refuse every bundle
+   * published before this field existed. See `taskSelectionSentence` below. It is a
+   * reader-supplied projection of a verified record, not a claim field: the claim package pins its
+   * own key set byte-for-byte.
    */
   readonly taskSelection?: TaskSelectionMode;
   /** Producer-verified binary admission/instrument facts. Required for claim-package/2 only. */

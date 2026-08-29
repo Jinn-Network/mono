@@ -19,8 +19,11 @@
  *   which is how `anchor-intent/v1` and `benchmark-publication/v1` already extend the Run without a
  *   protocol bump. A Run that declares nothing seals byte-identical bytes to before this existed.
  *
- * Absence stays legal, and readers are expected to say so out loud rather than omit the line:
- * silence is exactly how selection provenance used to hide.
+ * Absence stays legal, and it reads as absence rather than as a default: {@link readTaskSelectionMode}
+ * returns `undefined`, never a mode. A reader that can afford new bytes should say so out loud,
+ * since silence is exactly how selection provenance used to hide — but the published report face
+ * cannot: it is byte-compared against a deterministic builder, so a sentence rendered for the
+ * undeclared case would refuse every bundle published before this extension existed.
  */
 
 import { z } from "zod";
