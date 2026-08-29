@@ -270,10 +270,16 @@ export async function verifyEvidenceNativePortableBundle(
     },
   };
 
-  const signers = new Map(claim.trust.signers.map((signer) => [signer.keyId, {
-    signer,
-    publicKeyBytes: read(input.files, `artifacts/${signer.publicKey.digest.sha256}.bin`),
-  }]));
+  const signers = new Map(claim.trust.signers.map((signer) => {
+    const path = `artifacts/${signer.publicKey.digest.sha256}.bin`;
+    const publicKeyBytes = read(input.files, path);
+    // Bind the key bytes to the digest the claim declared for them, not merely to the path they
+    // were filed under. The metadata-first profile defines its retained set from these digests
+    // (issue #2986), so a key whose bytes hash to something else would make "exactly the declared
+    // signer public keys" a statement about filenames rather than about bytes.
+    assertDescriptor(publicKeyBytes, signer.publicKey, path);
+    return [signer.keyId, { signer, publicKeyBytes }] as const;
+  }));
   const verifiedSignerKeyIds = new Set<string>();
   const verifySignature = async (signature: DsseSignatureInput, identity: string, allowed: readonly string[]) => {
     if (signature.keyid === undefined) return false;

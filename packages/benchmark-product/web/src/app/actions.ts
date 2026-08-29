@@ -46,6 +46,7 @@ import {
   profileArmPinning,
   readAgentProfile,
   updateDraft,
+  summarizeVerificationOutcome,
   verifyPublicBundle,
 } from "@colophon-claims/core";
 import type { GuiActionState } from "@/lib/action-state";
@@ -162,12 +163,19 @@ export async function guidedVerifyBundleAction(_previous: GuiActionState, formDa
   }
   try {
     const verification = await verifyPublicBundle(resolve(bundle));
+    // The denominator is the check count this bundle's own format promises, and a deferred check is
+    // never counted as passed: a metadata-first bundle carries artifact digests without their bytes
+    // (issue #2986).
+    const outcome = summarizeVerificationOutcome(verification);
+    const deferred = outcome.notFetched === 0
+      ? ""
+      : ` ${outcome.notFetched} not fetched: this bundle carries the artifact digests, not their bytes.`;
     return {
       status: "success",
       result: {
         identity: `sha256:${verification.identity}`,
         checks: verification.checks,
-        statement: `${verification.checks.length} of 6 checks passed. The bundle was not uploaded or changed.`,
+        statement: `${outcome.passed} of ${outcome.total} checks passed.${deferred} The bundle was not uploaded or changed.`,
       },
     };
   } catch {

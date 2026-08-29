@@ -926,6 +926,27 @@ describe("Harbor → Inspect → human evidence-first golden lifecycle", () => {
       verifySignature: verifyEd25519Signature,
     })).rejects.toThrow(/digest does not match its exact descriptor/u);
 
+    // The branch that keeps the relaxation fail-closed: metadata-first accepts a referenced
+    // artifact without bytes ONLY because the claim declares its digest. Undeclare it and the
+    // bundle is refused, exactly as the full-evidence profile refuses a missing body.
+    const undeclaredClaimDocument = JSON.parse(new TextDecoder().decode(claim.bytes)) as {
+      records: { artifacts: { digest: { sha256: string } }[] };
+    };
+    undeclaredClaimDocument.records.artifacts = undeclaredClaimDocument.records.artifacts
+      .filter((artifact) => artifact.digest.sha256 !== smuggledDigest);
+    expect(undeclaredClaimDocument.records.artifacts.length)
+      .toBe(claimRecordsArtifactDigests(claim.bytes).length - 1);
+    const undeclaredFiles = new Map(metadataFirstFiles);
+    undeclaredFiles.delete("bundle.json");
+    undeclaredFiles.set("claim-package.json", sealEvidenceNativeClaimPackageV3(undeclaredClaimDocument).bytes);
+    undeclaredFiles.set("bundle.json", buildEvidenceNativeBundleManifestV5(undeclaredFiles, {
+      profile: BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
+    }).bytes);
+    await expect(verifyEvidenceNativePortableBundle({
+      files: undeclaredFiles,
+      verifySignature: verifyEd25519Signature,
+    })).rejects.toThrow(/claim artifact closure omits sha256:/u);
+
     // The full-evidence profile is unchanged: an omitted body is still a hard failure there.
     const truncatedFullFiles = new Map(bundleFiles);
     truncatedFullFiles.delete("bundle.json");

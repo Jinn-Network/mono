@@ -8,8 +8,9 @@ npx @colophon-claims/verify@0.2 ./bundle
 
 Use `--json` for machine-readable output. The reader runs the checks declared by the
 bundle format, covering its manifest, evidence closure, calculations, report, and claim
-consistency. Exit status is `0` when every check passes, `1` for an invalid bundle, and
-`2` for usage or operational failures.
+consistency. Exit status is `0` when the bundle is valid for the format and profile it
+declares, `1` for an invalid bundle, and `2` for usage or operational failures. A check a
+profile defers is reported as deferred, never as passed, and never as a failure.
 
 This 0.2 reader supports public bundle formats v2, v4, v5, v6, and v7. It intentionally
 rejects the unrelated accounting bundle v3. Formats v2 and v4 run six checks; the

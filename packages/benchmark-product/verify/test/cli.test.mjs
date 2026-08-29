@@ -326,6 +326,8 @@ test("human summary names all seven evidence-native checks for bundle v5", async
     reportDigest: `sha256:${"f".repeat(64)}`,
     evidenceRecords: 336,
     artifacts: 300,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
+    artifactContent: { status: "verified", verified: 300, notFetched: 0, notFetchedDigests: [] },
   });
   assert.match(output, /^Verified: 7 of 7 checks passed/m);
   assert.match(output, new RegExp(`Bundle: sha256:${"a".repeat(64)}`));
@@ -402,6 +404,8 @@ test("an undeclared-custody signer set prints the role alone", async () => {
     format: "benchmark-product-public-bundle/5",
     identity: `sha256:${"a".repeat(64)}`,
     checks: ["manifest"],
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
+    artifactContent: { status: "verified", verified: 0, notFetched: 0, notFetchedDigests: [] },
     signers: [
       { role: "publisher", identity: "urn:report:1", keyId: "k1", custody: "undeclared" },
       { role: "automated-grader", identity: "urn:evaluator:1", keyId: "k2", custody: "undeclared" },
@@ -521,7 +525,12 @@ test("a metadata-first v5 bundle discloses artifact-integrity as not fetched", a
   }
   assert.match(output, /Artifact content/);
   assert.match(output, /3 artifact bodies were not fetched/);
-  assert.match(output, /artifacts\/<sha256>\.bin/);
+  // Naming the digests is what makes the deferred check completable.
+  assert.match(output, new RegExp(`sha256:${"1".repeat(64)}`));
+  assert.match(output, new RegExp(`sha256:${"3".repeat(64)}`));
+  // Adding a body to the directory breaks the manifest closure, so it must not be advised.
+  assert.doesNotMatch(output, /Fetch each one into/);
+  assert.match(output, /verify the\s*\n\s*full-evidence bundle/);
   assert.match(output, /artifact\s*\ncontents themselves were not read/);
 });
 

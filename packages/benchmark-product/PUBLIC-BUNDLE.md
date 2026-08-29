@@ -283,6 +283,15 @@ A reader keys on the declared profile, not on which members happen to be present
 bundle at manifest parse rather than misreading it as a full-evidence bundle with members missing.
 Read a metadata-first bundle with a reader that lists the profile among the ones it supports.
 
+That is also the publication gate. `claim-package/3`'s `verification.command` names the reader a
+bundle instructs its readers to use, and no released reader line understands this profile yet, so
+**nothing may publish a metadata-first bundle until its claim package pins a reader release that
+declares the profile** — a claim naming a reader that cannot read it is an instruction to fail.
+Today the profile is a format definition and a local derivation of an already-published
+full-evidence bundle; no producer emits one. The local viewer, which is the one surface that can
+be pointed at a hand-derived metadata-first bundle, offers the local `colophon bundle verify`
+command instead of an `npx` line that would refuse.
+
 ## Portable verification
 
 Verification with your own tools — no Jinn code at all — is specified in

@@ -858,6 +858,15 @@ export { METHOD_CATALOG, isMethodCatalogId, listMethodCatalog } from "./operatio
 
 // BP-40: deletion-portable public bundle verification uses only bundle-carried bytes/public keys.
 export { verifyPublicBundle } from "./bundle/verify.js";
+// The one derivation of what a verification result may be said to have proved. Re-exported beside
+// `verifyPublicBundle` so every consumer of that result reaches the same counts and check states
+// rather than counting `checks` for itself (issue #2986).
+export { summarizeVerificationOutcome } from "@colophon-claims/verify";
+export type {
+  VerificationCheckOutcome,
+  VerificationCheckState,
+  VerificationOutcome,
+} from "@colophon-claims/verify";
 export type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./bundle/verify.js";
 
 // PUB-13b: an additive publication-profile projection. This is intentionally not wired into the
