@@ -46,7 +46,7 @@ const SOURCE_PATHS = {
 
 const PUBLIC_TITLE = "Do you need a Skill, or is CLAUDE.md enough?";
 const PUBLIC_SLUG = "skill-vs-root-claude-md-haiku-4-5";
-const VERIFY_COMMAND = "npx @colophon-claims/verify@0.1 ./bundle";
+const VERIFY_COMMAND = "npx @colophon-claims/check@0.2 ./bundle";
 
 const decoder = new TextDecoder();
 const codeUnitCompare = (left, right) => left < right ? -1 : left > right ? 1 : 0;

@@ -95,7 +95,7 @@ import {
 } from "../runtime/inspect/binary-judge-manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
-import { derivePublicComparison } from "@colophon-claims/verify";
+import { derivePublicComparison } from "@colophon-claims/check";
 
 export const PUBLIC_BUNDLE_FILES = [
   "static-bundle.json",

@@ -11,21 +11,31 @@ export const PRODUCT_RELEASE_PLATFORM_PINS_PATH = 'packages/benchmark-product/pr
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
 const EXACT_CANARY_PIN = /^0\.1\.0-canary\.sha\.[0-9a-f]{40}$/u;
-const VERIFY_RELEASES = {
-  '0.2.0': {
+/**
+ * Registered product releases, keyed `<package name>@<version>`. Issue #3023 split the reader's
+ * published identity: the checker now publishes as `@colophon-claims/check` and
+ * `@colophon-claims/verify` stays published as a passthrough alias. Both keys live here so a
+ * receipt is bound to the name it was actually issued for — an alias release must never inherit
+ * the checker's canary receipt, and vice versa. The two `@colophon-claims/verify` entries below
+ * are the already-published 0.2 line and are byte-frozen: their `receiptSha256` covers the pin
+ * object, `product.packageName` included.
+ */
+const PRODUCT_RELEASES = {
+  '@colophon-claims/verify@0.2.0': {
     decision: 'DR-2026-08-22-a',
     platformSourceSha: 'e00b2fc47fc5635b007eb349fb1e41aa81bb3c50',
     stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/32544891098/attempts/2',
     receiptSha256: '8c6749c2e6c303b17ceccbc12712e1210e275dcdbcb37fd495a14a15cbb4474e',
   },
-  '0.2.1': {
+  '@colophon-claims/verify@0.2.1': {
     decision: 'operator-authorization-2026-08-26',
     platformSourceSha: '7a138d2c104d09243e306952d0ce77caa64e4707',
     stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/32976208098',
     receiptSha256: 'fdd1ecf49eb6c0cec4b05e5c0d201dfcacbbeaf8164f766b9ca5e27b646b6dad',
   },
 };
-const VERIFY_RELEASE_VERSIONS = Object.keys(VERIFY_RELEASES);
+const PRODUCT_RELEASE_KEYS = Object.keys(PRODUCT_RELEASES);
+const releaseKey = (packageName, version) => `${packageName}@${version}`;
 const PRODUCT_RELEASE_PINS_KEYS = ['schemaVersion', 'receipts'];
 const VERIFY_020_RECEIPT_KEYS = [
   'decision',
@@ -135,17 +145,16 @@ export function validateProductReleasePlatformPin(pin, manifest) {
   if (!hasExactKeys(pin, VERIFY_020_RECEIPT_KEYS) || !hasExactKeys(pin.product, VERIFY_020_PRODUCT_KEYS)) {
     throw new Error('product-release pin must retain the immutable verifier 0.2 receipt shape');
   }
-  const release = VERIFY_RELEASES[pin.product.version];
+  const release = PRODUCT_RELEASES[releaseKey(pin?.product?.packageName, pin?.product?.version)];
   if (
     release === undefined
     || pin?.decision !== release.decision
-    || pin?.product?.packageName !== '@colophon-claims/verify'
     || pin.platformSourceSha !== release.platformSourceSha
     || pin.platformVersion !== `0.1.0-canary.sha.${release.platformSourceSha}`
     || manifest.name !== pin.product.packageName
     || manifest.version !== pin.product.version
   ) {
-    throw new Error('only a registered @colophon-claims/verify 0.2 patch release may use its exact canary receipt');
+    throw new Error(`only a registered ${pin?.product?.packageName ?? '<missing>'} release may use its exact canary receipt`);
   }
   refuseFloatingCanary(pin.platformVersion, 'product-release pin platformVersion');
   if (!COMMIT_SHA.test(String(pin.platformSourceSha))) {
@@ -199,18 +208,21 @@ export function validateProductReleasePlatformPins(pins, manifest) {
     !hasExactKeys(pins, PRODUCT_RELEASE_PINS_KEYS)
     || pins.schemaVersion !== 1
     || !Array.isArray(pins.receipts)
-    || JSON.stringify(pins.receipts.map((pin) => pin?.product?.version)) !== JSON.stringify(VERIFY_RELEASE_VERSIONS)
+    || JSON.stringify(pins.receipts.map((pin) => releaseKey(pin?.product?.packageName, pin?.product?.version)))
+      !== JSON.stringify(PRODUCT_RELEASE_KEYS)
   ) {
-    throw new Error('product-release platform pins must contain the exact ordered immutable verifier 0.2 receipts');
+    throw new Error('product-release platform pins must contain the exact ordered registered release receipts');
   }
   for (const pin of pins.receipts) {
     validateProductReleasePlatformPin(pin, {
       ...manifest,
-      name: '@colophon-claims/verify',
+      name: pin.product.packageName,
       version: pin.product.version,
     });
   }
-  const selected = pins.receipts.find((pin) => pin.product.version === manifest.version);
+  const selected = pins.receipts.find(
+    (pin) => pin.product.packageName === manifest.name && pin.product.version === manifest.version,
+  );
   if (selected === undefined) {
     throw new Error(`no immutable platform receipt is registered for ${manifest.name}@${manifest.version}`);
   }

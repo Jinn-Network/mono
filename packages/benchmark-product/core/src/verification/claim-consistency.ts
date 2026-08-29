@@ -1,5 +1,5 @@
 import { BENCHMARKING_METHOD_IDS, type BenchmarkRecord, type MatrixRecord, type ReportRecord, type RunRecord } from "@jinn-network/benchmarking-records";
-import { firstDifference, type ClaimAnchor } from "@colophon-claims/verify";
+import { firstDifference, type ClaimAnchor } from "@colophon-claims/check";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";

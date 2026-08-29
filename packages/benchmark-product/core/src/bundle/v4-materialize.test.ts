@@ -12,7 +12,7 @@ import {
   parseReport,
 } from "@jinn-network/benchmarking-records";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
-import { BINARY_INSTRUMENT_REPORT_LIMITATIONS, verifyPublicBundle } from "@colophon-claims/verify";
+import { BINARY_INSTRUMENT_REPORT_LIMITATIONS, verifyPublicBundle } from "@colophon-claims/check";
 import {
   canonicalJsonBytes,
   dssePreAuthEncoding,

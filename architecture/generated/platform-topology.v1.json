@@ -3,9 +3,9 @@
     "adjacentEntries": 6,
     "experimentalPolicy": 2,
     "implementationsV1": 60,
-    "inventory": 96,
-    "otherPackagesRootEntries": 15,
-    "packagesRootEntries": 90,
+    "inventory": 97,
+    "otherPackagesRootEntries": 16,
+    "packagesRootEntries": 91,
     "sealedPlatformV1": 13
   },
   "graph": {
@@ -16,19 +16,74 @@
     },
     "edges": [
       {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-aggregate"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-evidence"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-interop"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-local"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-protocol"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-records"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-run"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/task-admission"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-profiles"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
+      },
+      {
+        "from": "@colophon-claims/cli",
+        "kind": "runtime",
+        "to": "@colophon-claims/check"
+      },
+      {
         "from": "@colophon-claims/cli",
         "kind": "runtime",
         "to": "@colophon-claims/core"
       },
       {
-        "from": "@colophon-claims/cli",
-        "kind": "runtime",
-        "to": "@colophon-claims/verify"
-      },
-      {
         "from": "@colophon-claims/core",
         "kind": "runtime",
-        "to": "@colophon-claims/verify"
+        "to": "@colophon-claims/check"
       },
       {
         "from": "@colophon-claims/core",
@@ -168,57 +223,7 @@
       {
         "from": "@colophon-claims/verify",
         "kind": "runtime",
-        "to": "@jinn-network/benchmarking-aggregate"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-evidence"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-interop"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-local"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-protocol"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-records"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-run"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/task-admission"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-profiles"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-protocol"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/trust-core"
+        "to": "@colophon-claims/check"
       },
       {
         "from": "@colophon-claims/web",
@@ -1552,6 +1557,7 @@
       }
     ],
     "nodes": [
+      "@colophon-claims/check",
       "@colophon-claims/cli",
       "@colophon-claims/core",
       "@colophon-claims/verify",
@@ -2291,8 +2297,58 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@fontsource-variable/newsreader",
+          "@fontsource-variable/public-sans",
+          "@fontsource/ibm-plex-mono",
+          "@jinn-network/benchmarking-aggregate",
+          "@jinn-network/benchmarking-evidence",
+          "@jinn-network/benchmarking-interop",
+          "@jinn-network/benchmarking-local",
+          "@jinn-network/benchmarking-protocol",
+          "@jinn-network/benchmarking-records",
+          "@jinn-network/benchmarking-run",
+          "@jinn-network/task-admission",
+          "@jinn-network/task-execution-profiles",
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core",
+          "zod"
+        ]
+      },
+      "domain": "benchmark-product",
+      "name": "@colophon-claims/check",
+      "ownerGroup": "architecture-control",
+      "path": "packages/benchmark-product/check",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "independent",
+      "releaseGroup": "colophon-claims-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "role": "standalone Colophon public-bundle reader checker",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 4,
+      "transition": null,
+      "version": "0.2.1"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "classification": "product",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "@colophon-claims/check",
           "@colophon-claims/core",
-          "@colophon-claims/verify",
           "next",
           "react",
           "react-dom"
@@ -2331,7 +2387,7 @@
         "optional": [],
         "peer": [],
         "runtime": [
-          "@colophon-claims/verify",
+          "@colophon-claims/check",
           "@fontsource-variable/newsreader",
           "@fontsource-variable/public-sans",
           "@fontsource/ibm-plex-mono",
@@ -2398,21 +2454,7 @@
         "optional": [],
         "peer": [],
         "runtime": [
-          "@fontsource-variable/newsreader",
-          "@fontsource-variable/public-sans",
-          "@fontsource/ibm-plex-mono",
-          "@jinn-network/benchmarking-aggregate",
-          "@jinn-network/benchmarking-evidence",
-          "@jinn-network/benchmarking-interop",
-          "@jinn-network/benchmarking-local",
-          "@jinn-network/benchmarking-protocol",
-          "@jinn-network/benchmarking-records",
-          "@jinn-network/benchmarking-run",
-          "@jinn-network/task-admission",
-          "@jinn-network/task-execution-profiles",
-          "@jinn-network/task-execution-protocol",
-          "@jinn-network/trust-core",
-          "zod"
+          "@colophon-claims/check"
         ]
       },
       "domain": "benchmark-product",
@@ -2431,12 +2473,12 @@
       "requiredGateIds": [
         "benchmark-product-ci"
       ],
-      "role": "standalone Colophon public-bundle reader verifier",
+      "role": "deprecated passthrough alias onto the Colophon public-bundle reader checker",
       "stability": "experimental",
       "supersedes": [],
       "tier": 4,
       "transition": null,
-      "version": "0.2.1"
+      "version": "0.2.2"
     },
     {
       "boundaryPolicy": {
@@ -15260,6 +15302,15 @@
       {
         "conformance": [],
         "fixtures": [],
+        "name": "@colophon-claims/check",
+        "path": "packages/benchmark-product/check",
+        "profiles": [],
+        "releaseGroup": "colophon-claims-v1",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [],
         "name": "@colophon-claims/cli",
         "path": "packages/benchmark-product/cli",
         "profiles": [],
@@ -17754,8 +17805,9 @@
         "sealed-platform-v1"
       ],
       "canary": false,
-      "expectedPackageCount": 1,
+      "expectedPackageCount": 2,
       "packages": [
+        "@colophon-claims/check",
         "@colophon-claims/verify"
       ],
       "publishPolicies": [

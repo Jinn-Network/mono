@@ -12,7 +12,7 @@ import {
   type PublicComparisonView,
   type PublicBundleVerificationResult,
   type VerifiedPublicBundleSnapshot,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 
 function escapeMarkup(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");

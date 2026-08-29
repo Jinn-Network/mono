@@ -163,7 +163,7 @@ openssl subprocess calls — read it, or reimplement it; it holds no secrets.
 The reference verifier covers the remaining rows of the table:
 
 ```bash
-npx @colophon-claims/verify@1 <bundle-dir>
+npx @colophon-claims/check@0.2 <bundle-dir>
 ```
 
 Exit 0 with `Verified: 6 of 6 checks passed` (`manifest`, `evidence-closure`,
@@ -175,7 +175,7 @@ nothing. Every bundle names its own compatible command in
 ## The conformance kit
 
 The kit is the self-test corpus for external implementations. It lives in the
-source repository at `packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1/`;
+source repository at `packages/benchmark-product/check/fixtures/public-bundle-conformance-v1/`;
 it is deliberately not in the npm tarball, because it is roughly 10 MB of bundle
 bytes that a reader verifying one bundle does not need.
 

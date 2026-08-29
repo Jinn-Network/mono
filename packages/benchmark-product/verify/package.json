@@ -1,7 +1,7 @@
 {
   "name": "@colophon-claims/verify",
-  "version": "0.2.1",
-  "description": "Standalone public-bundle verifier for Colophon claims.",
+  "version": "0.2.2",
+  "description": "Deprecated alias for @colophon-claims/check. Install @colophon-claims/check instead; this name keeps resolving permanently so published bundle instructions never break.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
@@ -13,77 +13,24 @@
     "url": "https://github.com/Jinn-Network/mono.git",
     "directory": "packages/benchmark-product/verify"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./index.js",
   "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    },
-    "./admission": {
-      "import": "./dist/admission/index.js",
-      "types": "./dist/admission/index.d.ts"
-    }
+    ".": "./index.js",
+    "./admission": "./admission.js"
   },
   "bin": {
-    "colophon-verify": "./dist/bin.js"
+    "colophon-verify": "./bin.js"
   },
   "files": [
-    "dist/",
-    "schemas/",
-    "scripts/external-verify.py",
+    "index.js",
+    "admission.js",
+    "bin.js",
     "README.md"
   ],
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "yarn build && node --test test/*.test.mjs && vitest run",
-    "pack:smoke": "node scripts/pack-smoke.mjs",
-    "prepack": "yarn build"
-  },
   "dependencies": {
-    "@fontsource-variable/newsreader": "5.3.0",
-    "@fontsource-variable/public-sans": "5.3.0",
-    "@fontsource/ibm-plex-mono": "5.3.0",
-    "@jinn-network/benchmarking-aggregate": "0.1.0",
-    "@jinn-network/benchmarking-evidence": "0.1.0",
-    "@jinn-network/benchmarking-interop": "0.1.0",
-    "@jinn-network/benchmarking-local": "0.1.0",
-    "@jinn-network/benchmarking-protocol": "0.1.0",
-    "@jinn-network/benchmarking-records": "0.1.0",
-    "@jinn-network/benchmarking-run": "0.1.0",
-    "@jinn-network/task-admission": "0.1.0",
-    "@jinn-network/task-execution-profiles": "0.1.0",
-    "@jinn-network/task-execution-protocol": "0.1.0",
-    "@jinn-network/trust-core": "0.1.0",
-    "zod": "4.4.3"
-  },
-  "resolutions": {
-    "@noble/hashes": "2.2.0",
-    "@jinn-network/benchmarking-aggregate": "portal:../../benchmarking/aggregate",
-    "@jinn-network/benchmarking-evidence": "portal:../../benchmarking/evidence",
-    "@jinn-network/benchmarking-interop": "portal:../../benchmarking/interop",
-    "@jinn-network/benchmarking-local": "portal:../../benchmarking/local",
-    "@jinn-network/benchmarking-records": "portal:../../benchmarking/records",
-    "@jinn-network/benchmarking-run": "portal:../../benchmarking/run",
-    "@jinn-network/benchmarking-protocol": "portal:../../benchmarking/protocol",
-    "@jinn-network/environment-record": "portal:../../environments/record",
-    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
-    "@jinn-network/task-admission": "portal:../../task-supply/admission",
-    "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
-    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
-    "@jinn-network/trust-core": "portal:../../trust/core",
-    "@jinn-network/trust-resolve": "portal:../../trust/resolve",
-    "@jinn-network/trust-testing": "portal:../../trust/testing"
-  },
-  "devDependencies": {
-    "@jinn-network/trust-testing": "0.1.0",
-    "@types/node": "^22.0.0",
-    "ajv": "8.17.1",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.8"
+    "@colophon-claims/check": "0.2.1"
   }
 }

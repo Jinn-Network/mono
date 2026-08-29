@@ -20,7 +20,7 @@ import {
   BUNDLE_V4_FORMAT,
   BundleQualificationSchema,
   verifyPublicBundle,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { BUNDLE_V4_FORMAT as CORE_BUNDLE_V4_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
 import { createSyntheticV4BundleFixture } from "../bundle/testing/v4-synthetic-fixture.js";
@@ -45,7 +45,7 @@ import { exportDerivedBundle } from "./method.js";
 import { runPublish } from "./publish.js";
 
 const EXTERNAL_VERIFY_SCRIPT = fileURLToPath(
-  new URL("../../node_modules/@colophon-claims/verify/scripts/external-verify.py", import.meta.url),
+  new URL("../../node_modules/@colophon-claims/check/scripts/external-verify.py", import.meta.url),
 );
 const EXTERNAL_VERIFY_CHECKS = [
   "manifest-files", "cas-records", "sealed-bytes", "report-signature",

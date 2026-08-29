@@ -44,7 +44,7 @@ import {
   type BinaryItemBankEntry,
   type BinaryItemBankIntakeExtension,
   type BinarySourceManifestEntry,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 export {
   BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
   BINARY_ITEM_BANK_ENTRY_PROTOCOL,

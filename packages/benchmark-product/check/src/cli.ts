@@ -33,7 +33,7 @@ export interface VerifierCliDeps {
 }
 
 function usage(): string {
-  return "Usage: colophon-verify <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
+  return "Usage: colophon-check <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
     + "  --tsa-root     RFC 3161 trust anchor, DER or PEM. Repeatable.\n"
     + "  --ots-headers  Bitcoin block headers, one \"<height>:<80-byte-hex>\" per line. Repeatable.\n"
     + "Trust material is yours, not the bundle's: with none supplied a well-formed anchor reports\n"
@@ -231,7 +231,7 @@ export async function runVerifierCli(
     return {
       exitCode: 2,
       stdout: "",
-      stderr: `colophon-verify: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      stderr: `colophon-check: ${cause instanceof Error ? cause.message : String(cause)}\n`,
     };
   }
 
@@ -251,7 +251,7 @@ export async function runVerifierCli(
     const stdout = parsed.json
       ? `${JSON.stringify({ ok: false, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, code, message: error.message })}\n`
       : "";
-    const stderr = parsed.json ? "" : `colophon-verify: ${error.message}\n`;
+    const stderr = parsed.json ? "" : `colophon-check: ${error.message}\n`;
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };
   }
 }

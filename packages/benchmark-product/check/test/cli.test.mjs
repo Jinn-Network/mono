@@ -27,7 +27,7 @@ test("usage exits 2 and states the exit contract", async () => {
 });
 
 test("a missing bundle exits 1 with machine-readable invalid-bundle output", async () => {
-  const missing = join(await mkdtemp(join(tmpdir(), "colophon-verify-")), "missing");
+  const missing = join(await mkdtemp(join(tmpdir(), "colophon-check-")), "missing");
   const result = await invoke([missing, "--json"]);
   assert.equal(result.code, 1);
   assert.deepEqual(JSON.parse(result.stdout), {
@@ -306,7 +306,7 @@ test("a flag missing its value exits 2 with usage", async () => {
   for (const args of [["bundle", "--tsa-root"], ["bundle", "--ots-headers", "--json"], ["bundle", "--unknown"]]) {
     const result = await runVerifierCli(args, { verify: async () => { throw new Error("must not be reached"); } });
     assert.equal(result.exitCode, 2, args.join(" "));
-    assert.match(result.stderr, /Usage: colophon-verify/);
+    assert.match(result.stderr, /Usage: colophon-check/);
   }
 });
 

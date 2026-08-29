@@ -6,7 +6,7 @@ Source authority: [`architecture/platform-packages.v1.json`](../platform-package
 
 ## Inventory
 
-The catalog contains **96** entries: **13** `sealed-platform-v1` packages, **60** `implementations-v1` packages, **2** disabled `experimental-policy` packages, **15** other entries below `packages/**`, and **6** adjacent entries.
+The catalog contains **97** entries: **13** `sealed-platform-v1` packages, **60** `implementations-v1` packages, **2** disabled `experimental-policy` packages, **16** other entries below `packages/**`, and **6** adjacent entries.
 
 | Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -14,9 +14,10 @@ The catalog contains **96** entries: **13** `sealed-platform-v1` packages, **60*
 | @jinn-network/operator-console | apps/operator-console | operator | 4 | product | operator console product | candidate | transitional-or-private | private | @jinn-network/lifecycle-notifications<br>class-variance-authority<br>clsx<br>lucide-react<br>next<br>radix-ui<br>react<br>react-dom<br>tailwind-merge | — | — |
 | @jinn-network/website | apps/website | devx | 4 | product | developer-experience website product | candidate | transitional-or-private | private | class-variance-authority<br>clsx<br>fumadocs-core<br>fumadocs-mdx<br>fumadocs-ui<br>lucide-react<br>next<br>radix-ui<br>react<br>react-dom<br>tailwind-merge<br>zod | — | — |
 | @jinn-network/operator | operator | operator | 4 | product | operator daemon and application | transitional | legacy-product-lines | independent | @ethereumjs/wallet<br>@grpc/grpc-js<br>@hono/node-server<br>@huggingface/transformers<br>@jinn-network/attestation-issuer<br>@jinn-network/core<br>@jinn-network/environment-record<br>@jinn-network/evidence-catalog-sqlite<br>@jinn-network/evidence-discovery<br>@jinn-network/evidence-local-runtime<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/execution-evidence-builder<br>@jinn-network/execution-recorder<br>@jinn-network/lifecycle-notifications<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-pipeline<br>@jinn-network/marketplace-projector<br>@jinn-network/marketplace-venue-base<br>@jinn-network/plugin<br>@jinn-network/policy-identity<br>@jinn-network/read-plane<br>@jinn-network/record-discovery-client<br>@jinn-network/record-discovery-facts-task-execution<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/record-discovery-transport-http<br>@jinn-network/sdk<br>@jinn-network/task-admission<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-authoring<br>@jinn-network/trust-core<br>@jinn-network/trust-observation<br>@jinn-network/trust-resolve<br>@lmoe/gliner-onnx<br>@modelcontextprotocol/sdk<br>@msgpack/msgpack<br>@noble/curves<br>@noble/ed25519<br>@noble/hashes<br>@opentelemetry/api<br>@opentelemetry/core<br>@opentelemetry/exporter-trace-otlp-grpc<br>@opentelemetry/exporter-trace-otlp-http<br>@opentelemetry/resources<br>@opentelemetry/sdk-node<br>@opentelemetry/sdk-trace-base<br>@safe-global/protocol-kit<br>@safe-global/safe-deployments<br>@safe-global/types-kit<br>@scure/bip32<br>@scure/bip39<br>@secretlint/core<br>@secretlint/secretlint-rule-preset-recommend<br>@slicekit/erc8128<br>@types/better-sqlite3<br>@x402/core<br>@x402/evm<br>@x402/fetch<br>@x402/hono<br>ajv<br>ajv-formats<br>better-sqlite3<br>bs58<br>canonicalize<br>chokidar<br>dotenv<br>hono<br>node-pty<br>protobufjs<br>safe-regex<br>semver<br>tokenlens<br>viem<br>ws<br>yaml<br>zod<br>zod-to-json-schema | @coinbase/cdp-sdk | — |
-| @colophon-claims/cli | packages/benchmark-product/cli | benchmark-product | 4 | product | Colophon self-serve command and packaged local application | experimental | transitional-or-private | never | @colophon-claims/core<br>@colophon-claims/verify<br>next<br>react<br>react-dom | — | — |
-| @colophon-claims/core | packages/benchmark-product/core | benchmark-product | 4 | product | benchmark product core | experimental | transitional-or-private | never | @colophon-claims/verify<br>@fontsource-variable/newsreader<br>@fontsource-variable/public-sans<br>@fontsource/ibm-plex-mono<br>@jinn-network/attestation-issuer<br>@jinn-network/benchmarking-aggregate<br>@jinn-network/benchmarking-evaluation<br>@jinn-network/benchmarking-evidence<br>@jinn-network/benchmarking-interop<br>@jinn-network/benchmarking-local<br>@jinn-network/benchmarking-native-capture<br>@jinn-network/benchmarking-protocol<br>@jinn-network/benchmarking-publication<br>@jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/record-discovery-transport-http<br>@jinn-network/record-publication<br>@jinn-network/task-admission<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-oci-grader<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-core<br>zod | — | — |
-| @colophon-claims/verify | packages/benchmark-product/verify | benchmark-product | 4 | product | standalone Colophon public-bundle reader verifier | experimental | colophon-claims-v1 | independent | @fontsource-variable/newsreader<br>@fontsource-variable/public-sans<br>@fontsource/ibm-plex-mono<br>@jinn-network/benchmarking-aggregate<br>@jinn-network/benchmarking-evidence<br>@jinn-network/benchmarking-interop<br>@jinn-network/benchmarking-local<br>@jinn-network/benchmarking-protocol<br>@jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run<br>@jinn-network/task-admission<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core<br>zod | — | — |
+| @colophon-claims/check | packages/benchmark-product/check | benchmark-product | 4 | product | standalone Colophon public-bundle reader checker | experimental | colophon-claims-v1 | independent | @fontsource-variable/newsreader<br>@fontsource-variable/public-sans<br>@fontsource/ibm-plex-mono<br>@jinn-network/benchmarking-aggregate<br>@jinn-network/benchmarking-evidence<br>@jinn-network/benchmarking-interop<br>@jinn-network/benchmarking-local<br>@jinn-network/benchmarking-protocol<br>@jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run<br>@jinn-network/task-admission<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core<br>zod | — | — |
+| @colophon-claims/cli | packages/benchmark-product/cli | benchmark-product | 4 | product | Colophon self-serve command and packaged local application | experimental | transitional-or-private | never | @colophon-claims/check<br>@colophon-claims/core<br>next<br>react<br>react-dom | — | — |
+| @colophon-claims/core | packages/benchmark-product/core | benchmark-product | 4 | product | benchmark product core | experimental | transitional-or-private | never | @colophon-claims/check<br>@fontsource-variable/newsreader<br>@fontsource-variable/public-sans<br>@fontsource/ibm-plex-mono<br>@jinn-network/attestation-issuer<br>@jinn-network/benchmarking-aggregate<br>@jinn-network/benchmarking-evaluation<br>@jinn-network/benchmarking-evidence<br>@jinn-network/benchmarking-interop<br>@jinn-network/benchmarking-local<br>@jinn-network/benchmarking-native-capture<br>@jinn-network/benchmarking-protocol<br>@jinn-network/benchmarking-publication<br>@jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/record-discovery-transport-http<br>@jinn-network/record-publication<br>@jinn-network/task-admission<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-oci-grader<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-core<br>zod | — | — |
+| @colophon-claims/verify | packages/benchmark-product/verify | benchmark-product | 4 | product | deprecated passthrough alias onto the Colophon public-bundle reader checker | experimental | colophon-claims-v1 | independent | @colophon-claims/check | — | — |
 | @colophon-claims/web | packages/benchmark-product/web | benchmark-product | 4 | product | benchmark product web application | experimental | transitional-or-private | never | @colophon-claims/core<br>@fontsource-variable/newsreader<br>@fontsource-variable/public-sans<br>@fontsource/ibm-plex-mono<br>class-variance-authority<br>clsx<br>lucide-react<br>next<br>radix-ui<br>react<br>react-dom<br>server-only<br>tailwind-merge | — | — |
 | @jinn-network/benchmarking-aggregate | packages/benchmarking/aggregate | benchmarking | 3 | platform | aggregation capability | candidate | implementations-v1 | canary-and-stable | @jinn-network/benchmarking-records<br>@jinn-network/trust-core | — | — |
 | @jinn-network/benchmarking-evaluation | packages/benchmarking/evaluation | benchmarking | 3 | platform | TEP-free exact subject evaluation issuance | candidate | implementations-v1 | canary-and-stable | @jinn-network/attestation-issuer<br>@jinn-network/benchmarking-protocol<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/trust-core | — | vitest |
@@ -113,9 +114,20 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 
 | From | Kind | To |
 | --- | --- | --- |
+| @colophon-claims/check | runtime | @jinn-network/benchmarking-aggregate |
+| @colophon-claims/check | runtime | @jinn-network/benchmarking-evidence |
+| @colophon-claims/check | runtime | @jinn-network/benchmarking-interop |
+| @colophon-claims/check | runtime | @jinn-network/benchmarking-local |
+| @colophon-claims/check | runtime | @jinn-network/benchmarking-protocol |
+| @colophon-claims/check | runtime | @jinn-network/benchmarking-records |
+| @colophon-claims/check | runtime | @jinn-network/benchmarking-run |
+| @colophon-claims/check | runtime | @jinn-network/task-admission |
+| @colophon-claims/check | runtime | @jinn-network/task-execution-profiles |
+| @colophon-claims/check | runtime | @jinn-network/task-execution-protocol |
+| @colophon-claims/check | runtime | @jinn-network/trust-core |
+| @colophon-claims/cli | runtime | @colophon-claims/check |
 | @colophon-claims/cli | runtime | @colophon-claims/core |
-| @colophon-claims/cli | runtime | @colophon-claims/verify |
-| @colophon-claims/core | runtime | @colophon-claims/verify |
+| @colophon-claims/core | runtime | @colophon-claims/check |
 | @colophon-claims/core | runtime | @jinn-network/attestation-issuer |
 | @colophon-claims/core | runtime | @jinn-network/benchmarking-aggregate |
 | @colophon-claims/core | runtime | @jinn-network/benchmarking-evaluation |
@@ -143,17 +155,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @colophon-claims/core | runtime | @jinn-network/task-execution-supervisor |
 | @colophon-claims/core | runtime | @jinn-network/task-execution-workspace |
 | @colophon-claims/core | runtime | @jinn-network/trust-core |
-| @colophon-claims/verify | runtime | @jinn-network/benchmarking-aggregate |
-| @colophon-claims/verify | runtime | @jinn-network/benchmarking-evidence |
-| @colophon-claims/verify | runtime | @jinn-network/benchmarking-interop |
-| @colophon-claims/verify | runtime | @jinn-network/benchmarking-local |
-| @colophon-claims/verify | runtime | @jinn-network/benchmarking-protocol |
-| @colophon-claims/verify | runtime | @jinn-network/benchmarking-records |
-| @colophon-claims/verify | runtime | @jinn-network/benchmarking-run |
-| @colophon-claims/verify | runtime | @jinn-network/task-admission |
-| @colophon-claims/verify | runtime | @jinn-network/task-execution-profiles |
-| @colophon-claims/verify | runtime | @jinn-network/task-execution-protocol |
-| @colophon-claims/verify | runtime | @jinn-network/trust-core |
+| @colophon-claims/verify | runtime | @colophon-claims/check |
 | @colophon-claims/web | runtime | @colophon-claims/core |
 | @jinn-network/attestation-issuer | runtime | @jinn-network/evidence-protocol |
 | @jinn-network/attestation-issuer | runtime | @jinn-network/evidence-repository |
@@ -524,7 +526,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 
 | Release group | Packages | Required gates | Publish policies | Stack published | Canary | Stable |
 | --- | ---: | --- | --- | --- | --- | --- |
-| colophon-claims-v1 | 1 | benchmark-product-ci | independent | false | false | false |
+| colophon-claims-v1 | 2 | benchmark-product-ci | independent | false | false | false |
 | experimental-lifecycle-notifications | 1 | lifecycle-notifications-ci | disabled | false | false | false |
 | experimental-policy | 2 | policy-ci | disabled | false | false | false |
 | experimental-read-plane | 1 | read-plane-ci | disabled | false | false | false |
@@ -619,6 +621,7 @@ The exact 73-package trusted-publisher set is the union of stack-published group
 | @jinn-network/operator-console | transitional-or-private | — | — | — | — |
 | @jinn-network/website | transitional-or-private | — | — | — | — |
 | @jinn-network/operator | legacy-product-lines | schemas | — | fixtures | — |
+| @colophon-claims/check | colophon-claims-v1 | — | — | — | — |
 | @colophon-claims/cli | transitional-or-private | — | — | — | — |
 | @colophon-claims/core | transitional-or-private | — | — | — | — |
 | @colophon-claims/verify | colophon-claims-v1 | — | — | — | — |

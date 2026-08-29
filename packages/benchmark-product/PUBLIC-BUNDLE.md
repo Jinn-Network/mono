@@ -156,7 +156,7 @@ npx @colophon-claims/verify@0.1 <bundle-dir>
 Supply your own trust material to reach `verified`:
 
 ```bash
-npx @colophon-claims/verify@0.1 <bundle-dir> \
+npx @colophon-claims/check@0.2 <bundle-dir> \
   --tsa-root ./authority-root.pem \
   --ots-headers ./bitcoin-headers.txt
 ```
@@ -232,14 +232,19 @@ Verification with your own tools — no Jinn code at all — is specified in
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md): the check split, the
 DSSE and digest rules, the JSON Schemas shipped under the reader package's
 `schemas/`, and the conformance kit under
-`verify/fixtures/public-bundle-conformance-v1/` whose tampered variants an
+`check/fixtures/public-bundle-conformance-v1/` whose tampered variants an
 external verifier must reject.
 
 Use the smaller reader package, without the product or source workspace:
 
 ```bash
-npx @colophon-claims/verify@0.1 <bundle-dir>
+npx @colophon-claims/check@0.2 <bundle-dir>
 ```
+
+The checker was published as `@colophon-claims/verify` through 0.2.1. Every command a sealed
+bundle prints uses that name, and it stays published permanently as a passthrough alias, so those
+recorded instructions keep resolving unchanged. Only the pins quoted above are the sealed name;
+every instruction in this document is the current one.
 
 Claim-package/1, claim-package/2, public-bundle/2, and public-bundle/4 stamp the
 same first public line: `@0.1.0` / `@0.1`. Both formats return the same six top-level check names in

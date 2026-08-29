@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { RFC3161_TSA_ANCHOR_PROFILE, canonicalJsonBytes } from "@jinn-network/trust-core";
-import { verifyPublicBundle } from "@colophon-claims/verify";
+import { verifyPublicBundle } from "@colophon-claims/check";
 import { BUNDLE_V6_FORMAT, buildBundleManifest } from "./manifest.js";
 import { LOCAL_VENUE_LIMITS } from "../operations/run-results.js";
 import {

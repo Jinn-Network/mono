@@ -31,7 +31,9 @@ The self-serve source is now split into Colophon-owned Tier 4 packages:
 
 - `@colophon-claims/cli` — the installable `colophon` command;
 - `@colophon-claims/core` — product operations and local composition;
-- `@colophon-claims/verify` — the smaller reader-only verifier;
+- `@colophon-claims/check` — the smaller reader-only checker (published as
+  `@colophon-claims/verify` through 0.2.1; that name stays published permanently as a
+  passthrough alias);
 - `@colophon-claims/web` — private source/build input for the local UI.
 
 They are implemented but not published. Registry publication remains held until
@@ -55,7 +57,7 @@ a registry command because the packages have not been published.
 For a received bundle, the smaller reader surface is:
 
 ```bash
-npx @colophon-claims/verify@0.1 ./bundle
+npx @colophon-claims/check@0.2 ./bundle
 ```
 
 To verify a bundle with tools that are not ours, see

@@ -1,14 +1,27 @@
 name: Colophon npm Publish
 
-# Demand-gated Increment 1 publisher for @colophon-claims/verify.
-# The npm trusted-publisher workflow field is this filename. Do not rename it.
+# Demand-gated Increment 1 publisher for the Colophon reader.
+# Two published names ship from here (issue #3023):
+#   check  — @colophon-claims/check, the implementation, binary `colophon-check`
+#   verify — @colophon-claims/verify, the retired name, kept published permanently as a
+#            passthrough alias so instructions sealed into already-published bundles
+#            (`npx @colophon-claims/verify@0.1 ./bundle`) never stop resolving
+# The npm trusted-publisher workflow field is this filename, for both packages. Do not rename it;
+# configure each package name against this same file on npm.
 # Do not run this on push. Do not add a registry token.
 
 on:
   workflow_dispatch:
     inputs:
+      package:
+        description: 'Which published name to release'
+        required: true
+        type: choice
+        options:
+          - check
+          - verify
       confirm:
-        description: 'Type publish-verify to publish @colophon-claims/verify Increment 1'
+        description: 'Type publish-check or publish-verify to match the selected package'
         required: true
         type: string
 
@@ -30,9 +43,9 @@ jobs:
       id-token: write
     steps:
       - name: Require explicit confirmation
-        if: ${{ github.event.inputs.confirm != 'publish-verify' }}
+        if: ${{ github.event.inputs.confirm != format('publish-{0}', github.event.inputs.package) }}
         run: |
-          echo "Refusing to publish. Type publish-verify to continue."
+          echo "Refusing to publish. Type publish-${{ github.event.inputs.package }} to continue."
           exit 1
 
       - uses: actions/checkout@v7
@@ -46,13 +59,32 @@ jobs:
       - name: Install npm 11.19.0
         run: npm install -g npm@11.19.0
 
+      # Only the checker carries a Jinn platform closure, so only the checker needs its
+      # dependencies rewritten to an exact registered stack-canary receipt. A release without a
+      # registered receipt fails closed here rather than publishing an unpinned closure.
       - name: Pin platform dependencies to the recorded product-release receipt
-        run: node .github/scripts/colophon-publish-manifest.mjs --apply packages/benchmark-product/verify/package.json
+        if: ${{ github.event.inputs.package == 'check' }}
+        run: node .github/scripts/colophon-publish-manifest.mjs --apply packages/benchmark-product/check/package.json
 
-      - name: Install, build, and publish from the public registry
-        working-directory: packages/benchmark-product/verify
+      - name: Install, build, and publish the checker from the public registry
+        if: ${{ github.event.inputs.package == 'check' }}
+        working-directory: packages/benchmark-product/check
         run: |
           unset NODE_AUTH_TOKEN
           npm install
           npm run build
           npm publish --access public
+
+      # The alias has no build and no platform closure: three forwarding files and a dependency on
+      # the exact checker version it aliases.
+      - name: Publish the retired name as a passthrough alias
+        if: ${{ github.event.inputs.package == 'verify' }}
+        working-directory: packages/benchmark-product/verify
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public
+
+      # `npm deprecate @colophon-claims/verify "<note>"` is deliberately NOT run from this job.
+      # The note the registry page shows already ships in the alias package's own description and
+      # README. Setting the registry-wide deprecation flag is a one-time operator decision made
+      # against a credential this trusted-publishing job does not hold.

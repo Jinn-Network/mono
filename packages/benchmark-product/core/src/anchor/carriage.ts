@@ -7,7 +7,7 @@
  * - **Bytes come out of the sealed store, never out of RunState.** RunState names record digests;
  *   `getSealedBytes` re-verifies each digest on read, so a record that was edited in place surfaces
  *   as its own `record-integrity` refusal naming the store path, before anything projects it.
- * - **The projection is the shared one.** `deriveClaimAnchors` lives in `@colophon-claims/verify`
+ * - **The projection is the shared one.** `deriveClaimAnchors` lives in `@colophon-claims/check`
  *   and is the same function the portable verifier rebuilds the section with. Producing the section
  *   through a second local implementation would make the claim-consistency byte-compare a
  *   comparison of two guesses rather than of one function's output over two byte sets.
@@ -17,8 +17,8 @@
  */
 
 import { parseRun, readRunAnchorIntentExtension } from "@jinn-network/benchmarking-records";
-import { deriveClaimAnchors, ClaimAnchorProjectionError } from "@colophon-claims/verify";
-import type { ClaimAnchor, CarriedAnchorRecord } from "@colophon-claims/verify";
+import { deriveClaimAnchors, ClaimAnchorProjectionError } from "@colophon-claims/check";
+import type { ClaimAnchor, CarriedAnchorRecord } from "@colophon-claims/check";
 import { refuse } from "../errors.js";
 import type { RunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";

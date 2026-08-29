@@ -211,11 +211,11 @@ jobs:
           (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn vitest run src/backend.shutdown.test.ts && yarn build)
           (cd packages/benchmarking/run && yarn install --immutable && yarn build)
           (cd packages/benchmarking/local && yarn install --immutable && yarn build)
-      # The public family is ordered by its public dependencies: verify is standalone,
-      # core consumes verify, and cli consumes both. The private web is CLI build input,
+      # The public family is ordered by its public dependencies: the checker is standalone,
+      # core consumes the checker, and cli consumes both. The private web is CLI build input,
       # so its dependency tree must be installed after core and before the CLI packs it.
-      - name: Verify public bundle verifier
-        working-directory: packages/benchmark-product/verify
+      - name: Verify public bundle checker
+        working-directory: packages/benchmark-product/check
         run: |
           yarn install --immutable
           yarn typecheck

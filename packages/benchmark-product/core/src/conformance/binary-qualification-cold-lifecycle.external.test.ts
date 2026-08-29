@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { parseCellKey, parseMatrix, parseReport } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes, recordDigest } from "@jinn-network/trust-core";
-import { verifyPublicBundle } from "@colophon-claims/verify";
+import { verifyPublicBundle } from "@colophon-claims/check";
 import { createSyntheticV4BundleFixture } from "../bundle/testing/v4-synthetic-fixture.js";
 import { readVerdictEnvelope } from "../venue/signing.js";
 
@@ -65,7 +65,7 @@ const CELL_TABLE = [
 ] as const;
 const ARM_IDS = ["alpha", "beta", "delta", "gamma"] as const;
 const VERIFY_FIRST_PARTY_CLOSURE = [
-  "@colophon-claims/verify",
+  "@colophon-claims/check",
   "@jinn-network/benchmarking-aggregate",
   "@jinn-network/benchmarking-interop",
   "@jinn-network/benchmarking-local",
@@ -391,7 +391,7 @@ describe("T1 provider-free binary qualification cold lifecycle", () => {
     mkdirSync(coldReaderDir);
     writeFileSync(join(coldReaderDir, "package.json"), JSON.stringify({
       private: true,
-      dependencies: { "@colophon-claims/verify": "0.1" },
+      dependencies: { "@colophon-claims/check": "0.1" },
     }, null, 2), { flag: "wx" });
     writeFileSync(join(coldReaderDir, ".npmrc"), [
       `registry=${registryUrl}`,

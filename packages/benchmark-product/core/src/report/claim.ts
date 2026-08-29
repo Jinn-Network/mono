@@ -54,8 +54,8 @@ import {
   PROMPTED_SCREENING_PROFILE,
   SELF_RUN_TRUST_ROOT,
   anchoredTrustRoot,
-} from "@colophon-claims/verify";
-import type { ClaimAnchor } from "@colophon-claims/verify";
+} from "@colophon-claims/check";
+import type { ClaimAnchor } from "@colophon-claims/check";
 import { join } from "node:path";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { artifactsDir, claimPackageArtifactPath } from "../workspace/layout.js";
