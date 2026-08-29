@@ -228,11 +228,13 @@ test('Colophon trusted publishing is a separate workflow and never joins the sta
 });
 
 test('first-cut public surfaces disclose that spec.jinn.network is not hosted', () => {
+  // The CLI usage text used to carry this disclosure too. Issue #3022 (AC-1) requires the
+  // default human output to contain no unhosted origin URL, so that half of the control was
+  // retired deliberately — do not restore it. The README remains the guarded surface: the
+  // disclosure obligation still stands, it just lives in one place now. `origin-tripwire.mjs`
+  // does not cover this; it guards the retired pre-DR-2026-08-04 origin spelling instead.
   const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/verify/README.md'), 'utf8');
-  const cli = readFileSync(join(repoRoot, 'packages/benchmark-product/verify/src/cli.ts'), 'utf8');
-  for (const [label, text] of [['README', readme], ['CLI', cli]]) {
-    assert.match(text, /spec\.jinn\.network/u, label);
-    assert.match(text, /not hosted/iu, label);
-  }
+  assert.match(readme, /spec\.jinn\.network/u, 'README');
+  assert.match(readme, /not hosted/iu, 'README');
   assert.match(readme, /What this does not yet prove/u);
 });

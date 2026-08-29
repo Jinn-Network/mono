@@ -37,7 +37,7 @@ under `fixtures/public-bundle-conformance-v1/` for testing an independent verifi
 ## What this does not yet prove
 
 The `https://…`-shaped protocol identifiers that appear inside record files and in `--json`
-are internal names, not addresses this tool reads. Checking uses the exact `@jinn-network/*`
-bytes installed from npm and fetches nothing from the web, so a name that resolves to nothing
-changes no result here. A third party who treats one of those names as a live URL will not
-retrieve a document.
+are internal names, not addresses this tool reads. `spec.jinn.network` is one of them, and it
+is not hosted. Checking uses the exact `@jinn-network/*` bytes installed from npm and fetches
+nothing from the web, so a name that resolves to nothing changes no result here. A third party
+who treats one of those names as a live URL will not retrieve a document.
