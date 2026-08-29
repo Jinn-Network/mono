@@ -26,8 +26,8 @@ function utf8(value: string): Uint8Array {
  * Canonical unpadded-length base64 that spells `word` -- the false positive
  * itself: bytes whose encoding happens to contain a leak keyword.
  */
-function base64Spelling(word: string): string {
-  const blob = `${"A".repeat(88 - word.length)}${word}`;
+function base64Spelling(word: string, fill = "A"): string {
+  const blob = `${fill.repeat(88 - word.length)}${word}`;
   if (Buffer.from(blob, "base64").toString("base64") !== blob) throw new Error("fixture is not canonical base64");
   return blob;
 }
@@ -109,6 +109,41 @@ describe("bundle leak scan (#3063)", () => {
     expect(findLeaks(latin1, { path: "notes.txt" })).toEqual([
       expect.objectContaining({ kind: "pattern", match: "licensed benchmark" }),
     ]);
+  });
+
+  test("a URL-safe base64 payload is decoded too, not pattern-matched", () => {
+    // DSSE accepts both alphabets (trust-core's decodeBase64Strict), so a
+    // URL-safe payload must not fall back to scanning its own alphabet.
+    const urlSafe = (standard: string): string => {
+      const translated = standard.replaceAll("+", "-").replaceAll("/", "_");
+      // Guards the fixtures: a payload with no `+` or `/` decodes identically in
+      // either alphabet and would prove nothing about URL-safe handling.
+      expect(translated, "fixture must exercise the URL-safe alphabet").not.toBe(standard);
+      return translated;
+    };
+
+    const clean = envelope(urlSafe(base64Spelling("apikey", "/")), CLEAN_SIGNATURE);
+    expect(BUNDLE_LEAK_PATTERN.test(clean)).toBe(true);
+    expect(findLeaks(utf8(clean), { path: "records/a.bin" })).toEqual([]);
+
+    // `pad` only makes the encoding use the non-alphanumeric base64 characters.
+    const leaky = envelope(urlSafe(payloadOf({ datasetId: "LoCoMo-v1", pad: "\u00ff\u00ff\u00ff" })), CLEAN_SIGNATURE);
+    expect(findLeaks(utf8(leaky), { path: "records/b.bin" }))
+      .toEqual([expect.objectContaining({ kind: "pattern", match: "LoCoMo" })]);
+  });
+
+  test("a binary file still fails the workspace-path check", () => {
+    const workspaceDir = "/tmp/judge-p8-rehearsal-abc123";
+    const binary = new Uint8Array(Buffer.concat([
+      Buffer.from([0, 1, 2]),
+      Buffer.from(`${workspaceDir}/run`, "utf8"),
+      Buffer.from([0]),
+    ]));
+    expect(findLeaks(binary, { path: "opaque.bin", workspaceDir })).toEqual([
+      { path: "opaque.bin", kind: "workspace-path", where: "raw (binary)", match: workspaceDir },
+    ]);
+    // Without a workspace path it stays skipped: binary is not text to scan.
+    expect(findLeaks(binary, { path: "opaque.bin" })).toEqual([]);
   });
 
   test("binary files are skipped and a bundle directory is walked whole", () => {

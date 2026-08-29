@@ -25,9 +25,11 @@
  * before, so no plain-text leak escapes: a value is never skipped on the
  * strength of merely looking like base64.
  *
- * Binary files -- those containing a NUL byte -- are skipped, exactly as the
- * previous scan skipped them; every other file is read as text and scanned.
- * A base64 field that decodes to binary is likewise not text to scan.
+ * Binary files -- those containing a NUL byte -- carry no text to pattern-scan,
+ * exactly as the previous rehearsal scan treated them; every other file is read
+ * as text and scanned. A base64 field that decodes to binary is likewise not
+ * text to scan. The workspace-path check still reads a binary file's raw bytes,
+ * so the v4 producer closure loses none of its containment coverage.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -47,12 +49,21 @@ export interface LeakFinding {
   readonly match: string;
 }
 
-/** Decodes canonical padded standard base64, or returns undefined. Deliberately strict: `Buffer`'s decoder is lenient. */
+/**
+ * Decodes canonical padded base64 in either the standard or the URL-safe
+ * alphabet -- both spellings a DSSE envelope may carry, per `trust-core`'s
+ * `decodeBase64Strict` -- or returns undefined. Deliberately strict, and
+ * deliberately not a mixture of the two alphabets: `Buffer`'s own decoder is
+ * lenient, and a value that does not re-encode to itself is not base64 to
+ * decode. A payload this rejects falls back to the text scan, so the strictness
+ * costs sensitivity nowhere.
+ */
 function decodeCanonicalBase64(value: string): Uint8Array | undefined {
   if (value.length === 0 || value.length % 4 !== 0) return undefined;
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return undefined;
-  const buffer = Buffer.from(value, "base64");
-  if (buffer.toString("base64") !== value) return undefined;
+  if (!/^(?:[A-Za-z0-9+/]+|[A-Za-z0-9_-]+)={0,2}$/.test(value)) return undefined;
+  const standard = value.replaceAll("-", "+").replaceAll("_", "/");
+  const buffer = Buffer.from(standard, "base64");
+  if (buffer.toString("base64") !== standard) return undefined;
   return new Uint8Array(buffer);
 }
 
@@ -143,7 +154,16 @@ export function findLeaks(
   options: { readonly path: string; readonly workspaceDir?: string },
 ): LeakFinding[] {
   const text = readText(bytes);
-  if (text === undefined) return [];
+  if (text === undefined) {
+    // A binary file carries no text to pattern-scan -- and the previous
+    // rehearsal scan skipped it outright -- but the workspace path is still
+    // refused byte for byte, as the v4 producer closure refused it.
+    const workspaceDir = options.workspaceDir;
+    if (workspaceDir !== undefined && Buffer.from(bytes).includes(Buffer.from(workspaceDir, "utf8"))) {
+      return [{ path: options.path, kind: "workspace-path", where: "raw (binary)", match: workspaceDir }];
+    }
+    return [];
+  }
   const scanner = new Scanner(options.path, options.workspaceDir);
   scanner.document(text, "");
   return scanner.findings;
