@@ -75,9 +75,10 @@ and the divergence is a reportable finding.
   > **Amended 2026-08-30, recording the 2026-08-12 repair (`688bf27ad`, PR
   > #2601): the cited pattern moved and changed shape.** The file is now
   > `operator/src/daemon/native-evaluator-composition.ts` (renamed from
-  > `client/` in `5a4b537cf`); cite it by symbol rather than by line, as the
-  > `:309-345` span above has drifted. The host no longer re-serializes the
-  > statement through `sealSignedRecord`'s compact trust-core canonical form:
+  > `client/` in `5a4b537cf`, 2026-08-16); cite it by the
+  > `stateBackedProvisioner` symbol rather than by line, as the `:309-345`
+  > span above has drifted. The host no longer re-serializes the statement
+  > through `sealSignedRecord`'s compact trust-core canonical form:
   > it checks the producer's own spelling (`canonicalAttestationJsonBytes`)
   > and seals the sandbox's exact bytes with `sealSignedPayload`. G2's finding
   > — the harness writes a bare unsigned statement and the product host must

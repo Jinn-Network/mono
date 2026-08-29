@@ -663,10 +663,14 @@ reopened):**
   > uses the producer's own encoder. `sealSignedRecord` itself is unchanged
   > (`packages/trust/core/src/dsse.ts` still canonicalizes through compact
   > `canonicalJsonBytes`) and remains unusable on this path, exactly as this
-  > bullet says. This note records the repair only; BP-12's
-  > decision to wrap the harness's statement bytes verbatim via
-  > `dssePreAuthEncoding` + `sealDsseEnvelope` is unchanged and not reopened —
-  > both paths sign the produced bytes rather than a re-encoding of them.
+  > bullet says. This note records the host-side repair only and takes no
+  > position on BP-12's verbatim-wrap decision for the benchmark-product path;
+  > that decision was separately amended by the BP-13 addendum below
+  > ("Verdict canonicality correction"), which re-homed `sealVerdictStatement`
+  > to seal `canonicalJsonBytes(statement)` so the aggregation boundary can
+  > resolve it. The two paths therefore differ deliberately: the host seals the
+  > sandbox's exact produced bytes, while the benchmark-product venue seals a
+  > content-preserving re-encoding of the harness's own statement.
 - **Venue honesty realizations (§7.1).** Local-venue identity resolution
   echoes the venue's own recorded claims (solver = run owner; evaluator =
   the verdict's claimed evaluator identity) — a disclosed self-run
