@@ -159,7 +159,7 @@ describe("bundle leak scan (#3063)", () => {
       .toEqual([expect.objectContaining({ kind: "pattern", match: "LoCoMo" })]);
   });
 
-  test("binary files are skipped and a bundle directory is walked whole", () => {
+  test("an opaque binary file yields nothing and a bundle directory is walked whole", () => {
     const bundleDir = mkdtempSync(join(tmpdir(), "leak-scan-"));
     roots.push(bundleDir);
     mkdirSync(join(bundleDir, "records"));
