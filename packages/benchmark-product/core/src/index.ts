@@ -688,7 +688,18 @@ export {
   createWorkspacePublicationSource,
   normalizePublicArchiveBaseUrl,
   publicArchiveUrl,
+  refreshWorkspacePublicationWellKnown,
 } from "./run/publication-source.js";
+export {
+  DEFAULT_PUBLICATION_SERVE_HOST,
+  DEFAULT_PUBLICATION_SERVE_PORT,
+  startPublicationArchiveServer,
+} from "./run/publication-serve.js";
+export type {
+  PublicationArchiveServer,
+  PublicationArchiveServerOptions,
+  PublicationWellKnownOutcome,
+} from "./run/publication-serve.js";
 export { recordPublicationOrigin } from "./run/publication-authority.js";
 export { foldRunJournalLineage } from "./run/journal.js";
 export type { DispatchLineageFold } from "./run/journal.js";

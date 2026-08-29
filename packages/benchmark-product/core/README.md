@@ -224,7 +224,10 @@ always exactly one final envelope.
 Mutable drafts, grants, journals, scratch state, and private signing keys remain
 inside the workspace. Sealed records are stored as exact digest-addressed bytes.
 `publish` is **local immutable emission only: no upload, no hosting, no deployment**, package publication, or remote write. The emitted closure is
-public and not a general PII or confidentiality scrubber.
+public and not a general PII or confidentiality scrubber. `publication serve` is
+the separate, explicitly invoked verb that puts the already-emitted public
+archive tree on a socket; it announces nothing and writes no workspace record.
+See `docs/runbooks/colophon-announcement-source-serving.md`.
 
 For staged publication, `publicBaseUrl` is the exact archive mount, not merely an origin. For
 example, `https://example.test/publication` resolves records beneath
