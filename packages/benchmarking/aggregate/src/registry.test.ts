@@ -3,7 +3,7 @@ import { parseMatrix, sealMatrix, serializeCanonicalJson } from "@jinn-network/b
 import { canonicalJsonBytes, recordDigest, sealDsseEnvelope } from "@jinn-network/trust-core";
 import { BENCHMARKING_METHOD_REGISTRY } from "./index.js";
 import { createMethodRegistry } from "./registry.js";
-import { MethodInputError, type MethodInputErrorCode } from "./resolved-inputs.js";
+import { MethodInputError } from "./resolved-inputs.js";
 import { MAX_NONINFERIORITY_RESAMPLES_V1 } from "./stats/noninferiority.js";
 import type { MethodComputeInput } from "./method.js";
 
@@ -281,12 +281,6 @@ describe("resamples range guard (#2583)", () => {
   ])("%s reports an out-of-range resamples as a parameter-range failure", (id, params) => {
     expectRangeViolation(id, { ...params, resamples: 0 });
     expectRangeViolation(id, { ...params, resamples: MAX_NONINFERIORITY_RESAMPLES_V1 + 1 });
-  });
-
-  test("the range code is distinct from the cost-unit code", () => {
-    // paired-delta@1 has no cost leg at all, so method-incompatible-cost-unit could never be a
-    // truthful description of any failure it raises.
-    expect<MethodInputErrorCode>("method-parameter-out-of-range").not.toBe("method-incompatible-cost-unit");
   });
 
   test("noninferiority-iut@1 still reports mismatched cost units as method-incompatible-cost-unit", () => {
