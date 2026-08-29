@@ -118,3 +118,26 @@ export {
   PUBLIC_BUNDLE_VERIFIER_MAJOR,
   PUBLIC_BUNDLE_V4_VERIFIER_MAJOR,
 } from "./reader-instructions.js";
+// The deterministic public-repository projection of a bundle's freeze artifacts (issue #2870).
+// It lives in the standalone verifier because a third party holding only this package and a
+// published bundle must be able to regenerate the tree and diff it -- one renderer, no second
+// implementation for the producer to drift from.
+export {
+  FREEZE_REPO_BUNDLE_MEMBERS,
+  FREEZE_REPO_FORMAT,
+  FREEZE_REPO_MANIFEST_FILENAME,
+  FREEZE_REPO_ROLES,
+  exportFreezeRepo,
+  freezeRepoCommitId,
+  renderFreezeRepo,
+  verifyFreezeRepo,
+} from "./freeze-repo.js";
+export type {
+  FreezeRepoDifference,
+  FreezeRepoDifferenceKind,
+  FreezeRepoExportResult,
+  FreezeRepoPublication,
+  FreezeRepoSourceLicence,
+  FreezeRepoTree,
+  FreezeRepoVerificationResult,
+} from "./freeze-repo.js";

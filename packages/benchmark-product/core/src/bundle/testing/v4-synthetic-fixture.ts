@@ -843,6 +843,11 @@ export async function createSyntheticV4BundleFixture(input: {
   readonly armIds?: readonly string[];
   /** Defaults to "gpt-5.6-luna" (the reasoning-2026-08 profile). */
   readonly judgeModel?: "gpt-5.6-luna" | "gpt-4o-mini-2024-07-18";
+  /** SPDX identifier and citation sealed onto the Benchmark record. Options-only and default off,
+   * so every existing caller's bytes are unchanged; the freeze-repository export needs a bundle
+   * that actually carries licence data (issue #2870). */
+  readonly license?: string;
+  readonly citation?: string;
   /**
    * Builds an EVIDENCE TWIN PAIR (packet P5): `declaring`'s instrument interpolates `evidence`,
    * `twin`'s is identical to it once that interpolation is stripped. OPTIONS-ONLY and defaults
@@ -939,6 +944,8 @@ export async function createSyntheticV4BundleFixture(input: {
     sourceManifestJsonl: intake.sourceManifestJsonl,
     admissionIndexJsonl: intake.admissionIndexJsonl,
     description: "Provider-free synthetic evidence; no benchmark dataset content.",
+    ...(input.license === undefined ? {} : { license: input.license }),
+    ...(input.citation === undefined ? {} : { citation: input.citation }),
   }), "binary item-bank import");
 
   const arms = armIds;

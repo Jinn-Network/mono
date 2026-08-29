@@ -368,6 +368,60 @@ That limitation stays separate from power or minimum-detectable-effect disclosur
 an interval withheld for insufficient pairs or clusters is not the same claim as a
 completed interval whose sensitivity is below a target effect.
 
+## Freeze-artifact repository
+
+A sealed bundle is digest-addressed; a human audience clones, browses, and diffs a
+repository. `colophon freeze-repo export --bundle <dir> --out <dir>` projects a
+qualification bundle's freeze artifacts into one, and
+`colophon freeze-repo verify --bundle <dir> --repo <dir>` checks a published tree
+against the bundle it claims to be derived from.
+
+The repository is a **derived artifact**, not the claim of record — the same
+doctrine the Inspect View export carries. The sealed records remain the sole
+source of truth; what the projection adds is that the derivation is a function
+rather than a hand assembly, so a published tree cannot drift from the bundle
+without the check saying so.
+
+The format is `colophon-freeze-repo/1`, and the determinism claim is stated for
+it exactly: for a given format version the rendered tree is a pure function of the
+bundle bytes. No clock, no locale, no filesystem enumeration order, and no tool
+version reaches the tree. A renderer change is therefore a format bump, not silent
+drift.
+
+The layout:
+
+- `freeze.json` — every rendered path with its byte length and SHA-256, the
+  publication's licence data, the source rows, and the protocol identifier each
+  role's records declare. It does not list itself: its own digest is not knowable
+  before it is written.
+- `bundle/` — `bundle.json`, `benchmark.json`, `evidence.json`, and
+  `qualification.json`, copied byte for byte.
+- `artifacts/<role>/<sha256>` — the sealed freeze records, grouped by the evidence
+  role the bundle's own catalog assigns. The freeze artifacts are the
+  admission/qualification graph: the item bank and its sources, the admission
+  decisions and their ledger, label resolutions, analysis contexts, judge
+  instruments, and the human-review and screening material including the sampling
+  script. The Run/Matrix/Report execution graph is deliberately absent: that is the
+  claim, and the claim belongs in the bundle a reader verifies.
+- `LICENSE`, `NOTICE`, `metadata/spdx.json` — generated from the bundle's licence
+  data, never hand-written. The publication licence is the SPDX identifier the
+  sealed Benchmark record declares; the per-source attribution and licence
+  descriptors come from the sealed source-manifest rows. `LICENSE` states the
+  identifier and its canonical SPDX URL rather than reproducing licence text the
+  bundle does not carry. `NOTICE` carries the modification notice: members under
+  `artifacts/source-item/` are the licensed source bytes unmodified, and every
+  other member is a Colophon-derived record over them.
+- `README.md` — the doctrine, the layout, and the check.
+
+The tree's **git commit hash is the value a freeze announcement pins**. It is
+computed in-process from the rendered tree with a fixed identity and a zero
+timestamp, so it is a function of the bundle rather than of the machine that ran
+the export. Both verbs report it.
+
+A bundle with no qualification graph has no freeze artifacts, and a Benchmark
+record that declares no licence has no licence data to generate scaffolding from.
+Both are refusals, not empty repositories.
+
 ## Trust, privacy, and limitations
 
 The public keys prove that bundle-carried signatures match the workspace-minted

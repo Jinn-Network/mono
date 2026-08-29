@@ -123,6 +123,20 @@ performs no network or credential access. It is an ordering gate, not publicatio
 contract and post-dispatch ordering check are in the
 [E4 runbook](../../../docs/superpowers/plans/demo-report-1/E4-preregistration-adapter.md).
 
+The third standalone pair projects a sealed bundle's freeze artifacts into a
+deterministic public repository, and checks a published tree against the bundle
+it claims to be derived from:
+
+```text
+colophon freeze-repo export --bundle <dir> --out <dir> --json
+colophon freeze-repo verify --bundle <dir> --repo <dir> --json
+```
+
+Both read only the caller-selected immutable bundle and need no workspace or
+principal. The repository is a derived artifact, never the claim of record; the
+layout, the licence scaffolding, and the commit hash an announcement pins are in
+the [public-bundle guide](../PUBLIC-BUNDLE.md).
+
 Every workspace command accepts `--workspace <dir>`, `--principal <id>`, and
 `--json`; command-specific flags are listed by `colophon help`.
 

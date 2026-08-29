@@ -84,6 +84,7 @@ import {
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
 import { summarizeVerificationOutcome } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
+import { exportFreezeRepo, verifyFreezeRepo } from "@colophon-claims/verify";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { DEFAULT_PUBLICATION_SOURCE_NAME, requireRunState } from "../run/state.js";
@@ -113,6 +114,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --draft <draftId> --items <items.jsonl> --sources <sources.jsonl>
                    --admissions <admissions.jsonl>
                    [--name <name>] [--description <text>] [--version <ver>]
+                   [--license <spdx-id>] [--citation <text>]
                    [--parser-invalid-policy reject|abstain]
   human-review packet create --workspace <dir> --principal <id> --draft <draftId>
                    --file <packet-request.json>
@@ -170,6 +172,11 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   publish          --workspace <dir> --principal <id> --draft <draftId>
                    [--include-native-artifacts]
   bundle verify    --bundle <dir> [--json]
+  freeze-repo export --bundle <dir> --out <dir> [--json]
+                   (deterministic public-repository projection of the bundle's freeze
+                   artifacts; a derived tree, never the claim of record)
+  freeze-repo verify --bundle <dir> --repo <dir> [--json]
+                   (re-renders from the bundle and compares the published tree byte for byte)
   demo1 prereg verify --workspace <dir> --draft <draftId> --witness <witness.json>
                    --method-summary-sha256 <sha256> --grader-program-sha256 <sha256>
                    --source-commit <full-git-oid> [--json]
@@ -226,7 +233,7 @@ const IMPORT_SWEBENCH_FLAGS = [
 ] as const;
 const IMPORT_ITEM_BANK_FLAGS = [
   "workspace", "principal", "json", "profile", "draft", "items", "sources", "admissions",
-  "name", "description", "version", "parser-invalid-policy",
+  "name", "description", "version", "license", "citation", "parser-invalid-policy",
 ] as const;
 const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
@@ -269,6 +276,8 @@ const REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const VERIFY_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLISH_FLAGS = ["workspace", "principal", "json", "draft", "include-native-artifacts"] as const;
 const BUNDLE_VERIFY_FLAGS = ["bundle", "json"] as const;
+const FREEZE_REPO_EXPORT_FLAGS = ["bundle", "out", "json"] as const;
+const FREEZE_REPO_VERIFY_FLAGS = ["bundle", "repo", "json"] as const;
 const DEMO1_PREREG_VERIFY_FLAGS = [
   "workspace", "draft", "witness", "method-summary-sha256", "grader-program-sha256", "source-commit", "json",
 ] as const;
@@ -517,6 +526,8 @@ function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: b
   const name = optional(args, "name");
   const description = optional(args, "description");
   const version = optional(args, "version");
+  const license = optional(args, "license");
+  const citation = optional(args, "citation");
   const parserInvalidPolicy = optional(args, "parser-invalid-policy");
   if (
     parserInvalidPolicy !== undefined
@@ -538,6 +549,8 @@ function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: b
     ...(name === undefined ? {} : { name }),
     ...(description === undefined ? {} : { description }),
     ...(version === undefined ? {} : { version }),
+    ...(license === undefined ? {} : { license }),
+    ...(citation === undefined ? {} : { citation }),
     ...(parserInvalidPolicy === undefined ? {} : { parserInvalidPolicy }),
   };
   const operation = importBinaryItemBank(opContext, input);
@@ -1371,6 +1384,38 @@ async function handleBundleVerify(args: ParsedArgs, context: CliContext, jsonMod
   );
 }
 
+async function handleFreezeRepoExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, FREEZE_REPO_EXPORT_FLAGS);
+  const result = await exportFreezeRepo(
+    pathFrom(context.cwd, required(args, "bundle")),
+    pathFrom(context.cwd, required(args, "out")),
+  );
+  return renderResult(
+    { ok: true, result },
+    jsonMode,
+    (value) => `exported freeze repository for ${value.bundleIdentity}: ${value.fileCount} files, commit ${value.commitId}\n`,
+  );
+}
+
+async function handleFreezeRepoVerify(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, FREEZE_REPO_VERIFY_FLAGS);
+  const result = await verifyFreezeRepo(
+    pathFrom(context.cwd, required(args, "bundle")),
+    pathFrom(context.cwd, required(args, "repo")),
+  );
+  // A failed comparison is a RESULT, not an invocation error: the caller asked whether the tree
+  // matches, and "it does not, here is where" is the answer. Exit code stays 0; `ok` carries it.
+  return renderResult(
+    { ok: true, result },
+    jsonMode,
+    (value) => value.ok
+      ? `freeze repository matches ${value.bundleIdentity}: ${value.fileCount} files, commit ${value.commitId}\n`
+      : `freeze repository does NOT match ${value.bundleIdentity}: ${value.differences
+        .map((difference) => `${difference.path} (${difference.kind})`)
+        .join(", ")}\n`,
+  );
+}
+
 function handleDemo1PreregistrationVerify(
   args: ParsedArgs,
   context: CliContext,
@@ -1451,6 +1496,8 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["verify", handleVerify],
   ["publish", handlePublish],
   ["bundle verify", handleBundleVerify],
+  ["freeze-repo export", handleFreezeRepoExport],
+  ["freeze-repo verify", handleFreezeRepoVerify],
   ["demo1 prereg verify", handleDemo1PreregistrationVerify],
 ]);
 
