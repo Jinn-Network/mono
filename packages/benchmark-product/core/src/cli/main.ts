@@ -527,6 +527,16 @@ function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: b
   const description = optional(args, "description");
   const version = optional(args, "version");
   const license = optional(args, "license");
+  if (license !== undefined && !/^[A-Za-z0-9][A-Za-z0-9.+-]*$/u.test(license)) {
+    // The same SPDX 2.3 Annex A short-identifier grammar the freeze-repository export applies when
+    // it renders `SPDX-License-Identifier:`. Refusing here makes free text a one-second failure at
+    // the flag rather than a refusal after the record is sealed and published.
+    refuse(
+      "invalid-invocation",
+      "--license",
+      "--license must be an SPDX short identifier (SPDX 2.3 Annex A grammar), not free text",
+    );
+  }
   const citation = optional(args, "citation");
   const parserInvalidPolicy = optional(args, "parser-invalid-policy");
   if (

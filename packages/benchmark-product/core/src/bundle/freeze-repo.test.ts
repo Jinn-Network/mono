@@ -176,6 +176,44 @@ describe("freeze-repository export against a real v4 bundle", () => {
     await expect(exportFreezeRepo(unlicensedBundle, join(tempDir("out"), "repo")))
       .rejects.toThrow(/declares no licence/);
   });
+
+  test("refuses an output path it cannot enumerate rather than reading it as empty", async () => {
+    // The guard's whole job is "the directory IS the tree". An enumeration error is precisely the
+    // case where it cannot tell, and answering "empty" there would merge the export into whatever
+    // is actually present while still reporting the rendered tree's oid.
+    const blocked = join(tempDir("unreadable"), "tree");
+    writeFileSync(blocked, "not a directory\n");
+
+    await expect(exportFreezeRepo(licensedBundle, blocked)).rejects.toThrow(/could not be read/);
+  });
+
+  test("a repository the bundle cannot render is a freeze-repo failure, not a bundle verdict", async () => {
+    // The unlicensed bundle verifies perfectly; it just cannot be RENDERED as a freeze repository.
+    // Exit 1 would call a valid bundle invalid, and dropping the report would leave the caller with
+    // no bundle verdict at all — so the bundle result is still reported and the exit is operational.
+    const repoDir = join(tempDir("unrenderable"), "tree");
+    mkdirSync(repoDir, { recursive: true });
+
+    const result = await runVerifierCli([unlicensedBundle, "--freeze-repo", repoDir, "--json"]);
+    expect(result.exitCode).toBe(2);
+    const payload = JSON.parse(result.stdout) as {
+      ok: boolean;
+      identity?: string;
+      checks?: readonly string[];
+      freezeRepo: { ok: boolean; code: string; message: string };
+    };
+    expect(payload.ok).toBe(false);
+    expect(payload.identity).toEqual(expect.any(String));
+    expect(payload.checks).toEqual(expect.arrayContaining(["manifest"]));
+    expect(payload.freezeRepo.ok).toBe(false);
+    expect(payload.freezeRepo.code).toBe("conflict");
+    expect(payload.freezeRepo.message).toMatch(/declares no licence/);
+
+    const human = await runVerifierCli([unlicensedBundle, "--freeze-repo", repoDir]);
+    expect(human.exitCode).toBe(2);
+    expect(human.stdout).toContain("manifest");
+    expect(human.stderr).toContain("freeze repository not checked");
+  });
 });
 
 describe("freeze-repo CLI verbs", () => {

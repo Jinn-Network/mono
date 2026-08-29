@@ -102,8 +102,12 @@ const FIXED_INSTANT = "1970-01-01T00:00:00Z";
 
 /**
  * SPDX short-identifier grammar (SPDX 2.3 Annex A). Deliberately grammar, not the licence list: a
- * list would date, and the failure this guards is a free-text string ("internal use only") being
- * rendered into `SPDX-License-Identifier:` and a dead spdx.org URL as if it were an identifier.
+ * list would date. State what that buys exactly — it refuses free text with spaces or punctuation
+ * outside the grammar ("internal use only"), so such a string is never rendered into an
+ * `SPDX-License-Identifier:` line. It does NOT establish that the identifier is on the SPDX list:
+ * `Proprietary` and `LicenseRef-Whatever` satisfy the grammar. Because a "Canonical licence text:
+ * <URL>" line is a claim that has to resolve, `spdxUrl` emits one only where the list can carry
+ * it — never for a `LicenseRef-` identifier, which SPDX defines as off-list by construction.
  */
 const SPDX_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9.+-]*$/u;
 
@@ -331,8 +335,12 @@ function readSourceLicences(sourceManifestBytes: readonly Uint8Array[]): readonl
   return [...rows].sort((left, right) => compareStrings(left.provenanceSha256, right.provenanceSha256));
 }
 
-function spdxUrl(identifier: string): string {
-  return `https://spdx.org/licenses/${identifier}.html`;
+/** The canonical-text URL for a licence the SPDX list can carry, or `undefined` for a
+ * `LicenseRef-` identifier, which by SPDX 2.3 §10 names a licence that is NOT on the list and so
+ * has no page there. The grammar check upstream cannot prove list membership for anything else, so
+ * this is the narrowest honest cut. */
+function spdxUrl(identifier: string): string | undefined {
+  return /^LicenseRef-/u.test(identifier) ? undefined : `https://spdx.org/licenses/${identifier}.html`;
 }
 
 function renderLicense(publication: FreezeRepoPublication, sources: readonly FreezeRepoSourceLicence[]): Uint8Array {
@@ -342,7 +350,14 @@ function renderLicense(publication: FreezeRepoPublication, sources: readonly Fre
     `${publication.name} ${publication.version}`,
     "",
     `The Colophon-authored records in this repository are published under ${publication.license}.`,
-    `Canonical licence text: ${spdxUrl(publication.license)}`,
+    ...(spdxUrl(publication.license) === undefined
+      ? [`${publication.license} is a LicenseRef identifier, which SPDX defines as a licence the list does not carry, so there is no list entry to cite for it.`]
+      : [
+        `SPDX list entry for that identifier: ${spdxUrl(publication.license)!}`,
+        "That address is where the SPDX list publishes this identifier if it carries it. The export",
+        "checks the declared licence against the SPDX short-identifier grammar, not against the list,",
+        "so an identifier the list does not carry will not resolve there.",
+      ]),
     "",
     "That is the scope, exactly. Upstream sources keep their own licences, and source-derived text",
     "quoted inside these records stays subject to them. NOTICE names every source row with the",
@@ -492,19 +507,27 @@ function renderReadme(
     "export GIT_AUTHOR_NAME=Colophon GIT_AUTHOR_EMAIL=freeze@colophon.invalid",
     "export GIT_COMMITTER_NAME=Colophon GIT_COMMITTER_EMAIL=freeze@colophon.invalid",
     "export GIT_AUTHOR_DATE='@0 +0000' GIT_COMMITTER_DATE='@0 +0000'",
-    "git init --quiet && git add -A",
-    `git commit --quiet -m 'Colophon freeze ${bundleIdentity}'`,
+    "export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null",
+    "git init --quiet && git add -A -f",
+    `git commit --quiet --no-gpg-sign -m 'Colophon freeze ${bundleIdentity}'`,
     "git rev-parse HEAD    # equals the reported oid",
     "```",
+    "",
+    "The two `GIT_CONFIG_*` lines, `-f`, and `--no-gpg-sign` are not decoration: your own git",
+    "configuration would otherwise reach the object. `commit.gpgsign` adds a `gpgsig` header,",
+    "`core.autocrlf` rewrites the bytes, `init.templateDir` and `core.hooksPath` run code, and a",
+    "`core.excludesFile` matching `*.bin` makes `git add -A` silently drop the records under",
+    "`artifacts/` — each of which yields a different oid, the last of them with nothing said.",
     "",
     "## Layout",
     "",
     `- \`${FREEZE_REPO_MANIFEST_FILENAME}\` — every path with its byte length and SHA-256, plus the`,
     "  protocol identifier each role's records declare. It does not list itself.",
     "- `bundle/` — the bundle members that frame the freeze, copied byte for byte.",
-    "- `artifacts/<role>/<sha256>` — the sealed freeze records, grouped by the evidence role the",
-    "  bundle's own catalog assigns them. Each file is named by the SHA-256 of its exact bytes, so",
-    "  a file's name is its own check.",
+    "- `artifacts/<role>/<sha256>.<json|bin>` — the sealed freeze records, grouped by the evidence",
+    "  role the bundle's own catalog assigns them. The extension is `.json` when the exact bytes",
+    "  parse as JSON and `.bin` when they do not; the stem is the SHA-256 of those bytes, so a",
+    "  file's name is its own check.",
     "- `LICENSE`, `NOTICE`, `metadata/spdx.json` — generated from the bundle's licence data.",
     "",
     "## Roles present",
@@ -659,11 +682,24 @@ export async function exportFreezeRepo(
   // Never write into an occupied tree. Merging into leftovers would produce a directory that is
   // not the rendered tree, and the export's whole contract is that the directory IS the tree; a
   // recursive delete of a caller-named path is the wrong way to guarantee that.
+  // Only "the directory does not exist yet" reads as empty. Any other enumeration error — an
+  // unreadable subdirectory, say — is exactly the case where the guard cannot tell whether the
+  // tree is occupied, and answering "empty" there would let the export merge into leftovers (and
+  // follow a seeded symlink out of `repoDir`) while still reporting the rendered tree's oid.
   let occupied: readonly TreeEntry[] = [];
   try {
     occupied = listTree(repoDir);
-  } catch {
-    occupied = [];
+  } catch (cause) {
+    const code = (cause !== null && typeof cause === "object" && "code" in cause)
+      ? (cause as { code?: unknown }).code
+      : undefined;
+    if (code !== "ENOENT") {
+      refuse(
+        "conflict",
+        repoDir,
+        `"${repoDir}" could not be read to check that it is empty (${code ?? "unknown error"}); export writes a complete tree and will not write into a directory it cannot enumerate`,
+      );
+    }
   }
   if (occupied.length > 0) {
     refuse("conflict", repoDir, `"${repoDir}" already contains files; export writes a complete tree and will not merge into one — remove the directory and export again`);

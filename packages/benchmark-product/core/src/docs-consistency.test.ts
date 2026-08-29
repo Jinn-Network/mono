@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { GATED_OPERATIONS } from "./authority/policy.js";
 import { BUNDLE_FORMAT, BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
 import { PUBLIC_BUNDLE_FILES } from "./bundle/materialize.js";
+import { FREEZE_REPO_FORMAT, FREEZE_REPO_MANIFEST_FILENAME } from "@colophon-claims/verify";
 import { PRODUCT_ERROR_CODES } from "./errors.js";
 import { PRODUCT_BRANDING } from "./branding.js";
 
@@ -147,6 +148,23 @@ describe("product documentation consistency", () => {
     expect(guide).toContain("six checks");
     expect(guide).toMatch(/not confidential|non-confidential/i);
     expect(guide).toMatch(/local immutable emission.*not hosting/is);
+  });
+
+  it("pins the freeze-repository section to the renderer's own constants and layout", () => {
+    // The guide is where `verify/README.md` points a third party for the layout, so a claim here
+    // that the renderer does not honour is a spec defect. This pins the two constants and the two
+    // shapes that a reader writes a consumer against.
+    const guide = read(bundleReadmePath);
+    expect(guide).toContain(`\`${FREEZE_REPO_FORMAT}\``);
+    expect(guide).toContain(`\`${FREEZE_REPO_MANIFEST_FILENAME}\``);
+    expect(guide).toContain("`artifacts/<role>/<sha256>.<json|bin>`");
+    // `freeze.json` deliberately does not restate the source rows; saying it does sends a consumer
+    // to a field that is always undefined.
+    expect(guide).toMatch(/does not restate the source rows/);
+    // The published commit recipe must reproduce the pinned oid under a reader's own git config.
+    expect(guide).toContain("GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null");
+    expect(guide).toContain("git add -A -f");
+    expect(guide).toContain("--no-gpg-sign");
   });
 
   it("documents the exact private web configuration and package commands", () => {

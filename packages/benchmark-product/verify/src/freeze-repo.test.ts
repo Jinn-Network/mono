@@ -216,6 +216,18 @@ describe("freeze repository rendering", () => {
     expect(readme).toContain("colophon freeze-repo verify");
   });
 
+  test("the published commit recipe neutralizes the reader's own git configuration", () => {
+    // The recipe's only purpose is that a third party independently reproduces the pinned oid. A
+    // reader's `commit.gpgsign`, `core.autocrlf`, or a `core.excludesFile` matching `*.bin` each
+    // yields a different oid — the last of them silently — so the isolation the renderer's own
+    // parity test uses has to be part of the published recipe, not left implicit.
+    const readme = decoder.decode(renderFreezeRepo(snapshotOf()).files.get("README.md")!);
+
+    expect(readme).toContain("GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null");
+    expect(readme).toContain("git add -A -f");
+    expect(readme).toContain("--no-gpg-sign");
+  });
+
   test("refuses a bundle with no qualification graph rather than emitting an empty repository", () => {
     expect(() => renderFreezeRepo(snapshotOf({ format: BUNDLE_FORMAT })))
       .toThrow(/requires a qualification bundle/);
@@ -308,6 +320,30 @@ describe("freeze repository commit id agrees with git itself", () => {
 });
 
 describe("freeze repository fail-closed rules", () => {
+  test("cites no SPDX list address for a LicenseRef identifier, and says the check is grammar", () => {
+    // The grammar check is not list membership, so a rendered "canonical licence text" URL would be
+    // a claim the export cannot back. `LicenseRef-` is the one case SPDX itself settles: it names a
+    // licence the list does not carry, so no address is emitted at all.
+    const licenseRef = renderFreezeRepo(snapshotOf({
+      benchmark: {
+        protocol: "https://spec.jinn.network/benchmarking/v1",
+        name: "Off-list", description: "", version: "1.0.0",
+        license: "LicenseRef-Internal-1",
+        items: [], reveal: { policy: "immediate" },
+      },
+    }));
+    const offList = decoder.decode(licenseRef.files.get("LICENSE")!);
+    expect(offList).toContain("SPDX-License-Identifier: LicenseRef-Internal-1");
+    expect(offList).not.toContain("spdx.org/licenses/");
+    expect(offList).toContain("the list does not carry");
+
+    // For every other identifier the address is emitted, and the file states plainly that the
+    // export checked the grammar and not the list, so an off-list identifier will not resolve.
+    const listed = decoder.decode(renderFreezeRepo(snapshotOf()).files.get("LICENSE")!);
+    expect(listed).toContain("https://spdx.org/licenses/CC-BY-NC-4.0.html");
+    expect(listed).toContain("not against the list");
+  });
+
   test("refuses a licence that is not an SPDX short identifier", () => {
     const benchmark = {
       protocol: "https://spec.jinn.network/benchmarking/v1",
