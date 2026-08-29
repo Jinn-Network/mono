@@ -172,7 +172,7 @@ export function renderVerifiedBundle(result: PublicBundleVerificationResult): st
   const passedChecks = result.checks.length - (notFetched ? 1 : 0);
   const artifactContentReport = artifactContent === undefined || !notFetched
     ? ""
-    : `\nArtifact content\n  ${artifactContent.notFetched} artifact ${artifactContent.notFetched === 1 ? "body was" : "bodies were"} not fetched: this bundle carries their exact digests, not their bytes.\n  Fetch each one into artifacts/<sha256>.bin from any copy of the full-evidence bundle and re-run to complete this check.\n`;
+    : `\nArtifact content\n  ${artifactContent.notFetched} artifact ${artifactContent.notFetched === 1 ? "body was" : "bodies were"} not fetched. This bundle carries their\n  exact digests, not their bytes. Fetch each one into artifacts/<sha256>.bin\n  from any copy of the full-evidence bundle and re-run to complete this check.\n`;
   const artifactContentLimit = artifactContent === undefined || !notFetched
     ? ""
     : "\nEverything above was checked against the bytes this bundle carries. The artifact\ncontents themselves were not read, so nothing here says what they contain.";
