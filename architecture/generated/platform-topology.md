@@ -1135,6 +1135,7 @@ The exact 74-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/execution-recorder | packages/evidence/execution-recorder/fixtures/producer-contract-v1/task.md | — | — | — |
 | fixtures | @jinn-network/execution-recorder | packages/evidence/execution-recorder/fixtures/producer-contract-v1/trace.jsonl | — | — | — |
 | conformance | @jinn-network/execution-recorder | packages/evidence/execution-recorder/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/manifest.sha256.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/free.document.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/free.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/free.sha256 | — | — | — |

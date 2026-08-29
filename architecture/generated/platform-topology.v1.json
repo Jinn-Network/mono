@@ -10197,6 +10197,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/evidence-offer",
         "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/manifest.sha256.json",
+        "relativeSource": "fixtures/manifest.sha256.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
         "path": "packages/evidence/offer/fixtures/offer/free.document.json",
         "relativeSource": "fixtures/offer/free.document.json"
       },
