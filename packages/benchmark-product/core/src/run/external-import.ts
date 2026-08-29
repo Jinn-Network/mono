@@ -620,13 +620,19 @@ export async function writeExternalRunImport(
       // The exact shape `journalCouldNotGrade` writes (`./drive.ts`): a terminal for leg 1 with no
       // evaluation Task, Submission, or Delivery — because none was ever prepared. `deriveOutcome`
       // reads the delivery + this terminal as `unscorable`.
+      //
+      // NO `evaluator`, deliberately: this is a PRE-evaluation terminal, and the public reader
+      // refuses one that claims an evaluator identity ("pre-evaluation terminal cannot claim an
+      // evaluator identity"). The refusal is right — nothing evaluated this cell, so naming an
+      // evaluator over it would attach an identity to work that never happened. The reason still
+      // travels: on the journal entry's `detail`, on the solve Submission's and Delivery's
+      // namespaced annotation, and in the sealed import declaration.
       appendRunJournalEntry(workspaceDir, draftId, {
         kind: "evaluation",
         at: createdAt,
         cellKey,
         evaluationTerminal: "could-not-grade",
         detail: record.reason!,
-        evaluator: EXTERNAL_RUN_IMPORT_EVALUATOR_ID,
         evalIndex: 1,
       });
       unscorable += 1;

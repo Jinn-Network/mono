@@ -143,6 +143,16 @@
       }
     },
     {
+      "operation": "importRunRecords",
+      "cliVerb": "run import",
+      "authorityGated": true,
+      "description": "Turns a locked run into a run by importing an external harness's per-attempt results over the whole sealed slate (authority-gated as launch).",
+      "gui": {
+        "status": "unavailable",
+        "reason": "reads a local run dump and every evidence file it names by relative path; browser upload of a path-rooted evidence tree is intentionally unavailable"
+      }
+    },
+    {
       "operation": "importSweBenchRows",
       "cliVerb": "import swebench",
       "authorityGated": false,

@@ -46,7 +46,7 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **41 generated operations**, all shipped through the library and CLI
+contains **42 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -66,6 +66,7 @@ with an explicit shipped/deferred GUI disposition:
 | `admitHumanTruth` | `colophon human-review admit` | Derive two-person unanimous or explicitly operator-only truth records, including exclusion/replacement accounting. |
 | `importBinaryItemBank` | `colophon import item-bank` | Import admitted binary-judgment items from three canonical JSONL manifests. |
 | `importSweBenchRows` | `colophon import swebench` | Import SWE-bench-shaped rows through interop. |
+| `importRunRecords` | `colophon run import` | Turn a locked run into a run from an external harness's per-attempt records over the whole sealed slate. |
 | `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
 | `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
 | `listDrafts` | `colophon draft list` | List drafts. |

@@ -61,6 +61,9 @@ npx @colophon-claims/verify@0.1 ./bundle
 To verify a bundle with tools that are not ours, see
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).
 
+To turn results another harness already produced into a bundle, see
+[`EXTERNAL-RUN-IMPORT.md`](EXTERNAL-RUN-IMPORT.md).
+
 The contributor proof remains available from the mono:
 
 After the portal build order above has been completed, start from an empty
@@ -171,6 +174,9 @@ Procedure, receipt checklist, and the fail-closed
 - [Public bundle](./PUBLIC-BUNDLE.md) — frozen
   `benchmark-product-public-bundle/2` layout, citation, trust, privacy,
   limitations, and portable verification.
+- [External run-record import](./EXTERNAL-RUN-IMPORT.md) — the per-attempt
+  record shape, both dump dialects, the closed import vocabulary, and the
+  `--template` workflow.
 - [Inspect runtime](./INSPECT-RUNTIME.md) — optional real Inspect selection,
   execution, scorer attribution, native logs, and security limitations.
 - [Security and threat model](./SECURITY.md) — protected assets, boundaries,
