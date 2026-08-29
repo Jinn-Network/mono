@@ -944,8 +944,9 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
     const seed = requireIntegerParam(input.parameters, "seed");
     const resamples = requireIntegerParam(input.parameters, "resamples");
     // Redundant with parameterSchema's minimum/maximum, and deliberately kept (#2583): compute is
-    // a public entry point callers may reach without validateParameters, and an unchecked value
-    // would otherwise surface from the bootstrap as an untyped Error.
+    // a public entry point callers may reach without validateParameters, and the inner bootstrap
+    // guard is not a substitute -- it only runs on two or more source clusters, so without this an
+    // out-of-range resamples can reach the emitted bootstrap field of a successful result.
     if (resamples <= 0 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1) {
       throw new MethodInputError("method-parameter-out-of-range", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
     }
@@ -1137,8 +1138,9 @@ const pairedDeltaMethod: SingleSubjectMethod = {
     // enum-restricted decimal string; Number() is exact for the three permitted values.
     const alpha = Number(requireStringParam(input.parameters, "alpha"));
     // Redundant with parameterSchema's minimum/maximum, and deliberately kept (#2583): compute is
-    // a public entry point callers may reach without validateParameters, and an unchecked value
-    // would otherwise surface from the bootstrap as an untyped Error.
+    // a public entry point callers may reach without validateParameters, and the inner bootstrap
+    // guard is not a substitute -- it only runs on two or more source clusters, so without this an
+    // out-of-range resamples can reach the emitted bootstrap field of a successful result.
     if (resamples <= 0 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1) {
       throw new MethodInputError("method-parameter-out-of-range", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
     }
