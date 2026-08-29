@@ -149,24 +149,26 @@ function renderSigners(signers: readonly PublicBundleSigner[]): string {
  * the report page's "Named checks" list, and every refusal message -- and the gloss is additive.
  * The record spans both closure families: the six classic checks plus `integrity-anchors`, and
  * the evidence-native v5 pair. A name with no entry renders bare rather than throwing: the
- * renderer must never be the reason a valid bundle cannot be reported.
+ * renderer must never be the reason a valid bundle cannot be reported. A `Map` rather than an
+ * object literal so a check named `toString` or `constructor` misses instead of rendering an
+ * inherited `Object.prototype` member.
  */
-const CHECK_GLOSSES: Readonly<Record<string, string>> = {
-  manifest: "every file the bundle lists is present and matches its recorded digest",
-  "evidence-closure": "every record the results depend on is carried inside the bundle",
-  "artifact-integrity": "each stored artifact hashes to the digest its record names",
-  "signature-validity": "each signature verifies against the key its record names",
-  trust: "each signature verifies against the key the bundle names for it",
-  "matrix-rederivation": "the per-cell outcomes recompute to the sealed matrix",
-  "report-verification": "the report's numbers recompute from that sealed matrix",
-  "claim-consistency": "the published claim repeats the report without drift",
-  "integrity-anchors": "each carried time anchor is well-formed and covers what it names",
-};
+const CHECK_GLOSSES = new Map<string, string>([
+  ["manifest", "every file the bundle lists is present and matches its recorded digest"],
+  ["evidence-closure", "every record the results depend on is carried inside the bundle"],
+  ["artifact-integrity", "each stored artifact hashes to the digest its record names"],
+  ["signature-validity", "each signature verifies against the key its record names"],
+  ["trust", "each signature verifies against the key the bundle names for it"],
+  ["matrix-rederivation", "the per-cell outcomes recompute to the sealed matrix"],
+  ["report-verification", "the report's numbers recompute from that sealed matrix"],
+  ["claim-consistency", "the published claim repeats the report without drift"],
+  ["integrity-anchors", "each carried time anchor is well-formed and covers what it names"],
+]);
 
 export function renderVerifiedBundle(result: PublicBundleVerificationResult): string {
   const checks = result.checks
     .map((check) => {
-      const gloss = CHECK_GLOSSES[check];
+      const gloss = CHECK_GLOSSES.get(check);
       return `${check.padEnd(24)}passed${gloss === undefined ? "" : ` — ${gloss}`}`;
     })
     .join("\n");

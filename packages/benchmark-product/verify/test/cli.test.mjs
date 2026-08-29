@@ -129,11 +129,13 @@ test("an unrecognised check name still renders its result rather than failing", 
   const output = renderVerifiedBundle({
     format: "benchmark-product-public-bundle/2",
     identity: "a".repeat(64),
-    checks: ["manifest", "not-a-known-check"],
+    checks: ["manifest", "not-a-known-check", "toString"],
     benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
     reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
   });
   assert.match(output, /^not-a-known-check\s+passed$/m);
+  // An inherited `Object.prototype` member is a miss, not a gloss.
+  assert.match(output, /^toString\s+passed$/m);
 });
 
 test("human summary reports the actual passed count against the fixed six-check catalog", async () => {
