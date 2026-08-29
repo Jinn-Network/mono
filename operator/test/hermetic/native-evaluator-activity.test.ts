@@ -57,11 +57,16 @@
  * DSSE ceremony behind them. A hermetic rig cannot self-provide that serving plane — the same
  * boundary `test/e2e/native-fleet-loop.ts` draws when it labels LEG 2-7 SEEDED / DEPLOY-TIME. So
  * this rig admits the evaluation directly from the REAL on-chain `SolutionDeliveryClaimed` facts
- * over a rig-sealed subject document graph, and stands in for the subject-authority claim and the
- * decision-grade NAMED verdict gate. `verifyExactGraph` — the exact delivery/verdict/evidence join
- * around that gate — is not stood in and runs on every phase. Everything downstream — derivation,
- * claim, grading, publication, marketplace delivery, settlement, activity credit — is the real
- * code on a real chain. Restoring the ingestion half hermetically is the native G-loop's own
+ * over a rig-sealed subject document graph, and stands in for exactly three trust ports: the
+ * subject-authority claim, the decision-grade NAMED verdict gate, and the two DSSE delivery
+ * authorities (`solutionDeliveryAuthority` / `evaluationDeliveryAuthority`) — so no signature on a
+ * Delivery envelope, this operator's own verdict envelope included, is checked here.
+ *
+ * Everything else in the verification path is real and runs on every phase: `verifyExactGraph`'s
+ * task/attempt binding and verdict-output digest join, the `solution-delivery-noncanonical` reseal
+ * check, `solution-evidence-graph-invalid`, and `canonical-verdict-code-mismatch`. So is everything
+ * downstream — derivation, claim, grading, publication, marketplace delivery, settlement, activity
+ * credit — on a real chain. Restoring the ingestion half hermetically is the native G-loop's own
  * program, not this gate's.
  *
  * SKIP-CLEAN when the committed fixture is absent (the gate asserts its presence separately).
@@ -303,6 +308,8 @@ describeMaybe('hermetic native-evaluator verdict settlement credits staking acti
         // loop-completion gate means solution delivery alone must not have credited anything.
         const solverActivityBefore = await readActivityCount(fixture, solver, v3Env);
         const evaluatorActivityBefore = await readActivityCount(fixture, evaluator, v3Env);
+        expect(solverActivityBefore, 'solution delivery alone must not credit activity').toBe(0n);
+        expect(evaluatorActivityBefore, 'the evaluator has not delivered a verdict yet').toBe(0n);
 
         // ── LEG 3-6: the native evaluator over real verdict ports ────────────────────────
         const rig = await buildNativeEvaluatorRig({
@@ -326,19 +333,25 @@ describeMaybe('hermetic native-evaluator verdict settlement credits staking acti
         const loop = new EvaluatorLoop({
           composition: rig.composition,
           store: rig.store,
+          // Required by the config, unused here: it is read only by `run()`, and the rig drives
+          // `tick()` directly so it can mine between phases.
           pollIntervalMs: 50,
           // The coordinator's only durable diagnostic is the reason it records; surface it so a
           // stalled phase names itself instead of needing DB spelunking.
           // eslint-disable-next-line no-console
           logger: { info: (m) => console.log(m), warn: (m) => console.warn(m) },
         });
-        const deadline = Date.now() + 300_000;
+        const deadline = Date.now() + 420_000;
         let complete = false;
         while (Date.now() < deadline && !complete) {
           await loop.tick();
           complete = rig.state.getEvaluation(rig.evaluationId)?.state === 'complete';
           if (!complete) {
-            await anvilJsonRpc(fixture.anvil.rpcUrl, 'anvil_mine', ['0x41']); // 65 blocks
+            // Bury the phase's transaction past the rig's finality depth, then yield: the
+            // coordinator's `retry-not-due` backoff returns immediately, so an un-paced loop would
+            // spin a stalled run into a million-block Anvil instead of failing cleanly.
+            await fixture.anvil.mineBlocks(Number(LOCAL_FINALITY_DEPTH) + 1);
+            await new Promise<void>((resolve) => setTimeout(resolve, 250));
           }
         }
         const finalRow = rig.state.getEvaluation(rig.evaluationId);
@@ -377,6 +390,7 @@ describeMaybe('hermetic native-evaluator verdict settlement credits staking acti
     480_000,
   );
 });
+
 interface NativeEvaluatorRigInput {
   readonly fixture: DaemonHarnessFixture;
   readonly evaluator: BootstrappedOperator;
@@ -547,187 +561,207 @@ async function buildNativeEvaluatorRig(input: NativeEvaluatorRigInput) {
     claimEvidenceDir: join(rigRoot, 'claim-evidence'),
   });
 
-  // ── LEG 6: REAL production verdict ports over a REAL Safe broadcaster ──────────────────
-  const venueState = openVenueState(join(rigRoot, 'venue-state.sqlite'));
-  const walletClient = createWalletClient({
-    account: privateKeyToAccount(evaluator.agentPrivateKey),
-    chain: base,
-    transport: http(fixture.anvil.rpcUrl),
-  });
-  const broadcaster = createSafeBroadcaster({
-    chainId: base.id,
-    safeAddress: evaluator.safeAddress as Address,
-    publicClient,
-    walletClient,
-    ledger: createSubmissionLedger(venueState),
-    lock: createBroadcastLock(venueState),
-  });
-  const verdictPorts = createVerdictPorts({
-    publicClient,
-    broadcaster,
-    safeAddress: evaluator.safeAddress as Address,
-    routerAddress: input.routerAddress,
-    mechAddress: input.mechAddress,
-  });
-
-  // ── The durable evaluator aggregate, seeded from the REAL on-chain settlement facts ─────
-  const store = new Store(join(rigRoot, 'evaluator.sqlite'));
-  const state = new NativeEvaluatorStateRepository(store);
-  const settlementReceipt = await publicClient.getTransactionReceipt({
-    hash: input.solutionSettlementTxHash,
-  });
-  const material = predictionSubjectGraph();
-
-  const admitted = state.admitOpportunity({
-    opportunity: {
-      source: 'urn:jinn:solver:hermetic-native-activity-rig/solver-records',
-      sourceSequence: '0000000000000001',
-      sourceEntryDigest: documentDigest(utf8('hermetic-rig-source-entry')),
-      canonical: true,
-      finality: 'finalized',
-      chainId: base.id,
-      taskId: input.taskId,
-      attemptIndex: input.attemptIndex,
-      solutionRequestId: input.solutionRequestId,
-      operatorAddress: input.solverSafeAddress,
-      deliveryCid: 'bafy-hermetic-rig-solution',
-      advertisedDeliveryDigest: material.delivery.digest,
-      blockHash: settlementReceipt.blockHash,
-      blockNumber: settlementReceipt.blockNumber,
-      transactionHash: input.solutionSettlementTxHash,
-      logIndex: 0,
-      canonicalEventIdentity: `${base.id}:${settlementReceipt.blockHash}:0`,
-    },
-    evaluatorAgent: EVALUATOR_AGENT,
-    coordinator: input.coordinatorAddress,
-    material,
-  });
-
-  // The subject-authority claim a live trust catalog would produce (LEG 9, seeded). Recording it
-  // here is what makes `prepareClaim` skip `authority.claim`; everything it guards downstream —
-  // including the REAL `deriveNativeEvaluation` of the evaluation Task — still runs.
-  state.recordAdmissionVerified(admitted.evaluationId, {
-    requester: { signerKey: 'did:key:hermetic-rig-requester', sealingTime: '2026-01-01T00:00:00.000Z' },
-    admission: { signerKey: 'did:key:hermetic-rig-admission', effectiveTime: '2026-01-01T00:00:00.000Z' },
-    executor: {
-      signerKey: 'did:key:hermetic-rig-solver',
-      agent: 'urn:jinn:solver:hermetic-native-activity-rig',
-      declarationKey: 'did:key:hermetic-rig-solver-declaration',
-      effectiveTime: '2026-01-01T00:00:00.000Z',
-      address: input.solverSafeAddress,
-    },
-    evaluator: {
-      signerKey: roles.get('evaluator-verdict').keyId,
-      agent: EVALUATOR_AGENT,
-      declarationKey: roles.get('evaluator-settlement').keyId,
-      address: evaluator.safeAddress,
-    },
-    verificationDigest: documentDigest(utf8('hermetic-rig-subject-authority-verification')),
-  });
-
-  // ── The real local backend's dependencies ───────────────────────────────────────────────
-  const evidence = await openOperatorEvidence({ rootDir: join(rigRoot, 'evidence') });
-  const launcherDeployment = await buildPinnedNodeLauncherDeployment(runningNodeDigest());
-  const evaluationProfile = buildEvaluationTaskProfile();
-  const evaluationProfileDigest = sealTaskProfile(evaluationProfile).digest;
-  const subjectBytesByDigest = new Map<string, Uint8Array>(
-    [material.task, material.submission, material.requesterEnvelope, material.admissionReceipt,
-      material.delivery, material.deliveryEnvelope, material.evaluationSpec,
-      ...material.evidenceRecords, ...material.results]
-      .map((entry) => [entry.digest, entry.bytes]),
-  );
-
-  const composition = await buildNativeEvaluatorComposition({
-    roles,
-    state,
-    coordinatorAddress: input.coordinatorAddress,
-    evaluatorAddress: evaluator.safeAddress as `0x${string}`,
-    operatorIdentity: {
-      safeAddress: evaluator.safeAddress,
-      agentEoa: evaluator.agentAddress,
-      agentIri: EVALUATOR_AGENT,
-    },
-    deployment: {
-      module: PREDICTION_EVALUATOR_DEPLOYMENT_MODULE_PATH,
-      moduleDigest: deploymentModuleDigest,
-      signerHandle: EVALUATOR_SIGNER_HANDLE,
-      evaluationMethodDigest,
-    },
-    backend: {
-      stateRoot: join(rigRoot, 'evaluator-backend'),
-      source: EVALUATOR_AGENT,
-      executor: 'urn:jinn:operator-runtime:hermetic-native-activity-rig',
-      profileStore: {
-        get: (digest) => digest === evaluationProfileDigest ? evaluationProfile : undefined,
-      },
-      launcherDeployment,
-      workspaceRuntime: buildNativeWorkspaceRuntime(),
-      evidence: evidence.ports,
-      maxConcurrentAttempts: 1,
-    },
-    publisher: {
-      rootDir: join(rigRoot, 'public', 'evaluator'),
-      publicBaseUrl: 'https://evaluator.hermetic.invalid/native',
-    },
-    // LEG 8 (seeded): the signed-source read. The opportunity is already admitted, so every tick
-    // is exactly the recovery/advance pass the live loop runs alongside its source read.
-    opportunities: {
-      sourceId: 'urn:jinn:solver:hermetic-native-activity-rig/solver-records',
-      read: async () => [],
-    },
-    subject: {
-      fetcher: {
-        byCid: async () => undefined,
-        byDigest: async (digest: string) => subjectBytesByDigest.get(digest),
-      },
-    },
-    // Persisted above, so this is never reached on the happy path.
-    authority: {
-      claim: async () => { throw new Error('subject authority was already persisted by the rig'); },
-      dependencies: {} as never,
-    },
-    deadline: () => new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
-    verdictPorts,
-    // REAL chain reads against the loaded snapshot. An Anvil state fixture leaves the `finalized`
-    // tag pinned at the loaded tip, so a depth rule over `latest` is the only honest local reading.
-    chain: {
-      isFinalized: async (transaction) =>
-        (await publicClient.getBlockNumber()) >= transaction.blockNumber + LOCAL_FINALITY_DEPTH,
-      transactionStatus: async (txHash) => {
-        const receipt = await publicClient
-          .getTransactionReceipt({ hash: txHash })
-          .catch(() => undefined);
-        return receipt === undefined ? { kind: 'pending' as const } : { kind: 'canonical' as const };
-      },
-    },
-    // LEG 9 (seeded): a live catalog's decision-grade named gate. `verifyExactGraph` — the exact
-    // delivery/verdict/evidence join `buildNativeEvaluatorVerdictVerification` runs around this
-    // port — is NOT stood in, and still runs on every phase.
-    verification: {
-      gate: { gate: async () => ({ decisionGrade: true, failures: [] }) as never },
-      solutionDeliveryAuthority: { verify: async () => ({ ok: true }) } as never,
-      evaluationDeliveryAuthority: { verify: async () => ({ ok: true }) } as never,
-      preSettlementClaimTime: async () => new Date().toISOString(),
-      blockTime: async (blockNumber: bigint) => {
-        const block = await publicClient.getBlock({ blockNumber });
-        return new Date(Number(block.timestamp) * 1000).toISOString();
-      },
-    },
-  });
-
-  return {
-    store,
-    state,
-    venueState,
-    evidence,
-    composition,
-    evaluationId: admitted.evaluationId,
-    async close() {
-      try { await composition.close(); } catch { /* best-effort */ }
-      try { await evidence.close(); } catch { /* best-effort */ }
-      try { store.close(); } catch { /* best-effort */ }
-      try { venueState.close(); } catch { /* best-effort */ }
-      try { await rm(PREDICTION_EVALUATOR_DEPLOYMENT_SIDECAR_PATH, { force: true }); } catch { /* best-effort */ }
-    },
+  // Everything acquired from here on is released by `release()`, which the catch below runs if any
+  // later step throws. Without it a mid-build failure leaks the SQLite handles and the evidence
+  // runtime, and — worse — leaves the sidecar in the repo, where it is gitignored (so invisible to
+  // `git status`) and silently feeds the next run.
+  const opened: Array<() => Promise<void> | void> = [
+    () => rm(PREDICTION_EVALUATOR_DEPLOYMENT_SIDECAR_PATH, { force: true }),
+  ];
+  const release = async (): Promise<void> => {
+    for (const close of [...opened].reverse()) {
+      try { await close(); } catch { /* best-effort */ }
+    }
   };
+
+  try {
+    return await assembleRig();
+  } catch (cause) {
+    await release();
+    throw cause;
+  }
+
+  async function assembleRig() {
+    // ── LEG 6: REAL production verdict ports over a REAL Safe broadcaster ──────────────────
+    const venueState = openVenueState(join(rigRoot, 'venue-state.sqlite'));
+    opened.push(() => venueState.close());
+    const walletClient = createWalletClient({
+      account: privateKeyToAccount(evaluator.agentPrivateKey),
+      chain: base,
+      transport: http(fixture.anvil.rpcUrl),
+    });
+    const broadcaster = createSafeBroadcaster({
+      chainId: base.id,
+      safeAddress: evaluator.safeAddress as Address,
+      publicClient,
+      walletClient,
+      ledger: createSubmissionLedger(venueState),
+      lock: createBroadcastLock(venueState),
+    });
+    const verdictPorts = createVerdictPorts({
+      publicClient,
+      broadcaster,
+      safeAddress: evaluator.safeAddress as Address,
+      routerAddress: input.routerAddress,
+      mechAddress: input.mechAddress,
+    });
+
+    // ── The durable evaluator aggregate, seeded from the REAL on-chain settlement facts ─────
+    const store = new Store(join(rigRoot, 'evaluator.sqlite'));
+    opened.push(() => store.close());
+    const state = new NativeEvaluatorStateRepository(store);
+    const settlementReceipt = await publicClient.getTransactionReceipt({
+      hash: input.solutionSettlementTxHash,
+    });
+    const material = predictionSubjectGraph();
+
+    const admitted = state.admitOpportunity({
+      opportunity: {
+        source: 'urn:jinn:solver:hermetic-native-activity-rig/solver-records',
+        sourceSequence: '0000000000000001',
+        sourceEntryDigest: documentDigest(utf8('hermetic-rig-source-entry')),
+        canonical: true,
+        finality: 'finalized',
+        chainId: base.id,
+        taskId: input.taskId,
+        attemptIndex: input.attemptIndex,
+        solutionRequestId: input.solutionRequestId,
+        operatorAddress: input.solverSafeAddress,
+        deliveryCid: 'bafy-hermetic-rig-solution',
+        advertisedDeliveryDigest: material.delivery.digest,
+        blockHash: settlementReceipt.blockHash,
+        blockNumber: settlementReceipt.blockNumber,
+        transactionHash: input.solutionSettlementTxHash,
+        logIndex: 0,
+        canonicalEventIdentity: `${base.id}:${settlementReceipt.blockHash}:0`,
+      },
+      evaluatorAgent: EVALUATOR_AGENT,
+      coordinator: input.coordinatorAddress,
+      material,
+    });
+
+    // The subject-authority claim a live trust catalog would produce (LEG 9, seeded). Recording it
+    // here is what makes `prepareClaim` skip `authority.claim`; everything it guards downstream —
+    // including the REAL `deriveNativeEvaluation` of the evaluation Task — still runs.
+    state.recordAdmissionVerified(admitted.evaluationId, {
+      requester: { signerKey: 'did:key:hermetic-rig-requester', sealingTime: '2026-01-01T00:00:00.000Z' },
+      admission: { signerKey: 'did:key:hermetic-rig-admission', effectiveTime: '2026-01-01T00:00:00.000Z' },
+      executor: {
+        signerKey: 'did:key:hermetic-rig-solver',
+        agent: 'urn:jinn:solver:hermetic-native-activity-rig',
+        declarationKey: 'did:key:hermetic-rig-solver-declaration',
+        effectiveTime: '2026-01-01T00:00:00.000Z',
+        address: input.solverSafeAddress,
+      },
+      evaluator: {
+        signerKey: roles.get('evaluator-verdict').keyId,
+        agent: EVALUATOR_AGENT,
+        declarationKey: roles.get('evaluator-settlement').keyId,
+        address: evaluator.safeAddress,
+      },
+      verificationDigest: documentDigest(utf8('hermetic-rig-subject-authority-verification')),
+    });
+
+    // ── The real local backend's dependencies ───────────────────────────────────────────────
+    const evidence = await openOperatorEvidence({ rootDir: join(rigRoot, 'evidence') });
+    opened.push(() => evidence.close());
+    const launcherDeployment = await buildPinnedNodeLauncherDeployment(runningNodeDigest());
+    const evaluationProfile = buildEvaluationTaskProfile();
+    const evaluationProfileDigest = sealTaskProfile(evaluationProfile).digest;
+    const subjectBytesByDigest = new Map<string, Uint8Array>(
+      [material.task, material.submission, material.requesterEnvelope, material.admissionReceipt,
+        material.delivery, material.deliveryEnvelope, material.evaluationSpec,
+        ...material.evidenceRecords, ...material.results]
+        .map((entry) => [entry.digest, entry.bytes]),
+    );
+
+    const composition = await buildNativeEvaluatorComposition({
+      roles,
+      state,
+      coordinatorAddress: input.coordinatorAddress,
+      evaluatorAddress: evaluator.safeAddress as `0x${string}`,
+      operatorIdentity: {
+        safeAddress: evaluator.safeAddress,
+        agentEoa: evaluator.agentAddress,
+        agentIri: EVALUATOR_AGENT,
+      },
+      deployment: {
+        module: PREDICTION_EVALUATOR_DEPLOYMENT_MODULE_PATH,
+        moduleDigest: deploymentModuleDigest,
+        signerHandle: EVALUATOR_SIGNER_HANDLE,
+        evaluationMethodDigest,
+      },
+      backend: {
+        stateRoot: join(rigRoot, 'evaluator-backend'),
+        source: EVALUATOR_AGENT,
+        executor: 'urn:jinn:operator-runtime:hermetic-native-activity-rig',
+        profileStore: {
+          get: (digest) => digest === evaluationProfileDigest ? evaluationProfile : undefined,
+        },
+        launcherDeployment,
+        workspaceRuntime: buildNativeWorkspaceRuntime(),
+        evidence: evidence.ports,
+        maxConcurrentAttempts: 1,
+      },
+      publisher: {
+        rootDir: join(rigRoot, 'public', 'evaluator'),
+        publicBaseUrl: 'https://evaluator.hermetic.invalid/native',
+      },
+      // LEG 8 (seeded): the signed-source read. The opportunity is already admitted, so every tick
+      // is exactly the recovery/advance pass the live loop runs alongside its source read.
+      opportunities: {
+        sourceId: 'urn:jinn:solver:hermetic-native-activity-rig/solver-records',
+        read: async () => [],
+      },
+      subject: {
+        fetcher: {
+          byCid: async () => undefined,
+          byDigest: async (digest: string) => subjectBytesByDigest.get(digest),
+        },
+      },
+      // Persisted above, so this is never reached on the happy path.
+      authority: {
+        claim: async () => { throw new Error('subject authority was already persisted by the rig'); },
+        dependencies: {} as never,
+      },
+      deadline: () => new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+      verdictPorts,
+      // REAL chain reads against the loaded snapshot. An Anvil state fixture leaves the `finalized`
+      // tag pinned at the loaded tip, so a depth rule over `latest` is the only honest local reading.
+      chain: {
+        isFinalized: async (transaction) =>
+          (await publicClient.getBlockNumber()) >= transaction.blockNumber + LOCAL_FINALITY_DEPTH,
+        transactionStatus: async (txHash) => {
+          const receipt = await publicClient
+            .getTransactionReceipt({ hash: txHash })
+            .catch(() => undefined);
+          return receipt === undefined ? { kind: 'pending' as const } : { kind: 'canonical' as const };
+        },
+      },
+      // LEG 9 (seeded): a live catalog's decision-grade named gate. `verifyExactGraph` — the exact
+      // delivery/verdict/evidence join `buildNativeEvaluatorVerdictVerification` runs around this
+      // port — is NOT stood in, and still runs on every phase.
+      verification: {
+        gate: { gate: async () => ({ decisionGrade: true, failures: [] }) as never },
+        solutionDeliveryAuthority: { verify: async () => ({ ok: true }) } as never,
+        evaluationDeliveryAuthority: { verify: async () => ({ ok: true }) } as never,
+        preSettlementClaimTime: async () => new Date().toISOString(),
+        blockTime: async (blockNumber: bigint) => {
+          const block = await publicClient.getBlock({ blockNumber });
+          return new Date(Number(block.timestamp) * 1000).toISOString();
+        },
+      },
+    });
+
+    // The composition owns spawned children, so it closes first.
+    opened.push(() => composition.close());
+
+    return {
+      store,
+      state,
+      composition,
+      evaluationId: admitted.evaluationId,
+      close: release,
+    };
+  }
 }
