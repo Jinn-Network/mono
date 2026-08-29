@@ -37,6 +37,14 @@ async function fixture(plans?: readonly SyntheticV6AnchorPlan[]): Promise<Synthe
   return createSyntheticV6BundleFixture({ workspaceDir, ...(plans === undefined ? {} : { plans }) });
 }
 
+async function declaringFixture(
+  taskSelection: "claimant-chosen" | "fixed-public-set" | "drawn-post-lock",
+): Promise<SyntheticV6BundleFixture> {
+  const workspaceDir = mkdtempSync(join(tmpdir(), "anchored-v6-selection-"));
+  roots.push(workspaceDir);
+  return createSyntheticV6BundleFixture({ workspaceDir, taskSelection });
+}
+
 /** A detached copy, so every tamper case runs against bytes with no workspace behind them. */
 function detach(bundleDir: string): string {
   const root = mkdtempSync(join(tmpdir(), "anchored-v6-detached-"));
@@ -272,4 +280,46 @@ describe("anchored public bundle v6 — portable verification", () => {
 
     await expectRefusal(bundleDir, "non-allowlisted file");
   }, 240_000);
+});
+
+/**
+ * Task-selection provenance, end to end (issue #2980).
+ *
+ * The unit tests either side of this file can both be right while the feature is still broken: the
+ * producer renders assets and the reader byte-compares its own rebuild of them, so a declaration
+ * that reaches only one of the two refuses the whole bundle AFTER the irreversible lock. Only a
+ * round trip through `draft update` -> `runLock` -> `materialize` -> `verifyPublicBundle` proves
+ * the two agree. It also proves the stronger modes are reachable at all: every task-set intake in
+ * this product re-authors the Benchmark under the workspace key that is also the Run owner, so a
+ * verifier rule keyed on that relationship would make them dead letters.
+ */
+describe("task-selection provenance round trip", () => {
+  for (const mode of ["claimant-chosen", "fixed-public-set"] as const) {
+    test(`${mode} survives lock, materialization, and cold verification`, async () => {
+      const { bundle } = await declaringFixture(mode);
+      const verified = await verifyPublicBundle(detach(bundle.bundleDir));
+      expect(verified.checks).toContain("claim-consistency");
+    }, 120_000);
+  }
+
+  test("a contradicted declaration is refused at the lock, not after publication", async () => {
+    // SWE-bench intake reveals its items immediately, so `drawn-post-lock` is genuinely false for
+    // it. The claimant must learn that while the draft is still editable — refusing this at publish
+    // would strand a locked, executed, reported run in a bundle nothing can ever verify.
+    await expect(declaringFixture("drawn-post-lock")).rejects.toThrow(/reveals its items immediately/);
+  }, 120_000);
+
+  test("the declared sentence reaches the published face", async () => {
+    const { bundle } = await declaringFixture("claimant-chosen");
+    const html = readFileSync(join(bundle.bundleDir, "index.html"), "utf8");
+    expect(html).toContain('<p class="neutral">The claimant chose which tasks appear in this report.</p>');
+  }, 120_000);
+
+  test("an undeclared run publishes the same face bytes it always did", async () => {
+    const declared = await declaringFixture("claimant-chosen");
+    const undeclared = await fixture();
+    const face = (dir: string) => readFileSync(join(dir, "index.html"), "utf8");
+    expect(face(undeclared.bundle.bundleDir)).not.toContain("The claimant chose");
+    expect(face(declared.bundle.bundleDir)).not.toBe(face(undeclared.bundle.bundleDir));
+  }, 120_000);
 });

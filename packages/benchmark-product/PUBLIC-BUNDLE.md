@@ -284,22 +284,41 @@ the `https://spec.jinn.network/extensions/task-selection/v1` extension, whose
 
 Because the declaration is sealed into the Run, it is fixed at the lock and
 cannot be softened once results are known. Sealing does not make it true, so the
-verifier refuses a bundle whose other sealed records contradict it, under the
-`claim-consistency` check:
+verifier refuses a bundle whose other sealed records positively contradict it,
+under the `claim-consistency` check:
 
-- both stronger modes assert that someone other than the claimant chose the
-  tasks. The Benchmark record *is* the task selection, so a Benchmark whose
-  `author` is the Run's `owner` — or which names no author at all — cannot
-  support either;
-- `fixed-public-set` requires a set that was public no later than the Run's
-  `closeAt`: `reveal.policy` `immediate`, or `scheduled` with a `notBefore` at or
-  before the lock;
-- `drawn-post-lock` requires the opposite: items still withheld at the lock,
-  either `after-run` or a schedule opening strictly after it.
+- `fixed-public-set` is refused when the Benchmark record names no author — a set
+  nobody declared was never publicly declared — and when its reveal policy
+  withholds its items past the end of the run (`after-run`, or `scheduled` with a
+  `notBefore` at or after the Run's `closeAt`);
+- `drawn-post-lock` is refused when the Benchmark reveals its items
+  `immediate`ly, because the run was then locked against a set the claimant could
+  already read, and nothing was drawn afterwards.
 
 `claimant-chosen` carries no structural obligation. It asserts nothing about
 anyone but the claimant, and constraining it would only make the honest answer
 the expensive one.
+
+The same rule runs twice, on purpose: `run lock` applies it before sealing, so a
+contradicted declaration is a draft-validation refusal the claimant can still act
+on, and the cold verifier applies it again on bytes alone. Left to publish time
+only, a contradiction would surface after the run had been locked, executed,
+reported, and materialized — a bundle the workspace can never verify, with no way
+back.
+
+Two limits are worth stating plainly rather than leaving a reader to assume more.
+
+**These checks refuse; they never endorse.** No check can establish that a
+`fixed-public-set` declaration is true: the bundle carries no independent witness
+of the upstream set, so a claimant who assembled a private subset and declared it
+public will pass. The declaration's force comes from being sealed and attributable,
+not from being proved.
+
+**The comparison is against the run's close, not its lock.** `closeAt` is
+`lockedAt` plus a strictly positive interval, and no bundle carries `lockedAt`, so
+only the far side of the comparison is sound: a `notBefore` at or after `closeAt`
+is provably after the lock, while one before it settles nothing. A schedule that
+opens mid-run is therefore not refused under either mode.
 
 A declared mode renders as one sentence at the report's headline-result weight,
 in `index.html`, `README.md`, and `share.txt`. The declaration is not a

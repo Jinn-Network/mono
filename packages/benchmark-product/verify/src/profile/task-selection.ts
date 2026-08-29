@@ -6,18 +6,24 @@
  * true. What remains for a cold verifier is the part sealing cannot settle: whether the *other*
  * sealed records are consistent with what the declaration asserts.
  *
- * Note what is deliberately NOT checked here. An earlier design compared the Benchmark's items
- * against the Matrix's task digests. That is unreachable by construction: `expectedCellSet` is the
- * full cartesian product `items x arms x replicates`, so the Matrix always covers every Benchmark
- * item exactly. In this record model the *selection is the Benchmark record itself*, so the facts
- * that can contradict a declared mode are the Benchmark's authorship and its reveal timing
- * relative to the Run's lock.
+ * In this record model the *selection is the Benchmark record itself*: the Run seals a Benchmark
+ * digest, and `expectedCellSet` is the full cartesian product `items x arms x replicates`, so the
+ * Matrix always covers every Benchmark item exactly. Comparing the Matrix's task digests against
+ * the Benchmark's items — the first thing this module tried — is therefore dead code. What is left
+ * is the Benchmark's own reveal policy and whether anyone declared the set at all.
+ *
+ * These checks are refusals, not endorsements, and the asymmetry is the point: each one names a
+ * declaration the records positively contradict. None of them can establish that a declaration is
+ * TRUE, because the bundle carries no independent witness of an upstream set. `assertTaskSelection-
+ * Consistency` below says exactly where that boundary falls and why the tempting rule on the other
+ * side of it is unsound.
  */
 
 import {
   readTaskSelectionMode,
   type BenchmarkRecord,
   type RunRecord,
+  type TaskSelectionMode,
 } from "@jinn-network/benchmarking-records";
 import { refuse } from "./errors.js";
 
@@ -36,17 +42,21 @@ function instant(value: string): number {
 }
 
 /**
- * Whether the Benchmark's items were visible no later than the Run's lock.
+ * Whether the Benchmark's items were PROVABLY still withheld when the Run sealed against them.
  *
- * `immediate` is public from the moment the record exists. `scheduled` is public from `notBefore`,
- * and a schedule with no `notBefore` names no moment at all, so it cannot establish visibility
- * before the lock. `after-run` is withheld by definition.
+ * Deliberately one-directional, and the reason is a real trap. The only instant a cold verifier
+ * can read out of a sealed Run is `closeAt`, which is the run's CLOSE, not its lock —
+ * `closeAt = lockedAt + policy.closeAfterMs` with a strictly positive interval (24h by default),
+ * and `lockedAt` lives only in product-local state that no bundle carries. So `notBefore <= closeAt`
+ * establishes nothing about the lock: a schedule opening twelve hours into a twenty-four-hour run
+ * satisfies it while the items were plainly withheld at the lock. Only the far side is safe —
+ * `notBefore >= closeAt > lockedAt` proves withholding — so that is the only comparison made.
  */
-function publicByLock(benchmark: BenchmarkRecord, closeAt: string): boolean {
+function withheldAtLock(benchmark: BenchmarkRecord, closeAt: string): boolean {
   const { policy, notBefore } = benchmark.reveal;
-  if (policy === "immediate") return true;
-  if (policy === "after-run") return false;
-  return notBefore !== undefined && instant(notBefore) <= instant(closeAt);
+  if (policy === "after-run") return true;
+  if (policy !== "scheduled" || notBefore === undefined) return false;
+  return instant(notBefore) >= instant(closeAt);
 }
 
 /**
@@ -54,68 +64,77 @@ function publicByLock(benchmark: BenchmarkRecord, closeAt: string): boolean {
  * sealed. Exported so the reader's asset builder resolves the mode exactly once, through exactly
  * this refusal posture, instead of re-deriving it with its own error handling.
  */
-export function declaredTaskSelectionMode(runRecord: RunRecord): ReturnType<typeof readTaskSelectionMode> {
+export function declaredTaskSelectionMode(runRecord: RunRecord): TaskSelectionMode | undefined {
   try {
     return readTaskSelectionMode(runRecord as unknown as Record<string, unknown>);
-  } catch {
-    refuse("record-integrity", PATH, "the Run's declared task selection is not one of the recorded selection modes");
+  } catch (cause) {
+    refuse(
+      "record-integrity",
+      PATH,
+      `the Run's declared task selection is not one of the recorded selection modes: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
   }
 }
 
 /**
- * Refuses a bundle whose sealed records contradict its declared task-selection mode.
+ * The way the sealed records contradict a declared task-selection mode, or `undefined` when they
+ * do not. Pure, and shared deliberately: the producer calls it BEFORE the lock so a contradiction
+ * is a draft-validation refusal the claimant can still act on, and the cold verifier calls it after
+ * the fact through {@link assertTaskSelectionConsistency}. One rule, two postures — a second copy
+ * would be free to drift into refusing at publish what it accepted at lock, which is the worst
+ * possible place to disagree.
  *
- * Two contradictions, both derivable from bundle bytes alone:
+ * Two contradictions, both provable from bundle bytes:
  *
- * 1. **The claimant authored the item bank.** The Benchmark record *is* the task selection, so a
- *    Run whose `owner` is the Benchmark's `author` was selected by the claimant, and neither of the
- *    two stronger modes can be true. An absent `author` cannot support them either: the records do
- *    not name anyone else who chose.
- * 2. **The reveal timing does not match the mode** — a "public" set still withheld at the lock, or
- *    a "post-lock draw" over items the claimant could already read before locking.
+ * 1. **`fixed-public-set` over an undeclared set.** A set nobody declared is not a publicly
+ *    declared set, so the Benchmark record must at least name an `author`.
+ * 2. **Reveal policy that cannot coexist with the mode.** `fixed-public-set` is refused when the
+ *    items were provably withheld at the lock; `drawn-post-lock` is refused when they were
+ *    `immediate` — open the moment the record existed, so the Run sealed against a set the
+ *    claimant could already read, and nothing was drawn afterwards.
+ *
+ * What this deliberately does NOT do is decide the stronger modes from `benchmark.author` versus
+ * `run.owner`. That rule looks decisive and is not: `author` is a self-declaration the design spec
+ * marks non-authoritative, and every task-set intake in this product re-authors the Benchmark under
+ * the workspace's own key (`intake/workspace-authored.ts`), which is also the Run's owner. Enforcing
+ * on it would refuse every bundle this product can produce, making two of the three vocabulary
+ * values dead letters.
+ *
+ * So the honest boundary: these checks catch declarations the records positively contradict, but
+ * none can prove a `fixed-public-set` claim TRUE — the bundle carries no independent witness of the
+ * upstream set. `PUBLIC-BUNDLE.md` says so in the same words, because a gap a reader can see is
+ * worth more than one a rule pretends to close.
  *
  * `claimant-chosen` is unconstrained on purpose. It asserts nothing about anyone but the claimant,
  * so nothing can contradict it, and constraining it would only make the honest answer the
  * expensive one.
  */
-export function assertTaskSelectionConsistency(input: TaskSelectionConsistencyInput): void {
+export function taskSelectionContradiction(input: TaskSelectionConsistencyInput): string | undefined {
   const { benchmarkRecord, runRecord } = input;
   const declared = declaredTaskSelectionMode(runRecord);
-  if (declared === undefined || declared === "claimant-chosen") return;
+  if (declared === undefined || declared === "claimant-chosen") return undefined;
 
-  const author = benchmarkRecord.author;
-  if (author === undefined) {
-    refuse(
-      "record-integrity",
-      PATH,
-      `task selection is declared ${declared} but the Benchmark record names no author, so the records`
-        + " do not establish that anyone other than the claimant chose the tasks",
-    );
-  }
-  if (author === runRecord.owner) {
-    refuse(
-      "record-integrity",
-      PATH,
-      `task selection is declared ${declared} but the claimant authored the Benchmark record, so the`
-        + " claimant chose the tasks",
-    );
+  if (declared === "fixed-public-set") {
+    if (benchmarkRecord.author === undefined) {
+      return "task selection is declared fixed-public-set but the Benchmark record names no author,"
+        + " so the set it describes was never publicly declared by anyone";
+    }
+    if (withheldAtLock(benchmarkRecord, runRecord.closeAt)) {
+      return "task selection is declared fixed-public-set but the Benchmark's reveal policy withholds"
+        + " its items past the end of the run, so they were not public when the run was locked";
+    }
+    return undefined;
   }
 
-  const revealedByLock = publicByLock(benchmarkRecord, runRecord.closeAt);
-  if (declared === "fixed-public-set" && !revealedByLock) {
-    refuse(
-      "record-integrity",
-      PATH,
-      "task selection is declared fixed-public-set but the Benchmark's reveal policy withholds its"
-        + " items until after the run was locked",
-    );
+  if (benchmarkRecord.reveal.policy === "immediate") {
+    return "task selection is declared drawn-post-lock but the Benchmark reveals its items"
+      + " immediately, so the run was locked against a set the claimant could already read";
   }
-  if (declared === "drawn-post-lock" && revealedByLock) {
-    refuse(
-      "record-integrity",
-      PATH,
-      "task selection is declared drawn-post-lock but the Benchmark's items were already revealed"
-        + " when the run was locked, so nothing was drawn after the lock",
-    );
-  }
+  return undefined;
+}
+
+/** The cold verifier's posture over {@link taskSelectionContradiction}: a typed record refusal. */
+export function assertTaskSelectionConsistency(input: TaskSelectionConsistencyInput): void {
+  const contradiction = taskSelectionContradiction(input);
+  if (contradiction !== undefined) refuse("record-integrity", PATH, contradiction);
 }

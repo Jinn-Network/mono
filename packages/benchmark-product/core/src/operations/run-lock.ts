@@ -16,8 +16,11 @@
  * enforcement, it just drives the draft into a state those checks already treat as immutable.
  */
 
+import { taskSelectionContradiction } from "@colophon-claims/verify";
 import {
   RUN_RECORD_KIND,
+  parseBenchmark,
+  parseRun,
   sealRun,
   withRunAnchorIntentExtension,
   withRunTaskSelectionExtension,
@@ -224,6 +227,18 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       const runWithTaskSelection = declaredTaskSelection === undefined
         ? runWithDeclaredIntent
         : withRunTaskSelectionExtension(runWithDeclaredIntent, { mode: declaredTaskSelection });
+      // Check the declaration against the records BEFORE the irreversible seal, using the exact
+      // rule the cold verifier applies afterwards. Left to publish time, a contradiction would
+      // surface only once the run had been locked, executed, reported, and materialized -- a
+      // bundle the workspace can never verify, and no way back. Same rule, earlier and cheaper.
+      if (declaredTaskSelection !== undefined && document.spec.taskSet.kind === "benchmark") {
+        const contradiction = taskSelectionContradiction({
+          benchmarkRecord: parseBenchmark(getSealedBytes(clockedContext.workspaceDir, document.spec.taskSet.benchmarkSha256)),
+          runRecord: parseRun(sealRun(runWithTaskSelection).bytes),
+        });
+        if (contradiction !== undefined) refuse("validation", "spec.taskSelection", contradiction);
+      }
+
       const sealed = sealRun(runWithTaskSelection);
       const runSha256 = putSealedBytes(clockedContext.workspaceDir, sealed.bytes);
       recordWorkspaceAuthorship({
