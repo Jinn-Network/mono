@@ -54,9 +54,14 @@ export function resolveLiveOffers(entries: readonly OfferEntry[]): SupersessionR
     unique.push(entry);
   });
 
-  const supersededDigests = new Set<Sha256Digest>();
   const supersedersByPredecessor = new Map<Sha256Digest, number>();
-  /** successor digest -> the predecessor its honored supersession retires. */
+  /**
+   * successor digest -> the predecessor its honored supersession retires. This map is the
+   * single record of what has been retired: the superseded set is derived from its values at
+   * the end, never maintained alongside it. Two parallel structures would have to be kept in
+   * step through the cycle pass below, and one of them would eventually lose an edge the
+   * other still held.
+   */
   const honoredEdges = new Map<Sha256Digest, Sha256Digest>();
 
   unique.forEach((entry, index) => {
@@ -116,7 +121,6 @@ export function resolveLiveOffers(entries: readonly OfferEntry[]): SupersessionR
           + "live and the holder's announcement chain orders them",
       });
     }
-    supersededDigests.add(predecessorDigest);
     honoredEdges.set(entry.digest, predecessorDigest);
   });
 
@@ -131,11 +135,7 @@ export function resolveLiveOffers(entries: readonly OfferEntry[]): SupersessionR
     for (let cursor: Sha256Digest | undefined = digest; cursor !== undefined;) {
       if (path.includes(cursor)) {
         const cycle = path.slice(path.indexOf(cursor));
-        for (const member of cycle) {
-          const predecessor = honoredEdges.get(member);
-          honoredEdges.delete(member);
-          if (predecessor !== undefined) supersededDigests.delete(predecessor);
-        }
+        for (const member of cycle) honoredEdges.delete(member);
         diagnostics.push({
           code: "SUPERSESSION_CYCLE",
           path: "",
@@ -149,6 +149,13 @@ export function resolveLiveOffers(entries: readonly OfferEntry[]): SupersessionR
       cursor = honoredEdges.get(cursor);
     }
   }
+
+  // Derived only now, from the edges that survived the cycle pass. A member of a cycle that
+  // some offer OUTSIDE the cycle also retires stays retired: dropping the cycle's own edges
+  // says nothing about that outside supersession, and resurrecting a superseded offer — a
+  // stale, possibly higher price going live again — is the one failure direction that costs
+  // someone money.
+  const supersededDigests = new Set<Sha256Digest>(honoredEdges.values());
 
   return {
     live: unique.filter((entry) => !supersededDigests.has(entry.digest)),

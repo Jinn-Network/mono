@@ -25,6 +25,14 @@ export function isAbsoluteUri(value: string): boolean {
  * `https://r.example:443/v1`, and `https://r.example/v1` are the same identifier, so admitting
  * all three would let one rail appear twice in an offer and defeat the uniqueness rule that
  * makes "pay on one of its rails" unambiguous.
+ *
+ * The reach of that guarantee is exactly WHATWG URL's: scheme and host case-fold for the
+ * special schemes (http, https, ws, wss, ftp, file), and default ports and dot segments are
+ * removed. It does NOT reach opaque hosts and opaque paths, which round-trip verbatim — so
+ * `ipfs://BAFYBEIGD/x` and `ipfs://bafybeigd/x` remain two distinct rails here, as do
+ * `urn:UUID:x` and `urn:uuid:x` even though RFC 8141 calls URN namespace identifiers
+ * case-insensitive. A rail vocabulary that mints identifiers under such a scheme owes its own
+ * spelling rule; this check cannot supply one without knowing the scheme's equivalence law.
  */
 export function isNormalizedAbsoluteUri(value: string): boolean {
   if (/\s/u.test(value)) return false;

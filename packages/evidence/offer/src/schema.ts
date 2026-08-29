@@ -16,7 +16,8 @@ const NormalizedAbsoluteUri = z
   .refine(
     isNormalizedAbsoluteUri,
     "must be an absolute URI already in its normalized spelling (lowercase scheme and host, "
-      + "no default port), so one rail has exactly one identifier",
+      + "no default port, no dot segments), so one rail spelled with a special scheme has "
+      + "exactly one identifier",
   );
 
 /**

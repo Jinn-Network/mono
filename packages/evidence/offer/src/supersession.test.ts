@@ -152,6 +152,34 @@ describe("resolveLiveOffers", () => {
     expect(report.superseded.map((old) => old.digest)).toEqual([outside.digest]);
   });
 
+  // The mirror of the case above, and the one that costs someone money if it is wrong: an
+  // edge pointing INTO a cycle. Dropping the cycle's own edges says nothing about an outside
+  // supersession, so 1 must stay retired rather than come back live at its old price.
+  test("a cycle does not resurrect a member that an outside offer legitimately retired", () => {
+    // cycle 1 -> 2 -> 3 -> 1, plus 4 -> 1 from outside it.
+    const report = resolveLiveOffers([
+      entry("1", { supersedes: digest("2") }),
+      entry("2", { supersedes: digest("3") }),
+      entry("3", { supersedes: digest("1") }),
+      entry("4", { supersedes: digest("1") }),
+    ]);
+    expect(codes(report)).toEqual(["SUPERSESSION_FORK", "SUPERSESSION_CYCLE"]);
+    expect(report.live.map((live) => live.digest))
+      .toEqual([digest("2"), digest("3"), digest("4")]);
+    expect(report.superseded.map((old) => old.digest)).toEqual([digest("1")]);
+  });
+
+  test("a two-cycle does not resurrect a member an outside offer retired", () => {
+    const report = resolveLiveOffers([
+      entry("1", { supersedes: digest("2") }),
+      entry("2", { supersedes: digest("1") }),
+      entry("4", { supersedes: digest("1") }),
+    ]);
+    expect(codes(report)).toEqual(["SUPERSESSION_FORK", "SUPERSESSION_CYCLE"]);
+    expect(report.live.map((live) => live.digest)).toEqual([digest("2"), digest("4")]);
+    expect(report.superseded.map((old) => old.digest)).toEqual([digest("1")]);
+  });
+
   test("offers for different subjects never interfere", () => {
     const mine = entry("1");
     const other = entry("2", { subject: OTHER_SUBJECT });
