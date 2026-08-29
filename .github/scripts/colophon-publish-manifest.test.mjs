@@ -237,4 +237,9 @@ test('first-cut public surfaces disclose that spec.jinn.network is not hosted', 
   assert.match(readme, /spec\.jinn\.network/u, 'README');
   assert.match(readme, /not hosted/iu, 'README');
   assert.match(readme, /What this does not yet prove/u);
+
+  // The retired half becomes the guard for the obligation that replaced it: AC-1 requires the
+  // CLI's default human output to carry no unhosted origin URL, so assert its absence.
+  const cli = readFileSync(join(repoRoot, 'packages/benchmark-product/verify/src/cli.ts'), 'utf8');
+  assert.doesNotMatch(cli, /spec\.jinn\.network/u, 'CLI');
 });
