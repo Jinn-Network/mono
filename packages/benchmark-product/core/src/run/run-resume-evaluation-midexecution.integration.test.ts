@@ -35,7 +35,12 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { parseBenchmark, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
+import {
+  expectedCellCount,
+  parseBenchmark,
+  parseMatrix,
+  parseRun,
+} from "@jinn-network/benchmarking-records";
 import { launchAndWatch, MAX_CONCURRENT_CELLS } from "@jinn-network/benchmarking-run";
 import { armAdd } from "../operations/arms.js";
 import type { OperationContext } from "../operations/context.js";
@@ -282,6 +287,26 @@ describe("resume reconciles an evaluation attempt killed mid-execution", () => {
 
       const journalPath = rewindAttemptPastTerminal(accepted.submissionSha256);
       expect(readFileSync(journalPath, "utf8")).not.toContain("attempt-terminal");
+
+      // The ceiling below only takes capacity off the table while it actually exceeds the
+      // attempts this run can hold live at once — one solve leg and one evaluation leg per cell.
+      // Both halves of that are constants owned elsewhere (`MAX_CONCURRENT_CELLS` in
+      // `@jinn-network/benchmarking-run`, the cell count in this file's own fixture), so assert
+      // the relation rather than restate it in prose: lowering the platform maximum or widening
+      // the fixture then fails here, loudly and immediately, instead of returning this test to
+      // the machine-speed-dependent flake the ceiling was raised to cure.
+      const spec = readDraftDocument(workspaceDir, draftId).spec;
+      if (spec.taskSet.kind !== "benchmark") throw new Error("unreachable: no benchmark");
+      const runSha256 = requireRunState(workspaceDir, draftId).runSha256;
+      if (runSha256 === undefined) throw new Error("unreachable: no run record");
+      const liveAttemptCeiling = expectedCellCount(
+        parseBenchmark(getSealedBytes(workspaceDir, spec.taskSet.benchmarkSha256)),
+        parseRun(getSealedBytes(workspaceDir, runSha256)),
+      ) * 2;
+      expect(
+        MAX_CONCURRENT_CELLS,
+        `the platform ceiling no longer covers this run's ${liveAttemptCeiling} live attempts`,
+      ).toBeGreaterThanOrEqual(liveAttemptCeiling);
 
       // ── resume through the PUBLIC operation, on a fresh venue ───────────────────────────
       // Capacity is deliberately taken OFF the table: the ceiling is the platform maximum, well
