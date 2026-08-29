@@ -47,6 +47,11 @@ export type OfferRail = z.infer<typeof OfferRailSchema>;
  * Where to present payment and collect bytes. Required even for a free offer — served on
  * sight still means served from somewhere. The gate protocol itself is a separate concern
  * (the paid-retrieval gate issue); this record only points at one.
+ *
+ * The scheme is deliberately unconstrained, because a gate may legitimately live behind
+ * `https`, `ipfs`, or a scheme that does not exist yet. A `uri` is therefore an address a
+ * buyer's own client decides how to dereference, never a link a consumer may hand to a
+ * browser or a shell unexamined: anyone can seal an offer naming any gate.
  */
 export const OfferGateSchema = namespacedObject({ uri: AbsoluteUri });
 export type OfferGate = z.infer<typeof OfferGateSchema>;

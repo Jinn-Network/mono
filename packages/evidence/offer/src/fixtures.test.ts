@@ -15,6 +15,13 @@ describe("the shipped fixture corpus", () => {
     expect(() => offerFixtureUrl("/etc/passwd")).toThrow();
     expect(() => offerFixtureUrl("../package.json")).toThrow();
     expect(() => offerFixtureUrl("offer/../../package.json")).toThrow();
+    // WHATWG URL resolves these as double-dot path segments, so a textual ".." scan misses
+    // them and the guard has to be on the resolved url instead.
+    expect(() => offerFixtureUrl("offer/%2e%2e/%2e%2e/package.json")).toThrow();
+    expect(() => offerFixtureUrl("offer/%2E%2E/%2E%2E/package.json")).toThrow();
+    expect(() => offerFixtureUrl("offer/.%2e/.%2e/package.json")).toThrow();
+    expect(() => offerFixtureUrl("file:///etc/passwd")).toThrow();
+    expect(() => offerFixtureUrl("https://example.invalid/x")).toThrow();
   });
 
   test("every golden envelope parses to its pinned document", async () => {
