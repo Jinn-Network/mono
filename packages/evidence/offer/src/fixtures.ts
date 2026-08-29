@@ -24,6 +24,8 @@ export const INVALID_OFFERS: readonly string[] = [
   "bare-hex-subject",
   "relative-gate-uri",
   "relative-rail-identifier",
+  "unnormalized-rail-identifier",
+  "rail-spelled-twice",
 ];
 
 const FIXTURES_ROOT = new URL("../fixtures/", import.meta.url);

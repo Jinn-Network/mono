@@ -56,6 +56,8 @@ export function resolveLiveOffers(entries: readonly OfferEntry[]): SupersessionR
 
   const supersededDigests = new Set<Sha256Digest>();
   const supersedersByPredecessor = new Map<Sha256Digest, number>();
+  /** successor digest -> the predecessor its honored supersession retires. */
+  const honoredEdges = new Map<Sha256Digest, Sha256Digest>();
 
   unique.forEach((entry, index) => {
     // The schema pins `supersedes` to the `sha256:<64 lowercase hex>` grammar, which is
@@ -115,7 +117,38 @@ export function resolveLiveOffers(entries: readonly OfferEntry[]): SupersessionR
       });
     }
     supersededDigests.add(predecessorDigest);
+    honoredEdges.set(entry.digest, predecessorDigest);
   });
+
+  // A cycle cannot occur in honestly sealed bytes — an offer's digest is not knowable before
+  // the bytes naming it exist — so, like self-supersession above, this only ever arrives as
+  // hand-written input. It gets the same treatment for the same reason: retiring every member
+  // of a cycle would silently empty a holder's live set for a subject, and a set that vanishes
+  // with no diagnostic is the worst possible answer. The edges are dropped and every member
+  // stays live.
+  for (const digest of honoredEdges.keys()) {
+    const path: Sha256Digest[] = [];
+    for (let cursor: Sha256Digest | undefined = digest; cursor !== undefined;) {
+      if (path.includes(cursor)) {
+        const cycle = path.slice(path.indexOf(cursor));
+        for (const member of cycle) {
+          const predecessor = honoredEdges.get(member);
+          honoredEdges.delete(member);
+          if (predecessor !== undefined) supersededDigests.delete(predecessor);
+        }
+        diagnostics.push({
+          code: "SUPERSESSION_CYCLE",
+          path: "",
+          message:
+            `offers ${cycle.join(", ")} supersede one another in a cycle; the supersessions are `
+            + "refused and every member stays live",
+        });
+        break;
+      }
+      path.push(cursor);
+      cursor = honoredEdges.get(cursor);
+    }
+  }
 
   return {
     live: unique.filter((entry) => !supersededDigests.has(entry.digest)),

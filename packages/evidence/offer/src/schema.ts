@@ -3,12 +3,21 @@
 import { compareCodeUnitStrings, Sha256DigestSchema } from "@jinn-network/trust-core";
 import { z } from "zod";
 
-import { isAbsoluteUri, namespacedObject } from "./extensions.js";
+import { isAbsoluteUri, isNormalizedAbsoluteUri, namespacedObject } from "./extensions.js";
 import { OFFER_RECORD_KIND } from "./identifiers.js";
 
 const AbsoluteUri = z
   .string()
   .refine(isAbsoluteUri, "must be an absolute URI with no whitespace");
+
+/** For a URI that is an identity key — see `isNormalizedAbsoluteUri`. */
+const NormalizedAbsoluteUri = z
+  .string()
+  .refine(
+    isNormalizedAbsoluteUri,
+    "must be an absolute URI already in its normalized spelling (lowercase scheme and host, "
+      + "no default port), so one rail has exactly one identifier",
+  );
 
 /**
  * A payment amount is an exact integer written as a string in the rail's native units.
@@ -37,7 +46,7 @@ const RailAmount = z
  * equivalence across a multi-rail offer is the holder's assertion, sealed with the offer.
  */
 export const OfferRailSchema = namespacedObject({
-  rail: AbsoluteUri,
+  rail: NormalizedAbsoluteUri,
   to: z.string().min(1, "to is the rail-specific destination and cannot be empty"),
   amount: RailAmount,
 });
@@ -67,6 +76,10 @@ export type OfferGate = z.infer<typeof OfferGateSchema>;
  * because "pay on one of its rails" is ambiguous when one rail carries two amounts, and the
  * gate matches a rail entry by integer-exact amount. Sorted because equal terms must seal to
  * equal bytes and JCS does not sort arrays, so the schema does.
+ *
+ * Both rules compare rail identifiers as exact strings, which is why `rail` must already be in
+ * its normalized spelling: without that, two spellings of one URI would pass uniqueness and
+ * sortedness alike, and the offer would carry one rail at two prices.
  */
 const OfferRailsSchema = z.array(OfferRailSchema).superRefine((rails, ctx) => {
   for (let index = 1; index < rails.length; index += 1) {
@@ -114,4 +127,17 @@ export type OfferRecord = z.infer<typeof OfferRecordSchema>;
 /** An offer with no rail entries is served on sight; zero is first-class, never absence. */
 export function isFreeOffer(offer: OfferRecord): boolean {
   return offer.rails.length === 0;
+}
+
+/**
+ * Puts rail entries in the order the schema requires. Producers hold terms in whatever order
+ * they were priced; sealing refuses an unsorted list rather than reordering it, because a
+ * canonicalizer that silently rewrites content is how one document quietly becomes another.
+ * This is the sanctioned way to satisfy the rule without every producer reimplementing
+ * UTF-16 code-unit ordering — the one ordering that never consults the host locale.
+ */
+export function sortOfferRails<T extends { readonly rail: string }>(
+  rails: readonly T[],
+): readonly T[] {
+  return [...rails].sort((left, right) => compareCodeUnitStrings(left.rail, right.rail));
 }

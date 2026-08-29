@@ -12,7 +12,24 @@ const REVERSE_DNS_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z][A-Za-z0-9-]*)
 export function isAbsoluteUri(value: string): boolean {
   if (/\s/u.test(value)) return false;
   try {
-    return new URL(value).protocol.length > 1;
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * An absolute URI already written in its one normalized spelling — `new URL` round-trips it
+ * unchanged. Used where a URI is an identity key rather than a locator: `HTTPS://R.EXAMPLE/v1`,
+ * `https://r.example:443/v1`, and `https://r.example/v1` are the same identifier, so admitting
+ * all three would let one rail appear twice in an offer and defeat the uniqueness rule that
+ * makes "pay on one of its rails" unambiguous.
+ */
+export function isNormalizedAbsoluteUri(value: string): boolean {
+  if (/\s/u.test(value)) return false;
+  try {
+    return new URL(value).href === value;
   } catch {
     return false;
   }

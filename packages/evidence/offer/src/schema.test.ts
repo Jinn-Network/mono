@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { OFFER_RECORD_KIND } from "./identifiers.js";
-import { isFreeOffer, OfferRecordSchema } from "./schema.js";
+import { isFreeOffer, OfferRecordSchema, sortOfferRails } from "./schema.js";
 
 const SUBJECT = `sha256:${"a".repeat(64)}`;
 const USDC = "https://spec.jinn.network/rails/eip155-8453-erc20-usdc/v1";
@@ -86,6 +86,27 @@ describe("the offer record schema", () => {
         expect(parse(offer({ rails: [{ rail, to: "x", amount: "1" }] })).success).toBe(false);
       }
     });
+
+    // Without this, one rail spelled two ways passes both uniqueness and sortedness, and the
+    // offer carries one rail at two prices.
+    test("refuse an un-normalized spelling of an identifier that is already an identity key", () => {
+      for (const rail of [
+        "HTTPS://RAILS.EXAMPLE/v1",
+        "https://rails.example:443/v1",
+        "https://rails.example",
+      ]) {
+        expect(parse(offer({ rails: [{ rail, to: "x", amount: "1" }] })).success).toBe(false);
+      }
+    });
+
+    test("two spellings of one rail can no longer masquerade as two rails", () => {
+      expect(parse(offer({
+        rails: [
+          { rail: "HTTPS://RAILS.EXAMPLE/v1", to: "a", amount: "1" },
+          { rail: "https://rails.example/v1", to: "b", amount: "999" },
+        ],
+      })).success).toBe(false);
+    });
   });
 
   describe("rails ordering and uniqueness", () => {
@@ -114,6 +135,26 @@ describe("the offer record schema", () => {
           { rail: USDC, to: "y", amount: "2" },
         ],
       })).success).toBe(false);
+    });
+  });
+
+  describe("sortOfferRails", () => {
+    test("puts entries in the order the schema requires", () => {
+      const unsorted = [
+        { rail: USDC, to: "y", amount: "2" },
+        { rail: OLAS, to: "x", amount: "1" },
+      ];
+      expect(parse(offer({ rails: unsorted })).success).toBe(false);
+      expect(parse(offer({ rails: sortOfferRails(unsorted) })).success).toBe(true);
+    });
+
+    test("does not mutate its input", () => {
+      const unsorted = [
+        { rail: USDC, to: "y", amount: "2" },
+        { rail: OLAS, to: "x", amount: "1" },
+      ];
+      sortOfferRails(unsorted);
+      expect(unsorted[0]!.rail).toBe(USDC);
     });
   });
 

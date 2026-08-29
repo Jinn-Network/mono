@@ -17,6 +17,7 @@ describe("the public surface", () => {
       "verifyOffer",
       "resolveLiveOffers",
       "isFreeOffer",
+      "sortOfferRails",
       "InvalidOfferError",
     ]) {
       expect(Object.hasOwn(root, name), `${name} must be exported`).toBe(true);
@@ -27,7 +28,7 @@ describe("the public surface", () => {
   // could publish for anyone else's bytes.
   test("exposes no unsigned record-sealing entry point", () => {
     expect("sealUnsignedOffer" in root).toBe(false);
-    expect(root.sealOffer.length).toBe(1);
+    expect("sealUnsignedOfferPayload" in root).toBe(false);
   });
 
   // The fixture signer and the conformance kit belong to /testing, never the root.

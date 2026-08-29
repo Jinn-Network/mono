@@ -16,7 +16,6 @@ const { OFFER_RECORD_KIND, sealOffer } = await import(join(root, "dist", "index.
 const { createFixtureOfferSigner } = await import(join(root, "dist", "testing.js"));
 
 const SUBJECT = `sha256:${"a".repeat(64)}`;
-const OTHER_SUBJECT = `sha256:${"b".repeat(64)}`;
 const GATE = { uri: "https://gate.example/offers" };
 const USDC_BASE = "https://spec.jinn.network/rails/eip155-8453-erc20-usdc/v1";
 const OLAS_BASE = "https://spec.jinn.network/rails/eip155-8453-erc20-olas/v1";
@@ -69,6 +68,19 @@ const INVALID = {
   "relative-rail-identifier": {
     ...priced,
     rails: [{ ...priced.rails[1], rail: "usdc" }],
+  },
+  // A rail identifier is an identity key, so it must arrive in its one normalized spelling.
+  "unnormalized-rail-identifier": {
+    ...priced,
+    rails: [{ ...priced.rails[1], rail: "HTTPS://SPEC.JINN.NETWORK/rails/eip155-8453-erc20-usdc/v1" }],
+  },
+  // The same rail spelled two ways would otherwise pass uniqueness and sortedness alike.
+  "rail-spelled-twice": {
+    ...priced,
+    rails: [
+      { ...priced.rails[1], rail: "HTTPS://SPEC.JINN.NETWORK/rails/eip155-8453-erc20-usdc/v1" },
+      { ...priced.rails[1], amount: "999" },
+    ],
   },
 };
 

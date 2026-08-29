@@ -56,6 +56,11 @@ export type OfferVerification =
       /** Present when the envelope parsed and only the holder leg failed. */
       readonly offer?: OfferRecord;
       readonly digest?: Sha256Digest;
+      /**
+       * Present whenever a binding resolved but a later leg refused it — a scope violation is
+       * far easier to act on when the caller can see which scopes the binding actually carried.
+       */
+      readonly resolvedBinding?: ResolvedBinding;
     };
 
 /**
@@ -104,6 +109,9 @@ export async function verifyOffer(
       detail: outcome.detail ?? "the offer signature did not resolve to the claimed holder",
       offer: parsed.offer,
       digest: parsed.digest,
+      ...(outcome.resolvedBinding === undefined
+        ? {}
+        : { resolvedBinding: outcome.resolvedBinding }),
     };
   }
 

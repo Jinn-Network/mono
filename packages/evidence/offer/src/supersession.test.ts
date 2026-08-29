@@ -121,6 +121,37 @@ describe("resolveLiveOffers", () => {
     expect(report.live).toHaveLength(1);
   });
 
+  // Impossible against honestly sealed bytes, but a set that vanishes with no diagnostic is
+  // the worst possible answer to hand-written input.
+  test("a supersession cycle is reported and leaves every member live", () => {
+    const left = entry("1");
+    const right = entry("2");
+    const report = resolveLiveOffers([
+      { ...left, offer: { ...left.offer, supersedes: right.digest } as OfferRecord },
+      { ...right, offer: { ...right.offer, supersedes: left.digest } as OfferRecord },
+    ]);
+    expect(codes(report)).toEqual(["SUPERSESSION_CYCLE"]);
+    expect(report.live).toHaveLength(2);
+    expect(report.superseded).toEqual([]);
+  });
+
+  test("a cycle does not retire offers outside it", () => {
+    const left = entry("1");
+    const right = entry("2");
+    const outside = entry("3");
+    const successor = entry("4", { supersedes: outside.digest });
+    const report = resolveLiveOffers([
+      { ...left, offer: { ...left.offer, supersedes: right.digest } as OfferRecord },
+      { ...right, offer: { ...right.offer, supersedes: left.digest } as OfferRecord },
+      outside,
+      successor,
+    ]);
+    expect(codes(report)).toEqual(["SUPERSESSION_CYCLE"]);
+    expect(report.live.map((live) => live.digest))
+      .toEqual([left.digest, right.digest, successor.digest]);
+    expect(report.superseded.map((old) => old.digest)).toEqual([outside.digest]);
+  });
+
   test("offers for different subjects never interfere", () => {
     const mine = entry("1");
     const other = entry("2", { subject: OTHER_SUBJECT });

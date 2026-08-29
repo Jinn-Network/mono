@@ -9,7 +9,12 @@ export {
 } from "./identifiers.js";
 
 // Extension discipline
-export { isAbsoluteUri, isNamespacedExtensionKey, namespacedObject } from "./extensions.js";
+export {
+  isAbsoluteUri,
+  isNamespacedExtensionKey,
+  isNormalizedAbsoluteUri,
+  namespacedObject,
+} from "./extensions.js";
 
 // Record kind
 export {
@@ -17,6 +22,7 @@ export {
   OfferGateSchema,
   OfferRailSchema,
   OfferRecordSchema,
+  sortOfferRails,
 } from "./schema.js";
 export type { OfferGate, OfferRail, OfferRecord } from "./schema.js";
 

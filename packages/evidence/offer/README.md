@@ -57,6 +57,14 @@ because "pay on one of its rails" is ambiguous when one rail carries two prices,
 gate matches a rail entry by integer-exact amount. Sorted because equal terms must seal to
 equal bytes and JCS does not sort arrays, so the schema does.
 
+Both rules compare identifiers as exact strings, so a rail identifier must arrive already in
+its normalized spelling — `new URL` round-trips it unchanged. Without that,
+`HTTPS://R.EXAMPLE/v1` and `https://r.example/v1` would pass uniqueness and sortedness alike
+and the offer would carry one rail at two prices. Sealing refuses an unsorted list rather than
+reordering it, because a canonicalizer that silently rewrites content is how one document
+quietly becomes another; `sortOfferRails` puts a producer's entries in the required order
+without every producer reimplementing locale-free ordering.
+
 Top-level keys beyond the ones above must be namespaced (reverse-DNS or absolute URI, TEP
 §21.3). The same rule applies inside a rail entry and inside `gate`.
 
@@ -82,6 +90,13 @@ const outcome = await verifyOffer(
 `verifyOffer` checks both halves and needs both: `parseOfferEnvelope` alone proves only that
 someone wrote a price down. The binding must carry the offers trust scope
 (`OFFER_TRUST_SCOPE`) at the offer's effective time.
+
+Read the success case precisely. `ok: true` establishes that the signing key is bound to the
+agent you named, at that time, in that scope — it does not establish who that agent is. The
+holder IRI is an input, not something read out of the record, so it has to come from an
+independent claim: in practice the offer's announcement, on a chain that is holder-owned. A
+caller who derives the holder from the signing key has asked the signature to vouch for
+itself and learned nothing.
 
 ## Supersession
 
