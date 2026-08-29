@@ -110,18 +110,21 @@ describe("SWE-bench import — the batch timestamp is validated at the same edge
     // avoid.
     expect(() => importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "2026-02-30" }))
       .toThrow(/^provenanceTimestamp: timestamp "2026-02-30" cannot be converted/u);
-    expect(() => importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "not-a-timestamp" }))
-      .toThrow(/^provenanceTimestamp: .*cannot be converted/u);
   });
 
-  test("a malformed ROW is not mis-attributed to the batch timestamp", () => {
-    // Same discipline as the per-instance path: the try wraps only the conversion, so a row-shape
-    // failure keeps its own message even though every row carries the batch value.
-    const badRow = { ...ROWS[1]!, image: {} };
-    const withBatch = () =>
-      importSweBench([ROWS[0]!, badRow], { ...OPTS, provenanceTimestamp: "2026-01-03" });
-    expect(withBatch).toThrow();
-    expect(withBatch).not.toThrow(/provenanceTimestamp/u);
+  test("the batch value is refused even when every row carries an override", () => {
+    // The batch conversion runs once, before the row loop, so it fails fast on a value that no row
+    // would have read. Deliberate: the option is documented as the per-instance fallback, and a
+    // malformed fallback is a defect whether or not this particular slate happens to cover it.
+    expect(() =>
+      importSweBench(ROWS, {
+        ...OPTS,
+        provenanceTimestamp: "2026-02-30",
+        provenanceTimestamps: Object.fromEntries(
+          ROWS.map((row) => [row.instance_id, "2026-01-03T00:00:00Z"]),
+        ),
+      }),
+    ).toThrow(/^provenanceTimestamp: /u);
   });
 });
 

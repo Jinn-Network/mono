@@ -17,6 +17,9 @@
 
 import { describe, expect, test, vi } from "vitest";
 
+// MOCK_JUSTIFICATION: the platform package is the boundary, and its judgeability throw is no
+// longer reachable through any public option (see the header). Stubbing that one throw is the
+// only way left to exercise the product's mapping of it.
 vi.mock("@jinn-network/benchmarking-interop", () => ({
   importSweBench: () => {
     throw new Error(
@@ -32,28 +35,20 @@ vi.mock("@jinn-network/benchmarking-interop", () => ({
 const { BenchmarkProductError } = await import("../errors.js");
 const { convertSweBenchRows } = await import("./swebench.js");
 
-// The platform's own public importer fixture (packages/benchmarking/interop/fixtures/swebench/row.json).
-const GOLDEN_ROW = {
-  instance_id: "swe-rebench-2024-00042",
-  repo: "psf/requests",
-  base_commit: "d8bdd423ab2df9f87b7975cdb32b31f3002a20c0",
-  problem_statement: "Fix the connection pool leak when retries are exhausted.",
+// `importSweBench` is stubbed, so the row content is inert — it only has to satisfy this module's
+// own Zod row schema so the mapping under test is the thing that runs. Deliberately NOT a copy of
+// the golden fixture: a copy would imply a coupling that does not exist here, and would rot.
+const MINIMAL_ROW = {
+  instance_id: "stub-0001",
+  repo: "example/repo",
+  base_commit: "0000000000000000000000000000000000000000",
+  problem_statement: "stub",
   language: "python",
-  image: {
-    uri: "https://example.org/images/swe-rebench-runner:2024-00042",
-    digest: { sha256: "e8d6cfe4f52e87a1292f3897bf0bea28e4bde32703e6792bb9b1bc60d3024817" },
-  },
-  testMaterial: [{ uri: "https://example.org/tests/swe-rebench-2024-00042/test_pool.py" }],
-  parser: {
-    id: "jinn.parser.pytest-json-report",
-    version: "1.0.0",
-    digest: "sha256:d2136b44c86f551b2494d616a8ee7afd58e6f90681f1beb84441113154a13897",
-  },
-  transitions: {
-    failToPass: ["test_pool.py::test_retry_releases_connection"],
-    passToPass: ["test_pool.py::test_basic_get"],
-  },
-  timeout: 1800,
+  image: { uri: "https://example.org/image" },
+  testMaterial: [{ uri: "https://example.org/test.py" }],
+  parser: { id: "jinn.parser.stub", version: "1.0.0", digest: "sha256:00" },
+  transitions: { failToPass: ["a"], passToPass: ["b"] },
+  timeout: 1,
 };
 
 const OPTS = { name: "swe-bench probe", description: "interop conversion test", version: "1.0.0" };
@@ -62,7 +57,7 @@ describe("convertSweBenchRows — platform judgeability failures", () => {
   test("a judgeability throw refuses validation naming benchmark-judgeability", () => {
     let caught: unknown;
     try {
-      convertSweBenchRows([GOLDEN_ROW], OPTS);
+      convertSweBenchRows([MINIMAL_ROW], OPTS);
     } catch (cause) {
       caught = cause;
     }
