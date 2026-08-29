@@ -13,6 +13,7 @@ import type {
   IntegrityAnchorsReport,
   PublicBundleAnchorTrustMaterial,
 } from "./anchor/check.js";
+import type { PublicBundleSigner, PublicBundleSignerRole } from "./signers.js";
 import { VERIFIER_VERSION } from "./version.js";
 
 export { VERIFIER_VERSION } from "./version.js";
@@ -106,6 +107,42 @@ function renderAnchorReport(report: IntegrityAnchorsReport): string {
   return `\nAnchors\n${anchors}\n\nAnchor subjects\n${report.subjects.map(renderSubject).join("\n")}\n`;
 }
 
+const SIGNER_ROLE_NAMES: Record<PublicBundleSignerRole, string> = {
+  publisher: "publisher",
+  "automated-grader": "automated grader",
+  "human-reviewer": "human reviewer",
+  "label-admission": "label admission",
+};
+
+const SIGNER_ROLE_ORDER: readonly PublicBundleSignerRole[] = [
+  "publisher",
+  "automated-grader",
+  "human-reviewer",
+  "label-admission",
+];
+
+/** The role in plain words. `urn:`/`did:key` identifiers stay in `--json`, where they are the join
+ * key a reader actually needs them for; on this surface they are noise a reader has to decode.
+ * The custody suffix is omitted for the publisher, who *is* the operator the others are compared
+ * against, and for a bundle that declares no custody at all. */
+function renderSignerGroup(role: PublicBundleSignerRole, custody: PublicBundleSigner["custody"], count: number): string {
+  const suffix = custody === "same-operator" && role !== "publisher" ? " \u2014 same operator" : "";
+  return `  ${SIGNER_ROLE_NAMES[role]}${suffix} \u00b7 ${count} ${count === 1 ? "key" : "keys"}`;
+}
+
+function renderSigners(signers: readonly PublicBundleSigner[]): string {
+  const counts = new Map<string, { role: PublicBundleSignerRole; custody: PublicBundleSigner["custody"]; count: number }>();
+  for (const signer of signers) {
+    const key = `${signer.role} ${signer.custody}`;
+    const group = counts.get(key);
+    if (group === undefined) counts.set(key, { role: signer.role, custody: signer.custody, count: 1 });
+    else group.count += 1;
+  }
+  const groups = [...counts.values()]
+    .sort((left, right) => SIGNER_ROLE_ORDER.indexOf(left.role) - SIGNER_ROLE_ORDER.indexOf(right.role));
+  return `\nSigned by\n${groups.map((group) => renderSignerGroup(group.role, group.custody, group.count)).join("\n")}\n`;
+}
+
 export function renderVerifiedBundle(result: PublicBundleVerificationResult): string {
   const checks = result.checks.map((check) => `${check.padEnd(24)}passed`).join("\n");
   const totalChecks = result.format === "benchmark-product-public-bundle/5"
@@ -119,6 +156,9 @@ export function renderVerifiedBundle(result: PublicBundleVerificationResult): st
   const anchors = "anchors" in result && result.anchors !== undefined
     ? renderAnchorReport(result.anchors)
     : "";
+  const signers = result.signers === undefined || result.signers.length === 0
+    ? ""
+    : renderSigners(result.signers);
   const anchorLimits = anchors === ""
     ? ""
     : "\nAn anchor dates the bytes it covers and says nothing else about the run: not\nthat results were produced after it, and not that the anchoring authority is\nindependent of the bundle's owner.";
@@ -127,7 +167,7 @@ Bundle: ${identity}
 Format: ${result.format}
 
 ${checks}
-${anchors}
+${signers}${anchors}
 This checks the bundle's integrity, evidence closure, calculations, report,
 and claim consistency. It does not prove that the machine that produced the
 bundle was honest or that the compared identities are independent parties.${anchorLimits}
