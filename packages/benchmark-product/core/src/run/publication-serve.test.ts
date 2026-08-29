@@ -10,9 +10,9 @@
  */
 
 import { createPublicKey, verify as cryptoVerify } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { chmodSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
   WELL_KNOWN_PATH,
@@ -29,6 +29,7 @@ import {
 import { parseWellKnownDocument } from "@jinn-network/record-discovery-serve";
 import type { DsseEnvelope } from "@jinn-network/trust-core";
 import { createWorkspaceLayout } from "../workspace/workspace.js";
+import { publicationServeRoot } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import {
@@ -36,7 +37,7 @@ import {
   refreshWorkspacePublicationWellKnown,
   withWorkspacePublicationSourceLock,
 } from "./publication-source.js";
-import { startPublicationArchiveServer } from "./publication-serve.js";
+import { startPublicationArchiveServer, type PublicationArchiveServer } from "./publication-serve.js";
 
 const SOURCE_NAME = "colophon-benchmarks";
 const RECORD_KIND = "https://spec.jinn.network/records/task/v1";
@@ -138,7 +139,7 @@ describe("public archive server", () => {
 
     const server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
     try {
-      expect(server.announced).toBe(true);
+      expect(server.wellKnown).toBe("published");
 
       // 1. Discovery: the base URL alone must name the source and its newest archive page.
       const wellKnown = parseWellKnownDocument(await getJson(`${server.url}${WELL_KNOWN_PATH}`));
@@ -208,7 +209,7 @@ describe("public archive server", () => {
     expect(await refreshWorkspacePublicationWellKnown(workspaceDir, SOURCE_NAME)).toBe(false);
     const server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, host: "127.0.0.1", port: 0 });
     try {
-      expect(server.announced).toBe(false);
+      expect(server.wellKnown).toBe("not-announced");
       expect(server.port).toBeGreaterThan(0);
       expect((await fetch(`${server.url}${WELL_KNOWN_PATH}`)).status).toBe(404);
       expect((await fetch(`${server.url}/`)).status).toBe(404);
@@ -232,6 +233,32 @@ describe("public archive server", () => {
       expect(new Uint8Array(await probe.arrayBuffer())).toHaveLength(0);
     } finally {
       await server.close();
+    }
+  });
+
+  // Root ignores the mode bits below, so the induced failure would not occur; the behavior under
+  // test is the reporting, not the permission check.
+  const asNonRoot = typeof process.getuid === "function" && process.getuid() !== 0 ? test : test.skip;
+  asNonRoot("reports a failed well-known refresh apart from a source that never announced", async () => {
+    const workspaceDir = workspace("publication-serve-refresh-failed-");
+    await announce(workspaceDir, "only", "2026-08-13T12:00:00Z");
+    // Any failure to write the derived document takes this path -- lock contention against an
+    // in-flight announce is the common one; an unwritable well-known directory is simply the one
+    // a test can induce without racing a 30-second lock timeout.
+    const wellKnownDir = join(publicationServeRoot(workspaceDir), dirname(WELL_KNOWN_PATH).slice(1));
+    chmodSync(wellKnownDir, 0o500);
+    let server: PublicationArchiveServer | undefined;
+    try {
+      server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
+      // Not `not-announced`: this source HAS announced, and the document being served may now
+      // name a superseded archive page -- the opposite operator response from "nothing yet".
+      expect(server.wellKnown).toBe("refresh-failed");
+      expect(server.refreshFailure).toBeDefined();
+      // It serves what is on disk regardless: the signed chain is readable and complete.
+      expect((await fetch(`${server.url}${headPath(SOURCE_NAME)}`)).status).toBe(200);
+    } finally {
+      await server?.close();
+      chmodSync(wellKnownDir, 0o700);
     }
   });
 

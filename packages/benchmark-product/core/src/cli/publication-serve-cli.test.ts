@@ -56,9 +56,9 @@ describe("publication serve", () => {
 
     const result = await running;
     expect(result.exitCode).toBe(0);
-    const envelope = JSON.parse(result.stdout) as { ok: boolean; result: { url: string; announced: boolean } };
+    const envelope = JSON.parse(result.stdout) as { ok: boolean; result: { url: string; wellKnown: string } };
     expect(envelope.ok).toBe(true);
-    expect(envelope.result.announced).toBe(false);
+    expect(envelope.result.wellKnown).toBe("not-announced");
     await expect(fetch(envelope.result.url)).rejects.toThrow();
   });
 

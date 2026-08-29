@@ -32,7 +32,15 @@ export interface PublicationArchiveServerOptions {
   readonly host?: string;
   /** `0` binds an ephemeral port; the bound port is reported back on the result. */
   readonly port?: number;
+  /**
+   * Receives a post-listen server error. The listener exists so a late `EMFILE` cannot become an
+   * uncaught exception in a process whose whole job is to stay up unattended; this is how that
+   * silence is broken for the operator watching it.
+   */
+  readonly onError?: (cause: unknown) => void;
 }
+
+export type PublicationWellKnownOutcome = "published" | "not-announced" | "refresh-failed";
 
 export interface PublicationArchiveServer {
   readonly host: string;
@@ -40,11 +48,15 @@ export interface PublicationArchiveServer {
   /** Origin the archive is mounted at, with no trailing slash. */
   readonly url: string;
   /**
-   * Whether a well-known document naming the current archive root was written at start. `false`
-   * when the source has never announced, and also when the refresh could not run -- serving the
-   * tree that is already on disk beats refusing to serve over a derived document.
+   * What the start-time well-known refresh did. `refresh-failed` is kept distinct from
+   * `not-announced` because they call for opposite operator responses: nothing to publish yet,
+   * versus a document on disk that may now name a superseded archive page. Either way the server
+   * still serves -- the signed chain is on disk, and refusing to serve it over a derived document
+   * would be the wrong trade -- but only one of the two is a problem.
    */
-  readonly announced: boolean;
+  readonly wellKnown: PublicationWellKnownOutcome;
+  /** The refresh failure, present only when `wellKnown` is `refresh-failed`. */
+  readonly refreshFailure?: unknown;
   close(): Promise<void>;
 }
 
@@ -91,12 +103,20 @@ export async function startPublicationArchiveServer(
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) throw new TypeError("port must be an integer from 0 to 65535");
 
   // A serve that cannot refresh the derived document still serves the signed chain: the common
-  // cause is another product process holding the source lock mid-announce, and refusing to serve
-  // a readable tree over that would be the wrong trade.
-  let announced = false;
+  // cause is another product process holding the source lock mid-announce, whose acquire times
+  // out and throws rather than waiting forever. Refusing to serve a readable tree over that would
+  // be the wrong trade -- but reporting it as "nothing announced yet" would be a false statement
+  // about a source that has announced, so the failure is carried out separately.
+  let wellKnown: PublicationWellKnownOutcome;
+  let refreshFailure: unknown;
   try {
-    announced = await refreshWorkspacePublicationWellKnown(options.workspaceDir, options.sourceName);
-  } catch { /* served as found */ }
+    wellKnown = await refreshWorkspacePublicationWellKnown(options.workspaceDir, options.sourceName)
+      ? "published"
+      : "not-announced";
+  } catch (cause) {
+    wellKnown = "refresh-failed";
+    refreshFailure = cause;
+  }
   const handler = createWorkspacePublicationHttpHandler(options.workspaceDir);
 
   const server = createServer((request, response) => {
@@ -109,8 +129,9 @@ export async function startPublicationArchiveServer(
         // unless the status line is already out, in which case a truncated body must not be
         // presentable as a complete one.
         if (response.headersSent) { response.destroy(); return; }
-        response.writeHead(404);
-        response.end();
+        // The fallback itself is guarded: an escaping throw here would surface as an unhandled
+        // rejection out of this detached async call and take the process down.
+        try { response.writeHead(404); response.end(); } catch { response.destroy(); }
       }
     })();
   });
@@ -120,8 +141,10 @@ export async function startPublicationArchiveServer(
     server.listen(port, host, () => { server.removeListener("error", reject); resolve(); });
   });
   // A listening server with no `error` listener turns any later emission into an uncaught
-  // exception, which would kill a process whose whole job is to stay up unattended.
-  server.on("error", () => undefined);
+  // exception, which would kill a process whose whole job is to stay up unattended. Reported
+  // rather than swallowed: resource exhaustion that nobody is told about looks exactly like a
+  // healthy idle server.
+  server.on("error", (cause) => options.onError?.(cause));
 
   const address = server.address() as AddressInfo;
   const authority = address.family === "IPv6" ? `[${address.address}]` : address.address;
@@ -129,7 +152,8 @@ export async function startPublicationArchiveServer(
     host: address.address,
     port: address.port,
     url: `http://${authority}:${address.port}`,
-    announced,
+    wellKnown,
+    ...(wellKnown === "refresh-failed" ? { refreshFailure } : {}),
     close: () => new Promise<void>((resolve, reject) => {
       // Idempotent: a second close is the caller's `finally` running after an explicit stop, not
       // an error worth rejecting on.

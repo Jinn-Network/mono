@@ -12,7 +12,7 @@ Record Discovery serving layout:
 
 | Path | What it is | Mutability |
 |------|------------|------------|
-| `/.well-known/record-discovery` | names this workspace's source, its head path, and its newest archive page | rewritten after every announcement |
+| `/.well-known/jinn-record-discovery` | names this workspace's source, its head path, and its newest archive page | rewritten after every announcement |
 | `/sources/<name>/head` | the signed source head — current sequence, entry digest, `refreshBy` | rewritten after every announcement |
 | `/sources/<name>/entries/<page>` | a signed archive page, one entry per page, linked to its predecessor via `prevArchive` | immutable once written |
 | `/records/<sha256>` | the exact announced record bytes | immutable |
@@ -45,8 +45,8 @@ moving the archive to a new domain does not invalidate a single published
 record.
 
 What it must be is *reachable at announce time*. `publication register`,
-`publication report`, and `launch` each probe this base URL for the exact bytes
-they are about to announce and refuse the stage if the probe does not return
+`publication accounting`, `publication report`, and `launch` each probe this
+base URL for the exact bytes they are about to announce and refuse the stage if the probe does not return
 them. So the ordering is: serve (or mirror) first, configure second, announce
 third — not because the URL is permanent, but because the announce path checks
 it.
@@ -68,6 +68,14 @@ are exactly the table above, so the proxy needs no rewriting beyond stripping
 its own prefix if you mount below the origin root. Bind to a non-loopback
 address only when the proxy is on another host and the network between them is
 one you control.
+
+Give the archive its own origin, not a path on a domain that serves anything
+else. Publication artifacts carry the media type the producing venue declared
+for them, and the server returns it verbatim; a participant who supplies HTML
+bytes and declares `text/html` gets script execution on whatever origin the
+archive is mounted on. On a dedicated origin that is inert -- there is no
+cookie, no session, and no write route to reach -- which is exactly why it must
+not share an origin with something that has any of the three.
 
 ## Option B — publish the tree statically
 
@@ -111,7 +119,7 @@ statically is fine, because both read the same bytes.
 The acceptance test is a cold sync performed by a consumer that has never seen
 this source, on a machine that is not the producer:
 
-1. `GET <base>/.well-known/record-discovery` — it must name your source's agent
+1. `GET <base>/.well-known/jinn-record-discovery` — it must name your source's agent
    `did:key`, its name, its head path, and an archive root.
 2. `GET <base>/sources/<name>/head` — a DSSE envelope over the source head. Its
    `origin` must match the well-known entry, and `refreshBy` must be in the

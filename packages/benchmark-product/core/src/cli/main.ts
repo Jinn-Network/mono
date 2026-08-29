@@ -86,7 +86,7 @@ import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { DEFAULT_PUBLICATION_SOURCE_NAME, requireRunState } from "../run/state.js";
-import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer } from "../run/publication-serve.js";
+import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer, type PublicationWellKnownOutcome } from "../run/publication-serve.js";
 import { readDraftDocument } from "../operations/drafts.js";
 import { listMethodCatalog } from "../operations/method-catalog.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, readTextFile, required, type ParsedArgs } from "./args.js";
@@ -1130,6 +1130,22 @@ async function handlePublicationReport(args: ParsedArgs, context: CliContext, js
     `published signed Report v2 ${value.reportRecordSha256} (payload ${value.reportPayloadSha256}) at ${value.source.agent}/${value.source.name}#${value.receipt.sourceSequence}\n`);
 }
 
+/** How each start-time well-known outcome reads while the server is coming up. */
+const WELL_KNOWN_PROGRESS: Readonly<Record<PublicationWellKnownOutcome, string>> = {
+  published: "well-known published",
+  "not-announced": "no announcement yet — well-known withheld",
+  // Loud, because the document on disk may name a superseded archive page, and a cold consumer
+  // reading a superseded root silently misses every announcement after it.
+  "refresh-failed": "WARNING: the well-known document could not be refreshed and may be stale",
+};
+
+/** The same three outcomes in the terminal summary's past tense. */
+const WELL_KNOWN_SUMMARY: Readonly<Record<PublicationWellKnownOutcome, string>> = {
+  published: "the well-known document names the current archive root",
+  "not-announced": "the source has not announced yet, so no well-known document was published",
+  "refresh-failed": "the well-known document could not be refreshed, so what was served may name a superseded archive page",
+};
+
 /**
  * Serves this workspace's announcement source over plain HTTP until `context.shutdownSignal`
  * aborts. Read-only: the archive is append-only and digest-addressed, and this verb publishes no
@@ -1160,12 +1176,13 @@ async function handlePublicationServe(args: ParsedArgs, context: CliContext, jso
     sourceName: sourceName === undefined || sourceName === "" ? DEFAULT_PUBLICATION_SOURCE_NAME : sourceName,
     ...(host === undefined || host === "" ? {} : { host }),
     port,
+    ...(context.progress === undefined ? {} : { onError: (cause: unknown) => context.progress?.(`server error: ${cause instanceof Error ? cause.message : String(cause)}`) }),
   });
   try {
     // Taken after the bind so a failure to serve is not preceded by hijacking the process's
     // signal handling.
     const shutdownSignal = context.createShutdownSignal();
-    context.progress?.(`serving ${server.url} (${server.announced ? "well-known published" : "no announcement yet — well-known withheld"}); press Ctrl-C to stop`);
+    context.progress?.(`serving ${server.url} (${WELL_KNOWN_PROGRESS[server.wellKnown]}); press Ctrl-C to stop`);
     if (!shutdownSignal.aborted) {
       await new Promise<void>((resolve) => { shutdownSignal.addEventListener("abort", () => resolve(), { once: true }); });
     }
@@ -1173,9 +1190,9 @@ async function handlePublicationServe(args: ParsedArgs, context: CliContext, jso
     await server.close();
   }
   return renderResult(
-    { ok: true, result: { url: server.url, host: server.host, port: server.port, announced: server.announced } },
+    { ok: true, result: { url: server.url, host: server.host, port: server.port, wellKnown: server.wellKnown } },
     jsonMode,
-    (value) => `served ${value.url} until shutdown; ${value.announced ? "the well-known document names the current archive root" : "the source has not announced yet, so no well-known document was published"}\n`,
+    (value) => `served ${value.url} until shutdown; ${WELL_KNOWN_SUMMARY[value.wellKnown]}\n`,
   );
 }
 
