@@ -36,14 +36,23 @@ function canonical(value: unknown): Uint8Array {
 const SOURCE_BYTES = encoder.encode("the licensed upstream source document\n");
 const SOURCE_DIGEST = sha256Hex(SOURCE_BYTES);
 
-const SOURCE_MANIFEST_BYTES = encoder.encode(`${JSON.stringify({
-  protocol: "https://spec.jinn.network/binary-judgment/source-manifest-entry/v1",
-  provenanceSha256: `sha256:${SOURCE_DIGEST}`,
-  source: { uri: "https://example.test/source.json", digest: { sha256: SOURCE_DIGEST } },
-  license: { uri: "https://example.test/LICENSE.txt", digest: { sha256: "b".repeat(64) } },
-  attribution: { uri: "https://example.test/ATTRIBUTION.txt", digest: { sha256: "c".repeat(64) } },
-  publishedAt: "2026-01-02T03:04:05Z",
-})}\n`);
+const SECOND_SOURCE_DIGEST = sha256Hex(encoder.encode("a second licensed source\n"));
+
+function sourceRow(digest: string, suffix: string): string {
+  return JSON.stringify({
+    protocol: "https://spec.jinn.network/binary-judgment/source-manifest-entry/v1",
+    provenanceSha256: `sha256:${digest}`,
+    source: { uri: `https://example.test/source-${suffix}.json`, digest: { sha256: digest } },
+    license: { uri: `https://example.test/LICENSE-${suffix}.txt`, digest: { sha256: "b".repeat(64) } },
+    attribution: { uri: `https://example.test/ATTRIBUTION-${suffix}.txt`, digest: { sha256: "c".repeat(64) } },
+    publishedAt: "2026-01-02T03:04:05Z",
+  });
+}
+
+// Real JSONL: two rows, so the extension rule sees bytes that are not a single JSON document.
+const SOURCE_MANIFEST_BYTES = encoder.encode(
+  `${[sourceRow(SOURCE_DIGEST, "one"), sourceRow(SECOND_SOURCE_DIGEST, "two")].join("\n")}\n`,
+);
 
 const ITEM_BANK_BYTES = canonical({
   protocol: "https://spec.jinn.network/binary-judgment/item-bank-entry/v1",
@@ -78,7 +87,7 @@ function snapshotOf(overrides: SnapshotOverrides = {}): VerifiedBundleSnapshot {
     reveal: { policy: "immediate" },
   };
   const evidence = {
-    format: "benchmark-product.bundle-evidence/2",
+    format: "benchmark-product-evidence-catalog/4",
     records: records
       .map((record) => ({ sha256: sha256Hex(record.bytes), roles: record.roles }))
       .sort((left, right) => (left.sha256 < right.sha256 ? -1 : left.sha256 > right.sha256 ? 1 : 0)),
@@ -86,7 +95,7 @@ function snapshotOf(overrides: SnapshotOverrides = {}): VerifiedBundleSnapshot {
   const fileBytes = new Map<string, Uint8Array>([
     ["benchmark.json", canonical(benchmark)],
     ["evidence.json", canonical(evidence)],
-    ["qualification.json", canonical({ format: "benchmark-product.bundle-qualification/1" })],
+    ["qualification.json", canonical({ format: "benchmark-product-binary-qualification/1" })],
     ["bundle.json", canonical({ format: overrides.format ?? BUNDLE_V4_FORMAT, files: [] })],
   ]);
   for (const record of records) fileBytes.set(`records/${sha256Hex(record.bytes)}.bin`, record.bytes);
@@ -178,16 +187,18 @@ describe("freeze repository rendering", () => {
     expect(license).toContain("Colophon, LoCoMo judge freeze, 2026.");
 
     expect(notice).toContain(`source sha256:${SOURCE_DIGEST}`);
-    expect(notice).toContain("https://example.test/LICENSE.txt");
+    expect(notice).toContain("https://example.test/LICENSE-one.txt");
     expect(notice).toContain(`sha256:${"b".repeat(64)}`);
-    expect(notice).toContain("https://example.test/ATTRIBUTION.txt");
+    expect(notice).toContain("https://example.test/ATTRIBUTION-two.txt");
     // The modification notice the licence brief asks for.
     expect(notice).toContain("artifacts/source-item/");
     expect(notice).toMatch(/unmodified/);
     expect(notice).toMatch(/derived work/i);
 
     expect(spdx["packages"][0]["licenseDeclared"]).toBe("CC-BY-NC-4.0");
-    expect(spdx["packages"][1]["checksums"]).toEqual([{ algorithm: "SHA256", checksumValue: SOURCE_DIGEST }]);
+    expect(spdx["packages"]).toHaveLength(3);
+    expect(spdx["packages"].slice(1).map((entry: any) => entry.checksums[0].checksumValue).sort())
+      .toEqual([SOURCE_DIGEST, SECOND_SOURCE_DIGEST].sort());
   });
 
   test("the README states the derived-artifact doctrine and the check that proves the tree", () => {
@@ -261,9 +272,9 @@ describe("freeze repository commit id agrees with git itself", () => {
         env: {
           ...process.env,
           GIT_AUTHOR_NAME: "Colophon", GIT_AUTHOR_EMAIL: "freeze@colophon.invalid",
-          GIT_AUTHOR_DATE: "0 +0000",
+          GIT_AUTHOR_DATE: "@0 +0000",
           GIT_COMMITTER_NAME: "Colophon", GIT_COMMITTER_EMAIL: "freeze@colophon.invalid",
-          GIT_COMMITTER_DATE: "0 +0000",
+          GIT_COMMITTER_DATE: "@0 +0000",
         },
       }).trim();
 
@@ -275,9 +286,9 @@ describe("freeze repository commit id agrees with git itself", () => {
       env: {
         ...process.env,
         GIT_AUTHOR_NAME: "Colophon", GIT_AUTHOR_EMAIL: "freeze@colophon.invalid",
-        GIT_AUTHOR_DATE: "0 +0000",
+        GIT_AUTHOR_DATE: "@0 +0000",
         GIT_COMMITTER_NAME: "Colophon", GIT_COMMITTER_EMAIL: "freeze@colophon.invalid",
-        GIT_COMMITTER_DATE: "0 +0000",
+        GIT_COMMITTER_DATE: "@0 +0000",
       },
     }).trim();
 

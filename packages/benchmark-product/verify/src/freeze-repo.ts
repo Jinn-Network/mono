@@ -407,7 +407,6 @@ function renderSpdxMetadata(
         licenseDeclared: "NOASSERTION",
         licenseConcluded: "NOASSERTION",
         checksums: [{ algorithm: "SHA256", checksumValue: source.source.digest.sha256 }],
-        licenseInfoFromFiles: [],
         attributionTexts: [
           `licence document ${source.license.uri} sha256:${source.license.digest.sha256}`,
           `attribution document ${source.attribution.uri} sha256:${source.attribution.digest.sha256}`,
@@ -610,6 +609,18 @@ export async function exportFreezeRepo(
   deps: VerifyPublicBundleDeps = {},
 ): Promise<FreezeRepoExportResult> {
   const tree = renderFreezeRepo((await verifyPublicBundleSnapshot(bundleDir, deps)).snapshot);
+  // Never write into an occupied tree. Merging into leftovers would produce a directory that is
+  // not the rendered tree, and the export's whole contract is that the directory IS the tree; a
+  // recursive delete of a caller-named path is the wrong way to guarantee that.
+  let occupied: readonly string[] = [];
+  try {
+    occupied = listTree(repoDir);
+  } catch {
+    occupied = [];
+  }
+  if (occupied.length > 0) {
+    refuse("conflict", repoDir, `"${repoDir}" already contains files; export writes a complete tree and will not merge into one`);
+  }
   for (const [path, bytes] of tree.files) {
     const target = join(repoDir, path);
     mkdirSync(dirname(target), { recursive: true });

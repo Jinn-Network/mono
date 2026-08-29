@@ -423,6 +423,14 @@
       "reason": "portable verifier reads only the caller-selected immutable bundle and requires no workspace or principal"
     },
     {
+      "name": "freeze-repo export",
+      "reason": "deterministic public-repository projection reads only the caller-selected immutable bundle and writes one local directory; no workspace, principal, or audited record is involved"
+    },
+    {
+      "name": "freeze-repo verify",
+      "reason": "standalone byte-for-byte comparison of a published tree against the bundle it claims to be derived from; reads only what the caller names"
+    },
+    {
       "name": "demo1 prereg verify",
       "reason": "read-only post-lock/pre-dispatch gate verifies the exact local E4 witness without credentials or network access"
     },
