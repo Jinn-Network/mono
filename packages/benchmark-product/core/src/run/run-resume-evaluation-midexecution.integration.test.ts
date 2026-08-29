@@ -36,7 +36,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { parseBenchmark, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
-import { launchAndWatch } from "@jinn-network/benchmarking-run";
+import { launchAndWatch, MAX_CONCURRENT_CELLS } from "@jinn-network/benchmarking-run";
 import { armAdd } from "../operations/arms.js";
 import type { OperationContext } from "../operations/context.js";
 import { createDraft, readDraftDocument } from "../operations/drafts.js";
@@ -284,15 +284,25 @@ describe("resume reconciles an evaluation attempt killed mid-execution", () => {
       expect(readFileSync(journalPath, "utf8")).not.toContain("attempt-terminal");
 
       // ── resume through the PUBLIC operation, on a fresh venue ───────────────────────────
-      // Capacity headroom of one slot above the outstanding cell count: the interrupted
-      // evaluation attempt rehydrates NONTERMINAL, so the resumed backend counts it live and
-      // holds its capacity slot until that leg's own reconciliation settles it. Without the
-      // headroom an unrelated cell loses its dispatch to "local backend capacity exhausted" and
-      // expires — collateral of the crash, not the verdict-recovery question under test.
-      // That slot-holding is tracked as its own defect (issue #3192): reconciliation cannot
-      // move earlier than the evaluation cell's own preparation, so the slot is only
-      // released once this leg reaches `dispatchEvaluation`.
-      const resumed = await runResume(contextFor(clock), { draftId, maxConcurrentCells: 9 });
+      // Capacity is deliberately taken OFF the table: the ceiling is the platform maximum, well
+      // above the twelve attempts this run can ever hold live at once (six cells, each a solve
+      // leg and an evaluation leg). A smaller ceiling makes the test's own crash a race.
+      // `LocalBackend`'s rehydration calls `capacity.restore(live)` over every attempt on disk
+      // that has no `attempt-terminal` event, and the abandoned drive above leaves a
+      // TIMING-DEPENDENT number of those: the interrupted evaluation attempt always (it is
+      // rewound past its terminal on purpose), plus however many solve legs happened not to have
+      // terminaled at the instant the drive was abandoned — more of them on a slower or busier
+      // machine. Each holds a slot, and the evaluation one holds its until that leg reaches
+      // `dispatchEvaluation` (its own defect, issue #3192). Whenever the held count exceeds the
+      // headroom, an unrelated cell loses its dispatch to "local backend capacity exhausted" and
+      // expires — collateral of the crash, not the verdict-recovery question under test. A fixed
+      // small headroom cannot bound a count that varies with machine speed, so this does not use
+      // one: verified by sweeping the ceiling down, which reproduces exactly the CI failure
+      // (a cell `expired` at `dispatches: 1`, no attempt, no verdict) at and below 5.
+      const resumed = await runResume(contextFor(clock), {
+        draftId,
+        maxConcurrentCells: MAX_CONCURRENT_CELLS,
+      });
       expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
 
       const final = readRunJournalEntries(workspaceDir, draftId);
