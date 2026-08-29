@@ -5,10 +5,12 @@
  *
  * Before this guard, `verify.ts` accepted a second profile by byte-guessing: it rendered the
  * assets a pre-comparison ("Reader v1") producer would have written and, if the bundle happened
- * to match those bytes, adopted them as the expectation. No published bundle ever carried that
- * profile — the current producer cannot emit it (`core/src/bundle/materialize.ts` derives a
+ * to match those bytes, adopted them as the expectation. No bundle the verifier accepts is in
+ * that profile — the current producer cannot emit it (`core/src/bundle/materialize.ts` derives a
  * comparison for every non-binary bundle), and every conformance fixture carries the comparison
- * section — so the branch only widened what the verifier would accept.
+ * section — so the branch only widened what the verifier would accept. (The one committed bundle
+ * rendered without a comparison, `docs/proofs/2026-08-10-inspect-runtime/bundle`, refuses at its
+ * claim-package schema long before the asset check, as its own README records.)
  *
  * This test builds exactly that legacy rendering from the golden fixture's own verified facts and
  * requires the verifier to refuse it.
@@ -83,8 +85,8 @@ function rewriteAsLegacyPresentation(bundleDir: string): void {
   // `index.html` and `README.md`, so if the facts reconstructed above ever drifted from the ones
   // the verifier assembles internally, every asset would differ instead and this assertion would
   // fail — rather than the refusal below passing for an unrelated reason.
-  expect(changed.map(([name]) => name), "legacy rendering differs from the published profile")
-    .toEqual(["index.html", "README.md"]);
+  expect(changed.map(([name]) => name).sort(), "legacy rendering differs from the published profile")
+    .toEqual(["README.md", "index.html"]);
   for (const [name, bytes] of Object.entries(legacy)) writeFileSync(join(bundleDir, name), bytes);
   const manifest = JSON.parse(readFileSync(join(bundleDir, "bundle.json"), "utf8")) as {
     readonly format: "benchmark-product-public-bundle/2";

@@ -1771,13 +1771,12 @@ export async function verifyPublicBundleSnapshot(
     }),
     dissentCellKeys,
   };
-  // The closure selects the presentation profile, and the bundle must byte-match that one
-  // profile completely -- individual assets cannot be mixed, and there is no second profile the
-  // verifier will fall back to (issue #2984). A qualification-projecting bundle (`/4`, `/7`)
-  // renders the instrument-qualification graph and carries no comparison; every other bundle
-  // renders the human comparison, which `derivePublicComparison` always produces. The
-  // comparison-absent, qualification-absent rendering a pre-comparison producer would have
-  // written is therefore not a profile any bundle can be in, and is no longer accepted.
+  // The closure selects the presentation profile and the bundle must byte-match that one
+  // profile completely — assets cannot be mixed, and there is no second profile to fall back
+  // to (issue #2984). A qualification-projecting bundle (`/4`, `/7`) renders the
+  // instrument-qualification graph; every other one renders the human comparison, which
+  // `derivePublicComparison` above always produces. The comparison-absent rendering a
+  // pre-comparison producer would have written is therefore no bundle's profile.
   const expectedAssets = qualification !== undefined
     ? buildPublicAssets({ ...assetFacts, binaryQualification: binaryAssetQualification })
     : buildPublicAssets({ ...assetFacts, comparison });

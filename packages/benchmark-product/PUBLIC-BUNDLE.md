@@ -274,9 +274,9 @@ The bundle's closure selects exactly one presentation profile, and all five asse
 must byte-match that profile completely. A qualification-projecting bundle
 (`benchmark-product-public-bundle/4` and `/7`) renders the binary
 instrument-qualification graph and carries no comparison section; every other
-bundle renders the human comparison. There is no fallback profile: an asset set
-that is not the projection the closure selects is refused, whichever profile it
-happens to resemble.
+bundle that carries these five assets renders the human comparison. There is no
+fallback profile: an asset set that is not the projection the closure selects is
+refused, whichever profile it happens to resemble.
 
 ## Presentation and citation
 
