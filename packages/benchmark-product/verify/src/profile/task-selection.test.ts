@@ -150,6 +150,14 @@ describe("fixed-public-set", () => {
     ).message).toContain("withholds its items past the end of the run");
   });
 
+  test("refuses a schedule that never announces an opening, rather than reading it as open", () => {
+    // `notBefore` is optional under every reveal policy, so `{ policy: "scheduled" }` seals cleanly
+    // while naming no instant at which the items become readable. Read as open, deleting one
+    // optional key would let a privately assembled set pass the check that `after-run` fails.
+    expect(refusal(benchmark({ policy: "scheduled" }, CURATOR), run({ mode: "fixed-public-set" })).message)
+      .toContain("withholds its items past the end of the run");
+  });
+
   test("compares instants, not strings, so a differing UTC offset does not decide the check", () => {
     // 2026-08-19T20:00:00-05:00 is 2026-08-20T01:00:00Z — at or after closeAt, though it sorts before.
     expect(refusal(

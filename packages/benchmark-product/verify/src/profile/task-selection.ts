@@ -57,11 +57,19 @@ export interface TaskSelectionConsistencyInput {
  * `fixed-public-set`, and have both this check and the producer's pre-lock gate wave it through.
  * An uncomparable pair fails CLOSED for the same reason: it cannot arise from schema-valid records,
  * so treating it as proof of withholding costs nothing and removes the fail-open shape entirely.
+ *
+ * A `scheduled` reveal with no `notBefore` fails closed on the same principle. The Benchmark schema
+ * leaves `notBefore` optional under every policy, so `{ "policy": "scheduled" }` seals cleanly while
+ * announcing no instant at which the items become readable — strictly more withheld than
+ * `after-run`, which at least names the run's end. Reading it as open would hand a claimant a
+ * one-key evasion of the only reveal-policy teeth `fixed-public-set` has: delete the field, and a
+ * privately assembled set passes the check that `after-run` fails.
  */
 function withheldAtLock(benchmark: BenchmarkRecord, closeAt: string): boolean {
   const { policy, notBefore } = benchmark.reveal;
   if (policy === "after-run") return true;
-  if (policy !== "scheduled" || notBefore === undefined) return false;
+  if (policy !== "scheduled") return false;
+  if (notBefore === undefined) return true;
   const order = compareCalendarStrictRfc3339Instants(notBefore, closeAt);
   return order === undefined || order >= 0;
 }

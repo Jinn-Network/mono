@@ -290,7 +290,8 @@ under the `claim-consistency` check:
 - `fixed-public-set` is refused when the Benchmark record names no author — a set
   nobody declared was never publicly declared — and when its reveal policy
   withholds its items past the end of the run (`after-run`, or `scheduled` with a
-  `notBefore` at or after the Run's `closeAt`);
+  `notBefore` at or after the Run's `closeAt`, or `scheduled` with no `notBefore`
+  at all, which announces no instant at which the items become readable);
 - `drawn-post-lock` is refused when the Benchmark reveals its items
   `immediate`ly, because the run was then locked against a set the claimant could
   already read, and nothing was drawn afterwards.
