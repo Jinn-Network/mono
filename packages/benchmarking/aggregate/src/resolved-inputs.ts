@@ -35,13 +35,15 @@ export type MethodInputErrorCode =
   | "anchored-announcement-malformed"
   | "incompatible-run-replicates"
   | "method-incompatible-cost-unit"
+  | "method-parameter-out-of-range"
   | "binary-record-unavailable"
   | "binary-record-digest-mismatch"
   | "binary-record-malformed"
   | "binary-binding-mismatch";
 
-/** Typed, stable fail-closed method-input failure. `digest` always names the exact requested
- * record reference whose bytes were unavailable, malformed, mismatched, or incompatible. */
+/** Typed, stable fail-closed method-input failure. For a record-shaped code, `digest` names the
+ * exact requested record reference whose bytes were unavailable, malformed, mismatched, or
+ * incompatible; for `method-parameter-out-of-range` it names the offending parameter instead. */
 export class MethodInputError extends Error {
   readonly name = "MethodInputError";
 

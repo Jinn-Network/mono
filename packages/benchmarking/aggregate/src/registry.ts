@@ -943,8 +943,11 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
     const candidate = requireStringParam(input.parameters, "candidate");
     const seed = requireIntegerParam(input.parameters, "seed");
     const resamples = requireIntegerParam(input.parameters, "resamples");
+    // Redundant with parameterSchema's minimum/maximum, and deliberately kept (#2583): compute is
+    // a public entry point callers may reach without validateParameters, and an unchecked value
+    // would otherwise surface from the bootstrap as an untyped Error.
     if (resamples <= 0 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1) {
-      throw new MethodInputError("method-incompatible-cost-unit", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
+      throw new MethodInputError("method-parameter-out-of-range", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
     }
 
     type RelevantCell = {
@@ -1133,8 +1136,11 @@ const pairedDeltaMethod: SingleSubjectMethod = {
     // Sealed records admit only integer numbers, so alpha crosses the boundary as an
     // enum-restricted decimal string; Number() is exact for the three permitted values.
     const alpha = Number(requireStringParam(input.parameters, "alpha"));
+    // Redundant with parameterSchema's minimum/maximum, and deliberately kept (#2583): compute is
+    // a public entry point callers may reach without validateParameters, and an unchecked value
+    // would otherwise surface from the bootstrap as an untyped Error.
     if (resamples <= 0 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1) {
-      throw new MethodInputError("method-incompatible-cost-unit", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
+      throw new MethodInputError("method-parameter-out-of-range", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
     }
 
     type RelevantCell = {
