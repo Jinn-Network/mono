@@ -125,6 +125,7 @@ export {
   BEACON_BINDING_PROCEDURE,
   BEACON_SOURCES,
   BEACON_SOURCE_IDS,
+  MAX_BEACON_ROUND,
   BeaconReferenceSchema,
   RunBindingError,
   RunBindingSchema,

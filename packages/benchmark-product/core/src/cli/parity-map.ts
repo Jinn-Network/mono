@@ -228,7 +228,7 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   runQuote: { status: "shipped", action: "run.quote" },
   runLock: { status: "shipped", action: "run.lock" },
   runAnchor: { status: "shipped", action: "run.anchor" },
-  runBind: { status: "shipped", action: "bind" },
+  runBind: { status: "shipped", action: "run.bind" },
   // The browser never supplies the endpoint — the server's own configuration does, exactly as it
   // does for `publication.configure`. A browser-supplied anchor endpoint would make this action an
   // outbound-request primitive pointed wherever a form said.

@@ -13,6 +13,7 @@ import {
   BEACON_BINDING_PROCEDURE,
   BEACON_SOURCES,
   BEACON_SOURCE_IDS,
+  MAX_BEACON_ROUND,
   RunBindingError,
   beaconRoundInstant,
   computeBeaconOrder,
@@ -234,6 +235,14 @@ describe("verifyRunBinding", () => {
     ["an empty population", { itemSha256s: [], order: [] }],
   ])("refuses %s", (_label, overrides) => {
     expect(() => verifyRunBinding(censusBinding(overrides))).toThrow(RunBindingError);
+  });
+
+  test("refuses a round above the representable ceiling instead of throwing a RangeError", () => {
+    // Above MAX_BEACON_ROUND the schedule arithmetic leaves the range `Date` represents, and
+    // `toISOString` would throw an untyped RangeError from inside verification.
+    expect(() => verifyRunBinding(censusBinding({ beacon: beacon({ round: MAX_BEACON_ROUND + 1 }) })))
+      .toThrow(RunBindingError);
+    expect(beaconRoundInstant(beacon({ round: MAX_BEACON_ROUND }))).toBe("+097089-11-09T20:29:24.000Z");
   });
 
   test("refuses an unknown extra key rather than ignoring it", () => {

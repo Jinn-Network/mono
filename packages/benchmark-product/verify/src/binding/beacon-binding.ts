@@ -107,6 +107,15 @@ export type BeaconSourceId = keyof typeof BEACON_SOURCES;
 
 export const BEACON_SOURCE_IDS = Object.keys(BEACON_SOURCES).sort() as readonly BeaconSourceId[];
 
+/**
+ * The ceiling on a round index. Not a beacon limit -- it is what keeps `beaconRoundInstant`'s
+ * arithmetic inside the range `Date` can represent, so an absurd round is a typed refusal at the
+ * schema rather than an untyped `RangeError` from `toISOString` deep inside verification. At
+ * quicknet's 3-second period this is some 95,000 years of rounds, and every real Bitcoin height is
+ * eight orders of magnitude below it.
+ */
+export const MAX_BEACON_ROUND = 1_000_000_000_000;
+
 const HexValueSchema = z.string().regex(/^[0-9a-f]{64}$/, "must be 64 lowercase hex characters");
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/, "must match ^sha256:[0-9a-f]{64}$");
 const InstantSchema = z.string().datetime({ offset: true });
@@ -117,7 +126,7 @@ const InstantSchema = z.string().datetime({ offset: true });
  */
 export const BeaconReferenceSchema = z.strictObject({
   source: z.enum(Object.keys(BEACON_SOURCES) as [BeaconSourceId, ...BeaconSourceId[]]),
-  round: z.number().int().positive(),
+  round: z.number().int().positive().max(MAX_BEACON_ROUND),
   value: HexValueSchema,
 });
 export type BeaconReference = z.infer<typeof BeaconReferenceSchema>;
