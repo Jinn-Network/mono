@@ -650,15 +650,20 @@ reopened):**
   verbatim (`dssePreAuthEncoding` + `sealDsseEnvelope`), never
   re-canonicalizing — recorded in `src/venue/signing.ts`.
 
-  > **Amended 2026-08-12 (`688bf27ad`, PR #2601): the "unsatisfiable" claim above
-  > was true of the code as it then stood, and has since been repaired.** The
+  > **Amended 2026-08-30, recording the 2026-08-12 repair (`688bf27ad`, PR
+  > #2601): the "unsatisfiable" claim above was true of the code as it then
+  > stood, and has since been repaired.** The
   > byte-equality guard no longer re-canonicalizes through trust-core's compact
   > encoder. The host now checks the producer's own spelling
   > (`canonicalAttestationJsonBytes`, the encoder `buildResultEvaluationPayload`
   > writes with) and seals the sandbox's exact bytes via `sealSignedPayload`
   > (`operator/src/daemon/native-evaluator-composition.ts`, fail-closed on
-  > mismatch). So a `sealSignedRecord`-shaped pattern *can* now hold against a
-  > real spawned evaluation harness. This note records the repair only; BP-12's
+  > mismatch). The host-side seal-and-compare *shape* therefore does hold
+  > against a real spawned evaluation harness — but only because the comparison
+  > uses the producer's own encoder. `sealSignedRecord` itself is unchanged
+  > (`packages/trust/core/src/dsse.ts` still canonicalizes through compact
+  > `canonicalJsonBytes`) and remains unusable on this path, exactly as this
+  > bullet says. This note records the repair only; BP-12's
   > decision to wrap the harness's statement bytes verbatim via
   > `dssePreAuthEncoding` + `sealDsseEnvelope` is unchanged and not reopened —
   > both paths sign the produced bytes rather than a re-encoding of them.

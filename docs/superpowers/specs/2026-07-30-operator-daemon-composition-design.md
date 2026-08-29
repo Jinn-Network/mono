@@ -147,8 +147,8 @@ replaces the four that belong to the marketplace loop and keeps the rest untouch
 > Same reversal, same reasoning, recorded in the
 > [local-execution-backend design §10.4](./2026-07-27-local-execution-backend-design.md#104-evaluation-runner-design-reconciliation).
 >
-> **Further amended 2026-08-12 (`688bf27ad`, PR #2601): the re-serialization half of the
-> note above is superseded; its conclusion stands.** The host does *not* re-serialize the
+> **Further amended 2026-08-30, recording the 2026-08-12 repair (`688bf27ad`, PR #2601):
+> the re-serialization half of the note above is superseded; its conclusion stands.** The host does *not* re-serialize the
 > statement to canonical bytes and compare. That guard compared the harness's output against
 > trust-core's compact JCS encoding, while the harness writes the attestation family's pretty
 > spelling, so the two could never agree and every real evaluation threw. The host now checks
@@ -158,12 +158,12 @@ replaces the four that belong to the marketplace loop and keeps the rest untouch
 > in fact strengthened: the DSSE payload is now the graded file itself rather than a
 > re-encoding of it. The Evaluator loop row's reversal — no signing key in the sandbox, host-side
 > sealing — is unchanged. Cite these by symbol, not by line: the file is now
-> `operator/src/daemon/native-evaluator-composition.ts` (renamed from `client/` in
-> `5a4b537cf`), the grant rejection is its `stateBackedProvisioner` `setup` guard
+> `operator/src/daemon/native-evaluator-composition.ts` (renamed from `client/` on
+> 2026-08-16 in `5a4b537cf`), the grant rejection is its `stateBackedProvisioner` `setup` guard
 > ("evaluator-sealed Submission must remain grant-free", formerly cited `:291-293`) and the
 > byte check is in the same provisioner's `harvest` path (formerly cited `:343-345`);
-> `secretForwards: []` is `evaluation-harness/src/launcher.ts` in `makeEvaluationLauncher`
-> (formerly cited `:94-95`).
+> `secretForwards: []` is set in `evaluation-harness/src/launcher.ts`'s
+> `launcherCapabilities` helper (formerly cited `:94-95`).
 
 **Kept as-is:** reward-claim, checkpoint, eviction, balance-topup, harvest (corpus mining),
 watchdog + heartbeats.

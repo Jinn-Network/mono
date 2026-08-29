@@ -72,8 +72,8 @@ and the divergence is a reportable finding.
   (pattern: `client/src/daemon/native-evaluator-composition.ts:309-345`,
   which is marketplace-coupled and NOT reusable directly).
 
-  > **Amended 2026-08-12 (`688bf27ad`, PR #2601): the cited pattern moved and
-  > changed shape.** The file is now
+  > **Amended 2026-08-30, recording the 2026-08-12 repair (`688bf27ad`, PR
+  > #2601): the cited pattern moved and changed shape.** The file is now
   > `operator/src/daemon/native-evaluator-composition.ts` (renamed from
   > `client/` in `5a4b537cf`); cite it by symbol rather than by line, as the
   > `:309-345` span above has drifted. The host no longer re-serializes the

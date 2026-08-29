@@ -624,8 +624,9 @@ The approved-but-unimplemented Evaluation Runner design (`integration/evidence-v
   > [operator-daemon composition design](./2026-07-30-operator-daemon-composition-design.md#4-the-composed-operator-runtime--loop-map))
   > still describe the superseded in-executor-signing shape.
   >
-  > **Further amended 2026-08-12 (`688bf27ad`, PR #2601): the re-serialization
-  > half of the note above is superseded; its conclusion stands.** The host does
+  > **Further amended 2026-08-30, recording the 2026-08-12 repair
+  > (`688bf27ad`, PR #2601): the re-serialization half of the note above is
+  > superseded; its conclusion stands.** The host does
   > *not* re-serialize the statement to canonical bytes and compare. That guard
   > compared the harness's output against trust-core's compact JCS encoding,
   > while the harness writes the attestation family's pretty spelling, so the two
@@ -637,12 +638,12 @@ The approved-but-unimplemented Evaluation Runner design (`integration/evidence-v
   > graded file itself rather than a re-encoding of it. The grant-free and
   > no-key-in-sandbox premises are also unchanged. Cite these by symbol, not by
   > line: the file is now `operator/src/daemon/native-evaluator-composition.ts`
-  > (renamed from `client/` in `5a4b537cf`), the grant rejection is its
+  > (renamed from `client/` on 2026-08-16 in `5a4b537cf`), the grant rejection is its
   > `stateBackedProvisioner` `setup` guard ("evaluator-sealed Submission must
   > remain grant-free", formerly cited `:291-293`) and the byte check is in the
   > same provisioner's `harvest` path (formerly cited `:343-345`);
-  > `secretForwards: []` is `evaluation-harness/src/launcher.ts` in
-  > `makeEvaluationLauncher` (formerly cited `:94-95`).
+  > `secretForwards: []` is set in `evaluation-harness/src/launcher.ts`'s
+  > `launcherCapabilities` helper (formerly cited `:94-95`).
 - **Superseded** (the host-orchestration half, all unimplemented): the durable-job premise
   (§1, §3.4), `EvaluationAttemptCheckpointStore` and the recovery ladder (§14.3, §15),
   `attemptId` idempotency (§8.1), `EvaluationReceiptV1` (§19), the
