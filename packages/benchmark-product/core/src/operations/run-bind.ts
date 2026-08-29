@@ -12,7 +12,10 @@
  *
  * - **A separate operation, like `anchor`.** `runLock` stays synchronous and irreversible; binding
  *   is a thing that happens after it or does not. `bind` is audited like every operation but is not
- *   approval-gated: it moves no funds and changes no lifecycle state.
+ *   approval-gated, for the reason `anchor` is not: it moves no funds and changes no lifecycle
+ *   state. It is write-once and so irreversible, but the worst a binding can do is add a true
+ *   statement about randomness this run could not have predicted — it cannot weaken a claim, alter
+ *   a result, or make a run publishable that was not.
  * - **After lock, before launch.** A beacon that predates the seal binds nothing, and a beacon
  *   chosen after execution began binds nothing either — the operator would already know the run.
  *   Only `locked` is admitted, and `launchedAt` refuses independently of the draft state.

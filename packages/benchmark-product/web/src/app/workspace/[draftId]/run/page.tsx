@@ -20,7 +20,9 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
   const state = status?.state;
   const publication = view.ok && view.publication?.ok ? view.publication.result : undefined;
   const publicationConfiguration = view.ok ? view.publicationConfiguration : undefined;
-  const beaconSources = view.ok ? view.beaconSources : [];
+  // `?? []` for the same reason `publication` and `publicationConfiguration` above are optional-
+  // chained: a view that failed to load, or a caller holding an older shape, still renders a page.
+  const beaconSources = view.ok ? view.beaconSources ?? [] : [];
   const postHoc = state === "closed" || state === "reported" || state === "published-bundle";
   const reportStage = publication?.stages.find((stage) => stage.name === "report");
   const accountingStage = publication?.stages.find((stage) => stage.name === "accounting");
