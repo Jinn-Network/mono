@@ -223,6 +223,15 @@ jobs:
           yarn build
           yarn check:fixtures
           yarn pack:smoke
+      - name: Verify Evidence Offer
+        working-directory: packages/evidence/offer
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn check:fixtures
+          yarn pack:smoke
       - name: Verify Evidence Contribution
         working-directory: packages/evidence/contribution
         run: |

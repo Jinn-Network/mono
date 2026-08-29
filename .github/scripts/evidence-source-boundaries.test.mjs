@@ -11,7 +11,7 @@ const evidenceDirectories = [
   'catalog-sqlite', 'execution-evidence-builder', 'execution-recorder',
   'attestation-issuer', 'derivation',
   'publication', 'local-runtime', 'execution-recorder-bridge', 'retrieval',
-  'contribution', 'trace', 'trace-decode',
+  'contribution', 'trace', 'trace-decode', 'offer',
 ];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
@@ -387,6 +387,58 @@ const TRACE_DECODE_FORBIDDEN_PACKAGES = [
   '@jinn-network/plugin',
   '@jinn-network/sdk',
   '@jinn-network/trust-core',
+  'better-sqlite3',
+  'hermes-agent',
+  'kubo-rpc-client',
+  'node:child_process',
+  'node:crypto',
+  'node:dgram',
+  'node:dns',
+  'node:fs',
+  'node:http',
+  'node:http2',
+  'node:https',
+  'node:net',
+  'node:tls',
+  'viem',
+];
+
+// Offer is a tier-2 record kind: the sealed commercial statement and nothing else. It
+// composes trust-core ONLY (canonical bytes, the DSSE spine, key-binding resolution) and no
+// evidence package — an offer must be sealable and verifiable by a holder who runs none of
+// the rest of this tree. It performs no I/O outside its fixture loaders in the testing
+// region, where `node:crypto` is also allowed for the deterministic fixture signer.
+const OFFER_ALLOWED_DEPENDENCIES = ['@jinn-network/trust-core', 'zod'];
+const OFFER_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
+const OFFER_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const OFFER_FORBIDDEN_PACKAGES = [
+  '@jinn-network/attestation-issuer',
+  '@jinn-network/autopilot',
+  '@jinn-network/broadcast-bot',
+  '@jinn-network/client',
+  '@jinn-network/operator',
+  '@jinn-network/core',
+  '@jinn-network/evidence-catalog-sqlite',
+  '@jinn-network/evidence-contribution',
+  '@jinn-network/evidence-derivation',
+  '@jinn-network/evidence-discovery',
+  '@jinn-network/evidence-local-runtime',
+  '@jinn-network/evidence-protocol',
+  '@jinn-network/evidence-publication',
+  '@jinn-network/evidence-repository',
+  '@jinn-network/evidence-repository-ipfs',
+  '@jinn-network/evidence-repository-oci',
+  '@jinn-network/evidence-retrieval',
+  '@jinn-network/evidence-trace',
+  '@jinn-network/evidence-trace-decode',
+  '@jinn-network/execution-recorder',
+  '@jinn-network/execution-recorder-bridge',
+  '@jinn-network/indexer',
+  '@jinn-network/indexer-enrichment',
+  '@jinn-network/jinn-layer',
+  '@jinn-network/marketplace',
+  '@jinn-network/plugin',
+  '@jinn-network/sdk',
   'better-sqlite3',
   'hermes-agent',
   'kubo-rpc-client',
@@ -926,6 +978,28 @@ test('Trace Decode boundary checks catch package, I/O, and ambient-network escap
     assert.equal(
       forbiddenImports(source, TRACE_DECODE_FORBIDDEN_PACKAGES).length,
       7,
+    );
+    assert.equal(ambientNetworkUsesInFiles(files(source)).length, 1);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('Offer boundary checks catch package, I/O, and ambient-network escapes', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-offer-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'source.ts'), [
+      'import "@jinn-network/plugin";',
+      'export * from "@jinn-network/evidence-protocol";',
+      'await import("@jinn-network/core");',
+      'require("@jinn-network/evidence-trace");',
+      'import "node:fs";',
+      'import "node:crypto";',
+      'fetch;',
+    ].join('\n'));
+    assert.equal(
+      forbiddenImports(source, OFFER_FORBIDDEN_PACKAGES).length,
+      6,
     );
     assert.equal(ambientNetworkUsesInFiles(files(source)).length, 1);
   } finally { rmSync(fixture, { recursive: true, force: true }); }
@@ -1730,6 +1804,121 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     ),
     [],
     'the Trace Decode root entrypoint must not export testing.ts or fixtures.ts',
+  );
+
+  const offer = join(packages, 'offer');
+  const offerSource = join(offer, 'src');
+  const offerTestingEntry = join(offerSource, 'testing.ts');
+  const offerFixtureLoaders = join(offerSource, 'fixtures.ts');
+  const offerTestRegex = /\.test\.[cm]?[jt]sx?$/u;
+  const offerSourceFiles = files(offerSource);
+  const offerTestingFiles = offerSourceFiles.filter((file) =>
+    file === offerTestingEntry
+      || file === offerFixtureLoaders
+      || offerTestRegex.test(file));
+  const offerProductionFiles = offerSourceFiles.filter((file) =>
+    !offerTestingFiles.includes(file));
+  const offerManifest = manifest('offer');
+  const offerForeignRoots = evidenceDirectories
+    .filter((directory) => directory !== 'offer')
+    .map((directory) => join(packages, directory));
+
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      offerProductionFiles,
+      [...OFFER_FORBIDDEN_PACKAGES, 'vitest', 'node:fs/promises'],
+      [...offerForeignRoots, ...offerTestingFiles],
+    ),
+    [],
+    'Offer production source must not import forbidden packages, vitest, filesystem APIs, or the testing region',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      offerTestingFiles,
+      OFFER_FORBIDDEN_PACKAGES.filter((dependency) =>
+        dependency !== 'node:fs' && dependency !== 'node:crypto'),
+      offerForeignRoots,
+    ),
+    [],
+    'Offer testing files must not cross into foreign package roots',
+  );
+  assert.deepEqual(
+    offerTestingFiles.flatMap((file) =>
+      specifiers(readFileSync(file, 'utf8'))
+        .filter((specifier) => specifier === 'node:fs')
+        .map((specifier) => `${relative(root, file)} -> ${specifier}`)),
+    [],
+    'the Offer /testing region may only use node:fs/promises, never bare node:fs',
+  );
+  assert.deepEqual(
+    offerProductionFiles.flatMap((file) =>
+      specifiers(readFileSync(file, 'utf8'))
+        .filter((specifier) => specifier === 'node:crypto')
+        .map((specifier) => `${relative(root, file)} -> ${specifier}`)),
+    [],
+    'node:crypto belongs to the fixture signer in the testing region, never to production source',
+  );
+  assert.deepEqual(
+    ambientNetworkUsesInFiles(offerSourceFiles),
+    [],
+    'Offer source must not use ambient network APIs',
+  );
+  assert.deepEqual(Object.keys(offerManifest.exports).sort(), [
+    '.', './fixtures/*', './testing',
+  ]);
+  assert.deepEqual(offerManifest.exports['.'], {
+    import: './dist/index.js',
+    types: './dist/index.d.ts',
+  });
+  assert.deepEqual(offerManifest.exports['./testing'], {
+    import: './dist/testing.js',
+    types: './dist/testing.d.ts',
+  });
+  assert.deepEqual(
+    Object.keys(offerManifest.dependencies ?? {}).sort(),
+    OFFER_ALLOWED_DEPENDENCIES,
+  );
+  assert.deepEqual(
+    Object.keys(offerManifest.devDependencies ?? {}).sort(),
+    OFFER_ALLOWED_DEV_DEPENDENCIES,
+  );
+  assert.deepEqual(
+    Object.keys(offerManifest.optionalDependencies ?? {}),
+    [],
+    'offer may not declare optional dependencies',
+  );
+  assert.deepEqual(
+    Object.keys(offerManifest.peerDependencies ?? {}).sort(),
+    OFFER_ALLOWED_PEER_DEPENDENCIES,
+  );
+  assert.deepEqual(offerManifest.peerDependenciesMeta, {
+    vitest: { optional: true },
+  });
+  for (const section of [
+    'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
+  ]) {
+    for (const dependency of OFFER_FORBIDDEN_PACKAGES) {
+      assert.ok(
+        !Object.hasOwn(offerManifest[section] ?? {}, dependency),
+        `offer may not declare ${dependency} in ${section}`,
+      );
+    }
+  }
+  for (const directory of evidenceDirectories.filter((entry) => entry !== 'offer')) {
+    assertBoundary(
+      join(packages, directory, 'src'),
+      ['@jinn-network/evidence-offer'],
+      [offer],
+    );
+  }
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      [join(offerSource, 'index.ts')],
+      [],
+      [offerTestingEntry, offerFixtureLoaders],
+    ),
+    [],
+    'the Offer root entrypoint must not export testing.ts or fixtures.ts',
   );
 
   for (const directory of evidenceDirectories) {
