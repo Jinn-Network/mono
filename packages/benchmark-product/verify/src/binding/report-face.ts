@@ -78,15 +78,26 @@ function roundChoiceClause(binding: VerifiedRunBinding): string {
   // one admitted source is indexed by block height, where no round follows from a seal at all, so
   // its alternatives are every height published since rather than a single candidate.
   const derived = binding.mode === "sampled" ? "slate" : "order";
-  return binding.roundBasis === "seal-derived"
-    ? "The round was not the operator's to pick either: it is the first round this source publishes after the "
-      + "seal, so the seal instant alone fixes it. What choosing remains is the source — this procedure admits "
-      + "other beacons, one of them indexed by block height, where no round follows from a seal at all — so an "
-      + "operator could have bound a different source instead."
-    : `Which post-seal value applied was still the operator's choice: this binding names a round selected after `
-      + `the seal, and every round the source published in between was an available alternative deriving a `
-      + `different ${derived} from the same inputs. The value could not have been predicted; this ${derived} is `
-      + `nonetheless one of several the operator could have realised by waiting.`;
+  if (binding.roundBasis === "seal-derived") {
+    // Only a scheduled source reaches here: `requiredBeaconRound` derives nothing for a height, so
+    // an `attributive` binding is `operator-chosen` by construction.
+    return "The round was not the operator's to pick either: it is the first round this source publishes after "
+      + "the seal, so the seal instant alone fixes it. What choosing remains is the source — this procedure "
+      + "admits other beacons, one of them indexed by block height, where no round follows from a seal at all — "
+      + "so an operator could have bound a different source instead.";
+  }
+  if (binding.postSeal === "attributive") {
+    // Say no more here than the postdating clause two sentences earlier already conceded. Claiming
+    // the value was unpredictable would assert exactly what this branch cannot check: nothing in
+    // the bundle places this height after the seal, so nothing rules out a height that predates it.
+    return `No round follows from a seal on a height-indexed source, so this height was the operator's choice — `
+      + `and on the reader's side it is the chain, not this bundle, that places it after the seal at all. Any `
+      + `other height would have derived a different ${derived} from the same inputs.`;
+  }
+  return `Which post-seal value applied was still the operator's choice: this binding names a round selected after `
+    + `the seal, and every round the source published in between was an available alternative deriving a `
+    + `different ${derived} from the same inputs. The value could not have been predicted; this ${derived} is `
+    + `nonetheless one of several the operator could have realised by waiting.`;
 }
 
 const RECOMPUTE_CLAUSE =

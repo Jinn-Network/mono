@@ -230,11 +230,12 @@ describe("durable run monitor cancellation language", () => {
       ] } },
     });
     const markup = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
-    expect(markup).toContain("111111111");
-    expect(markup).toContain("2026-08-01T00:00:03.000Z");
+    // Pinned in the rendered form the negative guard below has to match, so that guard is not
+    // vacuous: JSX decodes the entity, so the markup carries a literal separator.
+    expect(markup).toContain("drand/quicknet \u00b7 round 111111111 \u00b7 2026-08-01T00:00:03.000Z");
     // The height-indexed source derives no round from a seal, so it is offered as a beacon but
     // never listed here -- listing one would imply a round the operator is held to.
-    expect(markup).not.toContain("bitcoin/mainnet &middot; round");
+    expect(markup).not.toContain("bitcoin/mainnet \u00b7 round");
 
     // A run that has bound has nothing left to bind to, so the list goes with the form.
     loadRunViewMock.mockReturnValue(view);

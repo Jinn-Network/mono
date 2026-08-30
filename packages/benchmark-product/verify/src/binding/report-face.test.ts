@@ -125,9 +125,13 @@ describe("runBindingSentence", () => {
       expect(chosen).toContain("could not have been predicted");
     });
 
-    test("a height-indexed beacon is always operator-chosen: no round follows from its seal", () => {
-      expect(runBindingSentence(census("bitcoin/mainnet")))
-        .toContain("Which post-seal value applied was still the operator's choice");
+    test("a height-indexed beacon is operator-chosen, and claims no unpredictability it cannot check", () => {
+      const sentence = runBindingSentence(census("bitcoin/mainnet"));
+      expect(sentence).toContain("No round follows from a seal on a height-indexed source");
+      expect(sentence).toContain("it is the chain, not this bundle, that places it after the seal");
+      // Nothing places this height after the seal, so nothing may say the value was unpredictable.
+      expect(sentence).not.toContain("could not have been predicted");
+      expect(sentence).not.toContain("selected after the seal");
     });
 
     test("the census sentence gains the residue and nothing stronger", () => {
