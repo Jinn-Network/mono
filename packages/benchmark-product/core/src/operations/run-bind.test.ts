@@ -268,7 +268,10 @@ describe("runBind", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(result.result.binding.roundBasis).toBe("operator-chosen");
-      expect(result.result.statement).toContain("still the operator's choice");
+      expect(result.result.statement).toContain("No round follows from a seal on a height-indexed source");
+      // Nothing in the bundle places a height after the seal, so the sentence claims no
+      // unpredictability -- the retraction this issue exists to make, on the branch that needs it.
+      expect(result.result.statement).not.toContain("could not have been predicted");
     });
 
     test("status offers the bindable rounds before the run binds, and drops them after", async () => {
