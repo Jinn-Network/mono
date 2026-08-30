@@ -819,6 +819,7 @@ The exact 74-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/fully-attrited-pass-at-k.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/fully-attrited-wilson.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/method-specs.json | — | — | — |
+| fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/noninferiority-cluster-bca-repo-keys.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/noninferiority-cluster-bca.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/noninferiority-fail.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/noninferiority-inconclusive.json | — | — | — |
