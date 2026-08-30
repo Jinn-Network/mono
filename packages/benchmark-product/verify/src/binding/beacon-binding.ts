@@ -215,7 +215,7 @@ function fail(path: string, detail: string): never {
  * verification. Guarding the arithmetic where the arithmetic happens makes the typed refusal a
  * property of this function, and therefore true for every source and every caller.
  */
-export function beaconRoundInstant(beacon: BeaconReference): string | undefined {
+export function beaconRoundInstant(beacon: Pick<BeaconReference, "source" | "round">): string | undefined {
   const source = BEACON_SOURCES[beacon.source];
   if (source.timeBasis !== "deterministic-round-time") return undefined;
   const { genesisTimeSeconds, periodSeconds } = source as BeaconSourceDefinition & {
@@ -280,7 +280,7 @@ export function requiredBeaconRound(
   // within one period of it, so this only ever throws on an input `Date` itself cannot represent.
   let publishedAt: string | undefined;
   try {
-    publishedAt = beaconRoundInstant({ source, round, value: "0".repeat(64) });
+    publishedAt = beaconRoundInstant({ source, round });
   } catch {
     return undefined;
   }

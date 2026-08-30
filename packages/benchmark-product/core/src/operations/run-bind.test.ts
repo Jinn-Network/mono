@@ -57,6 +57,10 @@ let workspaceDir: string;
 
 beforeEach(() => {
   workspaceDir = mkdtempSync(join(tmpdir(), "bind-"));
+  // Reset to a well-formed round for the tests that never lock: they refuse on the DRAFT STATE,
+  // and a leftover (or absent) round would refuse on the beacon first and pass for the wrong
+  // reason -- or, run in isolation, fail outright.
+  sealDerivedRound = LATE_ROUND;
 });
 
 afterEach(() => {

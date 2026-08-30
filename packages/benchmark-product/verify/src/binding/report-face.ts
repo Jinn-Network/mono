@@ -27,7 +27,6 @@
 
 import {
   BEACON_BINDING_PROCEDURE,
-  BEACON_SOURCE_IDS,
   BEACON_SOURCES,
   type VerifiedRunBinding,
 } from "./beacon-binding.js";
@@ -72,15 +71,22 @@ function postSealClause(binding: VerifiedRunBinding): string {
  * register the census branch uses about its own weaker binding.
  */
 function roundChoiceClause(binding: VerifiedRunBinding): string {
+  // Name the thing a chosen round would actually have moved. Saying "the result" for both modes
+  // made the census clause read as a retraction of a population claim a census never makes: with a
+  // census the population is the whole declared one whatever round applies, and only the ORDER
+  // moves. The residue named under `seal-derived` is likewise the SOURCE, not a count of sources:
+  // one admitted source is indexed by block height, where no round follows from a seal at all, so
+  // its alternatives are every height published since rather than a single candidate.
+  const derived = binding.mode === "sampled" ? "slate" : "order";
   return binding.roundBasis === "seal-derived"
     ? "The round was not the operator's to pick either: it is the first round this source publishes after the "
-      + "seal, so the seal instant alone fixes it. One choice does remain — this procedure admits "
-      + `${BEACON_SOURCE_IDS.length} beacon sources, so an operator prepared to wait for all of them could have `
-      + "realised one candidate per source."
-    : "Which post-seal value applied was still the operator's choice: this binding names a round selected after "
-      + "the seal, and every round the source published in between was an available alternative deriving a "
-      + "different result from the same inputs. So the value could not have been predicted, but the result could "
-      + "still have been selected after the fact — by waiting and choosing among the rounds already published.";
+      + "seal, so the seal instant alone fixes it. What choosing remains is the source — this procedure admits "
+      + "other beacons, one of them indexed by block height, where no round follows from a seal at all — so an "
+      + "operator could have bound a different source instead."
+    : `Which post-seal value applied was still the operator's choice: this binding names a round selected after `
+      + `the seal, and every round the source published in between was an available alternative deriving a `
+      + `different ${derived} from the same inputs. The value could not have been predicted; this ${derived} is `
+      + `nonetheless one of several the operator could have realised by waiting.`;
 }
 
 const RECOMPUTE_CLAUSE =
@@ -104,8 +110,8 @@ export function runBindingSentence(binding: VerifiedRunBinding | undefined): str
     // fact needed no prediction at all, only waiting for a round whose derivation the operator
     // liked -- so it is dropped rather than hedged.
     const opening = binding.roundBasis === "seal-derived"
-      ? `This run's slate was drawn, not chosen`
-      : `This run's slate was drawn from a value it could not have predicted`;
+      ? "This run's slate was drawn, not chosen"
+      : "This run's slate was drawn from a value it could not have predicted";
     const unpredictabilityClause = binding.roundBasis === "seal-derived"
       ? "Selecting the slate after the fact would have required predicting that value. "
       : "";

@@ -124,11 +124,12 @@ such: it shows the run's ORDER was fixed by randomness postdating the seal, not
 that the population was — a census makes no population choice. A run with no
 binding establishes neither, and its report face says so.
 
-One residue survives even a seal-derived round: the *source*. This procedure
-admits three beacons, so an operator prepared to wait for all of them could have
-realised one candidate per source and bound the source they preferred. Closing
-that would need the run to name its source in the sealed record itself; today it
-is named on the face instead.
+One residue survives even a seal-derived round: the *source*. Nothing in the seal
+names which beacon a run binds to, so an operator could have bound a different
+one — and `bitcoin/mainnet` derives no round from a seal at all, so through that
+source every height published since the seal is an available alternative. Closing
+this would need the run to name its source in the sealed record itself; today the
+face names the residue instead.
 
 ## The record family
 

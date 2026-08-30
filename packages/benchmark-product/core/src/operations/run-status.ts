@@ -288,12 +288,13 @@ export function runStatus(
       };
 
       const binding = readRunBindingCarriage(context.workspaceDir, runState);
+      const sealedAt = runState.lockedAt;
       const bindable = binding === undefined
         && document.state === "locked"
         && runState.launchedAt === undefined
-        && runState.lockedAt !== undefined
+        && sealedAt !== undefined
         ? BEACON_SOURCE_IDS.flatMap((source) => {
-          const required = requiredBeaconRound(source, runState.lockedAt!);
+          const required = requiredBeaconRound(source, sealedAt);
           return required === undefined ? [] : [{ source, round: required.round, publishedAt: required.publishedAt }];
         })
         : [];

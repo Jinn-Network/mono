@@ -113,7 +113,8 @@ describe("runBindingSentence", () => {
       const chosen = runBindingSentence(sampled(CHOSEN_ROUND));
       expect(chosen).not.toContain("drawn, not chosen");
       expect(chosen).not.toContain("would have required predicting that value");
-      expect(chosen).toContain("could still have been selected after the fact");
+      expect(chosen).toContain("one of several the operator could have realised");
+      expect(chosen).toContain("different slate from the same inputs");
     });
 
     test("the operator-chosen sentence names the residue in plain words", () => {
@@ -142,8 +143,20 @@ describe("runBindingSentence", () => {
       }
     });
 
-    test("the seal-derived clause names the source choice that survives it", () => {
-      expect(runBindingSentence(census())).toContain("beacon sources");
+    test("the seal-derived clause names the source choice that survives it, without miscounting it", () => {
+      const sentence = runBindingSentence(census());
+      expect(sentence).toContain("What choosing remains is the source");
+      // The height-indexed source has no derivable round at all, so its alternatives are every
+      // height published since -- a sentence that counted sources would understate exactly that.
+      expect(sentence).toContain("indexed by block height");
+    });
+
+    test("the census residue is about the ORDER, and never contradicts the population claim", () => {
+      const chosen = runBindingSentence(census("drand/quicknet", CHOSEN_ROUND));
+      expect(chosen).toContain("none could be selected after the fact");
+      expect(chosen).toContain("different order from the same inputs");
+      expect(chosen).not.toContain("slate from the same inputs");
+      expect(chosen).not.toContain("could still have been selected after the fact");
     });
   });
 });
