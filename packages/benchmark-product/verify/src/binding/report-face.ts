@@ -12,8 +12,14 @@
  * - **The words key on facts, not on configuration.** Every value in a sentence below comes from
  *   the verified binding itself, so the text is identical for every reader.
  *
- * A third rule is this module's own, and is the whole point of the issue: **the census sentence
- * says it is the weaker binding.** Ordering-only binding shows the run's order was fixed by
+ * A third rule follows from issue #3322: **a sentence claims unchosen-ness only where the seal
+ * established it.** A beacon that merely postdates the seal makes the value unpredictable and
+ * leaves the operator choosing among the values that postdate it. So both sentences carry
+ * `roundChoiceClause`, which asserts the second property under `seal-derived` and retracts it under
+ * `operator-chosen` rather than letting either branch imply it.
+ *
+ * A fourth rule is this module's own, and is the whole point of the originating issue: **the census
+ * sentence says it is the weaker binding.** Ordering-only binding shows the run's order was fixed by
  * randomness that postdates the seal; it does not show the population was, because with a census
  * there was no population choice to make. Letting the two modes share one confident sentence would
  * be the failure this feature exists to prevent.
@@ -21,6 +27,7 @@
 
 import {
   BEACON_BINDING_PROCEDURE,
+  BEACON_SOURCE_IDS,
   BEACON_SOURCES,
   type VerifiedRunBinding,
 } from "./beacon-binding.js";
@@ -56,6 +63,26 @@ function postSealClause(binding: VerifiedRunBinding): string {
       + "this bundle proves";
 }
 
+/**
+ * What the run's choice of ROUND does or does not add (issue #3322). A beacon that merely postdates
+ * the seal leaves the operator picking among realised values, and a sentence that names only the
+ * value's unpredictability reads as though it had ruled that out. So the clause is not decoration:
+ * under `seal-derived` it states the second property and then names the residue that survives it
+ * (the source choice), and under `operator-chosen` it retracts the property in the same plain
+ * register the census branch uses about its own weaker binding.
+ */
+function roundChoiceClause(binding: VerifiedRunBinding): string {
+  return binding.roundBasis === "seal-derived"
+    ? "The round was not the operator's to pick either: it is the first round this source publishes after the "
+      + "seal, so the seal instant alone fixes it. One choice does remain — this procedure admits "
+      + `${BEACON_SOURCE_IDS.length} beacon sources, so an operator prepared to wait for all of them could have `
+      + "realised one candidate per source."
+    : "Which post-seal value applied was still the operator's choice: this binding names a round selected after "
+      + "the seal, and every round the source published in between was an available alternative deriving a "
+      + "different result from the same inputs. So the value could not have been predicted, but the result could "
+      + "still have been selected after the fact — by waiting and choosing among the rounds already published.";
+}
+
 const RECOMPUTE_CLAUSE =
   `Any reader recomputes the derivation offline from the sealed digest, the published beacon value and the `
   + `item identities alone, by procedure ${BEACON_BINDING_PROCEDURE}; the verifier fails the run when its `
@@ -71,17 +98,28 @@ export function runBindingSentence(binding: VerifiedRunBinding | undefined): str
       + "nothing establishes that execution followed the seal rather than preceding it.";
   }
   if (binding.mode === "sampled") {
-    return `This run's slate was drawn, not chosen: its ${binding.sample.length} items were derived from a `
+    // The "could not have been selected after the fact" claim is the one issue #3322 exists to
+    // stop overstating, so it appears ONLY on the branch where the seal named the round. Under
+    // `operator-chosen` it is not merely unproven, it is false -- selecting the slate after the
+    // fact needed no prediction at all, only waiting for a round whose derivation the operator
+    // liked -- so it is dropped rather than hedged.
+    const opening = binding.roundBasis === "seal-derived"
+      ? `This run's slate was drawn, not chosen`
+      : `This run's slate was drawn from a value it could not have predicted`;
+    const unpredictabilityClause = binding.roundBasis === "seal-derived"
+      ? "Selecting the slate after the fact would have required predicting that value. "
+      : "";
+    return `${opening}: its ${binding.sample.length} items were derived from a `
       + `declared pool of ${binding.poolSize} by procedure ${BEACON_BINDING_PROCEDURE}, keyed on this run's sealed `
-      + `digest together with ${beaconName(binding)} — ${postSealClause(binding)}. Selecting the slate after the `
-      + `fact would have required predicting that value. ${RECOMPUTE_CLAUSE}`;
+      + `digest together with ${beaconName(binding)} — ${postSealClause(binding)}. `
+      + `${unpredictabilityClause}${roundChoiceClause(binding)} ${RECOMPUTE_CLAUSE}`;
   }
   return `This run evaluated its whole declared population of ${binding.poolSize} items, so no slate was selected `
     + `and none could be selected after the fact. The beacon binds execution ORDER only: the order was derived by `
     + `procedure ${BEACON_BINDING_PROCEDURE} from this run's sealed digest together with ${beaconName(binding)} — `
     + `${postSealClause(binding)}. This is a weaker binding than a beacon-drawn slate. It shows the run's order was `
     + `fixed by randomness postdating the seal; it does not show the population was, because a census makes no `
-    + `population choice. ${RECOMPUTE_CLAUSE}`;
+    + `population choice. ${roundChoiceClause(binding)} ${RECOMPUTE_CLAUSE}`;
 }
 
 /**

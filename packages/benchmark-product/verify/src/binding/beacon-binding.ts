@@ -45,6 +45,14 @@
  * reader does offline. A Bitcoin height does not: block times need headers, so that check is
  * attributive and this module says so instead of claiming an offline proof it cannot make.
  *
+ * Postdating alone would still leave the operator a choice, and issue #3322 closes it: admitting any
+ * round later than the seal makes the VALUE unpredictable but not WHICH realised value applies, so
+ * an operator could watch the rounds published between lock and launch and bind the one whose
+ * derivation they preferred. For a scheduled source the seal already names one round --
+ * `requiredBeaconRound`, the first published strictly after it -- so the commitment needs no
+ * separate record, the producer refuses any other round, and `roundBasis` reports which of the two
+ * situations a record is in so the report face can say only what is true of it.
+ *
  * This module does no filesystem or network I/O and throws `RunBindingError` on any invalid input.
  */
 
@@ -225,6 +233,60 @@ export function beaconRoundInstant(beacon: BeaconReference): string | undefined 
   return new Date(instantMs).toISOString();
 }
 
+/** The one round a run sealed at a given instant may bind to, and when that round is published. */
+export interface RequiredBeaconRound {
+  readonly round: number;
+  /** RFC 3339 UTC, from the source's own schedule -- the same arithmetic `beaconRoundInstant` does. */
+  readonly publishedAt: string;
+}
+
+/**
+ * The one round a run sealed at `sealedAt` may bind to on a `deterministic-round-time` source: the
+ * first round that source publishes STRICTLY after the seal (issue #3322).
+ *
+ * The point is that the seal already fixes it. `verifyRunBinding` admits any round whose instant
+ * postdates the seal, which makes the beacon VALUE unpredictable but leaves the CHOICE among
+ * realised values open: between seal and binding an operator sees many published rounds, can derive
+ * what each would produce, and can bind the one they prefer. The standard construction is to commit
+ * at seal time to a specific future round -- and for a scheduled source no separate commitment
+ * record is needed, because `(source, sealedAt)` already determines exactly one such round, and both
+ * are fixed at seal time and carried by the binding itself.
+ *
+ * From `instant(r) = genesis + (r - 1) * period`, the smallest `r` with `instant(r) > sealedAt` is
+ * `floor((sealedAt - genesis) / period) + 2`, clamped to round 1 for a seal that predates genesis.
+ *
+ * `undefined` -- meaning no round is derivable, so the operator's choice remains and the report face
+ * says so -- when the source indexes by block height rather than by a schedule, when `sealedAt` is
+ * unparseable, or when the required round leaves `MAX_BEACON_ROUND` or the representable range.
+ */
+export function requiredBeaconRound(
+  source: BeaconSourceId,
+  sealedAt: string,
+): RequiredBeaconRound | undefined {
+  const definition = BEACON_SOURCES[source];
+  if (definition.timeBasis !== "deterministic-round-time") return undefined;
+  const { genesisTimeSeconds, periodSeconds } = definition as BeaconSourceDefinition & {
+    readonly genesisTimeSeconds: number;
+    readonly periodSeconds: number;
+  };
+  const sealedAtMs = Date.parse(sealedAt);
+  if (!Number.isFinite(sealedAtMs)) return undefined;
+  const round = Math.max(
+    1,
+    Math.floor((sealedAtMs - genesisTimeSeconds * 1000) / (periodSeconds * 1000)) + 2,
+  );
+  if (!Number.isSafeInteger(round) || round > MAX_BEACON_ROUND) return undefined;
+  // `beaconRoundInstant` owns the representability refusal; a round derived from a real seal is
+  // within one period of it, so this only ever throws on an input `Date` itself cannot represent.
+  let publishedAt: string | undefined;
+  try {
+    publishedAt = beaconRoundInstant({ source, round, value: "0".repeat(64) });
+  } catch {
+    return undefined;
+  }
+  return publishedAt === undefined ? undefined : { round, publishedAt };
+}
+
 export interface BeaconOrderParams {
   /** `sha256:<64 lowercase hex>` -- the sealed record the beacon postdates. */
   readonly sealDigest: string;
@@ -279,6 +341,22 @@ export function computeBeaconOrder(params: BeaconOrderParams): BeaconOrderResult
 /** Whether the beacon's postdating of the seal was proven here, or only asserted by its chain. */
 export type BeaconPostSealBasis = "proven-offline" | "attributive";
 
+/**
+ * Whether the seal fixed WHICH post-seal value applied, or the operator picked it (issue #3322).
+ *
+ * `seal-derived` -- the named round is `requiredBeaconRound` for this source and seal, so there was
+ * exactly one round to bind to and no choosing happened. `operator-chosen` -- the round postdates
+ * the seal (that is still checked) but was selected afterwards from among those published since, so
+ * the derivation is one of several the operator could have realised. Every `attributive-height`
+ * source is `operator-chosen` by construction: a block height carries no schedule, so no round
+ * follows from the seal.
+ *
+ * This is derived and reported, never enforced here. A verifier states what the bytes are; the
+ * choosing happens in the producer, which is where the refusal belongs (`bind` refuses a round other
+ * than the derivable one). Refusing here would also make every already-sealed record unreadable.
+ */
+export type BeaconRoundBasis = "seal-derived" | "operator-chosen";
+
 /** What every verified binding carries, whichever mode produced it. */
 export interface VerifiedRunBindingBase {
   readonly procedure: typeof BEACON_BINDING_PROCEDURE;
@@ -291,6 +369,8 @@ export interface VerifiedRunBindingBase {
   /** The recomputed full order. In census mode this is the execution order. */
   readonly order: readonly string[];
   readonly postSeal: BeaconPostSealBasis;
+  /** Whether the seal fixed which post-seal round applied, or the operator chose it. */
+  readonly roundBasis: BeaconRoundBasis;
   /** The beacon's own publication instant, when its source's round index determines one. */
   readonly beaconInstant?: string;
 }
@@ -341,6 +421,11 @@ export function verifyRunBinding(candidate: unknown): VerifiedRunBinding {
     itemSha256s: pool,
   });
 
+  const required = requiredBeaconRound(binding.beacon.source, binding.sealedAt);
+  const roundBasis: BeaconRoundBasis = required !== undefined && required.round === binding.beacon.round
+    ? "seal-derived"
+    : "operator-chosen";
+
   const common = {
     procedure: BEACON_BINDING_PROCEDURE,
     beacon: binding.beacon,
@@ -350,6 +435,7 @@ export function verifyRunBinding(candidate: unknown): VerifiedRunBinding {
     poolSize: pool.length,
     order: derived.order,
     postSeal,
+    roundBasis,
     ...(beaconInstant === undefined ? {} : { beaconInstant }),
   } as const;
 
