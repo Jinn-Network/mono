@@ -14,8 +14,8 @@ import {
   parseBenchmark,
   parseRun,
 } from "@jinn-network/benchmarking-records";
-import { runBindingClass, runBindingSentence } from "@colophon-claims/verify";
-import type { RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
+import { BEACON_SOURCE_IDS, requiredBeaconRound, runBindingClass, runBindingSentence } from "@colophon-claims/verify";
+import type { BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
 import { readRunBindingCarriage } from "../binding/carriage.js";
 import type { LifecycleState } from "../domain/lifecycle.js";
 import { refuse, type ProductErrorEnvelope } from "../errors.js";
@@ -117,6 +117,19 @@ export interface RunStatusResult {
     readonly poolDigest: string;
     readonly statement: string;
   };
+  /**
+   * The rounds this run may still bind to, one per admitted source whose rounds follow a published
+   * schedule (issue #3322). `bind` refuses every other round on those sources, so the number is not
+   * something an operator can be left to guess: it is derived from this run's own seal, and it is
+   * what they fetch the value for. Absent once the run has bound, once it has launched, and before
+   * it is locked — in each of those cases there is no round left to offer.
+   */
+  readonly bindableBeaconRounds?: readonly {
+    readonly source: BeaconSourceId;
+    readonly round: number;
+    /** RFC 3339 UTC instant that round publishes, from the source's own schedule. */
+    readonly publishedAt: string;
+  }[];
   readonly evaluationRecovery?: {
     readonly maxInfrastructureRetries: 1;
     readonly retryableFailures: number;
@@ -275,6 +288,15 @@ export function runStatus(
       };
 
       const binding = readRunBindingCarriage(context.workspaceDir, runState);
+      const bindable = binding === undefined
+        && document.state === "locked"
+        && runState.launchedAt === undefined
+        && runState.lockedAt !== undefined
+        ? BEACON_SOURCE_IDS.flatMap((source) => {
+          const required = requiredBeaconRound(source, runState.lockedAt!);
+          return required === undefined ? [] : [{ source, round: required.round, publishedAt: required.publishedAt }];
+        })
+        : [];
 
       return {
         state: document.state,
@@ -288,6 +310,7 @@ export function runStatus(
             statement: runBindingSentence(binding),
           },
         }),
+        ...(bindable.length === 0 ? {} : { bindableBeaconRounds: bindable }),
         cancelRequested: cancelRequested(context.workspaceDir, input.draftId),
         ...(driver !== undefined ? { driver } : {}),
         cells,

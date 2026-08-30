@@ -26,6 +26,14 @@
  * - **Bind once.** Re-binding is re-drawing, which is precisely the post-hoc selection this
  *   procedure exists to make impossible. The operation refuses a second bind and `writeRunState`
  *   refuses it again for any writer, whatever the interleaving of two concurrent calls.
+ * - **Bind to the round the seal names, not to a preferred one** (issue #3322). Binding once is not
+ *   enough on its own: admitting any round later than the seal leaves the operator watching the
+ *   rounds published between lock and launch, deriving what each would produce, and binding the one
+ *   they like. So for a source whose rounds follow a published schedule this operation refuses every
+ *   round but `requiredBeaconRound` -- the first the source publishes strictly after the seal, which
+ *   `(source, sealedAt)` already determines, so no separate commitment record is needed. A
+ *   height-indexed source has no such round, and the residue is reported rather than refused: the
+ *   report face says the height was the operator's choice.
  * - **The beacon reference is operator-supplied, and that is sound.** This operation does no
  *   network I/O: a public beacon's `(round, value)` pair is published, so a reader checks the pair
  *   against the beacon itself and recomputes the derivation from it. Fetching the value here would
@@ -43,9 +51,11 @@ import { itemTaskDigest, parseBenchmark } from "@jinn-network/benchmarking-recor
 import { canonicalJsonBytes } from "@jinn-network/task-execution-profiles";
 import {
   BEACON_BINDING_PROCEDURE,
+  BEACON_SOURCES,
   BeaconReferenceSchema,
   RunBindingError,
   computeBeaconOrder,
+  requiredBeaconRound,
   runBindingSentence,
   verifyRunBinding,
 } from "@colophon-claims/verify";
@@ -119,6 +129,23 @@ export function runBind(context: OperationContext, input: RunBindInput): Operati
       }
       if (document.spec.taskSet.kind !== "benchmark") {
         refuse("conflict", `drafts.${input.draftId}.taskSet`, `draft ${input.draftId} has no attached benchmark`);
+      }
+
+      // Only a LATER round is refused here. An earlier one does not postdate the seal at all, and
+      // `verifyRunBinding` below refuses it in those terms -- the more informative refusal for that
+      // input, and the one an external reader recomputing the record would reach too.
+      const required = requiredBeaconRound(beacon.data.source, runState.lockedAt);
+      if (required !== undefined && beacon.data.round > required.round) {
+        refuse(
+          "validation",
+          `runs.${input.draftId}.binding.beacon.round`,
+          `this run may bind only to ${BEACON_SOURCES[beacon.data.source].displayName} round ${required.round}, `
+          + `published at ${required.publishedAt} — the first round this source publishes after the seal at `
+          + `${runState.lockedAt} — and this binding names round ${beacon.data.round}. Admitting any later round `
+          + "would leave the operator free to watch the rounds published since the seal and bind the one whose "
+          + "derivation they preferred, so the value would be unpredictable but the choice among realised values "
+          + "would not be",
+        );
       }
 
       const benchmark = parseBenchmark(

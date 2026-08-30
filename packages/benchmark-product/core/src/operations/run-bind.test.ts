@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   BEACON_SOURCES,
   computeBeaconOrder,
+  requiredBeaconRound,
   verifyRunBinding,
   type BeaconReference,
 } from "@colophon-claims/verify";
@@ -38,9 +39,16 @@ const LATE_ROUND = 200_000_000;
 /** genesis + 0 -- 2023, comfortably before any lock this suite takes. */
 const EARLY_ROUND = 1;
 
+/**
+ * The one round the seal names (issue #3322), recorded by `setUpLockedDraft` from the lock this
+ * suite actually took rather than hard-coded: it is a function of the lock instant, so pinning a
+ * number here would silently stop testing the rule the moment the fixture clock moved.
+ */
+let sealDerivedRound: number;
+
 const beacon = (overrides: Partial<BeaconReference> = {}): BeaconReference => ({
   source: "drand/quicknet",
-  round: LATE_ROUND,
+  round: sealDerivedRound,
   value: VALUE,
   ...overrides,
 });
@@ -74,6 +82,9 @@ async function setUpLockedDraft(clock: () => string, draftId = "draft-1"): Promi
   expect(quoted.ok).toBe(true);
   const locked = runLock(contextFor(clock), { draftId });
   if (!locked.ok) throw new Error("lock failed");
+  const lockedAt = readRunState(workspaceDir, draftId)?.lockedAt;
+  if (lockedAt === undefined) throw new Error("lock recorded no instant");
+  sealDerivedRound = requiredBeaconRound("drand/quicknet", lockedAt)!.round;
   return locked.result.runSha256;
 }
 
@@ -205,6 +216,72 @@ describe("runBind", () => {
     const result = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon() });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.detail).toMatch(/already launched/u);
+  });
+
+  /**
+   * Issue #3322: postdating the seal is not enough on its own. Between lock and launch an operator
+   * sees many published rounds and can derive what each would produce, so admitting any later round
+   * leaves the choice among realised values open. The seal names exactly one round on a scheduled
+   * source, and this is the refusal that holds the run to it.
+   */
+  describe("round choice", () => {
+    test("refuses a round later than the one the seal names, and names that round", async () => {
+      const clock = makeClock();
+      await setUpLockedDraft(clock);
+      const result = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon({ round: LATE_ROUND }) });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe("validation");
+      expect(result.error.detail).toContain(`round ${sealDerivedRound}`);
+      expect(result.error.detail).toMatch(/first round this source publishes after the seal/u);
+      expect(readRunState(workspaceDir, "draft-1")?.binding).toBeUndefined();
+    });
+
+    test("refuses the round one past it — the cheapest grind is refused like the largest", async () => {
+      const clock = makeClock();
+      await setUpLockedDraft(clock);
+      expect(runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon({ round: sealDerivedRound + 1 }) }).ok)
+        .toBe(false);
+    });
+
+    test("the round the seal names binds, and its sentence says the round was not chosen", async () => {
+      const clock = makeClock();
+      await setUpLockedDraft(clock);
+      const result = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon() });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.result.binding.roundBasis).toBe("seal-derived");
+      expect(result.result.statement).toContain("first round this source publishes after the seal");
+    });
+
+    test("a height-indexed source has no such round, so its height binds and is reported as chosen", async () => {
+      const clock = makeClock();
+      await setUpLockedDraft(clock);
+      const result = runBind(contextFor(clock), {
+        draftId: "draft-1",
+        beacon: { source: "bitcoin/mainnet", round: 900_000, value: VALUE },
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.result.binding.roundBasis).toBe("operator-chosen");
+      expect(result.result.statement).toContain("still the operator's choice");
+    });
+
+    test("status offers the bindable rounds before the run binds, and drops them after", async () => {
+      const clock = makeClock();
+      await setUpLockedDraft(clock);
+      const before = runStatus(contextFor(clock), { draftId: "draft-1" });
+      if (!before.ok) throw new Error("status failed");
+      expect(before.result.bindableBeaconRounds).toEqual([
+        { source: "drand/default", round: expect.any(Number), publishedAt: expect.any(String) },
+        { source: "drand/quicknet", round: sealDerivedRound, publishedAt: expect.any(String) },
+      ]);
+
+      runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon() });
+      const after = runStatus(contextFor(clock), { draftId: "draft-1" });
+      if (!after.ok) throw new Error("status failed");
+      expect(after.result.bindableBeaconRounds).toBeUndefined();
+    });
   });
 
   test("appends exactly one audit entry per call", async () => {
@@ -344,7 +421,7 @@ describe("runStatus", () => {
     const after = runStatus(contextFor(clock), { draftId: "draft-1" });
     if (!after.ok) throw new Error("status failed");
     expect(after.result.binding?.class).toBe("beacon-ordering-only");
-    expect(after.result.binding?.beacon.round).toBe(LATE_ROUND);
+    expect(after.result.binding?.beacon.round).toBe(sealDerivedRound);
     expect(after.result.binding?.postSeal).toBe("proven-offline");
     expect(after.result.binding?.statement).toContain("beacon-binding/1");
   });

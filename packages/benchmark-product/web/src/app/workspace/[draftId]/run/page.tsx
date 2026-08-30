@@ -23,6 +23,10 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
   // `?? []` for the same reason `publication` and `publicationConfiguration` above are optional-
   // chained: a view that failed to load, or a caller holding an older shape, still renders a page.
   const beaconSources = view.ok ? view.beaconSources ?? [] : [];
+  // Issue #3322: `bind` admits exactly one round per scheduled source, derived from this run's own
+  // seal. The form cannot ask an operator to compute it, so the run reports the numbers and the
+  // form shows them beside the field they go in.
+  const bindableRounds = status?.bindableBeaconRounds ?? [];
   const postHoc = state === "closed" || state === "reported" || state === "published-bundle";
   const reportStage = publication?.stages.find((stage) => stage.name === "report");
   const accountingStage = publication?.stages.find((stage) => stage.name === "accounting");
@@ -78,11 +82,12 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
           ? <p className="text-sm">{status.binding.statement}</p>
           : <ActionForm action={GUI_SERVER_ACTIONS["run.bind"]} submitLabel="Bind to this beacon value" disabled={state !== "locked"}>
               <HiddenDraft draftId={draftId} />
-              <p className="text-sm text-muted-foreground">Read a round from a public beacon that has already been published, and bind this sealed run to it. A round published before the seal is refused. A run binds once.</p>
+              <p className="text-sm text-muted-foreground">Read a round from a public beacon that has already been published, and bind this sealed run to it. On a scheduled beacon the seal names the one round this run may bind to; any other is refused. A run binds once.</p>
               <Label htmlFor="beacon-source">Beacon</Label>
               <select id="beacon-source" name="beaconSource" required disabled={state !== "locked"} className="h-10 rounded-md border border-input bg-background px-3 text-sm">{beaconSources.map((id) => <option key={id} value={id}>{id}</option>)}</select>
               <Label htmlFor="beacon-round">Round or block height</Label>
               <Input className="font-mono" id="beacon-round" name="beaconRound" required disabled={state !== "locked"} />
+              {bindableRounds.length > 0 && <ul className="grid gap-1 font-mono text-sm">{bindableRounds.map((bindable) => <li key={bindable.source}>{bindable.source} &middot; round {bindable.round} &middot; {bindable.publishedAt}</li>)}</ul>}
               <Label htmlFor="beacon-value">Published value</Label>
               <Input className="font-mono" id="beacon-value" name="beaconValue" required disabled={state !== "locked"} />
             </ActionForm>}

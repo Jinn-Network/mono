@@ -75,6 +75,27 @@ and the report face says so in those words.
 pair is public. Fetch it from the beacon and compare; a value the beacon never
 published binds nothing, and no Colophon code can tell you that.
 
+**Step 2b — check the round was not chosen.** Postdating the seal is not enough on
+its own. If a run could bind to *any* later round, an operator could watch the
+rounds published between sealing and launching, derive what each would produce,
+and bind the one they preferred: the value would be unpredictable, but the choice
+among realised values would not be. So for a scheduled beacon the seal names
+exactly one admissible round — the first published strictly after it:
+
+```text
+round = max(1, floor((sealedAt - genesis) / period) + 2)
+```
+
+with `sealedAt` and `genesis` in the same units. Recompute it from the record's
+own `sealedAt` and check the record names that round. Colophon's `bind` refuses
+any later round, so a bundle from this product will match; a record from anywhere
+else that names a different round tells you the operator chose which post-seal
+value applied, and its report face says so in those words.
+
+`bitcoin/mainnet` has no such round: a block height carries no schedule, so
+nothing derives one from the seal and the height stays the operator's choice.
+That residue is stated on the face rather than removed.
+
 **Step 3 — recompute the derivation.** For each item identity — a
 `sha256:`-prefixed lowercase-hex task digest — compute
 
@@ -93,11 +114,21 @@ This is deliberately the same encoding as the reference verifier's
 `screening-sample/1` procedure, whose only difference is that it keys on a sealed
 seed rather than on post-seal randomness.
 
-**What each binding establishes.** A beacon-drawn slate could not have been
-selected after the fact without predicting the beacon. A census run's binding is
-weaker and is stated as such: it shows the run's ORDER was fixed by randomness
-postdating the seal, not that the population was — a census makes no population
-choice. A run with no binding establishes neither, and its report face says so.
+**What each binding establishes.** A beacon-drawn slate on the round the seal names
+could not have been selected after the fact: neither the value nor which post-seal
+value applied was the operator's to pick. On any other round the value was still
+unpredictable, but the slate could have been selected after the fact by waiting
+and choosing among the rounds already published — the face says that instead of
+the stronger sentence. A census run's binding is weaker again and is stated as
+such: it shows the run's ORDER was fixed by randomness postdating the seal, not
+that the population was — a census makes no population choice. A run with no
+binding establishes neither, and its report face says so.
+
+One residue survives even a seal-derived round: the *source*. This procedure
+admits three beacons, so an operator prepared to wait for all of them could have
+realised one candidate per source and bound the source they preferred. Closing
+that would need the run to name its source in the sealed record itself; today it
+is named on the face instead.
 
 ## The record family
 
