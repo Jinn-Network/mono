@@ -118,3 +118,31 @@ export {
   PUBLIC_BUNDLE_VERIFIER_MAJOR,
   PUBLIC_BUNDLE_V4_VERIFIER_MAJOR,
 } from "./reader-instructions.js";
+// `beacon-binding/1` (issue #2976): the post-seal public-randomness binding, and the report face
+// that states which binding a run carries. Single-sourced here for the same reason the anchored
+// projection is -- the product core imports this package, so producer and reader run one function.
+export {
+  BEACON_BINDING_PROCEDURE,
+  BEACON_SOURCES,
+  BEACON_SOURCE_IDS,
+  MAX_BEACON_ROUND,
+  BeaconReferenceSchema,
+  RunBindingError,
+  RunBindingSchema,
+  beaconRoundInstant,
+  computeBeaconOrder,
+  verifyRunBinding,
+} from "./binding/beacon-binding.js";
+export type {
+  BeaconOrderParams,
+  BeaconOrderResult,
+  BeaconPostSealBasis,
+  BeaconReference,
+  BeaconSourceDefinition,
+  BeaconSourceId,
+  BeaconSourceTimeBasis,
+  RunBinding,
+  VerifiedRunBinding,
+} from "./binding/beacon-binding.js";
+export { runBindingClass, runBindingSentence, runBoundVenueLimits } from "./binding/report-face.js";
+export type { RunBindingClass } from "./binding/report-face.js";

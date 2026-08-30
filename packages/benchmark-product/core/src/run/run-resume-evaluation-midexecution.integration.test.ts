@@ -35,8 +35,13 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { parseBenchmark, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
-import { launchAndWatch } from "@jinn-network/benchmarking-run";
+import {
+  expectedCellCount,
+  parseBenchmark,
+  parseMatrix,
+  parseRun,
+} from "@jinn-network/benchmarking-records";
+import { launchAndWatch, MAX_CONCURRENT_CELLS } from "@jinn-network/benchmarking-run";
 import { armAdd } from "../operations/arms.js";
 import type { OperationContext } from "../operations/context.js";
 import { createDraft, readDraftDocument } from "../operations/drafts.js";
@@ -283,16 +288,46 @@ describe("resume reconciles an evaluation attempt killed mid-execution", () => {
       const journalPath = rewindAttemptPastTerminal(accepted.submissionSha256);
       expect(readFileSync(journalPath, "utf8")).not.toContain("attempt-terminal");
 
+      // The ceiling below only takes capacity off the table while it actually exceeds the
+      // attempts this run can hold live at once — one solve leg and one evaluation leg per cell.
+      // Both halves of that are constants owned elsewhere (`MAX_CONCURRENT_CELLS` in
+      // `@jinn-network/benchmarking-run`, the cell count in this file's own fixture), so assert
+      // the relation rather than restate it in prose: lowering the platform maximum or widening
+      // the fixture then fails here, loudly and immediately, instead of returning this test to
+      // the machine-speed-dependent flake the ceiling was raised to cure.
+      const spec = readDraftDocument(workspaceDir, draftId).spec;
+      if (spec.taskSet.kind !== "benchmark") throw new Error("unreachable: no benchmark");
+      const runSha256 = requireRunState(workspaceDir, draftId).runSha256;
+      if (runSha256 === undefined) throw new Error("unreachable: no run record");
+      const liveAttemptCeiling = expectedCellCount(
+        parseBenchmark(getSealedBytes(workspaceDir, spec.taskSet.benchmarkSha256)),
+        parseRun(getSealedBytes(workspaceDir, runSha256)),
+      ) * 2;
+      expect(
+        MAX_CONCURRENT_CELLS,
+        `the platform ceiling no longer covers this run's ${liveAttemptCeiling} live attempts`,
+      ).toBeGreaterThanOrEqual(liveAttemptCeiling);
+
       // ── resume through the PUBLIC operation, on a fresh venue ───────────────────────────
-      // Capacity headroom of one slot above the outstanding cell count: the interrupted
-      // evaluation attempt rehydrates NONTERMINAL, so the resumed backend counts it live and
-      // holds its capacity slot until that leg's own reconciliation settles it. Without the
-      // headroom an unrelated cell loses its dispatch to "local backend capacity exhausted" and
-      // expires — collateral of the crash, not the verdict-recovery question under test.
-      // That slot-holding is tracked as its own defect (issue #3192): reconciliation cannot
-      // move earlier than the evaluation cell's own preparation, so the slot is only
-      // released once this leg reaches `dispatchEvaluation`.
-      const resumed = await runResume(contextFor(clock), { draftId, maxConcurrentCells: 9 });
+      // Capacity is deliberately taken OFF the table: the ceiling is the platform maximum, well
+      // above the twelve attempts this run can ever hold live at once (six cells, each a solve
+      // leg and an evaluation leg). A smaller ceiling makes the test's own crash a race.
+      // `LocalBackend`'s rehydration calls `capacity.restore(live)` over every attempt on disk
+      // that has no `attempt-terminal` event, and the abandoned drive above leaves a
+      // TIMING-DEPENDENT number of those: the interrupted evaluation attempt always (it is
+      // rewound past its terminal on purpose), plus however many solve legs happened not to have
+      // terminaled at the instant the drive was abandoned — more of them on a slower or busier
+      // machine. Each holds a slot, and the evaluation one holds its until that leg reaches
+      // `dispatchEvaluation` (its own defect, issue #3192). Whenever the held count exceeds the
+      // headroom, an unrelated cell loses its dispatch to "local backend capacity exhausted" and
+      // expires — collateral of the crash, not the verdict-recovery question under test. A fixed
+      // small headroom cannot bound a count that varies with machine speed, so this does not use
+      // one: verified by sweeping the ceiling down, which reproduces exactly the CI failure
+      // (a cell `expired` at `dispatches: 1`, no attempt, no verdict) at and below 5.
+      const resumed = await runResume(contextFor(clock), {
+        draftId,
+        maxConcurrentCells: MAX_CONCURRENT_CELLS,
+      });
       expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
 
       const final = readRunJournalEntries(workspaceDir, draftId);
@@ -316,7 +351,19 @@ describe("resume reconciles an evaluation attempt killed mid-execution", () => {
       if (!collected.ok) throw new Error("unreachable");
       const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
       for (const cell of matrix.cells) {
-        expect(cell.outcome, cell.cellKey).toBe("judged");
+        // The cell's own lineage, not just its outcome: `expired` is the outcome of a cell that
+        // was NEVER DISPATCHED (§8.2 requires exactly that pairing) as well as of one that
+        // dispatched and ran out its window, and the two have opposite causes. `dispatches`
+        // separates them, and the attempt/delivery/verdict lineage says how far a dispatched one
+        // got, so a failure here names its own diagnosis instead of only the outcome string.
+        expect(cell.outcome, `${cell.cellKey}: ${JSON.stringify({
+          dispatches: cell.dispatches,
+          accounted: cell.accounted,
+          attempt: cell.attempt,
+          delivery: cell.delivery,
+          verdicts: cell.verdicts.length,
+          validVerdicts: cell.validVerdicts.length,
+        })}`).toBe("judged");
       }
       expect(matrix.completeness).toMatchObject({
         expected: matrix.cells.length,

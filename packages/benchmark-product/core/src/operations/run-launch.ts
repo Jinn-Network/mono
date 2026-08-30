@@ -27,6 +27,7 @@
 import {
   cellIdempotencyKey,
   expectedCellSet,
+  orderCellsByTask,
   parseBenchmark,
   parseRun,
   submissionExtensionBlock,
@@ -65,6 +66,7 @@ import {
   readRunJournalEntries,
 } from "../run/journal.js";
 import { requireRunState, writeRunState, type PublicationState } from "../run/state.js";
+import { readRunBindingCarriage } from "../binding/carriage.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
@@ -137,6 +139,14 @@ interface LoadedRun {
   readonly runRecord: RunRecord;
   readonly runSha256: string;
   readonly owner: string;
+  /**
+   * The beacon-derived execution order of a run bound by `beacon-binding/1` (issue #2976), as task
+   * digests without the `sha256:` prefix. Undefined for an unbound run, which keeps
+   * `expectedCellSet`'s order. Read here rather than at each dispatch site so the first launch and
+   * every resume use the one order: applying it to only one of them would mean the order the run
+   * bound itself to was not the order it ran in.
+   */
+  readonly dispatchTaskOrder?: readonly string[];
 }
 
 function loadLockedOrRunningRun(workspaceDir: string, draftId: string, expectedState: "locked" | "running"): LoadedRun {
@@ -157,7 +167,15 @@ function loadLockedOrRunningRun(workspaceDir: string, draftId: string, expectedS
     refuse("conflict", `drafts.${draftId}.taskSet`, `draft ${draftId} has no attached benchmark`);
   }
   const benchRecord = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
-  return { document, benchRecord, runRecord, runSha256: runState.runSha256, owner: runState.owner };
+  const binding = readRunBindingCarriage(workspaceDir, runState);
+  return {
+    document,
+    benchRecord,
+    runRecord,
+    runSha256: runState.runSha256,
+    owner: runState.owner,
+    ...(binding === undefined ? {} : { dispatchTaskOrder: binding.order.map((item) => item.slice("sha256:".length)) }),
+  };
 }
 
 const APEX_SWE_DEV_OPERATOR_HOST_REFUSAL =
@@ -586,6 +604,7 @@ export function runLaunch(
                 capture,
                 hostTerminalFacts: composeHostTerminalFacts(clockedContext.workspaceDir, deps.hostTerminalFacts),
                 maxConcurrentCells,
+                ...(loaded.dispatchTaskOrder === undefined ? {} : { dispatchTaskOrder: loaded.dispatchTaskOrder }),
               });
               await driveCellEvents(driveDeps, events);
               return { draft };
@@ -647,7 +666,8 @@ export function runResume(
       const entries = readRunJournalEntries(clockedContext.workspaceDir, input.draftId);
       const fold = foldRunJournal(entries);
       const expected = expectedCellSet(loaded.benchRecord, loaded.runRecord);
-      const outstanding = outstandingCells(expected, fold);
+      // Resume dispatches in the same beacon-derived order the first launch used; see LoadedRun.
+      const outstanding = orderCellsByTask(outstandingCells(expected, fold), loaded.dispatchTaskOrder);
 
       const journaledSubmissions = new Map<string, string>();
       // Same crash boundary, one leg down. An evaluation Submission the backend already accepted

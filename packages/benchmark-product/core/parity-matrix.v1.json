@@ -253,6 +253,16 @@
       }
     },
     {
+      "operation": "runBind",
+      "cliVerb": "bind",
+      "authorityGated": false,
+      "description": "Binds the sealed, not-yet-launched run to a public beacon value that postdates its seal, deriving and sealing the run's execution order from it (issue #2976).",
+      "gui": {
+        "status": "shipped",
+        "action": "run.bind"
+      }
+    },
+    {
       "operation": "runCancel",
       "cliVerb": "cancel",
       "authorityGated": true,
