@@ -24,8 +24,15 @@ export function isAbsoluteUri(value: string): boolean {
  * normalizes, rather than an opaque string it copies through. The trailing-dot rule is scoped
  * to these because `r.example.` is the same DNS name as `r.example` only where there is a DNS
  * name; under an opaque-host scheme the dot is just a character the vocabulary owns.
+ *
+ * A host of nothing but dots (`.`, the DNS root, and its degenerate siblings) is exempt, and
+ * `HAS_A_LABEL` is what exempts it. The rule exists to collapse `name.` onto `name`, and when
+ * every label is empty there is no `name` to collapse onto — refusing it would leave a URI
+ * with no accepted spelling at all, which is the one thing the guarantee below forbids.
  */
 const SPECIAL_SCHEMES = new Set(["http:", "https:", "ws:", "wss:", "ftp:", "file:"]);
+
+const HAS_A_LABEL = /[^.]/u;
 
 const UNRESERVED_OCTET = /^[A-Za-z0-9\-._~]$/;
 
@@ -84,10 +91,16 @@ function hasNoEmptyQueryOrFragment(value: string): boolean {
  * trailing-dot rule is scoped to the special schemes for the same reason, so nothing here
  * reaches into a region it cannot reason about.
  *
- * Stated positively, and this is the whole of the guarantee: under a special scheme, every
- * RFC 3986 equivalence class has exactly one spelling this function accepts, and every such
- * class has one — no rail is left unspellable. Under any other scheme it accepts one spelling
- * per string, and the vocabulary owns the rest.
+ * Stated positively, and this is the whole of the guarantee: under a special scheme, two URIs
+ * that are equivalent — under RFC 3986 §6.2.2, plus the trailing-dot rule, which is scheme-based
+ * rather than syntax-based normalization — never both pass, and the normalized spelling of any
+ * URI always does, so no rail is left unspellable. A string carrying a malformed escape is
+ * refused outright and is not an RFC 3986 URI to begin with, so it is outside that claim rather
+ * than a counterexample to it. `extensions.test.ts` runs both directions over the special-scheme
+ * space, because a rule that claims more than it delivers is worse than a modest one — which is
+ * the whole reason this function grew past its round-trip check.
+ *
+ * Under any other scheme it accepts one spelling per string, and the vocabulary owns the rest.
  */
 export function isNormalizedAbsoluteUri(value: string): boolean {
   if (/\s/u.test(value)) return false;
@@ -98,7 +111,10 @@ export function isNormalizedAbsoluteUri(value: string): boolean {
     return false;
   }
   if (url.href !== value) return false;
-  if (SPECIAL_SCHEMES.has(url.protocol) && url.hostname.endsWith(".")) return false;
+  if (SPECIAL_SCHEMES.has(url.protocol) && HAS_A_LABEL.test(url.hostname)
+    && url.hostname.endsWith(".")) {
+    return false;
+  }
   return hasNormalizedPercentEncoding(value) && hasNoEmptyQueryOrFragment(value);
 }
 

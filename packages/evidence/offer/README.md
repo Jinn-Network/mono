@@ -44,9 +44,9 @@ The protocol takes no fee and no cut, ever. There is no fee field to take one wi
   absolute URI, joining the identifier namespace the way scheme IRIs do. No rail binding
   ships with this package; concrete rails arrive as their own adapters. `to` keeps that
   openness — its syntax is opaque, because no address shape can be imposed on a rail that
-  does not exist yet — but it must render as something, and it may not carry control
-  characters, line separators, or Unicode bidi controls, which exist only to make one
-  destination display as another.
+  does not exist yet — but it must carry at least one character that is neither whitespace nor
+  a format character, and it may not carry control characters, line separators, or Unicode
+  bidi controls, which exist only to make one destination display as another.
 - **No reference currency and no conversion, anywhere.** Equivalence across a multi-rail
   offer is the holder's assertion, sealed with the offer.
 - **Repricing is supersession, never mutation.** A new price is a new record with a new
@@ -71,9 +71,9 @@ trailing-dot host under a special scheme (`r.example.` is the same DNS name), a 
 that is not in RFC 3986 §6.2.2 normal form (`%2f` for `%2F`, `%62` for the `b` it encodes), and
 an empty query or fragment (`…/v1?` and `…/v1#` address the same thing as `…/v1`). Each was
 otherwise a second identifier for one rail — a seller could seal `…/v1` at one price and `…/v1?`
-at another, and both would pass. Stated positively: under a special scheme, every RFC 3986
-equivalence class has exactly one spelling this accepts, and every class has one, so no rail is
-left unspellable.
+at another, and both would pass. Stated positively: under a special scheme, two equivalent URIs
+never both pass, and the normalized spelling of any URI always does, so no rail is left
+unspellable. Both directions are pinned by a test rather than asserted here.
 
 What the rule does **not** reach is opaque hosts and opaque paths, which round-trip verbatim:
 `ipfs://BAFYBEIGD/x` and `ipfs://bafybeigd/x` are two distinct rails here, as are `urn:UUID:x`

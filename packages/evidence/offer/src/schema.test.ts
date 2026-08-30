@@ -175,6 +175,13 @@ describe("the offer record schema", () => {
         .success).toBe(true);
     });
 
+    // The DNS root has no dotless spelling, so refusing it would leave a URI with no accepted
+    // spelling at all — and the guarantee is that every equivalence class has one.
+    test("exempt the lone-dot root host, which has no second spelling to collapse to", () => {
+      expect(parse(offer({ rails: [{ rail: "https://./", to: "x", amount: "1" }] })).success)
+        .toBe(true);
+    });
+
     // The honest limit, stated as a test so it cannot rot into an unnoticed claim: opaque
     // hosts and opaque paths round-trip verbatim, so these remain two rails, not one.
     test("do not reach a scheme whose equivalence law this package cannot know", () => {
