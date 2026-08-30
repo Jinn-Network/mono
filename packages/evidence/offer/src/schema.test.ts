@@ -150,6 +150,12 @@ describe("the offer record schema", () => {
       ["empty query and fragment", "https://rails.example/v1?#"],
       ["malformed percent-escape", "https://rails.example/%zz"],
       ["truncated percent-escape", "https://rails.example/v1%"],
+      ["raw octet outside the path grammar", "https://rails.example/a^b"],
+      ["raw pipe in a path", "https://rails.example/a|b"],
+      ["raw bracket in a path", "https://rails.example/a[b"],
+      ["raw brace in a query", "https://rails.example/p?a{b"],
+      ["raw backtick in a query", "https://rails.example/p?a`b"],
+      ["raw brace in a fragment", "https://rails.example/p#a{b"],
     ])("refuse a spelling WHATWG round-trips but RFC 3986 calls equivalent: %s", (_label, rail) => {
       expect(parse(offer({ rails: [{ rail, to: "x", amount: "1" }] })).success).toBe(false);
     });
@@ -161,6 +167,9 @@ describe("the offer record schema", () => {
       "https://rails.example/v1#frag",
       "https://rails.example/v1?a=%2F#f",
       "https://rails.example:8443/v1",
+      "https://rails.example/a%5Eb",
+      "https://rails.example/p?a%7Bb",
+      "https://rails.example/p#a%60b",
     ])("still accept the normalized spelling %j", (rail) => {
       expect(parse(offer({ rails: [{ rail, to: "x", amount: "1" }] })).success).toBe(true);
     });
@@ -191,6 +200,32 @@ describe("the offer record schema", () => {
           { rail: "ipfs://bafybeigd/x", to: "b", amount: "999" },
         ],
       })).success).toBe(true);
+    });
+
+    // WHATWG's percent-encode sets are narrower than RFC 3986's `pchar`, so it round-trips both
+    // `/a^b` and `/a%5Eb`. `%` sorts before `^`, so this document passed sortedness, and the two
+    // strings differ, so it passed uniqueness — while any consumer that percent-decodes sees one
+    // rail at two prices, which is what the gate matches on.
+    test("a raw octet and its escape are one rail, not two", () => {
+      expect(parse(offer({
+        rails: sortOfferRails([
+          { rail: "https://rails.example/a%5Eb", to: "0xAAAA", amount: "1" },
+          { rail: "https://rails.example/a^b", to: "0xBBBB", amount: "999999999" },
+        ]),
+      })).success).toBe(false);
+    });
+
+    // The other side of the same policy, kept executable so it cannot rot into an unnoticed
+    // claim: these three classes have no accepted spelling here at all. RFC 3986 §6.2.3
+    // withholds the empty-query elision and disclaims fragment normalization, and §3.2.2 treats
+    // a trailing dot as meaningful — so refusing them is this package's identity policy, and the
+    // cost is that a vocabulary meaning something by any of them cannot be spelled here.
+    test.each([
+      "https://rails.example./v1",
+      "https://rails.example/v1?",
+      "https://rails.example/v1#",
+    ])("leave %j unspellable by policy, not by oversight", (rail) => {
+      expect(parse(offer({ rails: [{ rail, to: "x", amount: "1" }] })).success).toBe(false);
     });
 
     test("two spellings of one rail can no longer masquerade as two rails", () => {

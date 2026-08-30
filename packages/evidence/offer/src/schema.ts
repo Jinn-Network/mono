@@ -17,8 +17,9 @@ const NormalizedAbsoluteUri = z
     isNormalizedAbsoluteUri,
     "must be an absolute URI already in its normalized spelling (lowercase scheme and host, "
       + "no default port, no dot segments, no trailing-dot host, no empty query or fragment, "
-      + "and percent-escapes uppercase and never over an unreserved character), so one rail "
-      + "spelled with a special scheme has exactly one identifier",
+      + "percent-escapes uppercase and never over an unreserved character, and no raw character "
+      + "RFC 3986 requires escaped in that component), so one rail spelled with a special scheme "
+      + "has exactly one identifier",
   );
 
 /**

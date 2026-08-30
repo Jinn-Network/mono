@@ -54,11 +54,42 @@ function hasNormalizedPercentEncoding(value: string): boolean {
 }
 
 /**
- * No empty query and no empty fragment. `https://r.example/v1`, `https://r.example/v1?`, and
- * `https://r.example/v1#` all address the same resource, and WHATWG round-trips the last two
- * unchanged, so without this one rail has three identifiers. `value` is already WHATWG's own
- * serialization when this runs, so the first `#` delimits the fragment and the first `?`
- * before it delimits the query — a literal one anywhere else is percent-encoded by then.
+ * The raw characters RFC 3986 §3.3 and §3.4 permit unescaped, per component. `pchar` is
+ * `unreserved / pct-encoded / sub-delims / ":" / "@"`; a path adds `/`, and a query or fragment
+ * adds `/` and `?`. `%` is here because it introduces an escape, which
+ * `hasNormalizedPercentEncoding` judges separately.
+ */
+const RFC3986_PATH_OCTET = /^[A-Za-z0-9\-._~!$&'()*+,;=:@/%]*$/u;
+const RFC3986_QUERY_OCTET = /^[A-Za-z0-9\-._~!$&'()*+,;=:@/?%]*$/u;
+
+/**
+ * Every character of the path, query, and fragment is one RFC 3986 lets stand unescaped there.
+ * WHATWG's percent-encode sets are narrower than `pchar`, so it round-trips both `…/a^b` and
+ * `…/a%5Eb` — and without this rule both would pass, putting one rail in an offer twice at two
+ * prices, which is the exact duplicate the uniqueness rule exists to refuse. The raw form loses,
+ * not the escape: `^ | [ ] { } \` and the backtick are in none of RFC 3986's production rules for
+ * these components, so the raw spelling is not a URI at all, while `%5E` is, round-trips
+ * unchanged, and is therefore the one accepted spelling rather than a second one.
+ */
+function hasOnlyRfc3986RawOctets(url: URL): boolean {
+  return RFC3986_PATH_OCTET.test(url.pathname)
+    && RFC3986_QUERY_OCTET.test(url.search.slice(1))
+    && RFC3986_QUERY_OCTET.test(url.hash.slice(1));
+}
+
+/**
+ * No empty query and no empty fragment. RFC 3986 §6.2.3 is explicit that these are *not*
+ * equivalent to the bare URI — an empty query may be elided only where a scheme licenses it, and
+ * a fragment is not subject to scheme-based normalization at all — so this is not a normalization
+ * rule but this package's own identity policy: `https://r.example/v1?` and `https://r.example/v1#`
+ * are refused outright rather than folded onto `https://r.example/v1`, because WHATWG round-trips
+ * all three unchanged and a rail vocabulary that spelled a delimiter it does not use would put
+ * one destination in an offer under three identifiers. The cost is stated where the guarantee is:
+ * a rail that means something by a trailing `?` or `#` has no accepted spelling here.
+ *
+ * `value` is already WHATWG's own serialization when this runs, so the first `#` delimits the
+ * fragment and the first `?` before it delimits the query — a literal one anywhere else is
+ * percent-encoded by then.
  */
 function hasNoEmptyQueryOrFragment(value: string): boolean {
   const hashIndex = value.indexOf("#");
@@ -80,8 +111,9 @@ function hasNoEmptyQueryOrFragment(value: string): boolean {
  * ws, wss, ftp, file), drops default ports, resolves dot segments, and drops empty userinfo
  * and an empty port — but it round-trips several spellings RFC 3986 calls equivalent, so this
  * check refuses those itself: a trailing-dot host under a special scheme (`r.example.`, the
- * same DNS name), a non-normalized percent-escape (`%2f` for `%2F`, `%62` for `b`), and an
- * empty query or fragment (`…/v1?`, `…/v1#`). Each was a second identifier for one rail.
+ * same DNS name), a non-normalized percent-escape (`%2f` for `%2F`, `%62` for `b`), a raw octet
+ * outside the component's RFC 3986 grammar (`…/a^b` beside `…/a%5Eb`), and an empty query or
+ * fragment (`…/v1?`, `…/v1#`). Each was a second identifier for one rail.
  *
  * What remains outside the guarantee is opaque hosts and opaque paths, which round-trip
  * verbatim: `ipfs://BAFYBEIGD/x` and `ipfs://bafybeigd/x` are still two distinct rails here,
@@ -91,17 +123,26 @@ function hasNoEmptyQueryOrFragment(value: string): boolean {
  * trailing-dot rule is scoped to the special schemes for the same reason, so nothing here
  * reaches into a region it cannot reason about.
  *
- * Stated positively, and this is the whole of the guarantee: under a special scheme, two URIs
- * that are equivalent never both pass, and the normalized spelling of any URI always does, so no
- * rail is left unspellable. "Equivalent" there is RFC 3986 §6.2.2 syntax-based normalization —
- * case, percent-encoding, path segments — plus two §6.2.3 scheme-based rules this check also
- * applies: the DNS trailing dot, and the elision of an empty query or fragment. Naming §6.2.2
- * alone would make the second half false, since `…/v1?` is already its own syntax-based normal
- * form and is refused all the same. A string carrying a malformed escape is
- * refused outright and is not an RFC 3986 URI to begin with, so it is outside that claim rather
- * than a counterexample to it. `extensions.test.ts` runs both directions over the special-scheme
- * space, because a rule that claims more than it delivers is worse than a modest one — which is
- * the whole reason this function grew past its round-trip check.
+ * Stated positively, and this is the whole of the guarantee: under a special scheme, two strings
+ * this check calls equivalent never both pass, and every equivalence class it admits has an
+ * accepted spelling. "Equivalent" is RFC 3986 §6.2.2 syntax-based normalization — case,
+ * percent-encoding, path segments — plus one rule from §6.2.1, that a raw octet and its escape
+ * are the same character where the grammar permits only the escape. It borrows nothing from
+ * §6.2.3: the two scheme-based rules this check also applies, the DNS trailing dot and the
+ * refusal of an empty query or fragment, are this package's own identity policy and that section
+ * licenses neither. §6.2.3 in fact withholds the empty-query elision absent a scheme license and
+ * disclaims fragment normalization outright, and §3.2.2 treats a trailing dot as meaningful
+ * rather than as a spelling variant.
+ *
+ * So say the cost plainly rather than let the sentence above absorb it. Three classes have no
+ * accepted spelling here at all, by policy and not by oversight: `https://r.example./v1`,
+ * `https://r.example/v1?`, and `https://r.example/v1#`. A rail vocabulary that mints an
+ * FQDN-rooted identifier, or means something by a delimiter it leaves empty, cannot be spelled by
+ * this check and needs a vocabulary-level rule the same way an opaque scheme does. A string
+ * carrying a malformed escape is refused for a different reason: it is not an RFC 3986 URI to
+ * begin with. `extensions.test.ts` runs both directions over a cross product of hand-picked
+ * special-scheme components, because a rule that claims more than it delivers is worse than a
+ * modest one — which is the whole reason this function grew past its round-trip check.
  *
  * Under any other scheme it accepts one spelling per string, and the vocabulary owns the rest.
  */
@@ -118,7 +159,9 @@ export function isNormalizedAbsoluteUri(value: string): boolean {
     && url.hostname.endsWith(".")) {
     return false;
   }
-  return hasNormalizedPercentEncoding(value) && hasNoEmptyQueryOrFragment(value);
+  return hasOnlyRfc3986RawOctets(url)
+    && hasNormalizedPercentEncoding(value)
+    && hasNoEmptyQueryOrFragment(value);
 }
 
 /** Extension names are reverse-DNS or absolute URIs (TEP §21.3); a bare key is neither. */

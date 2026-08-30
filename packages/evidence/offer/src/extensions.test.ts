@@ -5,11 +5,28 @@ import { isNormalizedAbsoluteUri } from "./extensions.js";
 const SPECIAL_SCHEMES = ["http:", "https:", "ws:", "wss:", "ftp:", "file:"];
 const UNRESERVED = /^[A-Za-z0-9\-._~]$/;
 
+// The raw characters RFC 3986 permits unescaped in each component, spelled out here rather than
+// imported so the oracle stays an independent statement of the rule. Anything else that WHATWG
+// nonetheless round-trips raw (`^ | [ ] { } \` and the backtick) has its escape as the normal
+// form, which is what makes `…/a^b` and `…/a%5Eb` one identity rather than two.
+const PATH_RAW = /[A-Za-z0-9\-._~!$&'()*+,;=:@/%]/u;
+const QUERY_RAW = /[A-Za-z0-9\-._~!$&'()*+,;=:@/?%]/u;
+
+function escapeIllegalRaw(value: string, permitted: RegExp): string {
+  return [...value]
+    .map((character) =>
+      permitted.test(character)
+        ? character
+        : `%${character.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`)
+    .join("");
+}
+
 /**
  * The normalized spelling of a WHATWG-stable URI, written independently of the implementation:
- * RFC 3986 §6.2.2 percent-escape normalization, empty-query and empty-fragment elision, and the
- * DNS trailing-dot rule where the host has a real label. WHATWG has already done the scheme and
- * host case-folding, the default port, and the dot segments by the time a string is stable.
+ * RFC 3986 §6.2.2 percent-escape normalization, §6.2.1 escaping of a raw octet the component's
+ * grammar does not permit, empty-query and empty-fragment elision, and the DNS trailing-dot rule
+ * where the host has a real label. WHATWG has already done the scheme and host case-folding, the
+ * default port, and the dot segments by the time a string is stable.
  */
 function normalizedSpelling(href: string): string {
   const url = new URL(href);
@@ -39,16 +56,23 @@ function normalizedSpelling(href: string): string {
   const authority = `${hostname}${url.port === "" ? "" : `:${url.port}`}`;
 
   return `${url.protocol}//${normalizePercent(credentials)}${authority}`
-    + normalizePercent(url.pathname)
-    + (query === null || query === "" ? "" : `?${normalizePercent(query)}`)
-    + (fragment === null || fragment === "" ? "" : `#${normalizePercent(fragment)}`);
+    + escapeIllegalRaw(normalizePercent(url.pathname), PATH_RAW)
+    + (query === null || query === ""
+      ? ""
+      : `?${escapeIllegalRaw(normalizePercent(query), QUERY_RAW)}`)
+    + (fragment === null || fragment === ""
+      ? ""
+      : `#${escapeIllegalRaw(normalizePercent(fragment), QUERY_RAW)}`);
 }
 
 const HOSTS = ["r.example", "R.Example", "r.example.", "r.example..", ".", "..", "a.b.c", "a.b.c.", "127.0.0.1", "[::1]", ""];
 const PORTS = ["", ":80", ":443", ":8443"];
-const PATHS = ["/", "/v1", "/a%62c", "/abc", "/%2f", "/%2F", "/~x", "/%7ex", "/a/../v1", "/%25", "/%2541", "/%E2%82%AC", "/%e2%82%ac", ""];
-const QUERIES = ["", "?", "?a=1", "?a=%2F", "?a=%2f", "?a=%62", "?#"];
-const FRAGMENTS = ["", "#", "#f", "#%7e", "#%7E", "#~"];
+// `^ [ |` and their escapes are here because WHATWG round-trips both spellings of each: without
+// the RFC 3986 raw-octet rule the pair is one rail under two identifiers, which is the collision
+// the first test below would then report.
+const PATHS = ["/", "/v1", "/a%62c", "/abc", "/%2f", "/%2F", "/~x", "/%7ex", "/a/../v1", "/%25", "/%2541", "/%E2%82%AC", "/%e2%82%ac", "/a^b", "/a%5Eb", "/a[b", "/a%5Bb", "/a|b", "/a%7Cb", ""];
+const QUERIES = ["", "?", "?a=1", "?a=%2F", "?a=%2f", "?a=%62", "?a{b", "?a%7Bb", "?a`b", "?a%60b", "?a^b", "?#"];
+const FRAGMENTS = ["", "#", "#f", "#%7e", "#%7E", "#~", "#a{b", "#a%7Bb", "#a|b", "#a%7Cb"];
 // `r.example.@` and `a%2Eb:r.example.@` exist to keep the oracle honest: they put the host
 // string inside the userinfo, which is what broke an earlier offset-splice implementation.
 const USERINFOS = ["", "u@", "u:p@", "@", "r.example.@", "a%2Eb:r.example.@"];

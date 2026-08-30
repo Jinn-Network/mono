@@ -66,14 +66,26 @@ its normalized spelling. Without that, `HTTPS://R.EXAMPLE/v1` and `https://r.exa
 pass uniqueness and sortedness alike and the offer would carry one rail at two prices.
 
 `new URL` round-tripping the string unchanged is most of that rule but not all of it, because
-WHATWG round-trips several spellings RFC 3986 calls equivalent. So the check also refuses a
-trailing-dot host under a special scheme (`r.example.` is the same DNS name), a percent-escape
-that is not in RFC 3986 §6.2.2 normal form (`%2f` for `%2F`, `%62` for the `b` it encodes), and
-an empty query or fragment (`…/v1?` and `…/v1#` address the same thing as `…/v1`). Each was
-otherwise a second identifier for one rail — a seller could seal `…/v1` at one price and `…/v1?`
-at another, and both would pass. Stated positively: under a special scheme, two equivalent URIs
-never both pass, and the normalized spelling of any URI always does, so no rail is left
-unspellable. Both directions are pinned by a test rather than asserted here.
+WHATWG round-trips several spellings RFC 3986 calls equivalent, and several its grammar does not
+permit at all. So the check also refuses a percent-escape that is not in RFC 3986 §6.2.2 normal
+form (`%2f` for `%2F`, `%62` for the `b` it encodes) and a raw octet the component's grammar
+requires escaped (`…/a^b` beside `…/a%5Eb` — WHATWG's percent-encode sets are narrower than
+`pchar`, so it round-trips both). Each was otherwise a second identifier for one rail: a seller
+could seal `…/a%5Eb` at one price and `…/a^b` at another, and both would pass.
+
+Two further refusals are this package's own identity policy rather than RFC 3986 normalization,
+and are worth naming as such: a trailing-dot host under a special scheme (`r.example.`), and an
+empty query or fragment (`…/v1?`, `…/v1#`). RFC 3986 §6.2.3 withholds the empty-query elision
+absent a scheme license and disclaims fragment normalization outright, and §3.2.2 treats a
+trailing dot as meaningful. Refusing these keeps one destination from arriving under three
+identifiers, and the cost is stated rather than hidden: `https://r.example./v1`,
+`https://r.example/v1?`, and `https://r.example/v1#` have **no** accepted spelling here at all. A
+vocabulary that means something by any of them needs its own rule, the same way an opaque scheme
+does.
+
+Stated positively, and this is the whole of it: under a special scheme, two strings this check
+calls equivalent never both pass, and every equivalence class it admits has an accepted spelling.
+Both directions are pinned by a test rather than asserted here.
 
 What the rule does **not** reach is opaque hosts and opaque paths, which round-trip verbatim:
 `ipfs://BAFYBEIGD/x` and `ipfs://bafybeigd/x` are two distinct rails here, as are `urn:UUID:x`
