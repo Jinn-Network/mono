@@ -97,9 +97,22 @@ function validate(document: unknown): OfferRecord {
   return parsed.data;
 }
 
-/** Validated record to its one canonical encoding. The single canonicalization point. */
+/**
+ * Validated record to its one canonical encoding. The single canonicalization point.
+ *
+ * The schema is deliberately extension-open (`namespacedObject` is a loose object), so a
+ * namespaced extension key may carry a value that validates and is still outside the I-JSON
+ * subset the canonicalizer accepts — a non-integral or non-finite number, or a string
+ * holding an unpaired UTF-16 surrogate. Those reach here from a hostile envelope, not only
+ * from a local producer, so trust-core's `TrustCoreError` is converted rather than allowed
+ * to escape: this boundary promises `category: "invalid-document"` and the class alone.
+ */
 function canonicalBytes(record: OfferRecord): Uint8Array {
-  return canonicalJsonBytes(withoutUndefinedMembers(record, ""));
+  try {
+    return canonicalJsonBytes(withoutUndefinedMembers(record, ""));
+  } catch (cause) {
+    invalid("", `offer document is not canonicalizable JSON: ${describe(cause)}`);
+  }
 }
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
