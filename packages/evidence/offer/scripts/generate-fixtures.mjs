@@ -74,6 +74,18 @@ const INVALID = {
     ...priced,
     rails: [{ ...priced.rails[1], rail: "HTTPS://SPEC.JINN.NETWORK/rails/eip155-8453-erc20-usdc/v1" }],
   },
+  // WHATWG round-trips `%62` unchanged, but RFC 3986 says it is the `b` it encodes, so this
+  // is the USDC rail under a second identifier. The refusal is what makes uniqueness real.
+  "equivalent-rail-spelling": {
+    ...priced,
+    rails: [{ ...priced.rails[1], rail: `${USDC_BASE.replace("usdc", "usd%63")}` }],
+  },
+  // A destination carrying U+202E renders as a different address than it is; opaque syntax
+  // is not the same as opaque display.
+  "spoofable-rail-destination": {
+    ...priced,
+    rails: [{ ...priced.rails[1], to: `0x2222222222222222\u202E222222222222222222222222` }],
+  },
   // The same rail spelled two ways would otherwise pass uniqueness and sortedness alike.
   "rail-spelled-twice": {
     ...priced,

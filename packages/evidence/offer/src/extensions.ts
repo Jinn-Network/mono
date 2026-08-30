@@ -19,28 +19,74 @@ export function isAbsoluteUri(value: string): boolean {
   }
 }
 
+const UNRESERVED_OCTET = /^[A-Za-z0-9\-._~]$/;
+
 /**
- * An absolute URI already written in its one normalized spelling — `new URL` round-trips it
- * unchanged. Used where a URI is an identity key rather than a locator: `HTTPS://R.EXAMPLE/v1`,
- * `https://r.example:443/v1`, and `https://r.example/v1` are the same identifier, so admitting
- * all three would let one rail appear twice in an offer and defeat the uniqueness rule that
- * makes "pay on one of its rails" unambiguous.
+ * Every percent-escape is a well-formed triplet in the one spelling RFC 3986 §6.2.2 calls
+ * normalized: uppercase hex digits, and never an escape of an unreserved octet. Both halves
+ * are equivalence rules, not style — `%2f` and `%2F` are the same octet, and `%62` is the
+ * same character as `b` — so admitting either spelling puts one rail in an offer twice.
+ * A malformed escape (`%zz`, a trailing `%`) is refused with them: `new URL` round-trips it
+ * verbatim, and a consumer that decodes per RFC 3986 cannot read it at all.
+ */
+function hasNormalizedPercentEncoding(value: string): boolean {
+  for (let index = value.indexOf("%"); index !== -1; index = value.indexOf("%", index + 1)) {
+    const triplet = value.slice(index + 1, index + 3);
+    if (!/^[0-9A-F]{2}$/.test(triplet)) return false;
+    if (UNRESERVED_OCTET.test(String.fromCharCode(Number.parseInt(triplet, 16)))) return false;
+  }
+  return true;
+}
+
+/**
+ * No empty query and no empty fragment. `https://r.example/v1`, `https://r.example/v1?`, and
+ * `https://r.example/v1#` all address the same resource, and WHATWG round-trips the last two
+ * unchanged, so without this one rail has three identifiers. `value` is already WHATWG's own
+ * serialization when this runs, so the first `#` delimits the fragment and the first `?`
+ * before it delimits the query — a literal one anywhere else is percent-encoded by then.
+ */
+function hasNoEmptyQueryOrFragment(value: string): boolean {
+  const hashIndex = value.indexOf("#");
+  if (hashIndex !== -1 && hashIndex === value.length - 1) return false;
+  const beforeFragment = hashIndex === -1 ? value : value.slice(0, hashIndex);
+  const queryIndex = beforeFragment.indexOf("?");
+  return queryIndex === -1 || queryIndex !== beforeFragment.length - 1;
+}
+
+/**
+ * An absolute URI already written in its one normalized spelling. Used where a URI is an
+ * identity key rather than a locator: `HTTPS://R.EXAMPLE/v1`, `https://r.example:443/v1`, and
+ * `https://r.example/v1` are the same identifier, so admitting all three would let one rail
+ * appear twice in an offer and defeat the uniqueness rule that makes "pay on one of its
+ * rails" unambiguous.
  *
- * The reach of that guarantee is exactly WHATWG URL's: scheme and host case-fold for the
- * special schemes (http, https, ws, wss, ftp, file), and default ports and dot segments are
- * removed. It does NOT reach opaque hosts and opaque paths, which round-trip verbatim — so
- * `ipfs://BAFYBEIGD/x` and `ipfs://bafybeigd/x` remain two distinct rails here, as do
- * `urn:UUID:x` and `urn:uuid:x` even though RFC 8141 calls URN namespace identifiers
+ * `new URL` round-tripping the value unchanged is the first half of the check and not the
+ * whole of it. WHATWG normalizes scheme and host case for the special schemes (http, https,
+ * ws, wss, ftp, file), drops default ports, resolves dot segments, and drops empty userinfo
+ * and an empty port — but it round-trips several spellings RFC 3986 calls equivalent, so this
+ * check refuses those itself: a trailing-dot host (`r.example.`, the same DNS name), a
+ * non-normalized percent-escape (`%2f` for `%2F`, `%62` for `b`), and an empty query or
+ * fragment (`…/v1?`, `…/v1#`). Each of those was a second identifier for one rail.
+ *
+ * What remains outside the guarantee is opaque hosts and opaque paths, which round-trip
+ * verbatim: `ipfs://BAFYBEIGD/x` and `ipfs://bafybeigd/x` are still two distinct rails here,
+ * as are `urn:UUID:x` and `urn:uuid:x` even though RFC 8141 calls URN namespace identifiers
  * case-insensitive. A rail vocabulary that mints identifiers under such a scheme owes its own
  * spelling rule; this check cannot supply one without knowing the scheme's equivalence law.
+ * The rule it does enforce is therefore exactly this: within one spelling of one scheme,
+ * there is one identifier — not that every scheme's equivalence class collapses to one.
  */
 export function isNormalizedAbsoluteUri(value: string): boolean {
   if (/\s/u.test(value)) return false;
+  let url: URL;
   try {
-    return new URL(value).href === value;
+    url = new URL(value);
   } catch {
     return false;
   }
+  if (url.href !== value) return false;
+  if (url.hostname.endsWith(".")) return false;
+  return hasNormalizedPercentEncoding(value) && hasNoEmptyQueryOrFragment(value);
 }
 
 /** Extension names are reverse-DNS or absolute URIs (TEP §21.3); a bare key is neither. */

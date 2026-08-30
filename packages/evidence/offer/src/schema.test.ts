@@ -73,6 +73,32 @@ describe("the offer record schema", () => {
     });
   });
 
+  describe("rail destinations", () => {
+    test("stay syntactically opaque — no rail binding ships here to impose an address shape", () => {
+      for (const to of ["0xdeadbeef", "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh", "acct:x@y.z"]) {
+        expect(parse(offer({ rails: [{ rail: USDC, to, amount: "1" }] })).success).toBe(true);
+      }
+    });
+
+    // A destination that renders as a different address in a buyer's UI, or that splices a
+    // second line into a naive display, is the one place display spoofing is money.
+    test.each([
+      ["a line feed", "0xdead\nbeef"],
+      ["a carriage return", "0xdead\rbeef"],
+      ["a NUL", "\u0000"],
+      ["a DEL", "0xdead\u007Fbeef"],
+      ["a C1 control", "0xdead\u0085beef"],
+      ["a right-to-left override", "0xdead\u202Ebeef"],
+      ["a left-to-right mark", "0xdead\u200Ebeef"],
+      ["an isolate", "0xdead\u2066beef"],
+      ["nothing but a space", " "],
+      ["nothing but unicode whitespace", "\u3000"],
+      ["the empty string", ""],
+    ])("refuse a destination that is %s", (_label, to) => {
+      expect(parse(offer({ rails: [{ rail: USDC, to, amount: "1" }] })).success).toBe(false);
+    });
+  });
+
   describe("rail identifiers", () => {
     test("are open: any absolute URI, not only jinn-owned ones", () => {
       expect(parse(offer({ rails: [{ rail: "https://rails.example/acme/v1", to: "x", amount: "1" }] }))
@@ -97,6 +123,45 @@ describe("the offer record schema", () => {
       ]) {
         expect(parse(offer({ rails: [{ rail, to: "x", amount: "1" }] })).success).toBe(false);
       }
+    });
+
+    // Every row here round-trips `new URL` unchanged, so the round-trip test alone let each
+    // pair seal as two rails carrying different destinations and different amounts. RFC 3986
+    // calls each pair one URI.
+    test.each([
+      ["trailing-dot host", "https://rails.example./v1"],
+      ["percent-escape of an unreserved character", "https://rails.example/a%62c"],
+      ["lowercase percent-escape", "https://rails.example/%2f"],
+      ["percent-escape of a tilde", "https://rails.example/%7ex"],
+      ["empty query", "https://rails.example/v1?"],
+      ["empty fragment", "https://rails.example/v1#"],
+      ["empty query and fragment", "https://rails.example/v1?#"],
+      ["malformed percent-escape", "https://rails.example/%zz"],
+      ["truncated percent-escape", "https://rails.example/v1%"],
+    ])("refuse a spelling WHATWG round-trips but RFC 3986 calls equivalent: %s", (_label, rail) => {
+      expect(parse(offer({ rails: [{ rail, to: "x", amount: "1" }] })).success).toBe(false);
+    });
+
+    // The refusals above must not swallow the spellings that are genuinely one rail's own.
+    test.each([
+      "https://rails.example/%2F",
+      "https://rails.example/v1?a=1",
+      "https://rails.example/v1#frag",
+      "https://rails.example/v1?a=%2F#f",
+      "https://rails.example:8443/v1",
+    ])("still accept the normalized spelling %j", (rail) => {
+      expect(parse(offer({ rails: [{ rail, to: "x", amount: "1" }] })).success).toBe(true);
+    });
+
+    // The honest limit, stated as a test so it cannot rot into an unnoticed claim: opaque
+    // hosts and opaque paths round-trip verbatim, so these remain two rails, not one.
+    test("do not reach a scheme whose equivalence law this package cannot know", () => {
+      expect(parse(offer({
+        rails: [
+          { rail: "ipfs://BAFYBEIGD/x", to: "a", amount: "1" },
+          { rail: "ipfs://bafybeigd/x", to: "b", amount: "999" },
+        ],
+      })).success).toBe(true);
     });
 
     test("two spellings of one rail can no longer masquerade as two rails", () => {

@@ -10260,6 +10260,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/evidence-offer",
         "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-equivalent-rail-spelling.json",
+        "relativeSource": "fixtures/offer/invalid-equivalent-rail-spelling.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
         "path": "packages/evidence/offer/fixtures/offer/invalid-leading-zero-amount.json",
         "relativeSource": "fixtures/offer/invalid-leading-zero-amount.json"
       },
@@ -10307,6 +10316,15 @@
         "packedTargets": [],
         "path": "packages/evidence/offer/fixtures/offer/invalid-signed-amount.json",
         "relativeSource": "fixtures/offer/invalid-signed-amount.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-spoofable-rail-destination.json",
+        "relativeSource": "fixtures/offer/invalid-spoofable-rail-destination.json"
       },
       {
         "claim": null,

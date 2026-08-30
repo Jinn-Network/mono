@@ -26,6 +26,8 @@ export const INVALID_OFFERS: readonly string[] = [
   "relative-rail-identifier",
   "unnormalized-rail-identifier",
   "rail-spelled-twice",
+  "equivalent-rail-spelling",
+  "spoofable-rail-destination",
 ];
 
 const FIXTURES_ROOT = new URL("../fixtures/", import.meta.url);

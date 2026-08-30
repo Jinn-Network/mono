@@ -26,6 +26,10 @@
       "sha256": "3206536cab4034db7bd970937ef6ec4a378b8027c7dd340ab513617210dc3465"
     },
     {
+      "id": "offer/invalid-equivalent-rail-spelling.json",
+      "sha256": "9f2645ca1ee75761c88548a9a01625936d05ada8de9bd00ec18a361ed4cebd62"
+    },
+    {
       "id": "offer/invalid-leading-zero-amount.json",
       "sha256": "edd182056a50d48dc04540eebfdee433950fb2d110c61226d695d121f607ff72"
     },
@@ -48,6 +52,10 @@
     {
       "id": "offer/invalid-signed-amount.json",
       "sha256": "fadc33bb215c3e1e59b97155d936c9cdaeeec1553f03e312c5b9f81cb04e81c9"
+    },
+    {
+      "id": "offer/invalid-spoofable-rail-destination.json",
+      "sha256": "256dc5b8c706d265d0cdac458fb53de17906e5639ee6de185e00079be46800fc"
     },
     {
       "id": "offer/invalid-unnormalized-rail-identifier.json",
