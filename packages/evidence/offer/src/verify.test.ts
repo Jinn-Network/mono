@@ -180,6 +180,39 @@ describe("verifyOffer", () => {
     expect(outcome.reason).toBe("window-violation");
   });
 
+  // A resolver that resolved by key alone would otherwise let the attacker hold an
+  // OfferEntry whose holder is the victim, and supersede the victim's genuine offers.
+  test("rejects a binding that resolved to an Agent IRI other than the claimed holder", async () => {
+    const { envelopeBytes } = await sealed();
+    const outcome = await verifyOffer(
+      { envelopeBytes, key: FIXTURE_SIGNER_KEY_ID, holder: HOLDER, atTime: AT_TIME },
+      deps(resolver(resolvedBinding({ agent: OTHER_HOLDER }))),
+    );
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe("binding-not-resolved");
+    expect(outcome.resolvedBinding?.binding.agent).toBe(OTHER_HOLDER);
+  });
+
+  // A dependency outage must never be confusable with a failed identity check.
+  test("reports a throwing port as dependency-failed rather than rejecting", async () => {
+    const { envelopeBytes } = await sealed();
+    const throwing: BindingResolver = {
+      async resolveBinding() {
+        throw new Error("resolver transport unreachable");
+      },
+    };
+    const outcome = await verifyOffer(
+      { envelopeBytes, key: FIXTURE_SIGNER_KEY_ID, holder: HOLDER, atTime: AT_TIME },
+      deps(throwing),
+    );
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe("dependency-failed");
+    expect(outcome.detail).toContain("resolver transport unreachable");
+    expect(outcome.offer?.subject).toBe(SUBJECT);
+  });
+
   test("applies the caller's policy to the vouching identity when one is supplied", async () => {
     const { envelopeBytes } = await sealed();
     const outcome = await verifyOffer(

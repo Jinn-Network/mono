@@ -39,6 +39,8 @@ export interface VerifyOfferDeps {
 
 export type OfferVerificationFailureReason =
   | "envelope-invalid"
+  /** An injected port threw — a resolver outage is not an identity failure, and never reads as one. */
+  | "dependency-failed"
   | VerificationFailureReason;
 
 export type OfferVerification =
@@ -70,6 +72,9 @@ export type OfferVerification =
  *
  * Both halves are required. A structurally valid offer proves only that someone wrote a
  * price down; it is the binding resolution that makes "only the holder can offer" true.
+ *
+ * Never rejects: a throwing injected port is reported as `dependency-failed`, kept distinct
+ * from every identity outcome so an unreachable dependency can never read as "not the holder".
  */
 export async function verifyOffer(
   input: VerifyOfferInput,
@@ -86,21 +91,34 @@ export async function verifyOffer(
     };
   }
 
-  const outcome = await verifyEnvelopeBinding(
-    {
-      envelopeBytes: input.envelopeBytes,
-      key: input.key,
-      agent: input.holder,
-      family: OFFER_TRUST_SCOPE,
-      atTime: input.atTime,
-    },
-    {
-      bindingResolver: deps.bindingResolver,
-      witnessVerifier: deps.witnessVerifier,
-      dsseVerifier: deps.dsseVerifier,
-      ...(deps.policy === undefined ? {} : { policy: deps.policy }),
-    },
-  );
+  let outcome;
+  try {
+    outcome = await verifyEnvelopeBinding(
+      {
+        envelopeBytes: input.envelopeBytes,
+        key: input.key,
+        agent: input.holder,
+        family: OFFER_TRUST_SCOPE,
+        atTime: input.atTime,
+      },
+      {
+        bindingResolver: deps.bindingResolver,
+        witnessVerifier: deps.witnessVerifier,
+        dsseVerifier: deps.dsseVerifier,
+        ...(deps.policy === undefined ? {} : { policy: deps.policy }),
+      },
+    );
+  } catch (cause) {
+    return {
+      ok: false,
+      reason: "dependency-failed",
+      detail: `binding verification dependency failed: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+      offer: parsed.offer,
+      digest: parsed.digest,
+    };
+  }
 
   if (!outcome.ok || outcome.resolvedBinding === undefined) {
     return {
@@ -112,6 +130,20 @@ export async function verifyOffer(
       ...(outcome.resolvedBinding === undefined
         ? {}
         : { resolvedBinding: outcome.resolvedBinding }),
+    };
+  }
+
+  // Defense in depth against a resolver that resolved by key alone: `resolveBinding` is
+  // contracted never to do that, but an echoed holder would let a forged offer supersede
+  // the victim's genuine ones. The sibling money-adjacent check asserts the same thing.
+  if (outcome.resolvedBinding.binding.agent !== input.holder) {
+    return {
+      ok: false,
+      reason: "binding-not-resolved",
+      detail: "the offer signature resolved to a different Agent IRI than the claimed holder",
+      offer: parsed.offer,
+      digest: parsed.digest,
+      resolvedBinding: outcome.resolvedBinding,
     };
   }
 
