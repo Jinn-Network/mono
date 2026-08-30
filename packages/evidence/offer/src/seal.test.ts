@@ -61,6 +61,7 @@ describe("sealOfferPayload", () => {
   test.each([
     ["a non-integral number", 1.5],
     ["a non-finite number", 1e400],
+    ["a non-safe-integer number", Number.MAX_SAFE_INTEGER + 1],
   ])("refuses %s in an extension value as an invalid document", (_label, value) => {
     try {
       sealOfferPayload(offer({ "com.example.x": value }));
