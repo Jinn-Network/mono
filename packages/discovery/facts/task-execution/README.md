@@ -79,9 +79,11 @@ edge, so only digest-bearing members are carried.
 `profile-document.v2` adds the output-slot schemas a profile pins. v1 declared only `extends`,
 but `outputConventions.slots[].schema` is the same optional-digest ResourceDescriptor this leaf
 already treats as an edge on an evaluation spec. `task.v2` carries the same field for
-`outputs[].schema`, which is the structurally identical member of a Task's own closed output
-slot: both kinds answer "which records pin output schema `sha256:X`" rather than one of them
-answering it and the other returning empty.
+`outputs[].schema`, the corresponding member of a Task's own closed output slot: both kinds
+answer "which records pin output schema `sha256:X`" rather than one of them answering it and the
+other returning empty. The two fields are not identically typed -- the profile-document field is
+an optional ResourceDescriptor, the Task field is `z.unknown()` -- so only a digest-map whose
+`sha256` entry is 64 lowercase hex characters is carried, from either side.
 
 Audited and unchanged: `submission.v1` already declares its one edge, the Task. A Submission's
 harness pin does carry a digest, but it lives under a namespaced key of the structurally open
