@@ -675,9 +675,12 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
         readonly draws: number;
         readonly clusters: readonly { readonly members: readonly string[] }[];
       };
-      expect(groupedBootstrap.count).toBe(3);
-      expect(groupedBootstrap.draws).toBe((fixture.parameters["resamples"] as number) * 3);
-      expect(groupedBootstrap.clusters).toHaveLength(3);
+      const expectedClusterCount = (fixture.expectedPublic as {
+        readonly bootstrap: { readonly count: number };
+      }).bootstrap.count;
+      expect(groupedBootstrap.count).toBe(expectedClusterCount);
+      expect(groupedBootstrap.draws).toBe((fixture.parameters["resamples"] as number) * expectedClusterCount);
+      expect(groupedBootstrap.clusters).toHaveLength(expectedClusterCount);
       expect(fixture.tasks.length).toBeGreaterThan(groupedBootstrap.count);
       expect(groupedBootstrap.clusters.filter((cluster) => cluster.members.length > 1).length).toBeGreaterThan(0);
 
