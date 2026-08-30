@@ -72,7 +72,7 @@ const SHA256_HEX = /^[0-9a-f]{64}$/;
  * well-formed siblings survive, and the dropped field recomputes to `undefined`, which
  * `factsConsistency` turns into `indeterminate` rather than a false `consistent`.
  */
-function prefixedSha256(digest: Record<string, string> | undefined): `sha256:${string}` | undefined {
+function prefixedSha256(digest: Record<string, unknown> | undefined): `sha256:${string}` | undefined {
   const hex = digest?.["sha256"];
   return typeof hex === "string" && SHA256_HEX.test(hex) ? (`sha256:${hex}` as const) : undefined;
 }
@@ -232,7 +232,7 @@ export const checkpointRecompute: RecordFactRecompute = async () => noFacts();
 /** A digest-bearing descriptor's `sha256`, in the prefixed spelling the cards carry. */
 function descriptorDigest(value: unknown): `sha256:${string}` | undefined {
   if (typeof value !== "object" || value === null) return undefined;
-  const digest = (value as { digest?: Record<string, string> }).digest;
+  const digest = (value as { digest?: Record<string, unknown> }).digest;
   return prefixedSha256(digest);
 }
 
@@ -249,11 +249,14 @@ function descriptorListDigests(value: unknown): `sha256:${string}`[] {
 
 /**
  * v1's card plus the inputs the Task pins and the output JSON Schemas its slots pin. `outputs` is
- * a closed array of a closed slot object, and a slot's `schema` is the same optional-digest
- * descriptor `profile-document.v2` carries for `outputConventions.slots[].schema` -- so the two
- * kinds answer "which records pin schema `sha256:X`" the same way rather than disagreeing about a
- * structurally identical field. An embedded schema carries no digest and is not an edge, which
- * `descriptorListDigests` already handles by skipping any entry without one.
+ * a closed array of a closed slot object whose `schema` answers the same question
+ * `profile-document.v2` answers for `outputConventions.slots[].schema` -- so the two kinds answer
+ * "which records pin schema `sha256:X`" the same way rather than one of them answering it. The
+ * two fields are NOT identically typed: the profile-document field is an optional
+ * ResourceDescriptor, this one is `z.unknown()`, so anything at all parses here and only a
+ * digest-map with a 64-hex `sha256` entry is carried (`prefixedSha256`). An embedded schema
+ * carries no digest and is not an edge, which `descriptorListDigests` already handles by
+ * skipping any entry without one.
  */
 export const taskRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
   const facts = await taskRecompute(bytes, refs);
@@ -389,8 +392,8 @@ export const evaluationSpecRecomputeV2: RecordFactRecompute = async (bytes, refs
 
 /**
  * v1's card plus the output-slot schemas a profile pins. v1 declared only `extends`, but a slot's
- * `schema` is the same optional-digest ResourceDescriptor this leaf already treats as an edge on
- * an evaluation spec: satisfiable by a `uri` alone under §6.4, in which case it pins nothing and
+ * `schema` is an optional-digest ResourceDescriptor of the kind this leaf already treats as an
+ * edge on an evaluation spec: satisfiable by a `uri` alone under §6.4, in which case it pins nothing and
  * is not carried, and an edge when it does carry a digest. "Which profiles validate output
  * against schema `sha256:X`" is the query a wrong schema makes someone ask.
  */
