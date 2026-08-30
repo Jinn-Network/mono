@@ -87,9 +87,10 @@ Stated positively, and this is the whole of it: under a special scheme, two stri
 calls equivalent never both pass, and every equivalence class it admits has an accepted spelling.
 Both directions are pinned by a test rather than asserted here.
 
-What the rule does **not** reach is opaque hosts and opaque paths, which round-trip verbatim:
-`ipfs://BAFYBEIGD/x` and `ipfs://bafybeigd/x` are two distinct rails here, as are `urn:UUID:x`
-and `urn:uuid:x`. A rail vocabulary minted under such a scheme owes its own spelling rule; this
+The raw-octet rule reaches every scheme: `urn:a^b` and `ipfs://bafybeigd/a^b` are refused under
+it, same as under a special scheme. What the rest of the rule does **not** reach is opaque hosts
+and opaque paths, which otherwise round-trip verbatim: `ipfs://BAFYBEIGD/x` and
+`ipfs://bafybeigd/x` are two distinct rails here, as are `urn:UUID:x` and `urn:uuid:x`. A rail vocabulary minted under such a scheme owes its own spelling rule; this
 check cannot supply one without knowing that scheme's equivalence law — which is also why the
 trailing-dot rule stops at the special schemes rather than reaching into a host it cannot read.
 

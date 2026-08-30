@@ -9,16 +9,15 @@ const UNRESERVED = /^[A-Za-z0-9\-._~]$/;
 // imported so the oracle stays an independent statement of the rule. Anything else that WHATWG
 // nonetheless round-trips raw (`^ | [ ] { } \` and the backtick) has its escape as the normal
 // form, which is what makes `…/a^b` and `…/a%5Eb` one identity rather than two.
-const PATH_RAW = /[A-Za-z0-9\-._~!$&'()*+,;=:@/%]/u;
-const QUERY_RAW = /[A-Za-z0-9\-._~!$&'()*+,;=:@/?%]/u;
+// Written as the complement of that set so the whole component is escaped in one pass: the
+// per-character spread this replaced allocated an array and ran a regex per octet, and the
+// reachability direction below runs it over every corpus member.
+const PATH_ILLEGAL = /[^A-Za-z0-9\-._~!$&'()*+,;=:@/%]/gu;
+const QUERY_ILLEGAL = /[^A-Za-z0-9\-._~!$&'()*+,;=:@/?%]/gu;
 
-function escapeIllegalRaw(value: string, permitted: RegExp): string {
-  return [...value]
-    .map((character) =>
-      permitted.test(character)
-        ? character
-        : `%${character.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`)
-    .join("");
+function escapeIllegalRaw(value: string, illegal: RegExp): string {
+  return value.replace(illegal, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
 }
 
 /**
@@ -56,13 +55,13 @@ function normalizedSpelling(href: string): string {
   const authority = `${hostname}${url.port === "" ? "" : `:${url.port}`}`;
 
   return `${url.protocol}//${normalizePercent(credentials)}${authority}`
-    + escapeIllegalRaw(normalizePercent(url.pathname), PATH_RAW)
+    + escapeIllegalRaw(normalizePercent(url.pathname), PATH_ILLEGAL)
     + (query === null || query === ""
       ? ""
-      : `?${escapeIllegalRaw(normalizePercent(query), QUERY_RAW)}`)
+      : `?${escapeIllegalRaw(normalizePercent(query), QUERY_ILLEGAL)}`)
     + (fragment === null || fragment === ""
       ? ""
-      : `#${escapeIllegalRaw(normalizePercent(fragment), QUERY_RAW)}`);
+      : `#${escapeIllegalRaw(normalizePercent(fragment), QUERY_ILLEGAL)}`);
 }
 
 const HOSTS = ["r.example", "R.Example", "r.example.", "r.example..", ".", "..", "a.b.c", "a.b.c.", "127.0.0.1", "[::1]", ""];
@@ -71,21 +70,46 @@ const PORTS = ["", ":80", ":443", ":8443"];
 // the RFC 3986 raw-octet rule the pair is one rail under two identifiers, which is the collision
 // the first test below would then report.
 const PATHS = ["/", "/v1", "/a%62c", "/abc", "/%2f", "/%2F", "/~x", "/%7ex", "/a/../v1", "/%25", "/%2541", "/%E2%82%AC", "/%e2%82%ac", "/a^b", "/a%5Eb", "/a[b", "/a%5Bb", "/a|b", "/a%7Cb", ""];
-const QUERIES = ["", "?", "?a=1", "?a=%2F", "?a=%2f", "?a=%62", "?a{b", "?a%7Bb", "?a`b", "?a%60b", "?a^b", "?#"];
+const QUERIES = ["", "?", "?a=1", "?a=%2F", "?a=%2f", "?a=%62", "?a{b", "?a%7Bb", "?a`b", "?a%60b", "?a^b", "?a%5Eb", "?#"];
 const FRAGMENTS = ["", "#", "#f", "#%7e", "#%7E", "#~", "#a{b", "#a%7Bb", "#a|b", "#a%7Cb"];
 // `r.example.@` and `a%2Eb:r.example.@` exist to keep the oracle honest: they put the host
 // string inside the userinfo, which is what broke an earlier offset-splice implementation.
 const USERINFOS = ["", "u@", "u:p@", "@", "r.example.@", "a%2Eb:r.example.@"];
 
-function stableUris(): readonly string[] {
-  const stable = new Set<string>();
+// The corpus is two sweeps rather than one cross product. Crossing every component spelling
+// against every authority spelling multiplies the work without testing anything more: the
+// raw-octet and percent-escape rules are per component and read nothing of the authority, and
+// the trailing-dot and userinfo rules read nothing of the components. One full cross product of
+// all six lists reached 3.8M members, which put the reachability direction — the only direction
+// that runs the oracle over every member rather than skipping refused ones — 58% over vitest's
+// 5s budget on CI while passing on a developer laptop. Sweeping the two axes separately carries
+// every component spelling and every authority spelling — including the six characters the last
+// version to run green had none of — and drops only the cross terms between the two axes.
+const AUTHORITY_SWEEP_PATHS = ["/", "/v1", "/a%62c", "/%2f", "/a/../v1", "/%25", "/a^b", ""];
+const AUTHORITY_SWEEP_QUERIES = ["", "?", "?a=1", "?a=%2f"];
+const AUTHORITY_SWEEP_FRAGMENTS = ["", "#", "#%7e", "#a{b"];
+// The component sweep keeps one authority per shape that the components could conceivably
+// interact with — a registrable name, a trailing dot, an IPv6 literal — rather than all eleven.
+const COMPONENT_SWEEP_HOSTS = ["r.example", "r.example.", "[::1]"];
+const COMPONENT_SWEEP_PORTS = ["", ":8443"];
+const COMPONENT_SWEEP_USERINFOS = ["", "u:p@"];
+
+function collectStable(
+  stable: Set<string>,
+  userinfos: readonly string[],
+  hosts: readonly string[],
+  ports: readonly string[],
+  paths: readonly string[],
+  queries: readonly string[],
+  fragments: readonly string[],
+): void {
   for (const scheme of SPECIAL_SCHEMES) {
-    for (const userinfo of USERINFOS) {
-      for (const host of HOSTS) {
-        for (const port of PORTS) {
-          for (const path of PATHS) {
-            for (const query of QUERIES) {
-              for (const fragment of FRAGMENTS) {
+    for (const userinfo of userinfos) {
+      for (const host of hosts) {
+        for (const port of ports) {
+          for (const path of paths) {
+            for (const query of queries) {
+              for (const fragment of fragments) {
                 let href: string;
                 try {
                   href = new URL(`${scheme}//${userinfo}${host}${port}${path}${query}${fragment}`).href;
@@ -100,6 +124,12 @@ function stableUris(): readonly string[] {
       }
     }
   }
+}
+
+function stableUris(): readonly string[] {
+  const stable = new Set<string>();
+  collectStable(stable, USERINFOS, HOSTS, PORTS, AUTHORITY_SWEEP_PATHS, AUTHORITY_SWEEP_QUERIES, AUTHORITY_SWEEP_FRAGMENTS);
+  collectStable(stable, COMPONENT_SWEEP_USERINFOS, COMPONENT_SWEEP_HOSTS, COMPONENT_SWEEP_PORTS, PATHS, QUERIES, FRAGMENTS);
   return [...stable];
 }
 

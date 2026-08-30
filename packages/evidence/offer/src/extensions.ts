@@ -140,11 +140,14 @@ function hasNoEmptyQueryOrFragment(value: string): boolean {
  * FQDN-rooted identifier, or means something by a delimiter it leaves empty, cannot be spelled by
  * this check and needs a vocabulary-level rule the same way an opaque scheme does. A string
  * carrying a malformed escape is refused for a different reason: it is not an RFC 3986 URI to
- * begin with. `extensions.test.ts` runs both directions over a cross product of hand-picked
- * special-scheme components, because a rule that claims more than it delivers is worse than a
- * modest one — which is the whole reason this function grew past its round-trip check.
+ * begin with. `extensions.test.ts` runs both directions over two sweeps of hand-picked
+ * special-scheme spellings — every component spelling against a few authorities, every authority
+ * spelling against a few components — because a rule that claims more than it delivers is worse
+ * than a modest one, which is the whole reason this function grew past its round-trip check.
  *
- * Under any other scheme it accepts one spelling per string, and the vocabulary owns the rest.
+ * Under any other scheme the raw-octet rule still applies, so a string carrying an octet outside
+ * the component's RFC 3986 grammar is refused whatever the scheme; everything else about the
+ * spelling is one per string, and the vocabulary owns it.
  */
 export function isNormalizedAbsoluteUri(value: string): boolean {
   if (/\s/u.test(value)) return false;
