@@ -608,8 +608,17 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       expect((await computeFixtureNames()).length).toBeGreaterThan(0);
     });
 
-    test("pins the mandatory non-vacuous whole-source-cluster BCa oracle and re-sealed grouping discriminator", async () => {
-      const fixture = await loadJson<ClusterBcaOracleFixture>("noninferiority-cluster-bca.json");
+    // Both fixtures share every numeric expectation: cluster keys are opaque strings and the
+    // realistic repo URLs sort into the same positions as the synthetic family tokens, so the
+    // grouping structure and cluster ordering are identical. The repo-keys variant is the
+    // conformance guard for realistic `https://github.com/owner/repo` provenance, where several
+    // tasks share one source repo — a reversion to per-instance keys makes each task its own
+    // singleton cluster and turns the pinned cluster count and draws red.
+    test.each([
+      "noninferiority-cluster-bca.json",
+      "noninferiority-cluster-bca-repo-keys.json",
+    ])("pins the mandatory non-vacuous whole-source-cluster BCa oracle and re-sealed grouping discriminator (%s)", async (fixtureName) => {
+      const fixture = await loadJson<ClusterBcaOracleFixture>(fixtureName);
       expect(fixture.oracle).toEqual({
         alpha: 0.05,
         minN: 5,
@@ -658,6 +667,19 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
         quality: groupedResult.quality,
         bootstrap: groupedResult.bootstrap,
       }).toEqual(expectedPublicForPrepared(fixture.expectedPublic, grouped));
+
+      // The clustering is non-vacuous: strictly fewer clusters than tasks, several tasks per
+      // source key, and `draws === resamples * clusterCount`.
+      const groupedBootstrap = groupedResult.bootstrap as {
+        readonly count: number;
+        readonly draws: number;
+        readonly clusters: readonly { readonly members: readonly string[] }[];
+      };
+      expect(groupedBootstrap.count).toBe(3);
+      expect(groupedBootstrap.draws).toBe((fixture.parameters["resamples"] as number) * 3);
+      expect(groupedBootstrap.clusters).toHaveLength(3);
+      expect(fixture.tasks.length).toBeGreaterThan(groupedBootstrap.count);
+      expect(groupedBootstrap.clusters.filter((cluster) => cluster.members.length > 1).length).toBeGreaterThan(0);
 
       const regroupedResult = compute(regrouped);
       expect({
