@@ -38,9 +38,10 @@
  * rejection. On a clean (zero) exit stdout stays exactly what the container printed.
  *
  * STDOUT/OOM (P0-4 N7): captured stdout is bounded to `maxStdoutBytes`; a container that floods
- * stdout cannot OOM the daemon — bytes past the cap are dropped. (The grader REPORT file read is
- * `readReport` inside the package's `containerGraderReportSource`, an unbounded `readFile`; bounding
- * that is a package concern, filed as #2477 against the evaluator-adapters package, out of reach here.)
+ * stdout cannot OOM the daemon — bytes past the cap are dropped. The other half of N7 — the grader
+ * REPORT file, read by `readReport` inside the package's `containerGraderReportSource` — is bounded
+ * in the package itself (`maxReportBytes`, defaulting to the same 4 MiB ceiling this driver puts on
+ * stdout), because that read is on disk and out of reach here.
  *
  * CONTAINER ISOLATION + RESOURCE BOUNDS (the driver's charter — "nothing in the package bounds an
  * untrusted container, the driver does"): a grader image is untrusted code, so the run is capped and
