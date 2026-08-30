@@ -253,7 +253,7 @@ describe("readRunBindingCarriage", () => {
       new TextEncoder().encode(JSON.stringify({ ...stored, order: [...stored.order].reverse() })),
     );
     const state = readRunState(workspaceDir, "draft-1")!;
-    expect(() => readRunBindingCarriage(workspaceDir, { binding: { recordSha256: tampered, boundAt: state.binding!.boundAt } }))
+    expect(() => readRunBindingCarriage(workspaceDir, { ...state, binding: { recordSha256: tampered, boundAt: state.binding!.boundAt } }))
       .toThrow(/differs from the beacon-binding\/1 recomputation/u);
   });
 
@@ -279,8 +279,56 @@ describe("readRunBindingCarriage", () => {
     const other = putSealedBytes(workspaceDir, new TextEncoder().encode("{}"));
     const state = readRunState(workspaceDir, "draft-1")!;
     // A run state naming a digest whose record is not a binding at all.
-    expect(() => readRunBindingCarriage(workspaceDir, { binding: { recordSha256: other, boundAt: state.binding!.boundAt } }))
+    expect(() => readRunBindingCarriage(workspaceDir, { ...state, binding: { recordSha256: other, boundAt: state.binding!.boundAt } }))
       .toThrow();
+  });
+
+  test("refuses a valid binding record written for a different run", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const otherRunSha256 = await setUpLockedDraft(clock, "draft-2");
+    const bound = runBind(contextFor(clock), { draftId: "draft-2", beacon: beacon() });
+    if (!bound.ok) throw new Error("bind failed");
+
+    // Honest bytes, honest digest, internally consistent -- everything but the run it belongs to.
+    // This is the post-hoc move the binding exists to make impossible: a run sealed after its
+    // results were known borrowing an older run's beacon to claim it could not have selected.
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(state.runSha256).not.toBe(otherRunSha256);
+    expect(() => readRunBindingCarriage(workspaceDir, {
+      ...state,
+      binding: { recordSha256: bound.result.recordSha256, boundAt: "2026-09-01T00:00:00Z" },
+    })).toThrow(/which is not this run's sealed Run/u);
+  });
+
+  test("refuses a binding record whose sealedAt disagrees with the run's lock", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const bound = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon() });
+    if (!bound.ok) throw new Error("bind failed");
+
+    // Same sealDigest, so the order still recomputes and `verifyRunBinding` passes; only the seal
+    // INSTANT moves, which is the half of the postdating claim `verifyRunBinding` cannot check.
+    const stored = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, bound.result.recordSha256)));
+    const forged = putSealedBytes(
+      workspaceDir,
+      new TextEncoder().encode(JSON.stringify({ ...stored, sealedAt: "2020-01-01T00:00:00Z" })),
+    );
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(() => readRunBindingCarriage(workspaceDir, {
+      ...state,
+      binding: { recordSha256: forged, boundAt: state.binding!.boundAt },
+    })).toThrow(/but this run was sealed at/u);
+  });
+
+  test("refuses a recorded binding on a run with no sealed identity to resolve it against", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const bound = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon() });
+    if (!bound.ok) throw new Error("bind failed");
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(() => readRunBindingCarriage(workspaceDir, { ...state, runSha256: undefined }))
+      .toThrow(/no sealed Run identity/u);
   });
 });
 
