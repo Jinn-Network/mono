@@ -19,6 +19,14 @@ export function isAbsoluteUri(value: string): boolean {
   }
 }
 
+/**
+ * The schemes WHATWG calls special — the ones whose host is a real domain it parses and
+ * normalizes, rather than an opaque string it copies through. The trailing-dot rule is scoped
+ * to these because `r.example.` is the same DNS name as `r.example` only where there is a DNS
+ * name; under an opaque-host scheme the dot is just a character the vocabulary owns.
+ */
+const SPECIAL_SCHEMES = new Set(["http:", "https:", "ws:", "wss:", "ftp:", "file:"]);
+
 const UNRESERVED_OCTET = /^[A-Za-z0-9\-._~]$/;
 
 /**
@@ -64,17 +72,22 @@ function hasNoEmptyQueryOrFragment(value: string): boolean {
  * whole of it. WHATWG normalizes scheme and host case for the special schemes (http, https,
  * ws, wss, ftp, file), drops default ports, resolves dot segments, and drops empty userinfo
  * and an empty port — but it round-trips several spellings RFC 3986 calls equivalent, so this
- * check refuses those itself: a trailing-dot host (`r.example.`, the same DNS name), a
- * non-normalized percent-escape (`%2f` for `%2F`, `%62` for `b`), and an empty query or
- * fragment (`…/v1?`, `…/v1#`). Each of those was a second identifier for one rail.
+ * check refuses those itself: a trailing-dot host under a special scheme (`r.example.`, the
+ * same DNS name), a non-normalized percent-escape (`%2f` for `%2F`, `%62` for `b`), and an
+ * empty query or fragment (`…/v1?`, `…/v1#`). Each was a second identifier for one rail.
  *
  * What remains outside the guarantee is opaque hosts and opaque paths, which round-trip
  * verbatim: `ipfs://BAFYBEIGD/x` and `ipfs://bafybeigd/x` are still two distinct rails here,
  * as are `urn:UUID:x` and `urn:uuid:x` even though RFC 8141 calls URN namespace identifiers
  * case-insensitive. A rail vocabulary that mints identifiers under such a scheme owes its own
- * spelling rule; this check cannot supply one without knowing the scheme's equivalence law.
- * The rule it does enforce is therefore exactly this: within one spelling of one scheme,
- * there is one identifier — not that every scheme's equivalence class collapses to one.
+ * spelling rule; this check cannot supply one without knowing the scheme's equivalence law. The
+ * trailing-dot rule is scoped to the special schemes for the same reason, so nothing here
+ * reaches into a region it cannot reason about.
+ *
+ * Stated positively, and this is the whole of the guarantee: under a special scheme, every
+ * RFC 3986 equivalence class has exactly one spelling this function accepts, and every such
+ * class has one — no rail is left unspellable. Under any other scheme it accepts one spelling
+ * per string, and the vocabulary owns the rest.
  */
 export function isNormalizedAbsoluteUri(value: string): boolean {
   if (/\s/u.test(value)) return false;
@@ -85,7 +98,7 @@ export function isNormalizedAbsoluteUri(value: string): boolean {
     return false;
   }
   if (url.href !== value) return false;
-  if (url.hostname.endsWith(".")) return false;
+  if (SPECIAL_SCHEMES.has(url.protocol) && url.hostname.endsWith(".")) return false;
   return hasNormalizedPercentEncoding(value) && hasNoEmptyQueryOrFragment(value);
 }
 

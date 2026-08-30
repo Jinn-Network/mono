@@ -80,6 +80,13 @@ describe("the offer record schema", () => {
       }
     });
 
+    // The emptiness rule judges the whole value, never a character in it: ZWJ and ZWNJ are
+    // load-bearing in Indic and Arabic scripts, and a rail may put human-readable text here.
+    test("accept an invisible formatting character inside an otherwise visible destination", () => {
+      expect(parse(offer({ rails: [{ rail: USDC, to: "0xdead\u200Dbeef", amount: "1" }] })).success)
+        .toBe(true);
+    });
+
     // A destination that renders as a different address in a buyer's UI, or that splices a
     // second line into a naive display, is the one place display spoofing is money.
     test.each([
@@ -89,10 +96,15 @@ describe("the offer record schema", () => {
       ["a DEL", "0xdead\u007Fbeef"],
       ["a C1 control", "0xdead\u0085beef"],
       ["a right-to-left override", "0xdead\u202Ebeef"],
+      ["an arabic letter mark", "0xdead\u061Cbeef"],
+      ["a line separator", "0xdead\u2028beef"],
+      ["a paragraph separator", "0xdead\u2029beef"],
       ["a left-to-right mark", "0xdead\u200Ebeef"],
       ["an isolate", "0xdead\u2066beef"],
       ["nothing but a space", " "],
       ["nothing but unicode whitespace", "\u3000"],
+      ["nothing but a zero-width space", "\u200B"],
+      ["nothing but a byte-order mark", "\uFEFF"],
       ["the empty string", ""],
     ])("refuse a destination that is %s", (_label, to) => {
       expect(parse(offer({ rails: [{ rail: USDC, to, amount: "1" }] })).success).toBe(false);
@@ -151,6 +163,16 @@ describe("the offer record schema", () => {
       "https://rails.example:8443/v1",
     ])("still accept the normalized spelling %j", (rail) => {
       expect(parse(offer({ rails: [{ rail, to: "x", amount: "1" }] })).success).toBe(true);
+    });
+
+    // The trailing-dot rule is scoped to the special schemes, where the host is a DNS name
+    // WHATWG parses. Under an opaque-host scheme the dot is a character the vocabulary owns,
+    // and refusing it would deny a spelling that has no equivalent.
+    test("apply the trailing-dot rule only where the host is a domain", () => {
+      expect(parse(offer({ rails: [{ rail: "https://rails.example./v1", to: "x", amount: "1" }] }))
+        .success).toBe(false);
+      expect(parse(offer({ rails: [{ rail: "ipfs://bafybeigd./x", to: "x", amount: "1" }] }))
+        .success).toBe(true);
     });
 
     // The honest limit, stated as a test so it cannot rot into an unnoticed claim: opaque

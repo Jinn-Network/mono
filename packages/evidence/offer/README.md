@@ -44,8 +44,9 @@ The protocol takes no fee and no cut, ever. There is no fee field to take one wi
   absolute URI, joining the identifier namespace the way scheme IRIs do. No rail binding
   ships with this package; concrete rails arrive as their own adapters. `to` keeps that
   openness — its syntax is opaque, because no address shape can be imposed on a rail that
-  does not exist yet — but it must be non-blank and free of control characters and Unicode
-  bidi formatting characters, which exist only to make one destination display as another.
+  does not exist yet — but it must render as something, and it may not carry control
+  characters, line separators, or Unicode bidi controls, which exist only to make one
+  destination display as another.
 - **No reference currency and no conversion, anywhere.** Equivalence across a multi-rail
   offer is the holder's assertion, sealed with the offer.
 - **Repricing is supersession, never mutation.** A new price is a new record with a new
@@ -66,16 +67,19 @@ pass uniqueness and sortedness alike and the offer would carry one rail at two p
 
 `new URL` round-tripping the string unchanged is most of that rule but not all of it, because
 WHATWG round-trips several spellings RFC 3986 calls equivalent. So the check also refuses a
-trailing-dot host (`r.example.` is the same DNS name), a percent-escape that is not in RFC 3986
-§6.2.2 normal form (`%2f` for `%2F`, `%62` for the `b` it encodes), and an empty query or
-fragment (`…/v1?` and `…/v1#` address the same thing as `…/v1`). Each of those was otherwise a
-second identifier for one rail — a seller could seal `…/v1` at one price and `…/v1?` at another,
-and both would pass.
+trailing-dot host under a special scheme (`r.example.` is the same DNS name), a percent-escape
+that is not in RFC 3986 §6.2.2 normal form (`%2f` for `%2F`, `%62` for the `b` it encodes), and
+an empty query or fragment (`…/v1?` and `…/v1#` address the same thing as `…/v1`). Each was
+otherwise a second identifier for one rail — a seller could seal `…/v1` at one price and `…/v1?`
+at another, and both would pass. Stated positively: under a special scheme, every RFC 3986
+equivalence class has exactly one spelling this accepts, and every class has one, so no rail is
+left unspellable.
 
 What the rule does **not** reach is opaque hosts and opaque paths, which round-trip verbatim:
 `ipfs://BAFYBEIGD/x` and `ipfs://bafybeigd/x` are two distinct rails here, as are `urn:UUID:x`
 and `urn:uuid:x`. A rail vocabulary minted under such a scheme owes its own spelling rule; this
-check cannot supply one without knowing that scheme's equivalence law.
+check cannot supply one without knowing that scheme's equivalence law — which is also why the
+trailing-dot rule stops at the special schemes rather than reaching into a host it cannot read.
 
 Sealing refuses an unsorted list rather than reordering it, because a canonicalizer that
 silently rewrites content is how one document quietly becomes another; `sortOfferRails` puts a

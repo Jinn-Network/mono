@@ -43,27 +43,42 @@ const RailAmount = z
 
 /**
  * Characters that make one destination render as another: C0 and C1 controls (a line feed
- * splices a second line into a naive display, a NUL truncates one) and the Unicode bidi
- * formatting characters (U+202E between two halves of an address reverses what a buyer
- * reads). This is the one field where display spoofing is money.
+ * splices a second line into a naive display, a NUL truncates one), the two Unicode line
+ * separators, which splice a line the same way in HTML and most UI toolkits, and the Unicode
+ * bidi controls (U+202E between two halves of an address reverses what a buyer reads). The
+ * bidi half is exactly `\p{Bidi_Control}` — all twelve, U+061C included, since ALM reorders a
+ * neutral run the same way its counterpart U+200F RLM does. This is the one field where
+ * display spoofing is money.
  */
 const DISPLAY_UNSAFE_CHARACTER =
-  /[\u0000-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
+  /[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/u;
+
+/**
+ * At least one character that is neither whitespace nor an invisible formatting character, so
+ * a destination that renders as nothing is refused however it is spelled — `""`, `" "`, an
+ * ideographic space, a lone zero-width space. Only the WHOLE value is judged: a format
+ * character *inside* a destination stays legal, because ZWJ and ZWNJ are load-bearing in Indic
+ * and Arabic scripts and a rail may put human-readable text here.
+ */
+const VISIBLE_CHARACTER = /[^\s\p{Cf}]/u;
 
 /**
  * The rail-specific payment destination. Its *syntax* stays opaque — this package binds no
  * rail and cannot know what a well-formed destination looks like on one that does not exist
  * yet, so no address shape is imposed here and none should be. What is refused is only what
- * is indefensible on every rail: a value that is blank or whitespace-only, and one carrying
- * characters whose whole effect is to make it display as a different address than it is.
+ * is indefensible on every rail: a value that renders as nothing, and one carrying characters
+ * whose whole effect is to make it display as a different address than it is.
  */
 const RailDestination = z
   .string()
-  .refine((value) => value.trim().length > 0, "to is the rail-specific destination and cannot be empty")
+  .refine(
+    (value) => VISIBLE_CHARACTER.test(value),
+    "to is the rail-specific destination and cannot be empty, whitespace-only, or invisible",
+  )
   .refine(
     (value) => !DISPLAY_UNSAFE_CHARACTER.test(value),
-    "to must not carry control characters or Unicode bidi formatting characters, which make "
-      + "one payment destination display as another",
+    "to must not carry control characters, line separators, or Unicode bidi controls, which "
+      + "make one payment destination display as another",
   );
 
 /**
