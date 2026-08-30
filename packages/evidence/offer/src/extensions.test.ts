@@ -110,12 +110,17 @@ describe("the normalized-identifier guarantee, under the special schemes", () =>
   // what ties the oracle back to the strings the implementation actually sees.
   test("an accepted spelling is already its own normal form", () => {
     const drifted: string[] = [];
+    let accepted = 0;
     for (const href of corpus) {
       if (!isNormalizedAbsoluteUri(href)) continue;
+      accepted += 1;
       const normalized = normalizedSpelling(href);
       if (normalized !== href) drifted.push(`${href} -> ${normalized}`);
     }
     expect(drifted).toEqual([]);
+    // Its own floor rather than a borrowed one: this direction skips every refused spelling, so
+    // acceptance collapsing to zero would leave `drifted` empty and pass it vacuously.
+    expect(accepted).toBeGreaterThan(10_000);
   });
 
   test("every identifier has an accepted spelling — no rail is left unspellable", () => {
