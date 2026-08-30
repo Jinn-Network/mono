@@ -7130,6 +7130,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/benchmarking-testing",
         "packedTargets": [],
+        "path": "packages/benchmarking/testing/fixtures/methods/noninferiority-cluster-bca-repo-keys.json",
+        "relativeSource": "fixtures/methods/noninferiority-cluster-bca-repo-keys.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-testing",
+        "packedTargets": [],
         "path": "packages/benchmarking/testing/fixtures/methods/noninferiority-cluster-bca.json",
         "relativeSource": "fixtures/methods/noninferiority-cluster-bca.json"
       },
