@@ -910,7 +910,7 @@ pinned to one keeps working. Like the `profiles.test.ts` pins, this table is an 
 from the same reading of the defining schemas as the profiles themselves — it records what was
 audited and does not independently prove any row complete.
 
-| Record kind | Leaf | Set | v1 declared | Revision |
+| Record kind | Leaf | Set | v1 declared | Revision (facts profile) |
 | --- | --- | --- | --- | --- |
 | `benchmark/v1` | `benchmarking` | `taskDigests`, `supersedesDigest` | _none_ | `benchmark/v2` adds both |
 | `benchmark-run/v1` | `benchmarking` | `benchmarkDigest`, `registrationArtifactDigests` | `benchmarkDigest` | `benchmark-run/v2` adds `registrationArtifactDigests` |
@@ -939,7 +939,7 @@ The three `evidence` rows are the exception recorded above. Their sets are stric
 their kinds' outbound sets, and what each still omits — predicate-block references, runtime
 components, execution inputs, derivation lineage — is tabulated with its blocker in
 `packages/discovery/facts/evidence/README.md`. Every other row declares its kind's whole
-outbound set. Each leaf README explains, per kind, why a given field is or is not an edge.
+outbound set. Each leaf README explains why a given field is or is not an edge.
 
 Requiring a card to carry every declared edge is a stronger and different rule, and is not
 adopted here: it would reinterpret
