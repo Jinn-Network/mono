@@ -57,10 +57,24 @@ function noFacts(): Record<string, never> {
   return {};
 }
 
-/** `sha256:<hex>` form of a ResourceDescriptor digest-map's `sha256` entry, if present. */
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * `sha256:<hex>` form of a ResourceDescriptor digest-map's `sha256` entry, if it is one.
+ *
+ * The source is unconstrained: `DigestMapSchema` is `z.record(z.string(), z.string())` and a
+ * Task's `outputs[].schema` is `z.unknown()`, so a schema-valid record can carry `12345`, a
+ * nested object, or an already-prefixed `sha256:...` string under the `sha256` key. Lifting one
+ * of those unchecked mints a non-digest fact, and a card carrying it costs its WHOLE edge set --
+ * `announcementEdgesFromCard` rejects the record rather than the one field. A value that is not
+ * 64 lowercase hex characters is therefore skipped here, exactly as `descriptorListDigests`
+ * already skips a descriptor that pins nothing: the malformed reference drops, its card's
+ * well-formed siblings survive, and the dropped field recomputes to `undefined`, which
+ * `factsConsistency` turns into `indeterminate` rather than a false `consistent`.
+ */
 function prefixedSha256(digest: Record<string, string> | undefined): `sha256:${string}` | undefined {
   const hex = digest?.["sha256"];
-  return hex !== undefined ? (`sha256:${hex}` as const) : undefined;
+  return typeof hex === "string" && SHA256_HEX.test(hex) ? (`sha256:${hex}` as const) : undefined;
 }
 
 /** Reads a string-typed value out of a loose/namespaced bag, else `undefined`. */
