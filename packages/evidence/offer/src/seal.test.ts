@@ -1,4 +1,4 @@
-import { parseDsseEnvelope, recordDigest } from "@jinn-network/trust-core";
+import { parseDsseEnvelope, recordDigest, sealSignedPayload } from "@jinn-network/trust-core";
 import { describe, expect, test } from "vitest";
 
 import { OFFER_RECORD_KIND, OFFER_RECORD_MEDIA_TYPE } from "./identifiers.js";
@@ -55,6 +55,31 @@ describe("sealOfferPayload", () => {
     } catch (error) {
       expect((error as InvalidOfferError).category).toBe("invalid-document");
       expect((error as InvalidOfferError).errors[0]!.path).toBe("subject");
+    }
+  });
+
+  test.each([
+    ["a non-integral number", 1.5],
+    ["a non-finite number", 1e400],
+  ])("refuses %s in an extension value as an invalid document", (_label, value) => {
+    try {
+      sealOfferPayload(offer({ "com.example.x": value }));
+      expect.unreachable("a value outside the I-JSON subset must throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(InvalidOfferError);
+      expect((error as InvalidOfferError).category).toBe("invalid-document");
+    }
+  });
+
+  test("refuses an unpaired UTF-16 surrogate as an invalid document", () => {
+    try {
+      sealOfferPayload(offer({
+        rails: [{ rail: USDC, to: "\ud800", amount: "1500000" }],
+      }));
+      expect.unreachable("a lone surrogate must throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(InvalidOfferError);
+      expect((error as InvalidOfferError).category).toBe("invalid-document");
     }
   });
 
@@ -132,6 +157,22 @@ describe("parseOfferEnvelope", () => {
     expect(parsed.offer).toEqual(offer());
     expect(parsed.digest).toBe(sealed.digest);
     expect(parsed.signatures).toHaveLength(1);
+  });
+
+  test("converts a hostile payload the canonicalizer refuses into an invalid document", async () => {
+    const payloadBytes = encode(JSON.stringify(offer({ "com.example.x": 1.5 })));
+    const sealed = await sealSignedPayload({
+      payloadBytes,
+      payloadType: OFFER_RECORD_MEDIA_TYPE,
+      signer: createFixtureOfferSigner(),
+    });
+    try {
+      parseOfferEnvelope(sealed.envelopeBytes);
+      expect.unreachable("a non-canonicalizable payload must throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(InvalidOfferError);
+      expect((error as InvalidOfferError).category).toBe("invalid-document");
+    }
   });
 
   test("refuses an envelope whose payloadType is another record kind", async () => {
