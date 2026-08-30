@@ -92,9 +92,12 @@ function hasNoEmptyQueryOrFragment(value: string): boolean {
  * reaches into a region it cannot reason about.
  *
  * Stated positively, and this is the whole of the guarantee: under a special scheme, two URIs
- * that are equivalent — under RFC 3986 §6.2.2, plus the trailing-dot rule, which is scheme-based
- * rather than syntax-based normalization — never both pass, and the normalized spelling of any
- * URI always does, so no rail is left unspellable. A string carrying a malformed escape is
+ * that are equivalent never both pass, and the normalized spelling of any URI always does, so no
+ * rail is left unspellable. "Equivalent" there is RFC 3986 §6.2.2 syntax-based normalization —
+ * case, percent-encoding, path segments — plus two §6.2.3 scheme-based rules this check also
+ * applies: the DNS trailing dot, and the elision of an empty query or fragment. Naming §6.2.2
+ * alone would make the second half false, since `…/v1?` is already its own syntax-based normal
+ * form and is refused all the same. A string carrying a malformed escape is
  * refused outright and is not an RFC 3986 URI to begin with, so it is outside that claim rather
  * than a counterexample to it. `extensions.test.ts` runs both directions over the special-scheme
  * space, because a rule that claims more than it delivers is worse than a modest one — which is
