@@ -625,7 +625,7 @@ The approved-but-unimplemented Evaluation Runner design (`integration/evidence-v
   > still describe the superseded in-executor-signing shape.
   >
   > **Further amended 2026-08-30, recording the 2026-08-12 repair
-  > (`688bf27ad`, PR #2601): the re-serialization half of the note above is
+  > (`f32da275a`, PR #2580): the re-serialization half of the note above is
   > superseded; its conclusion stands.** The host does
   > *not* re-serialize the statement to canonical bytes and compare. That guard
   > compared the harness's output against trust-core's compact JCS encoding,

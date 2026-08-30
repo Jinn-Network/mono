@@ -650,8 +650,8 @@ reopened):**
   verbatim (`dssePreAuthEncoding` + `sealDsseEnvelope`), never
   re-canonicalizing — recorded in `src/venue/signing.ts`.
 
-  > **Amended 2026-08-30, recording the 2026-08-12 repair (`688bf27ad`, PR
-  > #2601): the "unsatisfiable" claim above was true of the code as it then
+  > **Amended 2026-08-30, recording the 2026-08-12 repair (`f32da275a`, PR
+  > #2580): the "unsatisfiable" claim above was true of the code as it then
   > stood, and has since been repaired.** The
   > byte-equality guard no longer re-canonicalizes through trust-core's compact
   > encoder. The host now checks the producer's own spelling

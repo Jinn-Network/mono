@@ -147,7 +147,7 @@ replaces the four that belong to the marketplace loop and keeps the rest untouch
 > Same reversal, same reasoning, recorded in the
 > [local-execution-backend design §10.4](./2026-07-27-local-execution-backend-design.md#104-evaluation-runner-design-reconciliation).
 >
-> **Further amended 2026-08-30, recording the 2026-08-12 repair (`688bf27ad`, PR #2601):
+> **Further amended 2026-08-30, recording the 2026-08-12 repair (`f32da275a`, PR #2580):
 > the re-serialization half of the note above is superseded; its conclusion stands.** The host does *not* re-serialize the
 > statement to canonical bytes and compare. That guard compared the harness's output against
 > trust-core's compact JCS encoding, while the harness writes the attestation family's pretty
