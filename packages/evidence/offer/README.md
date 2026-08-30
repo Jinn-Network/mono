@@ -96,6 +96,9 @@ const outcome = await verifyOffer(
 someone wrote a price down. The binding must carry the offers trust scope
 (`OFFER_TRUST_SCOPE`) at the offer's effective time.
 
+It never rejects. A throwing injected port is returned as `reason: "dependency-failed"`, kept
+distinct from every identity reason so a resolver outage can never read as "not the holder".
+
 Read the success case precisely. `ok: true` establishes that the signing key is bound to the
 agent you named, at that time, in that scope — it does not establish who that agent is. The
 holder IRI is an input, not something read out of the record, so it has to come from an
