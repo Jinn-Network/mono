@@ -37,6 +37,7 @@ const source = {
   servingRoot: "https://archive.test",
   archiveRootUrl: "https://archive.test/sources/attempts/entries/0000000000000001",
   repositoryId: "archive.test/attempts",
+  signingKeys: [],
 };
 
 let directory: string;

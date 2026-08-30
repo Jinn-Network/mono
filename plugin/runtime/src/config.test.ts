@@ -118,3 +118,57 @@ describe("resolveRuntimeConfig", () => {
     expect(resolveRuntimeConfig(base)).toEqual(resolveRuntimeConfig({ ...base }));
   });
 });
+
+describe("corpus.sources[].signingKeys", () => {
+  const source = {
+    agent: "https://agents.test/alice",
+    name: "attempts",
+    servingRoot: "https://archive.test",
+    archiveRootUrl: "https://archive.test/sources/attempts/entries/0000000000000001",
+    repositoryId: "archive.test/attempts",
+  } as const;
+
+  function resolve(signingKeys: unknown) {
+    return resolveRuntimeConfig({
+      ...base,
+      file: { corpus: { sources: [{ ...source, ...(signingKeys === undefined ? {} : { signingKeys }) }] } },
+    });
+  }
+
+  test("defaults to no declared signing authority", () => {
+    expect(resolve(undefined).corpus.sources[0]!.signingKeys).toEqual([]);
+  });
+
+  test("accepts did:key entries with an RFC 3339 validFrom", () => {
+    const keys = [
+      { keyid: "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz", validFrom: "2026-01-01T00:00:00.000Z" },
+    ];
+    expect(resolve(keys).corpus.sources[0]!.signingKeys).toEqual(keys);
+  });
+
+  test("rejects a keyid that is not a did:key", () => {
+    expect(() => resolve([{ keyid: "key-1", validFrom: "2026-01-01T00:00:00.000Z" }])).toThrow(
+      PluginRuntimeError,
+    );
+  });
+
+  test("rejects a non-RFC-3339 validFrom", () => {
+    expect(() =>
+      resolve([
+        { keyid: "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz", validFrom: "yesterday" },
+      ]),
+    ).toThrow(PluginRuntimeError);
+  });
+
+  test("rejects an unknown key inside a signing-key entry", () => {
+    expect(() =>
+      resolve([
+        {
+          keyid: "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz",
+          validFrom: "2026-01-01T00:00:00.000Z",
+          revoked: true,
+        },
+      ]),
+    ).toThrow(PluginRuntimeError);
+  });
+});

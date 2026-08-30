@@ -6,6 +6,7 @@ import type { DsseSigner } from "@jinn-network/trust-core";
 import { describe, expect, test } from "vitest";
 
 import { main, buildOwnedEnvSnapshot } from "./bin.js";
+import { resolveCorpusBinIoFields } from "./session-host-corpus.js";
 import { RUNTIME_VERSION } from "./version.js";
 
 const testSigner: DsseSigner = async () => [
@@ -162,5 +163,24 @@ describe("main", () => {
       (snapshot as Record<string, string>).JINN_PLUGIN_HOME = "/mutated";
     }).toThrow();
     expect(raw.JINN_PLUGIN_HOME).toBe("/a");
+  });
+});
+
+describe("the composed corpus ports", () => {
+  test("main serve accepts them and reports the corpus capability started", async () => {
+    const home = await mkdtemp(join(tmpdir(), "jinn-bin-corpus-"));
+    const err: string[] = [];
+    const code = await main(["serve"], {}, {
+      writeOut: () => {},
+      writeErr: (line) => err.push(line),
+      homeDirectory: home,
+      untilShutdown: async () => {},
+      ...resolveCorpusBinIoFields({ env: {}, homeDirectory: home }),
+    });
+    expect(code).toBe(0);
+    // Without the ports this line never appeared: `hasCorpusPorts` was false
+    // for every in-repo entry point, so the capability was never constructed.
+    expect(err.join("\n")).toContain("corpus.capability.started");
+    expect(err.join("\n")).not.toContain("corpus ports not injected");
   });
 });

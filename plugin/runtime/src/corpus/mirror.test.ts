@@ -43,6 +43,7 @@ const source = {
   servingRoot: "https://archive.test",
   archiveRootUrl: `https://archive.test${archivePagePath(NAME, "0000000000000001")}`,
   repositoryId: "archive.test/attempts",
+  signingKeys: [],
 };
 
 let directory: string;

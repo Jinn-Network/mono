@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { main } from "./bin.js";
+import { resolveRuntimeConfig } from "./config.js";
+import { createCorpusCapability } from "./corpus/capability.js";
+import { resolveCorpusBinIoFields, type LocalCorpusPorts } from "./session-host-corpus.js";
 import {
   CAPTURE_SIGNER_DIRECTORY,
   loadOrCreateLocalCaptureSigner,
@@ -47,5 +50,33 @@ describe("session-host composition", () => {
     expect(code).toBe(0);
     expect(err.join("")).toContain("role=session");
     expect(join(home, CAPTURE_SIGNER_DIRECTORY)).toBeTruthy();
+  });
+});
+
+describe("the corpus composition root", () => {
+  test("makes the verified chain-verification posture live", async () => {
+    const home = await writableHome();
+    const config = resolveRuntimeConfig({ env: {}, homeDirectory: home });
+    const ports = resolveCorpusBinIoFields({ env: {}, homeDirectory: home }) as LocalCorpusPorts;
+    const capability = createCorpusCapability({
+      transport: ports.corpusTransport,
+      fs: ports.corpusFs,
+      dsseVerifier: ports.dsseVerifier,
+      readPolicyVersions: ports.readPolicyVersions,
+      verifyDriver: ports.corpusVerifyDriver,
+    });
+    await capability.start!({
+      config,
+      log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+    });
+
+    const checks = await capability.healthChecks!();
+    expect(checks).toContainEqual(
+      expect.objectContaining({
+        name: "corpus-chain-verification",
+        ok: true,
+        detail: "Announcement chains are verified before indexing.",
+      }),
+    );
   });
 });

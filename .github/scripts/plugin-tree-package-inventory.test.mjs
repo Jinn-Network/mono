@@ -44,6 +44,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
   ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
   ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
+  ['@jinn-network/record-discovery-transport-http', join(root, 'packages', 'discovery', 'transport-http')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
 ]);
@@ -63,6 +64,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/execution-recorder',
       '@jinn-network/record-discovery-client',
       '@jinn-network/record-discovery-protocol',
+      '@jinn-network/record-discovery-transport-http',
       '@jinn-network/trust-core',
     ],
     devDependencies: [],

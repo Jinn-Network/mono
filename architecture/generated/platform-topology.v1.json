@@ -1043,6 +1043,11 @@
       {
         "from": "@jinn-network/plugin-runtime",
         "kind": "runtime",
+        "to": "@jinn-network/record-discovery-transport-http"
+      },
+      {
+        "from": "@jinn-network/plugin-runtime",
+        "kind": "runtime",
         "to": "@jinn-network/trust-core"
       },
       {
@@ -6152,6 +6157,7 @@
           "@jinn-network/execution-recorder",
           "@jinn-network/record-discovery-client",
           "@jinn-network/record-discovery-protocol",
+          "@jinn-network/record-discovery-transport-http",
           "@jinn-network/trust-core",
           "@modelcontextprotocol/sdk",
           "better-sqlite3",

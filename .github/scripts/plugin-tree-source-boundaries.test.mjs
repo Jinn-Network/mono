@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 
-import { packageSpecifierMatches, scanSourceFile } from './plugin-tree-ast-custody.mjs';
+import { isHostAdapterPath, isSessionHostSignerPath, packageSpecifierMatches, scanSourceFile } from './plugin-tree-ast-custody.mjs';
 import {
   APPROVED_RUNTIME_DEPENDENCIES,
   APPROVED_RUNTIME_DEV_DEPENDENCIES,
@@ -113,6 +113,8 @@ function scanFixtureSource(fixtureDir, fileName, content, { isBinEntry = false, 
     isCaptureProduction: isCaptureProduction
       || filePath.includes('/src/capture/')
       || filePath.includes('\\src\\capture\\'),
+    isSessionHostSigner: isSessionHostSignerPath(filePath),
+    isHostAdapter: isHostAdapterPath(filePath),
   });
 }
 
@@ -256,6 +258,43 @@ test('bin.ts allows only the exact realpathSync import and rejects other fs or c
       'fetch("https://example.com");',
     ].join('\n'), { isBinEntry: true });
     assert.ok(overreach.length >= 3);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('the host-adapter layer may touch the disk, and only the signer is off the key-material canary', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-host-adapter-'));
+  try {
+    for (const adapter of ['session-host-signer.ts', 'session-host-corpus.ts', 'session-host-crypto.ts']) {
+      assert.equal(isHostAdapterPath(join(fixture, 'src', adapter)), true, `${adapter} must be a host adapter`);
+      assert.deepEqual(
+        scanFixtureSource(fixture, adapter, [
+          'import { readFile, readdir } from "node:fs/promises";',
+          'export const read = async (path: string) => (await readdir(path)).map((name) => readFile(name));',
+        ].join('\n')),
+        [],
+        `${adapter} must be allowed to read the disk`,
+      );
+    }
+
+    // The layer's fs allowance stops at its named members: a neighbouring
+    // module is not a host adapter merely for sitting beside one.
+    assert.equal(isHostAdapterPath(join(fixture, 'src', 'session-host.ts')), false);
+    assert.equal(isHostAdapterPath(join(fixture, 'src', 'config.ts')), false);
+
+    // The key-material canary is narrower than the fs allowance ON PURPOSE:
+    // only the signer holds private key material, and a later adapter must
+    // not inherit that exemption by joining the layer.
+    assert.deepEqual(
+      scanFixtureSource(fixture, 'session-host-signer.ts', 'export const load = (privateKey: string) => privateKey;'),
+      [],
+    );
+    for (const adapter of ['session-host-corpus.ts', 'session-host-crypto.ts']) {
+      assert.ok(
+        scanFixtureSource(fixture, adapter, 'export const load = (privateKey: string) => privateKey;')
+          .some((entry) => entry.includes('key-material')),
+        `${adapter} must stay under the key-material canary`,
+      );
+    }
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 

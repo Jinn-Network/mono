@@ -24,6 +24,7 @@ export const APPROVED_RUNTIME_DEPENDENCIES = Object.freeze({
   '@jinn-network/execution-recorder': '0.1.0',
   '@jinn-network/record-discovery-client': '0.1.0',
   '@jinn-network/record-discovery-protocol': '0.1.0',
+  '@jinn-network/record-discovery-transport-http': '0.1.0',
   '@jinn-network/trust-core': '0.1.0',
   '@modelcontextprotocol/sdk': '1.29.0',
   'better-sqlite3': '13.0.1',
@@ -54,6 +55,7 @@ export const APPROVED_RUNTIME_RESOLUTIONS = Object.freeze({
   '@jinn-network/record-discovery-client': 'portal:../../packages/discovery/client',
   '@jinn-network/record-discovery-protocol': 'portal:../../packages/discovery/protocol',
   '@jinn-network/record-discovery-serve': 'portal:../../packages/discovery/serve',
+  '@jinn-network/record-discovery-transport-http': 'portal:../../packages/discovery/transport-http',
   '@jinn-network/trust-core': 'portal:../../packages/trust/core',
   vite: '6.4.3',
 });

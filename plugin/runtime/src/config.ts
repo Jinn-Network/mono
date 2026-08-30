@@ -164,12 +164,47 @@ const HttpsUrlSchema = z.string().refine(
   { message: "must be an absolute https URL" },
 );
 
+/**
+ * A local copy of `did:key`'s spelling from
+ * `@jinn-network/trust-core/src/spellings.ts`, copied for the same reason
+ * `SOURCE_NAME_PATTERN` above is: this module validates without depending on
+ * the packages that own the grammars.
+ */
+const DID_KEY_PATTERN = /^did:key:z[1-9A-HJ-NP-Za-km-z]+$/;
+
+/**
+ * One key an archive's agent may sign its announcement chain with.
+ *
+ * This is FILE-ONLY for the same reason the source list above is, and it is
+ * the sharper case of the rule: "which key may speak for this archive" is the
+ * whole of announcement-chain authority. An environment variable that could
+ * introduce a signer would let anything able to set the environment silently
+ * become a trusted publisher, which custody law C2 forbids and which no
+ * review would ever see.
+ *
+ * `validFrom` is both the binding's effective start and the instant the key
+ * catalog probes at when asking whether a key was EVER bound — the
+ * point-in-time probe `AgentKeyCatalog.probeAt` documents, so a key whose
+ * window has since elapsed still corroborates the history it signed.
+ */
+const MirrorSourceSigningKeySchema = z.strictObject({
+  keyid: z.string().regex(DID_KEY_PATTERN, "must be a did:key multibase identifier"),
+  validFrom: z.iso.datetime({ offset: true }),
+});
+
 const MirrorSourceConfigSchema = z.strictObject({
   agent: z.string().min(1),
   name: z.string().regex(SOURCE_NAME_PATTERN, "must match the record-discovery source-name grammar"),
   servingRoot: HttpsUrlSchema,
   archiveRootUrl: HttpsUrlSchema,
   repositoryId: z.string().min(1),
+  /**
+   * Absent (the default) means this archive has declared NO signer, so under
+   * the `verified` posture its head signature resolves against no key and the
+   * chain is refused `unauthorized-signer`. That is the fail-closed direction:
+   * following an archive is not the same act as trusting a key to speak for it.
+   */
+  signingKeys: z.array(MirrorSourceSigningKeySchema).default([]),
 });
 
 const CorpusTrustConfigSchema = z.strictObject({
@@ -208,6 +243,7 @@ const CorpusConfigSchema = z.strictObject({
 });
 
 export type MirrorSourceConfig = z.infer<typeof MirrorSourceConfigSchema>;
+export type MirrorSourceSigningKey = z.infer<typeof MirrorSourceSigningKeySchema>;
 export type CorpusTrustConfig = z.infer<typeof CorpusTrustConfigSchema>;
 export type CorpusChainVerificationMode = z.infer<typeof CorpusChainVerificationSchema>;
 export type CorpusConfig = Omit<z.infer<typeof CorpusConfigSchema>, "chainVerification"> & {
