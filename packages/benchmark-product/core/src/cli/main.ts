@@ -83,6 +83,7 @@ import {
   type SignHumanReviewResponseInput,
 } from "../operations/index.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
+import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
 import type { BeaconReference } from "@colophon-claims/verify";
 import { summarizeVerificationOutcome } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
@@ -154,6 +155,9 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --beacon-source <id> --beacon-round <n> --beacon-value <64 hex>
   anchoring configure --workspace <dir> --principal <id>
                    (--provider <profileUri> --endpoint <url> | --file <anchoring.json> | --clear)
+  disclosure declare --workspace <dir> --principal <id> --draft <draftId>
+                   --file <disclosure.json>
+  disclosure show    --workspace <dir> --principal <id> --draft <draftId>
   publication configure --workspace <dir> --principal <id> --draft <draftId> --public-base-url <url>
   publication register  --workspace <dir> --principal <id> --draft <draftId> [--public-base-url <url>]
   publication status     --workspace <dir> --principal <id> --draft <draftId>
@@ -258,6 +262,8 @@ const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG
 const ANCHOR_FLAGS = ["workspace", "principal", "json", "draft", "subject", "provider", "endpoint"] as const;
 const BIND_FLAGS = ["workspace", "principal", "json", "draft", "beacon-source", "beacon-round", "beacon-value"] as const;
 const ANCHORING_CONFIGURE_FLAGS = ["workspace", "principal", "json", "provider", "endpoint", "file", "clear"] as const;
+const DISCLOSURE_DECLARE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const DISCLOSURE_SHOW_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -1122,6 +1128,33 @@ function handleAnchoringConfigure(args: ParsedArgs, context: CliContext, jsonMod
 }
 
 
+/**
+ * `disclosure declare` (issue #2839). The declaration always comes from a file: six honest sentences
+ * about an experiment are not a thing anyone types onto a command line, and a partially typed one is
+ * exactly the shape the record exists to make impossible.
+ */
+function handleDisclosureDeclare(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, DISCLOSURE_DECLARE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const result = disclosureDeclare(opContext, {
+    draftId: required(args, "draft"),
+    declaration: readJsonFile(pathFrom(context.cwd, required(args, "file"))),
+  });
+  return renderResult(result, jsonMode, (value) => `${value.replaced ? "replaced" : "sealed"} the disclosure record ${value.recordSha256}\n`
+    + `subject ${value.subjectSha256}, author ${value.author}\n`
+    + `${Object.entries(value.statuses).map(([variable, status]) => `  ${variable}\t${status}`).join("\n")}\n`);
+}
+
+function handleDisclosureShow(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, DISCLOSURE_SHOW_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const result = disclosureShow(opContext, { draftId: required(args, "draft") });
+  return renderResult(result, jsonMode, (value) => `disclosure record ${value.recordSha256}\n`
+    + `specification ${value.specification}\n`
+    + `subject ${value.subjectSha256}, author ${value.author}\n`
+    + `${Object.entries(value.variables).map(([variable, entry]) => `  ${variable}\t${entry.status}`).join("\n")}\n`);
+}
+
 async function handlePublicationConfigure(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, PUBLICATION_CONFIGURE_FLAGS);
   const opContext = buildOperationContext(args, context);
@@ -1469,6 +1502,8 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["anchor", handleAnchor],
   ["bind", handleBind],
   ["anchoring configure", handleAnchoringConfigure],
+  ["disclosure declare", handleDisclosureDeclare],
+  ["disclosure show", handleDisclosureShow],
   ["publication configure", handlePublicationConfigure],
   ["publication register", handlePublicationRegister],
   ["publication status", handlePublicationStatus],

@@ -43,6 +43,7 @@ import {
   ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
   BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
   BINARY_QUALIFICATION_VERIFICATION_COMMAND,
   PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
@@ -1715,6 +1716,14 @@ describe("issue #3205: an anchored run whose method emits a qualification projec
  */
 const PRE_ALLOCATION_UNANCHORED_BINARY_CLAIM_SHA256 = "23d59de90f615c05fe0b14d7c4a4c7f449ef3c4796988294c6eaf09fc6ccfe8f";
 const PRE_ALLOCATION_ANCHORED_WILSON_CLAIM_SHA256 = "eb20124f106947deedf1c25b5cb5349d11beda740be626bf079ebea93fe95a97";
+/**
+ * Issue #2839's own pre-allocation measurement, taken on the tree that had claim-package/5 but no
+ * `disclosure` section at all — origin/next @ f345990ce, with every portal dist rebuilt from that
+ * source. It pins the third projection the disclosed allocation could have moved: the ANCHORED
+ * binary-qualification claim. A change that made the disclosure section anything other than strictly
+ * opt-in would move these bytes and fail here.
+ */
+const PRE_DISCLOSURE_ANCHORED_BINARY_CLAIM_SHA256 = "e6dd2b4080e138de50976f318b7858901b2f65f3c225876b7e31fdf1251bb4bd";
 
 describe("issue #3205: byte-identity of every projection that already existed", () => {
   it("the unanchored binary-qualification claim keeps its exact pre-allocation bytes", () => {
@@ -1729,5 +1738,114 @@ describe("issue #3205: byte-identity of every projection that already existed", 
     );
     expect(claim.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
     expect(sha256Hex(canonicalJsonBytes(claim))).toBe(PRE_ALLOCATION_ANCHORED_WILSON_CLAIM_SHA256);
+  });
+});
+
+// --- issue #2839: the disclosed closure (claim-package/6) ---
+
+/**
+ * One projected disclosure section, written out rather than derived, for the same reason
+ * `FIXTURE_LOCK_ANCHOR` is: these tests exercise the CLAIM allocation, and
+ * `deriveDisclosureSpecification` is proven over real sealed record bytes by the records package's
+ * own suite and by the v8 producer suite. Synthetic prose throughout (design R7).
+ */
+const FIXTURE_DISCLOSURE = {
+  recordSha256: "7".repeat(64),
+  specification: "https://spec.jinn.network/disclosure/six-variable/v1",
+  subjectSha256: "8".repeat(64),
+  variables: {
+    "ingestion-model": { status: "undisclosed", reason: "not-stated" },
+    "retrieval-config": { status: "undisclosed", reason: "not-stated" },
+    "answer-model": {
+      status: "disclosed-by-publisher",
+      statement: "Fixed and stated by the upstream collection; this venue executed none of it.",
+    },
+    "answer-prompt": {
+      status: "disclosed-by-publisher",
+      statement: "Described in the source collection and not re-executed here.",
+    },
+    "judge-model": {
+      status: "measured-here",
+      statement: "One dated model snapshot, fixed for every arm, with sampling frozen by the sealed instrument.",
+      evidence: [{ role: "pinned-configuration", digest: { sha256: "6".repeat(64) } }],
+    },
+    "judge-prompt": {
+      status: "measured-here",
+      statement: "Sealed grading instruments, one per arm, each with its own frozen template digest.",
+      evidence: [{ role: "pinned-configuration", digest: { sha256: "5".repeat(64) } }],
+    },
+  },
+} as const;
+
+describe("issue #2839: a disclosed anchored binary-qualification run", () => {
+  it("builds claim-package/6 and pins the eight checks, disclosure-specification last", () => {
+    const claim = buildJudgeFamilyClaim(buildBinaryInstrumentFixture(), {
+      anchors: [FIXTURE_LOCK_ANCHOR],
+      disclosure: FIXTURE_DISCLOSURE as never,
+    });
+
+    expect(claim.claimSchema).toBe(DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(claim.disclosure).toEqual(FIXTURE_DISCLOSURE);
+    // /6 is /5 plus a section: the qualification projection and the anchors section are unchanged.
+    expect(claim.qualification).toEqual(binaryQualificationFixture());
+    expect(claim.anchors).toEqual([FIXTURE_LOCK_ANCHOR]);
+    expect(claim.verification.checks).toEqual([
+      "manifest",
+      "evidence-closure",
+      "trust",
+      "matrix-rederivation",
+      "report-verification",
+      "claim-consistency",
+      "integrity-anchors",
+      "disclosure-specification",
+    ]);
+    expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+  });
+
+  it("refuses an omitted section, a section on an earlier allocation, and the wrong check list", () => {
+    const claim = ClaimPackageSchema.parse(buildJudgeFamilyClaim(buildBinaryInstrumentFixture(), {
+      anchors: [FIXTURE_LOCK_ANCHOR],
+      disclosure: FIXTURE_DISCLOSURE as never,
+    }));
+
+    const { disclosure: _dropped, ...withoutSection } = claim as Record<string, unknown>;
+    expect(ClaimPackageSchema.safeParse(withoutSection).success).toBe(false);
+
+    // The section on claim-package/5 — the closure whose check would never read it.
+    const onFive = structuredClone(claim) as any;
+    onFive.claimSchema = ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID;
+    onFive.verification.checks = onFive.verification.checks.slice(0, 7);
+    expect(ClaimPackageSchema.safeParse(onFive).success).toBe(false);
+
+    // The disclosed closure claiming only the anchored seven.
+    const shortChecks = structuredClone(claim) as any;
+    shortChecks.verification.checks = shortChecks.verification.checks.slice(0, 7);
+    expect(ClaimPackageSchema.safeParse(shortChecks).success).toBe(false);
+
+    // A ranking smuggled into the disclosed claim fails the same anti-conclusion gate /2 and /5 use.
+    const ranked = structuredClone(claim) as any;
+    ranked.ranking = ["arm-a"];
+    expect(ClaimPackageSchema.safeParse(ranked).success).toBe(false);
+
+    // A section describing a variable entry the record could not have carried.
+    const impossible = structuredClone(claim) as any;
+    impossible.disclosure.variables["ingestion-model"] = {
+      status: "undisclosed", reason: "not-stated", statement: "vaguely named",
+    };
+    expect(ClaimPackageSchema.safeParse(impossible).success).toBe(false);
+
+    // A section missing one of the six.
+    const incomplete = structuredClone(claim) as any;
+    delete incomplete.disclosure.variables["judge-prompt"];
+    expect(ClaimPackageSchema.safeParse(incomplete).success).toBe(false);
+  });
+
+  it("the anchored binary-qualification claim keeps its exact pre-disclosure bytes", () => {
+    const claim = ClaimPackageSchema.parse(
+      buildJudgeFamilyClaim(buildBinaryInstrumentFixture(), { anchors: [FIXTURE_LOCK_ANCHOR] }),
+    );
+    expect(claim.claimSchema).toBe(ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(claim.disclosure).toBeUndefined();
+    expect(sha256Hex(canonicalJsonBytes(claim))).toBe(PRE_DISCLOSURE_ANCHORED_BINARY_CLAIM_SHA256);
   });
 });

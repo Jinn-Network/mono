@@ -12,12 +12,14 @@ consistency. Exit status is `0` when the bundle is valid for the format and prof
 declares, `1` for an invalid bundle, and `2` for usage or operational failures. A check a
 profile defers is reported as deferred, never as passed, and never as a failure.
 
-This 0.2 reader supports public bundle formats v2, v4, v5, v6, and v7. It intentionally
-rejects the unrelated accounting bundle v3. Formats v2 and v4 run six checks; the
-evidence-native v5 and the two anchored formats, v6 and v7, run seven. The v7 format is
-the anchored binary-qualification closure — v4's members plus v6's anchors — and it
-exists only from this 0.2.1 release, so its bundles pin `@0.2.1` rather than the `@0.1`
-line every earlier closure stamps.
+This 0.2 reader supports public bundle formats v2, v4, v5, v6, v7, and v8. It
+intentionally rejects the unrelated accounting bundle v3. Formats v2 and v4 run six
+checks; the evidence-native v5 and the two anchored formats, v6 and v7, run seven; the
+disclosed v8 runs eight. The v7 format is the anchored binary-qualification closure —
+v4's members plus v6's anchors — and v8 is v7 plus a sealed six-variable
+disclosure-specification record and the `disclosure-specification` check. Both exist
+only from this 0.2.1 release, so their bundles pin `@0.2.1` rather than the `@0.1` line
+every earlier closure stamps.
 The evidence-native v5 has two declared profiles, full-evidence and metadata-first;
 this reader supports both. A metadata-first bundle carries the artifact digests without
 the artifact bodies, so `artifact-integrity` reports `not fetched` rather than passing,

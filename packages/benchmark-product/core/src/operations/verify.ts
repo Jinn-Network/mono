@@ -44,6 +44,7 @@ import { evaluateIntegrityAnchors } from "@colophon-claims/verify";
 import { verifyMatrix } from "@jinn-network/benchmarking-run";
 import { verifyReport } from "@jinn-network/benchmarking-aggregate";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
+import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { refuse } from "../errors.js";
 import { additionalClaimPackagePath, ClaimPackageSchema } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
@@ -213,6 +214,9 @@ export async function verifyRunWorkspace(
       let sharedContext: {
         readonly previewLog: ReturnType<typeof readPreviewLog>;
         readonly carriage: ReturnType<typeof readRunAnchorCarriage>;
+        /** issue #2839: the disclosure section re-derived from the sealed record's own bytes, so
+         * this workspace-side rebuild compares the same projection the portable reader does. */
+        readonly disclosureCarriage: ReturnType<typeof readRunDisclosureCarriage>;
         readonly additionalLimitations: readonly string[];
         readonly suiteComparability?: {
           readonly executionConformance: boolean;
@@ -279,6 +283,7 @@ export async function verifyRunWorkspace(
           // below. Computed once — the anchors are a property of the Run/Matrix, not of any one
           // Report.
           const carriage = readRunAnchorCarriage(context.workspaceDir, runState);
+          const disclosureCarriage = readRunDisclosureCarriage(context.workspaceDir, runState);
           // The same shared check the portable reader runs, over the workspace's own sealed bytes
           // and with no trust material — roots and headers are verifier-side configuration, and a
           // producer that supplied its own here would be grading its own homework. `invalid`
@@ -370,6 +375,7 @@ export async function verifyRunWorkspace(
           sharedContext = {
             previewLog,
             carriage,
+            disclosureCarriage,
             additionalLimitations: [
               ...inspectAdditional,
               ...(suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation]),
@@ -383,7 +389,7 @@ export async function verifyRunWorkspace(
             }),
           };
         }
-        const { previewLog, carriage, additionalLimitations, suiteComparability } = sharedContext;
+        const { previewLog, carriage, disclosureCarriage, additionalLimitations, suiteComparability } = sharedContext;
 
         assertClaimConsistency({
           claim,
@@ -403,6 +409,7 @@ export async function verifyRunWorkspace(
           ...(additionalLimitations.length > 0 ? { additionalLimitations } : {}),
           ...(suiteComparability === undefined ? {} : { suiteComparability }),
           ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
+          ...(disclosureCarriage === undefined ? {} : { disclosure: disclosureCarriage.disclosure }),
           ...(previewLog === undefined
             ? {}
             : {

@@ -59,6 +59,27 @@ export const PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND =
 export const PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND =
   "npx @colophon-claims/verify@0.2 <bundle-dir>" as const;
 
+/**
+ * The disclosed closure's check list (disclosure-specification-record design §7, issue #2839): v7's
+ * seven plus `disclosure-specification`, **last**. It runs after `claim-consistency` because the
+ * claim's `disclosure` section is among the things it compares, and it is **always present** on this
+ * format — a disclosed bundle whose record was stripped is a closure failure, not a shorter list.
+ */
+export const PUBLIC_BUNDLE_V8_CHECKS = [
+  ...PUBLIC_BUNDLE_V7_CHECKS,
+  "disclosure-specification",
+] as const;
+
+/**
+ * Like v7 and for the same reason: no released reader before 0.2.1 understands
+ * `benchmark-product-public-bundle/8`, and a claim naming a reader that cannot read it would be an
+ * instruction to fail. The disclosed closure ships in the same unpublished 0.2.1 line as v7, so it
+ * pins that line rather than minting a third.
+ */
+export const PUBLIC_BUNDLE_V8_VERIFICATION_COMMAND = PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND;
+export const PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND =
+  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND;
+
 /** Every format through v6 stamps the same first public 0.1 line; v7 is the first that cannot. */
 export const PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS = {
   [BUNDLE_FORMAT]: {
@@ -81,6 +102,10 @@ export const PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS = {
     command: PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
     compatibleCommand: PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   },
+  [BUNDLE_V8_FORMAT]: {
+    command: PUBLIC_BUNDLE_V8_VERIFICATION_COMMAND,
+    compatibleCommand: PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
+  },
 } as const;
 import {
   BUNDLE_FORMAT,
@@ -88,4 +113,5 @@ import {
   BUNDLE_V5_FORMAT,
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
+  BUNDLE_V8_FORMAT,
 } from "./manifest.js";

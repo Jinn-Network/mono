@@ -30,12 +30,31 @@ export const BUNDLE_V6_FORMAT = "benchmark-product-public-bundle/6" as const;
  * qualification-projecting emits this one.
  */
 export const BUNDLE_V7_FORMAT = "benchmark-product-public-bundle/7" as const;
+/**
+ * The disclosed anchored binary-qualification closure (issue #2839, disclosure-specification-record
+ * design §6.5): v7's complete member list plus one `records/<sha256>.bin` member carrying the sealed
+ * disclosure-specification record, and the `disclosure-specification` check.
+ *
+ * **Why it stacks on v7 rather than on v4.** The design reserved this closure for the UNANCHORED
+ * qualified branch, on the premise (its §12.2) that anchoring and qualification could never
+ * combine. Issue #3205 dissolved that premise: the published official bundle IS anchored and
+ * qualified, on v7. Allocating disclosure on the unanchored branch would have forced the flagship to
+ * choose between its anchor and its disclosure record, so the allocation follows the real material.
+ * Anything narrower — a second, unanchored disclosed cell — would double the enumeration that
+ * #2889 exists to kill, and is deliberately not built.
+ *
+ * Additive in exactly the way v6 and v7 were: v2, v4, v5, v6, and v7 keep their member lists, check
+ * lists, and bytes, and only a run that is anchored AND qualification-projecting AND carrying a
+ * sealed disclosure declaration emits this one.
+ */
+export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
 export const SUPPORTED_BUNDLE_FORMATS = [
   BUNDLE_FORMAT,
   BUNDLE_V4_FORMAT,
   BUNDLE_V5_FORMAT,
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
+  BUNDLE_V8_FORMAT,
 ] as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 
@@ -53,6 +72,7 @@ const LegacyBundleManifestSchema = z.object({
     z.literal(BUNDLE_V4_FORMAT),
     z.literal(BUNDLE_V6_FORMAT),
     z.literal(BUNDLE_V7_FORMAT),
+    z.literal(BUNDLE_V8_FORMAT),
   ]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
@@ -86,7 +106,8 @@ export interface BuildBundleManifestOptions {
     | typeof BUNDLE_FORMAT
     | typeof BUNDLE_V4_FORMAT
     | typeof BUNDLE_V6_FORMAT
-    | typeof BUNDLE_V7_FORMAT;
+    | typeof BUNDLE_V7_FORMAT
+    | typeof BUNDLE_V8_FORMAT;
 }
 
 function sha256(bytes: Uint8Array): string {

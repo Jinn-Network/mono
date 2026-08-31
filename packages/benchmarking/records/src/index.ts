@@ -20,6 +20,10 @@ export {
   BENCHMARKING_METHOD_VERSION,
   BENCHMARKING_PROTOCOL,
   BENCHMARKING_REPORTS_SCOPE,
+  DISCLOSURE_SPECIFICATION_EXTENSION,
+  DISCLOSURE_SPECIFICATION_MEDIA_TYPE,
+  DISCLOSURE_SPECIFICATION_RECORD_KIND,
+  SIX_VARIABLE_DISCLOSURE_SPECIFICATION,
   MATRIX_MEDIA_TYPE,
   MATRIX_ASSEMBLY_PROCEDURE,
   MATRIX_ASSEMBLY_PROCEDURE_VERSION,
@@ -84,6 +88,32 @@ export {
   withRunAnchorIntentExtension,
 } from "./anchor-intent-extension.js";
 export type { RunAnchorIntentExtension } from "./anchor-intent-extension.js";
+// --- the disclosure-specification record and its Report extension (design §4-§6, issue #2839) ---
+export {
+  DISCLOSURE_EVIDENCE_ROLES,
+  DISCLOSURE_UNDISCLOSED_REASONS,
+  DISCLOSURE_VARIABLE_KEYS,
+  DisclosureSpecificationSchema,
+  DisclosureVariableEntrySchema,
+  DisclosureVariablesSchema,
+  parseDisclosureSpecification,
+  sealDisclosureSpecification,
+} from "./disclosure/schema.js";
+export type {
+  DisclosureEvidenceRole,
+  DisclosureSpecification,
+  DisclosureUndisclosedReason,
+  DisclosureVariableEntry,
+  DisclosureVariableKey,
+  DisclosureVariableStatus,
+} from "./disclosure/schema.js";
+export {
+  ReportDisclosureExtensionSchema,
+  readReportDisclosureExtension,
+  reportDisclosureExtension,
+  withReportDisclosureExtension,
+} from "./disclosure-extension.js";
+export type { ReportDisclosureExtension } from "./disclosure-extension.js";
 
 export type {
   MatrixPublicationExtension,

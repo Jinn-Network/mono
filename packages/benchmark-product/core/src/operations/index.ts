@@ -170,6 +170,13 @@ export { runCancel, type RunCancelDeps, type RunCancelInput, type RunCancelResul
 // and `resolveAnchorConfiguration` is a pure resolution rule; the facade's inventory is exactly the
 // operations, which is what `../cli/parity-map.ts` is allowed to assume.
 export { runAnchor, type AnchorSubject, type RunAnchorDeps, type RunAnchorInput, type RunAnchorResult } from "./run-anchor.js";
+export {
+  disclosureDeclare,
+  disclosureShow,
+  type DisclosureDeclareInput,
+  type DisclosureDeclareResult,
+  type DisclosureShowResult,
+} from "./disclosure-declare.js";
 export { runBind, type RunBindInput, type RunBindResult } from "./run-bind.js";
 export {
   anchoringConfigure,

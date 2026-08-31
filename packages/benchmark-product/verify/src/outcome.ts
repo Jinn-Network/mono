@@ -3,6 +3,7 @@ import {
   PUBLIC_BUNDLE_VERIFICATION_CHECKS,
   PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V7_CHECKS,
+  PUBLIC_BUNDLE_V8_CHECKS,
 } from "./reader-instructions.js";
 import type { PublicBundleVerificationResult } from "./verify.js";
 
@@ -46,7 +47,9 @@ export function summarizeVerificationOutcome(result: PublicBundleVerificationRes
       ? PUBLIC_BUNDLE_V6_CHECKS.length
       : result.format === "benchmark-product-public-bundle/7"
         ? PUBLIC_BUNDLE_V7_CHECKS.length
-        : PUBLIC_BUNDLE_VERIFICATION_CHECKS.length;
+        : result.format === "benchmark-product-public-bundle/8"
+          ? PUBLIC_BUNDLE_V8_CHECKS.length
+          : PUBLIC_BUNDLE_VERIFICATION_CHECKS.length;
   const deferred = result.format === "benchmark-product-public-bundle/5"
     && result.artifactContent.status === "not-fetched"
     ? result.artifactContent

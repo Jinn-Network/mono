@@ -135,6 +135,19 @@ export interface ProduceReportInput extends MethodPorts {
   readonly disclosures?: Disclosures;
   readonly limitations?: readonly string[];
   readonly author: string;
+  /**
+   * Extra namespaced top-level extension keys to seal into the Report payload BEFORE signing
+   * (disclosure-specification-record design §6.3, issue #2839). The extension's digest has to be
+   * inside the signed payload for the author's signature to cover it, and nothing in this module
+   * can re-sign after the fact, so the only honest seam is here.
+   *
+   * Strictly opt-in and strictly additive: absent -- which is every existing caller -- the sealed
+   * document is byte-for-byte what it was before this parameter existed. Keys are validated by
+   * `sealReport`'s own `topLevelRecordSchema`, which admits only absolute-URI or reverse-DNS names,
+   * so a bare key refuses at seal rather than being quietly written. A key that collides with a
+   * core Report field, or with the publication extension this module owns, refuses here.
+   */
+  readonly recordExtensions?: Readonly<Record<string, unknown>>;
 }
 
 export type DsseSigner = TrustDsseSigner;
@@ -447,7 +460,18 @@ async function produceReportWithExtension(
     author: input.author,
     ...(input.limitations === undefined ? {} : { limitations: input.limitations }),
     ...(publicationExtension === undefined ? {} : { [BENCHMARK_PUBLICATION_EXTENSION]: publicationExtension }),
+    ...(input.recordExtensions ?? {}),
   };
+  for (const key of Object.keys(input.recordExtensions ?? {})) {
+    // Spread last so a caller's key cannot be silently shadowed by a core field -- and refused here
+    // so it cannot silently shadow one either. Both directions are errors, not precedences.
+    if (key === BENCHMARK_PUBLICATION_EXTENSION) {
+      throw new Error(`produceReport: ${BENCHMARK_PUBLICATION_EXTENSION} is owned by this module and cannot be supplied as a record extension`);
+    }
+    if (["protocol", "subjects", "method", "preregistered", "results", "disclosures", "author", "limitations"].includes(key)) {
+      throw new Error(`produceReport: record extension key "${key}" collides with a core Report field`);
+    }
+  }
 
   const sealed = sealReport(document);
   const preAuthEncoding = dssePreAuthEncoding(REPORT_MEDIA_TYPE, sealed.bytes);

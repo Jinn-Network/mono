@@ -75,6 +75,8 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   runAnchor: "anchor",
   runBind: "bind",
   anchoringConfigure: "anchoring configure",
+  disclosureDeclare: "disclosure declare",
+  disclosureShow: "disclosure show",
   publicationConfigure: "publication configure",
   publicationRegister: "publication register",
   publicationAccounting: "publication accounting",
@@ -123,6 +125,8 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   runAnchor: "anchor",
   runBind: "bind",
   anchoringConfigure: "anchoring.configure",
+  disclosureDeclare: "disclosure.declare",
+  disclosureShow: "disclosure.show",
   publicationConfigure: "publication.configure",
   publicationRegister: "publication.register",
   publicationAccounting: "publication.accounting",
@@ -174,6 +178,10 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
     "Binds the sealed, not-yet-launched run to a public beacon value that postdates its seal, deriving and sealing the run's execution order from it (issue #2976).",
   anchoringConfigure:
     "Replaces or clears the workspace's ordered anchor provider and endpoint configuration, which is what makes later locks anchor automatically (authority-gated).",
+  disclosureDeclare:
+    "Seals this run's six-variable disclosure-specification record over its sealed Matrix, recording which of ingestion model, retrieval config, answer model, answer prompt, judge model, and judge prompt this venue measured and which it only carries as an assertion.",
+  disclosureShow:
+    "Reads the sealed disclosure-specification record back out of the workspace's content-addressed store.",
   publicationConfigure: "Configures the mutable public source locator and explicit prospective-publication intent.",
   publicationRegister: "Stores, announces, and exact-probes the registration closure before dispatch or truthfully post-hoc.",
   publicationAccounting: "Publishes retained complete or partial dispatch accounting and Matrix v2 without running work or requiring a Report.",
@@ -233,6 +241,12 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   // does for `publication.configure`. A browser-supplied anchor endpoint would make this action an
   // outbound-request primitive pointed wherever a form said.
   anchoringConfigure: { status: "shipped", action: "anchoring.configure" },
+  // The six statements are the venue's own prose about its own experiment, composed offline and
+  // handed over as a file. A browser form for them would invite the half-filled declaration the
+  // record's all-six-required rule exists to make impossible; the web surface for READING a
+  // disclosed bundle is packet R1's.
+  disclosureDeclare: { status: "unavailable", reason: "requires a locally composed six-variable declaration file" },
+  disclosureShow: { status: "unavailable", reason: "reads a local sealed record from the workspace store" },
   publicationConfigure: { status: "shipped", action: "publication.configure" },
   publicationRegister: { status: "shipped", action: "publication.register" },
   publicationAccounting: { status: "shipped", action: "publication.accounting" },

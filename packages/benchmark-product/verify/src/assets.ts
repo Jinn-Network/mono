@@ -1,4 +1,4 @@
-import { BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, DISCLOSURE_VARIABLE_KEYS } from "@jinn-network/benchmarking-records";
 import { validateBinaryInstrumentQualificationProjection } from "@jinn-network/benchmarking-aggregate";
 import type { MatrixRecord, ReportRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
@@ -661,6 +661,57 @@ function publicationGradeWording(truthAdmission: NonNullable<PublicAssetInput["b
   }
 }
 
+/**
+ * The six-variable disclosure table (issue #2839, ruling Q4: the bundle's own `index.html` and
+ * `README.md` are S2's; the site template is packet R1's).
+ *
+ * Rendered from `claim.disclosure` — a verified fact the claim already carries — so this hangs off
+ * the REPORT/claim facts rather than off a format test, and every bundle without a declaration
+ * renders byte-identically to what it rendered before this section existed.
+ *
+ * `measured-here` and `disclosed-by-publisher` are kept visually distinct and are never merged into
+ * one list: the whole point of the record is that a reader can tell at a glance which variables this
+ * venue proved and which it only carries. Nothing here counts, scores, or ranks the statuses (design
+ * §8), and there is no explanatory caption — the status token and the statement are the content.
+ */
+export function disclosureSpecificationHtml(input: PublicAssetInput): string {
+  const disclosure = input.claim.disclosure;
+  if (disclosure === undefined) return "";
+  const rows = DISCLOSURE_VARIABLE_KEYS.map((key) => {
+    const entry = disclosure.variables[key];
+    const detail = entry.status === "undisclosed"
+      ? `<p class="disclosure-reason">${escapeMarkup(entry.reason)}</p>`
+      : `<p class="disclosure-statement">${escapeMarkup(entry.statement)}</p>`;
+    const sources = entry.status === "disclosed-by-publisher" && entry.sources !== undefined
+      ? `<ul class="disclosure-sources">${entry.sources.map((source) => `<li>${escapeMarkup(source.uri)}</li>`).join("")}</ul>`
+      : "";
+    const evidence = entry.status === "measured-here"
+      ? `<ul class="disclosure-evidence">${entry.evidence.map((citation) => `<li><span class="role">${escapeMarkup(citation.role)}</span> <span class="digest">${escapeMarkup(citation.digest.sha256)}</span></li>`).join("")}</ul>`
+      : "";
+    return `<div class="disclosure-variable disclosure-${escapeMarkup(entry.status)}"><dt>${escapeMarkup(key)}</dt><dd><span class="disclosure-status">${escapeMarkup(entry.status)}</span>${detail}${sources}${evidence}</dd></div>`;
+  }).join("");
+  return `<section id="disclosure-specification" aria-labelledby="disclosure-specification-heading"><h2 id="disclosure-specification-heading">Six-variable disclosure</h2><dl class="facts disclosure">${rows}</dl><p class="digest">${escapeMarkup(disclosure.specification)} · record ${escapeMarkup(disclosure.recordSha256)} · subject ${escapeMarkup(disclosure.subjectSha256)}</p></section>`;
+}
+
+export function disclosureSpecificationMarkdown(input: PublicAssetInput): string {
+  const disclosure = input.claim.disclosure;
+  if (disclosure === undefined) return "";
+  const rows = DISCLOSURE_VARIABLE_KEYS.map((key) => {
+    const entry = disclosure.variables[key];
+    const detail = entry.status === "undisclosed"
+      ? `\n  - ${escapeMarkdown(entry.reason)}`
+      : `\n  - ${escapeMarkdown(entry.statement)}`;
+    const sources = entry.status === "disclosed-by-publisher" && entry.sources !== undefined
+      ? entry.sources.map((source) => `\n  - source: ${escapeMarkdown(source.uri)}`).join("")
+      : "";
+    const evidence = entry.status === "measured-here"
+      ? entry.evidence.map((citation) => `\n  - ${escapeMarkdown(citation.role)}: ${escapeMarkdown(citation.digest.sha256)}`).join("")
+      : "";
+    return `- ${escapeMarkdown(key)}: ${escapeMarkdown(entry.status)}${detail}${sources}${evidence}`;
+  }).join("\n");
+  return `## Six-variable disclosure\n\n${rows}\n\n- ${escapeMarkdown(disclosure.specification)}\n- record: ${escapeMarkdown(disclosure.recordSha256)}\n- subject: ${escapeMarkdown(disclosure.subjectSha256)}\n\n`;
+}
+
 export function binaryAdmissionHtml(input: PublicAssetInput): string {
   const admission = input.binaryQualification;
   if (admission === undefined) return "";
@@ -756,7 +807,7 @@ ${neutralClaimHtml(reportFacts)}
 </header>
 <main>
 <section class="adverse" aria-labelledby="adverse-heading"><h2 id="adverse-heading">Prominent adverse facts</h2>${list(adverse, "No adverse facts stated.")}</section>${input.comparison === undefined ? "" : `\n${comparisonSectionHtml(input.comparison)}`}
-<section aria-labelledby="scope-heading"><h2 id="scope-heading">Benchmark and configuration scope</h2><dl class="facts"><div><dt>Benchmark digest</dt><dd class="digest">${input.claim.scope.benchmarkSha256}</dd></div><div><dt>Tasks</dt><dd>${input.claim.scope.taskCount}</dd></div><div><dt>Replicates</dt><dd>${input.claim.scope.replicates}</dd></div><div><dt>Venue</dt><dd>${escapeMarkup(input.claim.scope.venue)}</dd></div></dl><h3>Arms and pinned configuration</h3><ul>${arms}</ul></section>${reportFacts.kind === "binary" ? binaryAdmissionHtml(input) : ""}
+<section aria-labelledby="scope-heading"><h2 id="scope-heading">Benchmark and configuration scope</h2><dl class="facts"><div><dt>Benchmark digest</dt><dd class="digest">${input.claim.scope.benchmarkSha256}</dd></div><div><dt>Tasks</dt><dd>${input.claim.scope.taskCount}</dd></div><div><dt>Replicates</dt><dd>${input.claim.scope.replicates}</dd></div><div><dt>Venue</dt><dd>${escapeMarkup(input.claim.scope.venue)}</dd></div></dl><h3>Arms and pinned configuration</h3><ul>${arms}</ul></section>${reportFacts.kind === "binary" ? binaryAdmissionHtml(input) : ""}${disclosureSpecificationHtml(input)}
 <section aria-labelledby="matrix-heading"><h2 id="matrix-heading">Sealed Matrix accounting</h2><p class="source-label">Source: authenticated <a href="matrix.json">matrix.json</a>; values below are copied without reconciliation.</p><pre>${escapeMarkup(canonicalText({ completeness: input.matrix.completeness, attrition: input.matrix.attrition }))}</pre><h3>Completeness and attrition</h3><dl class="facts"><div><dt>Matrix run outcome</dt><dd>${escapeMarkup(outcome)}</dd></div><div><dt>Matrix expected</dt><dd>${input.matrix.completeness.expected}</dd></div><div><dt>Matrix judged</dt><dd>${input.matrix.completeness.judged}</dd></div><div><dt>Matrix floor</dt><dd>${escapeMarkup(input.matrix.completeness.floor)}</dd></div></dl><div class="table-scroll" tabindex="0" role="region" aria-label="Per-arm Matrix attrition"><table><caption>Exact per-arm attrition stored in the Matrix</caption><thead><tr><th scope="col">Arm</th><th scope="col">Expected</th><th scope="col">Judged</th><th scope="col">Unjudged</th><th scope="col">Unscorable</th><th scope="col">Expired</th><th scope="col">Invalidated</th><th scope="col">Excluded</th><th scope="col">Replacements</th></tr></thead><tbody>${attritionRows(input)}</tbody></table></div><h3>Matrix asymmetry flags</h3>${list(input.matrix.attrition.asymmetryFlags, "None recorded in the Matrix.")}</section>
 <section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>; values below are copied without reconciliation.</p><h3>${factsHeading(reportFacts, "report")}</h3>${armResultsHtml(reportFacts, "Exact wilson@1 values from the sealed Report")}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
 <section aria-labelledby="claim-heading"><h2 id="claim-heading">Stored Claim facts</h2><p class="source-label">Source: authenticated <a href="claim-package.json">claim-package.json</a>; values below are copied without reconciliation.</p><h3>${factsHeading(claimFacts, "claim")}</h3>${armResultsHtml(claimFacts, "Exact arm values stored in the Claim package")}<h3>Claim method and preregistration</h3><dl class="facts"><div><dt>Claim method</dt><dd>${escapeMarkup(input.claim.method.id)} @ ${escapeMarkup(input.claim.method.version)}</dd></div><div><dt>Claim preregistered</dt><dd>${input.claim.method.preregistered ? "Yes" : "No"}</dd></div><div><dt>Assurance preset</dt><dd>${escapeMarkup(input.claim.assurance.preset)}</dd></div></dl><h3>Claim parameters</h3><pre>${escapeMarkup(canonicalText(input.claim.method.parameters))}</pre><h3>Claim completeness</h3><pre>${escapeMarkup(canonicalText(input.claim.completeness))}</pre><h3>Claim attrition</h3><pre>${escapeMarkup(canonicalText(input.claim.attrition))}</pre><h3>Claim conflicts</h3><pre>${escapeMarkup(canonicalText(input.claim.conflicted))}</pre><h3>Claim disclosures</h3><h4>Unverifiable axes, integrity tiers, and per-subject disclosures</h4><pre>${escapeMarkup(canonicalText(input.claim.disclosures))}</pre><h3>Resolved assurance primitives</h3><pre>${escapeMarkup(canonicalText(input.claim.assurance.resolved))}</pre><p>${escapeMarkup(input.claim.assurance.disclosure)}</p><h3>Rehearsal disclosure</h3>${rehearsalHtml}</section>
@@ -970,7 +1021,7 @@ ${adverse.map((value) => `- ${escapeMarkdown(value)}`).join("\n")}
 
 ## Configurations
 
-${arms}${reportFacts.kind === "binary" ? `\n\n${binaryAdmissionMarkdown(input).trimEnd()}` : ""}
+${arms}${reportFacts.kind === "binary" ? `\n\n${binaryAdmissionMarkdown(input).trimEnd()}` : ""}${input.claim.disclosure === undefined ? "" : `\n\n${disclosureSpecificationMarkdown(input).trimEnd()}`}
 
 ## Sealed Matrix accounting
 

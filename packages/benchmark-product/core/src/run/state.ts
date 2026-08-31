@@ -182,6 +182,8 @@ export const AdditionalBundleIdentitySchema = z.object({
     "report-verification",
     "claim-consistency",
     "integrity-anchors",
+    /** Recorded only by a disclosed publication (issue #2839). Additive in the same way. */
+    "disclosure-specification",
   ])),
 });
 
@@ -240,6 +242,8 @@ export const RunStateSchema = z.object({
     /** Recorded only by an anchored publication (anchor-evidence design §8). Additive: a receipt
      * written before this closure existed keeps exactly the six names it already had. */
     "integrity-anchors",
+    /** Recorded only by a disclosed publication (issue #2839). Additive in the same way. */
+    "disclosure-specification",
   ])).optional(),
   /** N-1 additional public bundle identities, one per additional Report, set at `publish` in the
    * SAME invocation as the canonical `bundleIdentity`/`bundleRelativePath`/`bundleChecks` triple
@@ -251,6 +255,16 @@ export const RunStateSchema = z.object({
   anchors: z.array(RunAnchorSchema).optional(),
   /** Absent on every run that has never bound to public randomness (issue #2976). */
   binding: RunBindingRefSchema.optional(),
+  /**
+   * sha256 hex of the sealed disclosure-specification record, set by `disclosure declare` (issue
+   * #2839). Absent on every run with no declaration, which is what keeps every existing claim and
+   * bundle byte-identical.
+   *
+   * The DIGEST only, exactly as `anchors` records anchor digests and nothing about their status:
+   * every fact about the declaration is read back from the record's own sealed bytes, never from
+   * here (design R5).
+   */
+  disclosureSha256: Sha256HexSchema.optional(),
   suiteQuote: z.object({
     protocol: z.enum(SUITE_PROTOCOL_IDS).optional(),
     executionConformance: z.boolean(),

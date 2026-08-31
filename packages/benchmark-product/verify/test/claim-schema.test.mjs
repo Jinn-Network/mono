@@ -303,3 +303,150 @@ test("claim-package/5 must pin verifier 0.2.1/@0.2 and the seven checks in order
 test("claim-package/4 still refuses a qualification projection — that closure is /5", () => {
   assert.equal(ClaimPackageSchema.safeParse(validAnchoredClaim({ qualification: {} })).success, false);
 });
+
+// --- issue #2839: the disclosed anchored binary-qualification allocation, claim-package/6 ---
+
+const V8_CHECKS = [...V6_CHECKS, "disclosure-specification"];
+
+/** Synthetic placeholder prose throughout (design R7): no third-party bytes appear here. */
+function disclosureSection(overrides = {}) {
+  return {
+    recordSha256: "7".repeat(64),
+    specification: "https://spec.jinn.network/disclosure/six-variable/v1",
+    subjectSha256: "8".repeat(64),
+    variables: {
+      "ingestion-model": { status: "undisclosed", reason: "not-stated" },
+      "retrieval-config": { status: "undisclosed", reason: "not-stated" },
+      "answer-model": {
+        status: "disclosed-by-publisher",
+        statement: "Fixed and stated by the upstream collection; this venue executed none of it.",
+      },
+      "answer-prompt": {
+        status: "disclosed-by-publisher",
+        statement: "Described in the source collection and not re-executed here.",
+      },
+      "judge-model": {
+        status: "measured-here",
+        statement: "One dated model snapshot, fixed for every arm.",
+        evidence: [{ role: "pinned-configuration", digest: { sha256: "6".repeat(64) } }],
+      },
+      "judge-prompt": {
+        status: "measured-here",
+        statement: "Sealed grading instruments, each with its own frozen template digest.",
+        evidence: [{ role: "pinned-configuration", digest: { sha256: "5".repeat(64) } }],
+      },
+    },
+    ...overrides,
+  };
+}
+
+function validDisclosedClaim(overrides = {}) {
+  const base = validBinaryClaim();
+  return {
+    ...base,
+    claimSchema: "benchmark-product.claim-package/6",
+    verification: { ...base.verification, command: V7_COMMAND, compatibleCommand: V7_COMPATIBLE, checks: V8_CHECKS },
+    anchors: [anchorEntry()],
+    disclosure: disclosureSection(),
+    ...overrides,
+  };
+}
+
+test("claim-package/6 admits the qualification, the anchors section, and the disclosure together", () => {
+  const parsed = ClaimPackageSchema.parse(validDisclosedClaim());
+  assert.equal(parsed.claimSchema, "benchmark-product.claim-package/6");
+  assert.deepEqual(parsed.disclosure, disclosureSection());
+  assert.deepEqual(parsed.qualification, validBinaryClaim().qualification);
+  assert.deepEqual(parsed.anchors, [anchorEntry()]);
+});
+
+test("claim-package/6 refuses an omitted disclosure section — there is no legal empty form", () => {
+  const { disclosure: _omitted, ...withoutSection } = validDisclosedClaim();
+  assert.equal(ClaimPackageSchema.safeParse(withoutSection).success, false);
+  assert.equal(ClaimPackageSchema.safeParse(validDisclosedClaim({ disclosure: {} })).success, false);
+});
+
+test("no earlier allocation carries a disclosure section", () => {
+  for (const claimSchema of ["benchmark-product.claim-package/2", "benchmark-product.claim-package/5"]) {
+    assert.equal(
+      ClaimPackageSchema.safeParse(validDisclosedClaim({ claimSchema })).success,
+      false,
+      `${claimSchema} must refuse a disclosure section`,
+    );
+  }
+  assert.equal(
+    ClaimPackageSchema.safeParse(validAnchoredClaim({ disclosure: disclosureSection() })).success,
+    false,
+  );
+});
+
+test("claim-package/6 must state the eight checks with disclosure-specification last", () => {
+  assert.equal(
+    ClaimPackageSchema.safeParse(validDisclosedClaim({
+      verification: { command: V7_COMMAND, compatibleCommand: V7_COMPATIBLE, checks: V6_CHECKS, trustRoot: "self-run" },
+    })).success,
+    false,
+  );
+  assert.equal(
+    ClaimPackageSchema.safeParse(validDisclosedClaim({
+      verification: {
+        command: V7_COMMAND, compatibleCommand: V7_COMPATIBLE,
+        checks: ["disclosure-specification", ...V6_CHECKS], trustRoot: "self-run",
+      },
+    })).success,
+    false,
+  );
+  assert.equal(
+    ClaimPackageSchema.safeParse(validDisclosedClaim({
+      verification: { command: V6_COMMAND, compatibleCommand: V6_COMPATIBLE, checks: V8_CHECKS, trustRoot: "self-run" },
+    })).success,
+    false,
+  );
+});
+
+test("claim-package/6 inherits /5's refusals: anchors, conclusions, and the qualification projection", () => {
+  const { anchors: _dropped, ...withoutAnchors } = validDisclosedClaim();
+  assert.equal(ClaimPackageSchema.safeParse(withoutAnchors).success, false);
+
+  const { qualification: _noQualification, ...withoutQualification } = validDisclosedClaim();
+  assert.equal(ClaimPackageSchema.safeParse(withoutQualification).success, false);
+
+  assert.equal(ClaimPackageSchema.safeParse(validDisclosedClaim({ headline: {} })).success, false);
+
+  const ranked = structuredClone(validDisclosedClaim());
+  ranked.qualification.ranking = ["arm-a"];
+  ranked.results.perSubject[0].results.ranking = ["arm-a"];
+  assert.equal(ClaimPackageSchema.safeParse(ranked).success, false);
+
+  const topLevel = structuredClone(validDisclosedClaim());
+  topLevel.ranking = ["arm-a"];
+  assert.equal(ClaimPackageSchema.safeParse(topLevel).success, false);
+});
+
+test("the disclosure section is strict: the six keys, the standard literal, and the record's own union", () => {
+  assert.equal(
+    ClaimPackageSchema.safeParse(validDisclosedClaim({
+      disclosure: disclosureSection({ specification: "https://example.invalid/other" }),
+    })).success,
+    false,
+  );
+
+  const seventh = disclosureSection();
+  seventh.variables["judge-input-shape"] = { status: "undisclosed", reason: "not-stated" };
+  assert.equal(ClaimPackageSchema.safeParse(validDisclosedClaim({ disclosure: seventh })).success, false);
+
+  const assertedWithEvidence = disclosureSection();
+  assertedWithEvidence.variables["answer-model"] = {
+    status: "disclosed-by-publisher",
+    statement: "An assertion that tries to carry a digest.",
+    evidence: [{ role: "pinned-configuration", digest: { sha256: "4".repeat(64) } }],
+  };
+  assert.equal(
+    ClaimPackageSchema.safeParse(validDisclosedClaim({ disclosure: assertedWithEvidence })).success,
+    false,
+  );
+
+  const extraKey = disclosureSection();
+  extraKey.completenessScore = 2;
+  assert.equal(ClaimPackageSchema.safeParse(validDisclosedClaim({ disclosure: extraKey })).success, false);
+});

@@ -36,6 +36,7 @@ import {
   ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ClaimPackageSchema,
+  DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
 } from "../report/claim.js";
 import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../human-review/verification-workspace.js";
 import type { AdmissionAuthorityRole, BinaryJudgmentAdmissionRecordRole } from "../human-review/verification.js";
@@ -55,8 +56,16 @@ import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/sig
 import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import {
+  BUNDLE_V4_FORMAT,
+  BUNDLE_V6_FORMAT,
+  BUNDLE_V7_FORMAT,
+  BUNDLE_V8_FORMAT,
+  buildBundleManifest,
+  verifyBundleManifest,
+} from "./manifest.js";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
+import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildPublicAssets } from "./assets.js";
 import {
   BUNDLE_ASSEMBLY_FORMAT,
@@ -271,7 +280,8 @@ function recordClosure(input: MaterializeBundleInput): {
     | "benchmark-product-public-bundle/2"
     | typeof BUNDLE_V4_FORMAT
     | typeof BUNDLE_V6_FORMAT
-    | typeof BUNDLE_V7_FORMAT;
+    | typeof BUNDLE_V7_FORMAT
+    | typeof BUNDLE_V8_FORMAT;
 } {
   const { workspaceDir, draftId, benchmarkSha256, runState, reportSelector } = input;
   if (
@@ -342,7 +352,11 @@ function recordClosure(input: MaterializeBundleInput): {
   // claim-package/5 is /2 plus the anchors section (issue #3205). Whether the run is ALSO anchored
   // is read below from the run's own recorded anchors, never from the claim's schema id.
   const binaryQualification = claim.claimSchema === BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID
-    || claim.claimSchema === ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID;
+    || claim.claimSchema === ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID
+    // claim-package/6 is /5 plus a disclosure section (issue #2839): same projection, same
+    // `qualification.json`. Whether the run is also disclosed is read below from the run's own
+    // sealed declaration, never from the claim's schema id.
+    || claim.claimSchema === DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID;
   if (binaryQualification !== (report.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument)) {
     refuse("record-integrity", "claim-package.json", "claim schema and sealed Report method disagree on binary qualification");
   }
@@ -393,6 +407,42 @@ function recordClosure(input: MaterializeBundleInput): {
     );
   }
 
+  // ── The disclosed closure (disclosure-specification-record design §6.6, issue #2839) ────────
+  //
+  // The sealed record's own bytes travel as an ordinary `records/<sha256>.bin` member, driven by the
+  // evidence catalog like every other record. Its claim section is compared for PRESENCE as well as
+  // contents, for the same reason the anchors section is: an undisclosed claim inside a disclosed
+  // closure is exactly as wrong as a disclosed claim whose section drifted.
+  const disclosureCarriage = readRunDisclosureCarriage(workspaceDir, runState);
+  const disclosed = disclosureCarriage !== undefined;
+  if (disclosed && !(anchored && binaryQualification)) {
+    // The one enumerated cell this closure occupies. Refusing loudly here rather than inventing a
+    // second disclosed allocation is deliberate: every extra cell doubles the enumeration that the
+    // capability-composition design (issue #2889) exists to replace, and the flagship case is
+    // anchored and qualification-projecting.
+    refuse(
+      "conflict",
+      "disclosure",
+      `${BUNDLE_V8_FORMAT} is the anchored binary-qualification closure plus a disclosure record, and`
+      + " no other closure version expresses a disclosure declaration; this run carries a declaration"
+      + (anchored ? "" : " but no anchor")
+      + (binaryQualification ? "" : " but no binary-qualification projection"),
+    );
+  }
+  const storedDisclosure = (claim as { readonly disclosure?: unknown }).disclosure;
+  const expectedDisclosure = disclosureCarriage?.disclosure;
+  if (!Buffer.from(canonicalJsonBytes({ disclosure: storedDisclosure ?? null } as never)).equals(
+    Buffer.from(canonicalJsonBytes({ disclosure: expectedDisclosure ?? null } as never)),
+  )) {
+    refuse(
+      "record-integrity",
+      "claim-package.json",
+      "the sealed claim's disclosure section is not the projection of the record this run declares"
+      + " — a declaration made or replaced after the run was reported is recorded, but this claim"
+      + " predates it and cannot be republished as though it did not",
+    );
+  }
+
   const files = new Map<string, Uint8Array>([
     ["benchmark.json", benchmarkBytes],
     ["run.json", runBytes],
@@ -407,6 +457,12 @@ function recordClosure(input: MaterializeBundleInput): {
   }
 
   const evidenceRecords = new Map<string, Set<BundleV4EvidenceRole>>();
+  // The one graph edge the disclosed closure adds. It is derived from the run's own sealed
+  // declaration, and the verifier derives the same edge from the Report extension that names it, so
+  // the record is reachable in the evidence closure from exactly one place on exactly one closure.
+  if (disclosureCarriage !== undefined) {
+    addRole(evidenceRecords, disclosureCarriage.recordSha256, "disclosure-specification");
+  }
   const admissionReviewerBindings = new Map<string, string>();
   const admissionAuthorityBindings = new Map<"roster-attestor" | "truth-reveal-attestor" | "operator-truth-attestor", string>();
   let binaryAssetQualification: {
@@ -1061,12 +1117,15 @@ function recordClosure(input: MaterializeBundleInput): {
   return {
     files,
     evidenceRecords,
-    // Two independent axes: carrying an anchor moves a bundle onto an anchored closure, and
-    // projecting a binary qualification moves it onto a qualification closure. Everything else
-    // emits exactly the version it emitted before either feature existed, byte for byte (§12).
+    // Three independent axes: carrying an anchor moves a bundle onto an anchored closure,
+    // projecting a binary qualification moves it onto a qualification closure, and declaring a
+    // disclosure record moves it onto the disclosed one. Everything else emits exactly the version
+    // it emitted before any of these features existed, byte for byte.
     format: anchored
       ? binaryQualification
-        ? BUNDLE_V7_FORMAT
+        ? disclosed
+          ? BUNDLE_V8_FORMAT
+          : BUNDLE_V7_FORMAT
         : BUNDLE_V6_FORMAT
       : binaryQualification
         ? BUNDLE_V4_FORMAT

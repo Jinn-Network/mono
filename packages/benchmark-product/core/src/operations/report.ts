@@ -62,6 +62,11 @@ import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
+import {
+  DISCLOSURE_SPECIFICATION_EXTENSION,
+  DISCLOSURE_SPECIFICATION_MEDIA_TYPE,
+} from "@jinn-network/benchmarking-records";
+import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
 import {
@@ -311,6 +316,11 @@ export function runReport(
       // method-independent, so every entry's claim package shares it.
       const carriage = readRunAnchorCarriage(clockedContext.workspaceDir, runState);
       const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells, runRecord, carriage.anchors);
+      // issue #2839: the sealed disclosure declaration, if this run has one. Read once for the same
+      // reason the anchors are -- it is method-independent, so every entry's Report carries the same
+      // extension and every entry's claim the same section. Absent for every run that never
+      // declared, which is what keeps existing Reports and claims byte-identical.
+      const disclosureCarriage = readRunDisclosureCarriage(clockedContext.workspaceDir, runState);
 
       interface SealedReportEntry {
         readonly method: string;
@@ -377,6 +387,18 @@ export function runReport(
               verdictRule,
               limitations,
               author: runState.owner,
+              // The extension's digest has to be INSIDE the signed payload for the report author's
+              // signature to cover the record (design §6.3), so it is supplied here, before sealing,
+              // rather than added to a sealed document afterwards.
+              ...(disclosureCarriage === undefined ? {} : {
+                recordExtensions: {
+                  [DISCLOSURE_SPECIFICATION_EXTENSION]: {
+                    name: "disclosure-specification",
+                    mediaType: DISCLOSURE_SPECIFICATION_MEDIA_TYPE,
+                    digest: { sha256: disclosureCarriage.recordSha256 },
+                  },
+                },
+              }),
             },
             signer,
           );
@@ -421,6 +443,7 @@ export function runReport(
             },
           },
           ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
+          ...(disclosureCarriage === undefined ? {} : { disclosure: disclosureCarriage.disclosure }),
           ...(previewLog !== undefined && previewLog.count > 0
             ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }
             : {}),

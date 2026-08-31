@@ -47,6 +47,32 @@ export const BENCHMARK_PUBLICATION_EXTENSION =
 export const ANCHOR_INTENT_EXTENSION =
   "https://spec.jinn.network/extensions/anchor-intent/v1";
 
+/**
+ * The disclosure-specification record (design `2026-08-19-disclosure-specification-record.md` §4.1,
+ * issue #2839): one sealed record naming exactly one subject and exactly six variables, each
+ * carrying exactly one of three statuses. The record-kind URI follows the record-discovery grammar
+ * `${RECORDS_ROOT}/<segment>/<major>`, spelled `v1` the way every shipped sibling above spells it.
+ */
+export const DISCLOSURE_SPECIFICATION_RECORD_KIND =
+  "https://spec.jinn.network/records/disclosure-specification/v1";
+export const DISCLOSURE_SPECIFICATION_MEDIA_TYPE =
+  "application/vnd.jinn.disclosure-specification.v1+json";
+/**
+ * `specification` is a SEPARATE identifier from `kind` on purpose (design §4.1): `kind` names this
+ * record SHAPE, `specification` names the standard the record claims compliance with. A later
+ * standard revision that keeps the shape bumps only the second, and a reader can tell the two apart
+ * without a changelog.
+ */
+export const SIX_VARIABLE_DISCLOSURE_SPECIFICATION =
+  "https://spec.jinn.network/disclosure/six-variable/v1";
+/**
+ * The Report extension key that pulls the sealed record's digest under the report author's existing
+ * DSSE signature (design §6.3). The record carries no envelope of its own: attribution comes from
+ * the carrier, and a second signature over the same claim by the same key would add no fact.
+ */
+export const DISCLOSURE_SPECIFICATION_EXTENSION =
+  "https://spec.jinn.network/extensions/disclosure-specification/v1";
+
 export const ASSEMBLY_PROCEDURE = "jinn.benchmarking.assembly";
 export const ASSEMBLY_PROCEDURE_VERSION = "1.0";
 export const MATRIX_ASSEMBLY_PROCEDURE = ASSEMBLY_PROCEDURE;
