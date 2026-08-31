@@ -15,8 +15,10 @@ import { OFFER_RECORD_KIND } from "./identifiers.js";
  * projection. An offer's identity is the digest of its DSSE envelope, so the announced
  * bytes are the envelope; `parseOfferEnvelope` is the strict parser that requires the exact
  * producer encoding and the exact canonical payload inside it, which is what makes the card
- * checkable at all. A card attached to re-serialized bytes recomputes to nothing and reads
- * as inconsistent.
+ * checkable at all. A card attached to re-serialized bytes recomputes to nothing, and every
+ * field it announces then compares against `undefined` — which discovery grades
+ * `indeterminate`, not `inconsistent`. That distinction matters to a consumer: a pipeline
+ * that drops only `inconsistent` keeps a card whose bytes it could not parse at all.
  *
  * Every field is native — read out of this record's own bytes, with no retrieval of any
  * referenced record. `subject` is declared *reference-bearing* in the profile so discovery's

@@ -27,6 +27,15 @@ function loadProfile(filename: string): FactsProfileDocument {
  * through discovery's `referrers` relation answers "which offers price `sha256:X`" without
  * fetching an offer.
  *
+ * It lifts into the CloudEvents attribute `offersubject`, NOT `subject`. CloudEvents 1.0
+ * reserves `subject` as a core context attribute, and discovery already fills it with the
+ * announced record's own digest; `toAnnouncementEvent` spreads the lifted extensions after
+ * the core attributes, so a field lifted as `subject` would silently overwrite the record
+ * pointer every consumer filters and resolves on. `parseFactsProfile` enforces only the
+ * CloudEvents *naming* rule and would not catch it. The two digests answer different
+ * questions — which record this announcement is about, and which content that record prices
+ * — and they must not share a slot.
+ *
  * `supersedes` is the kind's only other outbound reference, and the completeness rule
  * (design §12, amendment 2026-08-28) is a MUST on a new profile: a card must declare its
  * kind's whole outbound set, so an index can invert every edge the record pins. It carries

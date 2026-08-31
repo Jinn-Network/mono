@@ -2,6 +2,7 @@ import {
   assertRecordKindUri,
   cloudEventsFields,
   referenceBearingFields,
+  toAnnouncementEvent,
 } from "@jinn-network/record-discovery-protocol";
 import { describe, expect, it } from "vitest";
 
@@ -48,8 +49,41 @@ describe("offer facts profile (design §12)", () => {
     expect(
       cloudEventsFields(offerFactsProfile).map((field) => [field.name, field.cloudEvents?.attribute]),
     ).toEqual([
-      ["subject", "subject"],
+      ["subject", "offersubject"],
       ["priced", "priced"],
     ]);
+  });
+
+  // `toAnnouncementEvent` spreads lifted extensions AFTER the core attributes, so a field
+  // lifted under a reserved name overwrites it. `parseFactsProfile` checks only the naming
+  // grammar, so nothing else in the tree catches this.
+  it("lifts nothing under a CloudEvents core context attribute name", () => {
+    const reserved = new Set([
+      "id", "source", "specversion", "type", "datacontenttype", "dataschema", "subject", "time",
+    ]);
+    for (const field of cloudEventsFields(offerFactsProfile)) {
+      expect(
+        reserved.has(field.cloudEvents!.attribute),
+        `${field.name} may not lift into the reserved attribute ${field.cloudEvents!.attribute}`,
+      ).toBe(false);
+    }
+  });
+
+  it("keeps the announced record's digest as the event subject", () => {
+    const digest = `sha256:${"d".repeat(64)}` as const;
+    const event = toAnnouncementEvent(
+      {
+        record: { kind: OFFER_RECORD_KIND, digest },
+        facts: { subject: `sha256:${"a".repeat(64)}`, priced: true },
+        provenance: {
+          source: { agent: "did:key:zOfferProfileTest", name: "offers" },
+          entry: `sha256:${"e".repeat(64)}`,
+          announcementId: "ann-1",
+        },
+      },
+      offerFactsProfile,
+    );
+    expect(event.subject).toBe(digest);
+    expect((event as Record<string, unknown>)["offersubject"]).toBe(`sha256:${"a".repeat(64)}`);
   });
 });

@@ -189,7 +189,11 @@ const FACTS_CHAIN_ENVIRONMENTS_FORBIDDEN_PACKAGES = [
 // record kind (discovery design §12): protocol + evidence-offer are allowed; no serve/client,
 // no other facts/* leaf, no TEP, no environments, no benchmarking, and no evidence-protocol
 // tree either -- an offer prices any digest-addressed content and knows nothing about the
-// Evidence Protocol's record families.
+// Evidence Protocol's record families. trust-core is forbidden in SOURCE even though it is a
+// declared devDependency: that entry exists only so yarn's per-project resolution can satisfy
+// protocol's and evidence-offer's transitive dependency on it, and this leaf's own source
+// never imports it. Without the line here, a production import would pass both this guard and
+// the inventory guard.
 const FACTS_OFFERS_FORBIDDEN_PACKAGES = [
   '@jinn-network/record-discovery-serve', '@jinn-network/record-discovery-client',
   '@jinn-network/record-discovery-facts-evidence', '@jinn-network/record-discovery-facts-trust',

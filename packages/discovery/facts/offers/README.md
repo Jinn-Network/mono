@@ -64,11 +64,21 @@ mismatch.
 
 ## Withdrawal and supersession
 
-Neither is a card field, and neither should become one. An offer stops applying when its
+Liveness is not a card field and should not become one. An offer stops applying when its
 holder delists or supersedes it, and both are ordinary `withdrawn` announcements carrying
 the existing `"delisted"` / `"superseded"` reason codes. `liveOfferCards` takes the
-withdrawn set an index derived from the feeds it follows; a card never claims to be live
+withdrawn set an index derived from the feeds it follows, keyed on each announcement's own
+`record.digest` rather than on the digest its card claims; a card never claims to be live
 about itself.
+
+The card does carry the `supersedes` edge, and an index that resolves supersession from
+cards must apply the same rule the record layer's `resolveLiveOffers` applies: **a
+supersession retires a predecessor only when the successor shares the predecessor's subject
+AND its holder.** A card-only index that retires whatever a `supersedes` edge names lets a
+hostile announcer delist a competitor's offer from the catalog. Note also that a fabricated
+edge grades `indeterminate` rather than `inconsistent`, because `supersedes` is optional and
+an absent one recomputes to `undefined` — verification catches a *misstated* required field,
+not a fabricated optional one.
 
 ## Ordering is per rail
 

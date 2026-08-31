@@ -98,7 +98,7 @@ describe("offer record-fact recompute", () => {
     expect(await offerRecompute(new TextEncoder().encode("{}"), noReferencedBytes)).toEqual({});
   });
 
-  it("recomputes nothing from a re-serialized envelope, so a card on it reads inconsistent", async () => {
+  it("recomputes nothing from a re-serialized envelope, so any card on it grades indeterminate", async () => {
     const sealed = await sealOffer({ offer: priced, signer });
     const reserialized = new TextEncoder().encode(
       JSON.stringify(JSON.parse(new TextDecoder().decode(sealed.envelopeBytes)), null, 2),

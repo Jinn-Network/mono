@@ -94,6 +94,53 @@ describe("reading an offer card off an announced item", () => {
     })).toBeUndefined();
   });
 
+  it("misses a card whose digest is not the announcement's own", async () => {
+    const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
+    const card = item.facts as Record<string, unknown>;
+    expect(readOfferCard({
+      ...item,
+      facts: { ...card, offerRecordDigest: `sha256:${"f".repeat(64)}` },
+    })).toBeUndefined();
+  });
+
+  it("misses a card repeating or unsorting its rails, which would otherwise misprice it", async () => {
+    const item = await announce({
+      subject: SUBJECT,
+      rails: [{ rail: OLAS, amount: "9000000" }, { rail: USDC, amount: "9000000" }],
+    });
+    const card = item.facts as Record<string, unknown>;
+    // One rail at two prices: `amountOnRail` would rank the offer at whichever it met first.
+    expect(readOfferCard({
+      ...item,
+      facts: { ...card, "rails.rail": [USDC, USDC], "rails.amount": ["1", "9000000"] },
+    })).toBeUndefined();
+    expect(readOfferCard({
+      ...item,
+      facts: { ...card, "rails.rail": [USDC, OLAS] },
+    })).toBeUndefined();
+  });
+
+  it("misses a card whose digests are not digests, or whose rail renders as another", async () => {
+    const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
+    const card = item.facts as Record<string, unknown>;
+    for (const broken of [
+      { ...card, subject: "FREE — Ubuntu 24.04 base image" },
+      { ...card, subject: "SHA256:" + "A".repeat(64) },
+      { ...card, "rails.rail": [`https://rails.example/\u202egnitekcar`] },
+      { ...card, "rails.rail": ["https://rails.example/a\u0000b"] },
+      { ...card, "rails.rail": [""] },
+    ]) {
+      expect(readOfferCard({ ...item, facts: broken })).toBeUndefined();
+    }
+  });
+
+  it("misses rather than throws on an item with no record reference", async () => {
+    const item = await announce({ subject: SUBJECT, rails: [] });
+    const { record: _record, ...rest } = item;
+    expect(() => readOfferCard(rest as unknown as AnnouncedItem)).not.toThrow();
+    expect(readOfferCard(rest as unknown as AnnouncedItem)).toBeUndefined();
+  });
+
   it("misses rather than throws on a card an index cannot read", async () => {
     const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "1500000" }] });
     const card = item.facts as Record<string, unknown>;
@@ -123,6 +170,26 @@ describe("offers for one subject", () => {
 });
 
 describe("liveness comes from the chain, never from the card", () => {
+  it("cannot be evaded by a card that misstates its own digest", async () => {
+    // Delist sha256:A, then re-announce A under a card claiming to be some other offer. Keying
+    // liveness on the card's own digest would let the withdrawn offer back into the catalog.
+    const delisted = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "1" }] });
+    const impostor: AnnouncedItem = {
+      ...delisted,
+      facts: {
+        ...(delisted.facts as Record<string, unknown>),
+        offerRecordDigest: `sha256:${"f".repeat(64)}`,
+      },
+    };
+    expect(
+      listOffersForSubject([impostor], {
+        subject: SUBJECT,
+        rail: USDC,
+        withdrawnOfferDigests: new Set([digest(delisted)]),
+      }),
+    ).toEqual([]);
+  });
+
   it("drops offers the holder delisted or superseded", async () => {
     const kept = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
     const delisted = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "1" }] });
@@ -183,6 +250,14 @@ describe("cheapest first, within one rail", () => {
       .toEqual([digest(skewed), digest(flat)]);
     expect(cheapestFirstOnRail(offerCards([skewed, flat]), USDC).map(digestOfCard))
       .toEqual([digest(flat), digest(skewed)]);
+  });
+
+  it("drops rather than throws on a hand-built card whose amount is not an exact integer", async () => {
+    const good = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
+    const [card] = offerCards([good]);
+    const handBuilt = { ...card!, rails: [{ rail: USDC, amount: "abc" }] };
+    expect(() => cheapestFirstOnRail([handBuilt], USDC)).not.toThrow();
+    expect(cheapestFirstOnRail([handBuilt], USDC)).toEqual([]);
   });
 
   it("breaks ties on the offer digest so one input set has one output order", async () => {

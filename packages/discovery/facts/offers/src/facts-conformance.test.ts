@@ -190,6 +190,46 @@ describe("facts/offers leaf conformance via verifyItem", () => {
     ).toEqual({ status: "verified", facts: "inconsistent" });
   });
 
+  // Not `inconsistent`: an unparseable record recomputes to nothing, and an announced field
+  // compared against `undefined` is the unavailable-bytes signal. A pipeline that drops only
+  // `inconsistent` would keep this card, which is why the distinction is pinned here.
+  it("indeterminate: a card attached to bytes that are not a sealed offer", async () => {
+    // Bytes that hash to the digest they are announced under -- so the item is not corrupt --
+    // but that no strict offer parser accepts.
+    const bytes = new TextEncoder().encode("not a sealed offer");
+    const digest = recordDigest(bytes);
+    const entry: AnnouncementEntry = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      source: SOURCE,
+      sequence: GENESIS_SEQUENCE,
+      previous: null,
+      timestamp: "2026-08-31T12:00:00Z",
+      announcements: [
+        { announcementId: "ann-offer", action: "available", record: { kind: OFFER_RECORD_KIND, digest } },
+      ],
+    };
+    const entryDigest = digestOf(entry);
+    const kitPorts = makeInMemoryPorts({ entries: { [entryDigest]: entry } });
+    const outcome = await verifyItem({
+      item: {
+        record: { kind: OFFER_RECORD_KIND, digest },
+        facts: { subject: SUBJECT, priced: false, "rails.rail": [], "rails.amount": [] },
+        provenance: { source: SOURCE, entry: entryDigest, announcementId: "ann-offer" },
+      },
+      profile: offerFactsProfile,
+      decisionGrade: false,
+      ports: {
+        records: { async "fetch"() { return bytes; } },
+        entries: kitPorts.entries,
+        keys: kitPorts.keys,
+        sigs: kitPorts.sigs,
+        factsRecompute: OFFERS_FACTS_RECOMPUTE,
+        verifiedChain: async () => true,
+      },
+    });
+    expect(outcome).toEqual({ status: "verified", facts: "indeterminate" });
+  });
+
   it("consistent: a partial card is checked only on what it announces", async () => {
     const { offerRecordDigest, subject } = await truthfulCard();
     expect(await verify({ offerRecordDigest, subject }))
