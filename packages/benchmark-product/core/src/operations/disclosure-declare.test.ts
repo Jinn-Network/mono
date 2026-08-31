@@ -7,7 +7,7 @@
  * Every declaration string is synthetic placeholder prose written for this file (design R7).
  */
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -19,8 +19,11 @@ import {
   syntheticDisclosureDeclaration,
 } from "../bundle/testing/v4-synthetic-fixture.js";
 import { readRunState, writeRunState } from "../run/state.js";
+import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
+import { createSyntheticV6BundleFixture } from "../bundle/testing/v6-synthetic-fixture.js";
 import { disclosureDeclare, disclosureShow } from "./disclosure-declare.js";
+import { runReport } from "./report.js";
 import type { OperationContext } from "./context.js";
 
 const roots: string[] = [];
@@ -148,6 +151,57 @@ describe("what the operation seals", () => {
     expect(result.ok).toBe(false);
     expect(result.ok ? undefined : result.error.code).toBe("validation");
     expect(result.ok ? "" : result.error.issues?.[0]?.path).toMatch(/^disclosure\./);
+  }, 900_000);
+});
+
+describe("I1 — a declaration no report could carry refuses at report, not silently", () => {
+  test("an ANCHORED run with no binary-instrument analysis refuses rather than dropping the record", async () => {
+    // The case the per-bundle guard structurally cannot catch. `materialize.ts` refuses a declared
+    // run whose QUALIFICATION bundle is unanchored, but a wilson-family run has no qualification
+    // bundle at all, so there is nothing there to refuse. Before the report-time guard this run
+    // reported and published with the declaration discarded and no message anywhere.
+    //
+    // Anchored on purpose: it isolates the missing-analysis reason from the missing-anchor one.
+    const workspaceDir = mkdtempSync(join(tmpdir(), "disclosure-wilson-only-"));
+    roots.push(workspaceDir);
+    const built = await createSyntheticV6BundleFixture({
+      workspaceDir,
+      plans: [{ kind: "rfc3161-lock" }],
+    });
+    const context = contextFor(workspaceDir);
+
+    const state = readRunState(workspaceDir, built.draftId)!;
+    expect(state.anchors?.length ?? 0).toBeGreaterThan(0);
+    const { reportedAt: _reopened, ...openWindow } = state;
+    writeRunState(workspaceDir, built.draftId, openWindow as typeof state);
+    // The fixture runs to completion, so rewind the draft's own lifecycle state as well: `report`
+    // admits only a closed draft, and that gate would otherwise mask the one under test.
+    const draftFile = draftPath(workspaceDir, built.draftId);
+    const draft = JSON.parse(readFileSync(draftFile, "utf8")) as { state: string };
+    draft.state = "closed";
+    writeFileSync(draftFile, `${JSON.stringify(draft, null, 2)}\n`);
+
+    const declared = disclosureDeclare(context, {
+      draftId: built.draftId,
+      // The honest declaration for a run like this: it has no judge instruments to cite, so it
+      // measures nothing and says so. Every entry is a reason token, which is schema-valid.
+      declaration: {
+        variables: Object.fromEntries(
+          ["ingestion-model", "retrieval-config", "answer-model", "answer-prompt", "judge-model", "judge-prompt"]
+            .map((key) => [key, { status: "undisclosed", reason: "not-stated" }]),
+        ),
+      },
+    });
+    expect(declared.ok, declared.ok ? "" : JSON.stringify(declared.error)).toBe(true);
+
+    const reported = await runReport(context, { draftId: built.draftId });
+    expect(reported.ok).toBe(false);
+    expect(reported.ok ? undefined : reported.error.code).toBe("conflict");
+    expect(reported.ok ? "" : reported.error.detail).toMatch(/no binary-instrument analysis/);
+    // And the declaration is still on disk: refusing does not discard what the operator wrote.
+    expect(readRunState(workspaceDir, built.draftId)!.disclosureSha256).toBe(
+      declared.ok ? declared.result.recordSha256 : "",
+    );
   }, 900_000);
 });
 

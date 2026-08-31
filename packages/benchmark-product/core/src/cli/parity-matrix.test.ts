@@ -106,6 +106,11 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
     });
     expect(gui.filter((entry) => entry.gui.status === "deferred")).toEqual([]);
     expect(gui.find((entry) => entry.operation === "publicationAccounting")?.gui).toEqual({ status: "shipped", action: "publication.accounting" });
+    // SECOND MIRROR: `web/src/lib/server/gui-action-registry.test.ts`'s
+    // `EXPECTED_UNAVAILABLE_REASONS` pins the same dispositions plus their reason prose, and no gate
+    // in THIS package can catch a drift there. An operation added to `parity-map.ts` as
+    // `unavailable` has to be added in both places.
+    //
     // `disclosureDeclare`/`disclosureShow` join this set (issue #2839): the six statements are the
     // venue's own prose about its own experiment, composed offline and handed over as a file, and a
     // browser form for them would invite the half-filled declaration the record's all-six-required

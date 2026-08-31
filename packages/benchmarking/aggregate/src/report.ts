@@ -460,17 +460,20 @@ async function produceReportWithExtension(
     author: input.author,
     ...(input.limitations === undefined ? {} : { limitations: input.limitations }),
     ...(publicationExtension === undefined ? {} : { [BENCHMARK_PUBLICATION_EXTENSION]: publicationExtension }),
-    ...(input.recordExtensions ?? {}),
   };
+  // DERIVED, never a hand-kept list: the keys this module owns are exactly the ones it just wrote,
+  // so a field added to the literal above is covered here without anyone remembering to add it.
+  const ownedKeys = new Set(Object.keys(document));
   for (const key of Object.keys(input.recordExtensions ?? {})) {
-    // Spread last so a caller's key cannot be silently shadowed by a core field -- and refused here
-    // so it cannot silently shadow one either. Both directions are errors, not precedences.
+    // Refused rather than spread-over in either direction: a caller's key must not shadow a core
+    // field, and a core field must not silently win over a caller's key. Both are errors.
     if (key === BENCHMARK_PUBLICATION_EXTENSION) {
       throw new Error(`produceReport: ${BENCHMARK_PUBLICATION_EXTENSION} is owned by this module and cannot be supplied as a record extension`);
     }
-    if (["protocol", "subjects", "method", "preregistered", "results", "disclosures", "author", "limitations"].includes(key)) {
+    if (ownedKeys.has(key)) {
       throw new Error(`produceReport: record extension key "${key}" collides with a core Report field`);
     }
+    document[key] = (input.recordExtensions as Record<string, unknown>)[key];
   }
 
   const sealed = sealReport(document);

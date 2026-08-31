@@ -2,6 +2,19 @@ import { describe, expect, test } from "vitest";
 import { GUI_CAPABILITY_CATALOG } from "@colophon-claims/core";
 import { GUI_SERVER_ACTIONS } from "./gui-action-registry";
 
+/**
+ * The exact `unavailable` disposition of every operation, reason prose included.
+ *
+ * This is hand-maintained ON PURPOSE: the value it adds over reading the catalog is that it pins the
+ * REASON TEXT, which a derived assertion would restate rather than check. The cost is that it is one
+ * of TWO mirrors of the same dispositions, and neither package can import the other's:
+ *
+ *   - this one, which pins operation + reason, and
+ *   - `@colophon-claims/core`'s `src/cli/parity-matrix.test.ts`, which pins the operation NAME SET.
+ *
+ * Adding an `unavailable` operation to `core/src/cli/parity-map.ts` therefore requires editing both.
+ * No core-package gate catches this one, because the assertion lives here in `web`.
+ */
 const EXPECTED_UNAVAILABLE_REASONS = {
   importBinaryItemBank:
     "requires local licensed item, source/license, and human-admission manifests; browser upload is intentionally unavailable",
@@ -15,6 +28,10 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires server-configured migration input paths; browser-supplied paths are forbidden",
   exportDerivedBundle:
     "copies a machine-local job or log directory; browser path-based export is forbidden",
+  disclosureDeclare:
+    "requires a locally composed six-variable declaration file",
+  disclosureShow:
+    "reads a local sealed record from the workspace store",
 } as const;
 
 describe("generated library / CLI / GUI parity", () => {

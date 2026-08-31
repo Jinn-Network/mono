@@ -54,8 +54,14 @@ export interface DisclosureDeclareResult {
   readonly replaced: boolean;
 }
 
-/** Seals this run's disclosure-specification record and records its digest. Gated like every other
- * operation; see `../authority/policy.ts`. */
+/**
+ * Seals this run's disclosure-specification record and records its digest.
+ *
+ * NOT in `GATED_OPERATIONS` (`../authority/policy.ts`): it runs through the authority boundary like
+ * every operation, so the principal must be a real one, but it carries no grant of its own. The gate
+ * that matters for a declaration is `report`, which is gated and is what seals the record into a
+ * claim; a declaration that never reaches a report changes nothing a reader can see.
+ */
 export function disclosureDeclare(
   context: OperationContext,
   input: DisclosureDeclareInput,

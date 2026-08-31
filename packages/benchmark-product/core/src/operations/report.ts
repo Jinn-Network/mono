@@ -474,6 +474,34 @@ export function runReport(
         };
       }
 
+      // A declaration that nothing will carry is a silent loss, and this is the last point where the
+      // operator can still act on it: `report` is single-shot, and after it the declaration can never
+      // enter any claim (issue #2839, review finding I1).
+      //
+      // The per-bundle guard in `materialize.ts` cannot catch this. It refuses a declared run whose
+      // QUALIFICATION bundle is unanchored, but a run with no binary-instrument analysis has no
+      // qualification bundle at all, so there is nothing there to refuse and the declaration is
+      // dropped with no message. `buildClaimPackage`'s own refusal cannot catch it either, because
+      // the section is gated out per entry above before the builder ever sees it.
+      if (disclosureCarriage !== undefined) {
+        const carriedBy = [primarySelected, ...additionalSelected].filter((entry) =>
+          entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument);
+        if (carriedBy.length === 0 || !carriage.anchoredClosure) {
+          refuse(
+            "conflict",
+            "disclosure",
+            "this run carries a sealed disclosure declaration that no report it is about to produce"
+            + " could carry: the disclosed closure is the anchored binary-qualification cell, and this"
+            + " run has"
+            + (carriedBy.length === 0 ? " no binary-instrument analysis" : "")
+            + (carriedBy.length === 0 && !carriage.anchoredClosure ? " and" : "")
+            + (!carriage.anchoredClosure ? " no anchor" : "")
+            + ". Anchor the run and give it a binary-instrument analysis, or remove the declaration"
+            + " before reporting; a declaration made now could never enter any sealed claim.",
+          );
+        }
+      }
+
       const primaryResult = await sealReportEntry(primarySelected);
       const additionalResults: SealedReportEntry[] = [];
       for (const entry of additionalSelected) {

@@ -21,7 +21,7 @@ export interface PublicAssetInput {
   readonly dissentCellKeys: readonly string[];
   /**
    * Verifier-derived, authenticated human projection. Absent only for the
-   * qualification-projecting profile (`benchmark-product-public-bundle/4` and `/7`), which
+   * qualification-projecting profile (`benchmark-product-public-bundle/4`, `/7`, and `/8`), which
    * carries `binaryQualification` instead. There is no third, comparison-free profile: a
    * bundle rendered with neither field is refused at verification (issue #2984).
    */
