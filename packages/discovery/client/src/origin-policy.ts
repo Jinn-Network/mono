@@ -8,7 +8,7 @@
 //
 //  - `resolveContainedUrl` asks "does this stay inside the serving root the
 //    OPERATOR configured?". It is the stronger of the two and it is what the
-//    archive-root path uses: after it, a peer can only ever move the fetch
+//    archive-root path uses: after it, a peer can only ever move a request
 //    within an origin the operator already chose. It is also the invariant the
 //    rest of the sync path already assumes -- `sync.ts`'s `pageUrl` rebuilds
 //    every archive page after the first as `servingRoot + archivePagePath`, so
@@ -38,17 +38,26 @@ export class ContainedOriginError extends Error {
   }
 }
 
+/**
+ * The serving root reduced to the directory every contained URL must sit under:
+ * origin plus a path that always ends in `/`.
+ *
+ * Query and fragment are dropped rather than string-appended to. Appending `/`
+ * to a raw `https://host/archive?x=1` produces a base whose PATH is `/archive`
+ * with no trailing slash, and a prefix test against that would accept the
+ * sibling `/archived-elsewhere`.
+ */
 function httpBase(servingRoot: string, candidate: string): URL {
-  let base: URL;
+  let raw: URL;
   try {
-    base = new URL(`${servingRoot.replace(/\/+$/u, "")}/`);
+    raw = new URL(servingRoot);
   } catch {
     throw new ContainedOriginError(servingRoot, candidate, "the serving root is not an absolute URL");
   }
-  if (base.protocol !== "http:" && base.protocol !== "https:") {
+  if (raw.protocol !== "http:" && raw.protocol !== "https:") {
     throw new ContainedOriginError(servingRoot, candidate, "the serving root is not HTTP(S)");
   }
-  return base;
+  return new URL(`${raw.origin}${raw.pathname.replace(/\/+$/u, "")}/`);
 }
 
 /**
@@ -213,6 +222,14 @@ export function isPrivateOrReservedHost(hostname: string): boolean {
 
   const ipv6 = parseIPv6(host);
   if (ipv6 !== undefined) return isReservedIPv6(ipv6);
+
+  // An ambiguous numeric form -- octal (`0177.0.0.1`), hex (`0x7f000001`), or a
+  // bare integer (`2130706433`) -- is refused rather than treated as a name.
+  // Every one of those is a spelling of 127.0.0.1 that this parser deliberately
+  // does not accept, and no real hostname ends in an all-numeric label, so
+  // failing closed here costs nothing and closes the classic deny-list bypass.
+  const lastLabel = host.split(".").at(-1) ?? "";
+  if (/^(0[xX][0-9a-fA-F]+|[0-9]+)$/u.test(lastLabel)) return true;
 
   return false;
 }

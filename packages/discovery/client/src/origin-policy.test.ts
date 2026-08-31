@@ -84,6 +84,27 @@ describe("resolveContainedUrl (§7/§14.1: a peer-introduced path may not leave 
     );
   });
 
+  it("refuses a sibling when the serving root carries a query string", () => {
+    // Appending "/" to the raw root would leave the base path without its trailing
+    // slash, and a prefix test against `/archive` accepts `/archived-elsewhere`.
+    expect(() => resolveContainedUrl("https://peer.example/archive?x=1", "/archived-elsewhere/x.json")).toThrow(
+      ContainedOriginError,
+    );
+    expect(resolveContainedUrl("https://peer.example/archive?x=1", "entries/1.json").toString()).toBe(
+      "https://peer.example/archive/entries/1.json",
+    );
+  });
+
+  it("refuses a backslash-spelled protocol-relative locator", () => {
+    expect(() => resolveContainedUrl(ROOT, String.raw`\\evil.example/collect`)).toThrow(ContainedOriginError);
+  });
+
+  it("resolves the root-anchored archive page shape producers actually emit", () => {
+    expect(resolveContainedUrl("https://peer.example", "/sources/requester/entries/0001").toString()).toBe(
+      "https://peer.example/sources/requester/entries/0001",
+    );
+  });
+
   it("names the refused candidate and the serving root in the error", () => {
     try {
       resolveContainedUrl(ROOT, "http://169.254.169.254/latest/meta-data/");
@@ -123,6 +144,10 @@ describe("isPrivateOrReservedHost (§7/§14.1 hostile-locator classifier)", () =
     "::ffff:10.0.0.1",
     "64:ff9b::127.0.0.1", // NAT64 embedding
     "2002:7f00:0001::", // 6to4 embedding of 127.0.0.1
+    "2130706433", // bare-integer spelling of 127.0.0.1
+    "0177.0.0.1", // octal spelling of 127.0.0.1
+    "0x7f000001", // hex spelling of 127.0.0.1
+    "192.168.0x1", // mixed hex final label
   ];
   for (const host of refused) {
     it(`refuses ${host}`, () => {
