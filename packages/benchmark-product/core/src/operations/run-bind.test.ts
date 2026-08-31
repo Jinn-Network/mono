@@ -25,7 +25,7 @@ import { getSealedBytes, putSealedBytes, sealedRecordPath } from "../workspace/s
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { armAdd } from "./arms.js";
 import type { OperationContext } from "./context.js";
-import { createDraft, readDraftDocument } from "./drafts.js";
+import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { runBind } from "./run-bind.js";
 import { runLock } from "./run-lock.js";
@@ -89,6 +89,32 @@ async function setUpLockedDraft(clock: () => string, draftId = "draft-1"): Promi
   const lockedAt = readRunState(workspaceDir, draftId)?.lockedAt;
   if (lockedAt === undefined) throw new Error("lock recorded no instant");
   sealDerivedRound = requiredBeaconRound("drand/quicknet", lockedAt)!.round;
+  return locked.result.runSha256;
+}
+
+/**
+ * The same locked draft, but declaring its beacon source before the lock (issue #3426), so the
+ * seal names the beacon and `bind` has no source to choose.
+ */
+async function setUpLockedDraftDeclaring(
+  clock: () => string,
+  source: BeaconReference["source"],
+  draftId = "draft-1",
+): Promise<string> {
+  initWorkspace(contextFor(clock));
+  createDraft(contextFor(clock), { draftId, name: "Bind Test" });
+  await sampleInit(contextFor(clock), { draftId });
+  armAdd(contextFor(clock), { draftId, armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
+  armAdd(contextFor(clock), { draftId, armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+  const patched = updateDraft(contextFor(clock), { draftId, patch: { beaconSource: source } });
+  expect(patched.ok).toBe(true);
+  const quoted = await runQuote(contextFor(clock), { draftId });
+  expect(quoted.ok).toBe(true);
+  const locked = runLock(contextFor(clock), { draftId });
+  if (!locked.ok) throw new Error("lock failed");
+  const lockedAt = readRunState(workspaceDir, draftId)?.lockedAt;
+  if (lockedAt === undefined) throw new Error("lock recorded no instant");
+  sealDerivedRound = requiredBeaconRound("drand/quicknet", lockedAt)?.round ?? LATE_ROUND;
   return locked.result.runSha256;
 }
 
@@ -452,5 +478,105 @@ describe("runStatus", () => {
     expect(after.result.binding?.beacon.round).toBe(sealDerivedRound);
     expect(after.result.binding?.postSeal).toBe("proven-offline");
     expect(after.result.binding?.statement).toContain("beacon-binding/1");
+  });
+});
+
+/**
+ * Issue #3426. The round rule of #3322 binds only the round WITHIN a source; leaving the source
+ * open left it one selection away from having no effect, because the height-indexed source derives
+ * no round from a seal and never reaches the postdating refusal.
+ */
+describe("runBind against a declared beacon source", () => {
+  test("seals the declaration into the Run and restates it in the binding record", async () => {
+    const clock = makeClock();
+    await setUpLockedDraftDeclaring(clock, "drand/quicknet");
+
+    const result = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon() });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result.binding.declaredSource).toBe("drand/quicknet");
+    expect(result.result.binding.sourceBasis).toBe("seal-declared");
+    // The stored bytes carry it too, so an external reader recomputes the same basis.
+    const stored = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, result.result.recordSha256)));
+    expect(stored.declaredSource).toBe("drand/quicknet");
+    // The face states the stronger property and drops the residue clause.
+    expect(result.result.statement).toContain("The source was not the operator's to pick either");
+    expect(result.result.statement).not.toContain("What choosing remains is the source");
+  });
+
+  test("refuses a binding naming any other source, which is what makes the round rule effective", async () => {
+    const clock = makeClock();
+    await setUpLockedDraftDeclaring(clock, "drand/quicknet");
+    // The exact escape the issue describes: the height-indexed source, at a height that predates
+    // the seal by two decades. Without the refusal this verifies clean.
+    const result = runBind(contextFor(clock), {
+      draftId: "draft-1",
+      beacon: { source: "bitcoin/mainnet", round: 1, value: VALUE },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("validation");
+    expect(result.error.detail).toContain("names drand/quicknet as the beacon it binds to");
+    expect(readRunState(workspaceDir, "draft-1")?.binding).toBeUndefined();
+  });
+
+  test("a run that declares nothing binds exactly as it did before, and says the source was chosen", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const result = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon() });
+    if (!result.ok) throw new Error("bind failed");
+    expect(result.result.binding.declaredSource).toBeUndefined();
+    expect(result.result.binding.sourceBasis).toBe("operator-chosen");
+    expect(result.result.statement).toContain("What choosing remains is the source");
+    expect(JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, result.result.recordSha256))))
+      .not.toHaveProperty("declaredSource");
+  });
+
+  test("a declared height-indexed source binds, and its face still reports the height as chosen", async () => {
+    const clock = makeClock();
+    await setUpLockedDraftDeclaring(clock, "bitcoin/mainnet");
+    const result = runBind(contextFor(clock), {
+      draftId: "draft-1",
+      beacon: { source: "bitcoin/mainnet", round: 900_000, value: VALUE },
+    });
+    if (!result.ok) throw new Error("bind failed");
+    expect(result.result.binding.sourceBasis).toBe("seal-declared");
+    expect(result.result.statement).toContain("The sealed record names this source");
+    expect(result.result.statement).toContain("this height was still the operator's choice");
+  });
+
+  test("carriage refuses a binding that drops the declaration its sealed Run carries", async () => {
+    const clock = makeClock();
+    await setUpLockedDraftDeclaring(clock, "drand/quicknet");
+    const bound = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon() });
+    if (!bound.ok) throw new Error("bind failed");
+    // Omission is the escape the record's own verification cannot see: it verifies clean and reads
+    // as operator-chosen, which is exactly how a declared run's binding would look honest.
+    const stored = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, bound.result.recordSha256)));
+    delete stored.declaredSource;
+    const forged = putSealedBytes(workspaceDir, new TextEncoder().encode(JSON.stringify(stored)));
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(() => readRunBindingCarriage(workspaceDir, {
+      ...state,
+      binding: { recordSha256: forged, boundAt: state.binding!.boundAt },
+    })).toThrow(/binding declares no beacon source, but its sealed Run declares drand\/quicknet/u);
+  });
+
+  test("status names the declared source and offers only its bindable round", async () => {
+    const clock = makeClock();
+    await setUpLockedDraftDeclaring(clock, "drand/quicknet");
+    const status = runStatus(contextFor(clock), { draftId: "draft-1" });
+    if (!status.ok) throw new Error("status failed");
+    expect(status.result.declaredBeaconSource).toBe("drand/quicknet");
+    expect(status.result.bindableBeaconRounds?.map((entry) => entry.source)).toEqual(["drand/quicknet"]);
+  });
+
+  test("status omits the declared source, and offers every scheduled one, for an undeclared run", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const status = runStatus(contextFor(clock), { draftId: "draft-1" });
+    if (!status.ok) throw new Error("status failed");
+    expect(status.result.declaredBeaconSource).toBeUndefined();
+    expect(status.result.bindableBeaconRounds?.length).toBeGreaterThan(1);
   });
 });
