@@ -132,6 +132,7 @@ export {
   RunBindingSchema,
   beaconRoundInstant,
   computeBeaconOrder,
+  requiredBeaconRound,
   verifyRunBinding,
 } from "./binding/beacon-binding.js";
 export type {
@@ -139,9 +140,11 @@ export type {
   BeaconOrderResult,
   BeaconPostSealBasis,
   BeaconReference,
+  BeaconRoundBasis,
   BeaconSourceDefinition,
   BeaconSourceId,
   BeaconSourceTimeBasis,
+  RequiredBeaconRound,
   RunBinding,
   VerifiedRunBinding,
 } from "./binding/beacon-binding.js";
