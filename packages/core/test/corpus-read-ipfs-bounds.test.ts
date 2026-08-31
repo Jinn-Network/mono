@@ -87,6 +87,66 @@ describe('fetchFromIpfs redirect revalidation (#3410)', () => {
     ).rejects.toThrow(/redirect changes the gateway port \(5001\)/);
   });
 
+  it('refuses a redirect that carries embedded credentials', async () => {
+    const requested: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        requested.push(String(input));
+        // Same host family and same port, so only the credential check stops
+        // this hop. Without it the URL reaches `fetch`, whose own rejection
+        // quotes the secret straight into the aggregated error callers log.
+        return redirect('https://user:SUPERSECRET@gateway.example/ipfs/x');
+      }),
+    );
+
+    const failure = await fetchFromIpfs('https://gateway.example', CID, {
+      fallbackGatewayBase: false,
+    }).catch((error: unknown) => error as Error);
+
+    expect(failure.message).toMatch(/redirect carries embedded credentials/);
+    expect(failure.message).not.toContain('SUPERSECRET');
+    expect(requested.some((url) => url.includes('SUPERSECRET'))).toBe(false);
+  });
+
+  it('refuses a redirect to a non-http(s) scheme', async () => {
+    const requested: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        requested.push(String(input));
+        // `ftp://gateway.example/x` has the gateway's hostname and an empty
+        // port, so it clears both the host-family and port checks.
+        return redirect('ftp://gateway.example/x');
+      }),
+    );
+
+    await expect(
+      fetchFromIpfs('https://gateway.example', CID, { fallbackGatewayBase: false }),
+    ).rejects.toThrow(/redirect uses an unsupported scheme \(ftp:\)/);
+
+    expect(requested.some((url) => url.startsWith('ftp:'))).toBe(false);
+  });
+
+  it('refuses a 3xx response that carries no Location header', async () => {
+    const requested: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        requested.push(String(input));
+        return new Response('moved', { status: 302 });
+      }),
+    );
+
+    await expect(
+      fetchFromIpfs('https://gateway.example', CID, { fallbackGatewayBase: false }),
+    ).rejects.toThrow(/returned 302 without a Location header/);
+
+    // Without the guard, `new URL(String(null), current)` fabricates a second
+    // request for a path the caller never asked for.
+    expect(requested).toHaveLength(1);
+  });
+
   it('refuses a redirect chain longer than the hop cap', async () => {
     let hop = 0;
     vi.stubGlobal(
