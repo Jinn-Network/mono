@@ -1788,7 +1788,7 @@ The exact 74-package trusted-publisher set is the union of stack-published group
 
 ## Architecture-control ownership
 
-Task 6's validator enforces that every architecture-controlled path resolves to exactly these effective owners: `@oaksprout` `@ritsukai`. A path that does not reds `platform-architecture-control`.
+Task 6's validator enforces that every architecture-controlled path resolves to exactly these effective owners: `@oaksprout` `@ritsukai` `@ritsuKai2000`. A path that does not reds `platform-architecture-control`.
 The exhaustive path list and its per-category counts are a file census, not architecture: they move whenever any file is added, renamed, or deleted in scope, which made independent branches mutually inconsistent under merge (#3076). They are no longer committed. Run `node .github/scripts/architecture-control.mjs` for the full report, or read the coverage artifact that `platform-architecture-control` uploads on every run.
 
 ## Transitional and deprecated entries

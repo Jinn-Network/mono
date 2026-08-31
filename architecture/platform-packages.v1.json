@@ -37,9 +37,10 @@
   "manifestExclusions": [],
   "ownerGroups": {
     "architecture-control": [
-      "@oaksprout",
-      "@ritsukai"
-    ]
+        "@oaksprout",
+        "@ritsukai",
+        "@ritsuKai2000"
+      ]
   },
   "gateDefinitions": {
     "benchmarking-ci": {
