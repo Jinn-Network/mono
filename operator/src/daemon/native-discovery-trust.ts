@@ -91,15 +91,8 @@ function rolePurpose(role: NativeOperatorConfig['sources'][number]['role']): str
 
 /**
  * Resolves a peer-introduced `archiveRoot` against the serving root this operator configured,
- * refusing anything that leaves it (#3411).
- *
- * `new URL(path, base)` DISCARDS the base whenever `path` is absolute, and the HTTP transport
- * forwards an absolute `http(s)://` target verbatim, so before this guard a peer's introduction
- * could aim this daemon's fetch at loopback, private space, or any third-party host it liked.
- * Containment -- rather than a private-address deny-list -- is the policy because it is what
- * every LATER page fetch already assumes (`discovery/client`'s `pageUrl` rebuilds each subsequent
- * page from `servingRoot`), and because a serving root is legitimately loopback in every local
- * deployment.
+ * refusing anything that leaves it (#3411). Containment rather than a private-address deny-list;
+ * `origin-policy.ts` in `discovery/client` states why.
  */
 function absolute(base: string, path: string): string {
   return resolveContainedUrl(base, path).toString();

@@ -70,12 +70,8 @@ function chainConfig(config: NativeConsumerConfig): MarketplaceChainConfig {
 
 /**
  * Resolves a peer-introduced `archiveRoot` against the public base URL this consumer was pointed
- * at, refusing anything that leaves it (#3411).
- *
- * `new URL(path, base)` DISCARDS the base whenever `path` is absolute, so an introduction naming
- * `http://127.0.0.1:8545/` used to become the fetch target verbatim. Containment keeps every
- * archive read inside the origin the caller chose, which is also what `discovery/client`'s
- * subsequent `pageUrl` walk already assumes.
+ * at, refusing anything that leaves it (#3411). Containment rather than a private-address
+ * deny-list; `origin-policy.ts` in `discovery/client` states why.
  */
 function absoluteUrl(base: string, path: string): string {
   return resolveContainedUrl(base, path).toString();

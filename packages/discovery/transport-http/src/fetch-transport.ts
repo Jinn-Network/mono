@@ -119,10 +119,21 @@ async function fetchWithinOrigin(
   target: string,
   headers: Record<string, string>,
 ): Promise<Response> {
-  let current = target;
+  // Carried as a URL, not a string: every hop needs its origin, and re-parsing
+  // the spelling each time invites the two forms disagreeing. Parsing here also
+  // names the one input this transport cannot work with -- a relative target,
+  // which `fetch` would have rejected a line later with a bare TypeError.
+  let current: URL;
+  try {
+    current = new URL(target);
+  } catch {
+    throw new TypeError(
+      `GET ${target} is not an absolute URL; the transport needs one to hold each redirect hop to its origin.`,
+    );
+  }
   for (let hop = 0; ; hop += 1) {
     // eslint-disable-next-line no-await-in-loop -- a redirect chain is sequential by definition.
-    const response = await fetchLike(current, { method: "GET", headers, redirect: "manual" });
+    const response = await fetchLike(current.toString(), { method: "GET", headers, redirect: "manual" });
     if (!REDIRECT_STATUSES.has(response.status)) return response;
 
     const location = response.headers.get("location");
@@ -142,11 +153,10 @@ async function fetchWithinOrigin(
     if (next.protocol !== "http:" && next.protocol !== "https:") {
       throw new TransportRedirectError(target, location, `scheme ${next.protocol} is not HTTP(S)`);
     }
-    const from = new URL(current).origin;
-    if (next.origin !== from) {
-      throw new TransportRedirectError(target, location, `origin ${next.origin} is not ${from}`);
+    if (next.origin !== current.origin) {
+      throw new TransportRedirectError(target, location, `origin ${next.origin} is not ${current.origin}`);
     }
-    current = next.toString();
+    current = next;
   }
 }
 
