@@ -55,7 +55,8 @@ import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/sig
 import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import { buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT } from "../legacy-closures.js";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { buildPublicAssets } from "./assets.js";
 import {
@@ -96,31 +97,6 @@ import {
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
 import { derivePublicComparison } from "@colophon-claims/verify";
-
-export const PUBLIC_BUNDLE_FILES = [
-  "static-bundle.json",
-  "benchmark.json",
-  "run.json",
-  "matrix.json",
-  "report.json",
-  "report-envelope.json",
-  "claim-package.json",
-  "verdicts.json",
-  "evidence.json",
-  "verification/assembly.jsonl",
-  "trust/public-keys.json",
-  "index.html",
-  "badge.svg",
-  "social-card.svg",
-  "README.md",
-  "share.txt",
-] as const;
-
-export const PUBLIC_BUNDLE_V4_FILES = [
-  ...PUBLIC_BUNDLE_FILES.slice(0, 7),
-  "qualification.json",
-  ...PUBLIC_BUNDLE_FILES.slice(7),
-] as const;
 
 const ROLE_ORDER: readonly BundleV4EvidenceRole[] = BUNDLE_V4_EVIDENCE_ROLES;
 

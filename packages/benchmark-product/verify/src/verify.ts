@@ -86,8 +86,8 @@ import {
   type VerifiedBundleSnapshot,
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
-import { PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT } from "./manifest.js";
+import { LEGACY_ANCHOR_MEMBER_PATTERN, legacyClosure, type LegacyBundleFormat } from "./legacy-closures.js";
+import { BUNDLE_V5_FORMAT } from "./manifest.js";
 import {
   evaluateIntegrityAnchors,
   type IntegrityAnchorsReport,
@@ -138,11 +138,7 @@ export type PublicBundleVerificationCheck =
   | "integrity-anchors";
 
 export interface LegacyPublicBundleVerificationResult extends PublicBundleSignerDisclosure {
-  readonly format:
-    | "benchmark-product-public-bundle/2"
-    | "benchmark-product-public-bundle/4"
-    | "benchmark-product-public-bundle/6"
-    | "benchmark-product-public-bundle/7";
+  readonly format: LegacyBundleFormat;
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
   readonly benchmarkSha256: string;
@@ -425,13 +421,10 @@ export async function verifyPublicBundleSnapshot(
   };
   const checks: PublicBundleVerificationCheck[] = ["manifest"];
   const manifestPaths = new Set(checked.manifest.files.map((file) => file.path));
-  // Two independent axes, four formats. The qualification axis decides the mandatory member list,
-  // the evidence-catalog grammar, and the trust grammar; the anchor axis decides the `anchors/`
-  // allowlist and the `integrity-anchors` check. v6 is v2 plus anchors, v7 is v4 plus anchors
-  // (issue #3205) — neither axis reinterprets the other.
-  const carriesQualification = checked.manifest.format === BUNDLE_V4_FORMAT || checked.manifest.format === BUNDLE_V7_FORMAT;
-  const carriesAnchors = checked.manifest.format === BUNDLE_V6_FORMAT || checked.manifest.format === BUNDLE_V7_FORMAT;
-  const mandatoryFiles = carriesQualification ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
+  // Two independent axes, four formats, one frozen table (`legacy-closures.ts`). The qualification
+  // axis decides the mandatory member list, the evidence-catalog grammar, and the trust grammar;
+  // the anchor axis decides the `anchors/` allowlist and the `integrity-anchors` check.
+  const { carriesQualification, carriesAnchors, mandatoryFiles } = legacyClosure(checked.manifest.format);
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }
@@ -451,12 +444,10 @@ export async function verifyPublicBundleSnapshot(
   for (const path of manifestPaths) {
     if (/^native\/inspect\/[a-f0-9]{64}\.eval$/u.test(path)) expectedPaths.add(path);
   }
-  // `anchors/<sha256>.bin` is allowlisted only by the closure versions that define it: an anchor
-  // member in a v2 or v4 bundle is a non-allowlisted file, exactly as it was before these formats.
   const anchorPaths: string[] = [];
   if (carriesAnchors) {
     for (const path of manifestPaths) {
-      if (/^anchors\/[a-f0-9]{64}\.bin$/u.test(path)) {
+      if (LEGACY_ANCHOR_MEMBER_PATTERN.test(path)) {
         expectedPaths.add(path);
         anchorPaths.push(path);
       }

@@ -80,11 +80,10 @@ export type {
 export {
   BUNDLE_FORMAT,
   BUNDLE_V4_FORMAT,
-  BUNDLE_V5_FORMAT,
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
-  SUPPORTED_BUNDLE_FORMATS,
-} from "./manifest.js";
+} from "./legacy-closures.js";
+export { BUNDLE_V5_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 export type { BundleManifest, VerifiedBundleSnapshot } from "./manifest.js";
 export * from "./admission/index.js";
 export * from "./schema.js";
@@ -107,17 +106,19 @@ export {
   PUBLIC_BUNDLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_CHECKS,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
   PUBLIC_BUNDLE_VERIFIER_MAJOR,
   PUBLIC_BUNDLE_V4_VERIFIER_MAJOR,
+} from "./legacy-closures.js";
+export {
+  PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
 } from "./reader-instructions.js";
 // `beacon-binding/1` (issue #2976): the post-seal public-randomness binding, and the report face
 // that states which binding a run carries. Single-sourced here for the same reason the anchored

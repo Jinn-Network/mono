@@ -4,12 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { BenchmarkProductError } from "../errors.js";
-import {
-  BUNDLE_FORMAT,
-  BUNDLE_V4_FORMAT,
-  buildBundleManifest,
-  verifyBundleManifest,
-} from "./manifest.js";
+import { buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT } from "../legacy-closures.js";
 
 let bundleDir: string;
 

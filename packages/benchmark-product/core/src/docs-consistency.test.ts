@@ -3,7 +3,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { GATED_OPERATIONS } from "./authority/policy.js";
-import { BUNDLE_FORMAT, BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
+import { BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
+import { BUNDLE_FORMAT, PUBLIC_BUNDLE_FILES } from "./legacy-closures.js";
 import {
   BUNDLE_V5_FORMAT,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
@@ -14,7 +15,6 @@ import {
   BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
   BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE,
 } from "@jinn-network/benchmarking-protocol";
-import { PUBLIC_BUNDLE_FILES } from "./bundle/materialize.js";
 import { PRODUCT_ERROR_CODES } from "./errors.js";
 import { PRODUCT_BRANDING } from "./branding.js";
 

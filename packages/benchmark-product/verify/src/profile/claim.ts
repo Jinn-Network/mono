@@ -41,6 +41,15 @@ import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION } from "@jinn-netw
 import type { MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import {
+  ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
+  BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  CLAIM_PACKAGE_SCHEMA_ID,
+  LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_CHECKS as READER_VERIFICATION_CHECKS,
   PUBLIC_BUNDLE_VERIFICATION_COMMAND as READER_VERIFICATION_COMMAND,
@@ -50,42 +59,23 @@ import {
   PUBLIC_BUNDLE_V7_CHECKS as READER_ANCHORED_QUALIFICATION_VERIFICATION_CHECKS,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
-} from "../reader-instructions.js";
+} from "../legacy-closures.js";
 import { PROMPTED_SCREENING_PROFILE } from "../admission/contracts.js";
 import { ClaimAnchorSchema, SELF_RUN_TRUST_ROOT, anchoredTrustRoot } from "./anchor-claims.js";
 import type { ClaimAnchor } from "./anchor-claims.js";
 type VenueHonesty = unknown;
 
-export const CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/1";
-export const BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/2";
-/**
- * The anchored claim package (anchor-evidence design §7.4): claim-package/1 plus the `anchors`
- * section, carried by `benchmark-product-public-bundle/6`. The allocation is the next free number
- * in the classic path; the evidence-native claim-package/3 adopts the same anchor surface in its
- * own later allocation.
- */
-export const ANCHORED_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/4";
-/**
- * The anchored binary-qualification claim package (issue #3205): claim-package/2's exact
- * qualification projection plus claim-package/4's `anchors` section, carried by
- * `benchmark-product-public-bundle/7`. This is the "later allocation" both earlier guards named:
- * /2 has no anchors slot and /4 has no qualification slot, so before this number existed an
- * anchored run of a binary-instrument benchmark could not produce a claim at all. The allocation is
- * an ADDITION — /1, /2, /3, and /4 keep their meanings and their bytes.
- */
-export const ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/5";
-export const BINARY_QUALIFICATION_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@0.1.0 <bundle-dir>" as const;
-export const BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@0.1 <bundle-dir>" as const;
-/** Prompted-screening v2 claims require the verifier release that carries that admission surface. */
-export const PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@0.2.1 <bundle-dir>" as const;
-/** Previously materialized prompted bundles remain valid under their immutable 0.2.0 claim. */
-export const LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@0.2.0 <bundle-dir>" as const;
-export const PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@0.2 <bundle-dir>" as const;
+export {
+  ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
+  BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  CLAIM_PACKAGE_SCHEMA_ID,
+  LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+} from "../legacy-closures.js";
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/, "must be a lowercase sha256 hex digest");
 
