@@ -49,9 +49,19 @@ function base58Encode(bytes: Uint8Array): string {
   return "1".repeat(leadingZeros) + encoded;
 }
 
+/**
+ * The longest base58 spelling a 34-byte payload (multicodec + raw key) can
+ * have. Checked BEFORE decoding because the decode is BigInt work quadratic in
+ * the input length, and every caller here only ever wants that one length —
+ * so a longer string is not a key that might still decode, it is a key that
+ * cannot, and spending the quadratic to learn so is pure waste.
+ */
+const MAX_ED25519_DID_KEY_BASE58_LENGTH = 64;
+
 /** Returns `undefined` for anything outside the alphabet rather than guessing at intent. */
 function base58Decode(text: string): Uint8Array | undefined {
   if (text.length === 0) return undefined;
+  if (text.length > MAX_ED25519_DID_KEY_BASE58_LENGTH) return undefined;
   let value = 0n;
   for (const character of text) {
     const digit = BASE58_ALPHABET.indexOf(character);

@@ -261,6 +261,27 @@ test('bin.ts allows only the exact realpathSync import and rejects other fs or c
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('only the host-adapter layer may import the network-acquiring transport package', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-network-package-'));
+  try {
+    const line = 'import { createHttpTransport } from "@jinn-network/record-discovery-transport-http";\nexport const t = createHttpTransport;';
+    for (const adapter of ['session-host-corpus.ts', 'session-host-crypto.ts', 'session-host-signer.ts']) {
+      assert.deepEqual(scanFixtureSource(fixture, adapter, line), [], `${adapter} must be allowed the transport`);
+    }
+    // `createHttpTransport` defaults to `globalThis.fetch`, so importing it
+    // acquires ambient network without the file ever naming `fetch` — the one
+    // signal the custody guard otherwise has. Everywhere but the named layer
+    // that import is the finding.
+    for (const other of ['config.ts', 'session-host.ts', 'runtime.ts']) {
+      assert.ok(
+        scanFixtureSource(fixture, other, line)
+          .some((entry) => entry.includes('network-acquiring package')),
+        `${other} must not reach the network through the transport package`,
+      );
+    }
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('the host-adapter layer may touch the disk, and only the signer is off the key-material canary', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-host-adapter-'));
   try {

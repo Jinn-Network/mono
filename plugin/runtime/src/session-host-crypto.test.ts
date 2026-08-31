@@ -29,6 +29,18 @@ describe("decodeEd25519DidKey", () => {
     );
   });
 
+  test("refuses an over-long spelling without decoding it", () => {
+    // The decode is BigInt work quadratic in the input length and every caller
+    // wants exactly 34 bytes, so a longer string is not a key that might still
+    // decode — it is one that cannot. `createDidKeyDsseVerifier` takes its
+    // keyid from the envelope, so the bound is what keeps a nonsense keyid
+    // from costing more than the refusal is worth.
+    const overLong = `did:key:z${"1".repeat(4096)}`;
+    const started = process.hrtime.bigint();
+    expect(decodeEd25519DidKey(overLong)).toBeUndefined();
+    expect(Number(process.hrtime.bigint() - started)).toBeLessThan(50_000_000);
+  });
+
   test("returns undefined rather than throwing on malformed input", () => {
     const { didKey } = keypair();
     for (const malformed of [

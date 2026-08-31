@@ -122,6 +122,12 @@ function declaredSigningKeys(
  * procedure; a composition that wants that must resolve real binding records.
  */
 function declaredBinding(agent: string, key: MirrorSourceSigningKey): ResolvedBinding {
+  // `strength` is derived from the ceremony type rather than asserted
+  // (`deriveStrength`), so this pair is internally consistent — but it is a
+  // consistent description of a ceremony that did not happen. Nothing keeps
+  // `verify.ts`'s `requiredStrength` gate from reading it as a satisfied
+  // strong requirement, which is the sharpest form of the warning above: these
+  // bindings are for `isActiveForDiscoverySigning` and nothing else.
   const binding: KeyBinding = {
     protocol: "https://spec.jinn.network/trust/key-binding/v1",
     agent,
@@ -203,10 +209,14 @@ function createDeclaredVerifyDriver(
       keyCatalog: createDeclaredKeyCatalog(byAgent),
       verifier: declaredSignatureVerifier,
     }),
-    // Deliberately the MIRROR'S OWN high-water-mark store, not a second one.
-    // `verifySourceChain` reads and advances the same mark the mirror reads to
-    // decide `firstAdoption` and where `returningSync` resumes from; a separate
-    // store would leave the two disagreeing from the second sync onward, and
+    // Deliberately the mirror's own state FILE, which is what the two
+    // actually share: `verifySourceChain` reads and advances the same mark the
+    // mirror reads to decide `firstAdoption` and where `returningSync` resumes
+    // from. The capability builds its own store object over this same path
+    // (`capability.ts`, `get mirror()`), so the file is the shared position and
+    // the store objects are interchangeable views of it — which holds only
+    // because `createFileHighWaterMarkStore` memoizes nothing. A separate
+    // PATH would leave the two disagreeing from the second sync onward, and
     // the linkage walk would refuse a sound chain.
     hwm: createFileHighWaterMarkStore({ filePath: config.mirrorStatePath, fs }),
     // Item-grade ports, fail-closed. This composition offers CHAIN

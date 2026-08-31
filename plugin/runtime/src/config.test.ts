@@ -146,6 +146,29 @@ describe("corpus.sources[].signingKeys", () => {
     expect(resolve(keys).corpus.sources[0]!.signingKeys).toEqual(keys);
   });
 
+  test("canonicalizes validFrom to UTC, so string ordering matches instant ordering", () => {
+    // Every consumer orders this value AS A STRING — the binding resolver
+    // against the probe instant, `trust-adapter` against `now.toISOString()`.
+    // `2026-07-31T23:00:00-05:00` IS `2026-08-01T04:00Z`, but written that way
+    // it sorts before an `2026-08-01T00:00Z` probe and would admit the key
+    // four hours early.
+    expect(
+      resolve([
+        { keyid: "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz", validFrom: "2026-07-31T23:00:00-05:00" },
+      ]).corpus.sources[0]!.signingKeys[0]!.validFrom,
+    ).toBe("2026-08-01T04:00:00.000Z");
+  });
+
+  test("canonicalizes a second-precision validFrom to milliseconds", () => {
+    // "Z" sorts after ".", so `…T00:00:00Z` would compare as LATER than a
+    // `…T00:00:00.500Z` clock and fail closed for half a second.
+    expect(
+      resolve([
+        { keyid: "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz", validFrom: "2026-01-01T00:00:00Z" },
+      ]).corpus.sources[0]!.signingKeys[0]!.validFrom,
+    ).toBe("2026-01-01T00:00:00.000Z");
+  });
+
   test("rejects a keyid that is not a did:key", () => {
     expect(() => resolve([{ keyid: "key-1", validFrom: "2026-01-01T00:00:00.000Z" }])).toThrow(
       PluginRuntimeError,

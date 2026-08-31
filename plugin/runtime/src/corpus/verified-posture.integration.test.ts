@@ -169,13 +169,23 @@ describe("the verified posture over a genuinely signed archive", () => {
     const { capability } = await compose();
     expect((await capability.mirror.syncOnce()).status).toBe("synced");
 
-    // The archive has published nothing new, so it re-serves a head whose
-    // `issuedAt` has not advanced. `verifySourceChain` compares that against
-    // the `issuedAt` persisted on the high-water mark — which is only
-    // possible because the driver was given the MIRROR'S OWN store — and
-    // refuses the regression. Under the `verified` posture a returning sync
-    // therefore reports `failed` until the source re-signs its head; nothing
-    // is re-indexed either way.
+    // The subject here is the SHARED MARK: the second sync can only see the
+    // first sync's position because the driver and the mirror read the same
+    // state file. `verifySourceChain` compares the re-served head's `issuedAt`
+    // against that persisted mark (§5.2 requires it to strictly increase) and
+    // refuses the regression, so the refusal is the proof the mark carried.
+    //
+    // The refusal's SHAPE is a known gap, not a property worth keeping. The
+    // fixture archive is static, so a second sync re-presents an unchanged
+    // head — but so does any real archive polled more often than it re-signs,
+    // and this mirror has no same-head revalidation path (the one
+    // `operator/src/daemon/native-discovery.ts` documents as `verifyHead`).
+    // A live source would therefore report `broken-chain` between publishes
+    // and drive `corpus-chain-verification` red in ordinary operation. It is
+    // not reachable yet — no entry point supplies a config file, so
+    // `corpus.sources` is empty in every real process — and closing it is a
+    // design call about what a same-head sync should report, which is why it
+    // is filed rather than made here.
     const second = await capability.mirror.syncOnce();
     expect(second.sources[0]!.failure).toEqual({
       code: "chain-verification-rejected",

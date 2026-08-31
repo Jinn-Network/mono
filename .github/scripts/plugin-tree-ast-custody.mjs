@@ -90,6 +90,24 @@ function moduleRoot(specifier) {
   return normalizeModuleSpecifier(specifier);
 }
 
+/**
+ * Packages that hand a caller ambient network without ever naming `fetch`.
+ *
+ * `isNetworkModule` catches the node built-ins, and the `fetch` identifier is
+ * forbidden outright — but `createHttpTransport` defaults to `globalThis.fetch`
+ * on the caller's behalf, so importing it acquires the network with neither
+ * signal firing. The corpus composition root legitimately needs it; nothing
+ * else in the runtime library does, so the allowance is scoped the same way
+ * the filesystem allowance is: to the named host-adapter layer.
+ */
+const HOST_ADAPTER_ONLY_NETWORK_PACKAGES = ['@jinn-network/record-discovery-transport-http'];
+
+function isHostAdapterOnlyNetworkPackage(specifier) {
+  // `packageSpecifierMatches` rather than `moduleRoot`, which stops at the
+  // first slash and so reads a scoped name as bare `@jinn-network`.
+  return HOST_ADAPTER_ONLY_NETWORK_PACKAGES.some((name) => packageSpecifierMatches(specifier, name));
+}
+
 function isNetworkModule(specifier) {
   const rootName = moduleRoot(specifier);
   return NETWORK_MODULES.some((name) =>
@@ -796,6 +814,10 @@ function scanSourceFile(filePath, content, options) {
       add(`network module ${specifier}`);
       return;
     }
+    if (isHostAdapterOnlyNetworkPackage(specifier)) {
+      if (!isHostAdapter) add(`network-acquiring package ${specifier}`);
+      return;
+    }
     if (isProcessModule(specifier)) {
       add(`import ${specifier}`);
       return;
@@ -1402,6 +1424,7 @@ export {
   isSessionHostSignerPath,
   isForbiddenChildProcess,
   isForbiddenFs,
+  isHostAdapterOnlyNetworkPackage,
   isNetworkModule,
   isProcessModule,
   packageSpecifierMatches,

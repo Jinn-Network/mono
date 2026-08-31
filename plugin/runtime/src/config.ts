@@ -189,7 +189,19 @@ const DID_KEY_PATTERN = /^did:key:z[1-9A-HJ-NP-Za-km-z]+$/;
  */
 const MirrorSourceSigningKeySchema = z.strictObject({
   keyid: z.string().regex(DID_KEY_PATTERN, "must be a did:key multibase identifier"),
-  validFrom: z.iso.datetime({ offset: true }),
+  /**
+   * Canonicalized to UTC on the way in, because every consumer of this value
+   * ORDERS IT AS A STRING: `createDeclaredBindingResolver` compares it against
+   * the probe instant, and `trust-adapter.ts` compares the binding's
+   * `effectiveStart` against `now.toISOString()`. An accepted offset spelling
+   * sorts by its written digits rather than its instant, so
+   * `2026-07-31T23:00:00-05:00` — actually `2026-08-01T04:00Z` — would compare
+   * as EARLIER than an `2026-08-01T00:00Z` probe and admit the key four hours
+   * before its window opened. Second-precision spellings mis-order the same
+   * way against a millisecond clock, since "Z" sorts after ".". Offsets are
+   * still accepted, they just stop being stored the way they were written.
+   */
+  validFrom: z.iso.datetime({ offset: true }).transform((value) => new Date(value).toISOString()),
 });
 
 const MirrorSourceConfigSchema = z.strictObject({
