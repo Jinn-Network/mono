@@ -650,7 +650,7 @@ The exact 75-package trusted-publisher set is the union of stack-published group
 | @jinn-network/record-discovery-facts-chain-environments | implementations-v1 | — | profiles | — | — |
 | @jinn-network/record-discovery-facts-environments | implementations-v1 | — | profiles | — | — |
 | @jinn-network/record-discovery-facts-evidence | implementations-v1 | — | profiles | — | — |
-| @jinn-network/record-discovery-facts-offers | implementations-v1 | — | profiles | — | — |
+| @jinn-network/record-discovery-facts-offers | implementations-v1 | — | profiles | fixtures | — |
 | @jinn-network/record-discovery-facts-task-execution | implementations-v1 | — | profiles | — | — |
 | @jinn-network/record-discovery-facts-trust | implementations-v1 | — | profiles | — | — |
 | @jinn-network/record-discovery-protocol | sealed-platform-v1 | — | — | fixtures | — |
@@ -885,6 +885,11 @@ The exact 75-package trusted-publisher set is the union of stack-published group
 | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/result-evaluation.v1.json | — | — | https://spec.jinn.network/facts/result-evaluation/v1 |
 | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/result-evaluation.v2.json | — | — | https://spec.jinn.network/facts/result-evaluation/v2 |
 | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/result-evaluation.v3.json | — | — | https://spec.jinn.network/facts/result-evaluation/v3 |
+| fixtures | @jinn-network/record-discovery-facts-offers | packages/discovery/facts/offers/fixtures/catalog/free.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-facts-offers | packages/discovery/facts/offers/fixtures/catalog/priced.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-facts-offers | packages/discovery/facts/offers/fixtures/catalog/superseding.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-facts-offers | packages/discovery/facts/offers/fixtures/manifest.sha256.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-facts-offers | packages/discovery/facts/offers/fixtures/README.md | — | — | — |
 | profiles | @jinn-network/record-discovery-facts-offers | packages/discovery/facts/offers/profiles/offer.v1.json | — | — | https://spec.jinn.network/facts/offer/v1 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/checkpoint.v1.json | — | — | https://spec.jinn.network/facts/checkpoint/v1 |
 | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/delivery.v1.json | — | — | https://spec.jinn.network/facts/delivery/v1 |

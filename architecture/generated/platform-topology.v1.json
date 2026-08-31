@@ -3260,7 +3260,9 @@
       "path": "packages/discovery/facts/offers",
       "publicSurface": {
         "conformance": [],
-        "fixtures": [],
+        "fixtures": [
+          "fixtures"
+        ],
         "profiles": [
           "profiles"
         ],
@@ -7823,6 +7825,51 @@
         "packedTargets": [],
         "path": "packages/discovery/facts/evidence/profiles/result-evaluation.v3.json",
         "relativeSource": "profiles/result-evaluation.v3.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-facts-offers",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/offers/fixtures/catalog/free.json",
+        "relativeSource": "fixtures/catalog/free.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-facts-offers",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/offers/fixtures/catalog/priced.json",
+        "relativeSource": "fixtures/catalog/priced.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-facts-offers",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/offers/fixtures/catalog/superseding.json",
+        "relativeSource": "fixtures/catalog/superseding.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-facts-offers",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/offers/fixtures/manifest.sha256.json",
+        "relativeSource": "fixtures/manifest.sha256.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-facts-offers",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/offers/fixtures/README.md",
+        "relativeSource": "fixtures/README.md"
       },
       {
         "claim": {
@@ -15833,7 +15880,9 @@
       },
       {
         "conformance": [],
-        "fixtures": [],
+        "fixtures": [
+          "fixtures"
+        ],
         "name": "@jinn-network/record-discovery-facts-offers",
         "path": "packages/discovery/facts/offers",
         "profiles": [
