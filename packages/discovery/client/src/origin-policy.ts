@@ -221,6 +221,9 @@ function isReservedIPv6(bytes: readonly number[]): boolean {
   // 6to4 2002::/16 embeds the IPv4 address in the next four bytes.
   if (bytes[0] === 0x20 && bytes[1] === 0x02) return isReservedIPv4(bytes.slice(2, 6));
 
+  if (bytes[0] === 0x01 && bytes[1] === 0x00 && bytes.slice(2, 8).every((byte) => byte === 0)) return true; // discard-only 100::/64
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x00 && bytes[3] === 0x00) return true; // Teredo 2001::/32
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8) return true; // documentation 2001:db8::/32
   if (bytes[0] === 0xff) return true; // multicast ff00::/8
   if ((bytes[0]! & 0xfe) === 0xfc) return true; // unique local fc00::/7
   if (bytes[0] === 0xfe && (bytes[1]! & 0xc0) === 0x80) return true; // link-local fe80::/10
@@ -237,7 +240,12 @@ function isReservedIPv6(bytes: readonly number[]): boolean {
  * so a hostname that RESOLVES into private space is not caught here.
  */
 export function isPrivateOrReservedHost(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/gu, "").toLowerCase();
+  // The bracket strip handles `URL.hostname`'s IPv6 form. The trailing dot is
+  // the fully-qualified spelling of the SAME name -- `localhost.` resolves to
+  // loopback exactly as `localhost` does -- and `URL` preserves it on names
+  // (it normalizes it away only on address literals), so it has to come off
+  // here or the reserved-name test below is trivially side-stepped.
+  const host = hostname.replace(/^\[|\]$/gu, "").replace(/\.$/u, "").toLowerCase();
   if (host === "") return true;
   if (host === "localhost" || host.endsWith(".localhost")) return true;
 

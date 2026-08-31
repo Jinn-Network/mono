@@ -104,6 +104,15 @@ const MAX_REDIRECTS = 5;
  * promise the guard makes: a peer may move a request only within an origin the
  * operator already chose. The path within that origin stays the peer's to
  * choose -- it always was, since the peer serves the archive.
+ *
+ * Note this is deliberately weaker than the resolver's test, which is origin
+ * PLUS the serving root's path prefix. The transport has no serving root to
+ * compare against -- the fleet daemon builds it with an empty base and shares
+ * one instance across sources -- so a same-origin redirect could move the fetch
+ * outside that prefix. Harmless today (a path-bearing serving root has never
+ * had a working `.well-known` fetch, so the prefix is always `/`), but a
+ * deployment that changes that must move the prefix test in here rather than
+ * inherit the asymmetry silently.
  */
 async function fetchWithinOrigin(
   fetchLike: FetchLike,

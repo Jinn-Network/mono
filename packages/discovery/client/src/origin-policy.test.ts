@@ -152,6 +152,13 @@ describe("isPrivateOrReservedHost (§7/§14.1 hostile-locator classifier)", () =
     "::ffff:0:127.0.0.1", // IPv4-translated: the ffff sits one group earlier than IPv4-mapped
     "::ffff:0:10.0.0.1",
     "64:ff9b:1::7f00:1", // RFC 8215 local-use NAT64, refused whole
+    "localhost.", // the fully-qualified spelling of the same reserved name
+    "LOCALHOST.",
+    "foo.localhost.",
+    "127.0.0.1.", // URL normalizes the trailing dot off an address literal
+    "100::1", // discard-only 100::/64
+    "2001::5ef5:79fd", // Teredo 2001::/32
+    "2001:db8::1", // documentation 2001:db8::/32
   ];
   for (const host of refused) {
     it(`refuses ${host}`, () => {
