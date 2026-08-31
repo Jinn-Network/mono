@@ -45,6 +45,60 @@ The trust root is equally blunt, from `claim-package.json` `verification.trustRo
 "Signatures verify against the bundle-carried public keys minted by this
 workspace; there is no third-party trust anchor on the self-run venue."
 
+## Post-seal randomness: `beacon-binding/1`
+
+A seal shows a method document existed by a given time. It does not show the run
+followed it: a party could run privately, write a method describing what already
+happened, seal it, and re-run. A run closes that gap by binding a run property to
+a **public beacon value that did not exist when the seal was taken**
+(`beacon-binding/1`, issue #2976). `colophon status` reports the binding, and
+the derivation below is the whole procedure — recompute it yourself.
+
+The binding record names the sealed digest it postdates (`sealDigest`), when that
+seal was taken (`sealedAt`), the beacon (`source`, `round`, `value`), and either a
+drawn `sample` or, for a census run, the derived `order`.
+
+**Step 1 — check the beacon postdates the seal.** For a scheduled beacon the round
+index gives the instant by arithmetic, with no network access:
+
+| `source` | round 1 published at (Unix seconds) | period (seconds) |
+| --- | --- | --- |
+| `drand/quicknet` | 1692803367 | 3 |
+| `drand/default` | 1595431050 | 30 |
+
+`instant = genesis + (round - 1) * period`, and it must be strictly later than
+`sealedAt`. `bitcoin/mainnet` indexes by block height, whose time needs block
+headers; that ordering is what the chain asserts, not something the bundle proves,
+and the report face says so in those words.
+
+**Step 2 — check the beacon value against the beacon itself.** The `(round, value)`
+pair is public. Fetch it from the beacon and compare; a value the beacon never
+published binds nothing, and no Colophon code can tell you that.
+
+**Step 3 — recompute the derivation.** For each item identity — a
+`sha256:`-prefixed lowercase-hex task digest — compute
+
+```text
+HMAC-SHA256(key = utf8(sealDigest || value), message = utf8(itemSha256))
+```
+
+`sealDigest` enters as its `sha256:`-prefixed lowercase-hex string (71
+characters) and `value` as its 64 lowercase hex digits. Both are fixed-length, so
+**no delimiter separates them**. Sort the items ascending by those 32 HMAC bytes
+compared as *unsigned* bytes, breaking ties by `itemSha256` in code-unit order.
+That order is the answer: for a census run it is the execution order, and for a
+sampled run the slate is its first `sampleSize` entries.
+
+This is deliberately the same encoding as the reference verifier's
+`screening-sample/1` procedure, whose only difference is that it keys on a sealed
+seed rather than on post-seal randomness.
+
+**What each binding establishes.** A beacon-drawn slate could not have been
+selected after the fact without predicting the beacon. A census run's binding is
+weaker and is stated as such: it shows the run's ORDER was fixed by randomness
+postdating the seal, not that the population was — a census makes no population
+choice. A run with no binding establishes neither, and its report face says so.
+
 ## The record family
 
 A `benchmark-product-public-bundle/2` bundle is one directory:

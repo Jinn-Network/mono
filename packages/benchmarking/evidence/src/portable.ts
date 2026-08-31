@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
+  BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE,
   documentDigest,
   evidenceReferenceKey,
+  isMetadataFirstBundleProfile,
   parseBenchmarkAnalysisManifest,
   parseBenchmarkDefinitionV2,
   parseEvidenceCohort,
@@ -12,6 +15,7 @@ import {
   parseMatrixV2,
   sealEvidenceNativeBundleManifestV5,
   serializeCanonicalJson,
+  type EvidenceNativeBundleProfile,
   type EvidenceNativeClaimPackageV3,
   type EvidenceRecordReference,
 } from "@jinn-network/benchmarking-protocol";
@@ -50,10 +54,31 @@ export interface VerifyEvidenceNativePortableBundleInput {
   verifySignature(input: EvidenceNativeSignatureVerificationInput): boolean | Promise<boolean>;
 }
 
+/**
+ * What the `artifact-integrity` check actually did with the artifact bodies (issue #2986). A
+ * metadata-first bundle carries the digests without the bodies, so the honest outcome is
+ * `not-fetched` -- neither a pass over bytes nobody read nor a failure of a bundle that is exactly
+ * what it declares itself to be. A carried body is still digest-checked in both profiles, and a
+ * mismatch still fails the whole verification.
+ */
+export interface EvidenceNativeArtifactContentReport {
+  readonly status: "verified" | "not-fetched";
+  /** Declared artifacts whose bodies were carried and digest-checked. */
+  readonly verified: number;
+  /** Declared artifacts whose bodies were not carried. */
+  readonly notFetched: number;
+  /** Those artifacts' exact digests, code-unit sorted: the address to fetch and the expectation
+   * to check against, which is how the two profiles cross-reference. */
+  readonly notFetchedDigests: readonly string[];
+}
+
 export interface EvidenceNativePortableBundleVerification {
   readonly format: "benchmark-product-public-bundle/5";
+  /** The profile IRI exactly as the bundle's own `bundle.json` declares it. */
+  readonly profile: EvidenceNativeBundleProfile;
   readonly identity: `sha256:${string}`;
   readonly checks: typeof EVIDENCE_NATIVE_BUNDLE_V5_CHECKS;
+  readonly artifactContent: EvidenceNativeArtifactContentReport;
   readonly benchmarkDigest: `sha256:${string}`;
   readonly manifestDigest: `sha256:${string}`;
   readonly cohortDigest: `sha256:${string}`;
@@ -101,8 +126,50 @@ function decodeBase64(value: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+const ARTIFACT_PATH = /^artifacts\/([0-9a-f]{64})\.bin$/u;
+
+export interface BuildEvidenceNativeBundleManifestV5Options {
+  /** Defaults to the full-evidence profile, so every existing caller keeps byte-identical output. */
+  readonly profile?: EvidenceNativeBundleProfile;
+}
+
+/**
+ * The artifact bodies a metadata-first bundle keeps: the declared signer public keys. They are
+ * trust material the `signature-validity` check reads rather than evidence a reader may fetch
+ * later, and dropping them would make the profile unverifiable rather than smaller.
+ */
+export function metadataFirstRetainedArtifactDigests(
+  claim: EvidenceNativeClaimPackageV3,
+): ReadonlySet<string> {
+  return new Set(claim.trust.signers.map((signer) => signer.publicKey.digest.sha256));
+}
+
+/**
+ * Derives the metadata-first form of a full-evidence bundle by dropping exactly the evidence
+ * artifact bodies. Every retained member -- `claim-package.json` included -- keeps its exact bytes,
+ * so the two forms differ only in `bundle.json` and in which `artifacts/` members exist.
+ */
+export function projectMetadataFirstEvidenceNativeBundle(
+  files: ReadonlyMap<string, Uint8Array>,
+): Map<string, Uint8Array> {
+  const claim = parseEvidenceNativeClaimPackageV3(read(files, "claim-package.json"));
+  const retained = metadataFirstRetainedArtifactDigests(claim);
+  const projected = new Map<string, Uint8Array>();
+  for (const [path, bytes] of files) {
+    if (path === "bundle.json") continue;
+    const match = ARTIFACT_PATH.exec(path);
+    if (match !== null && !retained.has(match[1]!)) continue;
+    projected.set(path, bytes);
+  }
+  projected.set("bundle.json", buildEvidenceNativeBundleManifestV5(projected, {
+    profile: BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
+  }).bytes);
+  return projected;
+}
+
 export function buildEvidenceNativeBundleManifestV5(
   files: ReadonlyMap<string, Uint8Array>,
+  options: BuildEvidenceNativeBundleManifestV5Options = {},
 ) {
   if (files.has("bundle.json")) throw new TypeError("bundle.json is produced by the manifest builder");
   const entries = [...files].map(([path, bytes]) => {
@@ -111,7 +178,7 @@ export function buildEvidenceNativeBundleManifestV5(
   }).sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
   return sealEvidenceNativeBundleManifestV5({
     format: "benchmark-product-public-bundle/5",
-    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
+    profile: options.profile ?? BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE,
     files: entries,
   });
 }
@@ -121,6 +188,7 @@ export async function verifyEvidenceNativePortableBundle(
 ): Promise<EvidenceNativePortableBundleVerification> {
   const manifestBytes = read(input.files, "bundle.json");
   const bundle = parseEvidenceNativeBundleManifestV5(manifestBytes);
+  const metadataFirst = isMetadataFirstBundleProfile(bundle.profile);
   const expectedPaths = new Set(["bundle.json", ...bundle.files.map(({ path }) => path)]);
   if (expectedPaths.size !== input.files.size || [...input.files.keys()].some((path) => !expectedPaths.has(path))) {
     throw new TypeError("portable bundle file closure differs from bundle.json");
@@ -159,9 +227,27 @@ export async function verifyEvidenceNativePortableBundle(
 
   const recordBytes = new Map<string, Uint8Array>();
   const publicArtifacts = new Map<string, Uint8Array>();
+  const notFetchedArtifacts: string[] = [];
+  // Under metadata-first the carried artifact set is exactly the trust material, never a partial
+  // fetch: a bundle that keeps some other body is not the profile it declares, and admitting it
+  // would make "metadata-first" describe an open-ended family instead of one exact projection.
+  const retainedArtifacts = metadataFirst ? metadataFirstRetainedArtifactDigests(claim) : undefined;
+  if (retainedArtifacts !== undefined) {
+    for (const path of input.files.keys()) {
+      const match = ARTIFACT_PATH.exec(path);
+      if (match !== null && !retainedArtifacts.has(match[1]!)) {
+        throw new TypeError(`metadata-first bundle carries the omitted artifact body ${path}`);
+      }
+    }
+  }
   for (const artifact of claim.records.artifacts) {
-    const bytes = read(input.files, `artifacts/${artifact.digest.sha256}.bin`);
-    assertDescriptor(bytes, artifact, `artifacts/${artifact.digest.sha256}.bin`);
+    const path = `artifacts/${artifact.digest.sha256}.bin`;
+    if (retainedArtifacts !== undefined && !retainedArtifacts.has(artifact.digest.sha256)) {
+      notFetchedArtifacts.push(artifact.digest.sha256);
+      continue;
+    }
+    const bytes = read(input.files, path);
+    assertDescriptor(bytes, artifact, path);
     publicArtifacts.set(artifact.digest.sha256, bytes);
   }
   const declaredRecordPaths = new Set<string>();
@@ -184,10 +270,16 @@ export async function verifyEvidenceNativePortableBundle(
     },
   };
 
-  const signers = new Map(claim.trust.signers.map((signer) => [signer.keyId, {
-    signer,
-    publicKeyBytes: read(input.files, `artifacts/${signer.publicKey.digest.sha256}.bin`),
-  }]));
+  const signers = new Map(claim.trust.signers.map((signer) => {
+    const path = `artifacts/${signer.publicKey.digest.sha256}.bin`;
+    const publicKeyBytes = read(input.files, path);
+    // Bind the key bytes to the digest the claim declared for them, not merely to the path they
+    // were filed under. The metadata-first profile defines its retained set from these digests
+    // (issue #2986), so a key whose bytes hash to something else would make "exactly the declared
+    // signer public keys" a statement about filenames rather than about bytes.
+    assertDescriptor(publicKeyBytes, signer.publicKey, path);
+    return [signer.keyId, { signer, publicKeyBytes }] as const;
+  }));
   const verifiedSignerKeyIds = new Set<string>();
   const verifySignature = async (signature: DsseSignatureInput, identity: string, allowed: readonly string[]) => {
     if (signature.keyid === undefined) return false;
@@ -211,7 +303,9 @@ export async function verifyEvidenceNativePortableBundle(
         if (artifact !== undefined) available.set(entity["@id"], artifact);
       }
       const integrity = checkArtifactIntegrity(validated.value, available);
-      if (integrity.mismatched !== 0 || integrity.unavailable !== 0) {
+      // A carried body is digest-checked in both profiles, so a mismatch always fails. An absent
+      // body fails only where the bundle promised to carry it.
+      if (integrity.mismatched !== 0 || (!metadataFirst && integrity.unavailable !== 0)) {
         throw new TypeError("Execution Evidence artifact closure is not fully portable");
       }
     } else if (reference.family === "result-evaluation") {
@@ -277,13 +371,25 @@ export async function verifyEvidenceNativePortableBundle(
     matrix.cohort.digest.sha256 !== claim.records.cohort.digest.sha256 ||
     matrix.manifest.digest.sha256 !== claim.records.manifest.digest.sha256
   ) throw new TypeError("claim-package/3 is inconsistent with the exact evidence-native chain");
+  // Full evidence closes over bytes; metadata-first closes over digests. Either way an evidence
+  // reference the claim never declared is still a hole, not a deferred fetch.
+  const declaredArtifacts = new Set(claim.records.artifacts.map((artifact) => artifact.digest.sha256));
   for (const digest of referencedArtifacts) {
-    if (!publicArtifacts.has(digest)) throw new TypeError(`claim artifact closure omits sha256:${digest}`);
+    if (publicArtifacts.has(digest)) continue;
+    if (metadataFirst && declaredArtifacts.has(digest)) continue;
+    throw new TypeError(`claim artifact closure omits sha256:${digest}`);
   }
   return {
     format: "benchmark-product-public-bundle/5",
+    profile: bundle.profile,
     identity: documentDigest(manifestBytes),
     checks: EVIDENCE_NATIVE_BUNDLE_V5_CHECKS,
+    artifactContent: {
+      status: notFetchedArtifacts.length === 0 ? "verified" : "not-fetched",
+      verified: publicArtifacts.size,
+      notFetched: notFetchedArtifacts.length,
+      notFetchedDigests: [...notFetchedArtifacts].sort(),
+    },
     benchmarkDigest: documentDigest(benchmarkBytes),
     manifestDigest: documentDigest(analysisManifestBytes),
     cohortDigest: documentDigest(cohortBytes),

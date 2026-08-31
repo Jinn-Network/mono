@@ -40,6 +40,12 @@ export function resolveLiveOffers(entries: readonly OfferEntry[]): SupersessionR
   const diagnostics: ValidationDiagnostic[] = [];
   const byDigest = new Map<Sha256Digest, OfferEntry>();
   const unique: OfferEntry[] = [];
+  /**
+   * `unique` index -> the caller's `entries` index it came from. Every diagnostic path is
+   * quoted in the caller's index space, because that is the only one the caller holds; the
+   * two spaces diverge the moment a duplicate is dropped.
+   */
+  const sourceIndices: number[] = [];
 
   entries.forEach((entry, index) => {
     if (byDigest.has(entry.digest)) {
@@ -52,6 +58,7 @@ export function resolveLiveOffers(entries: readonly OfferEntry[]): SupersessionR
     }
     byDigest.set(entry.digest, entry);
     unique.push(entry);
+    sourceIndices.push(index);
   });
 
   const supersedersByPredecessor = new Map<Sha256Digest, number>();
@@ -64,7 +71,8 @@ export function resolveLiveOffers(entries: readonly OfferEntry[]): SupersessionR
    */
   const honoredEdges = new Map<Sha256Digest, Sha256Digest>();
 
-  unique.forEach((entry, index) => {
+  unique.forEach((entry, uniqueIndex) => {
+    const index = sourceIndices[uniqueIndex];
     // The schema pins `supersedes` to the `sha256:<64 lowercase hex>` grammar, which is
     // exactly `Sha256Digest`; zod infers the regex-refined string as plain `string`.
     const predecessorDigest = entry.offer.supersedes as Sha256Digest | undefined;
@@ -130,11 +138,21 @@ export function resolveLiveOffers(entries: readonly OfferEntry[]): SupersessionR
   // of a cycle would silently empty a holder's live set for a subject, and a set that vanishes
   // with no diagnostic is the worst possible answer. The edges are dropped and every member
   // stays live.
+  //
+  // Each offer supersedes at most one predecessor, so the walk from any start is a single
+  // path, and every node it crosses is settled by that one walk: a node already known to
+  // reach no live cycle can never begin one. Settling them is what keeps this linear in the
+  // number of edges rather than cubic in chain depth — and depth is the ordinary case, since
+  // a holder who reprices hourly has a chain thousands deep within the year.
+  const settled = new Set<Sha256Digest>();
   for (const digest of honoredEdges.keys()) {
+    if (settled.has(digest)) continue;
     const path: Sha256Digest[] = [];
+    const positionOnPath = new Map<Sha256Digest, number>();
     for (let cursor: Sha256Digest | undefined = digest; cursor !== undefined;) {
-      if (path.includes(cursor)) {
-        const cycle = path.slice(path.indexOf(cursor));
+      const revisited = positionOnPath.get(cursor);
+      if (revisited !== undefined) {
+        const cycle = path.slice(revisited);
         for (const member of cycle) honoredEdges.delete(member);
         diagnostics.push({
           code: "SUPERSESSION_CYCLE",
@@ -145,9 +163,12 @@ export function resolveLiveOffers(entries: readonly OfferEntry[]): SupersessionR
         });
         break;
       }
+      if (settled.has(cursor)) break;
+      positionOnPath.set(cursor, path.length);
       path.push(cursor);
       cursor = honoredEdges.get(cursor);
     }
+    for (const member of path) settled.add(member);
   }
 
   // Derived only now, from the edges that survived the cycle pass. A member of a cycle that

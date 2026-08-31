@@ -38,6 +38,11 @@ const exclude = [
   'test/hermetic/bootstrap-from-scratch.test.ts',
   'test/hermetic/full-loop.test.ts',
   'test/hermetic/indexer-roundtrip.test.ts',
+  // Same reason, plus one of its own: it writes the evaluator deployment sidecar to a FIXED repo
+  // path, which `test/native-evaluator/prediction-deployment.test.ts` also writes (and deliberately
+  // corrupts) — harmless under the hermetic gate's `fileParallelism: false`, a nondeterministic
+  // cross-file red under this config's parallel run.
+  'test/hermetic/native-evaluator-activity.test.ts',
   // G0b's on-chain public-repository lifecycle compiles contracts and spawns
   // local Anvil, so it is excluded from the default unit run for the same
   // reason as the files above. It is NOT unrun: `vitest.hermetic.config.ts`
