@@ -195,6 +195,7 @@ const FACTS_CHAIN_ENVIRONMENTS_FORBIDDEN_PACKAGES = [
 // never imports it. Without the line here, a production import would pass both this guard and
 // the inventory guard.
 const FACTS_OFFERS_FORBIDDEN_PACKAGES = [
+  '@jinn-network/trust-core',
   '@jinn-network/record-discovery-serve', '@jinn-network/record-discovery-client',
   '@jinn-network/record-discovery-facts-evidence', '@jinn-network/record-discovery-facts-trust',
   '@jinn-network/record-discovery-facts-task-execution',

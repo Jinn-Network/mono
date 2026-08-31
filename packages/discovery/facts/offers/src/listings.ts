@@ -43,7 +43,9 @@ function stringArrayField(card: Record<string, unknown>, name: string): string[]
   if (!has(card, name)) return undefined;
   const value = card[name];
   if (!Array.isArray(value)) return undefined;
-  return value.every((entry) => typeof entry === "string") ? (value as string[]) : undefined;
+  // Copied, not aliased: the array lives on the caller's `item.facts`, and a validating
+  // reader must not hand back a reference whose contents can change after it checked them.
+  return value.every((entry) => typeof entry === "string") ? [...(value as string[])] : undefined;
 }
 
 /** An amount as the offer schema pins it: an exact positive integer, no sign, no leading zero. */
