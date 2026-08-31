@@ -500,7 +500,7 @@ describe("runBind against a declared beacon source", () => {
     const stored = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, result.result.recordSha256)));
     expect(stored.declaredSource).toBe("drand/quicknet");
     // The face states the stronger property and drops the residue clause.
-    expect(result.result.statement).toContain("The source was not the operator's to pick either");
+    expect(result.result.statement).toContain("Nor was the source:");
     expect(result.result.statement).not.toContain("What choosing remains is the source");
   });
 

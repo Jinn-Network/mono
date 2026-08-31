@@ -382,9 +382,16 @@ export type BeaconRoundBasis = "seal-derived" | "operator-chosen";
 /**
  * Whether the seal fixed WHICH BEACON applied, or the operator picked it (issue #3426).
  *
- * `seal-declared` -- the sealed Run named this source, so the binding had one beacon available and
- * `bind` refuses a binding naming any other. `operator-chosen` -- the record declares no source, so
- * the operator selected one from the admitted set after sealing.
+ * `seal-declared` -- the record RESTATES a source the sealed Run named, so the binding had one
+ * beacon available and `bind` refuses a binding naming any other. `operator-chosen` -- the record
+ * declares no source, so the operator selected one from the admitted set after sealing.
+ *
+ * "Restates" is exact, and is the same standing the record's `sealedAt` and `sealDigest` have: this
+ * function never sees the Run, so it can check only that the restatement agrees with the beacon the
+ * binding itself names. Whether it agrees with the RUN is a separate check, made by whoever holds
+ * the sealed record -- `core/src/binding/carriage.ts` workspace-side, and step 2c of
+ * `EXTERNAL-VERIFICATION.md` for an external reader. Without that check a restatement is only a
+ * claim, and a face keyed on it says more than these bytes establish.
  *
  * The source residue is not a swap between equals, which is why it needed closing rather than only
  * reporting: `bitcoin/mainnet` is `attributive-height`, so `requiredBeaconRound` derives nothing for

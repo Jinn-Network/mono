@@ -198,7 +198,7 @@ describe("runBindingSentence", () => {
       (mode) => {
         const build = mode === "census" ? census : sampled;
         const declared = runBindingSentence(build("drand/quicknet", SEAL_DERIVED_ROUND, true));
-        expect(declared).toContain("The source was not the operator's to pick either");
+        expect(declared).toContain("Nor was the source:");
         expect(declared).toContain("the sealed record names the beacon this run binds to");
         expect(declared).toContain("first round this source publishes after the seal");
         // The residue paragraph is retracted, not merely joined by a stronger one.
@@ -207,9 +207,19 @@ describe("runBindingSentence", () => {
       },
     );
 
-    test("an undeclared source keeps the residue clause exactly as it read before", () => {
+    test("an undeclared source still names the residue, and claims nothing stronger", () => {
       expect(runBindingSentence(census())).toContain("What choosing remains is the source");
-      expect(runBindingSentence(census())).not.toContain("The source was not the operator's to pick");
+      expect(runBindingSentence(census())).toContain("indexed by block height");
+      expect(runBindingSentence(census())).not.toContain("Nor was the source:");
+    });
+
+    // The third face branch: a scheduled source bound to a later-than-required round. `runBind`
+    // refuses it, so it is reachable only through a foreign record read by the exported face --
+    // which is exactly why it must not be the one branch that says nothing about the source.
+    test.each([true, false])("a chosen round on a scheduled source still states the source (declared=%s)", (declared) => {
+      const sentence = runBindingSentence(census("drand/quicknet", CHOSEN_ROUND, declared));
+      expect(sentence).toContain("one of several the operator could have realized");
+      expect(sentence).toContain(declared ? "Nor was the source:" : "What choosing remains is the source");
     });
 
     // AC3: declaring the source fixes the BEACON, not the height inside it. A face that read

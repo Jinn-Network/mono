@@ -99,7 +99,6 @@ export function readRunDeclaredBeaconSource(workspaceDir: string, runSha256: str
   return readBeaconSource(run);
 }
 
-
 /**
  * Parses and verifies one binding record's exact bytes. Shared with the `bind` operation so the
  * record is verified by the same function before it is stored and on every read afterwards — a

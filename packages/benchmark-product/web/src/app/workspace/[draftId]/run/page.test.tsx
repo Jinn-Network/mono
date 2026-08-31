@@ -246,6 +246,28 @@ describe("durable run monitor cancellation language", () => {
       .not.toContain("111111111");
   });
 
+  test("offers only the beacon the seal declares, and says so (#3426)", async () => {
+    const view = status("running", false);
+    loadRunViewMock.mockReturnValue({
+      ...view,
+      status: { ...view.status, result: { ...view.status.result, declaredBeaconSource: "drand/quicknet" } },
+    });
+    const markup = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(markup).toContain('<option value="drand/quicknet">');
+    // `bind` refuses every other source, so offering one would be offering a refusal.
+    expect(markup).not.toContain('<option value="bitcoin/mainnet">');
+    expect(markup).not.toContain('<option value="drand/default">');
+    expect(markup).toContain("seal names the beacon below");
+  });
+
+  test("offers every admitted beacon, and adds no sentence, when the seal declares none (#3426)", async () => {
+    loadRunViewMock.mockReturnValue(status("running", false));
+    const markup = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(markup).toContain('<option value="bitcoin/mainnet">');
+    expect(markup).toContain('<option value="drand/quicknet">');
+    expect(markup).not.toContain("seal names the beacon below");
+  });
+
   test("marks a cell stranded between its delivered event and its delivery record (#3084)", async () => {
     loadRunViewMock.mockReturnValue({
       ok: true,

@@ -13,10 +13,11 @@ import {
   expectedCellSet,
   parseBenchmark,
   parseRun,
+  readBeaconSource,
 } from "@jinn-network/benchmarking-records";
 import { BEACON_SOURCE_IDS, requiredBeaconRound, runBindingClass, runBindingSentence } from "@colophon-claims/verify";
 import type { BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
-import { readRunBindingCarriage, readRunDeclaredBeaconSource } from "../binding/carriage.js";
+import { readRunBindingCarriage } from "../binding/carriage.js";
 import type { LifecycleState } from "../domain/lifecycle.js";
 import { refuse, type ProductErrorEnvelope } from "../errors.js";
 import { cancelRequested } from "../run/cancel-marker.js";
@@ -124,6 +125,12 @@ export interface RunStatusResult {
    * what they fetch the value for. Absent once the run has bound, once it has launched, and before
    * it is locked — in each of those cases there is no round left to offer.
    */
+  readonly bindableBeaconRounds?: readonly {
+    readonly source: BeaconSourceId;
+    readonly round: number;
+    /** RFC 3339 UTC instant that round publishes, from the source's own schedule. */
+    readonly publishedAt: string;
+  }[];
   /**
    * The beacon source this run's sealed record declares (issue #3426). Absent when it declares none
    * -- which is a fact about the run, not a default: an undeclared run leaves the beacon to the
@@ -131,12 +138,6 @@ export interface RunStatusResult {
    * bind form offers rather than the whole admitted set.
    */
   readonly declaredBeaconSource?: string;
-  readonly bindableBeaconRounds?: readonly {
-    readonly source: BeaconSourceId;
-    readonly round: number;
-    /** RFC 3339 UTC instant that round publishes, from the source's own schedule. */
-    readonly publishedAt: string;
-  }[];
   readonly evaluationRecovery?: {
     readonly maxInfrastructureRetries: 1;
     readonly retryableFailures: number;
@@ -296,9 +297,11 @@ export function runStatus(
 
       const binding = readRunBindingCarriage(context.workspaceDir, runState);
       const sealedAt = runState.lockedAt;
-      const declaredBeaconSource = runState.runSha256 === undefined
-        ? undefined
-        : readRunDeclaredBeaconSource(context.workspaceDir, runState.runSha256);
+      // Read off the Run record already parsed above rather than re-fetching and re-parsing the
+      // same bytes. Reported as the record's own string rather than narrowed to the admitted set:
+      // a declaration this product could not derive from is a fact about the run, and narrowing it
+      // away would report the run as declaring nothing while its binding list stayed empty.
+      const declaredBeaconSource = readBeaconSource(runRecord as unknown as Record<string, unknown>);
       const bindable = binding === undefined
         && document.state === "locked"
         && runState.launchedAt === undefined

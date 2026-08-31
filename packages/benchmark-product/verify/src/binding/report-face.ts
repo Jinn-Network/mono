@@ -12,8 +12,8 @@
  * - **The words key on facts, not on configuration.** Every value in a sentence below comes from
  *   the verified binding itself, so the text is identical for every reader.
  *
- * A third rule follows from issues #3322 and #3426: **a sentence claims unchosen-ness only where the
- * seal established it**, separately for the round and for the source. A beacon that merely postdates the seal makes the value unpredictable and
+ * A third rule follows from issues #3322 and #3426: **a sentence claims unchosen-ness only where
+ * the seal established it**, separately for the round and for the source. A beacon that merely postdates the seal makes the value unpredictable and
  * leaves the operator choosing among the values that postdate it. So both sentences carry
  * `roundChoiceClause`, which asserts the second property under `seal-derived` and retracts it under
  * `operator-chosen` rather than letting either branch imply it.
@@ -87,8 +87,8 @@ function roundChoiceClause(binding: VerifiedRunBinding): string {
   // height-indexed one it fixes only WHICH CHAIN, and the round clause below still concedes the
   // height. Under `operator-chosen` this is the residue PR #3375 could only report.
   const sourceClause = binding.sourceBasis === "seal-declared"
-    ? "The source was not the operator's to pick either: the sealed record names the beacon this run "
-      + "binds to, so a binding naming any other source is refused."
+    ? "Nor was the source: the sealed record names the beacon this run binds to, so a binding naming any "
+      + "other source is refused."
     : "What choosing remains is the source — the seal names no beacon, so an operator could have bound "
       + "a different one, and this procedure admits a beacon indexed by block height where no round "
       + "follows from a seal at all.";
@@ -112,10 +112,13 @@ function roundChoiceClause(binding: VerifiedRunBinding): string {
     return `${declared} — and on the reader's side it is the chain, not this bundle, that places it after the `
       + `seal at all. Any other height would have derived a different ${derived} from the same inputs.`;
   }
+  // A chosen round on a scheduled source. The source clause still applies here -- a declared source
+  // narrows what could have been chosen even when the round was -- and omitting it would leave this
+  // one branch of the three saying nothing about the source at all.
   return `Which post-seal value applied was still the operator's choice: this binding names a round selected after `
     + `the seal, and every round the source published in between was an available alternative deriving a `
     + `different ${derived} from the same inputs. The value could not have been predicted; this ${derived} is `
-    + `nonetheless one of several the operator could have realized by waiting.`;
+    + `nonetheless one of several the operator could have realized by waiting. ${sourceClause}`;
 }
 
 const RECOMPUTE_CLAUSE =
