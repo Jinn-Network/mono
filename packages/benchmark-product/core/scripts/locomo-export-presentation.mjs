@@ -385,7 +385,9 @@ export function buildLocomoPresentation({ workspaceDir, draftId }) {
           + " grammar accepts a fenced label but refuses surrounding prose.",
       },
       excludedItems: { count: results.excluded.count, byArm: excludedByArm },
-      completenessFloor: disclosures.completeness.floor.toFixed(4),
+      // The sealed Report carries the floor as a decimal STRING; older material carried a JSON
+      // number. Normalized to one fixed precision either way rather than trusting the encoding.
+      completenessFloor: Number(disclosures.completeness.floor).toFixed(4),
       runOutcome: disclosures.completeness.runOutcome,
     },
     manipulationCheck: {

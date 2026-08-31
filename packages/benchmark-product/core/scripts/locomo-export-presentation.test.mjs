@@ -68,6 +68,7 @@ function buildReport(overrides = {}) {
     expected = 4320,
     judged = 4320,
     conflicted = 0,
+    floorAsNumber = false,
   } = overrides;
   const excludedTotal = Object.values(excludedForArm)
     .reduce((sum, byClass) => sum + Object.values(byClass).reduce((a, b) => a + b, 0), 0);
@@ -81,7 +82,9 @@ function buildReport(overrides = {}) {
     },
     disclosures: {
       perSubject: [{
-        completeness: { expected, judged, floor: 0.995, runOutcome: "complete" },
+        // A decimal STRING, as the real sealed Report carries it — the shape that caught a
+        // `.toFixed` on a string. A JSON number is exercised by `floorAsNumber` below.
+        completeness: { expected, judged, floor: floorAsNumber ? 0.995 : "0.995", runOutcome: "complete" },
       }],
     },
     results: {
@@ -233,6 +236,13 @@ describe("locomo-export-presentation", () => {
       );
     });
   }
+
+  test("normalizes the completeness floor whether the record carries a string or a number", () => {
+    for (const floorAsNumber of [false, true]) {
+      const presentation = buildLocomoPresentation({ workspaceDir: workspace({ floorAsNumber }), draftId: DRAFT });
+      assert.equal(presentation.accounting.completenessFloor, "0.9950");
+    }
+  });
 
   test("refuses a report that is not the binary-instrument analysis", () => {
     const root = workspace();
