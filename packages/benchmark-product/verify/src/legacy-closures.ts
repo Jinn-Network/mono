@@ -22,6 +22,7 @@
  */
 
 import { z } from "zod";
+import { refuse } from "./profile/errors.js";
 
 // ── Format literals ────────────────────────────────────────────────────────────────────────────
 
@@ -179,17 +180,12 @@ export const PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
 export const LEGACY_ANCHOR_MEMBER_PATTERN = /^anchors\/[a-f0-9]{64}\.bin$/u;
 
 export interface LegacyClosure {
-  readonly format: LegacyBundleFormat;
   /** Decides the mandatory member list, the evidence-catalog grammar, and the trust grammar. */
   readonly carriesQualification: boolean;
   /** Decides the `anchors/` allowlist and the `integrity-anchors` check. */
   readonly carriesAnchors: boolean;
   readonly mandatoryFiles: readonly string[];
   readonly checks: readonly string[];
-  readonly instructions: {
-    readonly command: string;
-    readonly compatibleCommand: string;
-  };
 }
 
 /**
@@ -199,51 +195,42 @@ export interface LegacyClosure {
  */
 export const LEGACY_CLOSURES: { readonly [F in LegacyBundleFormat]: LegacyClosure } = {
   [BUNDLE_FORMAT]: {
-    format: BUNDLE_FORMAT,
     carriesQualification: false,
     carriesAnchors: false,
     mandatoryFiles: PUBLIC_BUNDLE_FILES,
     checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
-    instructions: {
-      command: PUBLIC_BUNDLE_VERIFICATION_COMMAND,
-      compatibleCommand: PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
-    },
   },
   [BUNDLE_V4_FORMAT]: {
-    format: BUNDLE_V4_FORMAT,
     carriesQualification: true,
     carriesAnchors: false,
     mandatoryFiles: PUBLIC_BUNDLE_V4_FILES,
     checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
-    instructions: {
-      command: PUBLIC_BUNDLE_V4_VERIFICATION_COMMAND,
-      compatibleCommand: PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
-    },
   },
   [BUNDLE_V6_FORMAT]: {
-    format: BUNDLE_V6_FORMAT,
     carriesQualification: false,
     carriesAnchors: true,
     mandatoryFiles: PUBLIC_BUNDLE_FILES,
     checks: PUBLIC_BUNDLE_V6_CHECKS,
-    instructions: {
-      command: PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
-      compatibleCommand: PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
-    },
   },
   [BUNDLE_V7_FORMAT]: {
-    format: BUNDLE_V7_FORMAT,
     carriesQualification: true,
     carriesAnchors: true,
     mandatoryFiles: PUBLIC_BUNDLE_V4_FILES,
     checks: PUBLIC_BUNDLE_V7_CHECKS,
-    instructions: {
-      command: PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
-      compatibleCommand: PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
-    },
   },
 };
 
+/**
+ * Fails closed on a format outside the frozen four. TypeScript makes that unreachable, but
+ * `summarizeVerificationOutcome` is a published entry point and a JavaScript caller reaches this
+ * lookup untyped: a missing cell must be the verifier's own refusal rather than a bare property
+ * access on `undefined`, and it must never fall back to some other closure's answer — printing one
+ * closure's check denominator over another closure's bytes is exactly the accounting P4 forbids.
+ */
 export function legacyClosure(format: LegacyBundleFormat): LegacyClosure {
-  return LEGACY_CLOSURES[format];
+  const closure = LEGACY_CLOSURES[format];
+  if (closure === undefined) {
+    refuse("record-integrity", "bundle.manifest.format", `unknown legacy bundle format "${format}"`);
+  }
+  return closure;
 }

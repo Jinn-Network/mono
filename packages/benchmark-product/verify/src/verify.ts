@@ -86,8 +86,8 @@ import {
   type VerifiedBundleSnapshot,
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
-import { LEGACY_ANCHOR_MEMBER_PATTERN, legacyClosure, type LegacyBundleFormat } from "./legacy-closures.js";
 import { BUNDLE_V5_FORMAT } from "./manifest.js";
+import { LEGACY_ANCHOR_MEMBER_PATTERN, legacyClosure, type LegacyBundleFormat } from "./legacy-closures.js";
 import {
   evaluateIntegrityAnchors,
   type IntegrityAnchorsReport,

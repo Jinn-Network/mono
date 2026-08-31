@@ -55,8 +55,8 @@ import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/sig
 import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
-import { buildBundleManifest, verifyBundleManifest } from "./manifest.js";
 import { BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT } from "../legacy-closures.js";
+import { buildBundleManifest, verifyBundleManifest } from "./manifest.js";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { buildPublicAssets } from "./assets.js";
 import {

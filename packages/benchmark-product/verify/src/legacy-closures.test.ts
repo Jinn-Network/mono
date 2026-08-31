@@ -131,11 +131,16 @@ describe("frozen legacy closure values", () => {
 });
 
 describe("the four closure cells", () => {
-  test("the table has exactly the four formats and each cell names itself", () => {
+  test("the table has exactly the four formats", () => {
     expect(Object.keys(LEGACY_CLOSURES).sort()).toEqual([...LEGACY_BUNDLE_FORMATS].sort());
-    for (const format of LEGACY_BUNDLE_FORMATS) {
-      expect(legacyClosure(format).format).toBe(format);
-    }
+  });
+
+  test("a format outside the frozen four is refused, never answered from another cell", () => {
+    // Unreachable from TypeScript; `summarizeVerificationOutcome` is published, so a JavaScript
+    // caller reaches this lookup untyped.
+    expect(() => legacyClosure("benchmark-product-public-bundle/8" as never)).toThrow(
+      /unknown legacy bundle format/u,
+    );
   });
 
   test("two independent axes: v6 is v2 plus anchors, v7 is v4 plus anchors", () => {
@@ -166,24 +171,6 @@ describe("the four closure cells", () => {
     }
   });
 
-  test("each cell carries its own reader instructions", () => {
-    expect(legacyClosure(BUNDLE_FORMAT).instructions).toEqual({
-      command: PUBLIC_BUNDLE_VERIFICATION_COMMAND,
-      compatibleCommand: PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
-    });
-    expect(legacyClosure(BUNDLE_V4_FORMAT).instructions).toEqual({
-      command: PUBLIC_BUNDLE_V4_VERIFICATION_COMMAND,
-      compatibleCommand: PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
-    });
-    expect(legacyClosure(BUNDLE_V6_FORMAT).instructions).toEqual({
-      command: PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
-      compatibleCommand: PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
-    });
-    expect(legacyClosure(BUNDLE_V7_FORMAT).instructions).toEqual({
-      command: PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
-      compatibleCommand: PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
-    });
-  });
 });
 
 describe("the anchor member shape", () => {
