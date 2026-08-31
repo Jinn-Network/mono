@@ -69,7 +69,10 @@ under the ratified `/8` capability vector. Until it lands:
 
 - `colophon publish` refuses, with `code: "conflict"` and issue path
   `runs.<draftId>.externalImport`. The GUI's `run.publish` is the same
-  operation and refuses identically.
+  operation and refuses on the same fact; the browser boundary redacts every
+  publish detail by policy, so a GUI operator sees the code and that issue path
+  rather than this reason. (`run import` itself is GUI-unavailable, so an
+  imported run reaches the GUI only from a workspace the CLI imported into.)
 - Managed signed Report v2 publication (`colophon publication report`) refuses
   for the same reason: it seals the same disclosure into a record it announces
   publicly, without materializing a bundle.
