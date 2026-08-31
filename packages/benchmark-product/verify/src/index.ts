@@ -90,6 +90,20 @@ export * from "./admission/index.js";
 export * from "./schema.js";
 export * from "./profile/binary-judge-manifest.js";
 export * from "./profile/binary-qualification.js";
+// The sealed report presentation (`presentation.json`). Single-sourced here for the same reason the
+// anchored projection is: the product core imports this package, so the producer that seals the
+// member and the reader that authenticates it run one schema rather than two copies of one.
+export {
+  REPORT_PRESENTATION_MEMBER,
+  REPORT_PRESENTATION_SCHEMA_ID,
+  ReportPresentationProjectionError,
+  ReportPresentationSchema,
+  deriveReportPresentation,
+} from "./profile/report-presentation.js";
+export type {
+  DeriveReportPresentationInput,
+  ReportPresentation,
+} from "./profile/report-presentation.js";
 export { ClaimPackageSchema } from "./profile/claim.js";
 export type { ClaimPackage } from "./profile/claim.js";
 export { firstDifference } from "./profile/claim-consistency.js";

@@ -226,6 +226,34 @@ npx @colophon-claims/verify@0.2.1 <bundle-dir>
 with `@0.2` as the compatible line. It returns the same **seven checks** as v6,
 in the same order.
 
+#### The optional `presentation.json` member
+
+v7 is the one closure whose member list admits an OPTIONAL member,
+`presentation.json`: a `colophon.report-presentation/2` document carrying the
+reader-facing page copy for the report this bundle publishes — its title,
+summary, the pre-registered questions in the words they were posted in, the
+per-arm result table, the accounting, and the limitations. An operator seals it
+with `presentation set` before publishing; a run that never does publishes
+exactly the bytes it published before this member existed, at the same bundle
+identity.
+
+The member carries no evidence and gates nothing. It enters no claim package, no
+signed envelope, and no evidence catalog, and nothing in the bundle is verified
+against it. Its one integrity property is that it is an ordinary manifest entry,
+so its bytes are inside the bundle digest: changing a word changes the bundle
+identity, and the previously published bundle stays exactly as it was at its own
+digest-addressed path.
+
+When the member is present the reader runs one more check,
+`report-presentation`, and the promised check count is **eight** rather than
+seven. That check parses the document and binds it to the bundle: the schema
+literal, the exact canonical encoding, the declared closure version, and — the
+failure this member exists to make impossible — the Report and Report-envelope
+digests, which must be the ones this bundle itself materializes. A presentation
+lifted from another report is refused rather than shown to a reader under a
+passing check list. A `presentation.json` member in a v2, v4, or v6 bundle is a
+non-allowlisted file, exactly as an anchor member is in v2 and v4.
+
 ### Evidence-native bundle v5 and its two profiles
 
 `benchmark-product-public-bundle/5` is the evidence-native closure. Unlike every format above it

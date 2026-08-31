@@ -182,6 +182,8 @@ export const AdditionalBundleIdentitySchema = z.object({
     "report-verification",
     "claim-consistency",
     "integrity-anchors",
+    /** Recorded only by a publication that carried a report presentation. Additive in the same way. */
+    "report-presentation",
   ])),
 });
 
@@ -240,6 +242,9 @@ export const RunStateSchema = z.object({
     /** Recorded only by an anchored publication (anchor-evidence design §8). Additive: a receipt
      * written before this closure existed keeps exactly the six names it already had. */
     "integrity-anchors",
+    /** Recorded only by a publication that carried a report presentation. Unlike every name above
+     * it is conditional on the BUNDLE rather than on its format, because the member is optional. */
+    "report-presentation",
   ])).optional(),
   /** N-1 additional public bundle identities, one per additional Report, set at `publish` in the
    * SAME invocation as the canonical `bundleIdentity`/`bundleRelativePath`/`bundleChecks` triple
@@ -251,6 +256,15 @@ export const RunStateSchema = z.object({
   anchors: z.array(RunAnchorSchema).optional(),
   /** Absent on every run that has never bound to public randomness (issue #2976). */
   binding: RunBindingRefSchema.optional(),
+  /**
+   * sha256 hex of the sealed report presentation, set by `presentation set`. Absent on every run
+   * with no presentation, which is what keeps every existing bundle byte-identical.
+   *
+   * The DIGEST only, exactly as `anchors` records anchor digests and nothing about their content:
+   * the slug, the title, and the report the presentation names are read back from the record's own
+   * sealed bytes, never from here.
+   */
+  presentationSha256: Sha256HexSchema.optional(),
   suiteQuote: z.object({
     protocol: z.enum(SUITE_PROTOCOL_IDS).optional(),
     executionConformance: z.boolean(),

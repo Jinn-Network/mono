@@ -744,6 +744,8 @@ export {
   runAnchor,
   runBind,
   anchoringConfigure,
+  presentationSet,
+  presentationShow,
   runPreview,
   runPublish,
   runQuote,

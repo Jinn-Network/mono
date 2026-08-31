@@ -36,6 +36,8 @@ import {
   authorityRevoke,
   authorityShow,
   anchoringConfigure,
+  presentationSet,
+  presentationShow,
   runBind,
   createDraft,
   getDraft,
@@ -154,6 +156,9 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --beacon-source <id> --beacon-round <n> --beacon-value <64 hex>
   anchoring configure --workspace <dir> --principal <id>
                    (--provider <profileUri> --endpoint <url> | --file <anchoring.json> | --clear)
+  presentation set  --workspace <dir> --principal <id> --draft <draftId>
+                   --slug <publication-slug> --file <presentation.json>
+  presentation show --workspace <dir> --principal <id> --draft <draftId>
   publication configure --workspace <dir> --principal <id> --draft <draftId> --public-base-url <url>
   publication register  --workspace <dir> --principal <id> --draft <draftId> [--public-base-url <url>]
   publication status     --workspace <dir> --principal <id> --draft <draftId>
@@ -258,6 +263,8 @@ const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG
 const ANCHOR_FLAGS = ["workspace", "principal", "json", "draft", "subject", "provider", "endpoint"] as const;
 const BIND_FLAGS = ["workspace", "principal", "json", "draft", "beacon-source", "beacon-round", "beacon-value"] as const;
 const ANCHORING_CONFIGURE_FLAGS = ["workspace", "principal", "json", "provider", "endpoint", "file", "clear"] as const;
+const PRESENTATION_SET_FLAGS = ["workspace", "principal", "json", "draft", "slug", "file"] as const;
+const PRESENTATION_SHOW_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -1122,6 +1129,38 @@ function handleAnchoringConfigure(args: ParsedArgs, context: CliContext, jsonMod
 }
 
 
+/**
+ * `presentation set`. The payload always comes from a file, for the same reason a disclosure
+ * declaration does: it is a document, produced by a per-report export script that read this
+ * workspace's own sealed Report, and no part of it is a thing anyone types onto a command line.
+ *
+ * `--slug` is required and separate from the file even though the file carries its own. That is the
+ * point: the slug is the publication identity a human is asserting, and requiring it twice is what
+ * turns a payload copied from another report into a refusal instead of a wrong page.
+ */
+function handlePresentationSet(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, PRESENTATION_SET_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const result = presentationSet(opContext, {
+    draftId: required(args, "draft"),
+    slug: required(args, "slug"),
+    presentation: readJsonFile(pathFrom(context.cwd, required(args, "file"))),
+  });
+  return renderResult(result, jsonMode, (value) => `${value.replaced ? "replaced" : "sealed"} the report presentation ${value.recordSha256}\n`
+    + `slug ${value.slug}, title ${value.title}\n`
+    + `presents report ${value.reportSha256} on ${value.bundleFormat}\n`);
+}
+
+function handlePresentationShow(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, PRESENTATION_SHOW_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const result = presentationShow(opContext, { draftId: required(args, "draft") });
+  return renderResult(result, jsonMode, (value) => `report presentation ${value.recordSha256}\n`
+    + `schema ${value.schema}\n`
+    + `slug ${value.slug}, title ${value.title}\n`
+    + `presents report ${value.reportSha256} on ${value.bundleFormat}\n`);
+}
+
 async function handlePublicationConfigure(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, PUBLICATION_CONFIGURE_FLAGS);
   const opContext = buildOperationContext(args, context);
@@ -1469,6 +1508,8 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["anchor", handleAnchor],
   ["bind", handleBind],
   ["anchoring configure", handleAnchoringConfigure],
+  ["presentation set", handlePresentationSet],
+  ["presentation show", handlePresentationShow],
   ["publication configure", handlePublicationConfigure],
   ["publication register", handlePublicationRegister],
   ["publication status", handlePublicationStatus],

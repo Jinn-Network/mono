@@ -95,6 +95,12 @@ import {
 } from "./anchor/check.js";
 import { ClaimAnchorProjectionError, deriveClaimAnchors } from "./profile/anchor-claims.js";
 import {
+  REPORT_PRESENTATION_MEMBER,
+  ReportPresentationProjectionError,
+  deriveReportPresentation,
+  type ReportPresentation,
+} from "./profile/report-presentation.js";
+import {
   verifyBinaryJudgmentAdmissionClosure,
   type AdmissionAuthorityRole,
   type AdmissionSha256,
@@ -135,7 +141,14 @@ export type PublicBundleVerificationCheck =
   | "claim-consistency"
   /** Always present for the two anchored closures, `benchmark-product-public-bundle/6` and `/7`,
    * never for any earlier one (anchor-evidence design §8, §12). */
-  | "integrity-anchors";
+  | "integrity-anchors"
+  /**
+   * Present exactly when the bundle carries the optional `presentation.json` member, and only on the
+   * closures that allow it. Unlike every check above it is CONDITIONAL rather than per-format: the
+   * member is opt-in display copy, so a `/7` bundle without one runs the same seven checks it ran
+   * before this member existed, over the same bytes.
+   */
+  | "report-presentation";
 
 export interface LegacyPublicBundleVerificationResult extends PublicBundleSignerDisclosure {
   readonly format:
@@ -155,6 +168,10 @@ export interface LegacyPublicBundleVerificationResult extends PublicBundleSigner
    * subject's context outcome (anchor-evidence design §8). Statuses are disclosed facts, not a
    * summary — nothing here is folded into a single verified badge. */
   readonly anchors?: IntegrityAnchorsReport;
+  /** Present exactly when the bundle carries a `presentation.json` that bound to this bundle's own
+   * report. Disclosed as the parsed record, not as a badge: nothing about the numbers it repeats is
+   * proved by it being here, only that these are the bytes sealed into this bundle identity. */
+  readonly presentation?: ReportPresentation;
   readonly qualification?: {
     readonly publicationGrade: boolean;
     readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
@@ -448,6 +465,13 @@ export async function verifyPublicBundleSnapshot(
     ...evidence.records.map((record) => `records/${record.sha256}.bin`),
   ]);
   if (manifestPaths.has("verification/cancel-requested.json")) expectedPaths.add("verification/cancel-requested.json");
+  // `presentation.json` is allowlisted only by the closure versions that define it, exactly as
+  // `anchors/` is: a presentation member in a `/2`, `/4`, or `/6` bundle is a non-allowlisted file,
+  // and stays one. The member itself is optional even on `/7` — its ABSENCE is not a closure
+  // failure, because it carries no evidence and gates nothing.
+  const carriesPresentation = checked.manifest.format === BUNDLE_V7_FORMAT
+    && manifestPaths.has(REPORT_PRESENTATION_MEMBER);
+  if (carriesPresentation) expectedPaths.add(REPORT_PRESENTATION_MEMBER);
   for (const path of manifestPaths) {
     if (/^native\/inspect\/[a-f0-9]{64}\.eval$/u.test(path)) expectedPaths.add(path);
   }
@@ -1753,6 +1777,29 @@ export async function verifyPublicBundleSnapshot(
   // bundle whose anchors were stripped is a closure failure above, not a shorter check list here.
   if (carriesAnchors) checks.push("integrity-anchors");
 
+  // The optional display member. Parsed and BOUND here rather than merely allowlisted above,
+  // because the failure worth catching is not a malformed file — it is a well-formed presentation
+  // of a different experiment, which a reader would be shown as this one under a passing check
+  // list. Bound to the report identities this verification already re-derived, never to anything
+  // the member itself asserts.
+  let presentation: ReportPresentation | undefined;
+  if (carriesPresentation) {
+    try {
+      presentation = deriveReportPresentation({
+        bytes: read(REPORT_PRESENTATION_MEMBER),
+        reportSha256: identities.reportSha256,
+        reportEnvelopeSha256: identities.reportEnvelopeSha256,
+        bundleFormat: checked.manifest.format,
+      });
+    } catch (cause) {
+      if (cause instanceof ReportPresentationProjectionError) {
+        refuse("record-integrity", REPORT_PRESENTATION_MEMBER, cause.message);
+      }
+      throw cause;
+    }
+    checks.push("report-presentation");
+  }
+
   const dissentCellKeys = assembly.cells
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
     .map((cell) => cell.cellKey)
@@ -1809,6 +1856,7 @@ export async function verifyPublicBundleSnapshot(
       ...identities,
       ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
       ...(anchorReport === undefined ? {} : { anchors: anchorReport }),
+      ...(presentation === undefined ? {} : { presentation }),
       ...(qualification === undefined ? {} : {
         qualification: {
           publicationGrade: qualification.publicationGrade,

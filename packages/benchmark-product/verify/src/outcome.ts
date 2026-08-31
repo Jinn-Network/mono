@@ -40,13 +40,19 @@ export interface VerificationOutcome {
  * can print a pass over bytes nobody read (issue #2986).
  */
 export function summarizeVerificationOutcome(result: PublicBundleVerificationResult): VerificationOutcome {
-  const total = result.format === "benchmark-product-public-bundle/5"
+  const formatTotal = result.format === "benchmark-product-public-bundle/5"
     ? EVIDENCE_NATIVE_BUNDLE_V5_CHECKS.length
     : result.format === "benchmark-product-public-bundle/6"
       ? PUBLIC_BUNDLE_V6_CHECKS.length
       : result.format === "benchmark-product-public-bundle/7"
         ? PUBLIC_BUNDLE_V7_CHECKS.length
         : PUBLIC_BUNDLE_VERIFICATION_CHECKS.length;
+  // `report-presentation` is the one check whose presence is a property of the BUNDLE rather than
+  // of its format (`verify.ts`), so the promised count has to move with it. Counting it against the
+  // format's fixed list would print "7 of 7" over eight checks read, which misreports what the
+  // reader actually did.
+  const total = formatTotal
+    + ("presentation" in result && result.presentation !== undefined ? 1 : 0);
   const deferred = result.format === "benchmark-product-public-bundle/5"
     && result.artifactContent.status === "not-fetched"
     ? result.artifactContent

@@ -75,6 +75,8 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   runAnchor: "anchor",
   runBind: "bind",
   anchoringConfigure: "anchoring configure",
+  presentationSet: "presentation set",
+  presentationShow: "presentation show",
   publicationConfigure: "publication configure",
   publicationRegister: "publication register",
   publicationAccounting: "publication accounting",
@@ -123,6 +125,8 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   runAnchor: "anchor",
   runBind: "bind",
   anchoringConfigure: "anchoring.configure",
+  presentationSet: "presentation.set",
+  presentationShow: "presentation.show",
   publicationConfigure: "publication.configure",
   publicationRegister: "publication.register",
   publicationAccounting: "publication.accounting",
@@ -174,6 +178,10 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
     "Binds the sealed, not-yet-launched run to a public beacon value that postdates its seal, deriving and sealing the run's execution order from it (issue #2976).",
   anchoringConfigure:
     "Replaces or clears the workspace's ordered anchor provider and endpoint configuration, which is what makes later locks anchor automatically (authority-gated).",
+  presentationSet:
+    "Seals this run's reader-facing report presentation over its sealed Report, so the published bundle carries the page copy inside its own digest.",
+  presentationShow:
+    "Reads the sealed report presentation back out of the workspace's content-addressed store.",
   publicationConfigure: "Configures the mutable public source locator and explicit prospective-publication intent.",
   publicationRegister: "Stores, announces, and exact-probes the registration closure before dispatch or truthfully post-hoc.",
   publicationAccounting: "Publishes retained complete or partial dispatch accounting and Matrix v2 without running work or requiring a Report.",
@@ -233,6 +241,12 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   // does for `publication.configure`. A browser-supplied anchor endpoint would make this action an
   // outbound-request primitive pointed wherever a form said.
   anchoringConfigure: { status: "shipped", action: "anchoring.configure" },
+  // A presentation is a document, produced by a per-report export script that read this
+  // workspace's own sealed Report. A browser form for it would invite the hand-typed page copy
+  // whose numbers drift from the record it presents, which is the failure the export script's
+  // accounting guard exists to make impossible.
+  presentationSet: { status: "unavailable", reason: "requires a locally composed presentation payload file" },
+  presentationShow: { status: "unavailable", reason: "reads a local sealed record from the workspace store" },
   publicationConfigure: { status: "shipped", action: "publication.configure" },
   publicationRegister: { status: "shipped", action: "publication.register" },
   publicationAccounting: { status: "shipped", action: "publication.accounting" },

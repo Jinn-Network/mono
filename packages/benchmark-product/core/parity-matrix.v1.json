@@ -193,6 +193,26 @@
       }
     },
     {
+      "operation": "presentationSet",
+      "cliVerb": "presentation set",
+      "authorityGated": false,
+      "description": "Seals this run's reader-facing report presentation over its sealed Report, so the published bundle carries the page copy inside its own digest.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires a locally composed presentation payload file"
+      }
+    },
+    {
+      "operation": "presentationShow",
+      "cliVerb": "presentation show",
+      "authorityGated": false,
+      "description": "Reads the sealed report presentation back out of the workspace's content-addressed store.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "reads a local sealed record from the workspace store"
+      }
+    },
+    {
       "operation": "publicationAccounting",
       "cliVerb": "publication accounting",
       "authorityGated": true,

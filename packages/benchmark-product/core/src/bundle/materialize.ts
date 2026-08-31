@@ -57,6 +57,7 @@ import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
 import { BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
+import { readRunPresentationCarriage } from "../presentation/carriage.js";
 import { buildPublicAssets } from "./assets.js";
 import {
   BUNDLE_ASSEMBLY_FORMAT,
@@ -393,6 +394,43 @@ function recordClosure(input: MaterializeBundleInput): {
     );
   }
 
+  // Two independent axes, four closure versions. Resolved here rather than at the return, because
+  // the optional presentation member has to be told which closure it is about to travel on.
+  const format = anchored
+    ? binaryQualification
+      ? BUNDLE_V7_FORMAT
+      : BUNDLE_V6_FORMAT
+    : binaryQualification
+      ? BUNDLE_V4_FORMAT
+      : "benchmark-product-public-bundle/2";
+
+  // ── The optional report presentation (`presentation.json`) ─────────────────────────────────
+  //
+  // Opt-in display copy, sealed into the bundle digest and nothing more: it enters no claim, no
+  // evidence catalog, and no signed envelope. Its ONE binding is to the Report this bundle
+  // materializes, which is also how a multi-analysis run scopes it — a sibling analysis's bundle
+  // resolves a different Report, matches nothing, and publishes exactly the bytes it published
+  // before this run had a presentation at all.
+  const presentationCarriage = readRunPresentationCarriage({
+    workspaceDir,
+    runState,
+    reportSha256,
+    reportEnvelopeSha256,
+    bundleFormat: format,
+  });
+  if (presentationCarriage !== undefined && format !== BUNDLE_V7_FORMAT) {
+    // Refusing loudly rather than dropping the member. A silent drop is the worse failure: an
+    // operator would publish a bundle they believe carries their page copy and find out only from
+    // the ingester. The enumerated list of presentation-bearing closures lives in
+    // `../presentation/state.ts`, where the seal-time half of this pair reads it.
+    refuse(
+      "conflict",
+      "presentation.json",
+      `${BUNDLE_V7_FORMAT} is the only closure whose member list carries presentation.json, and this`
+      + ` run's bundle for this Report is ${format}`,
+    );
+  }
+
   const files = new Map<string, Uint8Array>([
     ["benchmark.json", benchmarkBytes],
     ["run.json", runBytes],
@@ -402,6 +440,9 @@ function recordClosure(input: MaterializeBundleInput): {
     ["claim-package.json", claimBytes],
     ["static-bundle.json", canonicalJsonBytes(exportStaticBundle(matrix, [report]))],
   ]);
+  if (presentationCarriage !== undefined) {
+    files.set("presentation.json", presentationCarriage.bytes);
+  }
   for (const record of anchorCarriage.records) {
     files.set(`anchors/${record.recordSha256}.bin`, record.bytes);
   }
@@ -1058,20 +1099,12 @@ function recordClosure(input: MaterializeBundleInput): {
   }))) {
     files.set(path, bytes);
   }
-  return {
-    files,
-    evidenceRecords,
-    // Two independent axes: carrying an anchor moves a bundle onto an anchored closure, and
-    // projecting a binary qualification moves it onto a qualification closure. Everything else
-    // emits exactly the version it emitted before either feature existed, byte for byte (§12).
-    format: anchored
-      ? binaryQualification
-        ? BUNDLE_V7_FORMAT
-        : BUNDLE_V6_FORMAT
-      : binaryQualification
-        ? BUNDLE_V4_FORMAT
-        : "benchmark-product-public-bundle/2",
-  };
+  // Two independent axes: carrying an anchor moves a bundle onto an anchored closure, and
+  // projecting a binary qualification moves it onto a qualification closure. Everything else emits
+  // exactly the version it emitted before either feature existed, byte for byte (§12). Carrying a
+  // presentation is NOT a third axis: the member is optional inside `/7` rather than a closure of
+  // its own, so a presentation never moves a bundle between versions.
+  return { files, evidenceRecords, format };
 }
 
 export function materializePublicBundle(
