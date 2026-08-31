@@ -31,6 +31,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/evidence-trace', join(root, 'packages', 'evidence', 'trace')],
   ['@jinn-network/evidence-trace-decode', join(root, 'packages', 'evidence', 'trace-decode')],
   ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
+  ['@jinn-network/record-discovery-transport-http', join(root, 'packages', 'discovery', 'transport-http')],
 ];
 
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'jinn-plugin-tree-packed-types-'));
