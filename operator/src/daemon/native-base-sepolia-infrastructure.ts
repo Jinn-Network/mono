@@ -247,6 +247,13 @@ export function createBaseSepoliaRecordTransport(input: {
    * Every record serving root this operator configured: its own `publicBaseUrl` plus each
    * `recordSources[].baseUrl`. Required rather than optional so a new construction site has to
    * state its destination policy; an empty set refuses every `byLocation` (#3431).
+   *
+   * The deployment coupling this introduces, stated plainly: a peer's announced
+   * `locations[].locator` must sit under the `baseUrl` the operator configured for that peer. That
+   * is the one-origin topology `native-fleet-serving-plane.ts` describes and the same assumption
+   * `exactLocation` already makes when it SYNTHESIZES a requester record location, but nothing
+   * validates it — configure a peer by a proxy hostname it does not advertise and its records are
+   * refused rather than fetched.
    */
   readonly recordOrigins: readonly string[];
   readonly fetchImpl: (request: string | URL, init?: RequestInit) => Promise<Response>;
@@ -263,14 +270,12 @@ export function createBaseSepoliaRecordTransport(input: {
   const httpTimeoutMs = resolveFetchTimeoutMs(
     input.httpFetchTimeoutMs, 'JINN_NATIVE_HTTP_FETCH_TIMEOUT_MS', DEFAULT_HTTP_FETCH_TIMEOUT_MS);
   const allowRecordLocation = containedByConfiguredRoot(input.recordOrigins);
-  // The IPFS API is the operator's own configured endpoint; it is contained to its own origin for
-  // the same reason a locator is — a redirect off it must not become an arbitrary destination.
-  const allowIpfsApi = containedByConfiguredRoot([new URL(input.ipfsApiUrl).origin]);
 
   // A hung fetch is abandoned via an AbortSignal AND an independent timeout race, so even a transport
   // that ignores the signal cannot leave the caller waiting past the bound. A timeout REJECTS (it is
   // a miss/error, never valid empty bytes), so the digest check below still guards every byte that
-  // does arrive — fail-closed is preserved.
+  // does arrive — fail-closed is preserved. `fetchBytes` spends ONE budget across a whole redirect
+  // chain (see there), so the bound stays a bound on the caller's wait, not on a single hop.
   const fetchWithTimeout = async (url: URL, timeoutMs: number, init?: RequestInit): Promise<Response> => {
     if (timeoutMs <= 0) return input.fetchImpl(url, init);
     const controller = new AbortController();
@@ -297,6 +302,19 @@ export function createBaseSepoliaRecordTransport(input: {
    * `redirect: "follow"` let a contained locator answer `302 Location: http://127.0.0.1:8545/` and
    * walked the daemon there. Same shape as `transport-http`'s `fetchWithinOrigin` on the archive
    * path, with containment in place of same-origin because containment is what a locator has.
+   *
+   * Two consequences of that substitution, stated rather than left to be inferred:
+   *
+   *  - a hop from one configured root to ANOTHER configured root is admitted, where the
+   *    same-origin rule would refuse it. Both are roots the operator chose, which is the whole of
+   *    the promise this policy makes.
+   *  - the timeout is ONE budget for the whole chain. `redirect: "follow"` held the chain under a
+   *    single `AbortSignal`; following manually would otherwise hand each of six hops a fresh
+   *    bound, and six times the HTTP bound is well past the 30s fleet worker lease TTL that bound
+   *    exists to stay under.
+   *
+   * Method handling matches `fetch`'s own: 301/302/303 downgrade to GET (the IPFS `block/get` POST
+   * is the only body-bearing caller), 307/308 preserve the method.
    */
   const fetchBytes = async (
     target: URL,
@@ -305,6 +323,8 @@ export function createBaseSepoliaRecordTransport(input: {
     init?: RequestInit,
   ): Promise<Uint8Array> => {
     let current = target;
+    let currentInit = init;
+    const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : undefined;
     for (let hop = 0; ; hop += 1) {
       if (current.protocol !== 'https:' && current.protocol !== 'http:') {
         throw new Error('native public record locations must use HTTP(S)');
@@ -317,8 +337,15 @@ export function createBaseSepoliaRecordTransport(input: {
             : 'the redirect leaves every configured record origin',
         );
       }
+      let remainingMs = 0;
+      if (deadline !== undefined) {
+        remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+          throw new Error(`native public record fetch timed out after ${timeoutMs}ms`);
+        }
+      }
       // eslint-disable-next-line no-await-in-loop -- a redirect chain is sequential by definition.
-      const response = await fetchWithTimeout(current, timeoutMs, { ...init, redirect: 'manual' });
+      const response = await fetchWithTimeout(current, remainingMs, { ...currentInit, redirect: 'manual' });
       const location = RECORD_REDIRECT_STATUSES.has(response.status) ? response.headers.get('location') : null;
       if (location === null || location.trim() === '') {
         // Includes a redirect status carrying no Location, which is malformed and reported as the
@@ -334,9 +361,13 @@ export function createBaseSepoliaRecordTransport(input: {
         }
         return bytes;
       }
+      // Nothing reads a redirect's body; release the connection rather than leaving it held for
+      // the length of the chain.
+      void response.body?.cancel().catch(() => undefined);
       if (hop >= MAX_RECORD_REDIRECTS) {
         throw new NativeRecordDestinationError(location, `more than ${MAX_RECORD_REDIRECTS} redirects`);
       }
+      if (response.status !== 307 && response.status !== 308) currentInit = { ...init, method: 'GET' };
       try {
         current = new URL(location, current);
       } catch {
@@ -349,7 +380,11 @@ export function createBaseSepoliaRecordTransport(input: {
     if (!/^[a-z0-9]+$/u.test(cid)) throw new Error('native raw CID contains invalid characters');
     const url = new URL('/api/v0/block/get', input.ipfsApiUrl);
     url.searchParams.set('arg', cid);
-    return fetchBytes(url, ipfsTimeoutMs, allowIpfsApi, { method: 'POST' });
+    // The IPFS API is the operator's own configured endpoint. It is held to its own origin for the
+    // same reason a locator is contained: a redirect off it must not become an arbitrary
+    // destination. Computed here, off the URL already built, so a malformed `ipfsApiUrl` still
+    // fails where it always did rather than at transport construction.
+    return fetchBytes(url, ipfsTimeoutMs, (candidate) => candidate.origin === url.origin, { method: 'POST' });
   };
 
   return {
