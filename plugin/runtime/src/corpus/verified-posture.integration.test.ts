@@ -185,7 +185,9 @@ describe("the verified posture over a genuinely signed archive", () => {
     // not reachable yet — no entry point supplies a config file, so
     // `corpus.sources` is empty in every real process — and closing it is a
     // design call about what a same-head sync should report, which is why it
-    // is filed rather than made here.
+    // is left open here rather than decided. It has to be settled before an
+    // entry point starts supplying sources, because that is the change that
+    // makes it reachable.
     const second = await capability.mirror.syncOnce();
     expect(second.sources[0]!.failure).toEqual({
       code: "chain-verification-rejected",
