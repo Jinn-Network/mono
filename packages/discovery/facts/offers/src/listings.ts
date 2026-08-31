@@ -27,7 +27,7 @@ export interface OfferCard {
 }
 
 function has(card: Record<string, unknown>, name: string): boolean {
-  // Matches `factsConsistency`'s own own-property test. Plain indexing would let a field
+  // Matches `factsConsistency`'s own-property test. Plain indexing would let a field
   // reachable only through a polluted `Object.prototype` be *used* here and *skipped* there,
   // putting the two layers out of step over the same card.
   return Object.prototype.hasOwnProperty.call(card, name);
