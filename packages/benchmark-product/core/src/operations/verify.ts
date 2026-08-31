@@ -34,6 +34,7 @@
 
 import { readFileSync } from "node:fs";
 import {
+  BENCHMARKING_METHOD_IDS,
   expectedCellSet,
   parseBenchmark,
   parseMatrix,
@@ -413,7 +414,15 @@ export async function verifyRunWorkspace(
           ...(additionalLimitations.length > 0 ? { additionalLimitations } : {}),
           ...(suiteComparability === undefined ? {} : { suiteComparability }),
           ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
-          ...(disclosureCarriage === undefined ? {} : { disclosure: disclosureCarriage.disclosure }),
+          // Scoped exactly as `report` scopes it (issue #2839): only the anchored
+          // binary-qualification entry carries the section, because `/8` is the one disclosed cell.
+          // A run's sibling analyses project no qualification, so rebuilding THEIR claim with a
+          // disclosure would be rebuilding a claim no closure could have published.
+          ...(disclosureCarriage === undefined
+            || !carriage.anchoredClosure
+            || reportRecord.method.id !== BENCHMARKING_METHOD_IDS.binaryInstrument
+            ? {}
+            : { disclosure: disclosureCarriage.disclosure }),
           ...(previewLog === undefined
             ? {}
             : {
