@@ -234,7 +234,10 @@ describe("durable run monitor cancellation language", () => {
     // vacuous: JSX decodes the entity, so the markup carries a literal separator.
     expect(markup).toContain("drand/quicknet \u00b7 round 111111111 \u00b7 2026-08-01T00:00:03.000Z");
     // The height-indexed source derives no round from a seal, so it is offered as a beacon but
-    // never listed here -- listing one would imply a round the operator is held to.
+    // never listed here -- listing one would imply a round the operator is held to. The exclusion
+    // is `runStatus`'s, not the page's: the page renders whatever `bindableBeaconRounds` hands it,
+    // and `run-bind.test.ts`'s exact `toEqual` owns the rule. This line only guards the page
+    // against inventing an entry the source never supplied.
     expect(markup).not.toContain("bitcoin/mainnet \u00b7 round");
 
     // A run that has bound has nothing left to bind to, so the list goes with the form.

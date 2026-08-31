@@ -116,7 +116,7 @@ describe("runBindingSentence", () => {
       const chosen = runBindingSentence(sampled("drand/quicknet", CHOSEN_ROUND));
       expect(chosen).not.toContain("drawn, not chosen");
       expect(chosen).not.toContain("would have required predicting that value");
-      expect(chosen).toContain("one of several the operator could have realised");
+      expect(chosen).toContain("one of several the operator could have realized");
       expect(chosen).toContain("different slate from the same inputs");
     });
 

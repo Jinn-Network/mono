@@ -79,7 +79,7 @@ published binds nothing, and no Colophon code can tell you that.
 its own. If a run could bind to *any* later round, an operator could watch the
 rounds published between sealing and launching, derive what each would produce,
 and bind the one they preferred: the value would be unpredictable, but the choice
-among realised values would not be. So for a scheduled beacon the seal names
+among realized values would not be. So for a scheduled beacon the seal names
 exactly one admissible round — the first published strictly after it:
 
 ```text

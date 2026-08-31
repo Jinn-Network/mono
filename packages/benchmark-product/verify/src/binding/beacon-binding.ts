@@ -46,7 +46,7 @@
  * attributive and this module says so instead of claiming an offline proof it cannot make.
  *
  * Postdating alone would still leave the operator a choice, and issue #3322 closes it: admitting any
- * round later than the seal makes the VALUE unpredictable but not WHICH realised value applies, so
+ * round later than the seal makes the VALUE unpredictable but not WHICH realized value applies, so
  * an operator could watch the rounds published between lock and launch and bind the one whose
  * derivation they preferred. For a scheduled source the seal already names one round --
  * `requiredBeaconRound`, the first published strictly after it -- so the commitment needs no
@@ -246,7 +246,7 @@ export interface RequiredBeaconRound {
  *
  * The point is that the seal already fixes it. `verifyRunBinding` admits any round whose instant
  * postdates the seal, which makes the beacon VALUE unpredictable but leaves the CHOICE among
- * realised values open: between seal and binding an operator sees many published rounds, can derive
+ * realized values open: between seal and binding an operator sees many published rounds, can derive
  * what each would produce, and can bind the one they prefer. The standard construction is to commit
  * at seal time to a specific future round -- and for a scheduled source no separate commitment
  * record is needed, because `(source, sealedAt)` already determines exactly one such round, and both
@@ -347,7 +347,7 @@ export type BeaconPostSealBasis = "proven-offline" | "attributive";
  * `seal-derived` -- the named round is `requiredBeaconRound` for this source and seal, so there was
  * exactly one round to bind to and no choosing happened. `operator-chosen` -- the round postdates
  * the seal (that is still checked) but was selected afterwards from among those published since, so
- * the derivation is one of several the operator could have realised. Every `attributive-height`
+ * the derivation is one of several the operator could have realized. Every `attributive-height`
  * source is `operator-chosen` by construction: a block height carries no schedule, so no round
  * follows from the seal.
  *

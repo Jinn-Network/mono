@@ -143,7 +143,7 @@ export function runBind(context: OperationContext, input: RunBindInput): Operati
           + `published at ${required.publishedAt} — the first round this source publishes after the seal at `
           + `${runState.lockedAt} — and this binding names round ${beacon.data.round}. Admitting any later round `
           + "would leave the operator free to watch the rounds published since the seal and bind the one whose "
-          + "derivation they preferred, so the value would be unpredictable but the choice among realised values "
+          + "derivation they preferred, so the value would be unpredictable but the choice among realized values "
           + "would not be",
         );
       }

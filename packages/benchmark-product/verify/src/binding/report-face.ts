@@ -64,7 +64,7 @@ function postSealClause(binding: VerifiedRunBinding): string {
 
 /**
  * What the run's choice of ROUND does or does not add (issue #3322). A beacon that merely postdates
- * the seal leaves the operator picking among realised values, and a sentence that names only the
+ * the seal leaves the operator picking among realized values, and a sentence that names only the
  * value's unpredictability reads as though it had ruled that out. So the clause is not decoration:
  * under `seal-derived` it states the second property and then names the residue that survives it
  * (the source choice), and under `operator-chosen` it retracts the property in the same plain
@@ -97,7 +97,7 @@ function roundChoiceClause(binding: VerifiedRunBinding): string {
   return `Which post-seal value applied was still the operator's choice: this binding names a round selected after `
     + `the seal, and every round the source published in between was an available alternative deriving a `
     + `different ${derived} from the same inputs. The value could not have been predicted; this ${derived} is `
-    + `nonetheless one of several the operator could have realised by waiting.`;
+    + `nonetheless one of several the operator could have realized by waiting.`;
 }
 
 const RECOMPUTE_CLAUSE =

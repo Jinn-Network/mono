@@ -220,12 +220,16 @@ describe("runBind", () => {
     const result = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon() });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.detail).toMatch(/already launched/u);
+    // `runStatus`'s offer must track the refusal: a launched run has no bindable round to offer.
+    const status = runStatus(contextFor(clock), { draftId: "draft-1" });
+    if (!status.ok) throw new Error("status failed");
+    expect(status.result.bindableBeaconRounds).toBeUndefined();
   });
 
   /**
    * Issue #3322: postdating the seal is not enough on its own. Between lock and launch an operator
    * sees many published rounds and can derive what each would produce, so admitting any later round
-   * leaves the choice among realised values open. The seal names exactly one round on a scheduled
+   * leaves the choice among realized values open. The seal names exactly one round on a scheduled
    * source, and this is the refusal that holds the run to it.
    */
   describe("round choice", () => {
