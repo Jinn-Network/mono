@@ -16,7 +16,7 @@
  * intentional, not a gap to route around; see `docs/runbooks/phase-b-native-vertical.md` for the
  * operator-facing statement of this limit.
  */
-import { createTrustAdapter, type SourceEndpoint, type Transport } from '@jinn-network/record-discovery-client';
+import { createTrustAdapter, resolveContainedUrl, type SourceEndpoint, type Transport } from '@jinn-network/record-discovery-client';
 import {
   WELL_KNOWN_PATH,
   type SourceIdentity,
@@ -68,8 +68,17 @@ function chainConfig(config: NativeConsumerConfig): MarketplaceChainConfig {
   };
 }
 
+/**
+ * Resolves a peer-introduced `archiveRoot` against the public base URL this consumer was pointed
+ * at, refusing anything that leaves it (#3411).
+ *
+ * `new URL(path, base)` DISCARDS the base whenever `path` is absolute, so an introduction naming
+ * `http://127.0.0.1:8545/` used to become the fetch target verbatim. Containment keeps every
+ * archive read inside the origin the caller chose, which is also what `discovery/client`'s
+ * subsequent `pageUrl` walk already assumes.
+ */
 function absoluteUrl(base: string, path: string): string {
-  return new URL(path, `${base.replace(/\/+$/u, '')}/`).toString();
+  return resolveContainedUrl(base, path).toString();
 }
 
 /** Discovers the archive root URL for a public source via its `.well-known` introduction. */
@@ -87,11 +96,21 @@ async function resolveSourceEndpoint(input: {
   if (advertised.length !== 1) {
     throw new NativeConsumerDriverError(`public source ${input.source.agent}/${input.source.name} is not uniquely introduced at ${base}`);
   }
+  let archiveRootUrl: string;
+  try {
+    archiveRootUrl = absoluteUrl(base, advertised[0]!.archiveRoot);
+  } catch (cause) {
+    throw new NativeConsumerDriverError(
+      `public source ${input.source.agent}/${input.source.name} at ${base} introduces an archive root outside its serving root: `
+      + (cause instanceof Error ? cause.message : String(cause)),
+      { cause },
+    );
+  }
   return {
     agent: input.source.agent,
     name: input.source.name,
     servingRoot: base,
-    archiveRootUrl: absoluteUrl(base, advertised[0]!.archiveRoot),
+    archiveRootUrl,
   };
 }
 

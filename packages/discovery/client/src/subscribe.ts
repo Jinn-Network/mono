@@ -1,6 +1,7 @@
 import type { AnnouncementEntry, AnnouncementEvent, SourceCursor } from "@jinn-network/record-discovery-protocol";
 import { announcementDedupeKey, compareCodeUnitStrings } from "@jinn-network/record-discovery-protocol";
 
+import { isPrivateOrReservedHost } from "./origin-policy.js";
 import type { StreamSubscription, StreamTransport, Transport } from "./ports.js";
 
 // The §9 subscribe plane, client side: the five-case cursor contract
@@ -147,24 +148,6 @@ export function createPullDebounce(windowMs: number): PullDebounce {
 // re-hash (not this check) is the only accepted proof of content.
 // ---------------------------------------------------------------------------
 
-const PRIVATE_OR_LINK_LOCAL_HOST_PATTERNS = [
-  /^127\./, // IPv4 loopback
-  /^10\./, // IPv4 private
-  /^192\.168\./, // IPv4 private
-  /^172\.(1[6-9]|2\d|3[01])\./, // IPv4 private (172.16.0.0/12)
-  /^169\.254\./, // IPv4 link-local (cloud metadata endpoints live here)
-  /^0\./, // "this" network
-  /^localhost$/i,
-  /^::1$/, // IPv6 loopback
-  /^fc[0-9a-f]{2}:/i, // IPv6 unique local
-  /^fd[0-9a-f]{2}:/i, // IPv6 unique local
-  /^fe80:/i, // IPv6 link-local
-];
-
-function isPrivateOrLinkLocalHost(hostname: string): boolean {
-  return PRIVATE_OR_LINK_LOCAL_HOST_PATTERNS.some((pattern) => pattern.test(hostname));
-}
-
 export interface LocatorCheckDeps {
   transport: Transport;
   maxBytes: number;
@@ -195,7 +178,7 @@ export async function checkLocator(
   } catch {
     return { rejected: true, reason: "malformed" };
   }
-  if (isPrivateOrLinkLocalHost(url.hostname)) {
+  if (isPrivateOrReservedHost(url.hostname)) {
     return { rejected: true, reason: "private-address" };
   }
 

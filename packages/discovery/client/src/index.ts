@@ -4,4 +4,5 @@ export * from "./sync.js";
 export * from "./trust-adapter.js";
 export * from "./verify-driver.js";
 export * from "./query.js";
+export * from "./origin-policy.js";
 export * from "./subscribe.js";

@@ -1,5 +1,6 @@
 import {
   createTrustAdapter,
+  resolveContainedUrl,
   type Transport,
 } from '@jinn-network/record-discovery-client';
 import {
@@ -88,8 +89,20 @@ function rolePurpose(role: NativeOperatorConfig['sources'][number]['role']): str
   }
 }
 
+/**
+ * Resolves a peer-introduced `archiveRoot` against the serving root this operator configured,
+ * refusing anything that leaves it (#3411).
+ *
+ * `new URL(path, base)` DISCARDS the base whenever `path` is absolute, and the HTTP transport
+ * forwards an absolute `http(s)://` target verbatim, so before this guard a peer's introduction
+ * could aim this daemon's fetch at loopback, private space, or any third-party host it liked.
+ * Containment -- rather than a private-address deny-list -- is the policy because it is what
+ * every LATER page fetch already assumes (`discovery/client`'s `pageUrl` rebuilds each subsequent
+ * page from `servingRoot`), and because a serving root is legitimately loopback in every local
+ * deployment.
+ */
 function absolute(base: string, path: string): string {
-  return new URL(path, `${base.replace(/\/+$/u, '')}/`).toString();
+  return resolveContainedUrl(base, path).toString();
 }
 
 /**
@@ -214,11 +227,26 @@ export function buildNativeDiscoverySources(input: {
           `public source ${configured.agent}/${configured.name} is not uniquely introduced`,
         );
       }
+      let archiveRootUrl: string;
+      try {
+        archiveRootUrl = absolute(base, candidates[0]!.archiveRoot);
+      } catch (cause) {
+        // The serving root ANSWERED, and its answer names a destination outside itself. That is a
+        // statement about identity, so it refuses like every other bad introduction rather than
+        // degrading the source for the poll.
+        throw new NativeDiscoverySourceResolutionError(
+          configured.agent,
+          configured.name,
+          base,
+          cause instanceof Error ? cause.message : String(cause),
+          { cause, kind: 'unintroduced' },
+        );
+      }
       resolved = {
         agent: configured.agent,
         name: configured.name,
         servingRoot: base,
-        archiveRootUrl: absolute(base, candidates[0]!.archiveRoot),
+        archiveRootUrl,
       };
       return resolved;
     };
