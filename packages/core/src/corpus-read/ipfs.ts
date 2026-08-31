@@ -20,6 +20,20 @@ const FALLBACK_IPFS_GATEWAY_BASE = 'https://ipfs.io/ipfs/';
 export function normalizeIpfsGatewayBase(gatewayUrl: string): string {
   let normalized = gatewayUrl.trim();
   if (normalized === '') normalized = 'https://gateway.autonolas.tech';
+  // Drop any userinfo at the source. `fetch` rejects a credentialed URL
+  // outright, and its own error message quotes the URL back — so a gateway
+  // configured Infura-style would otherwise put its secret into every
+  // aggregated fetch error, which callers log.
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.username !== '' || parsed.password !== '') {
+      parsed.username = '';
+      parsed.password = '';
+      normalized = parsed.toString();
+    }
+  } catch {
+    // Not an absolute URL; leave it to the caller's own failure path.
+  }
   normalized = normalized.replace(/\/+$/, '');
   if (!normalized.toLowerCase().endsWith('/ipfs')) normalized = `${normalized}/ipfs`;
   return `${normalized}/`;
@@ -140,8 +154,8 @@ async function readBoundedText(response: Response): Promise<string> {
   }
 }
 
-async function fetchJson(url: string, signal: AbortSignal): Promise<unknown> {
-  const gateway = new URL(url);
+async function fetchJson(url: URL, signal: AbortSignal): Promise<unknown> {
+  const gateway = url;
   let current = new URL(url);
   for (let hop = 0; ; hop += 1) {
     // Redirects are resolved here rather than by `fetch`, so every hop is
@@ -238,11 +252,22 @@ export async function fetchFromIpfs(
     );
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), attemptMs);
+    // Parsed once here rather than inside the catch, so a URL this candidate
+    // cannot even parse is reported as a candidate failure instead of escaping
+    // as a bare TypeError that discards the other candidates' errors.
+    let target: URL;
     try {
-      return await fetchJson(url, controller.signal);
+      target = new URL(url);
+    } catch {
+      errors.push(`${name}: candidate URL could not be parsed`);
+      clearTimeout(timer);
+      continue;
+    }
+    try {
+      return await fetchJson(target, controller.signal);
     } catch (error) {
       errors.push(
-        `${name}:${displayUrl(new URL(url))}: ` +
+        `${name}:${displayUrl(target)}: ` +
           `${error instanceof Error ? error.message : String(error)}`,
       );
     } finally {

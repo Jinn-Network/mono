@@ -184,6 +184,24 @@ describe('fetchFromIpfs response byte cap (#3410)', () => {
     expect(enqueued).toBeLessThan(16);
   });
 
+  it('drops gateway credentials so they cannot reach an error message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        expect(String(input)).not.toContain('SUPERSECRET');
+        return new Response('nope', { status: 500, statusText: 'Server Error' });
+      }),
+    );
+
+    await expect(
+      fetchFromIpfs('https://projectid:SUPERSECRET@gateway.example', CID, {
+        fallbackGatewayBase: false,
+      }),
+    ).rejects.toThrow(
+      expect.objectContaining({ message: expect.not.stringContaining('SUPERSECRET') }) as Error,
+    );
+  });
+
   it('still returns a normal small JSON body', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ hello: 'world' })));
 
