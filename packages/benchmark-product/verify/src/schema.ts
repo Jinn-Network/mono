@@ -226,6 +226,12 @@ const PrefixedSha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 const IDENTIFIER_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u;
 export const BundleQualificationSchema = z.strictObject({
   format: z.literal(BUNDLE_QUALIFICATION_FORMAT),
+  // Deliberately NOT widened when a later closure allocates a new claim id (issue #3205's
+  // claim-package/5; the same resolution the disclosure-record design reached in its §6.5.1).
+  // This field names WHICH CLAIM PROJECTION SHAPE the qualification graph was built for, and the
+  // anchors section changes nothing about that graph: the qualification projection under /5 is
+  // byte-identical to the one under /2. Widening the literal would make this schema co-vary with
+  // an unrelated section, and would need widening again for every future closure.
   claimSchema: z.literal("benchmark-product.claim-package/2"),
   sourceManifestSha256: PrefixedSha256Schema,
   admissionManifestSha256: PrefixedSha256Schema,

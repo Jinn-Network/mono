@@ -48,6 +48,11 @@ const ORIGIN = STABLE_ORIGIN;
 const OTHER_ORIGIN = 'https://profiles.example';
 const PUBLIC_KEY_URL = 'https://keys.example/profile-manifest.pem';
 const KEY_ID = 'jinn-profile-manifest-test';
+// Every stack-published group shares the origin, so each one's manifest and sidecar are
+// fetched under its own name. Nothing is served at the origin root.
+const SEALED_GROUP = 'sealed-platform-v1';
+const groupManifestUrl = (group) => `${ORIGIN}/${group}/${MANIFEST_FILE_NAME}`;
+const groupSignatureUrl = (group) => `${ORIGIN}/${group}/${SIGNATURE_FILE_NAME}`;
 
 const temporaries = [];
 after(() => {
@@ -140,8 +145,8 @@ function realFixture() {
   };
 
   const routes = new Map();
-  routes.set(`${ORIGIN}/${MANIFEST_FILE_NAME}`, { status: 200, contentType: 'application/json', bytes: localManifestBytes });
-  routes.set(`${ORIGIN}/${SIGNATURE_FILE_NAME}`, { status: 200, contentType: 'application/json', bytes: signatureBytes });
+  routes.set(groupManifestUrl(SEALED_GROUP), { status: 200, contentType: 'application/json', bytes: localManifestBytes });
+  routes.set(groupSignatureUrl(SEALED_GROUP), { status: 200, contentType: 'application/json', bytes: signatureBytes });
   for (const { path, mediaType } of manifest.documents) {
     routes.set(`${ORIGIN}/${path}`, {
       status: 200,
@@ -310,7 +315,7 @@ test('happy path: the host serves the attested manifest, every document and a ve
 test('a charset parameter on an otherwise exact media type is conformant', async () => {
   const fixture = realFixture();
   const routes = clonedRoutes(fixture);
-  const manifestUrl = `${ORIGIN}/${MANIFEST_FILE_NAME}`;
+  const manifestUrl = groupManifestUrl(SEALED_GROUP);
   routes.set(manifestUrl, { ...routes.get(manifestUrl), contentType: 'application/json; charset=utf-8' });
   const result = await verifyLiveProfileHost(runArgs(fixture, { routes }));
   assert.equal(result.ok, true, result.reason);
@@ -321,7 +326,7 @@ test('manifest whitespace drift is refused even though the JSON is equivalent', 
   const routes = clonedRoutes(fixture);
   const reformatted = Buffer.from(`${JSON.stringify(fixture.manifest, null, 4)}\n`, 'utf8');
   assert.notEqual(Buffer.compare(reformatted, fixture.manifestBytes), 0);
-  routes.set(`${ORIGIN}/${MANIFEST_FILE_NAME}`, {
+  routes.set(groupManifestUrl(SEALED_GROUP), {
     status: 200,
     contentType: 'application/json',
     bytes: reformatted,
@@ -397,12 +402,62 @@ test('a single-page-application catch-all cannot make the gate pass vacuously', 
 test('a host answering 200 at manifest.json.sha256 is refused', async () => {
   const fixture = realFixture();
   const routes = clonedRoutes(fixture);
-  routes.set(`${ORIGIN}/${MANIFEST_FILE_NAME}.sha256`, {
+  routes.set(`${groupManifestUrl(SEALED_GROUP)}.sha256`, {
     status: 200,
     contentType: 'text/plain',
     bytes: Buffer.from(`${sha256(fixture.manifestBytes)}\n`),
   });
   await expectFailure(runArgs(fixture, { routes }), /manifest\.json\.sha256 answers 200/u);
+});
+
+test('a host that also serves a root manifest is refused', async () => {
+  // A stale single-group deployment left a manifest at the origin root. It is one group's
+  // inventory answering for every group, so it is a must-404, not a convenience alias.
+  const fixture = realFixture();
+  const routes = clonedRoutes(fixture);
+  routes.set(`${ORIGIN}/${MANIFEST_FILE_NAME}`, {
+    status: 200,
+    contentType: 'application/json',
+    bytes: fixture.manifestBytes,
+  });
+  await expectFailure(runArgs(fixture, { routes }), /manifest\.json answers 200; the origin root must serve no manifest/u);
+});
+
+test('a host that also serves a root signature sidecar is refused', async () => {
+  // The sidecar is half of the same stale root deployment, so it is probed like the
+  // manifest. Without this the gate accepted an origin the conformance suite refuses.
+  const fixture = realFixture();
+  const routes = clonedRoutes(fixture);
+  routes.set(`${ORIGIN}/${SIGNATURE_FILE_NAME}`, {
+    status: 200,
+    contentType: 'application/json',
+    bytes: fixture.signatureBytes,
+  });
+  await expectFailure(
+    runArgs(fixture, { routes }),
+    /manifest\.dsse\.json answers 200; the origin root must serve no signature sidecar/u,
+  );
+});
+
+test('a release group that is not a single literal path segment is refused', async () => {
+  const fixture = realFixture();
+  // Named as a malformed release group, not as a receipt mismatch: the guard runs first.
+  // `%2e%2e` and `.%2e` are the dangerous half: they pass a literal-path check and then
+  // resolve to `${origin}/manifest.json`, the one path the host must never answer.
+  for (const bad of ['a/b', 'a*', '%2e%2e', '.%2e']) {
+    const args = runArgs(fixture, { releaseGroup: bad });
+    await expectFailure(args, /^release group/u);
+    assert.equal(args.fetch.calls.length, 0, 'a malformed release group must be refused before any fetch');
+  }
+});
+
+test('an attested root whose manifest names a different release group is refused', async () => {
+  const fixture = realFixture();
+  const receipt = { ...fixture.receipt, releaseGroup: 'implementations-v1' };
+  await expectFailure(
+    runArgs(fixture, { receipt, releaseGroup: 'implementations-v1' }),
+    /release group/u,
+  );
 });
 
 test('a registered prefix identifier that answers 200 at its bare URI is refused', async () => {
@@ -418,7 +473,7 @@ test('a registered prefix identifier that answers 200 at its bare URI is refused
 test('a missing hosted signature sidecar is refused', async () => {
   const fixture = realFixture();
   const routes = clonedRoutes(fixture);
-  routes.delete(`${ORIGIN}/${SIGNATURE_FILE_NAME}`);
+  routes.delete(groupSignatureUrl(SEALED_GROUP));
   await expectFailure(runArgs(fixture, { routes }), /manifest\.dsse\.json returned 404/u);
 });
 
@@ -449,7 +504,7 @@ test('a signature over different bytes than the host serves is refused', async (
     fixture.privateKeyPem,
     KEY_ID,
   );
-  routes.set(`${ORIGIN}/${SIGNATURE_FILE_NAME}`, {
+  routes.set(groupSignatureUrl(SEALED_GROUP), {
     status: 200,
     contentType: 'application/json',
     bytes: Buffer.from(`${JSON.stringify(otherEnvelope, null, 2)}\n`, 'utf8'),
@@ -479,7 +534,7 @@ test('a sidecar whose payload is not the hosted manifest is refused', async () =
   const localManifest = readFileSync(join(drifted, MANIFEST_FILE_NAME));
 
   const routes = clonedRoutes(fixture);
-  routes.set(`${ORIGIN}/${SIGNATURE_FILE_NAME}`, { status: 200, contentType: 'application/json', bytes: sidecarBytes });
+  routes.set(groupSignatureUrl(SEALED_GROUP), { status: 200, contentType: 'application/json', bytes: sidecarBytes });
   const receipt = {
     ...fixture.receipt,
     surfaces: {
@@ -685,8 +740,8 @@ test('a receipt written by platform-verification-receipt.mjs is read without ada
   assert.equal(receipt.surfaces.profile.signature.sha256, sha256(sidecarBytes));
 
   const routes = new Map();
-  routes.set(`${ORIGIN}/${MANIFEST_FILE_NAME}`, { status: 200, contentType: 'application/json', bytes: localManifestBytes });
-  routes.set(`${ORIGIN}/${SIGNATURE_FILE_NAME}`, { status: 200, contentType: 'application/json', bytes: sidecarBytes });
+  routes.set(groupManifestUrl('platform-v1'), { status: 200, contentType: 'application/json', bytes: localManifestBytes });
+  routes.set(groupSignatureUrl('platform-v1'), { status: 200, contentType: 'application/json', bytes: sidecarBytes });
   for (const { path, mediaType } of profile.documents) {
     routes.set(`${ORIGIN}/${path}`, {
       status: 200,

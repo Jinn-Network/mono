@@ -46,7 +46,7 @@ test('every canonical stack-published package gets one registration bound to thi
     .map((pkg) => pkg.name)
     .sort();
   assert.deepEqual(registrations.map((registration) => registration.package), expectedPackages);
-  assert.equal(registrations.length, 73);
+  assert.equal(registrations.length, 74);
   assert.equal(registrations.length, expectedPackages.length);
   assert.equal(new Set(registrations.map((r) => r.package)).size, registrations.length);
   for (const registration of registrations) {

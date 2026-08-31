@@ -11,8 +11,13 @@ import {
   sealMatrix,
   sealReport,
   sealRun,
+  RUN_RECORD_KIND,
   type BenchmarkRecord,
 } from "@jinn-network/benchmarking-records";
+import {
+  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
+} from "@colophon-claims/verify";
 import {
   BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
   createMethodRegistry,
@@ -20,9 +25,14 @@ import {
   type DsseSigner,
   type MethodPorts,
 } from "@jinn-network/benchmarking-aggregate";
-import { canonicalJsonBytes, recordDigest, sealDsseEnvelope } from "@jinn-network/trust-core";
+import {
+  canonicalJsonBytes,
+  recordDigest,
+  sealDsseEnvelope,
+  RFC3161_TSA_ANCHOR_PROFILE,
+} from "@jinn-network/trust-core";
 import type { VenueHonesty } from "../operations/run-results.js";
-import { LOCAL_VENUE_LIMITS, unverifiableAxisCounts } from "../operations/run-results.js";
+import { LOCAL_VENUE_LIMITS, buildLocalVenueHonesty, unverifiableAxisCounts } from "../operations/run-results.js";
 import {
   BINARY_INSTRUMENT_REPORT_LIMITATIONS,
   binaryInstrumentReportLimitations,
@@ -30,6 +40,8 @@ import {
 import { assertClaimConsistency } from "../verification/claim-consistency.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import {
+  ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
   BINARY_QUALIFICATION_VERIFICATION_COMMAND,
@@ -1548,5 +1560,174 @@ describe("assertClaimConsistency — paired-majority-delta@1 carries PAIRED_ESTI
         additionalLimitations: FORCING_ADDITIONAL_LIMITATIONS,
       }),
     ).not.toThrow();
+  });
+});
+
+// --- issue #3205: the anchored binary-qualification closure (claim-package/5) ---
+
+/**
+ * One conformant RFC 3161 lock anchor's claim projection, written out rather than derived: these
+ * tests exercise the CLAIM allocation, and `deriveClaimAnchors` is proven over real proof bytes by
+ * the anchored producer suite (`bundle/v6-materialize.test.ts`) and the reader's own kit.
+ */
+const FIXTURE_LOCK_ANCHOR = {
+  subject: "lock",
+  kind: RUN_RECORD_KIND,
+  provider: RFC3161_TSA_ANCHOR_PROFILE,
+  recordSha256: "1".repeat(64),
+  facts: {
+    genTime: "2026-01-01T12:00:00Z",
+    policyOid: "2.999.1",
+    serialNumber: "0a",
+    signerCertificateSha256: "9".repeat(64),
+  },
+} as const;
+
+/** Exactly the configuration `binaryQualificationFixture()` reports, so the sealed method
+ * parameters and the projected qualification agree the way a real Run's do. */
+const BINARY_FIXTURE_PARAMETERS = {
+  verdictRule: "sole",
+  k: 1,
+  reduction: "strict-majority",
+  measurementProfile: BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
+  candidateClasses: ["factuality"],
+  strata: ["core", "stress"],
+  parserInvalidPolicy: "reject",
+  truthAdmission: "two-human-unanimous",
+  intervalAlpha: "0.05",
+} as const;
+
+function buildBinaryInstrumentFixture(limitations?: readonly string[]): JudgeFamilyFixture {
+  return buildJudgeFamilyFixture({
+    method: BENCHMARKING_METHOD_IDS.binaryInstrument,
+    parameters: { ...BINARY_FIXTURE_PARAMETERS },
+    results: binaryQualificationFixture(),
+    ...(limitations === undefined ? {} : { limitations }),
+  });
+}
+
+describe("issue #3205: an anchored run whose method emits a qualification projection", () => {
+  it("builds the anchored binary-qualification claim rather than refusing it", () => {
+    const claim = buildJudgeFamilyClaim(buildBinaryInstrumentFixture(), { anchors: [FIXTURE_LOCK_ANCHOR] });
+
+    expect(claim.claimSchema).toBe(ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(claim.qualification).toEqual(binaryQualificationFixture());
+    expect(claim.anchors).toEqual([FIXTURE_LOCK_ANCHOR]);
+    expect(claim.headline).toBeUndefined();
+    expect(claim.comparison).toBeUndefined();
+    expect(claim.verification.checks).toEqual([
+      "manifest",
+      "evidence-closure",
+      "trust",
+      "matrix-rederivation",
+      "report-verification",
+      "claim-consistency",
+      "integrity-anchors",
+    ]);
+    expect(claim.verification.command).toBe(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND);
+    expect(claim.verification.compatibleCommand).toBe(PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND);
+    expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+  });
+
+  it("keeps the qualification projection exact and refuses conclusions, drift, and a missing section", () => {
+    const claim = ClaimPackageSchema.parse(
+      buildJudgeFamilyClaim(buildBinaryInstrumentFixture(), { anchors: [FIXTURE_LOCK_ANCHOR] }),
+    );
+
+    const { anchors: _dropped, ...withoutAnchors } = claim;
+    expect(ClaimPackageSchema.safeParse(withoutAnchors).success).toBe(false);
+
+    const ranked = structuredClone(claim) as any;
+    ranked.qualification.ranking = ["arm-a"];
+    ranked.results.perSubject[0].results.ranking = ["arm-a"];
+    expect(ClaimPackageSchema.safeParse(ranked).success).toBe(false);
+
+    const smuggled = structuredClone(claim) as any;
+    smuggled.ranking = ["arm-a"];
+    expect(ClaimPackageSchema.safeParse(smuggled).success).toBe(false);
+
+    const drifted = structuredClone(claim) as any;
+    drifted.qualification.configuration.intervalAlpha = "0.01";
+    expect(ClaimPackageSchema.safeParse(drifted).success).toBe(false);
+
+    const unanchoredChecks = structuredClone(claim) as any;
+    unanchoredChecks.verification.checks = unanchoredChecks.verification.checks.slice(0, 6);
+    expect(ClaimPackageSchema.safeParse(unanchoredChecks).success).toBe(false);
+
+    const olderReader = structuredClone(claim) as any;
+    olderReader.verification.command = BINARY_QUALIFICATION_VERIFICATION_COMMAND;
+    expect(ClaimPackageSchema.safeParse(olderReader).success).toBe(false);
+  });
+
+  it("round-trips through assertClaimConsistency against the same re-derived anchors", () => {
+    const fixture = buildBinaryInstrumentFixture([
+      ...LOCAL_VENUE_LIMITS,
+      ...binaryInstrumentReportLimitations({ ...BINARY_FIXTURE_PARAMETERS }),
+    ]);
+    const claim = buildJudgeFamilyClaim(fixture, {
+      anchors: [FIXTURE_LOCK_ANCHOR],
+      // The governing lock anchor rewrites the venue's pre-registration sentence, exactly as it
+      // does for an anchored non-qualification claim — `report` supplies the same block.
+      venueHonesty: buildLocalVenueHonesty(fixture.matrixRecord.cells, fixture.runRecord, [FIXTURE_LOCK_ANCHOR]),
+    });
+
+    expect(() =>
+      assertClaimConsistency({
+        claim,
+        identities: {
+          benchmarkSha256: "c".repeat(64), runSha256: fixture.runSha256, matrixSha256: fixture.matrixSha256,
+          reportSha256: fixture.reportSha256, reportEnvelopeSha256: fixture.reportEnvelopeSha256,
+        },
+        benchmarkRecord: {} as unknown as BenchmarkRecord,
+        runRecord: fixture.runRecord,
+        matrixRecord: fixture.matrixRecord,
+        reportRecord: fixture.reportRecord,
+        draftId: "judge-1",
+        assurancePreset: JUDGE_FAMILY_ASSURANCE.preset,
+        anchors: [FIXTURE_LOCK_ANCHOR],
+      }),
+    ).not.toThrow();
+    // A claim that states an anchor nobody re-derived is still refused.
+    expect(() =>
+      assertClaimConsistency({
+        claim,
+        identities: {
+          benchmarkSha256: "c".repeat(64), runSha256: fixture.runSha256, matrixSha256: fixture.matrixSha256,
+          reportSha256: fixture.reportSha256, reportEnvelopeSha256: fixture.reportEnvelopeSha256,
+        },
+        benchmarkRecord: {} as unknown as BenchmarkRecord,
+        runRecord: fixture.runRecord,
+        matrixRecord: fixture.matrixRecord,
+        reportRecord: fixture.reportRecord,
+        draftId: "judge-1",
+        assurancePreset: JUDGE_FAMILY_ASSURANCE.preset,
+      }),
+    ).toThrow(/is not the exact projection/);
+  });
+});
+
+/**
+ * The allocation is an ADDITION. These two digests were measured on the tree that still refused the
+ * anchored qualification pair, so a change that moved either existing projection's bytes — the
+ * unanchored binary claim (`claim-package/2`, a reject-policy qualification) or the anchored
+ * non-qualification claim (`claim-package/4`) — fails here rather than silently republishing every
+ * bundle under new bytes.
+ */
+const PRE_ALLOCATION_UNANCHORED_BINARY_CLAIM_SHA256 = "23d59de90f615c05fe0b14d7c4a4c7f449ef3c4796988294c6eaf09fc6ccfe8f";
+const PRE_ALLOCATION_ANCHORED_WILSON_CLAIM_SHA256 = "eb20124f106947deedf1c25b5cb5349d11beda740be626bf079ebea93fe95a97";
+
+describe("issue #3205: byte-identity of every projection that already existed", () => {
+  it("the unanchored binary-qualification claim keeps its exact pre-allocation bytes", () => {
+    const claim = ClaimPackageSchema.parse(buildJudgeFamilyClaim(buildBinaryInstrumentFixture()));
+    expect(claim.claimSchema).toBe(BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(sha256Hex(canonicalJsonBytes(claim))).toBe(PRE_ALLOCATION_UNANCHORED_BINARY_CLAIM_SHA256);
+  });
+
+  it("the anchored non-qualification claim keeps its exact pre-allocation bytes", async () => {
+    const claim = ClaimPackageSchema.parse(
+      buildClaimPackage({ ...(await wilsonGoldenInput()), anchors: [FIXTURE_LOCK_ANCHOR] }),
+    );
+    expect(claim.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(sha256Hex(canonicalJsonBytes(claim))).toBe(PRE_ALLOCATION_ANCHORED_WILSON_CLAIM_SHA256);
   });
 });

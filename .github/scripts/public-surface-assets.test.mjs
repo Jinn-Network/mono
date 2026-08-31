@@ -363,14 +363,14 @@ test('enumeration rejects an encoded traversal identity before exposing a served
   }
 });
 
-test('all 51 current Jinn self-identifiers remain valid canonical hosted paths', async () => {
+test('all 68 current Jinn self-identifiers remain valid canonical hosted paths', async () => {
   const { enumeratePublicSurfaceAssets, jinnIdentifierServedPath } = await implementation;
   const { loadCatalogPackages } = await import('./platform-catalog.mjs');
   const claims = enumeratePublicSurfaceAssets({
     repoRoot,
     packages: loadCatalogPackages(repoRoot),
   }).filter(({ claim }) => claim !== null);
-  assert.equal(claims.length, 51);
+  assert.equal(claims.length, 68);
   for (const { claim } of claims) {
     assert.equal(jinnIdentifierServedPath(claim.identifier), claim.servedPath);
   }

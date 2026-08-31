@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   authorizationProfile,
+  authorizationProfileV2,
   keyBindingProfile,
+  keyBindingProfileV2,
   trustPolicyProfile,
 } from "./profiles.js";
 
@@ -15,6 +17,8 @@ const EXPECTED_DIGESTS: Record<string, string> = {
   "key-binding": "sha256:c2f21e1a74d5428403ac5925f209fd6b0d85508a8fb029629e71fe328690a82c",
   "authorization": "sha256:986c5c1a2572fcba504edb8ea12aabca16cd975f22b0e3aa4c3ed0110d095bb4",
   "trust-policy": "sha256:f2ffd2163fbe0c0d0d485dfc0d5e33af9d77ccec555c302fb476790577abab8b",
+  "key-binding-v2": "sha256:9e702670087714023d95cee5961c6d8adbbce621b131feb6b0e041bc5cbb39c4",
+  "authorization-v2": "sha256:c7c2d0f7352cc5f79b6bc13ffcfb92e3b71cfc092f4d38d7ea8d4f88ff0b81e2",
 };
 
 function expectPinnedDigest(name: string, digest: string) {
@@ -54,9 +58,44 @@ describe("facts/trust profile documents", () => {
   });
 
   it("no trust facts profile declares a substrate field (the trust layer never carries marketplace substrate)", () => {
-    for (const profile of [keyBindingProfile, authorizationProfile, trustPolicyProfile]) {
+    for (const profile of [keyBindingProfile, authorizationProfile, trustPolicyProfile, keyBindingProfileV2, authorizationProfileV2]) {
       expect(profile.fields.some((field) => field.class === "substrate")).toBe(false);
     }
+  });
+
+  it("key-binding v2 adds the ceremony evidence and the cited anchors", () => {
+    expect(keyBindingProfileV2.kind).toBe(RECORD_KINDS.keyBinding);
+    expect(keyBindingProfileV2.fields.every((field) => field.class === "record")).toBe(true);
+    // The kind's whole outbound set: the ceremony evidence bytes, each cited time anchor, and
+    // the binding this one replaces. Nothing else in `KeyBindingSchema` pins bytes by digest.
+    expect(referenceBearingFields(keyBindingProfileV2)).toEqual([
+      "ceremony.digest",
+      "anchorDigests",
+      "supersedes",
+    ]);
+    expect(cloudEventsFields(keyBindingProfileV2).map((field) => field.name)).toEqual(["agent", "relationship", "strength"]);
+    expectPinnedDigest("key-binding-v2", sealJson(keyBindingProfileV2).digest);
+  });
+
+  it("authorization v2 adds the delegation chain and the statement's subjects", () => {
+    expect(authorizationProfileV2.kind).toBe(RECORD_KINDS.authorization);
+    expect(authorizationProfileV2.fields.every((field) => field.class === "record")).toBe(true);
+    // The kind's whole outbound set: the subjects it authorizes over, the parent authorizations
+    // it attenuates, and its companion revocation.
+    expect(referenceBearingFields(authorizationProfileV2)).toEqual([
+      "subjectDigests",
+      "proofs",
+      "revocation",
+    ]);
+    expect(cloudEventsFields(authorizationProfileV2).map((field) => field.name)).toEqual(["issuer"]);
+    expectPinnedDigest("authorization-v2", sealJson(authorizationProfileV2).digest);
+  });
+
+  it("each v2 revision is a new profile URI and leaves its v1 document untouched", () => {
+    expect(keyBindingProfileV2.profile).not.toBe(keyBindingProfile.profile);
+    expect(authorizationProfileV2.profile).not.toBe(authorizationProfile.profile);
+    expect(referenceBearingFields(keyBindingProfile)).toEqual(["supersedes"]);
+    expect(referenceBearingFields(authorizationProfile)).toEqual(["revocation"]);
   });
 
   it("seals to a stable digest independent of source key order (JCS)", () => {

@@ -86,7 +86,7 @@ test('--dry-run prints the ordered plan and exits 0 without touching the working
     result.stdout,
     /wave 0: @jinn-network\/chain-environment-record, @jinn-network\/environment-record, @jinn-network\/evidence-protocol, @jinn-network\/task-execution-protocol, @jinn-network\/trust-core/,
   );
-  assert.match(result.stdout, /13 packages in 3 waves/);
+  assert.match(result.stdout, /14 packages in 3 waves/);
   assert.match(result.stdout, new RegExp(`publish version 0\\.1\\.0-canary\\.sha\\.${SHA} at canary`));
   const after = spawnSync('git', ['status', '--porcelain', 'packages/'], { cwd: repoRoot, encoding: 'utf8' });
   assert.equal(after.stdout, before.stdout, 'a dry run must leave the working tree unchanged');

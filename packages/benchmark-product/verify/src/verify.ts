@@ -34,6 +34,7 @@ import { ClaimPackageSchema } from "./profile/claim.js";
 import { buildMethodPortsFromResolver } from "./profile/ports.js";
 import { didKeyFromEd25519PublicKey } from "./profile/signing.js";
 import { buildPublicReportTrustDeps } from "./profile/trust.js";
+import { evidenceNativeBundleSigners, legacyBundleSigners, type PublicBundleSigner } from "./signers.js";
 import { buildAssemblyPortsFromFacts, type AssemblyPublicKeyRecord } from "./profile/assembly-ports.js";
 import {
   parseRunPinningEvidenceArtifact,
@@ -85,7 +86,7 @@ import {
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
 import { PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, BUNDLE_V6_FORMAT } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT } from "./manifest.js";
 import {
   evaluateIntegrityAnchors,
   type IntegrityAnchorsReport,
@@ -131,15 +132,16 @@ export type PublicBundleVerificationCheck =
   | "matrix-rederivation"
   | "report-verification"
   | "claim-consistency"
-  /** Always present for `benchmark-product-public-bundle/6`, never for any earlier closure
-   * (anchor-evidence design §8, §12). */
+  /** Always present for the two anchored closures, `benchmark-product-public-bundle/6` and `/7`,
+   * never for any earlier one (anchor-evidence design §8, §12). */
   | "integrity-anchors";
 
-export interface LegacyPublicBundleVerificationResult {
+export interface LegacyPublicBundleVerificationResult extends PublicBundleSignerDisclosure {
   readonly format:
     | "benchmark-product-public-bundle/2"
     | "benchmark-product-public-bundle/4"
-    | "benchmark-product-public-bundle/6";
+    | "benchmark-product-public-bundle/6"
+    | "benchmark-product-public-bundle/7";
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
   readonly benchmarkSha256: string;
@@ -165,9 +167,14 @@ export interface LegacyPublicBundleVerificationResult {
   };
 }
 
+/** Who signed the bundle, with the identifiers the human surface deliberately does not print. */
+export interface PublicBundleSignerDisclosure {
+  readonly signers?: readonly PublicBundleSigner[];
+}
+
 export type PublicBundleVerificationResult =
   | LegacyPublicBundleVerificationResult
-  | EvidenceNativePortableBundleVerification;
+  | (EvidenceNativePortableBundleVerification & PublicBundleSignerDisclosure);
 
 export interface VerifyPublicBundleDeps extends VerifyBundleSnapshotDeps {
   /**
@@ -389,11 +396,17 @@ export async function verifyPublicBundleSnapshot(
   const checked = verifyBundleSnapshot(bundleDir, deps);
   if (checked.manifest.format === BUNDLE_V5_FORMAT) {
     try {
+      const claimPackageBytes = checked.fileBytes.get("claim-package.json");
+      if (claimPackageBytes === undefined) throw new TypeError("portable bundle is missing claim-package.json");
+      const verification = await verifyEvidenceNativePortableBundle({
+        files: checked.fileBytes,
+        verifySignature: verifyEvidenceNativeSignature,
+      });
       return {
-        verification: await verifyEvidenceNativePortableBundle({
-          files: checked.fileBytes,
-          verifySignature: verifyEvidenceNativeSignature,
-        }),
+        verification: {
+          ...verification,
+          signers: evidenceNativeBundleSigners(claimPackageBytes, verification.verifiedSignerKeyIds),
+        },
         snapshot: checked,
       };
     } catch (cause) {
@@ -411,17 +424,19 @@ export async function verifyPublicBundleSnapshot(
   };
   const checks: PublicBundleVerificationCheck[] = ["manifest"];
   const manifestPaths = new Set(checked.manifest.files.map((file) => file.path));
-  const isV4 = checked.manifest.format === BUNDLE_V4_FORMAT;
-  // The anchored closure is v2's graph plus `anchors/`, so it takes v2's mandatory member list; the
-  // binary qualification projection has its own later anchored allocation and is not this one.
-  const isV6 = checked.manifest.format === BUNDLE_V6_FORMAT;
-  const mandatoryFiles = isV4 ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
+  // Two independent axes, four formats. The qualification axis decides the mandatory member list,
+  // the evidence-catalog grammar, and the trust grammar; the anchor axis decides the `anchors/`
+  // allowlist and the `integrity-anchors` check. v6 is v2 plus anchors, v7 is v4 plus anchors
+  // (issue #3205) — neither axis reinterprets the other.
+  const carriesQualification = checked.manifest.format === BUNDLE_V4_FORMAT || checked.manifest.format === BUNDLE_V7_FORMAT;
+  const carriesAnchors = checked.manifest.format === BUNDLE_V6_FORMAT || checked.manifest.format === BUNDLE_V7_FORMAT;
+  const mandatoryFiles = carriesQualification ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }
 
   const evidenceBytes = read("evidence.json");
-  const evidence = isV4
+  const evidence = carriesQualification
     ? parseJson(evidenceBytes, BundleV4EvidenceCatalogSchema, "evidence.json")
     : parseJson(evidenceBytes, BundleEvidenceCatalogSchema, "evidence.json");
   requireCanonical(evidenceBytes, evidence, "evidence.json");
@@ -435,10 +450,10 @@ export async function verifyPublicBundleSnapshot(
   for (const path of manifestPaths) {
     if (/^native\/inspect\/[a-f0-9]{64}\.eval$/u.test(path)) expectedPaths.add(path);
   }
-  // `anchors/<sha256>.bin` is allowlisted only by the closure version that defines it: an anchor
-  // member in a v2 or v4 bundle is a non-allowlisted file, exactly as it was before this format.
+  // `anchors/<sha256>.bin` is allowlisted only by the closure versions that define it: an anchor
+  // member in a v2 or v4 bundle is a non-allowlisted file, exactly as it was before these formats.
   const anchorPaths: string[] = [];
-  if (isV6) {
+  if (carriesAnchors) {
     for (const path of manifestPaths) {
       if (/^anchors\/[a-f0-9]{64}\.bin$/u.test(path)) {
         expectedPaths.add(path);
@@ -459,7 +474,7 @@ export async function verifyPublicBundleSnapshot(
   }
 
   const trustBytes = read("trust/public-keys.json");
-  const trust = isV4
+  const trust = carriesQualification
     ? parseJson(trustBytes, BundleV4TrustSchema, "trust/public-keys.json")
     : parseJson(trustBytes, BundleTrustSchema, "trust/public-keys.json");
   requireCanonical(trustBytes, trust, "trust/public-keys.json");
@@ -470,7 +485,7 @@ export async function verifyPublicBundleSnapshot(
   ] as const));
 
   let qualification: BundleQualification | undefined;
-  if (isV4) {
+  if (carriesQualification) {
     const qualificationBytes = read("qualification.json");
     qualification = parseJson(qualificationBytes, BundleQualificationSchema, "qualification.json");
     requireCanonical(qualificationBytes, qualification, "qualification.json");
@@ -519,7 +534,7 @@ export async function verifyPublicBundleSnapshot(
   // empty section and an omitted one are different claims, and §7.3's declared-but-absent bundle
   // carries the first.
   let claimAnchors: readonly import("./profile/anchor-claims.js").ClaimAnchor[] | undefined;
-  if (isV6) {
+  if (carriesAnchors) {
     const anchorRecords = anchorPaths
       .map((path) => {
         const bytes = read(path);
@@ -1728,9 +1743,9 @@ export async function verifyPublicBundleSnapshot(
     ...(claimAnchors === undefined ? {} : { anchors: claimAnchors }),
   });
   checks.push("claim-consistency");
-  // Always present for this closure version, and never for any earlier one: an anchored bundle
-  // whose anchors were stripped is a closure failure above, not a shorter check list here.
-  if (isV6) checks.push("integrity-anchors");
+  // Always present for the anchored closure versions, and never for any earlier one: an anchored
+  // bundle whose anchors were stripped is a closure failure above, not a shorter check list here.
+  if (carriesAnchors) checks.push("integrity-anchors");
 
   const dissentCellKeys = assembly.cells
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
@@ -1756,17 +1771,15 @@ export async function verifyPublicBundleSnapshot(
     }),
     dissentCellKeys,
   };
-  // Reader v1 remains able to authenticate bundles published before the
-  // human comparison projection existed. A bundle must match one complete,
-  // deterministic presentation profile; individual assets cannot be mixed.
-  const legacyAssets = qualification === undefined ? buildPublicAssets(assetFacts) : undefined;
-  const isLegacyPresentation = legacyAssets !== undefined
-    && Object.entries(legacyAssets).every(([path, bytes]) => equalBytes(read(path), bytes));
+  // The closure selects the presentation profile and the bundle must byte-match that one
+  // profile completely — assets cannot be mixed, and there is no second profile to fall back
+  // to (issue #2984). A qualification-projecting bundle (`/4`, `/7`) renders the
+  // instrument-qualification graph; every other one renders the human comparison, which
+  // `derivePublicComparison` above always produces. The comparison-absent rendering a
+  // pre-comparison producer would have written is therefore no bundle's profile.
   const expectedAssets = qualification !== undefined
     ? buildPublicAssets({ ...assetFacts, binaryQualification: binaryAssetQualification })
-    : isLegacyPresentation
-      ? legacyAssets!
-      : buildPublicAssets({ ...assetFacts, comparison });
+    : buildPublicAssets({ ...assetFacts, comparison });
   for (const [path, bytes] of Object.entries(expectedAssets)) {
     if (!equalBytes(read(path), bytes)) refuse("record-integrity", path, `${path} is not the exact projection of verified public facts`);
   }
@@ -1786,6 +1799,7 @@ export async function verifyPublicBundleSnapshot(
       format: checked.manifest.format,
       identity: checked.identity,
       checks,
+      signers: legacyBundleSigners(trust, new Set(verdictCatalog.verdicts.map((verdict) => verdict.evaluator))),
       ...identities,
       ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
       ...(anchorReport === undefined ? {} : { anchors: anchorReport }),

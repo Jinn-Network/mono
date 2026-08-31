@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
-import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
-import { PUBLIC_BUNDLE_VERIFICATION_CHECKS, PUBLIC_BUNDLE_V6_CHECKS } from "./reader-instructions.js";
+import { summarizeVerificationOutcome } from "./outcome.js";
 import { verifyPublicBundle, type PublicBundleVerificationResult, type VerifyPublicBundleDeps } from "./verify.js";
 import type {
   AnchorSubjectReport,
@@ -9,6 +8,7 @@ import type {
   IntegrityAnchorsReport,
   PublicBundleAnchorTrustMaterial,
 } from "./anchor/check.js";
+import type { PublicBundleSigner, PublicBundleSignerRole } from "./signers.js";
 import { VERIFIER_VERSION } from "./version.js";
 
 export { VERIFIER_VERSION } from "./version.js";
@@ -102,29 +102,83 @@ function renderAnchorReport(report: IntegrityAnchorsReport): string {
   return `\nAnchors\n${anchors}\n\nAnchor subjects\n${report.subjects.map(renderSubject).join("\n")}\n`;
 }
 
+const SIGNER_ROLE_NAMES: Record<PublicBundleSignerRole, string> = {
+  publisher: "publisher",
+  "automated-grader": "automated grader",
+  "human-reviewer": "human reviewer",
+  "label-admission": "label admission",
+};
+
+/** The role in plain words. `urn:`/`did:key` identifiers stay in `--json`, where they are the join
+ * key a reader actually needs them for; on this surface they are noise a reader has to decode.
+ * Undeclared custody is stated rather than left blank: a reader who has seen the same-operator
+ * suffix elsewhere would otherwise read its absence as an independence claim, which no bundle
+ * format can establish. The publisher takes no suffix -- it *is* the operator the others are
+ * measured against. */
+function renderSignerGroup(role: PublicBundleSignerRole, custody: PublicBundleSigner["custody"], count: number): string {
+  const suffix = role === "publisher"
+    ? ""
+    : custody === "same-operator" ? " \u2014 same operator" : " \u2014 custody not declared";
+  return `  ${SIGNER_ROLE_NAMES[role]}${suffix} \u00b7 ${count} ${count === 1 ? "key" : "keys"}`;
+}
+
+function renderSigners(signers: readonly PublicBundleSigner[]): string {
+  const counts = new Map<string, { role: PublicBundleSignerRole; custody: PublicBundleSigner["custody"]; count: number }>();
+  for (const signer of signers) {
+    const key = `${signer.role} ${signer.custody}`;
+    const group = counts.get(key);
+    if (group === undefined) counts.set(key, { role: signer.role, custody: signer.custody, count: 1 });
+    else group.count += 1;
+  }
+  // The role-name record's own key order is the print order; a second parallel list would drift.
+  const order = Object.keys(SIGNER_ROLE_NAMES) as PublicBundleSignerRole[];
+  const groups = [...counts.values()]
+    .sort((left, right) => order.indexOf(left.role) - order.indexOf(right.role));
+  return `\nSigned by\n${groups.map((group) => renderSignerGroup(group.role, group.custody, group.count)).join("\n")}\n`;
+}
+
 export function renderVerifiedBundle(result: PublicBundleVerificationResult): string {
-  const checks = result.checks.map((check) => `${check.padEnd(24)}passed`).join("\n");
-  const totalChecks = result.format === "benchmark-product-public-bundle/5"
-    ? EVIDENCE_NATIVE_BUNDLE_V5_CHECKS.length
-    : result.format === "benchmark-product-public-bundle/6"
-      ? PUBLIC_BUNDLE_V6_CHECKS.length
-      : PUBLIC_BUNDLE_VERIFICATION_CHECKS.length;
+  // A metadata-first bundle carries artifact digests without their bytes. Printing "passed" for a
+  // check that read nothing would be the one claim this format cannot afford, so the deferred check
+  // prints as not fetched and is counted out of the passed total.
+  const outcome = summarizeVerificationOutcome(result);
+  const artifactContent = outcome.artifactContent;
+  const checks = outcome.outcomes
+    .map(({ check, state }) => `${check.padEnd(24)}${state}`)
+    .join("\n");
+  const totalChecks = outcome.total;
   const identity = result.identity.startsWith("sha256:") ? result.identity : `sha256:${result.identity}`;
   const anchors = "anchors" in result && result.anchors !== undefined
     ? renderAnchorReport(result.anchors)
     : "";
+  const signers = result.signers === undefined || result.signers.length === 0
+    ? ""
+    : renderSigners(result.signers);
+  // Naming the digests is what makes the deferred check completable: they are the addresses to
+  // fetch and the expectations to check the fetched bytes against. Adding a body to this directory
+  // is not the completion path -- it would break the manifest closure the bundle is identified by,
+  // so the reader is pointed at the full-evidence bundle instead.
+  const artifactContentReport = artifactContent === undefined
+    ? ""
+    : `\nArtifact content\n  ${artifactContent.notFetched} artifact ${artifactContent.notFetched === 1 ? "body was" : "bodies were"} not fetched. This bundle carries their\n  exact digests, not their bytes:\n${artifactContent.notFetchedDigests.map((digest) => `    sha256:${digest}`).join("\n")}\n  Check fetched bytes against those digests yourself, or verify the\n  full-evidence bundle, which carries them.\n`;
+  const artifactContentLimit = artifactContent === undefined
+    ? ""
+    : "\nEverything above was checked against the bytes this bundle carries. The artifact\ncontents themselves were not read, so nothing here says what they contain.";
   const anchorLimits = anchors === ""
     ? ""
     : "\nAn anchor dates the bytes it covers and says nothing else about the run: not\nthat results were produced after it, and not that the anchoring authority is\nindependent of the bundle's owner.";
-  return `Verified: ${result.checks.length} of ${totalChecks} checks passed
+  const verdictLine = outcome.notFetched === 0
+    ? `Verified: ${outcome.passed} of ${totalChecks} checks passed`
+    : `Verified: ${outcome.passed} of ${totalChecks} checks passed, ${outcome.notFetched} not fetched`;
+  return `${verdictLine}
 Bundle: ${identity}
 Format: ${result.format}
 
 ${checks}
-${anchors}
+${signers}${artifactContentReport}${anchors}
 This checks the bundle's integrity, evidence closure, calculations, report,
 and claim consistency. It does not prove that the machine that produced the
-bundle was honest or that the compared identities are independent parties.${anchorLimits}
+bundle was honest or that the compared identities are independent parties.${artifactContentLimit}${anchorLimits}
 No files were uploaded.
 Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.
 Verification uses the exact platform bytes installed from npm.
@@ -162,6 +216,18 @@ function readBlockHeaders(bytes: Uint8Array, path: string): readonly { height: n
       header: new Uint8Array(Buffer.from(match[2]!.toLowerCase(), "hex")),
     };
   });
+}
+
+/** `urn:…` and `did:key:z…` as they appear inside a refusal message. The base58btc class stops a
+ * `did:key` match before a trailing `:reason` suffix the message appended. */
+const RAW_IDENTIFIER = /urn:[^\s,;)"']+|did:key:z[1-9A-HJ-NP-Za-km-z]+/gu;
+
+/** A refusal names the signer it refused, and on the machine surface that identifier is the whole
+ * point. On the human surface it is a string a reader cannot act on, so the same rule as the
+ * verified report applies: the identifier lives in `--json` (issue #3024). What failed, and where,
+ * is untouched. */
+function withoutRawIdentifiers(message: string): string {
+  return message.replace(RAW_IDENTIFIER, "<identifier: see --json>");
 }
 
 interface ParsedArguments {
@@ -245,7 +311,7 @@ export async function runVerifierCli(
     const stdout = parsed.json
       ? `${JSON.stringify({ ok: false, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, code, message: error.message })}\n`
       : "";
-    const stderr = parsed.json ? "" : `colophon-verify: ${error.message}\n`;
+    const stderr = parsed.json ? "" : `colophon-verify: ${withoutRawIdentifiers(error.message)}\n`;
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };
   }
 }

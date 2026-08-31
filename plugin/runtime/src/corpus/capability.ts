@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DsseChainVerifier, Sha256Digest } from "@jinn-network/trust-core";
-import type { Transport } from "@jinn-network/record-discovery-client";
+import type { Transport, VerifyDriver } from "@jinn-network/record-discovery-client";
 
 import type { CapabilityContext, RuntimeCapability } from "../capability.js";
 import type { CorpusConfig, RuntimeConfig } from "../config.js";
@@ -17,9 +17,12 @@ import {
 } from "./admission.js";
 import {
   UNVERIFIED_CHAIN_ACKNOWLEDGEMENT,
+  createDriverChainVerification,
   createRejectingChainVerification,
   createUnverifiedChainVerification,
   type ChainVerification,
+  type ChainVerificationInput,
+  type ChainVerificationOutcome,
 } from "./chain-verification.js";
 import { describeError } from "./errors.js";
 import type { CorpusFilesystem } from "./fs.js";
@@ -36,6 +39,14 @@ export interface CreateCorpusCapabilityOptions {
   readonly dsseVerifier: DsseChainVerifier;
   /** Host-supplied loader for the trust-policy version chain. */
   readonly readPolicyVersions: (directory: string) => Promise<readonly Uint8Array[]>;
+  /**
+   * The announcement-chain verification driver, injected by the composition
+   * root for the same reason `dsseVerifier` is (custody law C1/C3): C5
+   * implements no cryptography and resolves no keys itself. Absent means the
+   * `verified` posture cannot be honored, and the capability fails closed to
+   * rejecting rather than quietly downgrading to unverified.
+   */
+  readonly verifyDriver?: VerifyDriver;
   readonly now?: () => Date;
 }
 
@@ -52,6 +63,10 @@ interface Started {
   readonly corpus: CorpusConfig;
   readonly admission: CorpusAdmission;
   readonly chainVerification: ChainVerification;
+  /** Why the configured posture is not the live one, when they differ. */
+  readonly chainVerificationShortfall?: "driver-unavailable";
+  /** Head-signature refusals observed since start, newest wins, keyed by `agent/name`. */
+  readonly chainRejections: Map<string, string>;
   readonly log: RuntimeLogger;
   readonly policyError?: string;
   readonly policyCount: number;
@@ -103,6 +118,9 @@ export function createCorpusCapability(
               dsseVerifier: options.dsseVerifier,
             });
 
+      const chainRejections = new Map<string, string>();
+      const posture = selectChainVerification(corpus.chainVerification, options.verifyDriver);
+
       started = {
         config: context.config,
         corpus,
@@ -110,9 +128,9 @@ export function createCorpusCapability(
           createFollowedSourceAdmission(corpus.sources),
           producerAdmission,
         ),
-        chainVerification: corpus.acknowledgeUnverifiedChain
-          ? createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGEMENT)
-          : createRejectingChainVerification(),
+        chainVerification: recordingChainVerification(posture.verification, chainRejections),
+        ...(posture.shortfall === undefined ? {} : { chainVerificationShortfall: posture.shortfall }),
+        chainRejections,
         log: context.log,
         ...(policyError === undefined ? {} : { policyError }),
         policyCount: policyVersions.length,
@@ -120,7 +138,9 @@ export function createCorpusCapability(
 
       context.log.info("corpus.capability.started", {
         archives: corpus.sources.length,
+        configuredChainVerification: corpus.chainVerification,
         chainVerification: started.chainVerification.mode,
+        ...(posture.shortfall === undefined ? {} : { chainVerificationShortfall: posture.shortfall }),
       });
     },
 
@@ -179,13 +199,14 @@ export function createCorpusCapability(
                   `Delete the mirror state file at ${state.config.mirrorStatePath} to re-sync from genesis.`
                 : "Run a mirror sync; the runtime also syncs opportunistically at session start.",
         },
-        // This check measures whether THIS INSTALL is configured coherently —
-        // not whether this VERSION of the software has a verification driver.
-        // The latter is a universal, operator-unfixable capability fact (C5
-        // Finding F1); reporting it as a per-install failure would make every
-        // correct install red with a remedy nobody can act on, which spec §9.3
-        // forbids by name ("the doctor reports a known-outage state ... instead
-        // of printing a no-op remedy") and which trains operators to ignore red.
+        // This check measures whether THIS INSTALL is configured and composed
+        // coherently. When there was no way to inject a verification driver at
+        // all, driver absence was a universal, operator-unfixable capability
+        // fact (C5 Finding F1) and reporting it per-install would have made
+        // every correct install red with a remedy nobody could act on — which
+        // spec §9.3 forbids by name. Now that the driver is an injected port,
+        // its absence is this composition root's choice and both exits are
+        // real, so the check reports it.
         chainVerificationCheck(state),
       ];
 
@@ -257,6 +278,53 @@ export function createCorpusCapability(
     },
   });
 
+  /**
+   * Configuration names the posture; composition decides whether the runtime
+   * can honor it. `verified` without a driver is NOT silently demoted to
+   * unverified — that would be the exact accident
+   * `UNVERIFIED_CHAIN_ACKNOWLEDGEMENT` exists to make impossible — it fails
+   * closed to rejecting, and the health check says which of the two states
+   * this install is in.
+   */
+  function selectChainVerification(
+    mode: CorpusConfig["chainVerification"],
+    driver: VerifyDriver | undefined,
+  ): { readonly verification: ChainVerification; readonly shortfall?: "driver-unavailable" } {
+    if (mode === "unverified") {
+      return { verification: createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGEMENT) };
+    }
+    if (mode === "rejecting") {
+      return { verification: createRejectingChainVerification() };
+    }
+    if (driver === undefined) {
+      return { verification: createRejectingChainVerification(), shortfall: "driver-unavailable" };
+    }
+    return { verification: createDriverChainVerification(driver) };
+  }
+
+  /**
+   * A refusal is the mirror's answer to one source, and the mirror is
+   * constructed per operation — so without this the reason a feed is being
+   * refused lives only in that call's return value and the log, and health
+   * can report only the downstream symptom (no sync position) with no cause.
+   * The wrapper keeps the newest reason per source so the check can name it.
+   */
+  function recordingChainVerification(
+    inner: ChainVerification,
+    rejections: Map<string, string>,
+  ): ChainVerification {
+    return Object.freeze({
+      mode: inner.mode,
+      async verify(input: ChainVerificationInput): Promise<ChainVerificationOutcome> {
+        const key = `${input.source.agent}/${input.source.name}`;
+        const outcome = await inner.verify(input);
+        if (outcome.status === "rejected") rejections.set(key, outcome.reason);
+        else rejections.delete(key);
+        return outcome;
+      },
+    });
+  }
+
   function storePathsOf(config: RuntimeConfig) {
     return {
       catalogPath: config.mirrorCatalogPath,
@@ -294,39 +362,75 @@ export function createCorpusCapability(
   /**
    * Posture-vs-configuration, deliberately — NOT capability presence.
    *
-   * Three states, and each carries information a different one does not:
+   * Every state below is one an operator can either act on or has explicitly
+   * asked for, which is what keeps red worth reading:
    *  - nothing to verify (no archives followed) → green;
-   *  - a driver is wired → green, and the check silently starts reporting a
-   *    real verification result the day one exists;
+   *  - the driver posture is live → green, and any source the driver has
+   *    actually refused is named here with its reason, because the mirror
+   *    that saw the refusal is constructed per operation and cannot report it;
+   *  - `verified` configured but the runtime was composed without a driver →
+   *    red: this install indexes nothing, and both exits (compose the driver,
+   *    or choose another posture) are in the remedy;
    *  - archives followed with the unverified posture acknowledged → green,
    *    with the posture named in `detail` and `remedy: null`, because the
    *    operator explicitly wrote that flag and there is nothing to do;
-   *  - archives followed with NO posture chosen → red, because this install
-   *    will silently never index anything, and one config line fixes it.
-   *
-   * Red therefore means "something here is wrong and you can fix it", which is
-   * the only meaning that keeps red worth reading.
+   *  - archives followed with the rejecting posture → red, because that
+   *    install will silently never index anything and one config line fixes
+   *    it.
    */
   function chainVerificationCheck(state: Started): HealthCheck {
-    if (state.chainVerification.mode === "verified") {
+    const name = "corpus-chain-verification";
+    // Every branch below keys off the CONFIGURED posture, never the live
+    // object's `mode`: `mode` has two values for three postures — rejecting
+    // reports itself as `unverified` because it, too, verifies nothing — so
+    // reading it here would render an install that admits nothing as one that
+    // is happily mirroring.
+    const configured = state.corpus.chainVerification;
+    if (configured === "verified" && state.chainVerificationShortfall === undefined) {
+      const refused = [...state.chainRejections.entries()];
       return {
-        name: "corpus-chain-verification",
-        ok: true,
-        detail: "Announcement chains are verified before indexing.",
-        remedy: null,
+        name,
+        ok: refused.length === 0,
+        detail:
+          refused.length === 0
+            ? "Announcement chains are verified before indexing."
+            : `Announcement chains are verified before indexing; ${String(refused.length)} ` +
+              `archive(s) were refused at their last verification: ${refused
+                .map(([source, reason]) => `${source} (${reason})`)
+                .join(", ")}.`,
+        remedy:
+          refused.length === 0
+            ? null
+            : "A refused archive is serving a chain this runtime cannot verify; the reason above " +
+              "names which check failed — start from the archive's head signature, the signing " +
+              "keys this runtime resolves for it, and the entry linkage it served.",
       };
     }
     if (state.corpus.sources.length === 0) {
       return {
-        name: "corpus-chain-verification",
+        name,
         ok: true,
         detail: "No archives are followed, so there is no announcement chain to verify.",
         remedy: null,
       };
     }
-    if (state.corpus.acknowledgeUnverifiedChain) {
+    if (configured === "verified") {
       return {
-        name: "corpus-chain-verification",
+        name,
+        ok: false,
+        detail:
+          `${String(state.corpus.sources.length)} archive(s) are followed under the \`verified\` ` +
+          "posture, but this runtime was composed without an announcement-chain verification " +
+          "driver, so the mirror will not index anything from them.",
+        remedy:
+          "Compose the runtime with a corpus verification driver, or — for local development " +
+          "only — set `corpus.chainVerification` to `unverified` together with " +
+          "`corpus.acknowledgeUnverifiedChain`.",
+      };
+    }
+    if (configured === "unverified") {
+      return {
+        name,
         ok: true,
         detail:
           "Mirroring without announcement-chain verification — signatures on followed archives " +
@@ -335,14 +439,15 @@ export function createCorpusCapability(
       };
     }
     return {
-      name: "corpus-chain-verification",
+      name,
       ok: false,
       detail:
-        `${String(state.corpus.sources.length)} archive(s) are followed but no chain-verification ` +
-        "posture was chosen, so the mirror will not index anything from them.",
+        `${String(state.corpus.sources.length)} archive(s) are followed under the \`rejecting\` ` +
+        "posture, so the mirror will not index anything from them.",
       remedy:
-        "Set `corpus.acknowledgeUnverifiedChain` to true to mirror without chain verification, " +
-        "or stop following archives under `corpus.sources`.",
+        "Set `corpus.chainVerification` to `verified` (and compose the runtime with a " +
+        "verification driver), or to `unverified` with `corpus.acknowledgeUnverifiedChain` for " +
+        "local development.",
     };
   }
 

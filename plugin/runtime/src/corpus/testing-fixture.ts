@@ -307,11 +307,28 @@ function jsonResponse(value: unknown): TransportResponse {
   };
 }
 
+/**
+ * Wraps a head document in the published (DSSE-enveloped) wire shape §5.5
+ * defines. The signature bytes are a placeholder: nothing in this tree checks
+ * them — a `VerifyDriver` is what does, and every test that needs a verdict
+ * injects one — but a `verified` posture refuses an unsigned head outright, so
+ * a fixture archive that means to reach the driver has to carry an envelope.
+ */
+function envelopeHead(head: unknown): unknown {
+  return {
+    payloadType: "application/vnd.jinn.record-discovery.head+json",
+    payload: Buffer.from(JSON.stringify(head), "utf8").toString("base64"),
+    signatures: [{ keyid: FIXTURE_SIGNER_KEY, sig: Buffer.from([1]).toString("base64") }],
+  };
+}
+
 function buildArchiveTransport(
   source: MirrorSourceConfig,
   recordBytes: readonly Uint8Array[],
-  delayMs = 0,
+  options: { readonly delayMs?: number; readonly signHead?: boolean } = {},
 ): Transport {
+  const delayMs = options.delayMs ?? 0;
+  const signHead = options.signHead ?? false;
   const announcements = recordBytes.map((bytes, index) => ({
     announcementId: `ann-${String(index + 1)}`,
     action: "available" as const,
@@ -350,7 +367,9 @@ function buildArchiveTransport(
       if (delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
-      if (url === `${source.servingRoot}${headPath(source.name)}`) return jsonResponse(head);
+      if (url === `${source.servingRoot}${headPath(source.name)}`) {
+        return jsonResponse(signHead ? envelopeHead(head) : head);
+      }
       if (url === source.archiveRootUrl) return jsonResponse(page);
       for (const [digest, bytes] of recordsByDigest) {
         if (url === `${source.servingRoot}/records/${digest.slice("sha256:".length)}`) {
@@ -369,6 +388,7 @@ function buildArchiveTransport(
 export function buildFixtureArchive(
   source: MirrorSourceConfig,
   admittedProducers: readonly string[],
+  options: { readonly signHead?: boolean } = {},
 ): FixtureArchive {
   const policy = POLICY_BY_ADMISSION.get(policyCacheKey(admittedProducers)) ?? emptyPolicy;
   const aliceBytes = VARIANT_BYTES.filter(
@@ -378,10 +398,11 @@ export function buildFixtureArchive(
     family: "execution-evidence" as const,
     digest: recordDigest(aliceBytes[0]!),
   };
-  const transport = buildArchiveTransport(source, aliceBytes);
+  const signHead = options.signHead ?? false;
+  const transport = buildArchiveTransport(source, aliceBytes, { signHead });
   return {
     transport,
-    slowTransport: buildArchiveTransport(source, aliceBytes, 50),
+    slowTransport: buildArchiveTransport(source, aliceBytes, { delayMs: 50, signHead }),
     policyVersions: [policy.envelopeBytes],
     genesisDigest: policy.digest,
     reference,

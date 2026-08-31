@@ -88,16 +88,14 @@ test('the runtime distribution is restored straight into its package', () => {
   );
 });
 
-// The restore comment cites sibling workflows as precedent for restoring by
-// name. A citation that outlives the shape it names is worse than no citation:
-// it reads as settled while pointing at a workflow that no longer restores
-// anything. marketplace-ci.yml was cited until #2997 consolidated its jobs and
-// removed every artifact hand-off. This gate keeps the sentence honest.
-test('every workflow cited as by-name precedent actually restores by name', () => {
+// The restore step's comment is where the by-name shape is explained and its
+// precedent cited. The repository-wide gate in
+// `workflow-precedent-citations.test.mjs` checks that every cited workflow
+// still restores by name; this keeps the citation itself from simply
+// disappearing from this workflow.
+test('the restore step carries a comment citing a precedent workflow', () => {
   const lines = workflow.split('\n');
-  const restoreStep = lines.findIndex((line) =>
-    line.includes('- name: Restore Plugin Runtime distribution'),
-  );
+  const restoreStep = lines.findIndex((line) => line.includes('- name: Restore Plugin Runtime distribution'));
   assert.ok(restoreStep > 0, 'the runtime restore step must exist');
 
   const comment = [];
@@ -107,14 +105,8 @@ test('every workflow cited as by-name precedent actually restores by name', () =
   }
   assert.ok(comment.length > 0, 'the restore step must carry its explanatory comment');
 
-  const cited = [...new Set(comment.join('\n').match(/[\w-]+\.ya?ml/g) ?? [])];
+  const cited = [...new Set(comment.join('\n').match(/[\w-]+\.ya?ml/g) ?? [])].filter(
+    (name) => name !== 'plugin-tree-ci.yml',
+  );
   assert.ok(cited.length > 0, 'the comment must cite at least one precedent workflow');
-
-  for (const name of cited) {
-    const source = readFileSync(resolve(root, '.github/workflows', name), 'utf8');
-    assert.ok(
-      restoredArtifactNames(source).length > 0,
-      `${name} is cited as by-name-restore precedent but restores no artifact by name`,
-    );
-  }
 });

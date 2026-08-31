@@ -146,3 +146,124 @@ describe("factsConsistency RecordFactValue (program §7.129)", () => {
     expect(outcome).toBe("inconsistent");
   });
 });
+
+// Join edges are ordinary record facts: the completeness rule (design §12, amendment
+// 2026-08-28) grows what a profile declares, and facts-consistency covers the added fields the
+// same way it covers every other one. These pin that, including the one path the cases above
+// never take — an edge whose recompute must reach for another record's bytes.
+
+// A test-local profile URI, deliberately not one of the published ones: the real
+// `facts/benchmark-report/v2` binds record kind `benchmark-report/v2`, not the v1 kind above,
+// and these fields are synthetic anyway.
+const edgeProfile = parseFactsProfile({
+  protocol: RECORD_DISCOVERY_VERSION,
+  kind: KIND,
+  profile: "https://spec.jinn.network/facts/join-edge-fixture/v1",
+  fields: [
+    { name: "scalarField", class: "record" },
+    { name: "matrixDigests", class: "record", referenceBearing: true },
+    { name: "supersedesDigest", class: "record", referenceBearing: true },
+  ],
+});
+
+describe("factsConsistency over join edges (design §12 amendment)", () => {
+  it("flags a scalar edge that disagrees with the record", async () => {
+    const outcome = await factsConsistency({
+      item: itemWithFacts({ supersedesDigest: `sha256:${"1".repeat(64)}` }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({ supersedesDigest: `sha256:${"2".repeat(64)}` }),
+      records: unusedRecords,
+    });
+    expect(outcome).toBe("inconsistent");
+  });
+
+  it("accepts a scalar edge that agrees with the record", async () => {
+    const outcome = await factsConsistency({
+      item: itemWithFacts({ supersedesDigest: `sha256:${"1".repeat(64)}` }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({ supersedesDigest: `sha256:${"1".repeat(64)}` }),
+      records: unusedRecords,
+    });
+    expect(outcome).toBe("consistent");
+  });
+
+  it("is indeterminate — never consistent — when the referenced bytes an edge needs are unavailable", async () => {
+    const referenceBearing: FactsRecompute = {
+      get() {
+        return async (_bytes, refs) => {
+          const referenced = await refs.fetch(`sha256:${"1".repeat(64)}`);
+          return { supersedesDigest: referenced === undefined ? undefined : `sha256:${"1".repeat(64)}` };
+        };
+      },
+    };
+    const gated: RecordFetcher = {
+      async "fetch"() {
+        throw new Error("capability-gated to this consumer");
+      },
+    };
+    const outcome = await factsConsistency({
+      item: itemWithFacts({ supersedesDigest: `sha256:${"1".repeat(64)}` }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: referenceBearing,
+      records: gated,
+    });
+    expect(outcome).toBe("indeterminate");
+  });
+
+  it("checks a multi-valued edge element by element, in record order", async () => {
+    const announced = [`sha256:${"1".repeat(64)}`, `sha256:${"2".repeat(64)}`];
+    await expect(factsConsistency({
+      item: itemWithFacts({ matrixDigests: announced }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({ matrixDigests: [...announced] }),
+      records: unusedRecords,
+    })).resolves.toBe("consistent");
+    await expect(factsConsistency({
+      item: itemWithFacts({ matrixDigests: announced }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({ matrixDigests: [announced[1], announced[0]] }),
+      records: unusedRecords,
+    })).resolves.toBe("inconsistent");
+    await expect(factsConsistency({
+      item: itemWithFacts({ matrixDigests: [announced[0]] }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({ matrixDigests: [...announced] }),
+      records: unusedRecords,
+    })).resolves.toBe("inconsistent");
+  });
+
+  it("is indeterminate for an announced optional edge the record does not carry", async () => {
+    // The limit the §12 amendment states: when the component is absent the recompute omits the
+    // key, and `undefined` is already spoken for as the unavailable-referenced-bytes signal. So a
+    // *fabricated* optional edge reads `indeterminate`, not `inconsistent` — the check cannot
+    // distinguish "the record has no such component" from "the bytes could not be obtained".
+    const outcome = await factsConsistency({
+      item: itemWithFacts({ supersedesDigest: `sha256:${"9".repeat(64)}` }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({ scalarField: "owner-iri" }),
+      records: unusedRecords,
+    });
+    expect(outcome).toBe("indeterminate");
+  });
+
+  it("leaves an edge the card does not announce unchecked -- the skip completeness cannot close", async () => {
+    const outcome = await factsConsistency({
+      item: itemWithFacts({ scalarField: "owner-iri" }),
+      profile: edgeProfile,
+      recordBytes,
+      factsRecompute: recomputeOf({
+        scalarField: "owner-iri",
+        supersedesDigest: `sha256:${"1".repeat(64)}`,
+      }),
+      records: unusedRecords,
+    });
+    expect(outcome).toBe("consistent");
+  });
+});

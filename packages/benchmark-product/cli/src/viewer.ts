@@ -6,6 +6,8 @@ import {
   PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+  summarizeVerificationOutcome,
   verifyPublicBundleSnapshot,
   type PublicComparisonCell,
   type PublicComparisonView,
@@ -68,13 +70,34 @@ function viewerHtml(
   canStartWorkspace: boolean,
   availablePaths: ReadonlySet<string>,
 ): string {
-  const checks = verification.checks.map((check) => `<li><strong>${escapeMarkup(check)}</strong> <span>passed</span></li>`).join("");
+  // A metadata-first evidence-native bundle defers `artifact-integrity` (issue #2986): it carries
+  // the artifact digests without their bytes. Every count and every state on this page comes from
+  // the one shared derivation, so the headline cannot disagree with the list under it.
+  const outcome = summarizeVerificationOutcome(verification);
+  const checks = outcome.outcomes.map(({ check, state }) =>
+    `<li><strong>${escapeMarkup(check)}</strong> <span class="${state === "passed" ? "pass" : "deferred"}">${state}</span></li>`,
+  ).join("");
+  const verdict = outcome.notFetched === 0
+    ? `${outcome.passed} of ${outcome.total} bundle checks passed.`
+    : `${outcome.passed} of ${outcome.total} bundle checks passed, ${outcome.notFetched} not fetched.`;
+  const artifactContentNote = outcome.artifactContent === undefined
+    ? ""
+    : `<p class="deferred-note">${outcome.artifactContent.notFetched} artifact ${outcome.artifactContent.notFetched === 1 ? "body was" : "bodies were"} not fetched. This bundle carries their exact digests, not their bytes, so nothing here says what they contain. Check fetched bytes against those digests yourself, or verify the full-evidence bundle.</p>`;
+  // The anchored binary-qualification closure is the one format the @0.1 line cannot read
+  // (issue #3205), so it is named before the fall-through rather than inheriting it.
   const verificationCommand = verification.format === "benchmark-product-public-bundle/5"
     ? PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND
-    : verification.format === "benchmark-product-public-bundle/4"
-      ? PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND
-      : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
-  const copyCommand = `${verificationCommand} ${JSON.stringify(bundleDir)}`;
+    : verification.format === "benchmark-product-public-bundle/7"
+      ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
+      : verification.format === "benchmark-product-public-bundle/4"
+        ? PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND
+        : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
+  // No released npx line understands the metadata-first profile -- an older reader refuses it at
+  // manifest parse -- so this page offers the local command that does work instead of an
+  // instruction to fail.
+  const copyCommand = outcome.artifactContent === undefined
+    ? `${verificationCommand} ${JSON.stringify(bundleDir)}`
+    : `colophon bundle verify --bundle ${JSON.stringify(bundleDir)}`;
   const qualification = verification.format === "benchmark-product-public-bundle/5"
     ? undefined
     : verification.qualification;
@@ -96,7 +119,7 @@ function viewerHtml(
   const reportSection = availablePaths.has("index.html")
     ? '<section><h2>Published report</h2><p>This script-free report is inside the immutable bundle. The live result above was computed from the exact authenticated bytes when this local viewer started.</p><iframe title="Published Colophon benchmark report" src="/bundle/index.html"></iframe></section>'
     : '<section><h2>Published report records</h2><p>The evidence-native report is preserved as exact signed data rather than an embedded HTML projection.</p><p><a href="/bundle/report.json">Open report payload</a> · <a href="/bundle/report-envelope.json">Open signed envelope</a></p></section>';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Colophon — verified bundle</title><style>:root{--paper:#f7f4ed;--panel:#fffdf8;--ink:#14120e;--muted:#6b675f;--line:#cfc8bb;--red:#c7402a;--blue:#27406b}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 system-ui,sans-serif}header,main{max-width:1200px;margin:auto;padding:24px}main{display:grid;gap:28px}h1,h2{font:500 42px/1.1 Georgia,serif}h2{font-size:34px}.eyebrow{color:var(--red);font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}.answer{border-top:3px solid var(--red);padding-top:16px;font-weight:650}.sample-note{background:#eee9df;border-left:3px solid #9d6b23;padding:12px}.checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;padding:0;list-style:none}.checks li,details{background:var(--panel);border:1px solid var(--line);padding:12px}.checks span{color:#176b3a}.actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-block:20px}.actions form{margin:0}button,.button{appearance:none;border:1px solid var(--ink);border-radius:3px;background:transparent;color:var(--ink);cursor:pointer;padding:10px 14px;font:inherit;text-decoration:none}.primary{background:var(--ink);color:var(--panel)}code{overflow-wrap:anywhere}.table-scroll{overflow-x:auto;border-top:1px solid var(--ink)}table{width:100%;min-width:720px;border-collapse:collapse;table-layout:fixed}th,td{border-bottom:1px solid var(--line);padding:12px;text-align:left;vertical-align:top;overflow-wrap:anywhere}th small{display:block;color:var(--muted);font-weight:400;margin-top:6px}td span{color:var(--muted);font-size:.85rem}td a{color:inherit;text-decoration:none}details{margin-block:8px}summary{cursor:pointer}iframe{width:100%;min-height:780px;border:1px solid var(--line);background:white}@media(max-width:600px){header,main{padding:16px}h1{font-size:34px}h2{font-size:28px}}</style></head><body><header><p>Colophon · live local reader</p><h1>${heading}</h1><p class="answer">${verification.checks.length} of ${verification.checks.length} bundle checks passed. Nothing was uploaded.</p><p>Format <code>${escapeMarkup(verification.format)}</code></p><p>Bundle <code>${escapeMarkup(bundleDir)}</code></p><p>Identity <code>${escapeMarkup(identity)}</code></p><ul class="checks">${checks}</ul><div class="actions">${workspaceAction}<a class="button" href="/bundle/${evidencePath}">Open the evidence</a><button id="copy-verification" type="button" data-command="${escapeMarkup(copyCommand)}">Copy verification command</button><span id="copy-result" role="status" aria-live="polite"></span></div></header><main>${primaryProjection}${reportSection}</main><script nonce="${nonce}">const button=document.getElementById("copy-verification");const result=document.getElementById("copy-result");button?.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(button.dataset.command??"");result.textContent="Copied."}catch{result.textContent="Copy failed. Select the command from the bundle report."}});</script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Colophon — verified bundle</title><style>:root{--paper:#f7f4ed;--panel:#fffdf8;--ink:#14120e;--muted:#6b675f;--line:#cfc8bb;--red:#c7402a;--blue:#27406b}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 system-ui,sans-serif}header,main{max-width:1200px;margin:auto;padding:24px}main{display:grid;gap:28px}h1,h2{font:500 42px/1.1 Georgia,serif}h2{font-size:34px}.eyebrow{color:var(--red);font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}.answer{border-top:3px solid var(--red);padding-top:16px;font-weight:650}.sample-note{background:#eee9df;border-left:3px solid #9d6b23;padding:12px}.checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;padding:0;list-style:none}.checks li,details{background:var(--panel);border:1px solid var(--line);padding:12px}.checks span.pass{color:#176b3a}.checks span.deferred{color:#9d6b23}.deferred-note{background:#eee9df;border-left:3px solid #9d6b23;padding:12px}.actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-block:20px}.actions form{margin:0}button,.button{appearance:none;border:1px solid var(--ink);border-radius:3px;background:transparent;color:var(--ink);cursor:pointer;padding:10px 14px;font:inherit;text-decoration:none}.primary{background:var(--ink);color:var(--panel)}code{overflow-wrap:anywhere}.table-scroll{overflow-x:auto;border-top:1px solid var(--ink)}table{width:100%;min-width:720px;border-collapse:collapse;table-layout:fixed}th,td{border-bottom:1px solid var(--line);padding:12px;text-align:left;vertical-align:top;overflow-wrap:anywhere}th small{display:block;color:var(--muted);font-weight:400;margin-top:6px}td span{color:var(--muted);font-size:.85rem}td a{color:inherit;text-decoration:none}details{margin-block:8px}summary{cursor:pointer}iframe{width:100%;min-height:780px;border:1px solid var(--line);background:white}@media(max-width:600px){header,main{padding:16px}h1{font-size:34px}h2{font-size:28px}}</style></head><body><header><p>Colophon · live local reader</p><h1>${heading}</h1><p class="answer">${verdict} Nothing was uploaded.</p>${artifactContentNote}<p>Format <code>${escapeMarkup(verification.format)}</code></p><p>Bundle <code>${escapeMarkup(bundleDir)}</code></p><p>Identity <code>${escapeMarkup(identity)}</code></p><ul class="checks">${checks}</ul><div class="actions">${workspaceAction}<a class="button" href="/bundle/${evidencePath}">Open the evidence</a><button id="copy-verification" type="button" data-command="${escapeMarkup(copyCommand)}">Copy verification command</button><span id="copy-result" role="status" aria-live="polite"></span></div></header><main>${primaryProjection}${reportSection}</main><script nonce="${nonce}">const button=document.getElementById("copy-verification");const result=document.getElementById("copy-result");button?.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(button.dataset.command??"");result.textContent="Copied."}catch{result.textContent="Copy failed. Select the command from the bundle report."}});</script></body></html>`;
 }
 
 function contentType(path: string): string {

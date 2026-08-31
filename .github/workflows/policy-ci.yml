@@ -40,6 +40,8 @@ jobs:
         run: node --test .github/scripts/policy-identity-guards.test.mjs
       - name: Verify policy-outcomes' projection-never-record contract
         run: node --test .github/scripts/policy-outcomes-guards.test.mjs
+      - name: Verify Policy CI restores every distribution by name
+        run: node --test .github/scripts/policy-ci-workflow.test.mjs
 
   identity:
     needs: [architecture]
@@ -138,16 +140,25 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
-      - name: Restore all package distributions
+      # Restore by name, one step per package. A `pattern:` restore nests each
+      # artifact under `path/<artifact>/` only while two or more artifacts
+      # match; download-artifact v5 made a lone match extract straight into
+      # `path/` instead, so the pattern form silently changes shape with the
+      # artifact count. This workflow has exactly two `policy-*-dist`
+      # uploaders, the smallest count at which the nested layout holds:
+      # consolidating the packages or gating either upload on a path filter
+      # would have changed the layout with no gate to catch it. Restoring by
+      # name has no such dependency, and `policy-ci-workflow.test.mjs` keeps it
+      # that way. Same shape as plugin-tree-ci.yml.
+      - name: Restore Policy Identity distribution
         uses: actions/download-artifact@v8
         with:
-          pattern: policy-*-dist
-          path: .policy-dist
-      - name: Place package distributions
-        run: |
-          mkdir -p packages/policy/identity/dist
-          cp -R .policy-dist/policy-identity-dist/. packages/policy/identity/dist/
-          mkdir -p packages/policy/outcomes/dist
-          cp -R .policy-dist/policy-outcomes-dist/. packages/policy/outcomes/dist/
+          name: policy-identity-dist
+          path: packages/policy/identity/dist
+      - name: Restore Policy Outcomes distribution
+        uses: actions/download-artifact@v8
+        with:
+          name: policy-outcomes-dist
+          path: packages/policy/outcomes/dist
       - name: Compile packed public entrypoint consumers
         run: node .github/scripts/policy-packed-types.test.mjs

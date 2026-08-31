@@ -1,6 +1,6 @@
 /**
  * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
- * 41 parity operations over the operations facade, plus the path-oriented
+ * 42 parity operations over the operations facade, plus the path-oriented
  * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
@@ -36,6 +36,7 @@ import {
   authorityRevoke,
   authorityShow,
   anchoringConfigure,
+  runBind,
   createDraft,
   getDraft,
   importBinaryItemBank,
@@ -82,10 +83,13 @@ import {
   type SignHumanReviewResponseInput,
 } from "../operations/index.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
+import type { BeaconReference } from "@colophon-claims/verify";
+import { summarizeVerificationOutcome } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { readRunJournalEntries } from "../run/journal.js";
-import { requireRunState } from "../run/state.js";
+import { DEFAULT_PUBLICATION_SOURCE_NAME, requireRunState } from "../run/state.js";
+import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer, type PublicationWellKnownOutcome } from "../run/publication-serve.js";
 import { readDraftDocument } from "../operations/drafts.js";
 import { listMethodCatalog } from "../operations/method-catalog.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, readTextFile, required, type ParsedArgs } from "./args.js";
@@ -146,6 +150,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    [--ack-provider-network-costs] [--no-anchor]
   anchor           --workspace <dir> --principal <id> --draft <draftId>
                    --subject lock|matrix [--provider <profileUri>] [--endpoint <url>]
+  bind             --workspace <dir> --principal <id> --draft <draftId>
+                   --beacon-source <id> --beacon-round <n> --beacon-value <64 hex>
   anchoring configure --workspace <dir> --principal <id>
                    (--provider <profileUri> --endpoint <url> | --file <anchoring.json> | --clear)
   publication configure --workspace <dir> --principal <id> --draft <draftId> --public-base-url <url>
@@ -153,6 +159,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   publication status     --workspace <dir> --principal <id> --draft <draftId>
   publication accounting --workspace <dir> --principal <id> --draft <draftId>
   publication report     --workspace <dir> --principal <id> --draft <draftId>
+  publication serve      --workspace <dir> --principal <id>
+                   [--source <name>] [--host <address>] [--port <n>]
   launch           --workspace <dir> --principal <id> --draft <draftId>
                    [--concurrency <1-32>] [--ack-provider-network-costs]
   resume           --workspace <dir> --principal <id> --draft <draftId>
@@ -248,10 +256,12 @@ const QUOTE_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLA
 const NO_ANCHOR_FLAG = "no-anchor" as const;
 const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG, NO_ANCHOR_FLAG] as const;
 const ANCHOR_FLAGS = ["workspace", "principal", "json", "draft", "subject", "provider", "endpoint"] as const;
+const BIND_FLAGS = ["workspace", "principal", "json", "draft", "beacon-source", "beacon-round", "beacon-value"] as const;
 const ANCHORING_CONFIGURE_FLAGS = ["workspace", "principal", "json", "provider", "endpoint", "file", "clear"] as const;
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const PUBLICATION_SERVE_FLAGS = ["workspace", "principal", "json", "source", "host", "port"] as const;
 const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
@@ -1016,6 +1026,34 @@ function assertAnchorSubject(value: string): AnchorSubject {
   refuse("invalid-invocation", "--subject", `--subject must be "lock" or "matrix"`);
 }
 
+/**
+ * `bind` (issue #2976). The beacon reference is three flags rather than a file: it is three public
+ * values an operator reads off a beacon, and a reader checks the same three against it.
+ */
+function handleBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, BIND_FLAGS);
+  const round = Number(required(args, "beacon-round"));
+  if (!Number.isInteger(round)) {
+    refuse("invalid-invocation", "bind", "--beacon-round must be an integer round or block height");
+  }
+  const result = runBind(buildOperationContext(args, context), {
+    draftId: required(args, "draft"),
+    // Source and value are validated by the operation against the beacon registry and the hex
+    // shape, so an unknown source is refused by name there rather than guessed at here.
+    beacon: {
+      source: required(args, "beacon-source") as BeaconReference["source"],
+      round,
+      value: required(args, "beacon-value"),
+    },
+  });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `bound run ${value.binding.sealDigest} to ${value.binding.beacon.source} round `
+      + `${value.binding.beacon.round}: ${value.recordSha256}\n${value.statement}\n`,
+  );
+}
+
 async function handleAnchor(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, ANCHOR_FLAGS);
   const opContext = buildOperationContext(args, context);
@@ -1126,6 +1164,85 @@ async function handlePublicationReport(args: ParsedArgs, context: CliContext, js
     `published signed Report v2 ${value.reportRecordSha256} (payload ${value.reportPayloadSha256}) at ${value.source.agent}/${value.source.name}#${value.receipt.sourceSequence}\n`);
 }
 
+/** How each start-time well-known outcome reads while the server is coming up. */
+const WELL_KNOWN_PROGRESS: Readonly<Record<PublicationWellKnownOutcome, string>> = {
+  published: "well-known published",
+  "not-announced": "no announcement yet — well-known withheld",
+  // Loud, because the document on disk may name a superseded archive page, and a cold consumer
+  // reading a superseded root silently misses every announcement after it.
+  "refresh-failed": "WARNING: the well-known document could not be refreshed and may be stale",
+};
+
+/** The same three outcomes in the terminal summary's past tense. */
+const WELL_KNOWN_SUMMARY: Readonly<Record<PublicationWellKnownOutcome, string>> = {
+  published: "the well-known document names the current archive root",
+  "not-announced": "the source has not announced yet, so no well-known document was published",
+  "refresh-failed": "the well-known document could not be refreshed, so what was served may name a superseded archive page",
+};
+
+/**
+ * Serves this workspace's announcement source over plain HTTP until `context.shutdownSignal`
+ * aborts. Read-only: the archive is append-only and digest-addressed, and this verb publishes no
+ * new announcement -- it only refreshes the derived well-known document so a cold consumer can
+ * find the newest archive page.
+ *
+ * The signal is required rather than defaulted, because a verb that runs until interrupted needs
+ * a process that can interrupt it: `bin.ts` supplies one from SIGINT/SIGTERM, and an embedder
+ * that wants the server without the blocking verb should call `startPublicationArchiveServer`.
+ */
+async function handlePublicationServe(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, PUBLICATION_SERVE_FLAGS);
+  const { workspaceDir } = buildOperationContext(args, context);
+  if (context.createShutdownSignal === undefined) {
+    refuse("invalid-invocation", "publication serve", "publication serve requires a process that can signal shutdown");
+  }
+  const portText = optional(args, "port");
+  const port = portText === undefined || portText === "" ? DEFAULT_PUBLICATION_SERVE_PORT : Number(portText);
+  if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
+    refuse("invalid-invocation", "--port", "--port must be an integer from 0 to 65535");
+  }
+  // Present-but-empty is a typo, not an omission, so it falls back to the default exactly as an
+  // absent flag does rather than binding to the empty string.
+  const sourceName = optional(args, "source");
+  const host = optional(args, "host");
+  const server = await startPublicationArchiveServer({
+    workspaceDir,
+    sourceName: sourceName === undefined || sourceName === "" ? DEFAULT_PUBLICATION_SOURCE_NAME : sourceName,
+    ...(host === undefined || host === "" ? {} : { host }),
+    port,
+    ...(context.progress === undefined ? {} : { onError: (cause: unknown) => context.progress?.(`server error: ${cause instanceof Error ? cause.message : String(cause)}`) }),
+  });
+  try {
+    // Taken after the bind so a failure to serve is not preceded by hijacking the process's
+    // signal handling.
+    const shutdownSignal = context.createShutdownSignal();
+    context.progress?.(`serving ${server.url} (${WELL_KNOWN_PROGRESS[server.wellKnown]}); press Ctrl-C to stop`);
+    if (!shutdownSignal.aborted) {
+      await new Promise<void>((resolve) => { shutdownSignal.addEventListener("abort", () => resolve(), { once: true }); });
+    }
+  } finally {
+    await server.close();
+  }
+  return renderResult(
+    {
+      ok: true,
+      result: {
+        url: server.url,
+        host: server.host,
+        port: server.port,
+        wellKnown: server.wellKnown,
+        // The cause is what turns "may name a superseded archive page" into something an operator
+        // can act on; carried as its message so the envelope stays plain JSON.
+        ...(server.refreshFailure === undefined
+          ? {}
+          : { refreshFailure: server.refreshFailure instanceof Error ? server.refreshFailure.message : String(server.refreshFailure) }),
+      },
+    },
+    jsonMode,
+    (value) => `served ${value.url} until shutdown; ${WELL_KNOWN_SUMMARY[value.wellKnown]}${value.refreshFailure === undefined ? "" : ` (${value.refreshFailure})`}\n`,
+  );
+}
+
 /** `launch`'s `RunLaunchDeps`: `onProgress` streams to `context.progress` in human mode only —
  * `--json` mode's stdout stays the single machine-parseable envelope (module header). */
 function launchDeps(context: CliContext, jsonMode: boolean): RunLaunchDeps {
@@ -1198,9 +1315,19 @@ function handleStatus(args: ParsedArgs, context: CliContext, jsonMode: boolean):
   return renderResult(result, jsonMode, (value) => {
     const lines = [
       value.closeAt !== undefined ? `state ${value.state}, closeAt ${value.closeAt}` : `state ${value.state}`,
-      ...value.cells.map((cell) => `${cell.cellKey}\t${cell.status}\t${cell.dispatches}`),
+      ...value.cells.map((cell) => {
+        // A stranded cell (issue #3081) reads as an ordinary `delivered` otherwise — the marker
+        // is the only thing that separates a cell with a journaled verdict from one without.
+        const gap = cell.evaluationGap === undefined
+          ? ""
+          : cell.evaluationGap.deliveryJournaled
+            ? "\tawaiting evaluation"
+            : "\tawaiting evaluation (delivery not journaled)";
+        return `${cell.cellKey}\t${cell.status}\t${cell.dispatches}${gap}`;
+      }),
       `expected ${value.counts.expected}, dispatched ${value.counts.dispatched}, delivered ${value.counts.delivered}, `
-        + `judged ${value.counts.judged}, failed ${value.counts.failed}`,
+        + `judged ${value.counts.judged}, failed ${value.counts.failed}, `
+        + `awaiting evaluation ${value.counts.awaitingEvaluation}`,
     ];
     return `${lines.join("\n")}\n`;
   });
@@ -1269,7 +1396,11 @@ async function handleBundleVerify(args: ParsedArgs, context: CliContext, jsonMod
   return renderResult(
     { ok: true, result },
     jsonMode,
-    (value) => `verified public bundle ${value.identity}: ${value.checks.join(", ")}\n`,
+    // A deferred check is never printed as a bare check name: a metadata-first bundle carries its
+    // artifact digests without their bytes (issue #2986).
+    (value) => `verified public bundle ${value.identity}: ${summarizeVerificationOutcome(value).outcomes
+      .map(({ check, state }) => (state === "passed" ? check : `${check} (${state})`))
+      .join(", ")}\n`,
   );
 }
 
@@ -1336,12 +1467,14 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["quote", handleQuote],
   ["lock", handleLock],
   ["anchor", handleAnchor],
+  ["bind", handleBind],
   ["anchoring configure", handleAnchoringConfigure],
   ["publication configure", handlePublicationConfigure],
   ["publication register", handlePublicationRegister],
   ["publication status", handlePublicationStatus],
   ["publication accounting", handlePublicationAccounting],
   ["publication report", handlePublicationReport],
+  ["publication serve", handlePublicationServe],
   ["launch", handleLaunch],
   ["resume", handleResume],
   ["cancel", handleCancel],

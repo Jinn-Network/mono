@@ -178,14 +178,30 @@ const CorpusTrustConfigSchema = z.strictObject({
   producerPurpose: z.string().min(1).default("jinn:corpus-producer"),
 });
 
+/**
+ * Which of the three chain-verification postures this install takes:
+ *
+ *  - `verified` — the default, and the only posture a production mirror over
+ *    remote holder feeds may take: announcement chains are verified through
+ *    the host-injected `VerifyDriver` before anything is indexed;
+ *  - `unverified` — local development only, and unreachable without also
+ *    writing `acknowledgeUnverifiedChain: true`;
+ *  - `rejecting` — verify nothing, admit nothing.
+ */
+const CorpusChainVerificationSchema = z.enum(["verified", "unverified", "rejecting"]);
+
 const CorpusConfigSchema = z.strictObject({
   sources: z.array(MirrorSourceConfigSchema).default([]),
   maxEntriesPerSync: z.number().int().positive().max(10_000).default(500),
   syncTimeoutMs: z.number().int().positive().max(600_000).default(30_000),
+  /** Absent means `verified`, unless `acknowledgeUnverifiedChain` says otherwise. */
+  chainVerification: CorpusChainVerificationSchema.optional(),
   /**
    * Opt-in acknowledgement that this runtime mirrors without verifying
-   * announcement-chain signatures (C5 Finding F1). Default `false` means the
-   * mirror indexes nothing and says so in its health check — fail-closed.
+   * announcement-chain signatures (C5 Finding F1). It is the ONLY way to
+   * reach the `unverified` posture: naming that posture without this flag is
+   * a configuration error, so the unverified path stays impossible to acquire
+   * by accident.
    */
   acknowledgeUnverifiedChain: z.boolean().default(false),
   trust: CorpusTrustConfigSchema.optional(),
@@ -193,7 +209,11 @@ const CorpusConfigSchema = z.strictObject({
 
 export type MirrorSourceConfig = z.infer<typeof MirrorSourceConfigSchema>;
 export type CorpusTrustConfig = z.infer<typeof CorpusTrustConfigSchema>;
-export type CorpusConfig = z.infer<typeof CorpusConfigSchema>;
+export type CorpusChainVerificationMode = z.infer<typeof CorpusChainVerificationSchema>;
+export type CorpusConfig = Omit<z.infer<typeof CorpusConfigSchema>, "chainVerification"> & {
+  /** Always resolved — the file may omit it, the runtime never sees it absent. */
+  readonly chainVerification: CorpusChainVerificationMode;
+};
 
 function resolveCorpusConfig(file: unknown, homeDirectory: string): CorpusConfig {
   const raw = (file as { readonly corpus?: unknown } | undefined)?.corpus;
@@ -227,8 +247,24 @@ function resolveCorpusConfig(file: unknown, homeDirectory: string): CorpusConfig
     byRepository.add(source.repositoryId);
   }
 
+  // The acknowledgement flag is the gate on the unverified posture, in both
+  // directions: naming `unverified` without it is an error, and setting it
+  // alone (the pre-`chainVerification` spelling of the same intent) still
+  // selects that posture rather than being silently overridden by the new
+  // `verified` default.
+  if (parsed.data.chainVerification === "unverified" && !parsed.data.acknowledgeUnverifiedChain) {
+    throw new PluginRuntimeError(
+      RUNTIME_ERROR_CODES.configInvalid,
+      "corpus.chainVerification `unverified` requires corpus.acknowledgeUnverifiedChain: true.",
+    );
+  }
+  const chainVerification: CorpusChainVerificationMode =
+    parsed.data.chainVerification ??
+    (parsed.data.acknowledgeUnverifiedChain ? "unverified" : "verified");
+
   return {
     ...parsed.data,
+    chainVerification,
     ...(parsed.data.trust === undefined
       ? {}
       : {

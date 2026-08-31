@@ -39,7 +39,7 @@ function status(state: "running" | "closed" | "reported" | "published-bundle", c
         state,
         cancelRequested,
         cells: [],
-        counts: { expected: 6, dispatched: 6, delivered: 0, judged: 0, failed: 6 },
+        counts: { expected: 6, dispatched: 6, delivered: 0, judged: 0, failed: 6, awaitingEvaluation: 0 },
       },
     },
     publication: { ok: true as const, result: {
@@ -48,6 +48,7 @@ function status(state: "running" | "closed" | "reported" | "published-bundle", c
       compatibility: { status: "ready", dispatchCount: 0 }, postHocPublicationAvailable: ["closed", "reported", "published-bundle"].includes(state),
       recovery: { resumable: false, guidance: "Publication remains local until you explicitly configure and register a public source." },
     } },
+    beaconSources: ["bitcoin/mainnet", "drand/default", "drand/quicknet"],
     publicationConfiguration: { available: true, publicBaseUrl: "https://public.example/publication" },
   };
 }
@@ -177,7 +178,7 @@ describe("durable run monitor cancellation language", () => {
         error: { code: "execution", detail: sentinel },
       },
       cells: [],
-      counts: { expected: 0, dispatched: 0, delivered: 0, judged: 0, failed: 0 },
+      counts: { expected: 0, dispatched: 0, delivered: 0, judged: 0, failed: 0, awaitingEvaluation: 0 },
     });
     loadRunViewMock.mockReturnValue({
       ok: true,
@@ -191,5 +192,120 @@ describe("durable run monitor cancellation language", () => {
     expect(markup).toContain("server logs");
     expect(markup).not.toContain(sentinel);
     expect(markup).not.toContain("VERY_SECRET");
+  });
+
+  test("offers the beacon binding on a locked run and states it once bound (#2976)", async () => {
+    loadRunViewMock.mockReturnValue(status("running", false));
+    const unbound = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(unbound).toContain("Post-seal randomness");
+    expect(unbound).toContain("Bind to this beacon value");
+    expect(unbound).toContain("drand/quicknet");
+    // No endpoint, path, or URL field: the browser supplies three published values and nothing the
+    // server would call.
+    expect(unbound).not.toContain('name="endpoint"');
+
+    const bound = status("running", false);
+    loadRunViewMock.mockReturnValue({
+      ...bound,
+      status: { ...bound.status, result: { ...bound.status.result, binding: {
+        class: "beacon-ordering-only",
+        beacon: { source: "drand/quicknet", round: 200000000, value: "b".repeat(64) },
+        postSeal: "proven-offline",
+        poolDigest: `sha256:${"a".repeat(64)}`,
+        statement: "This run evaluated its whole declared population — ordering-only binding.",
+      } } },
+    });
+    const markup = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(markup).toContain("ordering-only binding");
+    expect(markup).not.toContain("Bind to this beacon value");
+  });
+
+  test("marks a cell stranded between its delivered event and its delivery record (#3084)", async () => {
+    loadRunViewMock.mockReturnValue({
+      ok: true,
+      draft: { ok: true, result: {} },
+      status: { ok: true, result: {
+        state: "running",
+        cancelRequested: false,
+        // The crash shape: the process was killed between the `delivered` cell event and the
+        // `delivery` record, so its generation has no journaled terminal and reads `active`.
+        driver: { operation: "run.launch", generation: "gen-1", startedAt: "2026-01-01T00:00:00.000Z", status: "active" },
+        cells: [
+          {
+            cellKey: "cell-stranded", armId: "baseline", replicate: 1, taskSha256: "a".repeat(64),
+            status: "delivered", dispatches: 1,
+            evaluationGap: { missingEvalIndexes: [1], deliveryJournaled: false },
+          },
+          {
+            cellKey: "cell-judged", armId: "baseline", replicate: 2, taskSha256: "b".repeat(64),
+            status: "judged", dispatches: 1,
+          },
+        ],
+        counts: { expected: 2, dispatched: 2, delivered: 1, judged: 1, failed: 0, awaitingEvaluation: 1 },
+      } },
+    });
+    const markup = renderToStaticMarkup(await RunMonitorPage({
+      params: Promise.resolve({ draftId: "draft-1" }),
+    }));
+    expect(markup).toContain("awaiting evaluation (delivery not journaled)");
+    // The aggregate tile: an operator scanning the summary row sees the count without reading
+    // every cell row.
+    expect(markup).toContain("Awaiting evaluation");
+  });
+
+  test("omits the awaiting-evaluation tile when no cell has a gap resume would act on", async () => {
+    loadRunViewMock.mockReturnValue({
+      ok: true,
+      draft: { ok: true, result: {} },
+      status: { ok: true, result: {
+        state: "running",
+        cancelRequested: false,
+        cells: [
+          {
+            cellKey: "cell-judged", armId: "baseline", replicate: 1, taskSha256: "b".repeat(64),
+            status: "judged", dispatches: 1,
+          },
+        ],
+        counts: { expected: 1, dispatched: 1, delivered: 1, judged: 1, failed: 0, awaitingEvaluation: 0 },
+      } },
+    });
+    const markup = renderToStaticMarkup(await RunMonitorPage({
+      params: Promise.resolve({ draftId: "draft-1" }),
+    }));
+    expect(markup).not.toContain("Awaiting evaluation");
+    expect(markup).not.toContain("awaiting evaluation");
+  });
+
+  // `runLaunch` journals `driver-started` before the first dispatch, so every `running` run with a
+  // delivered cell carries a driver generation, and a killed process never journals a terminal —
+  // `active` is the shape a crashed run presents. The tile states the count rather than naming an
+  // action, so it reaches that operator instead of being gated out of the one case it exists for.
+  test.each([
+    ["a driver generation is active", { driver: { operation: "run.launch", generation: "gen-1", startedAt: "2026-01-01T00:00:00.000Z", status: "active" } }],
+    ["a cancellation is pending", { driver: { operation: "run.launch", generation: "gen-1", startedAt: "2026-01-01T00:00:00.000Z", status: "active" }, cancelRequested: true }],
+  ])("states the awaiting-evaluation count while %s", async (_name, overrides) => {
+    loadRunViewMock.mockReturnValue({
+      ok: true,
+      draft: { ok: true, result: {} },
+      status: { ok: true, result: {
+        state: "running",
+        cancelRequested: false,
+        cells: [
+          {
+            cellKey: "cell-gap", armId: "baseline", replicate: 1, taskSha256: "a".repeat(64),
+            status: "delivered", dispatches: 1,
+            evaluationGap: { missingEvalIndexes: [1], deliveryJournaled: true },
+          },
+        ],
+        counts: { expected: 1, dispatched: 1, delivered: 1, judged: 0, failed: 0, awaitingEvaluation: 1 },
+        ...overrides,
+      } },
+    });
+    const markup = renderToStaticMarkup(await RunMonitorPage({
+      params: Promise.resolve({ draftId: "draft-1" }),
+    }));
+    expect(markup).toContain("Awaiting evaluation");
+    expect(markup).toContain("awaiting evaluation");
+    expect(markup).not.toContain("Resume heals these cells.");
   });
 });

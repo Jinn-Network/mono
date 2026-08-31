@@ -38,6 +38,7 @@ test("a missing bundle exits 1 with machine-readable invalid-bundle output", asy
       "benchmark-product-public-bundle/4",
       "benchmark-product-public-bundle/5",
       "benchmark-product-public-bundle/6",
+      "benchmark-product-public-bundle/7",
     ],
     code: "record-integrity",
     message: "bundle directory is missing",
@@ -325,8 +326,225 @@ test("human summary names all seven evidence-native checks for bundle v5", async
     reportDigest: `sha256:${"f".repeat(64)}`,
     evidenceRecords: 336,
     artifacts: 300,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
+    artifactContent: { status: "verified", verified: 300, notFetched: 0, notFetchedDigests: [] },
   });
   assert.match(output, /^Verified: 7 of 7 checks passed/m);
   assert.match(output, new RegExp(`Bundle: sha256:${"a".repeat(64)}`));
   assert.doesNotMatch(output, /sha256:sha256:/);
+});
+
+test("the anchored qualification closure counts its seven checks, not the unanchored six (#3205)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/7",
+    identity: "a".repeat(64),
+    checks: V6_CHECKS,
+    ...V6_IDENTITIES,
+    qualification: {
+      publicationGrade: false,
+      truthAdmission: "operator-only",
+      candidateClasses: ["factuality"],
+      strata: ["core"],
+      armCount: 4,
+      itemCount: 12,
+      exclusionCount: 0,
+    },
+    anchors: {
+      anchors: [{
+        recordSha256: "1".repeat(64),
+        status: "present",
+        provider: "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        subject: "lock",
+        timeBasis: "authority-time",
+        facts: { genTime: "2026-01-01T12:00:00Z", policyOid: "2.999.1", serialNumber: "0a", signerCertificateSha256: "9".repeat(64) },
+        trustMaterial: "none",
+      }],
+      subjects: [{ subject: "lock", outcome: "anchored" }, { subject: "matrix", outcome: "absent" }],
+      invalid: [],
+    },
+  });
+  assert.match(output, /^Verified: 7 of 7 checks passed/m);
+  assert.match(output, /^Format: benchmark-product-public-bundle\/7$/m);
+  assert.match(output, /integrity-anchors\s+passed/);
+  assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
+});
+
+const SIGNERS = [
+  { role: "publisher", identity: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX", keyId: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX", custody: "same-operator" },
+  { role: "automated-grader", identity: "urn:jinn:benchmark-product:local-venue:evaluator-1", keyId: "benchmark-product-verdict-dc8dbb6d84571890", custody: "same-operator" },
+  { role: "automated-grader", identity: "urn:jinn:benchmark-product:local-venue:evaluator-2", keyId: "benchmark-product-verdict-0f2ac1bb9e334410", custody: "same-operator" },
+  { role: "human-reviewer", identity: "urn:evaluator:reviewer-1", keyId: "benchmark-product-verdict-77aa11bb22cc33dd", custody: "same-operator" },
+  { role: "label-admission", identity: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX", keyId: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX", custody: "same-operator" },
+];
+
+test("the human surface names signer roles in plain words and prints no raw identifier", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/4",
+    identity: "a".repeat(64),
+    checks: ["manifest"],
+    ...V6_IDENTITIES,
+    signers: SIGNERS,
+  });
+  assert.match(output, /\nSigned by\n/);
+  assert.match(output, /^ {2}publisher · 1 key$/m);
+  assert.match(output, /^ {2}automated grader — same operator · 2 keys$/m);
+  assert.match(output, /^ {2}human reviewer — same operator · 1 key$/m);
+  assert.match(output, /^ {2}label admission — same operator · 1 key$/m);
+  assert.doesNotMatch(output, /urn:/);
+  assert.doesNotMatch(output, /did:key/);
+  // The publisher is the operator; "same operator" would say nothing about it.
+  assert.doesNotMatch(output, /publisher — same operator/);
+});
+
+test("an undeclared-custody signer set prints the role alone", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/5",
+    identity: `sha256:${"a".repeat(64)}`,
+    checks: ["manifest"],
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
+    artifactContent: { status: "verified", verified: 0, notFetched: 0, notFetchedDigests: [] },
+    signers: [
+      { role: "publisher", identity: "urn:report:1", keyId: "k1", custody: "undeclared" },
+      { role: "automated-grader", identity: "urn:evaluator:1", keyId: "k2", custody: "undeclared" },
+    ],
+  });
+  assert.match(output, /^ {2}automated grader — custody not declared · 1 key$/m);
+  // The publisher is the operator the others are measured against, so it takes no custody suffix.
+  assert.match(output, /^ {2}publisher · 1 key$/m);
+  assert.doesNotMatch(output, /same operator/);
+  assert.doesNotMatch(output, /urn:/);
+});
+
+test("a result without signers keeps the previous human surface", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/2",
+    identity: "a".repeat(64),
+    checks: ["manifest"],
+    ...V6_IDENTITIES,
+  });
+  assert.doesNotMatch(output, /Signed by/);
+});
+
+test("the golden bundle's default output carries no identifier while --json carries every one", async () => {
+  const golden = fileURLToPath(new URL("../fixtures/public-bundle-conformance-v1/golden", import.meta.url));
+  const human = await invoke([golden]);
+  assert.equal(human.code, undefined);
+  assert.doesNotMatch(human.stdout, /urn:/);
+  assert.doesNotMatch(human.stdout, /did:key/);
+  assert.match(human.stdout, /\nSigned by\n {2}publisher · 1 key\n {2}automated grader — same operator · 1 key\n/);
+
+  const json = await invoke([golden, "--json"]);
+  assert.equal(json.code, undefined);
+  const parsed = JSON.parse(json.stdout);
+  assert.deepEqual(parsed.signers, [
+    {
+      role: "publisher",
+      identity: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+      keyId: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+      custody: "same-operator",
+    },
+    {
+      role: "automated-grader",
+      identity: "urn:jinn:benchmark-product:local-venue:evaluator-1",
+      keyId: "benchmark-product-verdict-dc8dbb6d84571890",
+      custody: "same-operator",
+    },
+  ]);
+});
+
+test("a refusal says what failed without printing the identifier it refused", async () => {
+  const tampered = fileURLToPath(
+    new URL("../fixtures/public-bundle-conformance-v1/tampered/report-payload-edited", import.meta.url),
+  );
+  const human = await invoke([tampered]);
+  assert.equal(human.code, 1);
+  assert.match(human.stderr, /report-authenticity: no valid signer binds to author\/scope\/time/);
+  assert.match(human.stderr, /envelope-signature-invalid/);
+  assert.match(human.stderr, /<identifier: see --json>/);
+  assert.doesNotMatch(human.stderr, /did:key/);
+  assert.doesNotMatch(human.stderr, /urn:/);
+
+  const json = await invoke([tampered, "--json"]);
+  assert.equal(json.code, 1);
+  assert.match(JSON.parse(json.stdout).message, /did:key:z[1-9A-HJ-NP-Za-km-z]+:envelope-signature-invalid/);
+});
+
+const V5_CHECKS = [
+  "manifest", "evidence-closure", "artifact-integrity", "signature-validity",
+  "matrix-rederivation", "report-verification", "claim-consistency",
+];
+
+const V5_RESULT = {
+  format: "benchmark-product-public-bundle/5",
+  identity: `sha256:${"a".repeat(64)}`,
+  checks: V5_CHECKS,
+  benchmarkDigest: `sha256:${"b".repeat(64)}`,
+  manifestDigest: `sha256:${"c".repeat(64)}`,
+  cohortDigest: `sha256:${"d".repeat(64)}`,
+  matrixDigest: `sha256:${"e".repeat(64)}`,
+  reportDigest: `sha256:${"f".repeat(64)}`,
+  evidenceRecords: 12,
+  artifacts: 5,
+  verifiedSignerKeyIds: [],
+};
+
+test("a full-evidence v5 bundle prints all seven checks as passed", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    ...V5_RESULT,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
+    artifactContent: { status: "verified", verified: 5, notFetched: 0, notFetchedDigests: [] },
+  });
+  assert.match(output, /^Verified: 7 of 7 checks passed$/m);
+  for (const check of V5_CHECKS) assert.match(output, new RegExp(`${check}\\s+passed`));
+  assert.doesNotMatch(output, /not fetched/);
+  assert.doesNotMatch(output, /Artifact content/);
+});
+
+test("a metadata-first v5 bundle discloses artifact-integrity as not fetched", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    ...V5_RESULT,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
+    artifactContent: {
+      status: "not-fetched",
+      verified: 2,
+      notFetched: 3,
+      notFetchedDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
+    },
+  });
+  // The deferred check is never printed as a pass and never folded into the passed total.
+  assert.match(output, /^Verified: 6 of 7 checks passed, 1 not fetched$/m);
+  assert.match(output, /artifact-integrity\s+not fetched/);
+  for (const check of V5_CHECKS.filter((check) => check !== "artifact-integrity")) {
+    assert.match(output, new RegExp(`${check}\\s+passed`));
+  }
+  assert.match(output, /Artifact content/);
+  assert.match(output, /3 artifact bodies were not fetched/);
+  // Naming the digests is what makes the deferred check completable.
+  assert.match(output, new RegExp(`sha256:${"1".repeat(64)}`));
+  assert.match(output, new RegExp(`sha256:${"3".repeat(64)}`));
+  // Adding a body to the directory breaks the manifest closure, so it must not be advised.
+  assert.doesNotMatch(output, /Fetch each one into/);
+  assert.match(output, /verify the\s*\n\s*full-evidence bundle/);
+  assert.match(output, /artifact\s*\ncontents themselves were not read/);
+});
+
+test("a metadata-first bundle with one deferred body says body, not bodies", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    ...V5_RESULT,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
+    artifactContent: {
+      status: "not-fetched",
+      verified: 2,
+      notFetched: 1,
+      notFetchedDigests: ["1".repeat(64)],
+    },
+  });
+  assert.match(output, /1 artifact body was not fetched/);
 });

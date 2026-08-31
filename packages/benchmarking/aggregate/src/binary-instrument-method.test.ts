@@ -629,8 +629,22 @@ function makeFixture(options: {
         timeout: options.evaluationTimeout ?? 60,
       },
       measurements: MEASUREMENTS.map(([name, type]) => ({ name, type, required: true })),
-      verdictRule: { threshold: { measurement: "agreement", op: "eq", value: true } },
-      unscorable: [],
+      // Mirrors the sealed builder: the abstain policy declares its recorded-inconclusive class
+      // and the inconclusiveWhen node that makes an `inconclusive` delivery legal at all.
+      verdictRule: parserInvalidPolicy === "abstain"
+        ? {
+          all: [
+            {
+              class: "unparseable-judge-response",
+              inconclusiveWhen: { threshold: { measurement: "parseValid", op: "eq", value: false } },
+            },
+            { threshold: { measurement: "agreement", op: "eq", value: true } },
+          ],
+        }
+        : { threshold: { measurement: "agreement", op: "eq", value: true } },
+      unscorable: parserInvalidPolicy === "abstain"
+        ? [{ name: "unparseable-judge-response", disposition: "recorded-inconclusive" }]
+        : [],
       evidenceConventions: { requiredRefs: ["label-resolution.json"] },
     }));
     const taskBytes = sealTask({

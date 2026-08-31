@@ -46,7 +46,7 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **41 generated operations**, all shipped through the library and CLI
+contains **42 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -80,6 +80,7 @@ with an explicit shipped/deferred GUI disposition:
 | `runLaunch` | `colophon launch` | Drive the real local venue, serially by default or with `--concurrency 1-32`. |
 | `runLock` | `colophon lock` | Seal the preregistered Run. |
 | `runAnchor` | `colophon anchor` | Obtain, verify, and store third-party time evidence over the sealed Run or Matrix digest. |
+| `runBind` | `colophon bind` | Bind the sealed, not-yet-launched Run to a public beacon value that postdates its seal, sealing the derived execution order. |
 | `runPreview` | `colophon preview` | Run a disclosed, non-official rehearsal. |
 | `runPublish` | `colophon publish` | Verify and emit one immutable local bundle. |
 | `runQuote` | `colophon quote` | Present size, coverage, cap, and honest estimates. |
@@ -224,7 +225,10 @@ always exactly one final envelope.
 Mutable drafts, grants, journals, scratch state, and private signing keys remain
 inside the workspace. Sealed records are stored as exact digest-addressed bytes.
 `publish` is **local immutable emission only: no upload, no hosting, no deployment**, package publication, or remote write. The emitted closure is
-public and not a general PII or confidentiality scrubber.
+public and not a general PII or confidentiality scrubber. `publication serve` is
+the separate, explicitly invoked verb that puts the already-emitted public
+archive tree on a socket; it announces nothing and writes no workspace record.
+See `docs/runbooks/colophon-announcement-source-serving.md`.
 
 For staged publication, `publicBaseUrl` is the exact archive mount, not merely an origin. For
 example, `https://example.test/publication` resolves records beneath

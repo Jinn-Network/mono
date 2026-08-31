@@ -5,6 +5,10 @@ export type {
   VerifiedPublicBundleSnapshot,
   VerifyPublicBundleDeps,
 } from "./verify.js";
+// Signer roles in reader terms. The verifier's human surface prints these; the identifiers they
+// were derived from stay on the `--json` surface (issue #3024). The extractors themselves stay
+// internal: each has an authenticated-bytes precondition its signature cannot express.
+export type { PublicBundleSigner, PublicBundleSignerRole } from "./signers.js";
 export { derivePublicComparison } from "./comparison.js";
 export type {
   DerivePublicComparisonInput,
@@ -77,6 +81,7 @@ export {
   BUNDLE_V4_FORMAT,
   BUNDLE_V5_FORMAT,
   BUNDLE_V6_FORMAT,
+  BUNDLE_V7_FORMAT,
   SUPPORTED_BUNDLE_FORMATS,
 } from "./manifest.js";
 export type { BundleManifest, VerifiedBundleSnapshot } from "./manifest.js";
@@ -87,6 +92,12 @@ export * from "./profile/binary-qualification.js";
 export { ClaimPackageSchema } from "./profile/claim.js";
 export type { ClaimPackage } from "./profile/claim.js";
 export { firstDifference } from "./profile/claim-consistency.js";
+export { NOT_FETCHED_CHECK, summarizeVerificationOutcome } from "./outcome.js";
+export type {
+  VerificationCheckOutcome,
+  VerificationCheckState,
+  VerificationOutcome,
+} from "./outcome.js";
 export { VERIFIER_VERSION, renderVerifiedBundle, runVerifierCli } from "./cli.js";
 export type { VerifierCliDeps, VerifierCliResult } from "./cli.js";
 export {
@@ -100,7 +111,38 @@ export {
   PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V7_CHECKS,
+  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
   PUBLIC_BUNDLE_VERIFIER_MAJOR,
   PUBLIC_BUNDLE_V4_VERIFIER_MAJOR,
 } from "./reader-instructions.js";
+// `beacon-binding/1` (issue #2976): the post-seal public-randomness binding, and the report face
+// that states which binding a run carries. Single-sourced here for the same reason the anchored
+// projection is -- the product core imports this package, so producer and reader run one function.
+export {
+  BEACON_BINDING_PROCEDURE,
+  BEACON_SOURCES,
+  BEACON_SOURCE_IDS,
+  MAX_BEACON_ROUND,
+  BeaconReferenceSchema,
+  RunBindingError,
+  RunBindingSchema,
+  beaconRoundInstant,
+  computeBeaconOrder,
+  verifyRunBinding,
+} from "./binding/beacon-binding.js";
+export type {
+  BeaconOrderParams,
+  BeaconOrderResult,
+  BeaconPostSealBasis,
+  BeaconReference,
+  BeaconSourceDefinition,
+  BeaconSourceId,
+  BeaconSourceTimeBasis,
+  RunBinding,
+  VerifiedRunBinding,
+} from "./binding/beacon-binding.js";
+export { runBindingClass, runBindingSentence, runBoundVenueLimits } from "./binding/report-face.js";
+export type { RunBindingClass } from "./binding/report-face.js";

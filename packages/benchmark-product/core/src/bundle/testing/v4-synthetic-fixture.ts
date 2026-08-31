@@ -53,7 +53,10 @@ import {
   dssePreAuthEncoding,
   recordDigest,
   sealDsseEnvelope,
+  RFC3161_TSA_ANCHOR_PROFILE,
 } from "@jinn-network/trust-core";
+import type { AnchorProofSource } from "@jinn-network/trust-core";
+import { createFixtureAuthority } from "@jinn-network/trust-testing";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import type { OperationContext } from "../../operations/context.js";
 import { armAdd } from "../../operations/arms.js";
@@ -65,6 +68,7 @@ import {
 } from "../../operations/human-review.js";
 import { importBinaryItemBank } from "../../operations/import-item-bank.js";
 import { initWorkspace } from "../../operations/init.js";
+import { runAnchor } from "../../operations/run-anchor.js";
 import { runCollect } from "../../operations/run-collect.js";
 import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
@@ -101,6 +105,12 @@ import {
 } from "../../venue/signing.js";
 import type { LocalVenue } from "../../venue/venue.js";
 import { materializePublicBundle, type MaterializedBundle } from "../materialize.js";
+
+/** Earlier than any instant this fixture's own clock can reach, so the §8 step-4 splice-catch
+ * (`genTime <= run.closeAt`) is satisfied by construction. Inside the kit certificate's
+ * 2026-01-01 .. 2036-01-01 validity window. */
+export const ANCHORED_V4_FIXTURE_GEN_TIME_DER = "20260101120000Z";
+export const ANCHORED_V4_FIXTURE_GEN_TIME = "2026-01-01T12:00:00Z";
 
 export type SyntheticV4TruthAdmission = "operator-only" | "two-human-unanimous" | "screened-operator-sampled";
 export type SyntheticV4Scenario = "minimal" | "qualification-144";
@@ -848,6 +858,14 @@ export async function createSyntheticV4BundleFixture(input: {
    * `binary-instrument@1` entry (packet P5, spec §8.3 option 5). OPTIONS-ONLY, defaults to none.
    */
   readonly additionalAnalyses?: readonly { readonly method: string; readonly version: string }[];
+  /**
+   * Acquires one conformant RFC 3161 lock anchor through the real `anchor` operation between lock
+   * and launch, from a local fixture authority (issue #3205). OPTIONS-ONLY and defaults off, so
+   * every existing caller's bundle bytes and closure version are unchanged. With it on, the run is
+   * both anchored and qualification-projecting — the pairing that had no allocation before
+   * `benchmark-product-public-bundle/7`.
+   */
+  readonly anchorLock?: true;
 }): Promise<SyntheticV4BundleFixture> {
   const scenario = input.scenario ?? "minimal";
   const withEvidence = input.withEvidence ?? false;
@@ -1032,6 +1050,35 @@ export async function createSyntheticV4BundleFixture(input: {
   const createVenue = () => syntheticInspectVenue(input.workspaceDir, instrumentSha256s, scenario, judgeModel);
   requireOk(await runQuote(context, { draftId: DRAFT_ID }, { createVenue }), "quote");
   requireOk(runLock(context, { draftId: DRAFT_ID }), "lock");
+  if (input.anchorLock === true) {
+    // A real acquisition through the real operation: the write-once rule, the post-launch refusal,
+    // and the §8 step-4 splice-catch all run. Only the bytes a timestamp authority would have
+    // returned come from the conformance kit's local authority — `genTime` is fixed in the past so
+    // the splice-catch passes against this fixture's own 2026-08-15 clock by construction.
+    const authority = createFixtureAuthority("v4-anchored-fixture");
+    const rfc3161Source: AnchorProofSource = {
+      profile: RFC3161_TSA_ANCHOR_PROFILE,
+      async obtainProof(request) {
+        return authority.mintTimeStampToken({
+          subjectSha256: request.subjectSha256,
+          genTime: ANCHORED_V4_FIXTURE_GEN_TIME_DER,
+        }).tokenDer;
+      },
+    };
+    requireOk(
+      await runAnchor(
+        context,
+        {
+          draftId: DRAFT_ID,
+          subject: "lock",
+          providerProfile: RFC3161_TSA_ANCHOR_PROFILE,
+          endpoint: "https://timestamp.invalid/anchored-v4-fixture",
+        },
+        { sources: { [RFC3161_TSA_ANCHOR_PROFILE]: rfc3161Source } },
+      ),
+      "anchor lock",
+    );
+  }
   requireOk(await runLaunch(context, { draftId: DRAFT_ID }, { createVenue }), "launch");
   requireOk(await runCollect(context, { draftId: DRAFT_ID }), "collect");
   const reported = requireOk(await runReport(context, { draftId: DRAFT_ID }), "report");

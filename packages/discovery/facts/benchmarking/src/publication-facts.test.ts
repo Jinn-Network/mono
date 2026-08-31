@@ -20,6 +20,7 @@ import {
 } from "./identifiers.js";
 import {
   benchmarkAccountingRecompute,
+  benchmarkAccountingRecomputeV2,
   reportRecompute,
   signedReportRecompute,
 } from "./recompute.js";
@@ -238,5 +239,95 @@ describe("benchmark publication facts", () => {
       });
       expect(facts).not.toHaveProperty("publisherAuthorizationDigest");
     }
+  });
+});
+
+describe("BenchmarkAccounting v2: the dispatch-level join edges v1 left out", () => {
+  const digestOf = (seed: string) => seed.repeat(64).slice(0, 64);
+
+  function accountingWithDispatches(): Uint8Array {
+    return sealBenchmarkAccounting({
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
+      run: { name: "run", digest: { sha256: digestOf("1") } },
+      publisher: "did:example:publisher",
+      publisherAuthority: { kind: "run-owner" },
+      procedure: { id: "jinn.benchmarking.accounting", version: "1.0" },
+      scope: { streams: [{
+        role: "https://spec.jinn.network/roles/benchmark-publisher-dispatches/v1",
+        kind: "record-discovery",
+        source: { agent: "did:example:publisher", name: "benchmarks" },
+        through: { sequence: "0000000000000042", entry: `sha256:${digestOf("a")}` },
+      }] },
+      publicRegistration: { status: "post-hoc" },
+      closeBoundary: { at: "2026-08-13T00:00:00Z" },
+      cells: [{
+        cellKey: `${digestOf("b")}/solo/1`,
+        dispatches: [{
+          index: 1,
+          submission: {
+            kind: "https://spec.jinn.network/records/task-submission/v1",
+            record: { name: "submission", digest: { sha256: digestOf("2") } },
+          },
+          delivery: {
+            kind: "https://spec.jinn.network/records/delivery/v1",
+            record: { name: "delivery", digest: { sha256: digestOf("3") } },
+          },
+          observations: { name: "archive", digest: { sha256: digestOf("4") } },
+          evidence: [{
+            kind: "https://spec.jinn.network/records/execution-evidence/v1",
+            record: { name: "evidence", digest: { sha256: digestOf("5") } },
+          }],
+          evaluations: [{
+            kind: "https://spec.jinn.network/records/result-evaluation/v1",
+            record: { name: "evaluation", digest: { sha256: digestOf("6") } },
+          }],
+          correlations: [{
+            role: "https://spec.jinn.network/roles/correlation/v1",
+            artifact: { name: "correlation", digest: { sha256: digestOf("7") } },
+          }],
+          nativeArtifacts: [
+            {
+              role: "https://spec.jinn.network/roles/native/v1",
+              availability: "public",
+              artifact: { name: "native", digest: { sha256: digestOf("8") } },
+            },
+            {
+              role: "https://spec.jinn.network/roles/native-missing/v1",
+              availability: "source-absent",
+              reason: "the source deleted it before collection",
+            },
+          ],
+        }],
+      }],
+    }).bytes;
+  }
+
+  it("names every record and artifact the cells' dispatches point at", async () => {
+    const bytes = accountingWithDispatches();
+    const facts = await benchmarkAccountingRecomputeV2(bytes, noReferences);
+    expect(facts.submissionDigests).toEqual([`sha256:${digestOf("2")}`]);
+    expect(facts.deliveryDigests).toEqual([`sha256:${digestOf("3")}`]);
+    expect(facts.observationArchiveDigests).toEqual([`sha256:${digestOf("4")}`]);
+    expect(facts.evidenceDigests).toEqual([`sha256:${digestOf("5")}`]);
+    expect(facts.evaluationDigests).toEqual([`sha256:${digestOf("6")}`]);
+    expect(facts.correlationArtifactDigests).toEqual([`sha256:${digestOf("7")}`]);
+  });
+
+  it("carries only the native artifacts the record itself declares present", async () => {
+    const facts = await benchmarkAccountingRecomputeV2(accountingWithDispatches(), noReferences);
+    expect(facts.nativeArtifactDigests).toEqual([`sha256:${digestOf("8")}`]);
+  });
+
+  it("keeps every v1 fact and states empty edge lists for a record with no cells", async () => {
+    const bytes = await localFixture("benchmark-accounting/valid.json");
+    const v1 = await benchmarkAccountingRecompute(bytes, noReferences);
+    const v2 = await benchmarkAccountingRecomputeV2(bytes, noReferences);
+    expect(v2).toMatchObject(v1);
+    expect(v2.submissionDigests).toEqual([]);
+    expect(v2.deliveryDigests).toEqual([]);
+  });
+
+  it("emits no facts for bytes that are not an accounting record", async () => {
+    expect(await benchmarkAccountingRecomputeV2(encoder.encode("{"), noReferences)).toEqual({});
   });
 });
