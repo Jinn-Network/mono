@@ -196,6 +196,145 @@ covers and says nothing else about the run — not that results were produced
 after it, and not that the anchoring authority is independent of the bundle's
 owner.
 
+### Anchored binary qualification bundle v7
+
+A run that is both anchored and projecting a binary qualification emits
+`benchmark-product-public-bundle/7`. It is the intersection of the two closures
+above and nothing else: v4's complete member list, including
+`qualification.json`, plus v6's `anchors/<sha256>.bin` members and its
+`integrity-anchors` check. Every rule stated for either parent holds here
+unchanged, and v2, v4, and v6 bundles keep the versions, member lists, and bytes
+they already had.
+
+Its claim package is `benchmark-product.claim-package/5`: claim-package/2's
+exact per-subject F6 qualification projection plus claim-package/4's `anchors`
+section. Both parents' refusals are inherited. A ranking, selection, or any
+other conclusion smuggled into the claim is refused exactly as it is on
+claim-package/2, and an omitted anchors section is refused exactly as it is on
+claim-package/4. `qualification.json` keeps its frozen
+`benchmark-product.claim-package/2` literal on this closure: that field names
+which projection shape the qualification graph was built for, and that shape is
+byte-identical under both binary allocations.
+
+Unlike every earlier closure, v7 does not stamp the first public `@0.1` line. No
+released reader before `0.2.1` understands the format, so its claim pins:
+
+```bash
+npx @colophon-claims/verify@0.2.1 <bundle-dir>
+```
+
+with `@0.2` as the compatible line. It returns the same **seven checks** as v6,
+in the same order.
+
+### Evidence-native bundle v5 and its two profiles
+
+`benchmark-product-public-bundle/5` is the evidence-native closure. Unlike every format above it
+declares a `profile` IRI in its own `bundle.json`, and that declaration is part of the frozen
+contract: which members a reader must find is a fact the bundle states, never one the reader infers
+from what happens to be present. Its member list is `benchmark.json`, `analysis-manifest.json`,
+`cohort.json`, `matrix.json`, `report.json`, `report-envelope.json`, `claim-package.json`, one
+`records/<sha256>.bin` per evidence reference in `benchmark-product.claim-package/3`, and one
+`artifacts/<sha256>.bin` per artifact that package declares. It returns **seven checks**:
+`manifest`, `evidence-closure`, `artifact-integrity`, `signature-validity`,
+`matrix-rederivation`, `report-verification`, `claim-consistency`.
+
+Its `bundle.json` is the exact canonical manifest, is not listed inside itself, and is the only
+member that differs in shape from every earlier closure: `format` is the exact string
+`benchmark-product-public-bundle/5`, `profile` is one of the two IRIs below, and `files` is a
+non-empty array whose entries each bind one relative `path`, its lowercase hex `sha256`, and its
+`bytes` length. Entries are sorted and unique by path under UTF-16 code-unit comparison, and the
+manifest is serialized as canonical JSON; the bundle identity is `sha256:` followed by the
+lowercase hex SHA-256 of those exact bytes. A path is refused when it is empty, `.`, the reserved
+`bundle.json`, absolute, contains a backslash, or has any empty, `.`, or `..` segment.
+
+The v5 closure is **manifest-relative, not a fixed file list**. The set of files present must
+equal `bundle.json`'s declared paths plus `bundle.json` itself — an undeclared file present on
+disk, or a declared file that is missing, fails closed, as does any length or digest mismatch.
+Within that, the seven fixed members above are required, the `records/<sha256>.bin` set must match
+`benchmark-product.claim-package/3`'s evidence set exactly in both directions, and the
+`artifacts/<sha256>.bin` set is governed by the declared profile below. **Members beyond those are
+permitted** provided the manifest declares them: the bundle published on colophon.claims carries
+`presentation.json`, `README.md`, and a `source/` copy of the human-readable report and its sealed
+pre-run artifacts. A reader that rejects a member simply because this document does not name it
+will reject the real artifact.
+
+Its stored claim is `benchmark-product.claim-package/3`: the v5 evidence graph is addressed from
+`records.evidence` and `records.artifacts`, both sorted and unique, and its `verification.checks`
+is the exact seven-name tuple above — neither the six-name tuple of public-bundle/2 and
+public-bundle/4 nor the anchored seven-name tuple of public-bundle/6 and public-bundle/7, which is
+those six plus `integrity-anchors`.
+
+None of the five deterministic presentation assets is a v5 member, and the verifier runs no asset
+byte-compare for this format: there is no `index.html`, `badge.svg`, `social-card.svg`, or
+`share.txt` in its closure, so the citation rules about badges and cards do not apply to it. An
+extra member that happens to be human-readable — the published bundle's `README.md` and
+`presentation.json` — is manifest-integrity-checked like any other member and is not compared
+against the asset builder.
+
+V5 stamps the same first public line as v2 and v4. Unlike the v2-derived claim packages,
+`claim-package/3` carries one `verification.command` and no separate compatible line, and what it
+pins is the compatible `@0.1` line:
+
+```bash
+npx @colophon-claims/verify@0.1 <bundle-dir>
+```
+
+`@0.1.0` is the exact producer-side release inside that line, for byte-for-byte reproduction.
+
+Two profiles are defined. Both are the same format, the same grammar, and the same seven checks.
+
+- **Full evidence** — `https://spec.jinn.network/profiles/benchmark-product-public-bundle/5`.
+  Every declared artifact body is carried. `artifact-integrity` reads every one of them. An
+  artifact the evidence graph references but the bundle does not carry is a closure failure.
+- **Metadata first** —
+  `https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first`.
+  Exactly the full-evidence bundle minus the evidence artifact bodies. It carries every record,
+  every fixed member, and the artifact bodies that are declared signer public keys — those are
+  trust material `signature-validity` reads, not evidence a reader can fetch later. A reader who
+  only wants to recheck the arithmetic, the closure, the signatures, and the claim downloads the
+  records and the digests instead of the evidence.
+
+Every retained member of a metadata-first bundle is byte-identical to its full-evidence
+counterpart, `claim-package.json` included. That is how the two forms cross-reference:
+`claim-package/3`'s `records.artifacts` names every omitted body by exact digest, so a reader
+holding the metadata-first form has both the address to fetch and the exact expectation to check
+against, and the full form reduces to the metadata-first form by dropping those members and
+rebuilding `bundle.json`. Only `bundle.json` and the set of `artifacts/` members differ.
+
+Under metadata first, `manifest`, `evidence-closure`, `signature-validity`,
+`matrix-rederivation`, `report-verification`, and `claim-consistency` are unchanged and complete:
+they read records and fixed members, never artifact bodies. `artifact-integrity` reports
+**not fetched** rather than passing or failing. An absent body is a disclosed fact, not a closure
+failure; a body that *is* carried is still digest-checked, and a mismatch still fails the whole
+verification; the closure rule narrows from "every referenced artifact has bytes here" to "every
+referenced artifact is declared by digest in the claim package", so an evidence reference the claim
+never declared is still refused. The carried artifact set must be exactly the declared signer
+public keys — a metadata-first bundle carrying some other body is not the profile it declares and
+is refused, because a profile that admits any partial fetch names a family rather than one exact
+projection.
+
+The reader prints the deferred check as `not fetched`, counts it out of the passed total, and
+states what was not read. Nothing folds a deferred check into a pass: a bundle that reports seven
+of seven over bytes nobody read would be the one claim this format cannot afford.
+
+Under full evidence nothing changes. An unavailable artifact body is still a hard failure, and
+every v5 bundle published before this profile existed keeps its exact bytes, its profile IRI, and
+its outcome.
+
+A reader keys on the declared profile, not on which members happen to be present. `bundle.json`'s
+`profile` is a closed set, so a reader that predates the metadata-first profile refuses such a
+bundle at manifest parse rather than misreading it as a full-evidence bundle with members missing.
+Read a metadata-first bundle with a reader that lists the profile among the ones it supports.
+
+That is also the publication gate. `claim-package/3`'s `verification.command` names the reader a
+bundle instructs its readers to use, and no released reader line understands this profile yet, so
+**nothing may publish a metadata-first bundle until its claim package pins a reader release that
+declares the profile** — a claim naming a reader that cannot read it is an instruction to fail.
+Today the profile is a format definition and a local derivation of an already-published
+full-evidence bundle; no producer emits one. The local viewer, which is the one surface that can
+be pointed at a hand-derived metadata-first bundle, offers the local `colophon bundle verify`
+command instead of an `npx` line that would refuse.
+
 ## Portable verification
 
 Verification with your own tools — no Jinn code at all — is specified in
@@ -211,10 +350,16 @@ Use the smaller reader package, without the product or source workspace:
 npx @colophon-claims/verify@0.1 <bundle-dir>
 ```
 
-Claim-package/1, claim-package/2, public-bundle/2, and public-bundle/4 stamp the
-same first public line: `@0.1.0` / `@0.1`. Both formats return the same six top-level check names in
-the order below; v4 expands those checks internally rather than adding a seventh
-top-level result.
+Claim-package/1, claim-package/2, and claim-package/4 — the claims of public-bundle/2,
+public-bundle/4, and public-bundle/6 — stamp the same first public line: `@0.1.0` / `@0.1`.
+Claim-package/3, the claim of public-bundle/5, reads on the same line but pins only `@0.1`,
+because it has a single `command` field and no compatible-line field. Claim-package/5, the claim
+of public-bundle/7, is the one that the `@0.1` line cannot read and pins `@0.2.1` / `@0.2`.
+
+Public-bundle/2 and public-bundle/4 return the same six top-level check names in the order below;
+v4 expands those checks internally rather than adding a seventh top-level result. The three
+closures that return a seventh top-level check name their own lists where they are defined: v5
+above, and v6 and v7 with `integrity-anchors`.
 
 The full installed product exposes the same implementation through:
 
@@ -222,8 +367,8 @@ The full installed product exposes the same implementation through:
 colophon bundle verify --bundle <bundle-dir> --json
 ```
 
-Success returns the bundle identity, record digests, an Inspect runtime-method
-summary when applicable, and exactly **six checks**
+For public-bundle/2 and public-bundle/4, success returns the bundle identity, record digests,
+an Inspect runtime-method summary when applicable, and exactly **six checks**
 in this order:
 
 1. `manifest`
@@ -240,7 +385,19 @@ checks the stored claim, and byte-compares all five presentation assets with the
 deterministic asset builder. Asset comparison does not add a seventh returned
 check.
 
+The bundle's closure selects exactly one presentation profile, and all five assets
+must byte-match that profile completely. A qualification-projecting bundle
+(`benchmark-product-public-bundle/4` and `/7`) renders the binary
+instrument-qualification graph and carries no comparison section; every other
+bundle that carries these five assets renders the human comparison. There is no
+fallback profile: an asset set that is not the projection the closure selects is
+refused, whichever profile it happens to resemble.
+
 ## Presentation and citation
+
+This section describes the five deterministic presentation assets of the v2-derived closures
+(v2, v4, v6, and v7). Public-bundle/5 has none of them in its closure; its citation rules are the
+shared list below, minus every sentence about a badge, card, or share text.
 
 `index.html` is the canonical self-contained human report. It uses inline CSS
 only and no JavaScript, remote resource, object, frame, embed, or active content.

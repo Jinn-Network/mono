@@ -21,6 +21,7 @@ import {
 } from './loop-heartbeat.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
+import { sanitizeErrorText } from '../rpc/transport.js';
 import {
   SafeInnerRevertError,
   isNonRecoverableInnerRevert,
@@ -79,7 +80,7 @@ function emitTickErrorOrRaceLost(
     requestId: ctx.requestId,
     solverType: ctx.solverType,
     outcome: 'failed',
-    detail: err instanceof Error ? err.message : String(err),
+    detail: sanitizeErrorText(err),
   }, component);
   return 'tick_error';
 }

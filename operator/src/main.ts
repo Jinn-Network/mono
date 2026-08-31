@@ -165,6 +165,7 @@ import {
 } from './preflight/version-check.js';
 import { openBrowser } from './cli/open-browser.js';
 import { resolveDefaultStateDir } from './state-dir.js';
+import { sanitizeErrorText } from './rpc/transport.js';
 
 if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
   dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
@@ -813,7 +814,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             return {
               serviceIndex,
               status: 'reverted' as const,
-              detail: err instanceof Error ? err.message : String(err),
+              // #3036: walk `Error.cause` so a nested viem HttpRequestError's
+              // RPC URL is masked before it reaches the API response body.
+              detail: sanitizeErrorText(err),
             };
           }
         },
@@ -1414,7 +1417,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   // ── Harness registry ─────────────────────────────────────────────────────────
 
-  const solverNetRegistry = await loadSolverNets(config);
+  const solverNetRegistry = await loadSolverNets(config, { gcOrphanedVendorCopies: true });
   for (const net of solverNetRegistry.list()) {
     const plugins = net.runtimePlugins
       .map((plugin) => `${plugin.name}@${plugin.version}`)

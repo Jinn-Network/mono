@@ -175,4 +175,26 @@ describe("Colophon install surface", () => {
     expect(answer.stderr).toContain("nothing was created");
     expect(existsSync(output)).toBe(false);
   });
+
+  // `publication serve` is the one verb the wrapper cannot serve by forwarding flags alone: it
+  // runs until interrupted, so it refuses unless the context carries a way to signal shutdown.
+  // The runbook documents `colophon publication serve`, and this binary is what that name runs.
+  test("forwards the shutdown-signal factory so the documented publication serve verb runs", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "colophon-publication-serve-"));
+    const argv = ["publication", "serve", "--workspace", ".", "--principal", "sponsor-1", "--port", "0"];
+
+    const served = await runColophonCli(argv, {
+      ...context,
+      cwd: workspaceDir,
+      createShutdownSignal: () => AbortSignal.abort(),
+    });
+    expect(served.exitCode).toBe(0);
+    expect(served.stdout).toMatch(/^served http:\/\/127\.0\.0\.1:\d+ until shutdown; /);
+
+    // Without one the verb must refuse rather than bind a socket the process cannot stop -- which
+    // is exactly what the shipped binary did before it supplied the factory.
+    const refused = await runColophonCli(argv, { ...context, cwd: workspaceDir });
+    expect(refused.exitCode).not.toBe(0);
+    expect(refused.stderr).toMatch(/signal shutdown/);
+  });
 });

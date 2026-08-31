@@ -836,6 +836,124 @@ reference-bearing fields (the relation `referrers` inverts, §8), and, for each 
 into CloudEvents extension attributes (§9.1), declares the attribute name (conforming to
 CloudEvents attribute-naming rules) and a permitted scalar type.
 
+**Amendment 2026-08-28 (join edges).** Naming the reference-bearing fields is not enough:
+the set MUST be **complete**. Every facts profile MUST declare, as reference-bearing fields,
+every *outbound record reference* its record kind can carry — every field of the record's own
+sealed bytes that pins another sealed record or content-addressed artifact by digest. The
+reason is the join verb: an index serves discover, join, judge and fetch from announcement
+cards alone, never by fetching records, and for access-classified records fetching-to-join is
+not possible at all. A profile that omits an edge makes that join unanswerable from the feed.
+
+Three things the rule does not reach. A descriptor that pins nothing by digest — satisfiable
+by `uri` or inline `content` under §6.4 — names a location, not a reference. A digest of the
+record's *own* bytes or payload, such as a signed report's payload digest, is identity rather
+than an edge; it points nowhere. And a record's own enumerated content — the entries of a
+captured corpus — is covered by the record digest already and is unbounded in number, so
+carrying it would defeat the card's filtering purpose. What the rule reaches is the record's
+*dependencies and lineage*: the other records it composes, the artifacts it pins, and its
+supersession pointer. Adding an edge to a published profile is a **profile revision** — a new
+profile URI version, with the previous version retained and still registered so consumers
+pinned to it keep working (§15's versioning discipline; the retention convention is this
+amendment's) — never an in-place edit.
+
+One limit, stated rather than hidden. Some record kinds carry structurally *open* maps — TEP's
+`requirements` and `preferences`, a run's `pinning` and the `policy.submissionBaseline` it is
+checked against, an environment's `build.dependencyPinning` — whose keys are namespaced
+extensions or mechanism-specific members the defining schema does not enumerate. A digest placed
+under such a key is an outbound reference no profile can name, because a profile declares fields
+and there is no field to declare. Those references are outside the completeness rule until the
+kind closes the shape or names the key. A *namespaced extension whose own shape is closed* is not
+this case: a benchmarking publication extension validates against a fixed schema, so its members
+are enumerable fields the rule does reach.
+
+**What enforces this.** Not `facts-consistency`. That check compares announced fields against
+the record and skips any field the card does not announce, so it catches a *misstated* edge and
+never a *missing* one — a holder who suppresses a dispute edge publishes a card that verifies
+`consistent`. Its reach over a *misstated* edge is narrower still for an **optional** component:
+when the record does not carry one, the recompute omits the key, and an announced value for it
+compares against `undefined`, which is `indeterminate` — the unavailable-referenced-bytes signal
+— rather than `inconsistent`. So for an optional edge a fabricated value is indistinguishable
+from referenced bytes the checker could not obtain. Only a required component's edge is caught
+outright when it is misstated.
+
+Completeness is therefore a rule on the profile document, checked where profiles are
+authored: each `discovery/facts/*` leaf's tests pin its `referenceBearingFields` to the kind's
+whole outbound set, and that pin is what a reviewer reads. Those pins are **change-detectors,
+not completeness proofs**: the pinned list and the profile it checks are authored in the same
+change from the same reading of the defining schema, so an edge missed in that reading is
+missed by both and the test is green. What the pin buys is that a *later* silent narrowing of a
+profile fails loudly, and that the audited set is written down where the next reviewer can
+re-check it against the schema. Nothing in the tree derives the outbound set from the schema
+itself; a new profile that omits an edge fails no check at all until someone writes its pin.
+
+**Known exceptions at adoption.** The rule is a MUST and the tree does not yet meet it
+everywhere. Three profiles in the evidence leaf — `execution-evidence.v3`,
+`result-evaluation.v3` and `execution-verification.v2` — declare a strict *subset* of their
+kind's outbound set, and their pinned `referenceBearingFields` are therefore not completeness
+claims and must not be read as the conformance exemplar. What is undeclared, and why, is
+tabulated in `packages/discovery/facts/evidence/README.md`: the recompute functions read the
+record through the frozen `CatalogRecordProjection`, which carries none of the predicate-block
+references, runtime components, execution inputs or derivation lineage those kinds seal, so the
+emission cannot reach them; widening that projection is a change in another package and is a
+named follow-up. A profile document could name the fields ahead of the emission — nothing here
+forbids it — and that leaf chooses not to, so that its declared set and its emitted set stay in
+step. Every other profile in the tree declares its whole outbound set. A new profile is held to
+the MUST; this exception is not a precedent to copy.
+
+**Audit table.** The rule, its exclusions, its limit and its exceptions are stated above one at a
+time; this is the same tree read in one pass, so a profile author can see every kind's outbound
+set beside every other's. It is correct at this document's HEAD and describes the profiles in
+`packages/discovery/facts/*`. *Set* is what the newest facts profile registered for the kind
+declares reference-bearing; *v1 declared* is what the kind's first profile declared; *revision*
+is what the later profile did. Every earlier revision stays frozen and registered, so a consumer
+pinned to one keeps working. Like the `profiles.test.ts` pins, this table is an audit written
+from the same reading of the defining schemas as the profiles themselves — it records what was
+audited and does not independently prove any row complete.
+
+| Record kind | Leaf | Set | v1 declared | Revision (facts profile) |
+| --- | --- | --- | --- | --- |
+| `benchmark/v1` | `benchmarking` | `taskDigests`, `supersedesDigest` | _none_ | `benchmark/v2` adds both |
+| `benchmark-run/v1` | `benchmarking` | `benchmarkDigest`, `registrationArtifactDigests` | `benchmarkDigest` | `benchmark-run/v2` adds `registrationArtifactDigests` |
+| `benchmark-matrix/v1` | `benchmarking` | `runDigest`, `taskDigests`, `submissionDigests`, `deliveryDigests`, `verdictDigests`, `accountingDigest` | `runDigest` | `benchmark-matrix/v2` adds the other five |
+| `benchmark-accounting/v1` | `benchmarking` | `runDigest`, `publisherAuthorizationDigest`, `submissionDigests`, `deliveryDigests`, `evidenceDigests`, `evaluationDigests`, `observationArchiveDigests`, `correlationArtifactDigests`, `nativeArtifactDigests` | `runDigest`, `publisherAuthorizationDigest` | `benchmark-accounting/v2` adds the other seven |
+| `benchmark-report/v1`, `benchmark-report/v2` | `benchmarking` | `matrixDigests` | `matrixDigests` | none — the *record kind* was revised to v2 and `benchmark-report/v2` declares the same one edge. `reportPayloadDigest` is the record's own payload, which is identity rather than an edge |
+| `chain-environment/v1` | `chain-environments` | `runtime.image.manifestDigest`, `runtime.image.indexDigest`, `runtime.binary.digest`, `sourceAnchor.headerProofDigest`, `stateMaterialization.stateArtifactDigest`, `stateMaterialization.materializerDigest`, `stateMaterialization.sourceProofsDigest`, `stateMaterialization.fixtureCoverageManifestDigest`, `fixtureModuleDigests`, `capabilityEnvelope.toolInterfaceSchemaDigests`, `verificationContract.probeSuiteDigest`, `verificationContract.observationSchemaDigest`, `verificationContract.baselineObservationDigest`, `verificationContract.comparatorDigest`, `supersedesDigest` | `runtime.image.manifestDigest`, `stateMaterialization.stateArtifactDigest` | `chain-environment/v2` adds the other thirteen |
+| `crypto-environment/v1` | `chain-environments` | `chainWorld.digest`, `informationWorldDigests`, `serviceRuntimeImageDigests`, `composition.missPolicy.bodyDigest`, `supersedesDigest` | `chainWorld.digest` | `crypto-environment/v2` adds the other four |
+| `information-world/v1` | `chain-environments` | `capture.capturerDigest`, `supersedesDigest` | _none_ | `information-world/v2` adds both. A captured corpus's entries are the record's own enumerated content, not edges |
+| `environment/v1` | `environments` | `image.manifestDigest`, `image.indexDigest`, `parser.digest`, `build.recipeDigest` | `image.manifestDigest` | `environment/v2` adds the other three |
+| `execution-evidence/v1` | `evidence` | `taskDigest`, `runtimeDigest`, `resultDigests`, `nativeTraceDigest` — a **strict subset**, see below | `taskDigest` | `execution-evidence/v2` adds `runtimeDigest` and `resultDigests`; `.v3` adds `nativeTraceDigest` |
+| `result-evaluation/v1` | `evidence` | `taskDigest`, `resultDigests`, `supersedesDigests`, `disputesDigests` — a **strict subset**, see below | `taskDigest`, `resultDigest` | `result-evaluation/v2` widens `resultDigest` to `resultDigests`; `.v3` adds `supersedesDigests` and `disputesDigests` |
+| `execution-verification/v1` | `evidence` | `subjectDigest`, `supersedesDigests`, `disputesDigests` — a **strict subset**, see below | `subjectDigest` | `execution-verification/v2` adds the other two |
+| `task/v1` | `task-execution` | `profileDigest`, `evaluationDigest`, `supersedesDigest`, `inputDigests`, `outputSlotSchemaDigests` | `profileDigest`, `evaluationDigest`, `supersedesDigest` | `task/v2` adds `inputDigests` and `outputSlotSchemaDigests` |
+| `submission/v1` | `task-execution` | `taskDigest` | `taskDigest` | none — audited unchanged. The harness pin lives under a namespaced key of the open `requirements` map, which is outside the rule per the limit above |
+| `delivery/v1` | `task-execution` | `taskDigest`, `resultDigests`, `evidenceDigests`, `supersedesDigest` | `taskDigest` | `delivery/v2` adds the other three |
+| `evaluation-spec/v1` | `task-execution` | `graderDigests`, `environmentRecordDigest`, `abiRefDigests`, `imageDigest`, `testMaterialDigests`, `parserDigest`, `rubricDigest`, `judgeOutputSchemaDigest`, `reviewFormDigest`, `subSpecDigests` | _none_ | `evaluation-spec/v2` adds all ten |
+| `profile-document/v1` | `task-execution` | `extendsDigest`, `outputSlotSchemaDigests` | `extendsDigest` | `profile-document/v2` adds `outputSlotSchemaDigests` |
+| `plugin/v1` | `task-execution` | _none_ | _none_ | none — no defining schema exists in-tree, so there is nothing to declare and the empty profile asserts nothing |
+| `checkpoint/v1` | `task-execution` | _none_ | _none_ | none — same reason as `plugin/v1` |
+| `authorization/v1` | `trust` | `subjectDigests`, `proofs`, `revocation` | `revocation` | `authorization/v2` adds `subjectDigests` and `proofs` |
+| `key-binding/v1` | `trust` | `ceremony.digest`, `anchorDigests`, `supersedes` | `supersedes` | `key-binding/v2` adds `ceremony.digest` and `anchorDigests` |
+| `trust-policy/v1` | `trust` | `predecessor` | `predecessor` | none — audited unchanged; `predecessor` is the whole outbound set |
+
+The three `evidence` rows are the exception recorded above. Their sets are strict subsets of
+their kinds' outbound sets, and what each still omits — predicate-block references, runtime
+components, execution inputs, derivation lineage — is tabulated with its blocker in
+`packages/discovery/facts/evidence/README.md`. Every other row declares its kind's whole
+outbound set. Each leaf README explains why a given field is or is not an edge.
+
+Requiring a card to carry every declared edge is a stronger and different rule, and is not
+adopted here: it would reinterpret
+§5.4's contract, under which a card is the subset of facts a holder chooses to publish; it would
+invalidate every card already published against a profile whose field set later grows; and
+`undefined` from a recompute is already spoken for as the unavailable-referenced-bytes signal
+that drives `indeterminate`, so the check has no spare state left to say "the record has this
+and the card hid it".
+
+The §5.4 caveat is unchanged and bounds what an edge is worth: a card is a holder-authored
+summary. Edges are for assembling a graph cheaply and for `referrers` inversion; a decision
+resting on one re-checks it against the fetched record, where — subject to the optional-edge
+limit above — `facts-consistency` will catch a card that misstates it.
+
 Unknown kinds are not errors: a consumer skips announcements for kinds it has no profile
 for. This is what lets new record kinds deploy without touching the protocol.
 

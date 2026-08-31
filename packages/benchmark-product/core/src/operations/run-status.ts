@@ -14,6 +14,9 @@ import {
   parseBenchmark,
   parseRun,
 } from "@jinn-network/benchmarking-records";
+import { runBindingClass, runBindingSentence } from "@colophon-claims/verify";
+import type { RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
+import { readRunBindingCarriage } from "../binding/carriage.js";
 import type { LifecycleState } from "../domain/lifecycle.js";
 import { refuse, type ProductErrorEnvelope } from "../errors.js";
 import { cancelRequested } from "../run/cancel-marker.js";
@@ -46,6 +49,21 @@ export interface RunStatusCell {
     readonly recovered: boolean;
     readonly exhausted: boolean;
   };
+  /** Present, while the run is `running`, whenever this cell is in the UNFILTERED
+   * evaluation-gap set (`../run/journal.ts`'s `evaluationGaps`) — the same set `run.resume`
+   * sweeps when it is allowed to run at all (`./run-launch.ts`; a pending cancel marker makes
+   * it sweep nothing) and `run.collect` reads for terminal accounting
+   * (`./run-collect.ts`). This is a state, not a call to action: a delivered cell an active
+   * driver is still judging is in this set too. Deliberately independent of
+   * `evaluationRecovery`, which reports only infrastructure-retry recovery and disappears
+   * entirely when the run's policy allows no retries: a gap can exist with nothing having
+   * failed at all (issue #3084). `deliveryJournaled: false` is exactly the issue #3081 shape —
+   * a `delivered` cell-event whose `delivery` record never made it to the journal, which
+   * `run.resume` heals from the attempt the cell-event named. */
+  readonly evaluationGap?: {
+    readonly missingEvalIndexes: readonly number[];
+    readonly deliveryJournaled: boolean;
+  };
 }
 
 export interface RunStatusCounts {
@@ -55,6 +73,11 @@ export interface RunStatusCounts {
   /** Cells that reached a solve delivery (status "delivered" or "judged" — judged implies delivered). */
   readonly delivered: number;
   readonly judged: number;
+  /** Cells carrying an `evaluationGap` — delivered, but with no journaled verdict yet. Zero
+   * outside `running`, where `resume` cannot act. Non-zero becomes a cue to resume only once
+   * no driver is active and no cancellation is pending; while a driver is working, this is
+   * ordinary in-flight progress. */
+  readonly awaitingEvaluation: number;
   /** Cells whose accounted terminal is a non-replaceable failure (excludes "expired"/"cancelled",
    * each visible on the per-cell `status` for callers who want that distinction). */
   readonly failed: number;
@@ -81,6 +104,19 @@ export interface RunStatusResult {
   readonly driver?: RunDriverStatus;
   readonly cells: readonly RunStatusCell[];
   readonly counts: RunStatusCounts;
+  /**
+   * The run's `beacon-binding/1` binding (issue #2976), recomputed from the sealed record on every
+   * read rather than reported from state. Absent on a run that has never bound; `statement` is the
+   * report face's own words for which binding applied, so an operator reading status sees the same
+   * sentence a reader of the run does.
+   */
+  readonly binding?: {
+    readonly class: RunBindingClass;
+    readonly beacon: VerifiedRunBinding["beacon"];
+    readonly postSeal: VerifiedRunBinding["postSeal"];
+    readonly poolDigest: string;
+    readonly statement: string;
+  };
   readonly evaluationRecovery?: {
     readonly maxInfrastructureRetries: 1;
     readonly retryableFailures: number;
@@ -119,12 +155,19 @@ export function runStatus(
       const entries = readRunJournalEntries(context.workspaceDir, input.draftId);
       const fold = foldRunJournal(entries);
       const maxInfrastructureRetries = runRecord.policy.evaluation?.maxInfrastructureRetries ?? 0;
+      const gaps = evaluationGaps(
+        fold,
+        runRecord.policy.evaluation?.minVerdicts ?? 1,
+        maxInfrastructureRetries,
+      );
+      // Gated on `running` for the same reason `pendingEvaluationCells` below is: `run.resume`
+      // refuses outside `running` (`./run-launch.ts`'s `loadLockedOrRunningRun`), so reporting a
+      // gap on a closed run would be a permanent cue to an operation that cannot act on it.
+      const gapsByCellKey = document.state === "running"
+        ? new Map(gaps.map((gap) => [gap.cell.cellKey, gap]))
+        : new Map<string, typeof gaps[number]>();
       const pendingEvaluationCells = new Set(
-        evaluationGaps(
-          fold,
-          runRecord.policy.evaluation?.minVerdicts ?? 1,
-          maxInfrastructureRetries,
-        ).filter((gap) => document.state === "running"
+        gaps.filter((gap) => document.state === "running"
           && gap.cell.evaluationLegs.some((leg) => leg.retryableFailures > 0))
           .map((gap) => gap.cell.cellKey),
       );
@@ -183,6 +226,7 @@ export function runStatus(
 
       const cells: RunStatusCell[] = expected.map((coord) => {
         const cell = fold.get(coord.cellKey);
+        const gap = gapsByCellKey.get(coord.cellKey);
         const retryableFailures = cell?.evaluationLegs.reduce(
           (total, leg) => total + leg.retryableFailures,
           0,
@@ -204,6 +248,12 @@ export function runStatus(
           ...(cell?.verdictSha256 !== undefined ? { verdictSha256: cell.verdictSha256 } : {}),
           ...(cell?.detail !== undefined ? { detail: cell.detail } : {}),
           ...(cell?.blame !== undefined ? { blame: cell.blame } : {}),
+          ...(gap === undefined ? {} : {
+            evaluationGap: {
+              missingEvalIndexes: gap.missingEvalIndexes,
+              deliveryJournaled: gap.cell.deliverySha256 !== undefined,
+            },
+          }),
           ...(maxInfrastructureRetries === 0 ? {} : {
             evaluationRecovery: {
               retryableFailures,
@@ -220,12 +270,24 @@ export function runStatus(
         dispatched: cells.filter((cell) => cell.dispatches > 0).length,
         delivered: cells.filter((cell) => cell.status === "delivered" || cell.status === "judged").length,
         judged: cells.filter((cell) => cell.status === "judged").length,
+        awaitingEvaluation: cells.filter((cell) => cell.evaluationGap !== undefined).length,
         failed: cells.filter((cell) => cell.status === "failed").length,
       };
+
+      const binding = readRunBindingCarriage(context.workspaceDir, runState);
 
       return {
         state: document.state,
         ...(runState.closeAt !== undefined ? { closeAt: runState.closeAt } : {}),
+        ...(binding === undefined ? {} : {
+          binding: {
+            class: runBindingClass(binding),
+            beacon: binding.beacon,
+            postSeal: binding.postSeal,
+            poolDigest: binding.poolDigest,
+            statement: runBindingSentence(binding),
+          },
+        }),
         cancelRequested: cancelRequested(context.workspaceDir, input.draftId),
         ...(driver !== undefined ? { driver } : {}),
         cells,

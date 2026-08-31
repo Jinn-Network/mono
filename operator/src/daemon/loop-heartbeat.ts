@@ -13,6 +13,7 @@
  */
 import type { Store } from '../store/store.js';
 import { emitEvent } from '../observability/emit-event.js';
+import { sanitizeErrorText } from '../rpc/transport.js';
 
 /** Config-key namespace for per-loop heartbeats. */
 export const LOOP_HEARTBEAT_PREFIX = 'loop_heartbeat:';
@@ -208,7 +209,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<void> {
           emitEvent(opts.store, {
             kind: 'tick_error',
             outcome: 'failed',
-            detail: err instanceof Error ? err.message : String(err),
+            detail: sanitizeErrorText(err),
           }, opts.emitSource);
         }
       }

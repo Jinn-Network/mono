@@ -478,7 +478,8 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
     });
   }
 
-  async function seedValidatedPoolWithTwoEntries(): Promise<void> {
+  /** Seeds the validated pool and returns the store's own `updatedAt`. */
+  async function seedValidatedPoolWithTwoEntries(): Promise<string> {
     const store = new ValidatedPoolStore({ stateDir });
     await store.record(
       'org__repo-1',
@@ -490,6 +491,9 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
       { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-22T00:00:00.000Z' },
       EVAL_SEMANTICS_VERSION,
     );
+    const scorable = await store.getScorableEntries(EVAL_SEMANTICS_VERSION);
+    expect(scorable).not.toBeNull();
+    return scorable!.updatedAt;
   }
 
   function bumpValidatedPoolMtime(): void {
@@ -522,7 +526,7 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
     expect(gen.getState().poolPublicationUpdatedAt).toBeTypeOf('string');
   });
 
-  it('does not re-publish when validated-pool.json mtime is unchanged across ticks', async () => {
+  it('does not re-publish when the validated pool is no newer than the existing publication', async () => {
     const artifact: SweRebenchV2VettedPoolArtifact = {
       schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
       evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
@@ -549,8 +553,19 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
       evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
       publishedAt: '2026-05-22T00:00:00.000Z',
     });
-    await writeVettedPoolArtifactPublication({ stateDir, ref, artifact });
-    await seedValidatedPoolWithTwoEntries();
+    // Pin the publication's `updatedAt` to the pool store's own value.
+    // `resolvePublishedVettedPool` re-publishes when the store's `updatedAt`
+    // is strictly newer than the publication's, and this block runs with
+    // `shouldAdvanceTime: true` — so letting both default to `new Date()`
+    // makes the outcome depend on how much real time bled into the fake clock
+    // between the two writes, which is host-speed dependent (#3048).
+    const poolUpdatedAt = await seedValidatedPoolWithTwoEntries();
+    await writeVettedPoolArtifactPublication({
+      stateDir,
+      ref,
+      artifact,
+      updatedAt: poolUpdatedAt,
+    });
 
     const gen = makeTestGenerator({
       stateDir,

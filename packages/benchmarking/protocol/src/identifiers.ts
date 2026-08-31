@@ -47,5 +47,18 @@ export const MATRIX_V2_ASSEMBLY_VERSION = "3.0" as const;
 
 export const CLAIM_PACKAGE_V3_PROFILE =
   "https://spec.jinn.network/profiles/claim-package/3" as const;
+/**
+ * The full-evidence profile of `benchmark-product-public-bundle/5`: every artifact body the
+ * evidence graph references is carried in the bundle.
+ */
 export const BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE =
   "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5" as const;
+/**
+ * The metadata-first profile of the same format (issue #2986): identical grammar, identical member
+ * naming, and byte-identical retained members, minus the evidence artifact bodies. The declared
+ * signer public keys stay -- they are trust material the signature check reads, not evidence. The
+ * omitted bodies remain named by exact digest in `claim-package/3`'s `records.artifacts`, which is
+ * how the two profiles cross-reference.
+ */
+export const BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE =
+  "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first" as const;

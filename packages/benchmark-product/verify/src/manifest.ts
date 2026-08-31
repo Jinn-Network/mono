@@ -22,11 +22,20 @@ export const BUNDLE_V5_FORMAT = "benchmark-product-public-bundle/5" as const;
  * lists, byte shapes, and values; the `anchors/` member and the `integrity-anchors` check exist
  * only here. */
 export const BUNDLE_V6_FORMAT = "benchmark-product-public-bundle/6" as const;
+/**
+ * The anchored binary-qualification closure (issue #3205): v4's member list — `qualification.json`,
+ * the v4 evidence catalog, the v4 trust document — plus v6's `anchors/` member and its
+ * `integrity-anchors` check. Additive in exactly the same way v6 was: v2, v4, v5, and v6 keep their
+ * member lists, check lists, and bytes, and only a run that is BOTH anchored and
+ * qualification-projecting emits this one.
+ */
+export const BUNDLE_V7_FORMAT = "benchmark-product-public-bundle/7" as const;
 export const SUPPORTED_BUNDLE_FORMATS = [
   BUNDLE_FORMAT,
   BUNDLE_V4_FORMAT,
   BUNDLE_V5_FORMAT,
   BUNDLE_V6_FORMAT,
+  BUNDLE_V7_FORMAT,
 ] as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 
@@ -43,6 +52,7 @@ const LegacyBundleManifestSchema = z.object({
     z.literal(BUNDLE_FORMAT),
     z.literal(BUNDLE_V4_FORMAT),
     z.literal(BUNDLE_V6_FORMAT),
+    z.literal(BUNDLE_V7_FORMAT),
   ]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
@@ -72,7 +82,11 @@ export interface VerifyBundleSnapshotDeps {
 
 export interface BuildBundleManifestOptions {
   /** Defaults to v2 so existing producer and golden bytes remain immutable. */
-  readonly format?: typeof BUNDLE_FORMAT | typeof BUNDLE_V4_FORMAT | typeof BUNDLE_V6_FORMAT;
+  readonly format?:
+    | typeof BUNDLE_FORMAT
+    | typeof BUNDLE_V4_FORMAT
+    | typeof BUNDLE_V6_FORMAT
+    | typeof BUNDLE_V7_FORMAT;
 }
 
 function sha256(bytes: Uint8Array): string {

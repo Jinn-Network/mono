@@ -1,0 +1,15 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/crypto-environment/v1",
+  "profile": "https://spec.jinn.network/facts/crypto-environment/v2",
+  "fields": [
+    { "name": "cryptoEnvironmentRecordDigest", "class": "record" },
+    { "name": "chainWorld.digest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "chainworld", "scalar": "string" } },
+    { "name": "informationWorldCount", "class": "record", "cloudEvents": { "attribute": "worlds", "scalar": "number" } },
+    { "name": "informationWorldDigests", "class": "record", "referenceBearing": true },
+    { "name": "serviceRuntimeImageDigests", "class": "record", "referenceBearing": true },
+    { "name": "composition.requestBudget.maxRequests", "class": "record", "cloudEvents": { "attribute": "maxrequests", "scalar": "number" } },
+    { "name": "composition.missPolicy.bodyDigest", "class": "record", "referenceBearing": true },
+    { "name": "supersedesDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "supersedes", "scalar": "string" } }
+  ]
+}

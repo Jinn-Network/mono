@@ -128,6 +128,23 @@ export function defineBenchmark(
 }
 
 /**
+ * Converts a caller-supplied provenance timestamp, naming the option it came from.
+ *
+ * Left to `checkJudgeability`, a malformed date surfaces as `invalid-provenance` against a task
+ * DIGEST, naming neither the option nor the bad value — a digest-hunt on a large import. Both the
+ * batch `provenanceTimestamp` and each `provenanceTimestamps` entry route through here, so the
+ * same input shape gets the same outcome whichever option carried it.
+ */
+function normalizeProvenanceTimestamp(value: string, option: string): string {
+  try {
+    return toCalendarStrictRfc3339(value);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`${option}: ${detail}`);
+  }
+}
+
+/**
  * SWE-bench-shaped rows → sealed `repository-work/1.0` Tasks + a Benchmark over their digests
  * (§10.1 op 1). Content addressing kills ruler drift.
  */
@@ -135,7 +152,12 @@ export function importSweBench(
   rows: readonly SweBenchRow[],
   opts: DefineBenchmarkOptions,
 ): ImportedBenchmark {
-  const provenanceTimestamp = opts.provenanceTimestamp ?? "2026-07-29T00:00:00Z";
+  // The batch value takes the same edge validation as the per-instance map: same input shape,
+  // same outcome. Omitting the option keeps the literal default untouched, so the no-override
+  // path stays byte-deterministic.
+  const provenanceTimestamp = opts.provenanceTimestamp === undefined
+    ? "2026-07-29T00:00:00Z"
+    : normalizeProvenanceTimestamp(opts.provenanceTimestamp, "provenanceTimestamp");
   const overrides = opts.provenanceTimestamps;
   const tasks = rows.map((row) => {
     // `hasOwnProperty` rather than a plain index: a row whose instance_id collides with an
@@ -144,20 +166,15 @@ export function importSweBench(
     const hasOverride = overrides !== undefined
       && Object.prototype.hasOwnProperty.call(overrides, row.instance_id);
     if (!hasOverride) return sealRepositoryWorkTask(row, provenanceTimestamp);
-    // Normalize and validate HERE, where the offending instance is still in hand. Left to
-    // checkJudgeability below, a malformed date surfaces as `invalid-provenance` against a task
-    // DIGEST, naming neither the instance nor the bad value — a digest-hunt on a large import.
-    // The try wraps ONLY the conversion. Wrapping the seal too would prefix any row-shape failure
-    // (bad parser.digest, locator-less image, negative timeout) with `provenanceTimestamps[...]`,
-    // but only for rows carrying an override — pointing an operator at their timestamp file to
-    // debug a malformed row. That is the same misdirection this validation exists to remove.
-    let resolved: string;
-    try {
-      resolved = toCalendarStrictRfc3339(overrides[row.instance_id] as string);
-    } catch (cause) {
-      const detail = cause instanceof Error ? cause.message : String(cause);
-      throw new Error(`provenanceTimestamps["${row.instance_id}"]: ${detail}`);
-    }
+    // Normalize HERE, where the offending instance is still in hand, and OUTSIDE the seal.
+    // Wrapping the seal too would prefix any row-shape failure (bad parser.digest, locator-less
+    // image, negative timeout) with `provenanceTimestamps[...]`, but only for rows carrying an
+    // override — pointing an operator at their timestamp file to debug a malformed row. That is
+    // the same misdirection this validation exists to remove, inverted.
+    const resolved = normalizeProvenanceTimestamp(
+      overrides[row.instance_id] as string,
+      `provenanceTimestamps["${row.instance_id}"]`,
+    );
     return sealRepositoryWorkTask(row, resolved);
   });
   const benchmark = defineBenchmark(tasks, opts);

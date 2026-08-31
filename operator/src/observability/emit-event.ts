@@ -1,6 +1,7 @@
 import type { ActivityEventRow, Store } from '../store/store.js';
 import { getFileLogger } from './file-logger.js';
 import { LIFECYCLE_KINDS, type LifecycleKind } from '../api/contract/lifecycle-kind.js';
+import { sanitizeErrorText, sanitizePersistedText } from '../rpc/transport.js';
 
 type LifecycleListener = (row: ActivityEventRow) => void;
 const lifecycleListeners = new Set<LifecycleListener>();
@@ -56,6 +57,9 @@ export function emitEvent(
   component = 'lifecycle',
 ): void {
   const ts = new Date().toISOString();
+  const detail = event.detail == null
+    ? null
+    : sanitizePersistedText(sanitizeErrorText(event.detail));
   const id = store.recordActivityEvent({
     ts,
     kind: event.kind,
@@ -64,7 +68,7 @@ export function emitEvent(
     txHash: event.txHash ?? null,
     solverType: event.solverType ?? null,
     outcome: event.outcome ?? null,
-    detail: event.detail ?? null,
+    detail,
     credentialId: event.credentialId ?? null,
   });
   const row = store.getActivityEventById(id);
@@ -76,7 +80,7 @@ export function emitEvent(
       : (event.outcome === 'warn' || event.outcome === 'paused') ? 'warn'
       : 'info',
     component,
-    msg: event.detail ?? event.kind,
+    msg: detail ?? event.kind,
     requestId: event.requestId ?? null,
     txHash: event.txHash ?? null,
     serviceIndex: event.serviceIndex ?? null,

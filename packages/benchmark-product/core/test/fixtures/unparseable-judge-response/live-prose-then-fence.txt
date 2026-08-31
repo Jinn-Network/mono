@@ -1,0 +1,5 @@
+The generated answer refers to a car-related event in San Francisco, but it does not match the specific activity of attending a car modification workshop mentioned in the gold answer, making it incorrect. 
+
+```json
+{"label": "WRONG"}
+```

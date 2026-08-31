@@ -15,6 +15,7 @@ import type { FleetStateStore } from '../earning/store.js';
 import type { Store } from '../store/store.js';
 import { viemSendTransactionWithRetry, waitForTransactionReceiptWithRetry } from '../tx-retry.js';
 import { emitEvent } from '../observability/emit-event.js';
+import { sanitizeErrorText } from '../rpc/transport.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 import { isOperationalServiceStep } from '../earning/types.js';
 import { runLoop } from './loop-heartbeat.js';
@@ -73,7 +74,7 @@ export class BalanceTopupLoop {
           kind: 'tick_error',
           serviceIndex: displayIndex,
           outcome: 'failed',
-          detail: err instanceof Error ? err.message : String(err),
+          detail: sanitizeErrorText(err),
         }, 'balance-topup');
       }
     }
@@ -188,7 +189,7 @@ export class BalanceTopupLoop {
         emitEvent(jinnStore, {
           kind: 'tick_error',
           outcome: 'failed',
-          detail: err instanceof Error ? err.message : String(err),
+          detail: sanitizeErrorText(err),
         }, 'balance-topup');
       },
       afterTick: () => jinnStore.setConfigValue('last_balance_topup_tick_at', new Date().toISOString()),

@@ -1072,6 +1072,82 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
     expect(entries[0]).toMatchObject({ cellKey, evalTaskSha256: sha256Hex(new Uint8Array([4, 5])) });
   });
 
+  test("heals a gap whose delivery entry was lost by re-harvesting the attempt, byte-exactly (#3081)", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+
+    const predictionDigestHex = "e".repeat(64);
+    const predictionBytes = utf8({ probabilityYes: "0.5" });
+    const solveDeliveryBytes = utf8({ outputs: [{ name: "prediction", digest: { sha256: predictionDigestHex } }] });
+    const solveDeliveryDigestHex = "d".repeat(64);
+    const evalDeliveryDigestHex = "1".repeat(64);
+    const verdictEnvelopeHex = "2".repeat(64);
+    const backend = makeFakeBackend({
+      deliveriesByAttempt: {
+        "att-solve-1": [fakeDeliveryRef("att-solve-1", solveDeliveryDigestHex)],
+        "att-eval-1": [fakeDeliveryRef("att-eval-1", evalDeliveryDigestHex)],
+      },
+      deliveryBytesByDigest: {
+        [`sha256:${solveDeliveryDigestHex}`]: solveDeliveryBytes,
+        [`sha256:${evalDeliveryDigestHex}`]: utf8({ outputs: [{ name: "verdict", digest: { sha256: verdictEnvelopeHex } }] }),
+      },
+      artifactBytesByDigest: {
+        [predictionDigestHex]: predictionBytes,
+        [verdictEnvelopeHex]: utf8({ envelope: true }),
+      },
+      observeResult: fakeSnapshot("att-eval-1", "delivered"),
+    });
+    const venue = fakeVenue({ taskBytes: new Uint8Array([4, 5]), taskSha256: "4".repeat(64) });
+
+    // The stranded shape: the cell's `delivered` cell-event named this attempt, and the crash
+    // took the `delivery` entry that would have carried deliverySha256.
+    await driveEvaluationCatchUp(
+      { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
+      [{ cellKey, lastDispatch: 1, attempt: "att-solve-1", missingEvalIndexes: [1] }],
+    );
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    // The lost delivery entry is written back FIRST, then the evaluation leg runs.
+    expect(entries.map((entry) => entry.kind)).toEqual(["delivery", "evaluation"]);
+    expect(entries[0]).toMatchObject({
+      cellKey,
+      dispatch: 1,
+      attempt: "att-solve-1",
+      // The attempt's own bytes, re-read and re-stored content-addressed — never re-minted.
+      deliverySha256: sha256Hex(solveDeliveryBytes),
+      outputs: [{ name: "prediction", sha256: sha256Hex(predictionBytes) }],
+    });
+    expect(getSealedBytes(workspaceDir, sha256Hex(solveDeliveryBytes))).toEqual(solveDeliveryBytes);
+    expect(entries[1]).toMatchObject({ kind: "evaluation", cellKey, evalIndex: 1 });
+    // A second catch-up now takes the ordinary already-journaled path: healing converges.
+    expect(evaluationGaps(foldRunJournal(entries), 1)).toEqual([]);
+  });
+
+  test("a gap with neither a journaled delivery nor an attempt terminals could-not-grade (#3081)", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const backend = makeFakeBackend({});
+    const venue = fakeVenue({ taskBytes: new Uint8Array([4, 5]), taskSha256: "4".repeat(64) });
+
+    await driveEvaluationCatchUp(
+      { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
+      [{ cellKey, lastDispatch: 1, missingEvalIndexes: [1] }],
+    );
+
+    // Accounted, not skipped — resume and collect must never disagree about what is outstanding.
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries).toEqual([
+      expect.objectContaining({
+        kind: "evaluation",
+        cellKey,
+        evaluationTerminal: "could-not-grade",
+        detail: "delivered cell has neither a journaled Delivery nor an attempt reference",
+      }),
+    ]);
+  });
+
   test("catch-up with missingEvalIndexes [2] re-runs exactly leg 2 (BP-21)", async () => {
     const clock = makeClock();
     const { taskSha256 } = storeSubjectTaskAndSpec();

@@ -26,6 +26,9 @@ import {
   isRpcQuotaError,
   DEFAULT_RPC_COOLDOWN_MS,
   maskUrlsInMessage,
+  sanitizeErrorText,
+  sanitizePersistedText,
+  sanitizeStructuredValue,
 } from '../../src/rpc/transport.js';
 
 describe('parseRpcUrls', () => {
@@ -783,6 +786,121 @@ describe('maskUrlsInMessage', () => {
     expect(maskUrlsInMessage('connect ECONNREFUSED 127.0.0.1:0')).toBe(
       'connect ECONNREFUSED 127.0.0.1:0',
     );
+  });
+
+  // Issue #3035: the pattern was `https?://`, so a `wss://` endpoint passed
+  // through verbatim with its credentials intact.
+  it('masks ws:// and wss:// URLs down to their host', () => {
+    expect(
+      maskUrlsInMessage('socket wss://operator:SECRETKEY123@rpc.example/v2/SECRETKEY123 closed'),
+    ).toBe('socket rpc.example closed');
+    expect(maskUrlsInMessage('socket ws://rpc.example/v2/SECRETKEY123 closed')).toBe(
+      'socket rpc.example closed',
+    );
+  });
+
+  it('masks a wss:// URL carrying secrets in userinfo, path, query, and fragment', () => {
+    const masked = maskUrlsInMessage(
+      [
+        'userinfo wss://operator:SECRETKEY123@paid.example',
+        'path WSS://rpc.example/v2/SECRETKEY123',
+        'query wss://rpc.example/?apiKey=SECRETKEY123',
+        'fragment wss://rpc.example/#token=SECRETKEY123',
+      ].join(' '),
+    );
+
+    expect(masked).toContain('paid.example');
+    expect(masked).toContain('rpc.example');
+    expect(masked).not.toContain('SECRETKEY123');
+    expect(masked).not.toContain('apiKey=');
+    expect(masked).not.toContain('token=');
+    expect(masked).not.toContain('/v2/');
+  });
+
+  // Decision recorded for #3035: protocol-relative `//host/path` is out of
+  // scope. A bare `//` in free text is not reliably a URL (doubled path
+  // separators, comment markers), it has no scheme for `new URL` to parse
+  // without inventing a base, and no scheme-less slot can reach a live
+  // transport — viem's `http()` requires an absolute http(s) URL. Masking it
+  // would trade a real false-positive rate for a leak that cannot occur.
+  it('leaves protocol-relative URLs untouched (documented out of scope)', () => {
+    expect(maskUrlsInMessage('fetch //rpc.example/v2/SECRETKEY123 failed')).toBe(
+      'fetch //rpc.example/v2/SECRETKEY123 failed',
+    );
+  });
+});
+
+describe('sanitizeErrorText (#642)', () => {
+  const SECRET = 'SECRETKEY123';
+
+  it('keeps a host-only diagnostic for userinfo, path, query, and fragment secrets', () => {
+    const message = [
+      'userinfo https://operator:SECRETKEY123@paid.example',
+      'path https://base-mainnet.g.alchemy.com/v2/SECRETKEY123',
+      'query https://rpc.example/?apiKey=SECRETKEY123',
+      'fragment https://rpc.example/#token=SECRETKEY123',
+    ].join(' ');
+
+    const sanitized = sanitizeErrorText(message);
+    expect(sanitized).toContain('paid.example');
+    expect(sanitized).toContain('base-mainnet.g.alchemy.com');
+    expect(sanitized).toContain('rpc.example');
+    expect(sanitized).not.toContain(SECRET);
+    expect(sanitized).not.toContain('apiKey=');
+    expect(sanitized).not.toContain('token=');
+    expect(sanitized).not.toContain('/v2/');
+  });
+
+  it('walks Error.cause so a nested HttpRequestError cannot bypass the boundary', () => {
+    const cause = new HttpRequestError({
+      url: 'https://base-mainnet.g.alchemy.com/v2/SECRETKEY123',
+      body: { method: 'eth_blockNumber' },
+      details: 'fetch failed',
+    });
+    const err = new Error('claimDelivery failed');
+    err.cause = cause;
+
+    const sanitized = sanitizeErrorText(err);
+    expect(sanitized).toContain('claimDelivery failed');
+    expect(sanitized).toContain('caused by:');
+    expect(sanitized).toContain('base-mainnet.g.alchemy.com');
+    expect(sanitized).not.toContain(SECRET);
+  });
+
+  it('masks mixed-case schemes: URL schemes are case-insensitive and nothing normalizes rpcUrl', () => {
+    const message = [
+      'upper HTTPS://base-mainnet.g.alchemy.com/v2/SECRETKEY123',
+      'mixed Https://rpc.example/?apiKey=SECRETKEY123',
+      'plain HTTP://insecure.example/v2/SECRETKEY123',
+    ].join(' ');
+
+    const sanitized = sanitizeErrorText(message);
+    expect(sanitized).toContain('base-mainnet.g.alchemy.com');
+    expect(sanitized).toContain('rpc.example');
+    expect(sanitized).toContain('insecure.example');
+    expect(sanitized).not.toContain(SECRET);
+    expect(sanitized).not.toContain('apiKey=');
+    expect(sanitized).not.toContain('/v2/');
+  });
+
+  it('masks a mixed-case scheme reached through the Error.cause walk', () => {
+    const cause = new HttpRequestError({
+      url: 'HTTPS://base-mainnet.g.alchemy.com/v2/SECRETKEY123',
+      body: { method: 'eth_blockNumber' },
+      details: 'fetch failed',
+    });
+    const err = new Error('claimDelivery failed');
+    err.cause = cause;
+
+    const sanitized = sanitizeErrorText(err);
+    expect(sanitized).toContain('base-mainnet.g.alchemy.com');
+    expect(sanitized).not.toContain(SECRET);
+  });
+
+  it('sanitizePersistedText and sanitizeStructuredValue reuse the host-only dialect', () => {
+    const url = 'https://user:SECRETKEY123@rpc.example/v2/SECRETKEY123?k=SECRETKEY123#f=SECRETKEY123';
+    expect(sanitizePersistedText(url)).toBe('rpc.example');
+    expect(sanitizeStructuredValue({ error: url })).toEqual({ error: 'rpc.example' });
   });
 });
 

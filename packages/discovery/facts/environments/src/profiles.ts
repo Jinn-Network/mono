@@ -16,3 +16,11 @@ function loadProfile(filename: string): FactsProfileDocument {
 }
 
 export const environmentFactsProfile: FactsProfileDocument = loadProfile("environment.v1.json");
+
+/**
+ * Coexists with v1; v1's bytes and meaning stay frozen. v2 closes the join-edge gap the
+ * completeness rule names (protocol design §12, amendment 2026-08-28): the parser is pinned by
+ * digest in the record's own bytes, so `parser.digest` is an outbound reference the card owes
+ * an index, and inverting it answers "which environments run parser `sha256:X`".
+ */
+export const environmentFactsProfileV2: FactsProfileDocument = loadProfile("environment.v2.json");

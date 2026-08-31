@@ -1,0 +1,19 @@
+{
+  "kind": "https://spec.jinn.network/records/offer/v1",
+  "subject": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "rails": [
+    {
+      "rail": "https://spec.jinn.network/rails/eip155-8453-erc20-usdc/v1",
+      "to": "0x2222222222222222222222222222222222222222",
+      "amount": "1500000"
+    },
+    {
+      "rail": "https://spec.jinn.network/rails/eip155-8453-erc20-olas/v1",
+      "to": "0x1111111111111111111111111111111111111111",
+      "amount": "2500000000000000000"
+    }
+  ],
+  "gate": {
+    "uri": "https://gate.example/offers"
+  }
+}

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { DsseChainVerifier, DsseSigner } from "@jinn-network/trust-core";
-import type { Transport } from "@jinn-network/record-discovery-client";
+import type { Transport, VerifyDriver } from "@jinn-network/record-discovery-client";
 import { createEvidenceRetrievalFailure } from "@jinn-network/evidence-retrieval";
 import { openLocalEvidenceRuntime } from "@jinn-network/evidence-local-runtime";
 
@@ -120,6 +120,14 @@ export interface BinIo {
   readonly corpusFs?: CorpusFilesystem;
   readonly dsseVerifier?: DsseChainVerifier;
   readonly readPolicyVersions?: (directory: string) => Promise<readonly Uint8Array[]>;
+  /**
+   * Announcement-chain verification driver. Optional like the rest of the
+   * corpus ports, and for the same reason: this runtime resolves no keys and
+   * implements no cryptography. Absent, the `verified` posture cannot be
+   * honored and the corpus capability fails closed — see its
+   * `corpus-chain-verification` health check.
+   */
+  readonly corpusVerifyDriver?: VerifyDriver;
 }
 
 /** `serve [--role tools|session]`. Default `tools`: read-only MCP without capture signer. */
@@ -174,6 +182,7 @@ function buildServeCapabilities(
       fs: io.corpusFs!,
       dsseVerifier: io.dsseVerifier!,
       readPolicyVersions: io.readPolicyVersions!,
+      ...(io.corpusVerifyDriver === undefined ? {} : { verifyDriver: io.corpusVerifyDriver }),
     });
     capabilities.push(corpusCapability);
   }

@@ -3,6 +3,7 @@ import {
   cellIdempotencyKey,
   documentDigest,
   expectedCellSet,
+  orderCellsByTask,
   submissionExtensionBlock,
   type BenchmarkRecord,
   type RunRecord,
@@ -149,6 +150,14 @@ export interface LaunchOptions {
   capture?: LaunchCapturePort;
   /** Optional §7.4 classifier (defaults to `defaultClassifyTerminal`). */
   classifyTerminal?: TerminalClassifier;
+  /**
+   * Task digests (hex, no `sha256:` prefix) giving the order tasks are dispatched in — the
+   * beacon-derived execution order of a run bound by `beacon-binding/1` (issue #2976). Omission
+   * keeps `expectedCellSet`'s `cellKey` order, which is what every unbound run uses. Reordering
+   * never changes which cells run: a task this list does not name still runs, after the named
+   * ones.
+   */
+  dispatchTaskOrder?: readonly string[];
   /** Optional host-visible exclusion/unscorable facts per Attempt. */
   hostTerminalFacts?(input: {
     cellKey: string;
@@ -518,7 +527,7 @@ export async function* launchAndWatch(
   backend: BenchmarkExecutionBackend,
   opts: LaunchOptions,
 ): AsyncGenerator<CellStatusEvent> {
-  const cells = expectedCellSet(bench, run);
+  const cells = orderCellsByTask(expectedCellSet(bench, run), opts.dispatchTaskOrder);
   const maxPerCell = maxDispatches(run);
   const maxConcurrentCells = resolvedMaxConcurrentCells(opts);
   const inFlight = new Set<string>();

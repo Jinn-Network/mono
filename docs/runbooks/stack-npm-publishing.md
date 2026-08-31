@@ -1,6 +1,6 @@
 # Platform stack npm publishing runbook
 
-**Scope:** the catalog-derived stack-published release groups `sealed-platform-v1` (13 packages)
+**Scope:** the catalog-derived stack-published release groups `sealed-platform-v1` (14 packages)
 and `implementations-v1` (60 packages). Their exact package sets, runtime waves,
 trusted-publisher inputs, and policy are generated in the
 [live platform topology](../../architecture/generated/platform-topology.md#release-and-trusted-publishers).

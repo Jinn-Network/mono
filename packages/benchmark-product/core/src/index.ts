@@ -688,7 +688,18 @@ export {
   createWorkspacePublicationSource,
   normalizePublicArchiveBaseUrl,
   publicArchiveUrl,
+  refreshWorkspacePublicationWellKnown,
 } from "./run/publication-source.js";
+export {
+  DEFAULT_PUBLICATION_SERVE_HOST,
+  DEFAULT_PUBLICATION_SERVE_PORT,
+  startPublicationArchiveServer,
+} from "./run/publication-serve.js";
+export type {
+  PublicationArchiveServer,
+  PublicationArchiveServerOptions,
+  PublicationWellKnownOutcome,
+} from "./run/publication-serve.js";
 export { recordPublicationOrigin } from "./run/publication-authority.js";
 export { foldRunJournalLineage } from "./run/journal.js";
 export type { DispatchLineageFold } from "./run/journal.js";
@@ -731,6 +742,7 @@ export {
   runLaunch,
   runLock,
   runAnchor,
+  runBind,
   anchoringConfigure,
   runPreview,
   runPublish,
@@ -802,6 +814,8 @@ export type {
   RunLockInput,
   RunAnchorInput,
   RunAnchorResult,
+  RunBindInput,
+  RunBindResult,
   AnchorSubject,
   AnchoringConfigureInput,
   AnchoringConfigureResult,
@@ -858,7 +872,23 @@ export { METHOD_CATALOG, isMethodCatalogId, listMethodCatalog } from "./operatio
 
 // BP-40: deletion-portable public bundle verification uses only bundle-carried bytes/public keys.
 export { verifyPublicBundle } from "./bundle/verify.js";
+// The one derivation of what a verification result may be said to have proved. Re-exported beside
+// `verifyPublicBundle` so every consumer of that result reaches the same counts and check states
+// rather than counting `checks` for itself (issue #2986).
+export { summarizeVerificationOutcome } from "@colophon-claims/verify";
+export type {
+  VerificationCheckOutcome,
+  VerificationCheckState,
+  VerificationOutcome,
+} from "@colophon-claims/verify";
 export type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./bundle/verify.js";
+
+// The `beacon-binding/1` surface a caller needs to OFFER a binding (issue #2976): the admitted
+// beacon sources and the reference shape. Re-exported through this facade for the same reason the
+// verification-outcome summary is — the product's GUI may import only this package, and a second
+// copy of the source registry would be a second place the admitted beacons could drift.
+export { BEACON_SOURCES, BEACON_SOURCE_IDS, MAX_BEACON_ROUND } from "@colophon-claims/verify";
+export type { BeaconReference, BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
 
 // PUB-13b: an additive publication-profile projection. This is intentionally not wired into the
 // v2 `publish` operation or CLI: callers opt into its accounting-first, report-optional contract.

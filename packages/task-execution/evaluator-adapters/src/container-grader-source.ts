@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { randomUUID } from "node:crypto";
-import { chmod, link, mkdir, open, readFile, rm } from "node:fs/promises";
+import { chmod, link, mkdir, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   EvaluationOperationalError,
@@ -31,6 +31,15 @@ export const GRADER_CONTEXT_SCHEMA = "jinn.grader-context.v1";
 
 /** Container-side working directory used when the specification declares no `workspace.root`. */
 export const DEFAULT_GRADER_CONTAINER_WORKDIR = "/jinn/evaluation";
+
+/**
+ * OOM bound on the grader's report file (P0-4 N7, the package half). It mirrors the host driver's
+ * `maxStdoutBytes` bound on the log channel — the two channels an untrusted container controls get
+ * the same ceiling. It is deliberately not the swe-rebench adapter's 1 MiB `maxTestLogBytes`: that
+ * one tail-caps *published evidence*, downstream of this read and after the whole file is already
+ * in memory, so it never bounded anything here.
+ */
+export const DEFAULT_MAX_GRADER_REPORT_BYTES = 4 * 1024 * 1024;
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
@@ -132,6 +141,12 @@ export interface ContainerGraderReportSourceOptions {
   readonly workspaceRoot: string;
   /** The complete container environment. Nothing is read from `process.env`. */
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * OOM bound on the grader's report file. A hostile or buggy grader can write a multi-GB
+   * `grader-output.json`; reading it whole would exhaust the attempt process. Defaults to
+   * {@link DEFAULT_MAX_GRADER_REPORT_BYTES}.
+   */
+  readonly maxReportBytes?: number;
 }
 
 function fail(
@@ -291,18 +306,57 @@ type ReportRead =
   | { readonly ok: true; readonly report: unknown }
   | { readonly ok: false; readonly detail: string; readonly cause?: unknown };
 
+type BoundedRead =
+  | { readonly overBound: true }
+  | { readonly overBound: false; readonly bytes: Uint8Array };
+
+/**
+ * Reads at most `maxBytes` from a file the container wrote, reporting rather than truncating when
+ * there is more. It reads through a handle into one `maxBytes + 1` buffer — the extra byte is what
+ * distinguishes "exactly at the bound" from "over it" — so a multi-GB report costs the bound, not
+ * the file size. A truncated read is never returned: a partial report would parse as a different
+ * grading, so over-bound is a failure, not a prefix.
+ */
+async function readBounded(path: string, maxBytes: number): Promise<BoundedRead> {
+  const handle = await open(path, "r");
+  try {
+    const buffer = new Uint8Array(maxBytes + 1);
+    let filled = 0;
+    while (filled < buffer.byteLength) {
+      const { bytesRead } = await handle.read(buffer, filled, buffer.byteLength - filled);
+      if (bytesRead === 0) break;
+      filled += bytesRead;
+    }
+    if (filled > maxBytes) return { overBound: true };
+    return { overBound: false, bytes: buffer.subarray(0, filled) };
+  } finally {
+    await handle.close();
+  }
+}
+
 /**
  * Reads the container's report without deciding anything. It reports rather than throws so the
  * caller can weigh a complete report against an elapsed deadline.
  */
-async function readReport(directory: string, exitCode: number): Promise<ReportRead> {
+async function readReport(
+  directory: string,
+  exitCode: number,
+  maxBytes: number,
+): Promise<ReportRead> {
   const suffix = `(container exit ${exitCode})`;
-  let bytes: Uint8Array;
+  let read: BoundedRead;
   try {
-    bytes = await readFile(join(directory, GRADER_OUTPUT_NAME));
+    read = await readBounded(join(directory, GRADER_OUTPUT_NAME), maxBytes);
   } catch (cause) {
     return { ok: false, detail: `the grader container wrote no ${GRADER_OUTPUT_NAME} ${suffix}`, cause };
   }
+  if (read.overBound) {
+    return {
+      ok: false,
+      detail: `${GRADER_OUTPUT_NAME} exceeds the ${maxBytes}-byte report bound ${suffix}`,
+    };
+  }
+  const bytes = read.bytes;
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -339,6 +393,10 @@ async function readReport(directory: string, exitCode: number): Promise<ReportRe
 export function containerGraderReportSource(
   options: ContainerGraderReportSourceOptions,
 ): GraderReportSource {
+  const maxReportBytes = options.maxReportBytes ?? DEFAULT_MAX_GRADER_REPORT_BYTES;
+  if (!Number.isSafeInteger(maxReportBytes) || maxReportBytes <= 0) {
+    throw new TypeError("maxReportBytes must be a positive whole number of bytes");
+  }
   return {
     async read(request: GraderReportRequest): Promise<RawGraderReport> {
       const block = deterministicProcessBlock(request.specification);
@@ -414,7 +472,7 @@ export function containerGraderReportSource(
       // A complete report is a grading the container actually performed, so it is never thrown
       // away for a deadline that elapsed at return time. Only when nothing gradeable came back
       // does an elapsed deadline get to classify the failure.
-      const outcome = await readReport(hostWorkdir, result.exitCode);
+      const outcome = await readReport(hostWorkdir, result.exitCode, maxReportBytes);
       if (outcome.ok) return { report: outcome.report, log: result.stdout };
       if (timeoutSignal.aborted) abortedRun();
       fail("UNAVAILABLE", outcome.detail, outcome.cause);

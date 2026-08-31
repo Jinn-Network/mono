@@ -268,6 +268,16 @@ export function publicationAccounting(
         };
         const parsedDelivery = line.deliverySha256 === undefined ? undefined : DeliveryRecordSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, line.deliverySha256))));
         const delivery = line.deliverySha256 === undefined ? undefined : publicationReference(RECORD_KINDS.delivery, line.deliverySha256, DELIVERY_MEDIA_TYPE, "delivery");
+        // Intentional, and the counterpart of `run/drive.ts`'s local-authorship filter: evaluations
+        // are announced from `line.verdicts` on the next line, never from a delivery's evidence
+        // reference list. The journal names the exact envelope bytes this product fetched and
+        // sealed, and `drive.ts` records their `resultEvaluation` authorship at that same moment;
+        // a reference list, by contrast, can name an evaluation whose bytes this workspace never
+        // held. Announcing from the journal is what makes every announced evaluation one this
+        // workspace can speak for. The managed local venue puts only its execution-evidence
+        // receipt in `evidenceRecords`, so today this filter drops nothing -- it is what keeps a
+        // future adapter that does list evaluations from announcing one twice, the second time
+        // under no authority at all.
         const evidence = (parsedDelivery?.evidenceRecords ?? []).filter((reference) => reference.family !== "result-evaluation").map((reference) => {
           const digestHex = reference.digest.slice("sha256:".length);
           const kind = reference.family === "execution-evidence" ? RECORD_KINDS.executionEvidence : RECORD_KINDS.executionVerification;
