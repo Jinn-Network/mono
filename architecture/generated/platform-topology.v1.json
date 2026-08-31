@@ -2025,7 +2025,8 @@
   "ownership": {
     "requiredOwners": [
       "@oaksprout",
-      "@ritsukai"
+      "@ritsukai",
+      "@ritsuKai2000"
     ],
     "version": 1
   },
