@@ -27,6 +27,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import {
+  BENCHMARKING_METHOD_IDS,
   DISCLOSURE_SPECIFICATION_EXTENSION,
   parseDisclosureSpecification,
 } from "@jinn-network/benchmarking-records";
@@ -34,12 +35,14 @@ import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { verifyPublicBundle } from "@colophon-claims/verify";
 import {
   ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
 } from "../report/claim.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
-import { BUNDLE_V7_FORMAT, BUNDLE_V8_FORMAT, buildBundleManifest } from "./manifest.js";
-import { PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
+import { BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, BUNDLE_V8_FORMAT, buildBundleManifest } from "./manifest.js";
+import { materializePublicBundle, PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
+import { readRunState } from "../run/state.js";
 import {
   createSyntheticV4BundleFixture,
   type SyntheticV4BundleFixture,
@@ -354,6 +357,41 @@ describe("disclosed bundle v8 — the standalone reader (T1)", () => {
     const refused = await refusal(copy);
     expect(refused.path).toBe("evidence-closure");
     expect(refused.message).toMatch(/roles do not equal its derived graph roles/);
+  }, 900_000);
+
+  test("a sibling analysis of the SAME disclosed run publishes on its own closure, without the section", async () => {
+    // The regression the real official workspace found and no single-analysis fixture would have.
+    // That run publishes THREE bundles, one per analysis, and its two additional analyses project no
+    // qualification — so they have nowhere to put a disclosure section. Handing it to them refused
+    // at the claim schema and made a disclosed run unpublishable end to end.
+    const workspaceDir = mkdtempSync(join(tmpdir(), "disclosed-v8-siblings-"));
+    roots.push(workspaceDir);
+    const built = await createSyntheticV4BundleFixture({
+      workspaceDir,
+      truthAdmission: "operator-only",
+      anchorLock: true,
+      declareDisclosure: true,
+      additionalAnalyses: [{ method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: "1" }],
+    });
+
+    // The canonical entry is disclosed.
+    expect(json(built.bundle.bundleDir, "bundle.json").format).toBe(BUNDLE_V8_FORMAT);
+    expect(json(built.bundle.bundleDir, "claim-package.json").claimSchema).toBe(DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID);
+
+    // The sibling is not, and it publishes exactly the closure it published before this feature.
+    const sibling = materializePublicBundle({
+      workspaceDir,
+      draftId: built.draftId,
+      benchmarkSha256: built.benchmarkSha256,
+      runState: readRunState(workspaceDir, built.draftId)!,
+      reportSelector: { method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: "1" },
+    });
+    expect(json(sibling.bundleDir, "bundle.json").format).toBe(BUNDLE_V6_FORMAT);
+    const siblingClaim = json(sibling.bundleDir, "claim-package.json");
+    expect(siblingClaim.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(siblingClaim.disclosure).toBeUndefined();
+    expect(json(sibling.bundleDir, "report.json")[DISCLOSURE_SPECIFICATION_EXTENSION]).toBeUndefined();
+    await expect(verifyPublicBundle(sibling.bundleDir)).resolves.toMatchObject({ format: BUNDLE_V6_FORMAT });
   }, 900_000);
 
   test("T11a — a v8 bundle whose Report lost its extension refuses at the check's first step", async () => {

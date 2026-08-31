@@ -377,6 +377,13 @@ export function runReport(
             ? [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits]
             : [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits, previewLimitation];
 
+        // ONE predicate for both halves of the binding (issue #2839). The Report extension and the
+        // claim section have to agree: G0 refuses a Report carrying the extension on any closure
+        // other than `/8`, and `/8` is the anchored binary-qualification cell. A run's sibling
+        // analyses project no qualification, so their Reports carry neither.
+        const entryIsDisclosed = disclosureCarriage !== undefined
+          && carriage.anchoredClosure
+          && entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument;
         let produced: ProducedReport;
         try {
           produced = await produceReport(
@@ -390,15 +397,15 @@ export function runReport(
               // The extension's digest has to be INSIDE the signed payload for the report author's
               // signature to cover the record (design §6.3), so it is supplied here, before sealing,
               // rather than added to a sealed document afterwards.
-              ...(disclosureCarriage === undefined ? {} : {
+              ...(entryIsDisclosed ? {
                 recordExtensions: {
                   [DISCLOSURE_SPECIFICATION_EXTENSION]: {
                     name: "disclosure-specification",
                     mediaType: DISCLOSURE_SPECIFICATION_MEDIA_TYPE,
-                    digest: { sha256: disclosureCarriage.recordSha256 },
+                    digest: { sha256: disclosureCarriage!.recordSha256 },
                   },
                 },
-              }),
+              } : {}),
             },
             signer,
           );
@@ -443,14 +450,7 @@ export function runReport(
             },
           },
           ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
-          // Only the entry whose projection is the binary qualification can carry the section, and
-          // only when the run is also anchored: `/8` is the one disclosed cell. A run's sibling
-          // analyses publish on their own closures, without it (issue #2839).
-          ...(disclosureCarriage === undefined
-            || !carriage.anchoredClosure
-            || entry.method !== BENCHMARKING_METHOD_IDS.binaryInstrument
-            ? {}
-            : { disclosure: disclosureCarriage.disclosure }),
+          ...(entryIsDisclosed ? { disclosure: disclosureCarriage!.disclosure } : {}),
           ...(previewLog !== undefined && previewLog.count > 0
             ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }
             : {}),
