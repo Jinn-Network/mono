@@ -167,6 +167,19 @@ export interface LocatorCheckResult {
  * any network call; an oversized or wrongly-typed response is rejected
  * after retrieval (the transport's own `declaredLength`/`contentType`,
  * checked ahead of trusting the body).
+ *
+ * It has no in-repo production caller, and that is not the dead code it looks
+ * like (#3411). It is the normative §7.4/§13.3 consumer guard: `ClientUnderTest`
+ * in `@jinn-network/record-discovery-testing` REQUIRES it, and the published
+ * consumer vectors drive it, so any client claiming discovery conformance --
+ * this repo's or a third party's -- has to expose it. Deleting it would delete a
+ * spec obligation and its vector coverage, not unused code.
+ *
+ * It is also not the guard the archive path wants. That path resolves a peer's
+ * introduction against an origin the OPERATOR configured, so `resolveContainedUrl`
+ * applies there and is strictly stronger: it refuses a public third-party
+ * destination too, and it leaves the loopback serving root of a local deployment
+ * usable, which this address classifier would reject outright.
  */
 export async function checkLocator(
   location: { profile: string; locator: string },
