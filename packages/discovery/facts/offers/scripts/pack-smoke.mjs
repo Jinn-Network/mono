@@ -86,6 +86,15 @@ if (jinnDependencies.length !== expectedJinnDependencies.length
 }
 const distFiles = await readdir(${JSON.stringify(join(installedRoot, "dist"))});
 if (distFiles.some((name) => name.includes(".test."))) throw new Error("test output leaked into dist");
+// The fixture catalog is a packed surface: a consumer across the evidence/discovery
+// boundary reads these bytes through the "./fixtures/*" subpath to recompute cards from a
+// real record, and this leaf is the only edge it can reach the offer kind through.
+for (const name of ["free", "priced", "superseding"]) {
+  const envelope = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "fixtures", "catalog"))} + "/" + name + ".json", "utf8"));
+  if (typeof envelope.payload !== "string") {
+    throw new Error("the fixture catalog did not ship a sealed envelope for " + name);
+  }
+}
 await readFile(${JSON.stringify(join(installedRoot, "README.md"))});
 console.log("Installed package imports, dependency boundary, and dist shape verified.");
 `,

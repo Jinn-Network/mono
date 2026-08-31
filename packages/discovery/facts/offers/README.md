@@ -101,6 +101,17 @@ const catalog = listOffersForSubject(announcedItems, {
 });
 ```
 
+## Fixtures
+
+`fixtures/catalog/` ships the three sealed offer envelopes this leaf's queries are
+demonstrated on, mirrored byte for byte from the record package's goldens and pinned by
+`src/fixtures.test.ts`. They ship in the published archive under the `./fixtures/*` export:
+this leaf is the one sanctioned edge between the discovery tree and the offer record kind,
+so a consumer on the far side of that boundary — `@jinn-network/evidence-local-runtime`,
+whose `src/offer-listings.test.ts` publishes them through the real durable source writer and
+then answers "offers for subject X, live, cheapest first" from the announced cards alone —
+reaches real offer bytes through here or not at all.
+
 ## Card and record must agree
 
 A card that disagrees with its record is a defect of the announcing feed. The chain-and-facts

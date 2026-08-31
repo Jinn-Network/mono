@@ -20,10 +20,12 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
-    "./profiles/*": "./profiles/*"
+    "./profiles/*": "./profiles/*",
+    "./fixtures/*": "./fixtures/*"
   },
   "files": [
     "dist/",
+    "fixtures/",
     "profiles/",
     "README.md"
   ],
