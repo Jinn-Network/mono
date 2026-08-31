@@ -113,6 +113,26 @@
       }
     },
     {
+      "operation": "disclosureDeclare",
+      "cliVerb": "disclosure declare",
+      "authorityGated": false,
+      "description": "Seals this run's six-variable disclosure-specification record over its sealed Matrix, recording which of ingestion model, retrieval config, answer model, answer prompt, judge model, and judge prompt this venue measured and which it only carries as an assertion.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires a locally composed six-variable declaration file"
+      }
+    },
+    {
+      "operation": "disclosureShow",
+      "cliVerb": "disclosure show",
+      "authorityGated": false,
+      "description": "Reads the sealed disclosure-specification record back out of the workspace's content-addressed store.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "reads a local sealed record from the workspace store"
+      }
+    },
+    {
       "operation": "exportDerivedBundle",
       "cliVerb": "export",
       "authorityGated": false,

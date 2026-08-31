@@ -335,6 +335,42 @@ full-evidence bundle; no producer emits one. The local viewer, which is the one 
 be pointed at a hand-derived metadata-first bundle, offers the local `colophon bundle verify`
 command instead of an `npx` line that would refuse.
 
+### Disclosed anchored binary qualification bundle v8
+
+A run that is anchored, projecting a binary qualification, and carrying a sealed
+six-variable disclosure declaration emits
+`benchmark-product-public-bundle/8`. It is v7's complete member list plus one
+`records/<sha256>.bin` carrying the sealed disclosure-specification record, and
+nothing else. v2, v4, v6, and v7 bundles keep the versions, member lists, and
+bytes they already had, and a run with no declaration emits exactly the bundle
+it emitted before this closure existed.
+
+The record states all six variables that produced the score --- ingestion model,
+retrieval config, answer model, answer prompt, judge model, judge prompt ---
+each under exactly one of three statuses:
+
+- `measured-here`: this venue executed the variable, and the bundle carries the
+  sealed bytes that fix it. Every citation is authenticated against the
+  bundle's own evidence closure.
+- `disclosed-by-publisher`: the variable is fixed and stated, but this venue did
+  not execute it, so no evidence in this bundle can establish it. The verifier
+  carries the statement and never checks it.
+- `undisclosed`: the variable is not stated. The entry carries a reason token
+  and nothing else.
+
+The distinction is structural, not editorial: the record's schema gives an
+assertion nowhere to put a digest, so a declared variable can never be presented
+as a measured one.
+
+The Report names the record through the
+`https://spec.jinn.network/extensions/disclosure-specification/v1` extension
+key, which puts the record's digest under the report author's existing
+signature. That key is legal on this format and no other. Its claim package is
+`benchmark-product.claim-package/6`: claim-package/5 plus a `disclosure` section
+carrying each variable entry verbatim, and it pins the same `@0.2.1` reader v7
+does. It returns **eight checks** --- v7's seven plus `disclosure-specification`,
+last.
+
 ## Portable verification
 
 Verification with your own tools — no Jinn code at all — is specified in

@@ -745,6 +745,8 @@ export {
   runAnchor,
   runBind,
   anchoringConfigure,
+  disclosureDeclare,
+  disclosureShow,
   runPreview,
   runPublish,
   runQuote,
