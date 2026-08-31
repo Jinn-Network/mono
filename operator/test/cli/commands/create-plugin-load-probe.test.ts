@@ -11,7 +11,7 @@
  * dirs, so the loader's materialization never writes to ~/.jinn-client/.
  *
  * No new operator/src substrate is introduced — the test asserts the real
- * loader path the `references/load-probe.mjs` script will drive at runtime.
+ * loader path directly.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
