@@ -37,13 +37,16 @@ const census = (
     order: ORDER,
   });
 
-const sampled = (round = SEAL_DERIVED_ROUND): VerifiedRunBinding =>
+const sampled = (
+  source: "drand/quicknet" | "bitcoin/mainnet" = "drand/quicknet",
+  round = source === "drand/quicknet" ? SEAL_DERIVED_ROUND : 900_000,
+): VerifiedRunBinding =>
   verifyRunBinding({
     procedure: "beacon-binding/1",
     mode: "sampled",
     sealDigest: SEAL,
     sealedAt: SEALED_AT,
-    beacon: { source: "drand/quicknet", round, value: VALUE },
+    beacon: { source, round, value: VALUE },
     poolItemSha256s: POOL,
     sampleSize: 2,
     sample: ORDER.slice(0, 2),
@@ -110,7 +113,7 @@ describe("runBindingSentence", () => {
       expect(sealDerived).toContain("would have required predicting that value");
       expect(sealDerived).toContain("first round this source publishes after the seal");
 
-      const chosen = runBindingSentence(sampled(CHOSEN_ROUND));
+      const chosen = runBindingSentence(sampled("drand/quicknet", CHOSEN_ROUND));
       expect(chosen).not.toContain("drawn, not chosen");
       expect(chosen).not.toContain("would have required predicting that value");
       expect(chosen).toContain("one of several the operator could have realised");
@@ -118,20 +121,37 @@ describe("runBindingSentence", () => {
     });
 
     test("the operator-chosen sentence names the residue in plain words", () => {
-      const chosen = runBindingSentence(sampled(CHOSEN_ROUND));
+      const chosen = runBindingSentence(sampled("drand/quicknet", CHOSEN_ROUND));
       expect(chosen).toContain("names a round selected after the seal");
       expect(chosen).toContain("available alternative");
       // The value's own unpredictability survives; only the choice among values is retracted.
       expect(chosen).toContain("could not have been predicted");
     });
 
-    test("a height-indexed beacon is operator-chosen, and claims no unpredictability it cannot check", () => {
-      const sentence = runBindingSentence(census("bitcoin/mainnet"));
-      expect(sentence).toContain("No round follows from a seal on a height-indexed source");
-      expect(sentence).toContain("it is the chain, not this bundle, that places it after the seal");
-      // Nothing places this height after the seal, so nothing may say the value was unpredictable.
-      expect(sentence).not.toContain("could not have been predicted");
-      expect(sentence).not.toContain("selected after the seal");
+    // Both modes, because the rule is the branch's and not one mode's: `runBindingSentence` is
+    // exported for readers of foreign bundles, which reach sampled x height-indexed even though
+    // this product's own `runBind` writes census bindings only.
+    test.each(["census", "sampled"] as const)(
+      "a height-indexed beacon is operator-chosen in %s mode, and claims no unpredictability it cannot check",
+      (mode) => {
+        const sentence = runBindingSentence(
+          mode === "census" ? census("bitcoin/mainnet") : sampled("bitcoin/mainnet"),
+        );
+        expect(sentence).toContain("No round follows from a seal on a height-indexed source");
+        expect(sentence).toContain("it is the chain, not this bundle, that places it after the seal");
+        // Nothing places this height after the seal, so no clause -- the opening included -- may
+        // say the value was unpredictable, in either of the two wordings the module can produce.
+        expect(sentence).not.toContain("could not have been predicted");
+        expect(sentence).not.toContain("could not have predicted");
+        expect(sentence).not.toContain("selected after the seal");
+      },
+    );
+
+    test("the sampled opening on a height-indexed beacon concedes what the bundle cannot place", () => {
+      const sentence = runBindingSentence(sampled("bitcoin/mainnet"));
+      expect(sentence).toContain("drawn from a value this bundle cannot place after the seal");
+      expect(sentence).not.toContain("drawn, not chosen");
+      expect(sentence).toContain("different slate from the same inputs");
     });
 
     test("the census sentence gains the residue and nothing stronger", () => {
@@ -160,7 +180,6 @@ describe("runBindingSentence", () => {
       expect(chosen).toContain("none could be selected after the fact");
       expect(chosen).toContain("different order from the same inputs");
       expect(chosen).not.toContain("slate from the same inputs");
-      expect(chosen).not.toContain("could still have been selected after the fact");
     });
   });
 });

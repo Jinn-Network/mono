@@ -120,9 +120,16 @@ export function runBindingSentence(binding: VerifiedRunBinding | undefined): str
     // `operator-chosen` it is not merely unproven, it is false -- selecting the slate after the
     // fact needed no prediction at all, only waiting for a round whose derivation the operator
     // liked -- so it is dropped rather than hedged.
+    //
+    // The opening keys on `postSeal` as well, for the same reason `roundChoiceClause` does: under
+    // `attributive` nothing in the bundle places the height after the seal, so an opening that
+    // called the value unpredictable would assert what the branch cannot check -- and would be
+    // retracted two clauses later by the very postdating clause it introduces.
     const opening = binding.roundBasis === "seal-derived"
       ? "This run's slate was drawn, not chosen"
-      : "This run's slate was drawn from a value it could not have predicted";
+      : binding.postSeal === "attributive"
+        ? "This run's slate was drawn from a value this bundle cannot place after the seal"
+        : "This run's slate was drawn from a value it could not have predicted";
     const unpredictabilityClause = binding.roundBasis === "seal-derived"
       ? "Selecting the slate after the fact would have required predicting that value. "
       : "";

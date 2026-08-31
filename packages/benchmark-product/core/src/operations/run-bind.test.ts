@@ -241,6 +241,23 @@ describe("runBind", () => {
       expect(readRunState(workspaceDir, "draft-1")?.binding).toBeUndefined();
     });
 
+    /**
+     * The lower adjacency, which the `EARLY_ROUND = 1` case above does not reach: the round one
+     * BEFORE the required one is refused too, and by the postdating rule rather than this one. The
+     * two refusals therefore meet with no gap and no double-refusal, leaving exactly one admissible
+     * round -- the claim the design rests on, asserted here through `runBind` itself.
+     */
+    test("refuses the round one before it — the two refusals meet with no gap", async () => {
+      const clock = makeClock();
+      await setUpLockedDraft(clock);
+      const result = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon({ round: sealDerivedRound - 1 }) });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe("validation");
+      expect(result.error.detail).toMatch(/does not postdate the seal/u);
+      expect(readRunState(workspaceDir, "draft-1")?.binding).toBeUndefined();
+    });
+
     test("refuses the round one past it — the cheapest grind is refused like the largest", async () => {
       const clock = makeClock();
       await setUpLockedDraft(clock);
