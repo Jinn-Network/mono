@@ -117,6 +117,45 @@ describe("verifySourceChain: issuedAt monotonicity (§10.3 step 3, §5.2, MAJOR 
     expect(outcome).toEqual({ status: "broken-chain", at: "issued-at-monotonicity" });
   });
 
+  it("rejects a re-signed idle head at the SAME position, because the walk is fed no entries (#3443 gap)", async () => {
+    // A live source re-signs its idle head at least daily (`serve`'s
+    // `maintainHead`): same `sequence`, same `entry`, a bumped `issuedAt`.
+    // `issuedAt` monotonicity passes -- and then the linkage walk looks the
+    // head's own cited entry up in the fed set, which a returning consumer's
+    // walk above its mark is legitimately empty for, and fails `linkage`
+    // before it consults the boundary the entry IS.
+    //
+    // So a correctly operating archive is still refused between appends. That
+    // is NOT closed by the same-head revalidation path #3443 added (which
+    // covers only a byte-identical head), and closing it is a separate
+    // decision: either admit this shape onto revalidation and advance the
+    // mark, or terminate the walk when `headEntryDigest === stopAt.digest`.
+    // Both consumers refuse it today, so this test states the current
+    // behaviour rather than blessing it.
+    const entry = genesisEntry();
+    const { digest } = sealJson(entry);
+    const head: SourceHead = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      origin: `${AGENT}/feed`,
+      sequence: GENESIS_SEQUENCE,
+      entry: digest,
+      issuedAt: "2026-07-27T18:00:00.000Z", // strictly AFTER the mark below
+      refreshBy: "2026-07-29T00:00:00.000Z",
+    };
+    const hwm = makeHwmStore({
+      mark: { sequence: GENESIS_SEQUENCE, entry: digest, issuedAt: "2026-07-27T12:00:00.000Z" },
+    });
+
+    const outcome = await verifySourceChain({
+      head,
+      headSignature: signedHead(head),
+      entries: (async function* () {})(), // a returning walk above the mark yields nothing
+      ports: { keys, sigs, fresh, hwm, now: new Date("2026-07-28T00:00:00.000Z"), firstAdoption: false },
+    });
+
+    expect(outcome).toEqual({ status: "broken-chain", at: "linkage" });
+  });
+
   it("rejects a re-signed head whose issuedAt exactly equals the persisted mark's issuedAt (strict increase required)", async () => {
     const entry = genesisEntry();
     const { digest } = sealJson(entry);

@@ -269,6 +269,14 @@ export function buildNativeDiscoverySources(input: {
       // The protocol's `source-head-revalidation` procedure, shared with the
       // plugin runtime's corpus mirror (#3443) so the same-head shortcut is
       // closed the same way in both consumers.
+      //
+      // One deliberate change from the inline body this replaces: that one
+      // wrapped the whole procedure in a try/catch, so a throwing key resolve
+      // or signature verify surfaced as `invalid-head-envelope`. The shared
+      // procedure guards only the envelope parse, and a trust-catalog throw
+      // now propagates -- which is what `verify` above has always done, and a
+      // catalog fault deserves its own stack rather than a lie about the
+      // envelope. `pollSource` still refuses the source either way.
       async verifyHead(candidate) {
         return verifySourceHead({
           source: candidate.source,

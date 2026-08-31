@@ -338,6 +338,14 @@ export function createCorpusCapability(
       // A revalidated unchanged head clears the source's standing rejection
       // exactly as an accepted chain does -- otherwise a mirror that recovers
       // between publishes would stay red until the archive next appends.
+      //
+      // Newest-wins is the whole contract here, and it cuts both ways: a
+      // source that equivocated and then rolled back to re-serving its last
+      // accepted head clears its own `forked` rejection this way. That is
+      // deliberate rather than overlooked -- this map is in-memory and a
+      // restart forgets it regardless, so it reports what the LAST poll saw,
+      // never a durable verdict on a source. Durable equivocation evidence is
+      // the chain procedure's `forked` outcome, not this health chip.
       async revalidateHead(input: HeadRevalidationInput): Promise<ChainVerificationOutcome> {
         return record(input.source, await inner.revalidateHead(input));
       },

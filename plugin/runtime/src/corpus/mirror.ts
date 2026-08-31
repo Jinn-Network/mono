@@ -66,8 +66,8 @@ export interface CreateCorpusMirrorOptions {
 }
 
 /**
- * Whether a fetched head names EXACTLY the position already on file, and
- * nothing else.
+ * Whether a fetched head names EXACTLY the position and instant already on
+ * file, and nothing else.
  *
  * All four facts are load-bearing, and every one of them is what keeps the
  * revalidation path fail-closed:
@@ -80,13 +80,31 @@ export interface CreateCorpusMirrorOptions {
  *   chain claim is `verifySourceChain`'s to judge, not this path's.
  * - `issuedAt` must equal the mark's. A LOWER one is a rollback or a
  *   backdated re-sign and must keep meeting the strict-increase rule; a
- *   HIGHER one is a genuine re-signing at the same position, which is a new
- *   head this consumer has not accepted before and goes through the full
- *   procedure.
+ *   HIGHER one is a genuine re-signing at the same position, which this
+ *   consumer has not accepted before.
  *
- * So the only head this admits is one byte-identical to a head already
- * accepted -- and even that still has to clear signature, key-validity and
- * freshness on every poll.
+ * ## Two divergences worth naming
+ *
+ * The operator's equivalent (`sameHead`, `operator/src/daemon/native-discovery.ts`)
+ * compares `refreshBy` and the signature bytes too, because it persists a whole
+ * signed high-water record. `HighWaterMark` carries only `sequence`/`entry`/
+ * `issuedAt`, so this predicate cannot. The residue is narrow: a head with the
+ * same position and `issuedAt` but a stretched `refreshBy` is a §5.2-violating
+ * re-sign that would be revalidated as fresh -- and minting one needs the
+ * source's own currently-valid signing key, which already buys the ability to
+ * re-sign correctly. It is not a door an outsider can reach.
+ *
+ * The other divergence is a gap, not a residue: a head re-signed at the SAME
+ * position with a HIGHER `issuedAt` -- which `serve`'s `maintainHead` produces
+ * on every idle source at least daily -- is routed to `verifySourceChain` and
+ * REFUSED there today. `returningSync` feeds no entries above the mark, so the
+ * linkage walk cannot find the head's own cited entry and fails `linkage`
+ * before it ever consults the boundary. Both consumers refuse that shape (the
+ * operator as `rewound-or-tampered-head`), so closing it is an ecosystem-wide
+ * design call -- admit it onto revalidation and advance the mark, or let the
+ * walk terminate when the head's entry IS the boundary -- and not one to make
+ * silently inside the same-head fix. The refusal itself is pinned protocol-side
+ * (`verify/source-chain.test.ts`, "re-signed idle head").
  */
 function isUnchangedHead(
   head: SourceHead,

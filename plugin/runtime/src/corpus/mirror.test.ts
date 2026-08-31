@@ -252,15 +252,22 @@ describe("mirror sync", () => {
       expect(posture.revalidateHead).not.toHaveBeenCalled();
     });
 
-    test("a genuinely re-signed head at the same position keeps the chain path", async () => {
+    test("a genuinely re-signed head at the same position keeps the chain path -- where it is still refused", async () => {
       const marks = await seeded();
       const posture = spyPosture();
       const { transport } = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "2026-07-31T00:00:00Z" });
 
-      await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
+      const outcome = await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
 
       expect(posture.verify).toHaveBeenCalledTimes(1);
       expect(posture.revalidateHead).not.toHaveBeenCalled();
+      // Routing alone would be a satisfying-looking assertion that hides the
+      // outcome, so state the outcome: this posture ADMITS everything, and the
+      // sync is still a clean one only because the mocked chain path says ok.
+      // The real `verifySourceChain` refuses this head -- see
+      // `isUnchangedHead`'s note on the gap, and the protocol-level test that
+      // pins the refusal (`source-chain.test.ts`, "re-signed idle head").
+      expect(outcome.sources[0]!.status).toBe("synced");
     });
 
     test("a head naming a different chain position keeps the chain path", async () => {
