@@ -26,7 +26,10 @@ describe('fetchFromIpfs redirect revalidation (#3410)', () => {
     const requested: string[] = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        // The whole redirect control rests on this: with the default
+        // `follow`, undici would chase the Location itself, unrevalidated.
+        expect(init?.redirect).toBe('manual');
         requested.push(String(input));
         return redirect('https://169.254.169.254/latest/meta-data/');
       }),
@@ -73,6 +76,17 @@ describe('fetchFromIpfs redirect revalidation (#3410)', () => {
     ).resolves.toEqual({ ok: true });
   });
 
+  it('refuses a redirect to a different port on the gateway host', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => redirect('http://127.0.0.1:5001/admin')),
+    );
+
+    await expect(
+      fetchFromIpfs('http://127.0.0.1:8080', CID, { fallbackGatewayBase: false }),
+    ).rejects.toThrow(/redirect changes the gateway port \(5001\)/);
+  });
+
   it('refuses a redirect chain longer than the hop cap', async () => {
     let hop = 0;
     vi.stubGlobal(
@@ -87,8 +101,8 @@ describe('fetchFromIpfs redirect revalidation (#3410)', () => {
       fetchFromIpfs('https://gateway.example', CID, { fallbackGatewayBase: false }),
     ).rejects.toThrow(/exceeded 3 redirects/);
 
-    // Initial request plus at most the capped number of follow-ups.
-    expect(hop).toBeLessThanOrEqual(4);
+    // Exactly the initial request plus the three capped follow-ups.
+    expect(hop).toBe(4);
   });
 });
 
@@ -185,7 +199,7 @@ describe('fetchFromIpfs whole-operation deadline (#3410)', () => {
     vi.useRealTimers();
   });
 
-  it('stops walking candidates once the whole-operation deadline passes', async () => {
+  it('bounds the whole call while still attempting every candidate', async () => {
     vi.useFakeTimers();
     const started: string[] = [];
     vi.stubGlobal(
@@ -201,14 +215,21 @@ describe('fetchFromIpfs whole-operation deadline (#3410)', () => {
       ),
     );
 
-    const pending = fetchFromIpfs('https://gateway.example', HEX_CID);
+    const begunAt = Date.now();
+    let settledAt = 0;
+    const pending = fetchFromIpfs('https://gateway.example', HEX_CID).catch((error: unknown) => {
+      settledAt = Date.now();
+      throw error;
+    });
     const assertion = expect(pending).rejects.toThrow(
       /IPFS JSON fetch failed after all candidates/,
     );
     await vi.advanceTimersByTimeAsync(180_000);
     await assertion;
 
-    // Four candidates at 15s each would need 60s; the 45s deadline cuts it short.
-    expect(started.length).toBe(3);
+    // Two CID path candidates x two gateways, every one of them tried...
+    expect(started.length).toBe(4);
+    // ...inside the whole-operation budget, not four times the per-attempt one.
+    expect(settledAt - begunAt).toBeLessThanOrEqual(45_000);
   });
 });
