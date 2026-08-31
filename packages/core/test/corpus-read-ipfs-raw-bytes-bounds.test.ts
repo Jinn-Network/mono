@@ -192,9 +192,11 @@ describe('fetchBytesFromIpfs response byte cap (#3438)', () => {
       ),
     );
 
+    // The aggregate wrapper alone would pass on any failure; the cap message
+    // is what distinguishes "refused for size" from "the gateway hung up".
     await expect(
       fetchBytesFromIpfs('https://gateway.example', CID, { fallbackGatewayBase: false }),
-    ).rejects.toThrow(/IPFS raw bytes fetch failed after all candidates/);
+    ).rejects.toThrow(/exceeds the 8388608-byte cap/);
 
     // Bounded: the reader stopped near the 8 MiB cap instead of draining
     // all 64 MiB the stream was willing to hand over.
@@ -229,6 +231,11 @@ describe('fetchBytesFromIpfs response byte cap (#3438)', () => {
   });
 
   it('keeps the query string out of the error message', async () => {
+    // `normalizeIpfsGatewayBase` appends `/ipfs/` after the query rather than
+    // before it, so this base normalizes to `…/ipfs?apiKey=…/ipfs/<cid>` — the
+    // CID lands inside the query and the request could never resolve. That is
+    // a separate normalization defect; what is pinned here is only that
+    // `displayUrl` drops the query before the message is built.
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response('nope', { status: 404, statusText: 'Not Found' })),

@@ -1,16 +1,20 @@
 const IPFS_FETCH_TIMEOUT_MS = 15_000;
 /**
- * Bound on the whole `fetchFromIpfs` call. The per-attempt timer above is
- * re-armed for every gateway x CID candidate, so without this a single call
- * could legitimately run for the product of the two. Every candidate is still
- * attempted: the per-attempt timer is clamped to an equal share of whatever
- * budget remains.
+ * Bound on one whole `fetchFromIpfs` / `fetchBytesFromIpfs` call. The
+ * per-attempt timer above is re-armed for every gateway x CID candidate, so
+ * without this a single call could legitimately run for the product of the
+ * two. Every candidate is still attempted: the per-attempt timer is clamped
+ * to an equal share of whatever budget remains.
  */
 const IPFS_TOTAL_FETCH_TIMEOUT_MS = 45_000;
 /**
- * Corpus manifests and donation artifacts are JSON envelopes orders of
- * magnitude smaller than this; a response above it is hostile or broken, and
- * buffering it would exhaust memory (#3410).
+ * Cap on any single gateway response, JSON or raw. Corpus manifests and
+ * donation artifacts are JSON envelopes orders of magnitude smaller than this
+ * (#3410); the raw-bytes path added in #3438 also carries source-bundle files
+ * and sealed documents, which are larger but nowhere near this. A response
+ * above it is hostile or broken, and buffering it would exhaust memory — so
+ * size this against the largest legitimate *source file*, not against the
+ * JSON envelopes alone.
  */
 const MAX_IPFS_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_IPFS_REDIRECT_HOPS = 3;
