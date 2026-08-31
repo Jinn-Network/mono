@@ -1403,9 +1403,15 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
   return renderResult(
     result,
     jsonMode,
+    // The second line is not decoration. `publish` refuses an imported run (operator ruling, issue
+    // #3417), and an operator who learns that only after collect and report has spent the whole
+    // chain to find out. The `--json` envelope is unchanged: machine callers branch on the
+    // publication refusal's own typed code and path, not on this prose.
     (value) => `imported ${value.importedCellCount} cells into draft ${value.draft.draftId}: `
       + `${value.written.graded} graded, ${value.written.ungradeable} ungradeable, `
-      + `${value.written.notDelivered} not delivered\n`,
+      + `${value.written.notDelivered} not delivered\n`
+      + "note: publication of an imported run is refused pending issue #3417 — collect and report "
+      + "work, publish does not (see EXTERNAL-RUN-IMPORT.md)\n",
   );
 }
 

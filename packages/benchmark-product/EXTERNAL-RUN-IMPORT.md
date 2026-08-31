@@ -2,10 +2,16 @@
 
 How results a *different* harness already produced become a benchmark-product
 run. You lock a run here, hand the importer one file of per-attempt records,
-and the ordinary product chain — collect, report, publish — does the rest. The
-bundle that comes out is not a second, weaker kind of artifact: it is the same
-frozen `benchmark-product-public-bundle/2`, and the same public reader accepts
-it.
+and the ordinary product chain — collect, then report — reads that evidence
+exactly as it reads a driven run's.
+
+> **Publication of an imported run is refused today.** `colophon publish`, the
+> GUI's `run.publish`, and managed signed-Report publication all refuse a run
+> whose evidence was imported. The reason is a disclosure defect that cannot be
+> fixed inside this feature, and the fix is tracked as **issue #3417**. Read
+> [Why publication is refused](#why-publication-is-refused-issue-3417) before
+> planning around this document. Everything up to and including the sealed,
+> signed Report works; the act of emitting a public bundle does not.
 
 [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md) is the output format.
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md) is the verification
@@ -18,21 +24,71 @@ Read this table first. It is the whole point of the document.
 | Claim | Status after import |
 | --- | --- |
 | Every slot the sealed run pre-registered is accounted for | proven — import refuses a dump that does not cover the slate exactly once |
-| The matrix is the correct aggregation of the imported evidence | proven — re-derived byte-exactly by the public reader |
+| The matrix is the correct aggregation of the imported evidence | proven — re-derived byte-exactly, by the workspace verifier and by the public reader over a materialized bundle |
 | Each graded cell's verdict is the sealed EvaluationSpec's own rule applied to the imported measurements | proven — recomputed at assembly and again by the reader |
-| The evidence files are exactly the bytes the dump named | proven — sealed by digest, carried in the bundle |
+| The evidence files are exactly the bytes the dump named | proven — sealed by digest, carried in the record closure |
 | The external harness ran the pinned harness, model, or loadout | **not claimed** — every pinning axis reports `unverifiable` |
 | Anyone here observed the attempt | **not claimed** — the evaluator identity transcribed measurements and evaluated nothing |
 | The dump is a faithful record of what the external harness did | **not claimed by any tool** — it is the operator's assertion |
+| The run can be published as a public bundle | **refused** — the sealed disclosure would contradict itself; see [below](#why-publication-is-refused-issue-3417) |
 
-The verdict records say the second and third of those in their own
-`limitations` field, so a reader of the bundle cannot miss it:
+The verdict records say the second and third of the "not claimed" rows in their
+own `limitations` field, so a reader cannot miss them:
 
 - This evaluator transcribed measurements produced by an external harness outside this workspace. It executed no grader, observed no attempt, and performed no evaluation of its own; the verdict is the sealed EvaluationSpec's verdict rule applied to the transcribed measurements.
 - Run pinning was not observed for the imported attempt, so every pinning axis is reported unverifiable rather than matched.
 
 The transcribing identity is `urn:jinn:colophon:external-import-transcriber/v1`,
 deliberately unmistakable and distinct from every venue evaluator.
+
+## Why publication is refused (issue #3417)
+
+Every Report this product seals carries the local-venue disclosure verbatim,
+and its third line reads:
+
+> Run pinning on the harness, model, and loadout axes is enforced by an
+> admission gate at dispatch time.
+
+For an imported run that sentence is false. No venue dispatched these cells and
+no admission gate ever ran — while the same bundle's own cells report every
+pinning axis as `unverifiable`. Publishing it would put a self-contradicting
+claim inside a signed disclosure, which is the one artifact whose whole purpose
+is to state honestly what a run does and does not prove.
+
+It cannot be fixed inside this feature. The workspace verifier and the shipped
+reader both derive the *expected* disclosure from the sealed Run record alone
+(`localVenueLimitsForRun`), and the Run record is sealed at `lock` — before the
+import exists. The two facts that record the import, `RunState`'s
+`externalImportSha256` and the `external-import` run-journal entry, are
+workspace-local: neither enters the bundle closure, and the reader rejects
+bundle members it does not expect. An honest bundle therefore needs a
+reader-visible import marker, which is a format change.
+
+That marker is **issue #3417** — registering `external-import` as a capability
+under the ratified `/8` capability vector. Until it lands:
+
+- `colophon publish` refuses, with `code: "conflict"` and issue path
+  `runs.<draftId>.externalImport`. The GUI's `run.publish` is the same
+  operation and refuses identically.
+- Managed signed Report v2 publication (`colophon publication report`) refuses
+  for the same reason: it seals the same disclosure into a record it announces
+  publicly, without materializing a bundle.
+- The refusal is decided from the run itself, ahead of every other check, so it
+  does not depend on lifecycle state, on flags, or on whether a bundle already
+  exists on disk.
+- Both durable signals are consulted. The importer appends the
+  `external-import` journal marker *before* the first per-cell entry precisely
+  so a crash cannot leave a run that reads as driven; a run whose RunState
+  field never landed is still refused on the journal marker alone.
+
+Everything before publication is unaffected. Import, `run collect`, and
+`report` all work, and the sealed Matrix, the signed Report, and the imported
+records stay readable in the workspace. The structural claim that the resulting
+bundle *shape* is the ordinary frozen
+`benchmark-product-public-bundle/2` — accepted by the packaged public reader,
+matrix re-derivation included — is still proven, in
+`core/src/operations/run-import.bundle.test.ts`, by materializing the bundle
+directly rather than by publishing it.
 
 ## The per-attempt record shape
 
@@ -61,8 +117,9 @@ else is refused, naming the measurement, the row, and the declared type.
 
 Evidence paths may not leave the dump file's own directory. An absolute path,
 or a relative one that climbs out of the tree, is refused: whatever a dump
-names is sealed into the workspace and travels inside the published bundle, so
-the boundary of what can be published is the directory you handed the importer.
+names is sealed into the workspace and travels inside the bundle closure, so
+the boundary of what could ever be published is the directory you handed the
+importer.
 
 Evidence is read without following links. A dump and its evidence tree come
 from a different harness and often arrive as one archive, so a symbolic link
@@ -247,6 +304,6 @@ timings, and evidence digests, and the run journal names it by digest.
 
 The reason behind each dispatched non-graded slot also rides the sealed
 submission and delivery as a namespaced annotation, so it travels inside the
-published bundle's `records/` closure. A slot imported as `unrun` has no
+bundle's `records/` closure. A slot imported as `unrun` has no
 dispatch and therefore no submission to carry it: its reason stays durable in
 the workspace declaration but does not travel in the bundle.

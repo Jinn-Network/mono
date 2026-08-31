@@ -41,6 +41,7 @@ import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
 import { recordWorkspaceAuthorship, requireWorkspaceAuthorship, WORKSPACE_AUTHORSHIP_ROLE } from "../run/publication-authority.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
 import { createWorkspacePublicationJournal, createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
+import { externalRunImportMarker, importedRunPublicationRefusal } from "../run/imported-run.js";
 import { requireRunState, writeRunState, type PublicationStage, type RunState } from "../run/state.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
@@ -249,6 +250,17 @@ export function publicationReport(
     const lock = await acquirePublicationLock(context.workspaceDir, input.draftId);
     try {
       let state = requireRunState(context.workspaceDir, input.draftId);
+      // The SECOND surface that seals the local-venue disclosure into a signed, publicly announced
+      // record: `limitations` below is `LOCAL_VENUE_LIMITS` verbatim, admission-gate sentence and
+      // all. Refusing an imported run here for the same reason `operations/publish.ts` refuses one
+      // (operator ruling, issue #3417) keeps the ruling from having exactly one door closed —
+      // a Report v2 announced from an imported run would carry the identical contradiction into a
+      // public archive, without ever materializing a bundle. Checked before any stage is read so
+      // an imported run cannot advance the managed publication chain at all.
+      const imported = externalRunImportMarker(context.workspaceDir, input.draftId, state);
+      if (imported !== undefined) {
+        refuse("conflict", `runs.${input.draftId}.externalImport`, importedRunPublicationRefusal(input.draftId, imported));
+      }
       const publication = state.publication;
       if (publication === undefined || state.runSha256 === undefined || state.accountingSha256 === undefined || state.matrixV2Sha256 === undefined) {
         refuse("conflict", `runs.${input.draftId}`, "a managed Run with complete BenchmarkAccounting and Matrix v2 is required before signed report publication");

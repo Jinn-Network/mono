@@ -61,8 +61,9 @@ npx @colophon-claims/verify@0.1 ./bundle
 To verify a bundle with tools that are not ours, see
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).
 
-To turn results another harness already produced into a bundle, see
-[`EXTERNAL-RUN-IMPORT.md`](EXTERNAL-RUN-IMPORT.md).
+To import results another harness already produced, see
+[`EXTERNAL-RUN-IMPORT.md`](EXTERNAL-RUN-IMPORT.md). Publication of an
+imported run is refused pending issue #3417.
 
 The contributor proof remains available from the mono:
 
@@ -175,8 +176,9 @@ Procedure, receipt checklist, and the fail-closed
   `benchmark-product-public-bundle/2` layout, citation, trust, privacy,
   limitations, and portable verification.
 - [External run-record import](./EXTERNAL-RUN-IMPORT.md) — the per-attempt
-  record shape, both dump dialects, the closed import vocabulary, and the
-  `--template` workflow.
+  record shape, both dump dialects, the closed import vocabulary, the
+  `--template` workflow, and why publication of an imported run is refused
+  pending issue #3417.
 - [Inspect runtime](./INSPECT-RUNTIME.md) — optional real Inspect selection,
   execution, scorer attribution, native logs, and security limitations.
 - [Security and threat model](./SECURITY.md) — protected assets, boundaries,

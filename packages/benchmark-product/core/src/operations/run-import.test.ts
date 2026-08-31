@@ -20,7 +20,8 @@ import { EVALUATOR_REQUIREMENT_KEY } from "../venue/provisioner.js";
 import { readExternalRunRecordsCsv, type ExternalRunRecord } from "../intake/external-run-records.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { requireWorkspaceAuthorship } from "../run/publication-authority.js";
-import { readRunState } from "../run/state.js";
+import { externalRunImportMarker } from "../run/imported-run.js";
+import { readRunState, writeRunState } from "../run/state.js";
 import {
   EXTERNAL_RUN_IMPORT_DECLARATION_PROTOCOL,
   EXTERNAL_RUN_IMPORT_EVALUATOR_ID,
@@ -651,5 +652,54 @@ describe("run.import — a refused dump leaves the draft importable", () => {
       expect(outcome.error.detail, path).toMatch(/row 1/u);
       expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
     }
+  }, 120_000);
+});
+
+/**
+ * The publication gate reads a durable fact about the run, not a flag this operation passes along.
+ * These tests pin the two signals `../run/imported-run.ts` consults, including the half-written
+ * case the marker-first journal ordering exists to make honest — `operations/publish.ts` and
+ * `operations/publication-report.ts` refuse on either one (operator ruling, issue #3417).
+ */
+describe("run.import — the durable import marker the publication gate reads", () => {
+  test("absent on a locked, never-imported run; names the declaration once imported", async () => {
+    const clock = makeClock();
+    const { cellKeys } = await lockedRun(clock);
+    // A locked run with an empty journal is exactly the shape a DRIVEN run has at this point, so
+    // this is the control: the gate must find nothing here or it would refuse every run.
+    expect(externalRunImportMarker(workspaceDir, "draft-1")).toBeUndefined();
+
+    const imported = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1", records: mixedRows(cellKeys), source: SOURCE, evidenceRoot,
+    });
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    if (!imported.ok) return;
+    expect(externalRunImportMarker(workspaceDir, "draft-1")).toEqual({
+      declarationSha256: imported.result.declarationSha256,
+      source: "run-state",
+    });
+  }, 120_000);
+
+  test("survives in the journal when the RunState field never landed", async () => {
+    const clock = makeClock();
+    const { cellKeys } = await lockedRun(clock);
+    const imported = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1", records: mixedRows(cellKeys), source: SOURCE, evidenceRoot,
+    });
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    if (!imported.ok) return;
+
+    // Exactly the state a crash between the journal marker and the final `writeRunState` leaves —
+    // the case `writeExternalRunImport` orders the marker FIRST to keep honest. A gate that read
+    // only RunState would call this run driven.
+    const { externalImportSha256: _dropped, ...withoutField } = readRunState(workspaceDir, "draft-1")!;
+    writeRunState(workspaceDir, "draft-1", withoutField);
+    expect(readRunState(workspaceDir, "draft-1")?.externalImportSha256).toBeUndefined();
+
+    expect(externalRunImportMarker(workspaceDir, "draft-1")).toEqual({
+      declarationSha256: imported.result.declarationSha256,
+      harness: SOURCE.harness,
+      source: "run-journal",
+    });
   }, 120_000);
 });
