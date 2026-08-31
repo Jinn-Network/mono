@@ -44,6 +44,18 @@ export class TransportOversizeError extends Error {
   }
 }
 
+export class TransportRedirectError extends Error {
+  readonly url: string;
+  readonly location: string;
+
+  constructor(url: string, location: string, detail: string) {
+    super(`GET ${url} was redirected to ${location}: ${detail}`);
+    this.name = "TransportRedirectError";
+    this.url = url;
+    this.location = location;
+  }
+}
+
 export interface HttpTransportOptions {
   /** Hard ceiling on a single response body. Defaults to 8 MiB. */
   maxBytes?: number;
@@ -64,6 +76,69 @@ interface CacheEntry {
 function resolveUrl(baseUrl: string, url: string): string {
   if (/^https?:\/\//i.test(url)) return url;
   return `${baseUrl.replace(/\/+$/, "")}${url.startsWith("/") ? url : `/${url}`}`;
+}
+
+/**
+ * Redirect statuses this transport treats as a redirect. 304 sits in the same
+ * numeric band and is emphatically NOT one -- it is the §7.3 revalidation hit
+ * the caller below turns back into cached bytes.
+ */
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/** Enough hops for a peer normalizing its own paths; far short of undici's 20. */
+const MAX_REDIRECTS = 5;
+
+/**
+ * Performs the request, following only redirects that stay on the origin the
+ * caller asked for.
+ *
+ * A destination guard that inspects the requested URL is worth nothing if the
+ * server at that URL can then post a forwarding address (#3411). The serving
+ * root is operator-CONFIGURED but peer-OPERATED: with the default
+ * `redirect: "follow"` a peer answered a perfectly contained request with
+ * `302 Location: http://127.0.0.1:8545/` and undici walked the daemon there,
+ * restoring exactly the arbitrary-destination fetch the containment guard in
+ * `discovery/client`'s `origin-policy` exists to remove.
+ *
+ * Same-origin is the invariant enforced here because it is precisely the
+ * promise the guard makes: a peer may move a request only within an origin the
+ * operator already chose. The path within that origin stays the peer's to
+ * choose -- it always was, since the peer serves the archive.
+ */
+async function fetchWithinOrigin(
+  fetchLike: FetchLike,
+  target: string,
+  headers: Record<string, string>,
+): Promise<Response> {
+  let current = target;
+  for (let hop = 0; ; hop += 1) {
+    // eslint-disable-next-line no-await-in-loop -- a redirect chain is sequential by definition.
+    const response = await fetchLike(current, { method: "GET", headers, redirect: "manual" });
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+
+    const location = response.headers.get("location");
+    // A redirect status with no Location is malformed; hand it back so the
+    // caller's ordinary non-2xx check reports it as the HTTP error it is.
+    if (location === null || location.trim() === "") return response;
+    if (hop >= MAX_REDIRECTS) {
+      throw new TransportRedirectError(target, location, `more than ${MAX_REDIRECTS} redirects`);
+    }
+
+    let next: URL;
+    try {
+      next = new URL(location, current);
+    } catch {
+      throw new TransportRedirectError(target, location, "the redirect target is not a resolvable URL");
+    }
+    if (next.protocol !== "http:" && next.protocol !== "https:") {
+      throw new TransportRedirectError(target, location, `scheme ${next.protocol} is not HTTP(S)`);
+    }
+    const from = new URL(current).origin;
+    if (next.origin !== from) {
+      throw new TransportRedirectError(target, location, `origin ${next.origin} is not ${from}`);
+    }
+    current = next.toString();
+  }
 }
 
 /**
@@ -129,7 +204,7 @@ export function createHttpTransport(
       };
 
       requests += 1;
-      const response = await fetchLike(target, { method: "GET", headers });
+      const response = await fetchWithinOrigin(fetchLike, target, headers);
 
       if (response.status === 304 && cached !== undefined) {
         revalidations += 1;

@@ -148,6 +148,10 @@ describe("isPrivateOrReservedHost (§7/§14.1 hostile-locator classifier)", () =
     "0177.0.0.1", // octal spelling of 127.0.0.1
     "0x7f000001", // hex spelling of 127.0.0.1
     "192.168.0x1", // mixed hex final label
+    "192.0.0.1", // IETF protocol assignments (192.0.0.0/24)
+    "::ffff:0:127.0.0.1", // IPv4-translated: the ffff sits one group earlier than IPv4-mapped
+    "::ffff:0:10.0.0.1",
+    "64:ff9b:1::7f00:1", // RFC 8215 local-use NAT64, refused whole
   ];
   for (const host of refused) {
     it(`refuses ${host}`, () => {
@@ -166,6 +170,8 @@ describe("isPrivateOrReservedHost (§7/§14.1 hostile-locator classifier)", () =
     "2606:4700::1111",
     "::ffff:8.8.8.8",
     "2002:0808:0808::", // 6to4 of a public IPv4
+    "::ffff:0:8.8.8.8", // IPv4-translated public address
+    "192.0.1.1", // just outside 192.0.0.0/24
   ];
   for (const host of allowed) {
     it(`allows ${host}`, () => {

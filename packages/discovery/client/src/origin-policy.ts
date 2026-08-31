@@ -20,10 +20,24 @@
 //    the archive-root path: a serving root is loopback in every local
 //    deployment, and containment there is both stronger and correct.
 //
-// Neither resolves DNS. Address pinning is not expressible through the injected
-// `Transport`/`FetchLike` ports these paths use, and on the contained path the
-// destination is an operator-configured origin, so a rebinding attack would have
-// to target the operator's own host.
+// Scope, stated exactly so the next audit does not have to re-derive it: only
+// the ARCHIVE-ROOT path is guarded here. The operator's own record fetches by
+// locator (`NativePublicRecordTransport.byLocation`, reached from a peer's
+// announcement `locations[]`) still carry no destination policy; their bytes are
+// digest-verified, which guards the response and not the request. That path is
+// behind trust verification and is a separate surface with its own containment
+// question -- what root would a locator be contained TO -- so it is deliberately
+// left for its own change rather than half-solved here.
+//
+// Neither primitive resolves DNS, and containment restricts the URL, not the
+// socket. A peer owns DNS for its own hostname, so it can point the configured
+// serving root at loopback or a metadata endpoint directly -- no rebinding race
+// needed. Address pinning is not expressible through the injected
+// `Transport`/`FetchLike` ports these paths use, so the honest statement of the
+// guarantee is: a peer cannot move a request to an origin the operator did not
+// choose. Whether the operator chose an origin worth trusting is the operator's
+// call. The transport enforces the same rule per redirect hop, which is the
+// other half of that promise (`transport-http`'s `fetchWithinOrigin`).
 
 /** A peer-introduced URL that does not stay inside the configured serving root. */
 export class ContainedOriginError extends Error {
@@ -171,6 +185,7 @@ function isReservedIPv4(octets: readonly number[]): boolean {
   if (a === 169 && b === 254) return true; // link-local, incl. cloud metadata
   if (a === 172 && b >= 16 && b <= 31) return true; // private (172.16.0.0/12)
   if (a === 192 && b === 168) return true; // private
+  if (a === 192 && b === 0 && octets[2] === 0) return true; // IETF protocol assignments (192.0.0.0/24)
   if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking (198.18.0.0/15)
   if (a >= 224) return true; // multicast (224/4) plus reserved and broadcast (240/4)
   return false;
@@ -189,10 +204,19 @@ function isReservedIPv6(bytes: readonly number[]): boolean {
     if (embedded[0] === 0 && embedded[1] === 0 && embedded[2] === 0 && embedded[3] === 1) return true;
     return isReservedIPv4(embedded);
   }
-  // NAT64 well-known prefix 64:ff9b::/96.
-  if (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b
-    && bytes.slice(4, 12).every((byte) => byte === 0)) {
+  // IPv4-translated (::ffff:0:a.b.c.d, RFC 2765) -- the other embedding that
+  // carries a real IPv4 destination, distinguished from IPv4-mapped only by
+  // where the ffff sits.
+  if (zeroThrough(8) && bytes[8] === 0xff && bytes[9] === 0xff && bytes[10] === 0 && bytes[11] === 0) {
     return isReservedIPv4(bytes.slice(12));
+  }
+  // NAT64 well-known prefix 64:ff9b::/96.
+  if (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b) {
+    // RFC 8215 local-use 64:ff9b:1::/48 places the embedded IPv4 at a
+    // deployment-chosen offset, so the prefix is refused whole rather than
+    // guessed at.
+    if (bytes[4] === 0x00 && bytes[5] === 0x01) return true;
+    if (bytes.slice(4, 12).every((byte) => byte === 0)) return isReservedIPv4(bytes.slice(12));
   }
   // 6to4 2002::/16 embeds the IPv4 address in the next four bytes.
   if (bytes[0] === 0x20 && bytes[1] === 0x02) return isReservedIPv4(bytes.slice(2, 6));
