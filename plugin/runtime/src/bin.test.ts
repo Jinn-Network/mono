@@ -5,7 +5,10 @@ import { join } from "node:path";
 import type { DsseSigner } from "@jinn-network/trust-core";
 import { describe, expect, test } from "vitest";
 
-import { main, buildOwnedEnvSnapshot } from "./bin.js";
+import { main, buildOwnedEnvSnapshot, buildServeCapabilities } from "./bin.js";
+import { resolveRuntimeConfig } from "./config.js";
+import { createLineLogger } from "./logger.js";
+import { createPluginRuntime, type PluginRuntime } from "./runtime.js";
 import { resolveCorpusBinIoFields } from "./session-host-corpus.js";
 import { RUNTIME_VERSION } from "./version.js";
 
@@ -182,5 +185,39 @@ describe("the composed corpus ports", () => {
     // for every in-repo entry point, so the capability was never constructed.
     expect(err.join("\n")).toContain("corpus.capability.started");
     expect(err.join("\n")).not.toContain("corpus ports not injected");
+  });
+
+  test("a default install with no config file is aggregate-healthy", async () => {
+    // The serve path never renders a report — the composed `runtimeHealth`
+    // closure is what the MCP `health` tool returns — so this composes the
+    // capability set exactly as `main` does and reads the report directly.
+    // Constructing the corpus capability on every real launch (which the
+    // injected ports now do) must not make that report permanently red: no
+    // in-repo entry point passes a config `file`, so `corpus.trust` is always
+    // `undefined` here, and its remedy names keys nothing can read.
+    const home = await mkdtemp(join(tmpdir(), "jinn-bin-corpus-health-"));
+    const binIo = {
+      writeOut: () => {},
+      writeErr: () => {},
+      homeDirectory: home,
+      untilShutdown: async () => {},
+      ...resolveCorpusBinIoFields({ env: {}, homeDirectory: home }),
+    };
+    let runtime: PluginRuntime;
+    runtime = createPluginRuntime({
+      config: resolveRuntimeConfig({ env: {}, homeDirectory: home }),
+      log: createLineLogger("info", () => {}),
+      capabilities: buildServeCapabilities("tools", binIo, () => runtime.health()),
+    });
+    await runtime.start();
+    const report = await runtime.health();
+    await runtime.stop();
+
+    expect(report.checks.find((check) => check.name === "corpus-trust-policy")).toMatchObject({
+      ok: true,
+      remedy: null,
+    });
+    expect(report.checks.filter((check) => !check.ok)).toEqual([]);
+    expect(report.ok).toBe(true);
   });
 });

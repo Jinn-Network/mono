@@ -161,7 +161,13 @@ function hasCorpusPorts(io: BinIo): boolean {
   );
 }
 
-function buildServeCapabilities(
+/**
+ * Exported for the composition test that asserts a default `serve` install is
+ * aggregate-healthy. `main` builds the capability set inline and never renders
+ * a report on the serve path, so the only way to assert on the composed
+ * runtime's health is to compose it exactly as `main` does.
+ */
+export function buildServeCapabilities(
   role: RuntimeRole,
   io: BinIo,
   runtimeHealth: () => ReturnType<ReturnType<typeof createPluginRuntime>["health"]>,

@@ -211,11 +211,26 @@ export function createCorpusCapability(
       ];
 
       if (state.corpus.trust === undefined) {
+        // Empty by configuration, exactly as `corpus-mirror` treats a
+        // followed-nothing install: with no archives there is no producer to
+        // admit, so an absent trust policy is not a fault. Reporting it as one
+        // made every default `serve` process red — no in-repo entry point
+        // passes a config `file`, so `corpus.trust` is `undefined` on every
+        // real launch — with a remedy naming two keys nothing reads, which is
+        // the operator-unfixable remedy spec §9.3 forbids by name. Declining a
+        // trust policy WHILE following archives is still a fault, and stays
+        // red. See Finding F-C7-1.
         checks.push({
           name: "corpus-trust-policy",
-          ok: false,
-          detail: "No trust policy is configured, so no producer is admitted.",
-          remedy: "Set `corpus.trust.genesisDigest` and `corpus.trust.policyDirectory`.",
+          ok: followed === 0,
+          detail:
+            followed === 0
+              ? "No trust policy is configured — with no archives followed, there is no producer to admit."
+              : "No trust policy is configured, so no producer is admitted.",
+          remedy:
+            followed === 0
+              ? null
+              : "Set `corpus.trust.genesisDigest` and `corpus.trust.policyDirectory`.",
         });
       } else if (state.policyError !== undefined) {
         checks.push({
