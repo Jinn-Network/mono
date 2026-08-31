@@ -115,6 +115,12 @@ export interface ObservedPayment {
   readonly observedAt?: string;
 }
 
+/**
+ * A payment that does not reference the offer asked about is `mismatched`, never `observed`
+ * carrying its true digest. `observe` answers "is there a payment referencing THIS offer",
+ * and `mismatched` is the spelling for "there is a payment under that reference, but not for
+ * this". The gate refuses either shape, but only one of them is an answer to the question.
+ */
 export type PaymentObservation =
   | { readonly status: "observed"; readonly payment: ObservedPayment }
   | { readonly status: "not-found"; readonly detail: string }
@@ -276,6 +282,21 @@ export function assertConformingRailAdapter(adapter: RailAdapter): RailSelfDescr
       `rail adapter "${rail}" claims trust model "${description.trustModel}" and must name `
         + "the party carrying that assurance",
     );
+  }
+
+  // Before any presence rule, because `claim: null` is "present" to `!== undefined` and
+  // would otherwise reach a caller as a TypeError from a later `.bind`. This package
+  // promises `GateConfigurationError` for every construction defect.
+  for (const [name, value, required] of [
+    ["observe", adapter.observe, true],
+    ["verifyPayerControl", adapter.verifyPayerControl, false],
+    ["deliver", adapter.deliver, false],
+    ["claim", adapter.claim, false],
+  ] as const) {
+    if (value === undefined && !required) continue;
+    if (typeof value !== "function") {
+      fail(`rail adapter "${rail}" has a ${name} that is not a function`);
+    }
   }
 
   if (description.paymentsArePubliclyVisible && adapter.verifyPayerControl === undefined) {

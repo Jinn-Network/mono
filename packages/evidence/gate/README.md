@@ -89,24 +89,25 @@ ships with this package. Rail authors run `describeRailAdapterConformance` from
 
 ## What the gate enforces itself
 
-An adapter is third-party code speaking for a payment system the gate knows nothing about,
-so after every `observe` the gate re-checks the observation itself: that it names the payment
-the request named, and that the referenced offer, the destination, and the amount are the
-*sealed* ones. Amount equality is integer-exact,
-including against overpayment — a gate cannot make change, and a payment for a different
-amount is a payment on different terms. A lax, buggy, or hostile adapter can misjudge its own
-rail; it can never widen the offer.
+An adapter is third-party code speaking for a payment system the gate knows nothing about, so
+after every `observe` the gate re-checks the observation itself: that it names the payment the
+request named, and that the referenced offer, the destination, and the amount are the *sealed*
+ones. Amount equality is integer-exact, including against overpayment — a gate cannot make
+change, and a payment for a different amount is a payment on different terms. A lax, buggy, or
+hostile adapter can misjudge its own rail; it can never widen the offer.
 
 `maxSubjectBytes` bounds what the gate hands over, not what it reads: `SubjectSource` returns
 whole bytes, so by the time the bound applies the source has already produced them. A source
 reading from somewhere unbounded owes its own read bound — which is where it belongs anyway,
 since only the source knows a subject's size before fetching it.
 
-The description a gate decides from is the frozen copy taken when the adapter was installed,
-and so are the four methods it calls. All of them are ordinary properties of third-party code
-and may be getters: one answering `paymentsArePubliclyVisible: true` at construction and
-`false` afterwards would otherwise pass the payer-proof requirement and then be served to
-onlookers with no challenge at all.
+The description a gate decides from is the copy taken when the adapter was installed, and so
+are the four methods it calls — each read exactly once, and it is that capture which is then
+judged. All of them are ordinary properties of third-party code and may be getters: one
+answering `paymentsArePubliclyVisible: true` at construction and `false` afterwards would
+otherwise pass the payer-proof requirement and then be served to onlookers with no challenge
+at all, and a `claim` answering `undefined` while the `on-delivery` rule is checked and a
+function immediately after would run both money-moving acts.
 
 The gate also hashes the subject bytes before serving them. The buyer would catch a mismatch
 too, but catching it here means a holder whose store has quietly corrupted learns it from

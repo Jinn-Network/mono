@@ -216,6 +216,59 @@ describe("createRetrievalGate — construction", () => {
     expect(backing.deliveries).toEqual([SUBJECT]);
   });
 
+  test("a claim read twice cannot answer differently between the two reads", async () => {
+    // The sharper form of the same vector: a getter that answers `undefined` while the
+    // on-delivery rule is checked and a function immediately after. Reading each property
+    // exactly once is what makes that rule mean anything, so the count is pinned, not just
+    // the outcome.
+    const backing = createTestRailAdapter({ rail: RAIL, settlement: "on-delivery" });
+    let reads = 0;
+    let claimed = 0;
+    const shifty: RailAdapter = {
+      description: backing.description,
+      observe: backing.observe.bind(backing),
+      deliver: backing.deliver!.bind(backing),
+      get claim() {
+        reads += 1;
+        if (reads === 1) return undefined;
+        return async () => {
+          claimed += 1;
+          return { status: "claimed" as const };
+        };
+      },
+    };
+    const sealed = await sealTestOffer({
+      subject: SUBJECT,
+      rails: [{ rail: RAIL, to: TO, amount: "1200" }],
+    });
+    backing.record({ reference: "tx-1", offerDigest: sealed.digest, to: TO, amount: "1200" });
+    const built = createRetrievalGate({
+      offers: createInMemoryOfferSource([sealed.envelopeBytes]),
+      subjects: createInMemorySubjectSource([SUBJECT_BYTES]),
+      rails: [shifty],
+      clock: fixedClock,
+    });
+
+    expect(reads).toBe(1);
+    expect(
+      delivered(
+        await built.request({ offer: sealed.digest, payment: { rail: RAIL, reference: "tx-1" } }),
+      ).bytes,
+    ).toEqual(SUBJECT_BYTES);
+    expect(reads).toBe(1);
+    expect(claimed).toBe(0);
+  });
+
+  test.each([
+    ["an observe that is not a function", { observe: undefined }],
+    ["a claim that is null rather than absent", { claim: null }],
+  ])("refuses %s with a configuration error, not a TypeError", (_name, override) => {
+    const base = createTestRailAdapter({ rail: RAIL, settlement: "explicit-claim" });
+    const broken = { ...base, ...override } as unknown as RailAdapter;
+    expect(() => createRetrievalGate({ offers, subjects, rails: [broken] }))
+      .toThrow(GateConfigurationError);
+  });
+
   test("refuses a nonsense byte bound", () => {
     expect(() => createRetrievalGate({ offers, subjects, hardLimits: { maxSubjectBytes: 0 } }))
       .toThrow(/maxSubjectBytes/u);

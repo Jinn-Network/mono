@@ -160,12 +160,33 @@ interface InstalledRail {
   ) => Promise<ClaimOutcome>;
 }
 
+/**
+ * Capture first, then validate the capture — never the adapter.
+ *
+ * Validating the adapter and then reading its methods again is two reads of one property,
+ * and two reads of a getter can differ: a `claim` that answers `undefined` while the
+ * `on-delivery` rule is checked and a function immediately after would pass conformance and
+ * then be called, running both money-moving acts. So every property is read exactly once,
+ * into `captured`, and it is `captured` that is judged and `captured` that is used.
+ *
+ * The bind target is still the adapter, so `this` is what an ordinary `adapter.fn(...)` call
+ * would have given it.
+ */
 function installRail(adapter: RailAdapter): InstalledRail {
-  const description = assertConformingRailAdapter(adapter);
-  const { verifyPayerControl, deliver, claim } = adapter;
-  return {
+  const { description, observe, verifyPayerControl, deliver, claim } = adapter;
+  const captured = {
     description,
-    observe: adapter.observe.bind(adapter),
+    observe,
+    ...(verifyPayerControl === undefined ? {} : { verifyPayerControl }),
+    ...(deliver === undefined ? {} : { deliver }),
+    ...(claim === undefined ? {} : { claim }),
+  } as RailAdapter;
+  // Also proves each captured member is callable, so the binds below cannot raise a
+  // TypeError where this package promises a GateConfigurationError.
+  const validated = assertConformingRailAdapter(captured);
+  return {
+    description: validated,
+    observe: observe.bind(adapter),
     ...(verifyPayerControl === undefined
       ? {}
       : { verifyPayerControl: verifyPayerControl.bind(adapter) }),
