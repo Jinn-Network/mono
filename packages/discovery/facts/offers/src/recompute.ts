@@ -18,12 +18,12 @@ import { OFFER_RECORD_KIND } from "./identifiers.js";
  * checkable at all. A card attached to re-serialized bytes recomputes to nothing and reads
  * as inconsistent.
  *
- * Every field is native — read out of this record's own bytes, with no referenced-record
- * fetch. `subject` is declared *reference-bearing* in the profile so discovery's `referrers`
- * relation inverts it, which is the query the whole profile exists for ("which offers price
- * `sha256:X`"). It is not thereby a retrievable record: an offer prices any digest-addressed
- * content, an OCI blob included, so there are no referenced bytes to fetch and re-hash. Same
- * posture as `facts/environments` and its `image.manifestDigest`.
+ * Every field is native — read out of this record's own bytes, with no retrieval of any
+ * referenced record. `subject` is declared *reference-bearing* in the profile so discovery's
+ * `referrers` relation inverts it, which is the query the whole profile exists for ("which
+ * offers price `sha256:X`"). It is not thereby a retrievable record: an offer prices any
+ * digest-addressed content, an OCI blob included, so there are no referenced bytes to
+ * retrieve and re-hash. Same posture as `facts/environments` and its `image.manifestDigest`.
  *
  * `rails.rail` and `rails.amount` are two positionally aligned arrays rather than one array
  * of objects because a record fact is a scalar or an ordered array of scalars; an array of

@@ -2,10 +2,10 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalPolicy": 2,
-    "implementationsV1": 60,
-    "inventory": 97,
+    "implementationsV1": 61,
+    "inventory": 98,
     "otherPackagesRootEntries": 15,
-    "packagesRootEntries": 91,
+    "packagesRootEntries": 92,
     "sealedPlatformV1": 14
   },
   "graph": {
@@ -1211,6 +1211,16 @@
         "to": "@jinn-network/record-discovery-protocol"
       },
       {
+        "from": "@jinn-network/record-discovery-facts-offers",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-offer"
+      },
+      {
+        "from": "@jinn-network/record-discovery-facts-offers",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-protocol"
+      },
+      {
         "from": "@jinn-network/record-discovery-facts-task-execution",
         "kind": "runtime",
         "to": "@jinn-network/record-discovery-protocol"
@@ -1624,6 +1634,7 @@
       "@jinn-network/record-discovery-facts-chain-environments",
       "@jinn-network/record-discovery-facts-environments",
       "@jinn-network/record-discovery-facts-evidence",
+      "@jinn-network/record-discovery-facts-offers",
       "@jinn-network/record-discovery-facts-task-execution",
       "@jinn-network/record-discovery-facts-trust",
       "@jinn-network/record-discovery-protocol",
@@ -1792,6 +1803,7 @@
             "@jinn-network/evidence-discovery",
             "@jinn-network/evidence-repository"
           ],
+          "@jinn-network/record-discovery-facts-offers": [],
           "@jinn-network/record-discovery-facts-task-execution": [],
           "@jinn-network/record-discovery-facts-trust": [],
           "@jinn-network/record-discovery-serve": [],
@@ -1896,6 +1908,7 @@
             "@jinn-network/record-discovery-client",
             "@jinn-network/record-discovery-facts-benchmarking",
             "@jinn-network/record-discovery-facts-environments",
+            "@jinn-network/record-discovery-facts-offers",
             "@jinn-network/record-discovery-facts-task-execution",
             "@jinn-network/record-discovery-facts-trust",
             "@jinn-network/record-discovery-serve",
@@ -3221,6 +3234,45 @@
         "record-discovery-ci"
       ],
       "role": "evidence facts projection",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "@jinn-network/evidence-offer",
+          "@jinn-network/record-discovery-protocol"
+        ]
+      },
+      "domain": "evidence",
+      "name": "@jinn-network/record-discovery-facts-offers",
+      "ownerGroup": "architecture-control",
+      "path": "packages/discovery/facts/offers",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [
+          "profiles"
+        ],
+        "schemas": []
+      },
+      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "implementations-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "role": "offer facts projection",
       "stability": "candidate",
       "supersedes": [],
       "tier": 3,
@@ -7771,6 +7823,19 @@
         "packedTargets": [],
         "path": "packages/discovery/facts/evidence/profiles/result-evaluation.v3.json",
         "relativeSource": "profiles/result-evaluation.v3.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
+          "identifier": "https://spec.jinn.network/facts/offer/v1",
+          "servedPath": "facts/offer/v1"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-offers",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/offers/profiles/offer.v1.json",
+        "relativeSource": "profiles/offer.v1.json"
       },
       {
         "claim": {
@@ -15769,6 +15834,17 @@
       {
         "conformance": [],
         "fixtures": [],
+        "name": "@jinn-network/record-discovery-facts-offers",
+        "path": "packages/discovery/facts/offers",
+        "profiles": [
+          "profiles"
+        ],
+        "releaseGroup": "implementations-v1",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [],
         "name": "@jinn-network/record-discovery-facts-task-execution",
         "path": "packages/discovery/facts/task-execution",
         "profiles": [
@@ -16786,6 +16862,13 @@
       },
       {
         "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/offer/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-offers",
+        "path": "packages/discovery/facts/offers/profiles/offer.v1.json"
+      },
+      {
+        "field": "profile",
         "identifier": "https://spec.jinn.network/facts/plugin/v1",
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-task-execution",
@@ -17105,6 +17188,7 @@
             "@jinn-network/record-discovery-facts-chain-environments",
             "@jinn-network/record-discovery-facts-environments",
             "@jinn-network/record-discovery-facts-evidence",
+            "@jinn-network/record-discovery-facts-offers",
             "@jinn-network/record-discovery-facts-task-execution",
             "@jinn-network/record-discovery-facts-trust",
             "@jinn-network/record-discovery-serve",
@@ -17213,6 +17297,7 @@
         "@jinn-network/record-discovery-facts-chain-environments",
         "@jinn-network/record-discovery-facts-environments",
         "@jinn-network/record-discovery-facts-evidence",
+        "@jinn-network/record-discovery-facts-offers",
         "@jinn-network/record-discovery-facts-task-execution",
         "@jinn-network/record-discovery-facts-trust",
         "@jinn-network/record-discovery-protocol",
@@ -17755,6 +17840,17 @@
           ],
           "environment": "npm-publish",
           "organization": "Jinn-Network",
+          "package": "@jinn-network/record-discovery-facts-offers",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
           "package": "@jinn-network/record-discovery-facts-task-execution",
           "provider": "GitHub Actions",
           "repository": "mono",
@@ -18164,7 +18260,7 @@
         "sealed-platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 60,
+      "expectedPackageCount": 61,
       "packages": [
         "@jinn-network/attestation-issuer",
         "@jinn-network/benchmarking-aggregate",
@@ -18204,6 +18300,7 @@
         "@jinn-network/record-discovery-facts-chain-environments",
         "@jinn-network/record-discovery-facts-environments",
         "@jinn-network/record-discovery-facts-evidence",
+        "@jinn-network/record-discovery-facts-offers",
         "@jinn-network/record-discovery-facts-task-execution",
         "@jinn-network/record-discovery-facts-trust",
         "@jinn-network/record-discovery-serve",
