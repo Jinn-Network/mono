@@ -21,9 +21,11 @@
  *
  * Absence stays legal, and it reads as absence rather than as a default: {@link readTaskSelectionMode}
  * returns `undefined`, never a mode. A reader that can afford new bytes should say so out loud,
- * since silence is exactly how selection provenance used to hide — but the published report face
- * cannot: it is byte-compared against a deterministic builder, so a sentence rendered for the
- * undeclared case would refuse every bundle published before this extension existed.
+ * since silence is exactly how selection provenance used to hide — but Colophon's published report
+ * face cannot yet say anything at all here, declared or not. Its assets are byte-compared against a
+ * deterministic builder by the verifier release the bundle itself pins, and that release predates
+ * this extension, so any sentence keyed on it would make the bundle refuse itself. Rendering is
+ * held for issue #3416; the declaration is enforced meanwhile under `claim-consistency`.
  */
 
 import { z } from "zod";

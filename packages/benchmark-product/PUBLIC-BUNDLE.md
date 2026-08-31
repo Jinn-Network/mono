@@ -450,12 +450,23 @@ only the far side of the comparison is sound: a `notBefore` at or after `closeAt
 is provably after the lock, while one before it settles nothing. A schedule that
 opens mid-run is therefore not refused under either mode.
 
-A declared mode renders as one sentence at the report's headline-result weight,
-in `index.html`, `README.md`, and `share.txt`. The declaration is not a
-claim-package field: `claim-package.json` pins its own key set byte-for-byte, and
-the presentation is projected from the verified Run instead. A Run that declares
-nothing renders nothing, which is what keeps every bundle published before this
-field existed byte-identical and still verifying.
+**Nothing about the declaration reaches the published face.** `index.html`,
+`README.md`, `share.txt`, `badge.svg`, and `social-card.svg` carry no projection
+of it: the asset builder is never given the mode, so a declaring bundle's five
+assets are exactly what a reader that has never heard of `task-selection/v1`
+rebuilds from the same records. (Its Run *digest* still differs, as it would for
+any other Run field, and every reader derives that digest from the bundle's own
+Run.) This is a compatibility requirement rather than an editorial choice. The classic and anchored allocations
+pin `npx @colophon-claims/verify@0.1.0`, and that verifier byte-compares every
+presentation asset against its own rebuild; a bundle that rendered the sentence
+would therefore instruct its reader to run a verifier that refuses it. Rendering
+the declaration is held for issue #3416, to land once the reader line the bundle
+pins derives the sentence too. Until then the declaration is readable where it is
+sealed — in the Run record — and enforced where it is checked, under
+`claim-consistency`.
+
+The declaration is also not a claim-package field, and will not become one:
+`claim-package.json` pins its own key set byte-for-byte.
 
 ## Presentation and citation
 

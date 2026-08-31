@@ -78,7 +78,7 @@ import {
   inspectLogVerifierMethod,
 } from "./profile/inspect-assurance.js";
 import { assertClaimConsistency } from "./profile/claim-consistency.js";
-import { assertTaskSelectionConsistency, declaredTaskSelectionMode } from "./profile/task-selection.js";
+import { assertTaskSelectionConsistency } from "./profile/task-selection.js";
 import { buildPublicAssets } from "./assets.js";
 import { derivePublicComparison, type PublicComparisonView } from "./comparison.js";
 import {
@@ -1733,7 +1733,6 @@ export async function verifyPublicBundleSnapshot(
   // the records? -- and because the claim pins the check list byte-for-byte, so a new named check
   // would be a bundle-format bump rather than an addition.
   assertTaskSelectionConsistency({ benchmarkRecord: benchmark, runRecord: run });
-  const taskSelection = declaredTaskSelectionMode(run);
   assertClaimConsistency({
     claim,
     identities,
@@ -1777,9 +1776,6 @@ export async function verifyPublicBundleSnapshot(
       return match === null ? [] : [match[1]!];
     }),
     dissentCellKeys,
-    // #2980: a reader-supplied projection of the verified Run's sealed declaration. Absent when the
-    // Run declared nothing, which renders exactly the bytes every pre-existing bundle carries.
-    ...(taskSelection === undefined ? {} : { taskSelection }),
   };
   // The closure selects the presentation profile and the bundle must byte-match that one
   // profile completely — assets cannot be mixed, and there is no second profile to fall back

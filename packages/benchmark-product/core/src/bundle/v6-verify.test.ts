@@ -286,12 +286,15 @@ describe("anchored public bundle v6 — portable verification", () => {
  * Task-selection provenance, end to end (issue #2980).
  *
  * The unit tests either side of this file can both be right while the feature is still broken: the
- * producer renders assets and the reader byte-compares its own rebuild of them, so a declaration
- * that reaches only one of the two refuses the whole bundle AFTER the irreversible lock. Only a
- * round trip through `draft update` -> `runLock` -> `materialize` -> `verifyPublicBundle` proves
+ * declaration is sealed at the lock and judged again by a cold reader that only has bytes, so a
+ * rule that reaches only one of the two refuses the whole bundle AFTER the irreversible lock. Only
+ * a round trip through `draft update` -> `runLock` -> `materialize` -> `verifyPublicBundle` proves
  * the two agree. It also proves the stronger modes are reachable at all: every task-set intake in
  * this product re-authors the Benchmark under the workspace key that is also the Run owner, so a
  * verifier rule keyed on that relationship would make them dead letters.
+ *
+ * The face renders nothing for any of it -- that is held for issue #3416 -- and the last test here
+ * is what keeps the hold honest end to end.
  */
 describe("task-selection provenance round trip", () => {
   for (const mode of ["claimant-chosen", "fixed-public-set"] as const) {
@@ -312,17 +315,33 @@ describe("task-selection provenance round trip", () => {
       .rejects.toThrow(/^lock: .*reveals its items immediately/);
   }, 120_000);
 
-  test("the declared sentence reaches the published face", async () => {
+  /**
+   * The reader-compatibility invariant, end to end (issue #3416).
+   *
+   * The render is held, so a declaring bundle must publish a face that a task-selection-unaware
+   * builder reproduces exactly -- which is what the pinned `@colophon-claims/verify@0.1.0` this
+   * bundle's own claim package instructs a reader to run actually does. Two things prove it here:
+   * no asset carries the held sentences, and cold verification passes, and passing IS the
+   * byte-comparison of all five assets against a rebuild.
+   */
+  test("a declaring bundle publishes a face carrying no trace of the declaration", async () => {
     const { bundle } = await declaringFixture("claimant-chosen");
-    const html = readFileSync(join(bundle.bundleDir, "index.html"), "utf8");
-    expect(html).toContain('<p class="neutral">The claimant chose which tasks appear in this report.</p>');
-  }, 120_000);
-
-  test("an undeclared run publishes the same face bytes it always did", async () => {
-    const declared = await declaringFixture("claimant-chosen");
-    const undeclared = await fixture();
-    const face = (dir: string) => readFileSync(join(dir, "index.html"), "utf8");
-    expect(face(undeclared.bundle.bundleDir)).not.toContain("The claimant chose");
-    expect(face(declared.bundle.bundleDir)).not.toBe(face(undeclared.bundle.bundleDir));
+    const held = [
+      "The claimant chose which tasks",
+      "the complete, publicly declared set",
+      "drawn by a fixed rule after the run was locked",
+    ];
+    for (const asset of ["index.html", "README.md", "share.txt", "badge.svg", "social-card.svg"]) {
+      const text = readFileSync(join(bundle.bundleDir, asset), "utf8");
+      for (const sentence of held) {
+        expect(text, `${asset} must not render task-selection provenance`).not.toContain(sentence);
+      }
+    }
+    // The claim package still points a reader at the classic pinned verifier, and that verifier
+    // rebuilds these exact assets. Byte-comparing them is what `verifyPublicBundle` does below.
+    expect(json(bundle.bundleDir, "claim-package.json").verification.command)
+      .toBe("npx @colophon-claims/verify@0.1.0 <bundle-dir>");
+    const verified = await verifyPublicBundle(detach(bundle.bundleDir));
+    expect(verified.checks).toContain("claim-consistency");
   }, 120_000);
 });

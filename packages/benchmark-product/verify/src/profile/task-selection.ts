@@ -76,8 +76,10 @@ function withheldAtLock(benchmark: BenchmarkRecord, closeAt: string): boolean {
 
 /**
  * The declared mode, refusing rather than throwing raw on bytes the Run schema would not have
- * sealed. Exported so the reader's asset builder resolves the mode exactly once, through exactly
- * this refusal posture, instead of re-deriving it with its own error handling.
+ * sealed. Exported so any reader that resolves the mode does so through this refusal posture
+ * rather than re-deriving it with its own error handling. No presentation asset consumes it today
+ * -- the report face renders nothing for task selection until issue #3416 -- so its only callers
+ * are `taskSelectionContradiction` below and its own tests.
  */
 export function declaredTaskSelectionMode(runRecord: RunRecord): TaskSelectionMode | undefined {
   try {
