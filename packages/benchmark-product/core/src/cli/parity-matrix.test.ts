@@ -108,6 +108,8 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
     expect(gui.find((entry) => entry.operation === "publicationAccounting")?.gui).toEqual({ status: "shipped", action: "publication.accounting" });
     expect(gui.filter((entry) => entry.gui.status === "unavailable").map((entry) => entry.operation).sort()).toEqual([
       "admitHumanTruth", "createHumanReviewPackets", "exportDerivedBundle", "importBinaryItemBank", "migrateTerminalBenchLegacyTask",
+      // Both take a locally composed document file, which is why neither has a browser form.
+      "presentationSet", "presentationShow",
       "signHumanReviewResponse",
     ]);
   });

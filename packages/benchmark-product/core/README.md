@@ -46,7 +46,7 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **42 generated operations**, all shipped through the library and CLI
+contains **44 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -81,6 +81,8 @@ with an explicit shipped/deferred GUI disposition:
 | `runLock` | `colophon lock` | Seal the preregistered Run. |
 | `runAnchor` | `colophon anchor` | Obtain, verify, and store third-party time evidence over the sealed Run or Matrix digest. |
 | `runBind` | `colophon bind` | Bind the sealed, not-yet-launched Run to a public beacon value that postdates its seal, sealing the derived execution order. |
+| `presentationSet` | `colophon presentation set` | Seal the reader-facing report presentation this run's bundle carries. |
+| `presentationShow` | `colophon presentation show` | Read the sealed report presentation back out of the store. |
 | `runPreview` | `colophon preview` | Run a disclosed, non-official rehearsal. |
 | `runPublish` | `colophon publish` | Verify and emit one immutable local bundle. |
 | `runQuote` | `colophon quote` | Present size, coverage, cap, and honest estimates. |
