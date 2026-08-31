@@ -7,6 +7,7 @@
     { "name": "subject", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "subject", "scalar": "string" } },
     { "name": "priced", "class": "record", "cloudEvents": { "attribute": "priced", "scalar": "boolean" } },
     { "name": "rails.rail", "class": "record" },
-    { "name": "rails.amount", "class": "record" }
+    { "name": "rails.amount", "class": "record" },
+    { "name": "supersedes", "class": "record", "referenceBearing": true }
   ]
 }

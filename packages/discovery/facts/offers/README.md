@@ -7,12 +7,33 @@ consumer runs to re-derive that card from the record's own sealed bytes, and the
 listing queries an index answers with them.
 
 The card carries the offer's own digest, the `subject` it prices, whether the offer is
-`priced` or free, and — for a priced offer — the rail identifiers with their amounts.
-Nothing else. The offer remains the binding document: anything a buyer commits to is checked
-against the fetched, digest-checked, signature-verified offer, never against a card.
+`priced` or free, and — for a priced offer — the rail identifiers with their amounts. No
+further terms: no gate, no fee, no expiry, no liveness. The offer remains the binding
+document: anything a buyer commits to is checked against the fetched, digest-checked,
+signature-verified offer, never against a card.
 
 `subject` is declared reference-bearing, so discovery's `referrers` relation inverts it:
 "which offers price `sha256:X`" is a first-class query, answered without fetching an offer.
+
+## Join edges
+
+A facts profile must declare its kind's complete outbound-reference set (record-discovery
+design §12, amendment 2026-08-28), and that MUST binds a new profile. An offer seals exactly
+two digests: the `subject` it prices and, when it is a reprice, the `supersedes` predecessor
+it replaces. Both are declared, so an index can invert both — "which offers price `sha256:X`"
+and "which offer replaced `sha256:Y`".
+
+`supersedes` is a lineage edge, not a term, and it does not make a card self-certifying about
+its own liveness. Supersession retires a predecessor only when the successor is live and
+shares the predecessor's subject and holder; that is a fold over a set of offers, never a
+property of one. An offer that supersedes nothing does not announce the field.
+
+The profile's `referenceBearingFields` is pinned in `profiles.test.ts`. That pin is a
+change-detector authored from the same reading of the offer schema as the profile itself, not
+an independent completeness proof; see the design amendment's *What enforces this*.
+
+Every kind's set, across every leaf, is tabulated together in the design amendment's *Audit
+table* (§12).
 
 Announcements confer no validity. A card is a filter-before-fetch hint; every decision-grade
 use requires the fetched, digest-checked record.

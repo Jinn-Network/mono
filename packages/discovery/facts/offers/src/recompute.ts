@@ -25,6 +25,11 @@ import { OFFER_RECORD_KIND } from "./identifiers.js";
  * digest-addressed content, an OCI blob included, so there are no referenced bytes to
  * retrieve and re-hash. Same posture as `facts/environments` and its `image.manifestDigest`.
  *
+ * `supersedes` is optional in the record and is emitted only when the offer carries one. An
+ * absent optional component is simply not announced; a card that announces a value for one
+ * the record does not carry compares against `undefined`, which discovery reads as
+ * `indeterminate` rather than `inconsistent` (design §12, *What enforces this*).
+ *
  * `rails.rail` and `rails.amount` are two positionally aligned arrays rather than one array
  * of objects because a record fact is a scalar or an ordered array of scalars; an array of
  * objects is not a representable fact value. Their order is the record's own — the offer
@@ -42,6 +47,7 @@ export const offerRecompute: RecordFactRecompute = async (bytes) => {
       priced: offer.rails.length > 0,
       "rails.rail": offer.rails.map((rail) => rail.rail),
       "rails.amount": offer.rails.map((rail) => rail.amount),
+      ...(offer.supersedes === undefined ? {} : { supersedes: offer.supersedes }),
     };
     return facts;
   } catch {

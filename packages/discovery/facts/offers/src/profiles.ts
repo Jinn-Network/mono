@@ -19,12 +19,22 @@ function loadProfile(filename: string): FactsProfileDocument {
 
 /**
  * The offer card: the offer's own digest, the subject it prices, whether it is free or
- * priced, and — for a priced offer — the rail identifiers with their amounts. Nothing else.
- * The offer remains the binding document; anything a buyer commits to is checked against the
- * sealed offer, never against a card.
+ * priced, and — for a priced offer — the rail identifiers with their amounts. No further
+ * *terms*: no gate, no fee, no expiry, no liveness. The offer remains the binding document;
+ * anything a buyer commits to is checked against the sealed offer, never against a card.
  *
  * `subject` is reference-bearing, which is the whole point of the profile: inverting it
  * through discovery's `referrers` relation answers "which offers price `sha256:X`" without
  * fetching an offer.
+ *
+ * `supersedes` is the kind's only other outbound reference, and the completeness rule
+ * (design §12, amendment 2026-08-28) is a MUST on a new profile: a card must declare its
+ * kind's whole outbound set, so an index can invert every edge the record pins. It carries
+ * no term — repricing is supersession, and this is the lineage edge, not a price — and it is
+ * what lets an index resolve "which offer replaced this one" from cards. It never makes a
+ * card self-certifying about its own liveness: supersession retires a predecessor only when
+ * the successor is live and shares its subject and holder, which is a fold over a set of
+ * offers, never a property of one. An offer that supersedes nothing simply does not announce
+ * the field.
  */
 export const offerFactsProfile: FactsProfileDocument = loadProfile("offer.v1.json");

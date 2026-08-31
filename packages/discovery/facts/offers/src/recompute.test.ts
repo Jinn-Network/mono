@@ -78,6 +78,18 @@ describe("offer record-fact recompute", () => {
     });
   });
 
+  it("announces the supersession edge only when the offer carries one", async () => {
+    const predecessor = await sealOffer({ offer: priced, signer });
+    const superseding = await sealOffer({
+      offer: { ...priced, supersedes: predecessor.digest },
+      signer,
+    });
+    expect(await offerRecompute(predecessor.envelopeBytes, noReferencedBytes))
+      .not.toHaveProperty("supersedes");
+    expect(await offerRecompute(superseding.envelopeBytes, noReferencedBytes))
+      .toMatchObject({ supersedes: predecessor.digest });
+  });
+
   it("recomputes nothing from a bare canonical payload — an offer's identity is its envelope", async () => {
     expect(await offerRecompute(sealOfferPayload(priced), noReferencedBytes)).toEqual({});
   });

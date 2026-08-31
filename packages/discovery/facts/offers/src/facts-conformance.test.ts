@@ -93,13 +93,18 @@ async function verify(
 
 async function truthfulCard(offer: unknown = document): Promise<Record<string, unknown>> {
   const sealed = await sealOffer({ offer, signer });
-  const rails = (offer as { rails: readonly { rail: string; amount: string }[] }).rails;
+  const terms = offer as {
+    subject: string;
+    rails: readonly { rail: string; amount: string }[];
+    supersedes?: string;
+  };
   return {
     offerRecordDigest: recordDigest(sealed.envelopeBytes),
-    subject: (offer as { subject: string }).subject,
-    priced: rails.length > 0,
-    "rails.rail": rails.map((rail) => rail.rail),
-    "rails.amount": rails.map((rail) => rail.amount),
+    subject: terms.subject,
+    priced: terms.rails.length > 0,
+    "rails.rail": terms.rails.map((rail) => rail.rail),
+    "rails.amount": terms.rails.map((rail) => rail.amount),
+    ...(terms.supersedes === undefined ? {} : { supersedes: terms.supersedes }),
   };
 }
 
@@ -163,6 +168,24 @@ describe("facts/offers leaf conformance via verifyItem", () => {
       await verify(
         { ...(await truthfulCard(gratis)), priced: true, "rails.rail": [USDC], "rails.amount": ["1"] },
         gratis,
+      ),
+    ).toEqual({ status: "verified", facts: "inconsistent" });
+  });
+
+  it("consistent: a truthful supersession edge matches the sealed predecessor digest", async () => {
+    const predecessor = await sealOffer({ offer: document, signer });
+    const superseding = { ...document, supersedes: predecessor.digest };
+    expect(await verify(await truthfulCard(superseding), superseding))
+      .toEqual({ status: "verified", facts: "consistent" });
+  });
+
+  it("inconsistent: a card naming a predecessor the offer never superseded", async () => {
+    const predecessor = await sealOffer({ offer: document, signer });
+    const superseding = { ...document, supersedes: predecessor.digest };
+    expect(
+      await verify(
+        { ...(await truthfulCard(superseding)), supersedes: `sha256:${"d".repeat(64)}` },
+        superseding,
       ),
     ).toEqual({ status: "verified", facts: "inconsistent" });
   });

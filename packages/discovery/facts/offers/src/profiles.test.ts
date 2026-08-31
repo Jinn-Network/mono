@@ -15,19 +15,20 @@ describe("offer facts profile (design §12)", () => {
     expect(offerFactsProfile.profile).toBe("https://spec.jinn.network/facts/offer/v1");
   });
 
-  it("names exactly the card the design allows and nothing else", () => {
+  it("names the terms the design allows, plus the kind's remaining outbound edge", () => {
     expect(offerFactsProfile.fields.map((field) => field.name)).toEqual([
       "offerRecordDigest",
       "subject",
       "priced",
       "rails.rail",
       "rails.amount",
+      "supersedes",
     ]);
   });
 
-  it("carries no gate, no supersedes, and no liveness field", () => {
+  it("carries no gate, no fee, no expiry, and no liveness field", () => {
     const names = new Set(offerFactsProfile.fields.map((field) => field.name));
-    for (const absent of ["gate.uri", "supersedes", "live", "withdrawn", "expiresAt"]) {
+    for (const absent of ["gate.uri", "fee", "cut", "live", "withdrawn", "expiresAt", "status"]) {
       expect(names.has(absent), `${absent} must not be a card field`).toBe(false);
     }
   });
@@ -36,8 +37,11 @@ describe("offer facts profile (design §12)", () => {
     for (const field of offerFactsProfile.fields) expect(field.class).toBe("record");
   });
 
-  it("declares subject reference-bearing so referrers inverts it into 'offers for X'", () => {
-    expect(referenceBearingFields(offerFactsProfile)).toEqual(["subject"]);
+  // The completeness rule (design §12, amendment 2026-08-28) is a MUST on a new profile: this
+  // pin is the whole outbound set an offer seals. It is a change-detector authored from the
+  // same reading of the schema as the profile, not an independent completeness proof.
+  it("declares every digest the offer pins: the subject it prices and the offer it replaces", () => {
+    expect(referenceBearingFields(offerFactsProfile)).toEqual(["subject", "supersedes"]);
   });
 
   it("lifts only the scalar filters into CloudEvents attributes, never the rail arrays", () => {
