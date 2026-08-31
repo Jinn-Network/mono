@@ -259,6 +259,47 @@ describe("createRetrievalGate — construction", () => {
     expect(claimed).toBe(0);
   });
 
+  test("every member of the adapter and of its description is read exactly once", async () => {
+    // The durable form of the read-count guard, and the shape-agnostic one: a getter can
+    // only be watched where someone thought to put one, and the double-read this replaces
+    // was one level down, on `description.assuredBy`. Counting through a Proxy pins all of
+    // them at once and needs no foresight about which member the next mistake will be on.
+    const rail = createTestRailAdapter({
+      rail: RAIL,
+      settlement: "explicit-claim",
+      trustModel: "assured-by-code",
+      assuredBy: "0xEscrow",
+      payments: [{ reference: "tx-1", offerDigest: ABSENT, to: TO, amount: "1200" }],
+    });
+    const reads: Record<string, number> = {};
+    const count = <T extends object>(target: T, prefix: string): T =>
+      new Proxy(target, {
+        get(held, key, receiver) {
+          if (typeof key === "string") reads[`${prefix}${key}`] = (reads[`${prefix}${key}`] ?? 0) + 1;
+          return Reflect.get(held, key, receiver);
+        },
+      });
+    const watched: RailAdapter = count(
+      { ...rail, description: count({ ...rail.description }, "description.") },
+      "",
+    );
+
+    createRetrievalGate({ offers, subjects, rails: [watched], clock: fixedClock });
+
+    expect(reads).toEqual({
+      description: 1,
+      observe: 1,
+      deliver: 1,
+      claim: 1,
+      verifyPayerControl: 1,
+      "description.rail": 1,
+      "description.trustModel": 1,
+      "description.assuredBy": 1,
+      "description.settlement": 1,
+      "description.paymentsArePubliclyVisible": 1,
+    });
+  });
+
   test.each([
     ["an observe that is not a function", { observe: undefined }],
     ["a claim that is null rather than absent", { claim: null }],

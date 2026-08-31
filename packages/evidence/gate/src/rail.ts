@@ -242,18 +242,23 @@ function fail(message: string): never {
  * the first onlooker to quote the transaction hash. One that declares `on-delivery` and also
  * implements `claim` charges twice. Loud at construction is the only place these are cheap.
  *
- * The description is read exactly once and returned as a frozen copy, and a gate must use
- * that copy rather than reading the adapter again. `description` is an ordinary property of
+ * The description and each of its members are read exactly once and returned as a frozen
+ * copy, and a gate must use that copy rather than reading the adapter again. `description` is an ordinary property of
  * third-party code and may be a getter: one that answers `paymentsArePubliclyVisible: true`
  * here and `false` afterwards would pass every check below and then be served to onlookers
  * with no challenge and no proof.
  */
 export function assertConformingRailAdapter(adapter: RailAdapter): RailSelfDescription {
+  // Each member is read into a local before it is used, for the same reason the description
+  // itself is: they belong to third-party data and a getter can answer differently twice. An
+  // `assuredBy` answering a party name to a presence test and `undefined` to the read would
+  // otherwise put an `assuredBy` key on an `unassured` rail, past the rule that forbids one.
   const declared = adapter.description;
+  const assuredBy = declared.assuredBy;
   const description: RailSelfDescription = Object.freeze({
     rail: declared.rail,
     trustModel: declared.trustModel,
-    ...(declared.assuredBy === undefined ? {} : { assuredBy: declared.assuredBy }),
+    ...(assuredBy === undefined ? {} : { assuredBy }),
     settlement: declared.settlement,
     paymentsArePubliclyVisible: declared.paymentsArePubliclyVisible,
   });
@@ -272,12 +277,12 @@ export function assertConformingRailAdapter(adapter: RailAdapter): RailSelfDescr
     fail(`rail adapter "${rail}" declares unknown settlement "${description.settlement}"`);
   }
 
-  const assuredBy = description.assuredBy?.trim() ?? "";
+  const namedParty = description.assuredBy?.trim() ?? "";
   if (description.trustModel === "unassured") {
     if (description.assuredBy !== undefined) {
       fail(`rail adapter "${rail}" is unassured and must not name an assuring party`);
     }
-  } else if (assuredBy === "") {
+  } else if (namedParty === "") {
     fail(
       `rail adapter "${rail}" claims trust model "${description.trustModel}" and must name `
         + "the party carrying that assurance",

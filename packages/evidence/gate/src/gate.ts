@@ -174,13 +174,15 @@ interface InstalledRail {
  */
 function installRail(adapter: RailAdapter): InstalledRail {
   const { description, observe, verifyPayerControl, deliver, claim } = adapter;
-  const captured = {
+  // Annotated, not asserted: an assertion would stay legal if `RailAdapter` grew a required
+  // member, and the capture would silently drop it.
+  const captured: RailAdapter = {
     description,
     observe,
     ...(verifyPayerControl === undefined ? {} : { verifyPayerControl }),
     ...(deliver === undefined ? {} : { deliver }),
     ...(claim === undefined ? {} : { claim }),
-  } as RailAdapter;
+  };
   // Also proves each captured member is callable, so the binds below cannot raise a
   // TypeError where this package promises a GateConfigurationError.
   const validated = assertConformingRailAdapter(captured);
