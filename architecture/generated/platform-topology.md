@@ -105,7 +105,7 @@ The catalog contains **97** entries: **14** `sealed-platform-v1` packages, **60*
 | @jinn-network/trust-observation | packages/trust/observation | trust | 3 | platform | Class O/A receipt container profile and writeObservation() | candidate | implementations-v1 | canary-and-stable | zod | — | — |
 | @jinn-network/trust-resolve | packages/trust/resolve | trust | 3 | platform | trust resolution binding | candidate | implementations-v1 | canary-and-stable | @jinn-network/trust-core<br>viem | — | — |
 | @jinn-network/trust-testing | packages/trust/testing | trust | — | platform-support | trust conformance kit | candidate | implementations-v1 | canary-and-stable | @jinn-network/trust-core<br>@jinn-network/trust-resolve<br>@noble/curves<br>@noble/hashes | — | vitest |
-| @jinn-network/plugin-runtime | plugin/runtime | plugin-product | — | product-support | unpublished plugin product support runtime | candidate | transitional-or-private | never | @jinn-network/evidence-catalog-sqlite<br>@jinn-network/evidence-derivation<br>@jinn-network/evidence-discovery<br>@jinn-network/evidence-local-runtime<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/evidence-retrieval<br>@jinn-network/evidence-trace<br>@jinn-network/evidence-trace-decode<br>@jinn-network/execution-recorder<br>@jinn-network/record-discovery-client<br>@jinn-network/record-discovery-protocol<br>@jinn-network/trust-core<br>@modelcontextprotocol/sdk<br>better-sqlite3<br>zod | — | — |
+| @jinn-network/plugin-runtime | plugin/runtime | plugin-product | — | product-support | unpublished plugin product support runtime | candidate | transitional-or-private | never | @jinn-network/evidence-catalog-sqlite<br>@jinn-network/evidence-derivation<br>@jinn-network/evidence-discovery<br>@jinn-network/evidence-local-runtime<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/evidence-retrieval<br>@jinn-network/evidence-trace<br>@jinn-network/evidence-trace-decode<br>@jinn-network/execution-recorder<br>@jinn-network/record-discovery-client<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-transport-http<br>@jinn-network/trust-core<br>@modelcontextprotocol/sdk<br>better-sqlite3<br>zod | — | — |
 | @jinn-network/chain-only-gate-harness | scripts/chain-only-gate | repository-operations | — | repository-tooling | live chain-environment end-to-end gate harness | experimental | transitional-or-private | never | — | — | — |
 
 ## Runtime dependency topology
@@ -319,6 +319,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/plugin-runtime | runtime | @jinn-network/execution-recorder |
 | @jinn-network/plugin-runtime | runtime | @jinn-network/record-discovery-client |
 | @jinn-network/plugin-runtime | runtime | @jinn-network/record-discovery-protocol |
+| @jinn-network/plugin-runtime | runtime | @jinn-network/record-discovery-transport-http |
 | @jinn-network/plugin-runtime | runtime | @jinn-network/trust-core |
 | @jinn-network/policy-optimization | runtime | @jinn-network/attestation-issuer |
 | @jinn-network/policy-optimization | runtime | @jinn-network/benchmarking-aggregate |

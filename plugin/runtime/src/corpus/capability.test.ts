@@ -23,6 +23,7 @@ const source = () => ({
   servingRoot: "https://archive.test",
   archiveRootUrl: "https://archive.test/sources/attempts/entries/0000000000000001",
   repositoryId: "archive.test/attempts",
+  signingKeys: [],
 });
 
 const transport = {
@@ -216,6 +217,35 @@ describe("corpus capability", () => {
       (check) => b.find((other) => other.name === check.name)!.ok !== check.ok,
     );
     expect(differing.length).toBeGreaterThan(0);
+  });
+
+  test("an absent trust policy with no archives followed is GREEN with no remedy", async () => {
+    // Empty by configuration, the same state `corpus-mirror` already treats as
+    // green. No in-repo entry point passes a config `file`, so this IS the
+    // default install; reporting it red made every default `serve` process
+    // report `ok: false` behind a remedy naming two keys nothing reads.
+    const { capability: built, context: built_context } = capability();
+    await built.start!(built_context);
+
+    const trust = (await built.healthChecks!()).find(
+      (check) => check.name === "corpus-trust-policy",
+    )!;
+    expect(trust.ok).toBe(true);
+    expect(trust.remedy).toBeNull();
+    expect(trust.detail).toContain("no producer to admit");
+  });
+
+  test("an absent trust policy WHILE following archives stays red with its remedy", async () => {
+    const { capability: built, context: built_context } = capability({
+      corpus: { sources: [source()] },
+    });
+    await built.start!(built_context);
+
+    const trust = (await built.healthChecks!()).find(
+      (check) => check.name === "corpus-trust-policy",
+    )!;
+    expect(trust.ok).toBe(false);
+    expect(trust.remedy).toContain("corpus.trust.genesisDigest");
   });
 
   test("reports the trust policy as not fixable from this machine when unresolvable", async () => {
