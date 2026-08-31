@@ -1,7 +1,7 @@
 {
   "name": "@colophon-claims/core",
   "version": "0.1.0",
-  "description": "Core of the standalone benchmark product (internal codename benchmark-product): the Tier 4 product domain \u2014 workspace, draft model, lifecycle, audit journal, principals/authority, the operations-library facade, and the CLI agent surface.",
+  "description": "Core of the standalone benchmark product (internal codename benchmark-product): the Tier 4 product domain — workspace, draft model, lifecycle, audit journal, principals/authority, the operations-library facade, and the CLI agent surface.",
   "publishConfig": {
     "access": "public"
   },
