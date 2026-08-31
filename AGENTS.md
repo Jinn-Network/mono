@@ -17,9 +17,9 @@ Skill bodies use Claude Code tool names. Map them with the existing superpowers 
 
 | Kind | Skill | Path Codex should load |
 |------|-------|------------------------|
-| Bash + `gh` | `eng-day` | [`.agents/skills/eng-day/SKILL.md`](.agents/skills/eng-day/SKILL.md) |
-| Orchestration | `implement-issue` | [`.agents/skills/implement-issue/SKILL.md`](.agents/skills/implement-issue/SKILL.md) |
+| Bash + `gh` | `merge-batch` | [`.agents/skills/merge-batch/SKILL.md`](.agents/skills/merge-batch/SKILL.md) |
+| Orchestration | `release-readiness` | [`.agents/skills/release-readiness/SKILL.md`](.agents/skills/release-readiness/SKILL.md) |
 
-`eng-day` is Bash + `gh` and needs no tool-name translation. `implement-issue` is an orchestration skill: map `Task` / `Skill` / `TodoWrite` through `codex-tools.md` (`spawn_agent`, native skill load, `update_plan`).
+`merge-batch` is Bash + `gh` and needs no tool-name translation. `release-readiness` is an orchestration skill: map `Task` / `Skill` / `TodoWrite` through `codex-tools.md` (`spawn_agent`, native skill load, `update_plan`).
 
 Repo conventions beyond skills live in [`CLAUDE.md`](CLAUDE.md) and [`docs/engineering/handbook.md`](docs/engineering/handbook.md).

@@ -33,7 +33,7 @@ Local install of those references: `./scripts/install-superpowers-codex-global.s
 
 | Kind | Skill | Codex path |
 |------|-------|------------|
-| Bash + `gh` | `eng-day` | `.agents/skills/eng-day/SKILL.md` |
-| Orchestration | `implement-issue` | `.agents/skills/implement-issue/SKILL.md` |
+| Bash + `gh` | `merge-batch` | `.agents/skills/merge-batch/SKILL.md` |
+| Orchestration | `release-readiness` | `.agents/skills/release-readiness/SKILL.md` |
 
-`eng-day` is portable as written (Bash + `gh`). `implement-issue` uses Claude tool names (`Task`, `Skill`, `TodoWrite`); Codex maps those via `codex-tools.md` (`spawn_agent`, native skill load, `update_plan`).
+`merge-batch` is portable as written (Bash + `gh`). `release-readiness` uses Claude tool names (`Task`, `Skill`, `TodoWrite`); Codex maps those via `codex-tools.md` (`spawn_agent`, native skill load, `update_plan`).
