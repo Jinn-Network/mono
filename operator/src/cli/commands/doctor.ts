@@ -362,6 +362,7 @@ configuration:
   - writable_volume             state directory is writable (write+fsync+unlink probe)
   - state_on_volume             state resolves under JINN_STATE_DIR in a deployment context
   - credentials_resolvable      agent-CLI credentials resolvable (presence-only; no secret echo)
+  - credentials_valid           required-runtime credential validity (Claude / Hermes / Codex)
   - agent_cli_non_root          daemon not running as root (uid 0)
   - portfolio_impl_state_dir    HL impl state directory present and readable
   - hl_api_wallet               HL API wallet generated and approved by operator
@@ -418,6 +419,12 @@ Examples:
           stateDir: config.stateDir,
           earningDir: config.earningDir,
           runtimeMode: config.runtimeMode,
+          executionWiring: config.executionWiring,
+          claudePath: config.claudePath,
+          ...(config.hermesPath !== undefined ? { hermesPath: config.hermesPath } : {}),
+          ...(config.hermesProvider !== undefined ? { hermesProvider: config.hermesProvider } : {}),
+          ...(config.hermesBaseUrl !== undefined ? { hermesBaseUrl: config.hermesBaseUrl } : {}),
+          ...(config.codexPath !== undefined ? { codexPath: config.codexPath } : {}),
         },
         {
           env: ctx.env,
