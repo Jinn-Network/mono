@@ -410,6 +410,9 @@ export async function buildFleetNativeRuntime(
 
   const records = createBaseSepoliaRecordTransport({
     ipfsApiUrl,
+    // The record origins this operator configured (#3431): its own serving plane plus every
+    // configured record source. A peer-announced locator outside them is refused before the fetch.
+    recordOrigins: [publicBaseUrl, ...(config.recordSources ?? []).map(({ baseUrl }) => baseUrl)],
     fetchImpl: input.fetchImpl ?? globalThis.fetch,
   });
   // One `createViemBaseSepoliaReadClients` call supplies both trust-catalog chain reads: the
