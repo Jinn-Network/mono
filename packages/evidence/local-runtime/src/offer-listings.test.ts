@@ -34,6 +34,7 @@ import {
   OFFER_RECORD_KIND,
   listOffersForSubject,
   offerRecompute,
+  type WithdrawnAnnouncement,
 } from "@jinn-network/record-discovery-facts-offers";
 import type {
   DurableSourceSigner,
@@ -169,20 +170,20 @@ async function announceCatalog(
 
 interface ReadFeed {
   readonly items: AnnouncedItem[];
-  readonly withdrawnRecordDigests: Set<string>;
+  readonly withdrawn: WithdrawnAnnouncement[];
 }
 
 /**
  * What an index does: walk the source's published archive pages and fold them into announced
- * items, plus the set of record digests the chain has withdrawn. Withdrawals name an
- * announcement, so the digest they retract is resolved through the available announcement
- * that minted it -- never through a card's own claim about itself.
+ * items, plus the withdrawals the chains have published. A withdrawal names an announcement,
+ * not a record digest, and it is scoped to the chain that published it -- so it is folded as
+ * the `(source, retracts)` pair the entry carries, never through a card's own claim about
+ * itself and never across sources.
  */
 async function readPublishedFeed(blobs: RecordingBlobs): Promise<ReadFeed> {
   const pages = [...blobs.values.keys()].filter((path) => path.startsWith(ENTRIES_PREFIX)).sort();
   const items: AnnouncedItem[] = [];
-  const digestByAnnouncementId = new Map<string, string>();
-  const retracted: string[] = [];
+  const withdrawn: WithdrawnAnnouncement[] = [];
   for (const path of pages) {
     const blob = await blobs.get(path);
     const page = JSON.parse(new TextDecoder().decode(blob!.bytes)) as {
@@ -192,10 +193,9 @@ async function readPublishedFeed(blobs: RecordingBlobs): Promise<ReadFeed> {
       const entryDigest = recordDigest(sealJson(entry).bytes);
       for (const announcement of entry.announcements) {
         if (announcement.action === "withdrawn") {
-          retracted.push(announcement.retracts);
+          withdrawn.push({ source: entry.source, announcementId: announcement.retracts });
           continue;
         }
-        digestByAnnouncementId.set(announcement.announcementId, announcement.record.digest);
         items.push({
           record: announcement.record,
           ...(announcement.facts === undefined ? {} : { facts: announcement.facts }),
@@ -208,13 +208,7 @@ async function readPublishedFeed(blobs: RecordingBlobs): Promise<ReadFeed> {
       }
     }
   }
-  const withdrawnRecordDigests = new Set(
-    retracted.flatMap((id) => {
-      const digest = digestByAnnouncementId.get(id);
-      return digest === undefined ? [] : [digest];
-    }),
-  );
-  return { items, withdrawnRecordDigests };
+  return { items, withdrawn };
 }
 
 describe("a card-only offer catalog over the local runtime's published chain", () => {
@@ -271,13 +265,13 @@ describe("a card-only offer catalog over the local runtime's published chain", (
     const publishedReads = blobs.reads.length;
 
     const feed = await readPublishedFeed(blobs);
-    expect(feed.withdrawnRecordDigests).toEqual(new Set([digests.get("priced")]));
+    expect(feed.withdrawn).toEqual([{ source: SOURCE, announcementId: "offer-priced" }]);
 
     const readsBefore = blobs.reads.length;
     const catalog = listOffersForSubject(feed.items, {
       subject: SUBJECT,
       rail: USDC,
-      withdrawnOfferDigests: feed.withdrawnRecordDigests,
+      withdrawnAnnouncements: feed.withdrawn,
     });
 
     // Free sorts ahead of every priced offer; the withdrawn USDC 1500000 offer is gone; the
