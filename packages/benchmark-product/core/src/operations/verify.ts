@@ -97,7 +97,11 @@ export type RunVerifyCheck =
   /** Only for a run on the anchored closure — one that carries an anchor, or whose sealed Run
    * declared anchoring intent (anchor-evidence design §8). The same shared implementation the
    * portable reader runs, over this workspace's own sealed anchor bytes. */
-  | "integrity-anchors";
+  | "integrity-anchors"
+  /** Only for a run that carries a sealed disclosure declaration (issue #2839). The section is
+   * re-derived from the record's own bytes by the shared projection and byte-compared inside
+   * `claim-consistency`; this name records that the run had one to compare. */
+  | "disclosure-specification";
 
 /** One additional sealed Report this invocation also independently verified (packet P5, spec §8.3
  * option 5) — one per `runState.additionalReports` entry. It passed the SAME report-verification +
@@ -441,6 +445,7 @@ export async function verifyRunWorkspace(
       checks.push("report-verification");
       checks.push("claim-consistency");
       if (sharedContext!.carriage.anchoredClosure) checks.push("integrity-anchors");
+      if (sharedContext!.disclosureCarriage !== undefined) checks.push("disclosure-specification");
 
       return {
         draftId: input.draftId,
