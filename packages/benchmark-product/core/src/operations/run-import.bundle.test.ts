@@ -43,6 +43,7 @@ import { initWorkspace } from "./init.js";
 import { runCollect } from "./run-collect.js";
 import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
+import { publicationReport } from "./publication-report.js";
 import { runPublish } from "./publish.js";
 import { runReport } from "./report.js";
 import { sampleInit } from "./sample.js";
@@ -319,5 +320,28 @@ describe("run.import — publication of an imported run is refused (#3417)", () 
     expect(published.error.code).toBe("conflict");
     expect(published.error.detail).toMatch(/#3417/u);
     expect(existsSync(publicBundlesDir(workspaceDir, draftId))).toBe(false);
+  }, 180_000);
+
+  test("managed signed-Report publication refuses on the import, not on staging state", async () => {
+    const clock = makeClock();
+    const draftId = "draft-1";
+    await reportedImportedRun(clock, draftId);
+
+    // `publication report` seals the identical `LOCAL_VENUE_LIMITS` into a signed record it
+    // announces publicly, WITHOUT materializing a bundle — so closing only `publish` would leave
+    // the same contradiction one verb away. What this pins is which refusal comes back: this
+    // draft has no managed publication stage either, so it would earn the generic "a managed Run
+    // ... is required" refusal on the very next line. Getting the import refusal instead is the
+    // evidence that the gate is decided from the run itself and ahead of every stage check, so an
+    // imported run cannot advance the managed chain far enough to be refused for a reason an
+    // operator could then go and satisfy.
+    const reported = await publicationReport(contextFor(clock), { draftId });
+    expect(reported.ok).toBe(false);
+    if (reported.ok) return;
+    expect(reported.error.code).toBe("conflict");
+    expect(reported.error.issues?.map((issue) => issue.path)).toEqual([`runs.${draftId}.externalImport`]);
+    expect(reported.error.detail).toMatch(/admission gate/u);
+    expect(reported.error.detail).toMatch(/#3417/u);
+    expect(reported.error.detail).not.toMatch(/managed Run/u);
   }, 180_000);
 });
