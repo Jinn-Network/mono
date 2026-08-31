@@ -27,8 +27,6 @@ export const GATE_REFUSAL_CODES = [
   "payment-not-found",
   /** A payment exists but does not match the sealed rail entry exactly. */
   "payment-mismatch",
-  /** Payments on this rail are public, so pickup must prove payer control, and no proof came. */
-  "payer-proof-required",
   /** The proof did not answer a live challenge issued by this gate. */
   "challenge-unknown",
   /** The rail refused the proof: whoever is asking is not the payer. */

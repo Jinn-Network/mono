@@ -129,6 +129,60 @@ describe("createRetrievalGate — construction", () => {
       })).toThrow(/needs a challenge store/u);
   });
 
+  test("a clock that does not read an RFC 3339 instant is a deployment defect", async () => {
+    const { offerDigest, offers: held } = await freeHarness();
+    const broken = createRetrievalGate({
+      offers: held,
+      subjects: createInMemorySubjectSource([SUBJECT_BYTES]),
+      clock: { now: () => "half past four" },
+    });
+    await expect(broken.request({ offer: offerDigest })).rejects.toThrow(GateConfigurationError);
+  });
+
+  test("a rail whose self-description changes after construction cannot drop the proof leg", async () => {
+    // `description` is third-party code and may be a getter. The gate must decide from the
+    // copy it validated, or an adapter could pass the payer-proof requirement at
+    // construction and then be served to onlookers with no challenge at all.
+    const backing = createTestRailAdapter({
+      rail: RAIL,
+      paymentsArePubliclyVisible: true,
+      payerSecrets: { "payer-a": "s" },
+    });
+    let asked = 0;
+    const shifty: RailAdapter = {
+      observe: backing.observe.bind(backing),
+      verifyPayerControl: backing.verifyPayerControl!.bind(backing),
+      get description() {
+        asked += 1;
+        return { ...backing.description, paymentsArePubliclyVisible: asked === 1 };
+      },
+    };
+    const sealed = await sealTestOffer({
+      subject: SUBJECT,
+      rails: [{ rail: RAIL, to: TO, amount: "1200" }],
+    });
+    backing.record({
+      reference: "tx-1",
+      offerDigest: sealed.digest,
+      to: TO,
+      amount: "1200",
+      payer: "payer-a",
+    });
+    const built = createRetrievalGate({
+      offers: createInMemoryOfferSource([sealed.envelopeBytes]),
+      subjects: createInMemorySubjectSource([SUBJECT_BYTES]),
+      rails: [shifty],
+      challenges: createInMemoryChallengeStore({ nonce: countingNonce }),
+      clock: fixedClock,
+    });
+    expect(built.rails[0]?.paymentsArePubliclyVisible).toBe(true);
+    const outcome = await built.request({
+      offer: sealed.digest,
+      payment: { rail: RAIL, reference: "tx-1" },
+    });
+    expect(outcome.status).toBe("challenge");
+  });
+
   test("refuses a nonsense byte bound", () => {
     expect(() => createRetrievalGate({ offers, subjects, hardLimits: { maxSubjectBytes: 0 } }))
       .toThrow(/maxSubjectBytes/u);
@@ -295,6 +349,43 @@ describe("createRetrievalGate — the paid path", () => {
     ).toBe("payment-mismatch");
   });
 
+  test("a rail that answers about a different payment than the request named is refused", async () => {
+    // Self-consistent either way, but the holder's signed sales history must never be able
+    // to name a payment the buyer did not present.
+    const sealed = await sealTestOffer({
+      subject: SUBJECT,
+      rails: [{ rail: RAIL, to: TO, amount: "1200" }],
+    });
+    const answersAboutAnother: RailAdapter = {
+      description: {
+        rail: RAIL,
+        trustModel: "unassured",
+        settlement: "already-settled",
+        paymentsArePubliclyVisible: false,
+      },
+      observe: async (): Promise<PaymentObservation> => ({
+        status: "observed",
+        payment: {
+          reference: "tx-2",
+          offerDigest: sealed.digest,
+          to: TO,
+          amount: "1200",
+        },
+      }),
+    };
+    const gate = createRetrievalGate({
+      offers: createInMemoryOfferSource([sealed.envelopeBytes]),
+      subjects: createInMemorySubjectSource([SUBJECT_BYTES]),
+      rails: [answersAboutAnother],
+      clock: fixedClock,
+    });
+    const outcome = refused(
+      await gate.request({ offer: sealed.digest, payment: { rail: RAIL, reference: "tx-1" } }),
+    );
+    expect(outcome.code).toBe("payment-mismatch");
+    expect(outcome.detail).toContain("a different payment than the one the request named");
+  });
+
   test("an untidy but integer-equal amount is honored", async () => {
     const { gate, offerDigest, rail } = await priced();
     rail.record({ reference: "tx-padded", offerDigest, to: TO, amount: "0001200" });
@@ -358,6 +449,28 @@ describe("createRetrievalGate — the rail's delivery and claim acts", () => {
     );
     expect(rail.deliveries).toEqual([SUBJECT]);
     expect(rail.claims).toEqual([]);
+  });
+
+  test("redelivery on a key-reveal rail settles once, and is still free", async () => {
+    // On this settlement the delivery act IS the taking, so a second collection of the same
+    // purchase must not settle again -- and must not be refused either.
+    const { gate, offerDigest, rail } = await priced({ settlement: "on-delivery" });
+    const request = { offer: offerDigest, payment: { rail: RAIL, reference: "tx-1" } };
+    expect(delivered(await gate.request(request)).bytes).toEqual(SUBJECT_BYTES);
+    expect(delivered(await gate.request(request)).bytes).toEqual(SUBJECT_BYTES);
+    expect(delivered(await gate.request(request)).bytes).toEqual(SUBJECT_BYTES);
+    expect(rail.deliveries).toEqual([SUBJECT]);
+  });
+
+  test("the delivery act runs after the bytes are verified, never before", async () => {
+    const { gate, offerDigest, rail, subjects } = await priced({ settlement: "on-delivery" });
+    subjects.remove(SUBJECT);
+    expect(
+      refused(
+        await gate.request({ offer: offerDigest, payment: { rail: RAIL, reference: "tx-1" } }),
+      ).code,
+    ).toBe("subject-unavailable");
+    expect(rail.deliveries).toEqual([]);
   });
 
   test("a capture that declines refuses the delivery rather than giving bytes away", async () => {

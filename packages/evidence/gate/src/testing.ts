@@ -41,15 +41,27 @@ export function createFixtureSigner(keyid = "did:key:zGateFixtureSigner") {
  * What a payer knows and an onlooker does not: the answer to a challenge, computed from a
  * secret only the paying key holds.
  *
- * A real rail's proof is a signature over the nonce by the paying key. This is the same
- * shape with a shared secret standing in for the key material, which is enough to model the
- * one property the gate depends on: reading a payment off a public ledger tells you who
- * paid, and still does not let you answer for them.
+ * A real rail's proof is a signature by the paying key, and it must cover the **whole**
+ * challenge rather than the nonce alone — which is why this covers the whole challenge, so
+ * the recipe a rail author copies is the safe one. A proof over the nonce by itself is
+ * relayable across gates: an attacker running gate M takes a nonce from honest gate H,
+ * re-issues it as M's own challenge to someone transacting with M, and replays the answer at
+ * H. Binding the offer, rail, and payment reference into the signed material is what makes
+ * an answer worthless anywhere but the pickup it was asked about.
+ *
+ * The shared secret stands in for key material, which is enough to model the one property
+ * the gate depends on: reading a payment off a public ledger tells you who paid, and still
+ * does not let you answer for them.
  */
 export function signTestPayerProof(secret: string, challenge: GateChallenge): string {
-  return createHash("sha256")
-    .update(`jinn-gate-payer-proof/v1:${secret}:${challenge.nonce}`)
-    .digest("hex");
+  const bound = [
+    "jinn-gate-payer-proof/v1",
+    challenge.offerDigest,
+    challenge.rail,
+    challenge.paymentReference,
+    challenge.nonce,
+  ].join("\u0000");
+  return createHash("sha256").update(`${secret}\u0000${bound}`).digest("hex");
 }
 
 export interface SealTestOfferInput {
@@ -107,7 +119,7 @@ export interface TestRailAdapter extends RailAdapter {
   record(payment: TestRailPayment): void;
   /** Every claim the gate has made, in order. Empty on rails that need no claim. */
   readonly claims: readonly ClaimOutcome["status"][];
-  /** How many times the gate ran this rail's delivery act. */
+  /** The subject of every delivery act the gate ran that actually settled, in order. */
   readonly deliveries: readonly Sha256Digest[];
   /** Makes the next claim decline once, the way a capture against a dead card does. */
   failNextClaim(detail: string): void;
@@ -145,6 +157,7 @@ export function createTestRailAdapter(
   for (const payment of options.payments ?? []) ledger.set(payment.reference, payment);
   const payerSecrets = new Map(Object.entries(options.payerSecrets ?? {}));
   const claimed = new Set<string>();
+  const handedOver = new Set<string>();
   const claims: ClaimOutcome["status"][] = [];
   const deliveries: Sha256Digest[] = [];
   let nextClaimFailure: string | undefined;
@@ -224,6 +237,13 @@ export function createTestRailAdapter(
               nextDeliveryRefusal = undefined;
               return { status: "refused" as const, detail };
             }
+            // Idempotent per payment, because on this settlement the delivery act IS the
+            // taking: the gate runs it on every collection, and settling twice is charging
+            // twice.
+            if (handedOver.has(input.payment.reference)) {
+              return { status: "already-delivered" as const };
+            }
+            handedOver.add(input.payment.reference);
             deliveries.push(input.subject);
             return { status: "ready" as const };
           },
@@ -374,7 +394,32 @@ export function describeRailAdapterConformance(testCase: RailAdapterConformanceC
       expect(second.status).toBe("already-claimed");
     });
 
-    test("a public rail refuses an answer the paying key did not produce", async () => {
+    test("the delivery act is idempotent, so redelivery is free", async () => {
+    // On an `on-delivery` rail this act is the taking of the money, and the gate runs it on
+    // every collection of the same purchase.
+    const subject = await testCase.create();
+    if (subject.adapter.deliver === undefined) return;
+    const observation = await subject.adapter.observe(
+      {
+        offerDigest: subject.offerDigest,
+        entry: subject.entry,
+        reference: subject.reference,
+      },
+      NO_SIGNAL,
+    );
+    if (observation.status !== "observed") throw new Error("the subject payment must observe");
+    const delivery = {
+      offerDigest: subject.offerDigest,
+      subject: subject.offerDigest,
+      payment: observation.payment,
+    };
+    const first = await subject.adapter.deliver(delivery, NO_SIGNAL);
+    const second = await subject.adapter.deliver(delivery, NO_SIGNAL);
+    expect(first.status).toBe("ready");
+    expect(second.status).toBe("already-delivered");
+  });
+
+  test("a public rail refuses an answer the paying key did not produce", async () => {
       const subject = await testCase.create();
       if (!subject.adapter.description.paymentsArePubliclyVisible) return;
       if (subject.adapter.verifyPayerControl === undefined) {

@@ -2,7 +2,7 @@
 
 import { isFreeOffer, parseOfferEnvelope } from "@jinn-network/evidence-offer";
 import type { OfferRail, OfferRecord } from "@jinn-network/evidence-offer";
-import { recordDigest } from "@jinn-network/trust-core";
+import { isCalendarStrictRfc3339, recordDigest } from "@jinn-network/trust-core";
 import type { DsseSigner, Sha256Digest } from "@jinn-network/trust-core";
 
 import { GateConfigurationError } from "./errors.js";
@@ -28,9 +28,14 @@ import type { SealedDeliveryStatement } from "./statement.js";
 
 export interface GateHardLimits {
   /**
-   * The largest subject this gate will read into memory and hand over. A gate answers
-   * strangers, so the bound is on by default rather than opt-in; a holder selling large
-   * artifacts raises it deliberately.
+   * The largest subject this gate will hand over. A gate answers strangers, so the bound is
+   * on by default rather than opt-in; a holder selling large artifacts raises it
+   * deliberately.
+   *
+   * It bounds what is *served*, not what is read: `SubjectSource` returns whole bytes, so by
+   * the time this applies the source has already produced them. A source reading from
+   * somewhere unbounded owes its own read bound — which is where it belongs anyway, since
+   * only the source knows a subject's size before fetching it.
    */
   readonly maxSubjectBytes: number;
 }
@@ -115,6 +120,13 @@ export interface RetrievalGate {
   request(input: GateRequest, options?: GateOperationOptions): Promise<GateOutcome>;
 }
 
+interface SettledPayment {
+  readonly adapter: RailAdapter;
+  /** The sealed rail entry the payment matched, which is where the rail spelling comes from. */
+  readonly entry: OfferRail;
+  readonly payment: ObservedPayment;
+}
+
 function refuse(code: GateRefusalCode, detail: string): GateRefusal {
   return { status: "refused", code, detail };
 }
@@ -150,7 +162,15 @@ function disagreementWithSealedTerms(
   payment: ObservedPayment,
   offerDigest: Sha256Digest,
   entry: OfferRail,
+  requestedReference: string,
 ): string | undefined {
+  if (payment.reference !== requestedReference) {
+    // Not exploitable on its own -- the challenge and the sealed statement both use the
+    // adapter's reference, so the gate stays self-consistent. It is checked because the
+    // holder's signed sales history must not be able to name a payment the buyer never
+    // presented.
+    return "the rail reported a different payment than the one the request named";
+  }
   if (payment.offerDigest !== offerDigest) {
     return `the observed payment references offer ${payment.offerDigest}, not ${offerDigest}`;
   }
@@ -194,20 +214,26 @@ function describe(cause: unknown): string {
  * wrong.
  */
 export function createRetrievalGate(options: CreateRetrievalGateOptions): RetrievalGate {
-  const adapters = new Map<string, RailAdapter>();
+  // Every later decision reads `description` -- the frozen copy taken and validated once at
+  // construction -- and never `adapter.description`, which is third-party code and may be a
+  // getter that answers differently the second time it is asked.
+  const adapters = new Map<
+    string,
+    { readonly adapter: RailAdapter; readonly description: RailSelfDescription }
+  >();
   for (const adapter of options.rails ?? []) {
-    assertConformingRailAdapter(adapter);
-    if (adapters.has(adapter.description.rail)) {
+    const description = assertConformingRailAdapter(adapter);
+    if (adapters.has(description.rail)) {
       throw new GateConfigurationError(
-        `two rail adapters claim "${adapter.description.rail}"; a gate cannot know which `
-          + "one speaks for a payment",
+        `two rail adapters claim "${description.rail}"; a gate cannot know which one speaks `
+          + "for a payment",
       );
     }
-    adapters.set(adapter.description.rail, adapter);
+    adapters.set(description.rail, { adapter, description });
   }
 
   const publicRail = [...adapters.values()].find(
-    (adapter) => adapter.description.paymentsArePubliclyVisible,
+    (installed) => installed.description.paymentsArePubliclyVisible,
   );
   if (publicRail !== undefined && options.challenges === undefined) {
     throw new GateConfigurationError(
@@ -226,7 +252,7 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
 
   const clock = options.clock ?? systemClock;
   const railDescriptions = Object.freeze(
-    [...adapters.values()].map((adapter) => adapter.description),
+    [...adapters.values()].map((installed) => installed.description),
   );
 
   async function resolveOffer(
@@ -262,28 +288,34 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
   async function readSubject(
     subject: Sha256Digest,
     callOptions: GateOperationOptions,
-  ): Promise<Uint8Array | GateRefusal> {
+  ): Promise<{ readonly bytes: Uint8Array } | { readonly refusal: GateRefusal }> {
     const bytes = await options.subjects.read(subject, callOptions);
     if (bytes === null) {
-      return refuse("subject-unavailable", `this gate holds no bytes for ${subject}`);
+      return {
+        refusal: refuse("subject-unavailable", `this gate holds no bytes for ${subject}`),
+      };
     }
     if (bytes.byteLength > hardLimits.maxSubjectBytes) {
-      return refuse(
-        "subject-too-large",
-        `${subject} is ${bytes.byteLength} bytes and this gate serves at most `
-          + `${hardLimits.maxSubjectBytes}`,
-      );
+      return {
+        refusal: refuse(
+          "subject-too-large",
+          `${subject} is ${bytes.byteLength} bytes and this gate serves at most `
+            + `${hardLimits.maxSubjectBytes}`,
+        ),
+      };
     }
     const actual = recordDigest(bytes);
     if (actual !== subject) {
       // The buyer's hash check would catch this too. Catching it here means a holder whose
       // store has quietly corrupted learns from their own gate rather than from a customer.
-      return refuse(
-        "subject-digest-mismatch",
-        `the bytes held for ${subject} hash to ${actual}, so they are not the subject`,
-      );
+      return {
+        refusal: refuse(
+          "subject-digest-mismatch",
+          `the bytes held for ${subject} hash to ${actual}, so they are not the subject`,
+        ),
+      };
     }
-    return bytes;
+    return { bytes };
   }
 
   async function settle(
@@ -292,7 +324,7 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
     request: GateRequest,
     callOptions: GateOperationOptions,
     now: string,
-  ): Promise<{ readonly adapter: RailAdapter; readonly payment: ObservedPayment } | GateOutcome> {
+  ): Promise<SettledPayment | GateOutcome> {
     const requested = request.payment;
     if (requested === undefined) {
       return refuse(
@@ -308,13 +340,14 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
         `offer ${offerDigest} does not carry rail "${requested.rail}"`,
       );
     }
-    const adapter = adapters.get(entry.rail);
-    if (adapter === undefined) {
+    const installed = adapters.get(entry.rail);
+    if (installed === undefined) {
       return refuse(
         "rail-unsupported",
         `this gate has no adapter for rail "${entry.rail}"`,
       );
     }
+    const { adapter, description } = installed;
 
     const observation = await adapter.observe(
       { offerDigest, entry, reference: requested.reference },
@@ -327,12 +360,17 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
       return refuse("payment-mismatch", observation.detail);
     }
     const { payment } = observation;
-    const disagreement = disagreementWithSealedTerms(payment, offerDigest, entry);
+    const disagreement = disagreementWithSealedTerms(
+      payment,
+      offerDigest,
+      entry,
+      requested.reference,
+    );
     if (disagreement !== undefined) {
       return refuse("payment-mismatch", disagreement);
     }
 
-    if (adapter.description.paymentsArePubliclyVisible) {
+    if (description.paymentsArePubliclyVisible) {
       // Checked at construction, so this is a type narrowing rather than a runtime branch.
       const challenges = options.challenges as ChallengeStore;
       if (request.payerProof === undefined) {
@@ -381,7 +419,7 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
       }
     }
 
-    return { adapter, payment };
+    return { adapter, entry, payment };
   }
 
   return {
@@ -390,6 +428,14 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
 
     async request(input, callOptions = {}) {
       const now = clock.now();
+      if (!isCalendarStrictRfc3339(now)) {
+        // A deployment defect, not a request outcome: a challenge minted against an
+        // unreadable instant has no expiry anyone can evaluate, and a delivery statement
+        // sealed with one is not a record. Loud, and the same answer for every path.
+        throw new GateConfigurationError(
+          `the gate clock produced ${JSON.stringify(now)}, which is not an RFC 3339 instant`,
+        );
+      }
 
       const resolved = await resolveOffer(input.offer, callOptions);
       if ("refusal" in resolved) return resolved.refusal;
@@ -399,8 +445,7 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
       // at the one place a validated value re-enters the gate's own vocabulary.
       const subject = offer.subject as Sha256Digest;
 
-      let adapter: RailAdapter | undefined;
-      let payment: ObservedPayment | undefined;
+      let settled: SettledPayment | undefined;
 
       if (isFreeOffer(offer)) {
         if (input.payment !== undefined) {
@@ -411,18 +456,21 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
           );
         }
       } else {
-        const settled = await settle(offer, input.offer, input, callOptions, now);
-        if ("status" in settled) return settled;
-        adapter = settled.adapter;
-        payment = settled.payment;
+        const outcome = await settle(offer, input.offer, input, callOptions, now);
+        if ("status" in outcome) return outcome;
+        settled = outcome;
       }
 
-      const bytes = await readSubject(subject, callOptions);
-      if (!(bytes instanceof Uint8Array)) return bytes;
+      const read = await readSubject(subject, callOptions);
+      if ("refusal" in read) return read.refusal;
+      const { bytes } = read;
 
-      if (adapter?.deliver !== undefined && payment !== undefined) {
-        const delivery = await adapter.deliver(
-          { offerDigest: input.offer, subject, payment },
+      if (settled?.adapter.deliver !== undefined) {
+        // `already-delivered` is a success, like `already-claimed`: the gate keeps no record
+        // of who has collected what, so it runs this act on every collection of the same
+        // purchase and the rail is the one that knows it has already happened.
+        const delivery = await settled.adapter.deliver(
+          { offerDigest: input.offer, subject, payment: settled.payment },
           callOptions,
         );
         if (delivery.status === "refused") {
@@ -430,11 +478,14 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
         }
       }
 
-      if (adapter?.claim !== undefined && payment !== undefined) {
+      if (settled?.adapter.claim !== undefined) {
         // After the bytes are read and verified, before they are handed back: a capture that
         // fails must cost the buyer their delivery, not the holder their payment. And
         // `already-claimed` is a success, which is what makes redelivery free.
-        const claim = await adapter.claim({ offerDigest: input.offer, payment }, callOptions);
+        const claim = await settled.adapter.claim(
+          { offerDigest: input.offer, payment: settled.payment },
+          callOptions,
+        );
         if (claim.status === "failed") {
           return refuse("claim-failed", claim.detail);
         }
@@ -449,9 +500,16 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
               kind: DELIVERY_STATEMENT_RECORD_KIND,
               offer: input.offer,
               subject,
-              ...(payment === undefined
+              ...(settled === undefined
                 ? {}
-                : { payment: { rail: input.payment!.rail, reference: payment.reference } }),
+                : {
+                    payment: {
+                      // The sealed spelling, not the requester's -- equal by construction,
+                      // but this is the one that was checked against the offer.
+                      rail: settled.entry.rail,
+                      reference: settled.payment.reference,
+                    },
+                  }),
               deliveredAt: now,
             },
             signer: options.deliveryStatements.signer,

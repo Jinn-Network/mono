@@ -137,8 +137,14 @@ export interface RailDeliveryInput {
   readonly payment: ObservedPayment;
 }
 
+/**
+ * `already-delivered` is a success, and it is required for the same reason
+ * `already-claimed` is: redelivery is free, so the gate runs this act on every collection
+ * and the rail is the one that knows it has already happened.
+ */
 export type RailDeliveryOutcome =
   | { readonly status: "ready" }
+  | { readonly status: "already-delivered" }
   | { readonly status: "refused"; readonly detail: string };
 
 export interface ClaimPaymentInput {
@@ -186,7 +192,15 @@ export interface RailAdapter {
     options: RailOperationOptions,
   ): Promise<PayerControlOutcome>;
 
-  /** Step 2, the rail's own act at the moment of delivery. Required for `on-delivery`. */
+  /**
+   * Step 2, the rail's own act at the moment of delivery. Required for `on-delivery`.
+   *
+   * **Must be idempotent for one payment.** The gate keeps no record of who has collected
+   * what — that is what makes redelivery free — so it runs this act on every collection of
+   * the same purchase, and on an `on-delivery` rail this act is the taking of the money. A
+   * rail that settles a second time here charges twice; one that refuses the repeat breaks
+   * free redelivery. Answer `already-delivered` instead.
+   */
   deliver?(
     input: RailDeliveryInput,
     options: RailOperationOptions,
@@ -204,15 +218,29 @@ function fail(message: string): never {
 }
 
 /**
- * Refuses an adapter whose self-description and methods disagree.
+ * Refuses an adapter whose self-description and methods disagree, and hands back the
+ * description it validated, frozen.
  *
  * Every rule here is one where the mismatch is silent and expensive at run time. An adapter
  * that says its payments are public but ships no payer-proof check does not fail; it serves
  * the first onlooker to quote the transaction hash. One that declares `on-delivery` and also
  * implements `claim` charges twice. Loud at construction is the only place these are cheap.
+ *
+ * The description is read exactly once and returned as a frozen copy, and a gate must use
+ * that copy rather than reading the adapter again. `description` is an ordinary property of
+ * third-party code and may be a getter: one that answers `paymentsArePubliclyVisible: true`
+ * here and `false` afterwards would pass every check below and then be served to onlookers
+ * with no challenge and no proof.
  */
-export function assertConformingRailAdapter(adapter: RailAdapter): void {
-  const { description } = adapter;
+export function assertConformingRailAdapter(adapter: RailAdapter): RailSelfDescription {
+  const declared = adapter.description;
+  const description: RailSelfDescription = Object.freeze({
+    rail: declared.rail,
+    trustModel: declared.trustModel,
+    ...(declared.assuredBy === undefined ? {} : { assuredBy: declared.assuredBy }),
+    settlement: declared.settlement,
+    paymentsArePubliclyVisible: declared.paymentsArePubliclyVisible,
+  });
   const { rail } = description;
 
   if (!isNormalizedAbsoluteUri(rail)) {
@@ -276,4 +304,6 @@ export function assertConformingRailAdapter(adapter: RailAdapter): void {
         + "implement claim(): there is nothing left to take",
     );
   }
+
+  return description;
 }

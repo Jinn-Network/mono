@@ -9,7 +9,7 @@ const SECRET = "the paying key's own material";
 
 // The shipped test rail is the first consumer of its own conformance driver: if the double
 // the whole suite leans on does not honor the lifecycle, nothing below it proves anything.
-for (const settlement of ["already-settled", "explicit-claim"] as const) {
+for (const settlement of ["already-settled", "explicit-claim", "on-delivery"] as const) {
   describeRailAdapterConformance({
     name: `the in-memory test rail (${settlement})`,
     create: () => ({

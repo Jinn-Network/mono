@@ -54,6 +54,13 @@ three-step lifecycle:
 | deliver | `deliver` | the rail's own act at the moment of delivery |
 | claim | `claim` | taking the payment, where that is a separate act |
 
+Both `deliver` and `claim` must be **idempotent for one payment**. The gate keeps no record
+of who has collected what — that is what makes redelivery free — so it runs both acts on
+every collection of the same purchase. `already-delivered` and `already-claimed` are
+successes and are how a rail says so. This matters most on an `on-delivery` rail, where the
+delivery act *is* the taking: settling twice charges twice, and refusing the repeat breaks
+free redelivery.
+
 Three steps rather than one `verify` call, deliberately. That is what admits
 assurance-bearing rails without reshaping the gate: an escrow contract observes a funded
 escrow, releases it on delivery, and refunds on timeout; a key-reveal rail observes a
@@ -89,6 +96,11 @@ including against overpayment — a gate cannot make change, and a payment for a
 amount is a payment on different terms. A lax, buggy, or hostile adapter can misjudge its own
 rail; it can never widen the offer.
 
+`maxSubjectBytes` bounds what the gate hands over, not what it reads: `SubjectSource` returns
+whole bytes, so by the time the bound applies the source has already produced them. A source
+reading from somewhere unbounded owes its own read bound — which is where it belongs anyway,
+since only the source knows a subject's size before fetching it.
+
 The gate also hashes the subject bytes before serving them. The buyer would catch a mismatch
 too, but catching it here means a holder whose store has quietly corrupted learns it from
 their own gate rather than from a customer.
@@ -101,8 +113,9 @@ produced. Onlookers cannot redeem someone else's payment, and a proof copied off
 does not work twice.
 
 **Redelivery to the same payer is free.** No one-time-download bookkeeping exists anywhere in
-this package — nothing records who has collected what. The gate claims on every delivery, and
-`already-claimed` is a success, which is what makes the second collection cost nothing.
+this package — nothing records who has collected what. The gate runs the rail's delivery and
+claim acts on every collection, and `already-delivered` / `already-claimed` are successes,
+which is what makes the second collection cost nothing.
 
 **A payment made while terms were live is honored even after they are superseded.** The gate
 does not consult supersession at all. Repricing announces new terms and says nothing about
@@ -138,7 +151,10 @@ Media type: `application/vnd.jinn.delivery-statement.v1+json`
 ```
 
 Sealed the way an offer is: JCS canonical payload, DSSE envelope under the media type, signed
-by the holder, identity being the digest of the envelope bytes. It carries no price — the
+by the holder, identity being the digest of the envelope bytes. It ships inside this
+implementation package rather than as its own sealed-platform record package because the gate
+is its only producer and only consumer today; a second one of either is the signal to promote
+it, and the kind URI and media type do not move when that happens. It carries no price — the
 offer it names carries the terms, and a second copy of a number is a number that can
 disagree with the first. `payment` absent is the free path, and absence is its only spelling.
 
