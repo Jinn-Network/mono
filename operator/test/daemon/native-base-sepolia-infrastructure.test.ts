@@ -8,6 +8,7 @@ import {
   createBaseSepoliaRecordTransport,
   NativeRecordDestinationError,
   createNativeInfrastructure,
+  reportRefusedRecordDestination,
   createSolverReads,
   createViemBaseSepoliaReadClients,
   mountBaseSepoliaPublicSource,
@@ -20,6 +21,7 @@ import {
 import { documentDigest } from '@jinn-network/task-execution-protocol';
 import { recordPath } from '@jinn-network/record-discovery-protocol';
 import { buildNativeEvaluationSpecResolver } from '../../src/daemon/native-assembly.js';
+import { buildFleetDeliveryBytesResolver } from '../../src/daemon/native-fleet-runtime.js';
 import type { NativeInfrastructureFactoryInput } from '../../src/daemon/native-infrastructure-bundle.js';
 import type { NativeEngagementRow, NativeOperationRow } from '../../src/daemon/native-operator-state.js';
 
@@ -380,8 +382,10 @@ describe('first-party Base Sepolia public record transport', () => {
         fetchImpl,
       });
 
-      await expect(transport.byLocation(`${CONFIGURED}abc`)).rejects.toBeInstanceOf(NativeRecordDestinationError);
-      expect(fetchImpl.mock.calls.length).toBeLessThanOrEqual(6);
+      // `toBe`, not `toBeLessThanOrEqual`: the cap is 1 initial request plus 5 follows, and a
+      // bound-from-above assertion also passes for a cap silently shrunk to 1.
+      await expect(transport.byLocation(`${CONFIGURED}abc`)).rejects.toThrow(/more than 5 redirects/u);
+      expect(fetchImpl.mock.calls.length).toBe(6);
     });
 
     it('never fetches a same-origin redirect that escapes the configured path prefix', async () => {
@@ -431,9 +435,11 @@ describe('first-party Base Sepolia public record transport', () => {
         fetchImpl,
       });
 
-      const started = Date.now();
+      // Asserted by hop count rather than by wall clock: elapsed time is bounded by scheduler
+      // drift on a loaded runner as much as by the budget, and a per-hop budget would let all six
+      // hops run — so the chain stopping short of the cap is the property, without a clock.
       await expect(transport.byLocation(`${CONFIGURED}abc`)).rejects.toThrow(/timed out/u);
-      expect(Date.now() - started).toBeLessThan(180);
+      expect(fetchImpl.mock.calls.length).toBeLessThan(6);
     });
 
     it('refuses every location when no record origin is configured', async () => {
@@ -462,6 +468,92 @@ describe('first-party Base Sepolia public record transport', () => {
 
       await expect(transport.byDigest(`sha256:${'00'.repeat(32)}`)).rejects.toThrow(/redirect leaves/u);
       expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    // `fetchBytes` is shared with `byRawCid`, whose containment is the IPFS API origin, not the
+    // record origins. A fixed record-origin wording sent an operator to `recordSources` when the
+    // problem was `ipfs.apiUrl`, so the policy applied is named in the refusal itself.
+    it('names the policy that refused the destination, not always the record origins', async () => {
+      const ipfs = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl: async () => new Response(null, {
+          status: 307,
+          headers: { location: 'http://127.0.0.1:5001/api/v0/block/get' },
+        }),
+      });
+      await expect(ipfs.byDigest(`sha256:${'00'.repeat(32)}`)).rejects.toThrow(/ipfs\.apiUrl/u);
+
+      const records = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl: async () => new Response('unreachable'),
+      });
+      await expect(records.byLocation('https://attacker.example.test/records/x'))
+        .rejects.toThrow(/recordSources\[\]\.baseUrl/u);
+    });
+  });
+
+  // #3431 acceptance criterion 1's second half: a refused locator "does not produce a daemon fetch,
+  // AND the refusal is named in logs". Three of the five peer-supplied `byLocation` paths iterate
+  // replicas inside a bare catch and fall through to the IPFS plane, where native records are never
+  // pinned — so without this the operator sees an IPFS "block was not found" that names neither the
+  // destination nor the refusal, and has no route back to the configuration mistake.
+  describe('refused destinations are named in logs (#3431)', () => {
+    it('warns with the destination and the reason', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const named = reportRefusedRecordDestination(
+          'delivery card location',
+          new NativeRecordDestinationError('http://169.254.169.254/latest/meta-data/', 'it is not contained'),
+        );
+        expect(named).toBe(true);
+        const line = String(warn.mock.calls.at(-1)?.[0]);
+        expect(line).toContain('delivery card location');
+        expect(line).toContain('http://169.254.169.254/latest/meta-data/');
+        expect(line).toContain('it is not contained');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('stays silent for an ordinary serving-plane miss, which is not a refusal', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(reportRefusedRecordDestination('fleet delivery serving plane', new Error('fetch failed')))
+          .toBe(false);
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    // A real call site, not just the helper: this resolver returns `undefined` on refusal, so
+    // nothing downstream can tell a refusal from a plain miss unless it is logged here.
+    it('names a refusal reached through buildFleetDeliveryBytesResolver, and still falls through', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const fetchImpl = vi.fn(async () => new Response('unreachable'));
+        const transport = createBaseSepoliaRecordTransport({
+          ipfsApiUrl: 'https://ipfs.example.invalid',
+          recordOrigins: ['https://records.example.invalid/records/'],
+          fetchImpl,
+        });
+        const resolve = buildFleetDeliveryBytesResolver(
+          transport.byLocation,
+          ['https://peer.example.test'],
+        );
+
+        const digest = `sha256:${'11'.repeat(32)}` as const;
+        await expect(resolve(digest)).resolves.toBeUndefined();
+        expect(fetchImpl).not.toHaveBeenCalled();
+        const line = String(warn.mock.calls.at(-1)?.[0]);
+        expect(line).toContain('fleet delivery serving plane');
+        expect(line).toContain(`https://peer.example.test${recordPath(digest)}`);
+        expect(line).toContain('not contained');
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 

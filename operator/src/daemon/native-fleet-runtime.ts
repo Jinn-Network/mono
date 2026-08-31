@@ -59,6 +59,7 @@ import {
   createBaseSepoliaRecordTransport,
   createSolverReads,
   createViemBaseSepoliaReadClients,
+  reportRefusedRecordDestination,
 } from './native-base-sepolia-infrastructure.js';
 import {
   buildFleetNativeDiscovery,
@@ -101,7 +102,12 @@ export function buildFleetDeliveryBytesResolver(
         // eslint-disable-next-line no-await-in-loop -- alternate content-addressed serving planes.
         const bytes = await byLocation(`${base}${recordPath(digest)}`);
         if (documentDigest(bytes) === digest) return bytes;
-      } catch { /* serving-plane miss/failure — try the next configured origin, then IPFS */ }
+      } catch (cause) {
+        // Serving-plane miss/failure — try the next configured origin, then IPFS. A destination
+        // refusal is named first (#3431): this resolver returns `undefined` on refusal, so nothing
+        // downstream can tell one apart from a plain miss.
+        reportRefusedRecordDestination('fleet delivery serving plane', cause);
+      }
     }
     return undefined;
   };

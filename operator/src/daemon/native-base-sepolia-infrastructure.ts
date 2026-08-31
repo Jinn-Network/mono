@@ -209,6 +209,28 @@ export class NativeRecordDestinationError extends Error {
   }
 }
 
+/**
+ * Names a refused record destination in the daemon log, and says whether that is what it was
+ * (#3431 acceptance criterion 1: a refused locator "does not produce a daemon fetch, and the
+ * refusal is named in logs").
+ *
+ * Three of the five peer-supplied `byLocation` paths iterate alternate replicas inside a bare
+ * `catch { }` and fall through to the IPFS plane, where native records are never pinned. Without
+ * this the operator sees only an IPFS "block was not found" that names neither the destination nor
+ * the refusal, and has no route from that symptom back to the configuration mistake that caused it
+ * (a peer configured by one hostname while it advertises another). `NativeRecordDestinationError`
+ * is a typed class precisely so a refusal can be told apart from a serving-plane miss; this is what
+ * spends that distinction. The caller still continues to the next replica — a refusal is not fatal,
+ * it is invisible, and only the second half of that is a defect.
+ */
+export function reportRefusedRecordDestination(context: string, cause: unknown): boolean {
+  if (!(cause instanceof NativeRecordDestinationError)) return false;
+  console.warn(
+    `[native-records] ${context}: refused destination ${cause.destination}: ${cause.detail}`,
+  );
+  return true;
+}
+
 /** Redirect statuses. 304 sits in the same band and is NOT one of them. */
 const RECORD_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
@@ -320,6 +342,11 @@ export function createBaseSepoliaRecordTransport(input: {
     target: URL,
     timeoutMs: number,
     allow: (url: URL) => boolean,
+    // Which containment was applied, in the operator's own configuration vocabulary. This function
+    // is shared with `byRawCid`, whose policy is the IPFS API origin rather than the record
+    // origins, so a fixed record-origin wording would point an operator at `recordSources` when the
+    // problem is `ipfs.apiUrl`.
+    policy: string,
     init?: RequestInit,
   ): Promise<Uint8Array> => {
     let current = target;
@@ -333,8 +360,8 @@ export function createBaseSepoliaRecordTransport(input: {
         throw new NativeRecordDestinationError(
           current.toString(),
           hop === 0
-            ? 'it is not contained by any configured record origin'
-            : 'the redirect leaves every configured record origin',
+            ? `it is not contained by ${policy}`
+            : `the redirect leaves ${policy}`,
         );
       }
       let remainingMs = 0;
@@ -384,11 +411,22 @@ export function createBaseSepoliaRecordTransport(input: {
     // same reason a locator is contained: a redirect off it must not become an arbitrary
     // destination. Computed here, off the URL already built, so a malformed `ipfsApiUrl` still
     // fails where it always did rather than at transport construction.
-    return fetchBytes(url, ipfsTimeoutMs, (candidate) => candidate.origin === url.origin, { method: 'POST' });
+    return fetchBytes(
+      url,
+      ipfsTimeoutMs,
+      (candidate) => candidate.origin === url.origin,
+      'the configured IPFS API origin (ipfs.apiUrl)',
+      { method: 'POST' },
+    );
   };
 
   return {
-    byLocation: async (location) => fetchBytes(new URL(location), httpTimeoutMs, allowRecordLocation),
+    byLocation: async (location) => fetchBytes(
+      new URL(location),
+      httpTimeoutMs,
+      allowRecordLocation,
+      'any configured record origin (publicBaseUrl / recordSources[].baseUrl)',
+    ),
     byRawCid,
     async byDigest(digest) {
       const bytes = await byRawCid(rawCodecCidFromSha256Digest(digest));
@@ -958,7 +996,12 @@ export function createBaseSepoliaEvaluatorReads(input: {
         try {
           // eslint-disable-next-line no-await-in-loop -- alternate content-addressed public replicas.
           if (matchesDigest(await input.records.byLocation(location))) { resolved = true; break; }
-        } catch { /* serving-plane miss/failure — try the next location, then the IPFS plane */ }
+        } catch (cause) {
+          // Serving-plane miss/failure — try the next location, then the IPFS plane. A destination
+          // refusal is named first: it is a configuration fault, not a miss, and the IPFS fallback
+          // below would otherwise report it as a "block was not found".
+          reportRefusedRecordDestination('delivery card location', cause);
+        }
       }
       if (!resolved && !matchesDigest(await input.records.byDigest(expected.advertisedDeliveryDigest))) {
         return null;
