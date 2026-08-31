@@ -66,8 +66,12 @@ also the code for a corrupt bundle, so running the wrong line reads as an
 invalid bundle rather than as a version mismatch. What that looks like, and how
 to tell the two apart, is under
 [Reading a bundle with a reader that is too old](#reading-a-bundle-with-a-reader-that-is-too-old).
-The table in [Portable verification](#portable-verification) is the same
-mapping in one place.
+The bundle names its own line: the producer wrote it into the claim package's
+`verification.command`, with `verification.compatibleCommand` beside it. That is
+the instruction to follow whenever the claim package is at hand, because it is
+the exact line the producer named. The table in
+[Portable verification](#portable-verification) is the same mapping keyed by
+format, for a reader who has only `bundle.json`.
 
 Verify a version 2 bundle with:
 
@@ -78,6 +82,18 @@ npx @colophon-claims/verify@0.1 <bundle-dir>
 `@0.1.0` is the exact producer-side release inside that line, for byte-for-byte
 reproduction. Version 2 carries no anchors, so the anchor trust-material flags
 below do not apply to it. It returns **six checks**.
+
+One kind of version 2 bundle names a later line. A run whose screening was
+prompted — its claim carries `method.parameters.promptedScreeningProfile ===
+"prompted-codex-screening/v1"` — pins `@0.2.1`, with `@0.2` as the compatible
+line and `@0.2.0` on bundles materialized before `0.2.1` existed. Prompted
+screening does not move the format, so such a bundle is still `.../2`, and the
+`@0.1` line does verify it: claim-package/1 states no reader requirement of its
+own, so no line refuses it on the pin. What the bundle's own `index.html` and
+share text instruct, and what reproduces the producer's exact release, is the
+`@0.2.1` line its claim names. Take the line from the claim package's
+`verification.command` rather than inferring it from the format string; the
+publication caveat stated for v7 below applies to that `@0.2.1` too.
 
 ### Binary qualification bundle v4
 
@@ -109,16 +125,31 @@ badge, social card, and share text are narrower signposts: verified state, exact
 scope, full Report digest, and relative links only. They carry no rate,
 instrument conclusion, preference, selection, or ordering.
 
-V4 reads on the same first public line as v2:
+An unprompted v4 reads on the same first public line as v2:
 
 ```bash
 npx @colophon-claims/verify@0.1 <bundle-dir>
 ```
 
-`@0.1.0` is the exact producer-side release inside that line. V4 carries no
-anchors, so the anchor trust-material flags below do not apply to it. It returns
-the same **six checks** as v2: the qualification projection changes what
-`evidence-closure` and `claim-consistency` examine, not which checks run.
+`@0.1.0` is the exact producer-side release inside that line. A v4 whose
+screening was prompted pins `@0.2.1` instead, with `@0.2` compatible and `@0.2.0`
+on bundles materialized before `0.2.1` existed:
+
+```bash
+npx @colophon-claims/verify@0.2.1 <bundle-dir>
+```
+
+The format string does not record that difference — prompted screening is a
+fourth axis, and only anchoring, qualification, and disclosure select the format
+— so take the line from the claim package's own `verification.command`, or read
+`method.parameters.promptedScreeningProfile`, which is
+`"prompted-codex-screening/v1"` on a prompted bundle and absent otherwise. The
+publication caveat stated for v7 below applies to a prompted v4's `@0.2.1` too.
+
+V4 carries no anchors, so the anchor trust-material flags below do not apply to
+it. It returns the same **six checks** as v2 on both lines: the qualification
+projection changes what `evidence-closure` and `claim-consistency` examine, not
+which checks run.
 
 ### Anchored bundle v6
 
@@ -469,31 +500,58 @@ DSSE and digest rules, the JSON Schemas shipped under the reader package's
 external verifier must reject.
 
 Use the smaller reader package, without the product or source workspace. Which line reads which
-closure is not uniform, so start from the `format` string in the bundle's own `bundle.json` and
-take its row. Each section above states the same thing in place, with the anchored form spelled
+closure is not uniform, and the format string alone does not settle it: **read the line the
+bundle's own claim package pins** in `verification.command`, with `verification.compatibleCommand`
+as the compatible line. The producer named that line for this exact bundle, and it is correct on
+every closure. Use the table below when you cannot reach the claim package and have only
+`bundle.json`. Each section above states the same thing in place, with the anchored form spelled
 out where it applies.
 
 | `bundle.json` format | Pinned line | Compatible line | Checks | Anchor flags |
 | --- | --- | --- | --- | --- |
-| `benchmark-product-public-bundle/2` | `@0.1.0` | `@0.1` | six | not applicable |
-| `benchmark-product-public-bundle/4` | `@0.1.0` | `@0.1` | six | not applicable |
+| `benchmark-product-public-bundle/2`, unprompted | `@0.1.0` | `@0.1` | six | not applicable |
+| `benchmark-product-public-bundle/2`, prompted screening | `@0.2.1`, publication pending (`@0.2.0` if already materialized) | `@0.2`; `@0.1` also verifies, since claim-package/1 states no reader requirement | six | not applicable |
+| `benchmark-product-public-bundle/4`, unprompted | `@0.1.0` | `@0.1` | six | not applicable |
+| `benchmark-product-public-bundle/4`, prompted screening | `@0.2.1`, publication pending (`@0.2.0` if already materialized) | `@0.2`, and only for a bundle pinning `@0.2.0`; `@0.1` refuses | six | not applicable |
 | `benchmark-product-public-bundle/5` | `@0.1` | none pinned | seven | not applicable |
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1`, publication pending | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/8` | `@0.2.1`, publication pending | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
 
+Prompted screening is why the format string is not sufficient for the first four rows. It is a
+fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a
+prompted run emits `.../2` or `.../4` exactly as an unprompted one does while pinning a later
+reader. What distinguishes it is inside the claim package: its
+`method.parameters.promptedScreeningProfile` is `"prompted-codex-screening/v1"` on a prompted
+bundle and absent otherwise. That is the second reason to take the line from the claim package
+rather than from the format.
+
 Every row runs as `npx @colophon-claims/verify<line> <bundle-dir>`, with the anchor flags appended
 where the row lists them.
 
-**Publication pending is not a formality.** The `0.2.1` reader that public-bundle/7 and
-public-bundle/8 pin is cut by a manual, demand-gated workflow that has not been fired, so no
-`0.2.1` exists on the registry today. `@0.2.1` does not resolve, and `@0.2` resolves to `0.2.0`,
-which supports public-bundle/2, /4, /5, and /6 and refuses /7 and /8. Read those two formats with
-`colophon bundle verify --bundle <bundle-dir> --json`, which wraps the same reader, or with a
-reader built from the `0.2.1` source, until the release is cut.
+**Publication pending is not a formality.** The `0.2.1` reader that public-bundle/7,
+public-bundle/8, and every prompted bundle pin is cut by a manual, demand-gated workflow that has
+not been fired, so no `0.2.1` exists on the registry today. `@0.2.1` does not resolve, and `@0.2`
+resolves to `0.2.0`, which supports public-bundle/2, /4, /5, and /6 and refuses /7 and /8. Until the
+release is cut, read anything that pins `@0.2.1` with `colophon bundle verify --bundle <bundle-dir>
+--json`, which wraps the same reader, or with a reader built from the `0.2.1` source.
+
+A prompted /4 bundle fails differently from a /7 or /8 one under `@0.2`, and the distinction
+matters when you read the refusal. `0.2.0` supports the format and carries the prompted-screening
+branch, so it parses `bundle.json`; what it requires of claim-package/2 is the command `@0.2.0`
+exactly, so it accepts a prompted bundle materialized before `0.2.1` existed and refuses a newer
+one on the claim, with `binary claim package must pin verifier 0.2.0/@0.2`. That is a
+reader-too-old refusal, not a fact about the bundle. A prompted /2 is refused by neither line:
+claim-package/1 carries no reader requirement, so an older reader verifies it while the bundle's
+own assets name `@0.2.1`.
 
 Claim-package/1, claim-package/2, and claim-package/4 — the claims of public-bundle/2,
-public-bundle/4, and public-bundle/6 — stamp the same first public line: `@0.1.0` / `@0.1`.
+public-bundle/4, and public-bundle/6 — stamp the same first public line, `@0.1.0` / `@0.1`, with one
+exception: a claim-package/1 or claim-package/2 whose method parameters carry
+`promptedScreeningProfile` stamps `@0.2.1` / `@0.2` instead (`@0.2.0` / `@0.2` if it was
+materialized before `0.2.1` existed). Only claim-package/2 enforces that pin, so the `@0.1` line
+refuses a prompted public-bundle/4 and verifies a prompted public-bundle/2 whose stated line it is
+not.
 Claim-package/3, the claim of public-bundle/5, reads on the same line but pins only `@0.1`,
 because it has a single `command` field and no compatible-line field. Claim-package/5 and
 claim-package/6, the claims of public-bundle/7 and public-bundle/8, are the ones the `@0.1` line
@@ -561,8 +619,15 @@ Tell the two apart with `--json`, which names both sides of the mismatch:
 
 If the `format` string in the bundle's own `bundle.json` is absent from that `supportedFormats`
 list, the refusal is a version mismatch and says nothing about the bundle: re-run the line the
-table above gives for that format. If the format **is** listed and the reader still refuses, the
-refusal is about the bytes, and the bundle should be treated as failing.
+bundle's claim package pins, or the line the table above gives for that format.
+
+A listed format is not on its own a verdict either. A reader can support the format and still be
+too old for the claim inside it — a prompted-screening public-bundle/4 is a format both `0.1.0` and
+`0.2.0` support, while its claim pins `@0.2.1`, so each of those readers parses `bundle.json` and
+then refuses the claim: `binary claim package must pin verifier 0.1.0/@0.1` under `@0.1`, and
+`binary claim package must pin verifier 0.2.0/@0.2` under `@0.2`. A refusal that names the pinned
+verifier is that mismatch, not a fact about the bytes. Before treating any refusal as a failing
+bundle, check that the line you ran is the one the claim package's `verification.command` names.
 
 The reverse direction is safe. A newer reader keeps every earlier format in `supportedFormats`,
 so `0.2.1` reads a public-bundle/2 bundle exactly as `0.1.0` does; the line pinned inside the
