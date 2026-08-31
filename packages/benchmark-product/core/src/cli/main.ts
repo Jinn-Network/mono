@@ -42,6 +42,7 @@ import {
   createDraft,
   getDraft,
   importBinaryItemBank,
+  importRunRecords,
   importSweBenchRows,
   admitHumanTruth,
   createHumanReviewPackets,
@@ -85,6 +86,14 @@ import {
   type SignHumanReviewResponseInput,
 } from "../operations/index.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
+import { dirname } from "node:path";
+import { expectedCellSet, parseBenchmark, parseRun } from "@jinn-network/benchmarking-records";
+import { parseEvaluationSpec } from "@jinn-network/task-execution-profiles";
+import {
+  readExternalRunRecords,
+  type ExternalRunRecordFormat,
+} from "../intake/external-run-records.js";
+import { getSealedBytes } from "../workspace/sealed-store.js";
 import type { BeaconReference } from "@colophon-claims/verify";
 import { summarizeVerificationOutcome } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
@@ -166,6 +175,11 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   publication report     --workspace <dir> --principal <id> --draft <draftId>
   publication serve      --workspace <dir> --principal <id>
                    [--source <name>] [--host <address>] [--port <n>]
+  run import       --workspace <dir> --principal <id> --draft <draftId>
+                   --file <records.jsonl|records.csv> --source <harness>
+                   [--format jsonl|csv]
+                   --template instead of --file/--source prints the sealed
+                   slate as a skeleton to fill in
   launch           --workspace <dir> --principal <id> --draft <draftId>
                    [--concurrency <1-32>] [--ack-provider-network-costs]
   resume           --workspace <dir> --principal <id> --draft <draftId>
@@ -271,6 +285,7 @@ const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as 
 const PUBLICATION_SERVE_FLAGS = ["workspace", "principal", "json", "source", "host", "port"] as const;
 const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const RUN_IMPORT_FLAGS = ["workspace", "principal", "json", "draft", "file", "format", "source", "template"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const RESUME_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const CANCEL_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -1308,6 +1323,137 @@ async function handleLaunch(args: ParsedArgs, context: CliContext, jsonMode: boo
   return renderResult(result, jsonMode, (value) => `launched draft ${value.draft.draftId}: run complete\n`);
 }
 
+/** `run import`'s two dialects. Default `jsonl`: it is the richer of the two (typed measurement
+ * values, no column grammar), so a dump that omits `--format` gets the reader that can carry
+ * everything the record shape allows. */
+function importFormat(args: ParsedArgs): ExternalRunRecordFormat {
+  const value = optional(args, "format");
+  if (value === undefined) return "jsonl";
+  if (value !== "jsonl" && value !== "csv") {
+    refuse("invalid-invocation", "format", `--format must be "jsonl" or "csv", got "${value}"`);
+  }
+  return value;
+}
+
+/**
+ * The sealed slate, rendered as a skeleton the operator fills in.
+ *
+ * This is what keeps the slate refusals rare rather than routine: the denominator is fixed at lock
+ * time and there is no exclude flag, so an operator hand-writing a dump has to reproduce the exact
+ * expected cell set or be refused. Emitting it removes that whole class of mistake — and it also
+ * removes any need for a task-id -> task-digest mapping, which the sealed Benchmark record cannot
+ * supply anyway (`BenchmarkItemSchema` carries a task REFERENCE, not the harness's own id).
+ *
+ * The measurement columns are exactly what each subject Task's own sealed EvaluationSpec declares.
+ * A `graded` row's verdict is computed from that spec's verdict rule, so these are the names the
+ * rule can actually read; anything else would be a column with nowhere to land.
+ */
+function renderImportTemplate(
+  workspaceDir: string,
+  draftId: string,
+  format: ExternalRunRecordFormat,
+): { readonly template: string; readonly rows: number; readonly measurements: readonly string[] } {
+  const document = readDraftDocument(workspaceDir, draftId);
+  if (document.spec.taskSet.kind !== "benchmark") {
+    refuse("conflict", `drafts.${draftId}.taskSet`, `draft ${draftId} has no attached benchmark`);
+  }
+  const runState = requireRunState(workspaceDir, draftId);
+  if (runState.runSha256 === undefined) {
+    refuse("conflict", `runs.${draftId}`, `draft ${draftId} has no sealed Run record yet — lock it first`);
+  }
+  const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
+  const run = parseRun(getSealedBytes(workspaceDir, runState.runSha256));
+  const coords = expectedCellSet(benchmark, run);
+
+  const perCoordMeasurements = coords.map((coord) => declaredMeasurementNames(workspaceDir, coord.taskDigest));
+  const union = [...new Set(perCoordMeasurements.flat())].sort();
+
+  if (format === "csv") {
+    const header = [...IMPORT_TEMPLATE_COLUMNS, ...union.map((name) => `m.${name}`)].join(",");
+    const blanks = ",".repeat(IMPORT_TEMPLATE_COLUMNS.length - 1 + union.length);
+    const lines = [header, ...coords.map((coord) => `${coord.cellKey}${blanks}`)];
+    return { template: `${lines.join("\n")}\n`, rows: coords.length, measurements: union };
+  }
+  // No `reason` key: it is FORBIDDEN on `graded`, the most common row type, so emitting a blank
+  // one made the template refuse itself unless the operator deleted a key first. `outcome` stays
+  // blank on purpose — it is the one field the operator must choose, and the reader refuses an
+  // unfilled row rather than guessing an outcome for it.
+  const lines = coords.map((coord, index) => JSON.stringify({
+    cellKey: coord.cellKey,
+    outcome: "",
+    ...(perCoordMeasurements[index]!.length === 0
+      ? {}
+      // Sorted, so the two dialects present the same measurement inventory in the same order.
+      : { measurements: Object.fromEntries([...perCoordMeasurements[index]!].sort().map((name) => [name, ""])) }),
+  }));
+  return { template: `${lines.join("\n")}\n`, rows: coords.length, measurements: union };
+}
+
+/** The fixed columns a template emits, in the order the CSV dialect's header documents. */
+const IMPORT_TEMPLATE_COLUMNS = [
+  "cellKey", "outcome", "reason", "startedAt", "endedAt", "durationMs", "evidence",
+] as const;
+
+/** Every measurement name one subject Task's bound EvaluationSpec declares. A Task that binds no
+ * spec cannot carry a `graded` row at all, so it contributes no columns. */
+function declaredMeasurementNames(workspaceDir: string, taskDigestHex: string): readonly string[] {
+  const task = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, taskDigestHex))) as {
+    readonly evaluation?: { readonly digest?: { readonly sha256?: string } };
+  };
+  const specSha256 = task.evaluation?.digest?.sha256;
+  if (specSha256 === undefined) return [];
+  return parseEvaluationSpec(getSealedBytes(workspaceDir, specSha256))
+    .measurements.map((measurement) => measurement.name);
+}
+
+async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, RUN_IMPORT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const format = importFormat(args);
+
+  if (present(args, "template")) {
+    for (const flag of ["file", "source"] as const) {
+      if (optional(args, flag) !== undefined) {
+        refuse("invalid-invocation", flag, `run import --template prints a skeleton and reads nothing; --${flag} is not accepted with it`);
+      }
+    }
+    const rendered = renderImportTemplate(opContext.workspaceDir, draftId, format);
+    if (jsonMode) {
+      return {
+        exitCode: 0,
+        stdout: `${JSON.stringify({ ok: true, result: { format, rows: rendered.rows, measurements: rendered.measurements, template: rendered.template } })}\n`,
+        stderr: "",
+      };
+    }
+    return { exitCode: 0, stdout: rendered.template, stderr: "" };
+  }
+
+  // Relative `evidence[].path` entries resolve against the dump's own directory, so a dump and the
+  // artifacts it names move together as one tree.
+  const file = pathFrom(context.cwd, required(args, "file"));
+  const records = readExternalRunRecords(readTextFile(file), format);
+  const result = await importRunRecords(opContext, {
+    draftId,
+    records,
+    source: { harness: required(args, "source") },
+    evidenceRoot: dirname(file),
+  });
+  return renderResult(
+    result,
+    jsonMode,
+    // The second line is not decoration. `publish` refuses an imported run (operator ruling, issue
+    // #3417), and an operator who learns that only after collect and report has spent the whole
+    // chain to find out. The `--json` envelope is unchanged: machine callers branch on the
+    // publication refusal's own typed code and path, not on this prose.
+    (value) => `imported ${value.importedCellCount} cells into draft ${value.draft.draftId}: `
+      + `${value.written.graded} graded, ${value.written.ungradeable} ungradeable, `
+      + `${value.written.notDelivered} not delivered\n`
+      + "note: publication of an imported run is refused pending issue #3417 — collect and report "
+      + "work, publish does not (see EXTERNAL-RUN-IMPORT.md)\n",
+  );
+}
+
 async function handleResume(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, RESUME_FLAGS);
   const opContext = buildOperationContext(args, context);
@@ -1516,6 +1662,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["publication accounting", handlePublicationAccounting],
   ["publication report", handlePublicationReport],
   ["publication serve", handlePublicationServe],
+  ["run import", handleRunImport],
   ["launch", handleLaunch],
   ["resume", handleResume],
   ["cancel", handleCancel],
