@@ -36,4 +36,4 @@ Local install of those references: `./scripts/install-superpowers-codex-global.s
 | Bash + `gh` | `merge-batch` | `.agents/skills/merge-batch/SKILL.md` |
 | Orchestration | `release-readiness` | `.agents/skills/release-readiness/SKILL.md` |
 
-`merge-batch` is portable as written (Bash + `gh`). `release-readiness` uses Claude tool names (`Task`, `Skill`, `TodoWrite`); Codex maps those via `codex-tools.md` (`spawn_agent`, native skill load, `update_plan`).
+`merge-batch` is portable as written (Bash + `gh`). `release-readiness` uses Claude tool names (`Task`, `Skill`); Codex maps those via `codex-tools.md` (`spawn_agent`, native skill load).
