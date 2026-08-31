@@ -80,8 +80,8 @@ const DISPLAY_UNSAFE_CHARACTER =
  *   item's digest is bound to the announcement entry; the card's copy is written by the
  *   announcer. Reading the announcer's copy is how an announcer picks its own rank among equal
  *   prices, since the digest is the tie-break, and it is the digest a catalog carries forward
- *   to fetch and verify the offer a row stands for — so a misstated one sends the buyer's
- *   verification at the wrong record. The two values agree in every honest card, so binding
+ *   when it retrieves and verifies the offer a row stands for — so a misstated one sends the
+ *   buyer's verification at the wrong record. The two values agree in every honest card, so binding
  *   them costs nothing and closes both.
  * - **The two rail arrays must be the same length**, because their alignment is what makes
  *   them one list.
@@ -197,10 +197,14 @@ function withdrawalKey(source: SourceIdentity, announcementId: string): string {
  * `WithdrawnAnnouncement`), so an index following many feeds may hand the whole set over at
  * once: one source's withdrawal can never reach another source's announcement, whatever
  * digest the two carry.
+ *
+ * An array, not an `Iterable`, because a one-shot iterator drains on the first call and every
+ * later one reads as "nothing is withdrawn" — a silent fail-open showing withdrawn prices as
+ * live. Requiring a re-readable list makes that unexpressible rather than merely discouraged.
  */
 export function liveOfferCards(
   cards: readonly OfferCard[],
-  withdrawn: Iterable<WithdrawnAnnouncement>,
+  withdrawn: readonly WithdrawnAnnouncement[],
 ): OfferCard[] {
   const retired = new Set<string>();
   for (const entry of withdrawn) {
@@ -282,7 +286,7 @@ export interface OfferListingQuery {
    * carrying the source that published it. Omitted means nothing is known to be withdrawn —
    * never that nothing is live.
    */
-  readonly withdrawnAnnouncements?: Iterable<WithdrawnAnnouncement>;
+  readonly withdrawnAnnouncements?: readonly WithdrawnAnnouncement[];
 }
 
 /**
