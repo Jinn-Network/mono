@@ -448,7 +448,13 @@ async function produceReportWithExtension(
   }
   const methodTuple = { id: input.method.id, version: input.method.version, parameters };
   const preregistered = derivePreregistered(runs, methodTuple);
-  const document: Record<string, unknown> = {
+  // Every key this module owns is written here, the CONDITIONAL ones included, with `undefined`
+  // standing for "this call omits it". That is what makes `ownedKeys` below structurally complete:
+  // deriving it from the emitted document alone would miss `limitations` on any call that does not
+  // set it, and a caller could then supply `limitations` as an extension key and have it spread in.
+  // The undefined entries are stripped before sealing, so the emitted document is exactly what it
+  // was before this shape existed.
+  const coreDocument: Record<string, unknown> = {
     protocol: BENCHMARKING_PROTOCOL,
     subjects: exactSubjects.map((subject) => ({
       digest: { sha256: stripSha256Prefix(subject.digest) },
@@ -458,12 +464,15 @@ async function produceReportWithExtension(
     results,
     disclosures: derivedDisclosures,
     author: input.author,
-    ...(input.limitations === undefined ? {} : { limitations: input.limitations }),
-    ...(publicationExtension === undefined ? {} : { [BENCHMARK_PUBLICATION_EXTENSION]: publicationExtension }),
+    limitations: input.limitations,
+    [BENCHMARK_PUBLICATION_EXTENSION]: publicationExtension,
   };
-  // DERIVED, never a hand-kept list: the keys this module owns are exactly the ones it just wrote,
-  // so a field added to the literal above is covered here without anyone remembering to add it.
-  const ownedKeys = new Set(Object.keys(document));
+  // DERIVED, never a hand-kept list: a field added to `coreDocument` above is covered here without
+  // anyone remembering to add it, whether or not this particular call emits it.
+  const ownedKeys = new Set(Object.keys(coreDocument));
+  const document: Record<string, unknown> = Object.fromEntries(
+    Object.entries(coreDocument).filter(([, value]) => value !== undefined),
+  );
   for (const key of Object.keys(input.recordExtensions ?? {})) {
     // Refused rather than spread-over in either direction: a caller's key must not shadow a core
     // field, and a core field must not silently win over a caller's key. Both are errors.

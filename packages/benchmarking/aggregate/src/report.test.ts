@@ -1335,9 +1335,23 @@ describe("produceReport recordExtensions (issue #2839)", () => {
 
   test("a key colliding with any core Report field is refused, not spread over", async () => {
     const fixture = makeFixture();
-    // Every field the document literal writes, derived rather than restated: this is the assertion
-    // that fails if a future core field is added without the guard learning about it.
-    const coreFields = Object.keys(await produce(fixture).then((produced) => produced.record));
+    // Derived from a record that carries EVERY field the literal can write, optional ones included.
+    // Deriving from a default fixture would silently skip `limitations`, because that fixture never
+    // sets it -- and a hand-maintained guard that forgot `limitations` would then pass this test.
+    // Verified by mutation: reverting the guard to a hardcoded list missing `limitations` fails here.
+    const withOptionalFields = await produceReport(
+      {
+        ...fixture.ports,
+        subjects: fixture.subjectBytes,
+        method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+        verdictRule: "unanimous",
+        author: AUTHOR,
+        limitations: ["a limitation, so the optional field is present in the key set below"],
+      },
+      signer,
+    );
+    const coreFields = Object.keys(withOptionalFields.record);
+    expect(coreFields).toContain("limitations");
     expect(coreFields.length).toBeGreaterThan(5);
     for (const field of coreFields) {
       await expect(
