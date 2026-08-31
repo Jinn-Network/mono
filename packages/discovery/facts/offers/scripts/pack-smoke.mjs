@@ -96,7 +96,7 @@ for (const name of ["free", "priced", "superseding"]) {
   }
 }
 await readFile(${JSON.stringify(join(installedRoot, "README.md"))});
-console.log("Installed package imports, dependency boundary, and dist shape verified.");
+console.log("Installed package imports, dependency boundary, dist shape, and fixture catalog verified.");
 `,
   );
   await run(process.execPath, [smokeScript], { cwd: temporaryRoot });
