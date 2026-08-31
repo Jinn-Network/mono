@@ -970,6 +970,17 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
   // fourth cell, anchored+qualification, is claim-package/5 (issue #3205); before it existed this
   // pairing threw, which made anchoring and binary-instrument benchmarking mutually exclusive.
   const anchoredQualification = anchored && projection.qualification !== undefined;
+  // The disclosed allocation is the anchored QUALIFICATION cell plus a section, and there is no
+  // other disclosed cell (issue #2839). A run publishes one bundle per analysis, and its sibling
+  // headline/comparison analyses project no qualification, so they have nowhere to put the section.
+  // Refusing here rather than dropping it silently is what makes the caller state which entry the
+  // record belongs to instead of discovering later that one bundle quietly lost it.
+  if (disclosure !== undefined && !anchoredQualification) {
+    throw new Error(
+      "claim package: only the anchored binary-qualification closure carries a disclosure section"
+      + " — this projection has no qualification, and no other closure version expresses one",
+    );
+  }
 
   return {
     claimSchema: anchoredQualification && disclosure !== undefined

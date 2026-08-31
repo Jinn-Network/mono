@@ -414,8 +414,11 @@ function recordClosure(input: MaterializeBundleInput): {
   // contents, for the same reason the anchors section is: an undisclosed claim inside a disclosed
   // closure is exactly as wrong as a disclosed claim whose section drifted.
   const disclosureCarriage = readRunDisclosureCarriage(workspaceDir, runState);
-  const disclosed = disclosureCarriage !== undefined;
-  if (disclosed && !(anchored && binaryQualification)) {
+  // A run publishes one bundle per analysis. Only the QUALIFICATION bundle can be disclosed, because
+  // `/8` is the one disclosed cell; a sibling headline or comparison analysis publishes on its own
+  // closure without the section, exactly as it did before this feature existed.
+  const disclosed = disclosureCarriage !== undefined && anchored && binaryQualification;
+  if (disclosureCarriage !== undefined && binaryQualification && !anchored) {
     // The one enumerated cell this closure occupies. Refusing loudly here rather than inventing a
     // second disclosed allocation is deliberate: every extra cell doubles the enumeration that the
     // capability-composition design (issue #2889) exists to replace, and the flagship case is
@@ -425,12 +428,11 @@ function recordClosure(input: MaterializeBundleInput): {
       "disclosure",
       `${BUNDLE_V8_FORMAT} is the anchored binary-qualification closure plus a disclosure record, and`
       + " no other closure version expresses a disclosure declaration; this run carries a declaration"
-      + (anchored ? "" : " but no anchor")
-      + (binaryQualification ? "" : " but no binary-qualification projection"),
+      + " and a binary-qualification projection but no anchor",
     );
   }
   const storedDisclosure = (claim as { readonly disclosure?: unknown }).disclosure;
-  const expectedDisclosure = disclosureCarriage?.disclosure;
+  const expectedDisclosure = disclosed ? disclosureCarriage.disclosure : undefined;
   if (!Buffer.from(canonicalJsonBytes({ disclosure: storedDisclosure ?? null } as never)).equals(
     Buffer.from(canonicalJsonBytes({ disclosure: expectedDisclosure ?? null } as never)),
   )) {
@@ -460,8 +462,8 @@ function recordClosure(input: MaterializeBundleInput): {
   // The one graph edge the disclosed closure adds. It is derived from the run's own sealed
   // declaration, and the verifier derives the same edge from the Report extension that names it, so
   // the record is reachable in the evidence closure from exactly one place on exactly one closure.
-  if (disclosureCarriage !== undefined) {
-    addRole(evidenceRecords, disclosureCarriage.recordSha256, "disclosure-specification");
+  if (disclosed) {
+    addRole(evidenceRecords, disclosureCarriage!.recordSha256, "disclosure-specification");
   }
   const admissionReviewerBindings = new Map<string, string>();
   const admissionAuthorityBindings = new Map<"roster-attestor" | "truth-reveal-attestor" | "operator-truth-attestor", string>();

@@ -130,6 +130,8 @@ describe("disclosed bundle v8 — producer (T1)", () => {
     expect(record.author).toBe(report.author);
     expect(record.subject.digest.sha256).toBe(json(built.bundle.bundleDir, "claim-package.json").records.matrixSha256);
 
+    // Only the QUALIFICATION bundle is disclosed: the run's sibling analyses publish on their own
+    // closures without the section, because `/8` is the one disclosed cell.
     // The evidence catalog declares exactly the one role, and no second.
     const catalogEntry = (json(built.bundle.bundleDir, "evidence.json").records as Array<{ sha256: string; roles: string[] }>)
       .find((entry) => entry.sha256 === extension.digest.sha256);

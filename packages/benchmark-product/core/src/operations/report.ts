@@ -443,7 +443,14 @@ export function runReport(
             },
           },
           ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
-          ...(disclosureCarriage === undefined ? {} : { disclosure: disclosureCarriage.disclosure }),
+          // Only the entry whose projection is the binary qualification can carry the section, and
+          // only when the run is also anchored: `/8` is the one disclosed cell. A run's sibling
+          // analyses publish on their own closures, without it (issue #2839).
+          ...(disclosureCarriage === undefined
+            || !carriage.anchoredClosure
+            || entry.method !== BENCHMARKING_METHOD_IDS.binaryInstrument
+            ? {}
+            : { disclosure: disclosureCarriage.disclosure }),
           ...(previewLog !== undefined && previewLog.count > 0
             ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }
             : {}),
