@@ -54,6 +54,14 @@ export const ANCHOR_INTENT_EXTENSION =
 export const TASK_SELECTION_EXTENSION =
   "https://spec.jinn.network/extensions/task-selection/v1";
 
+/**
+ * The beacon source a run will bind to, sealed into the Run record (issue #3426). Fixing it at seal
+ * time is what leaves `beacon-binding/1` no source to choose: with the round already determined by
+ * `(source, sealedAt)`, naming the source in the seal determines the beacon outright.
+ */
+export const BEACON_SOURCE_EXTENSION =
+  "https://spec.jinn.network/extensions/beacon-source/v1";
+
 export const ASSEMBLY_PROCEDURE = "jinn.benchmarking.assembly";
 export const ASSEMBLY_PROCEDURE_VERSION = "1.0";
 export const MATRIX_ASSEMBLY_PROCEDURE = ASSEMBLY_PROCEDURE;

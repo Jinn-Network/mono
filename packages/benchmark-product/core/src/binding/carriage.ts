@@ -25,6 +25,7 @@
 
 import { RunBindingError, verifyRunBinding } from "@colophon-claims/verify";
 import type { VerifiedRunBinding } from "@colophon-claims/verify";
+import { parseRun, readBeaconSource } from "@jinn-network/benchmarking-records";
 import { refuse } from "../errors.js";
 import type { RunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
@@ -60,7 +61,42 @@ export function readRunBindingCarriage(
       `binding names a seal at ${binding.sealedAt}, but this run was sealed at ${runState.lockedAt}`,
     );
   }
+  // The declared source is the third field the binding restates from the sealed record (#3426), and
+  // it is checked against the sealed bytes for the same reason the two above are: `verifyRunBinding`
+  // can only tell that the restatement agrees with the binding's OWN beacon, never that it agrees
+  // with the Run. Omission is the case that makes this load-bearing rather than tidy -- a binding
+  // that simply drops the field verifies clean and reports `operator-chosen`, which would let a run
+  // that declared a source bind any other one and print the honest-looking weaker sentence over it.
+  const declared = readRunDeclaredBeaconSource(workspaceDir, runState.runSha256);
+  if (binding.declaredSource !== declared) {
+    const carried = binding.declaredSource === undefined
+      ? "binding declares no beacon source"
+      : `binding names ${binding.declaredSource} as this run's declared beacon source`;
+    const sealed = declared === undefined ? "its sealed Run declares none" : `its sealed Run declares ${declared}`;
+    refuse("record-integrity", path, `${carried}, but ${sealed}`);
+  }
   return binding;
+}
+
+/**
+ * The beacon source this run's SEALED Run record declares (#3426), or `undefined` when it declares
+ * none. Read from the sealed bytes on every call rather than mirrored into `RunState`: the seal is
+ * what makes the declaration unforgeable after the lock, and a mutable copy beside it would be a
+ * second answer free to disagree with the one every reader recomputes from.
+ */
+export function readRunDeclaredBeaconSource(workspaceDir: string, runSha256: string): string | undefined {
+  const path = `records/${runSha256}.bin`;
+  let run: Record<string, unknown>;
+  try {
+    run = parseRun(getSealedBytes(workspaceDir, runSha256)) as unknown as Record<string, unknown>;
+  } catch (cause) {
+    // A raw schema throw must not cross this package boundary, for the reason the module header
+    // gives: it reaches an operator as an internal failure rather than as "this Run does not
+    // conform". `getSealedBytes` has already re-verified the digest, so anything left is the
+    // record's own shape.
+    refuse("record-integrity", path, `sealed Run record does not conform: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+  return readBeaconSource(run);
 }
 
 

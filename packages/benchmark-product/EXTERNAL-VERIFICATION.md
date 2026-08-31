@@ -55,8 +55,9 @@ a **public beacon value that did not exist when the seal was taken**
 the derivation below is the whole procedure — recompute it yourself.
 
 The binding record names the sealed digest it postdates (`sealDigest`), when that
-seal was taken (`sealedAt`), the beacon (`source`, `round`, `value`), and either a
-drawn `sample` or, for a census run, the derived `order`.
+seal was taken (`sealedAt`), the beacon (`source`, `round`, `value`), optionally the
+beacon source the sealed record declared (`declaredSource`), and either a drawn
+`sample` or, for a census run, the derived `order`.
 
 **Step 1 — check the beacon postdates the seal.** For a scheduled beacon the round
 index gives the instant by arithmetic, with no network access:
@@ -96,6 +97,38 @@ value applied, and its report face says so in those words.
 nothing derives one from the seal and the height stays the operator's choice.
 That residue is stated on the face rather than removed.
 
+**Step 2c — check the source was not chosen either.** A round rule binds only the
+round *within a source*. Choosing the source is choosing which rule applies, and
+one admitted source has no rule at all: `bitcoin/mainnet` derives no round from a
+seal, and nothing in the bundle places its value after the seal. So a run that
+left the source open left the round rule one selection away from having no
+effect. A run closes this by naming its beacon in the sealed Run record itself,
+under the extension key
+
+```text
+https://spec.jinn.network/extensions/beacon-source/v1
+```
+
+whose value is `{ "source": "<beacon source id>" }`. Two checks, and they are
+separate:
+
+1. **Inside the binding record.** If it carries `declaredSource`, it must equal
+   `beacon.source`. The reference verifier refuses a record where it does not.
+2. **Against the sealed Run.** Read the extension from the Run record the binding's
+   `sealDigest` names, and check it agrees with the binding's `declaredSource` —
+   *including when the binding carries none*. This second check is the one that
+   matters, and omission is why: a binding that simply drops the field verifies
+   clean on its own and reads as an operator-chosen source, which is exactly how a
+   run that declared a beacon would bind a different one and still look honest.
+
+A Run that declares no source is a legitimate and historical state — every run
+sealed before this extension existed is one — and its face says the beacon was the
+operator's choice. A Run that declares one gets the stronger sentence, and
+Colophon's `bind` refuses a binding naming any other source. Declaring a source
+does **not** rescue `bitcoin/mainnet`: the beacon is then fixed, but no round
+follows from a seal on a height-indexed source, so the height remains the
+operator's choice and the face keeps saying so.
+
 **Step 3 — recompute the derivation.** For each item identity — a
 `sha256:`-prefixed lowercase-hex task digest — compute
 
@@ -128,13 +161,16 @@ stated as such: it shows the run's ORDER was fixed by randomness postdating the
 seal, not that the population was — a census makes no population choice. A run
 with no binding establishes neither, and its report face says so.
 
-One residue survives even a seal-derived round: the *source*. Nothing in the
-seal names which beacon a run binds to, so an operator could have bound a
-different one — and `bitcoin/mainnet` derives no round from a seal at all. The
-procedure runs no postdating check on a height-indexed source, so through that
-source every height the chain carries is an available alternative, including
-heights that predate the seal. Closing this would need the run to name its
-source in the sealed record itself; today the face names the residue instead.
+Where the sealed Run declares no beacon source, one residue survives even a
+seal-derived round: the *source*. An operator could have bound a different beacon
+— and `bitcoin/mainnet` derives no round from a seal at all. The procedure runs no
+postdating check on a height-indexed source, so through that source every height
+the chain carries is an available alternative, including heights that predate the
+seal. The face names that residue. Where the Run does declare a source (step 2c),
+the face drops it: with the source fixed at the seal and the round determined by
+`(source, sealedAt)`, the beacon is fixed outright. On a height-indexed declared
+source the face states the narrower truth — the beacon was fixed, the height
+within it was not.
 
 ## The record family
 

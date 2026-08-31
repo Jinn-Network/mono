@@ -6,6 +6,7 @@
 export {
   ANCHOR_INTENT_EXTENSION,
   TASK_SELECTION_EXTENSION,
+  BEACON_SOURCE_EXTENSION,
   ASSEMBLY_PROCEDURE,
   ASSEMBLY_PROCEDURE_VERSION,
   BENCHMARK_ACCOUNTING_MEDIA_TYPE,
@@ -96,6 +97,15 @@ export {
   withRunTaskSelectionExtension,
 } from "./task-selection.js";
 export type { RunTaskSelectionExtension, TaskSelectionMode } from "./task-selection.js";
+
+export {
+  RunBeaconSourceExtensionSchema,
+  readBeaconSource,
+  readRunBeaconSourceExtension,
+  runBeaconSourceExtension,
+  withRunBeaconSourceExtension,
+} from "./beacon-source.js";
+export type { RunBeaconSourceExtension } from "./beacon-source.js";
 
 export type {
   MatrixPublicationExtension,

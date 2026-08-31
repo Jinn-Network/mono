@@ -22,7 +22,13 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
   const publicationConfiguration = view.ok ? view.publicationConfiguration : undefined;
   // `?? []` for the same reason `publication` and `publicationConfiguration` above are optional-
   // chained: a view that failed to load, or a caller holding an older shape, still renders a page.
-  const beaconSources = view.ok ? view.beaconSources ?? [] : [];
+  const allBeaconSources = view.ok ? view.beaconSources ?? [] : [];
+  // Issue #3426: when the sealed record names the beacon this run binds to, `bind` refuses every
+  // other source. Offering the rest would be offering refusals.
+  const declaredBeaconSource = status?.declaredBeaconSource;
+  const beaconSources = declaredBeaconSource === undefined
+    ? allBeaconSources
+    : allBeaconSources.filter((id) => id === declaredBeaconSource);
   // Issue #3322: `bind` admits exactly one round per scheduled source, derived from this run's own
   // seal. The form cannot ask an operator to compute it, so the run reports the numbers and the
   // form shows them beside the field they go in.
@@ -82,7 +88,7 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
           ? <p className="text-sm">{status.binding.statement}</p>
           : <ActionForm action={GUI_SERVER_ACTIONS["run.bind"]} submitLabel="Bind to this beacon value" disabled={state !== "locked"}>
               <HiddenDraft draftId={draftId} />
-              <p className="text-sm text-muted-foreground">Read a round from a public beacon that has already been published, and bind this sealed run to it. On a scheduled beacon the seal names the one round this run may bind to; any other is refused. A run binds once.</p>
+              <p className="text-sm text-muted-foreground">Read a round from a public beacon that has already been published, and bind this sealed run to it. On a scheduled beacon the seal names the one round this run may bind to; any other is refused.{declaredBeaconSource === undefined ? "" : " This run\u2019s seal names the beacon below, and any other source is refused."} A run binds once.</p>
               <Label htmlFor="beacon-source">Beacon</Label>
               <select id="beacon-source" name="beaconSource" required disabled={state !== "locked"} className="h-10 rounded-md border border-input bg-background px-3 text-sm">{beaconSources.map((id) => <option key={id} value={id}>{id}</option>)}</select>
               <Label htmlFor="beacon-round">Round or block height</Label>

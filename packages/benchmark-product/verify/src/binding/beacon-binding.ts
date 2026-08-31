@@ -53,6 +53,14 @@
  * separate record, the producer refuses any other round, and `roundBasis` reports which of the two
  * situations a record is in so the report face can say only what is true of it.
  *
+ * The SOURCE choice survived that, and issue #3426 closes it on the same terms. It was never a swap
+ * between equally constrained beacons: `bitcoin/mainnet` is `attributive-height`, so no round
+ * follows from a seal for it and the postdating refusal below is never reached on that branch --
+ * leaving the round rule one source selection away from having no effect. So the sealed record names
+ * the beacon the run will bind to, `declaredSource` restates that naming inside the binding, the
+ * producer refuses a binding naming any other source, and `sourceBasis` reports which of the two
+ * situations a record is in.
+ *
  * This module does no filesystem or network I/O and throws `RunBindingError` on any invalid input.
  */
 
@@ -142,8 +150,12 @@ const InstantSchema = z.string().datetime({ offset: true });
  * A public beacon reference: which beacon, which round or height, and the value it published
  * there. `round` is the source's own index -- a drand round number, a Bitcoin block height.
  */
+export const BeaconSourceIdSchema = z.enum(
+  Object.keys(BEACON_SOURCES) as [BeaconSourceId, ...BeaconSourceId[]],
+);
+
 export const BeaconReferenceSchema = z.strictObject({
-  source: z.enum(Object.keys(BEACON_SOURCES) as [BeaconSourceId, ...BeaconSourceId[]]),
+  source: BeaconSourceIdSchema,
   round: z.number().int().positive().max(MAX_BEACON_ROUND),
   value: HexValueSchema,
 });
@@ -155,6 +167,16 @@ const CommonBindingFields = {
   sealDigest: DigestSchema,
   /** When that seal was taken. The beacon must postdate it. */
   sealedAt: InstantSchema,
+  /**
+   * The beacon source the SEALED record named (issue #3426), restated here the way `sealedAt` is
+   * restated: this record must be checkable on its own, and a reader who also holds the sealed Run
+   * checks the restatement against it (`beacon-source/v1`).
+   *
+   * Optional, because absence is a real and historical state: a run that declared no source left
+   * the beacon to the operator, and every record sealed before this field existed is exactly that
+   * run. Absence is reported as `operator-chosen`, never defaulted to a source.
+   */
+  declaredSource: BeaconSourceIdSchema.optional(),
   beacon: BeaconReferenceSchema,
 } as const;
 
@@ -357,6 +379,25 @@ export type BeaconPostSealBasis = "proven-offline" | "attributive";
  */
 export type BeaconRoundBasis = "seal-derived" | "operator-chosen";
 
+/**
+ * Whether the seal fixed WHICH BEACON applied, or the operator picked it (issue #3426).
+ *
+ * `seal-declared` -- the sealed Run named this source, so the binding had one beacon available and
+ * `bind` refuses a binding naming any other. `operator-chosen` -- the record declares no source, so
+ * the operator selected one from the admitted set after sealing.
+ *
+ * The source residue is not a swap between equals, which is why it needed closing rather than only
+ * reporting: `bitcoin/mainnet` is `attributive-height`, so `requiredBeaconRound` derives nothing for
+ * it and `beaconRoundInstant` returns `undefined`, which means the postdating refusal in
+ * `verifyRunBinding` is never reached on that branch. Under `operator-chosen` the round rule is
+ * therefore one source selection away from having no effect at all.
+ *
+ * Like {@link BeaconRoundBasis} this is derived and reported here, never enforced: a verifier states
+ * what the bytes are, and refusing an undeclared source would make every already-sealed record
+ * unreadable. The refusal belongs to the producer, and `bind` makes it.
+ */
+export type BeaconSourceBasis = "seal-declared" | "operator-chosen";
+
 /** What every verified binding carries, whichever mode produced it. */
 export interface VerifiedRunBindingBase {
   readonly procedure: typeof BEACON_BINDING_PROCEDURE;
@@ -371,6 +412,10 @@ export interface VerifiedRunBindingBase {
   readonly postSeal: BeaconPostSealBasis;
   /** Whether the seal fixed which post-seal round applied, or the operator chose it. */
   readonly roundBasis: BeaconRoundBasis;
+  /** Whether the seal fixed which beacon applied, or the operator chose it. */
+  readonly sourceBasis: BeaconSourceBasis;
+  /** The source the sealed record named, present exactly when it named one. */
+  readonly declaredSource?: BeaconSourceId;
   /** The beacon's own publication instant, when its source's round index determines one. */
   readonly beaconInstant?: string;
 }
@@ -421,6 +466,19 @@ export function verifyRunBinding(candidate: unknown): VerifiedRunBinding {
     itemSha256s: pool,
   });
 
+  // A record that restates a declaration contradicting its own beacon is refused rather than
+  // reported: the two fields would name two different runs' worth of intent, and no reading of the
+  // bytes is honest. The restatement's agreement with the SEALED record is checked by the reader
+  // who holds it (workspace-side: `core/src/binding/carriage.ts`).
+  if (binding.declaredSource !== undefined && binding.declaredSource !== binding.beacon.source) {
+    fail(
+      "declaredSource",
+      `the sealed record named ${BEACON_SOURCES[binding.declaredSource].displayName} as this run's beacon, but `
+      + `this binding names ${BEACON_SOURCES[binding.beacon.source].displayName} — a declared source the binding `
+      + "does not use fixes nothing",
+    );
+  }
+
   const required = requiredBeaconRound(binding.beacon.source, binding.sealedAt);
   const roundBasis: BeaconRoundBasis = required !== undefined && required.round === binding.beacon.round
     ? "seal-derived"
@@ -436,6 +494,10 @@ export function verifyRunBinding(candidate: unknown): VerifiedRunBinding {
     order: derived.order,
     postSeal,
     roundBasis,
+    sourceBasis: binding.declaredSource === undefined
+      ? ("operator-chosen" as const)
+      : ("seal-declared" as const),
+    ...(binding.declaredSource === undefined ? {} : { declaredSource: binding.declaredSource }),
     ...(beaconInstant === undefined ? {} : { beaconInstant }),
   } as const;
 
