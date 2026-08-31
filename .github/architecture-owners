@@ -5,49 +5,49 @@
 # log/decisions/2026-08-20-human-surface-enqueue-gate.md.
 
 # Canonical docs (PAC coverage if enumerated).
-/PRINCIPLES.md @oaksprout @ritsukai
-/SPEC.md       @oaksprout @ritsukai
-/THESIS.md     @oaksprout @ritsukai
-/BRAND.md      @oaksprout @ritsukai
-/GROWTH.md     @oaksprout @ritsukai
-/GLOSSARY.md   @oaksprout @ritsukai
-/CLAUDE.md     @oaksprout @ritsukai
-/README.md     @oaksprout @ritsukai
+/PRINCIPLES.md @oaksprout @ritsukai @ritsuKai2000
+/SPEC.md       @oaksprout @ritsukai @ritsuKai2000
+/THESIS.md     @oaksprout @ritsukai @ritsuKai2000
+/BRAND.md      @oaksprout @ritsukai @ritsuKai2000
+/GROWTH.md     @oaksprout @ritsukai @ritsuKai2000
+/GLOSSARY.md   @oaksprout @ritsukai @ritsuKai2000
+/CLAUDE.md     @oaksprout @ritsukai @ritsuKai2000
+/README.md     @oaksprout @ritsukai @ritsuKai2000
 
 # Product-canon specs and former GitHub render dirs (PAC last-match still
 # covers these trees via the blankets below; keep the explicit prefixes so a
 # later blanket shrink cannot drop them).
-/apps/operator-console/OPERATOR-APP-SPEC.md @oaksprout @ritsukai
-/apps/operator-console/app/        @oaksprout @ritsukai
-/apps/operator-console/components/ @oaksprout @ritsukai
-/packages/indexer/explorer/src/App.tsx     @oaksprout @ritsukai
-/packages/indexer/explorer/src/views/      @oaksprout @ritsukai
-/packages/indexer/explorer/src/components/ @oaksprout @ritsukai
-/packages/indexer/explorer/src/styles/     @oaksprout @ritsukai
-/apps/website/app/        @oaksprout @ritsukai
-/apps/website/components/ @oaksprout @ritsukai
-/apps/website/content/    @oaksprout @ritsukai
-/apps/website/styles/     @oaksprout @ritsukai
+/apps/operator-console/OPERATOR-APP-SPEC.md @oaksprout @ritsukai @ritsuKai2000
+/apps/operator-console/app/        @oaksprout @ritsukai @ritsuKai2000
+/apps/operator-console/components/ @oaksprout @ritsukai @ritsuKai2000
+/packages/indexer/explorer/src/App.tsx     @oaksprout @ritsukai @ritsuKai2000
+/packages/indexer/explorer/src/views/      @oaksprout @ritsukai @ritsuKai2000
+/packages/indexer/explorer/src/components/ @oaksprout @ritsukai @ritsuKai2000
+/packages/indexer/explorer/src/styles/     @oaksprout @ritsukai @ritsuKai2000
+/apps/website/app/        @oaksprout @ritsukai @ritsuKai2000
+/apps/website/components/ @oaksprout @ritsukai @ritsuKai2000
+/apps/website/content/    @oaksprout @ritsukai @ritsuKai2000
+/apps/website/styles/     @oaksprout @ritsukai @ritsuKai2000
 
-/.github/CODEOWNERS           @oaksprout @ritsukai
-/docs/engineering/handbook.md @oaksprout @ritsukai
-/log/decisions/               @oaksprout @ritsukai
+/.github/CODEOWNERS           @oaksprout @ritsukai @ritsuKai2000
+/docs/engineering/handbook.md @oaksprout @ritsukai @ritsuKai2000
+/log/decisions/               @oaksprout @ritsukai @ritsuKai2000
 
 # Deliberately last. The validator enumerates every catalog/control surface
 # and applies last-match semantics, so a later rule that weakens either
 # required owner fails platform-architecture-control.
-/architecture/          @oaksprout @ritsukai
-/docs/                  @oaksprout @ritsukai
-/spec/                  @oaksprout @ritsukai
-/contracts/             @oaksprout @ritsukai
-/.github/scripts/       @oaksprout @ritsukai
-/.github/workflows/     @oaksprout @ritsukai
-/apps/broadcast-bot/    @oaksprout @ritsukai
-/apps/operator-console/ @oaksprout @ritsukai
-/apps/website/          @oaksprout @ritsukai
-/operator/                @oaksprout @ritsukai
-/packages/              @oaksprout @ritsukai
-/plugin/runtime/        @oaksprout @ritsukai
-/scripts/               @oaksprout @ritsukai
-/.github/CODEOWNERS     @oaksprout @ritsukai
-/.github/architecture-owners @oaksprout @ritsukai
+/architecture/          @oaksprout @ritsukai @ritsuKai2000
+/docs/                  @oaksprout @ritsukai @ritsuKai2000
+/spec/                  @oaksprout @ritsukai @ritsuKai2000
+/contracts/             @oaksprout @ritsukai @ritsuKai2000
+/.github/scripts/       @oaksprout @ritsukai @ritsuKai2000
+/.github/workflows/     @oaksprout @ritsukai @ritsuKai2000
+/apps/broadcast-bot/    @oaksprout @ritsukai @ritsuKai2000
+/apps/operator-console/ @oaksprout @ritsukai @ritsuKai2000
+/apps/website/          @oaksprout @ritsukai @ritsuKai2000
+/operator/                @oaksprout @ritsukai @ritsuKai2000
+/packages/              @oaksprout @ritsukai @ritsuKai2000
+/plugin/runtime/        @oaksprout @ritsukai @ritsuKai2000
+/scripts/               @oaksprout @ritsukai @ritsuKai2000
+/.github/CODEOWNERS     @oaksprout @ritsukai @ritsuKai2000
+/.github/architecture-owners @oaksprout @ritsukai @ritsuKai2000

@@ -6,30 +6,30 @@
 
 # Canonical docs — require code-owner review.
 # See spec/2026-04-28-canonical-docs.md for policy.
-/PRINCIPLES.md @oaksprout @ritsukai
-/SPEC.md       @oaksprout @ritsukai
-/THESIS.md     @oaksprout @ritsukai
-/BRAND.md      @oaksprout @ritsukai
-/GROWTH.md     @oaksprout @ritsukai
-/GLOSSARY.md   @oaksprout @ritsukai
-/CLAUDE.md     @oaksprout @ritsukai
-/README.md     @oaksprout @ritsukai
+/PRINCIPLES.md @oaksprout @ritsukai @ritsuKai2000
+/SPEC.md       @oaksprout @ritsukai @ritsuKai2000
+/THESIS.md     @oaksprout @ritsukai @ritsuKai2000
+/BRAND.md      @oaksprout @ritsukai @ritsuKai2000
+/GROWTH.md     @oaksprout @ritsukai @ritsuKai2000
+/GLOSSARY.md   @oaksprout @ritsukai @ritsuKai2000
+/CLAUDE.md     @oaksprout @ritsukai @ritsuKai2000
+/README.md     @oaksprout @ritsukai @ritsuKai2000
 
 # Product-canon specs (not screens). Render dirs of live frontends are out of
 # this GitHub gate. A new product-canon spec must be added here by hand.
-/apps/operator-console/OPERATOR-APP-SPEC.md @oaksprout @ritsukai
-/packages/indexer/explorer/EXPLORER-APP-SPEC.md @oaksprout @ritsukai
-/apps/website/WEBSITE-APP-SPEC.md @oaksprout @ritsukai
+/apps/operator-console/OPERATOR-APP-SPEC.md @oaksprout @ritsukai @ritsuKai2000
+/packages/indexer/explorer/EXPLORER-APP-SPEC.md @oaksprout @ritsukai @ritsuKai2000
+/apps/website/WEBSITE-APP-SPEC.md @oaksprout @ritsukai @ritsuKai2000
 
 # Root visual contract.
-/DESIGN.md   @oaksprout @ritsukai
-/DESIGN.json @oaksprout @ritsukai
+/DESIGN.md   @oaksprout @ritsukai @ritsuKai2000
+/DESIGN.json @oaksprout @ritsukai @ritsuKai2000
 
 # External speech.
-/docs/press/            @oaksprout @ritsukai
-/apps/website/content/  @oaksprout @ritsukai
+/docs/press/            @oaksprout @ritsukai @ritsuKai2000
+/apps/website/content/  @oaksprout @ritsukai @ritsuKai2000
 
 # The gate itself: CODEOWNERS, the handbook, and the decision log.
-/.github/CODEOWNERS           @oaksprout @ritsukai
-/docs/engineering/handbook.md @oaksprout @ritsukai
-/log/decisions/               @oaksprout @ritsukai
+/.github/CODEOWNERS           @oaksprout @ritsukai @ritsuKai2000
+/docs/engineering/handbook.md @oaksprout @ritsukai @ritsuKai2000
+/log/decisions/               @oaksprout @ritsukai @ritsuKai2000
