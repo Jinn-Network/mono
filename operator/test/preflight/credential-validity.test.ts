@@ -239,9 +239,111 @@ describe('checkCredentialsValid', () => {
     expect(JSON.stringify(result)).not.toContain('or-secret');
   });
 
+  it('REGRESSION: a rate-limited OpenRouter credential is non-blocking, not invalid', async () => {
+    // `hermes auth list` annotates a pooled credential the provider is
+    // throttling as `rate-limited (12m 3s left)`. The CLI ran cleanly (exit 0,
+    // no errno) and OpenRouter AUTHENTICATED the key — it is rate-limiting it
+    // for a stated window, and it works again in minutes with no operator
+    // action. Judged on `authed` alone this falls through every earlier guard
+    // onto the env-presence split and reads as `invalid`: blocking, and
+    // boot-fatal for a required runtime in a hosted deployment. A daemon that
+    // restarts inside the window then refuses to boot, takes the operator
+    // console (served by that same daemon) down with it, and prints a remedy
+    // telling the operator to replace the one credential that is not broken.
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['hermes'],
+        env: { OPENROUTER_API_KEY: 'or-secret' },
+        authContext: AUTH_CTX,
+      },
+      validityDeps({
+        probeHermesAuthStatus: async () =>
+          hermesProbe({
+            authed: false,
+            exitCode: 0,
+            raw:
+              'openrouter (1 credentials):\n' +
+              '  #0  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY rate-limited (429) (12m 3s left)',
+            unusableReason: 'throttled',
+          }),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([
+      { runtime: 'hermes', validity: 'throttled', note: 'openrouter credential rate-limited' },
+    ]);
+    // `throttled` is outside the blocking set, so no remedy is emitted at all
+    // — and in particular nothing tells the operator to replace the key.
+    expect(result.remedy).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain('OPENROUTER_API_KEY');
+    expect(JSON.stringify(result)).not.toContain('or-secret');
+  });
+
+  it('REGRESSION: an exhausted OpenRouter credential with a wait window still open is non-blocking', async () => {
+    // The other annotation `_format_exhausted_status` emits for an open
+    // window. Same fact, same verdict.
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['hermes'],
+        env: { OPENROUTER_API_KEY: 'or-secret' },
+        authContext: AUTH_CTX,
+      },
+      validityDeps({
+        probeHermesAuthStatus: async () =>
+          hermesProbe({
+            authed: false,
+            exitCode: 0,
+            raw:
+              'openrouter (1 credentials):\n' +
+              '  #0  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY exhausted (1h 4m left)',
+            unusableReason: 'throttled',
+          }),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([
+      { runtime: 'hermes', validity: 'throttled', note: 'openrouter credential rate-limited' },
+    ]);
+    expect(result.remedy).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain('OPENROUTER_API_KEY');
+  });
+
+  it('reports a throttled non-OpenRouter provider as throttled rather than absent', async () => {
+    // The throttle verdict is a fact about whatever provider was probed, so it
+    // is read before the OpenRouter-only env split. Calling a provider that
+    // HAS a pooled credential `absent` would be a second, quieter
+    // misclassification of the same answer.
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['hermes'],
+        env: { OPENROUTER_API_KEY: 'or-secret' },
+        authContext: AUTH_CTX,
+        hermesProvider: 'anthropic',
+      },
+      validityDeps({
+        probeHermesAuthStatus: async (provider) =>
+          hermesProbe({
+            provider,
+            authed: false,
+            exitCode: 0,
+            raw: 'anthropic (1 credentials):\n  #0  key   oauth rate-limited (429) (2m 0s left)',
+            unusableReason: 'throttled',
+          }),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.runtimes).toEqual([
+      { runtime: 'hermes', validity: 'throttled', note: 'anthropic credential rate-limited' },
+    ]);
+    expect(result.remedy).toBeUndefined();
+  });
+
   it('still reports invalid when hermes runs and rejects a present credential', async () => {
-    // The complement of the two cases above: hermes answered, so `authed:
-    // false` with a key present really is an invalid credential.
+    // The complement of the cases above: hermes answered, the pool carries a
+    // credential OpenRouter HARD-REJECTED (`auth failed (re-auth may be
+    // required)`), and the key is present. That is a credential the runtime
+    // actually rejected — it stays `invalid` and blocking, which is exactly
+    // what #1001 asks to be boot-fatal for a required runtime.
     const result = await checkCredentialsValid(
       {
         requiredRuntimes: ['hermes'],
@@ -254,6 +356,7 @@ describe('checkCredentialsValid', () => {
             authed: false,
             exitCode: 0,
             raw: 'openrouter (1 credentials):\n  #1 api_key auth failed (re-auth may be required)',
+            unusableReason: 'auth_failed',
           }),
       }),
     );
@@ -261,6 +364,27 @@ describe('checkCredentialsValid', () => {
     expect(result.runtimes).toEqual([{ runtime: 'hermes', validity: 'invalid' }]);
     expect(result.remedy).toMatch(/hermes/i);
     expect(JSON.stringify(result)).not.toContain('or-secret');
+  });
+
+  it('still reports invalid when hermes sees no pooled credential at all while the key is present', async () => {
+    // The remaining route to `invalid`, pinned so the fix above cannot be read
+    // as having made the hermes branch unable to block. An empty pool with
+    // `OPENROUTER_API_KEY` set means the runtime is not carrying the operator's
+    // credential — nothing rejected it and nothing is throttling it, so there
+    // is no `unusableReason`, and it will not clear on its own.
+    const result = await checkCredentialsValid(
+      {
+        requiredRuntimes: ['hermes'],
+        env: { OPENROUTER_API_KEY: 'or-secret' },
+        authContext: AUTH_CTX,
+      },
+      validityDeps({
+        probeHermesAuthStatus: async () => hermesProbe({ authed: false, exitCode: 0, raw: '' }),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.runtimes).toEqual([{ runtime: 'hermes', validity: 'invalid' }]);
+    expect(result.remedy).toMatch(/OPENROUTER_API_KEY/);
   });
 
   it('REGRESSION: hermes in local-provider mode never gates on OpenRouter auth', async () => {

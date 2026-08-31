@@ -183,6 +183,33 @@ export interface HermesAuthStatus {
    * both classify on exit status already.
    */
   exitCode?: number | null;
+  /**
+   * WHY the provider has no usable credential, when hermes ran and answered
+   * and the pool is non-empty. Absent when a credential is usable, when the
+   * pool is empty (nothing was rejected or throttled), and when the probe
+   * could not run at all.
+   *
+   * `authed: false` alone conflates two states the line parser already
+   * separates and then discards:
+   *   - `auth_failed` — the provider REJECTED the credential (`auth failed`,
+   *     `(re-auth may be required)`). It stays broken until an operator
+   *     replaces or re-authenticates it.
+   *   - `throttled`   — the provider ACCEPTED the credential and is
+   *     rate-limiting it for a stated window (`rate-limited (12m 3s left)`,
+   *     `exhausted (1h 4m left)`). The credential is correct and works again
+   *     when the window elapses, with no operator action.
+   *
+   * Without the split, `preflight/credential-validity.ts` classifies a merely
+   * throttled credential as `invalid` — blocking, and boot-fatal for a
+   * required runtime in a hosted deployment — so a daemon restarting inside a
+   * throttle window refuses to boot and prints a remedy naming the one
+   * credential that is not broken.
+   *
+   * `authed` semantics are deliberately untouched: `HermesAgentHarness
+   * .isReady()` must keep declining claims for a throttled pool, because
+   * claim-level readiness is the right place for a temporary condition.
+   */
+  unusableReason?: 'auth_failed' | 'throttled';
 }
 
 /**
@@ -201,12 +228,28 @@ export interface HermesAuthStatus {
  *
  * A line that carries an exhaustion keyword but no `(ready to retry)` and no
  * `re-auth` hint (e.g. exhausted with a wait window still open) is unusable.
+ *
+ * The two unusable forms are NOT the same fact and are returned apart, because
+ * the split is the whole basis on which a caller may block: a rejection
+ * demands an operator, a throttle window demands only time. Reporting a bare
+ * boolean here is what let `preflight/credential-validity.ts` read a valid,
+ * momentarily rate-limited credential as `invalid`. This is the single place
+ * the annotation grammar lives — callers read {@link
+ * HermesAuthStatus.unusableReason}, never re-parse `raw`.
  */
-function isCredentialLineUnusable(line: string): boolean {
-  // `(ready to retry)` means the exhaustion window has elapsed — usable.
-  if (/\(ready to retry\)/i.test(line)) return false;
-  // A hard auth failure or any still-open exhaustion window → unusable.
-  return /\bauth failed\b|\(re-auth may be required\)|\brate-limited\b|\bexhausted\b/i.test(line);
+type CredentialLineState = 'usable' | 'throttled' | 'auth_failed';
+
+function classifyCredentialLine(line: string): CredentialLineState {
+  // `(ready to retry)` means the exhaustion window has elapsed — usable. This
+  // escape is checked first, exactly as before, so it still wins over every
+  // keyword below.
+  if (/\(ready to retry\)/i.test(line)) return 'usable';
+  // A hard auth failure: the provider rejected this credential.
+  if (/\bauth failed\b|\(re-auth may be required\)/i.test(line)) return 'auth_failed';
+  // A still-open exhaustion window: the provider authenticated this credential
+  // and is throttling it.
+  if (/\brate-limited\b|\bexhausted\b/i.test(line)) return 'throttled';
+  return 'usable';
 }
 
 /**
@@ -267,10 +310,16 @@ export async function probeHermesAuthStatus(
     // rather than guess.
     return { provider, authed: false, raw, exitCode: result.status };
   }
-  const hasUsableCredential = credentialLines.some(
-    (line) => !isCredentialLineUnusable(line),
-  );
-  return { provider, authed: hasUsableCredential, raw, exitCode: result.status };
+  const lineStates = credentialLines.map(classifyCredentialLine);
+  if (lineStates.includes('usable')) {
+    return { provider, authed: true, raw, exitCode: result.status };
+  }
+  // Every pooled credential is unusable. A rejection anywhere in the pool wins
+  // over a throttle: the pool cannot recover on its own, and calling that
+  // `throttled` would let a genuinely broken credential ride out as advisory.
+  const unusableReason: NonNullable<HermesAuthStatus['unusableReason']> =
+    lineStates.includes('auth_failed') ? 'auth_failed' : 'throttled';
+  return { provider, authed: false, raw, exitCode: result.status, unusableReason };
 }
 
 export function addHermesDoctorRoutes(app: Hono, config: HermesDoctorConfig = {}): void {

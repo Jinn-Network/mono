@@ -502,6 +502,85 @@ describe('runDeploymentReadinessChecks', () => {
     expect(JSON.stringify(report)).not.toContain('or-xxxx');
   });
 
+  it('REGRESSION GUARD: a throttled OpenRouter credential is advisory, not boot-fatal', async () => {
+    // The two guards above cover a probe that could not run and a probe that
+    // ran and broke. This is the leg inside the ANSWER itself: hermes ran
+    // cleanly (exit 0, no errno) and reported a pooled credential OpenRouter
+    // is rate-limiting for a stated window. OpenRouter authenticated that
+    // credential — it has not rejected it — so the key is correct, present,
+    // and usable again in minutes with no operator action. Refusing the boot
+    // here turns a transient throttle into a crash loop that only clears when
+    // the window elapses, and takes the operator console down with the daemon
+    // that serves it. Claim-level readiness still declines the work:
+    // `HermesAgentHarness.isReady()` reads the same `authed: false` and
+    // reports not-ready, which is the right place for a temporary condition.
+    const report = await runDeploymentReadinessChecks(
+      {
+        stateDir: tmp,
+        earningDir: join(tmp, 'earning'),
+        runtimeMode: undefined,
+        executionWiring: [{ harness: 'hermes-agent' }],
+      },
+      baseDeps({
+        env: { JINN_STATE_DIR: tmp, OPENROUTER_API_KEY: 'or-xxxx' },
+        getuid: () => 1000,
+        detectAuthContext: () => 'container',
+        probeHermesAuthStatus: async () => ({
+          provider: 'openrouter',
+          authed: false,
+          raw:
+            'openrouter (1 credentials):\n' +
+            '  #0  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY rate-limited (429) (12m 3s left)',
+          exitCode: 0,
+          unusableReason: 'throttled' as const,
+        }),
+      }),
+    );
+    expect(report.deployment).toBe(true);
+    expect(report.bootFatal).toBe(false);
+    const validity = report.checks.find((c) => c.name === 'credentials_valid');
+    expect(validity?.ok).toBe(true);
+    expect(validity?.detail).toMatch(/hermes: throttled \(openrouter credential rate-limited\)/);
+    expect(validity?.remedy).toBeUndefined();
+    expect(JSON.stringify(report)).not.toContain('or-xxxx');
+  });
+
+  it('REGRESSION GUARD: a hard OpenRouter auth failure stays boot-fatal', async () => {
+    // The complement of the guard above, at aggregate level: the same clean
+    // exit and the same present key, but the pool reports a credential
+    // OpenRouter REJECTED. #1001 asks for exactly this to refuse the boot of a
+    // required runtime in a hosted deployment, so the throttle carve-out must
+    // not have disarmed it.
+    const report = await runDeploymentReadinessChecks(
+      {
+        stateDir: tmp,
+        earningDir: join(tmp, 'earning'),
+        runtimeMode: undefined,
+        executionWiring: [{ harness: 'hermes-agent' }],
+      },
+      baseDeps({
+        env: { JINN_STATE_DIR: tmp, OPENROUTER_API_KEY: 'or-xxxx' },
+        getuid: () => 1000,
+        detectAuthContext: () => 'container',
+        probeHermesAuthStatus: async () => ({
+          provider: 'openrouter',
+          authed: false,
+          raw:
+            'openrouter (1 credentials):\n' +
+            '  #0  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY auth failed (401) (re-auth may be required)',
+          exitCode: 0,
+          unusableReason: 'auth_failed' as const,
+        }),
+      }),
+    );
+    expect(report.deployment).toBe(true);
+    expect(report.bootFatal).toBe(true);
+    const validity = report.checks.find((c) => c.name === 'credentials_valid');
+    expect(validity?.ok).toBe(false);
+    expect(validity?.detail).toMatch(/hermes: invalid/);
+    expect(JSON.stringify(report)).not.toContain('or-xxxx');
+  });
+
   it('REGRESSION GUARD: bare-local invalid auth stays advisory, not boot-fatal', async () => {
     const report = await runDeploymentReadinessChecks(
       {

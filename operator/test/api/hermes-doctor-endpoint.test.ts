@@ -343,6 +343,121 @@ describe('probeHermesAuthStatus', () => {
     expect(result.authed).toBe(true);
   });
 
+  // `unusableReason` (#1001, fourth round). `authed: false` alone cannot say
+  // WHY a pool is unusable, and the two reasons are not the same fact. A hard
+  // auth failure is a credential the provider REJECTED — it stays broken until
+  // an operator replaces it. An open throttle window is a credential the
+  // provider ACCEPTED and is rate-limiting for a stated period — it works again
+  // in minutes with no operator action. The split already exists inside the
+  // line parser and was discarded on the way out, so
+  // `preflight/credential-validity.ts` read a throttled credential as
+  // `invalid` — blocking, and boot-fatal for a required runtime in a hosted
+  // deployment. These cases drive the real `hermes auth list` annotation forms
+  // through the real parser (not a stubbed status), the way the `exitCode`
+  // contract above is pinned.
+
+  it('reports unusableReason "throttled" when the only credential is rate-limited with time left', async () => {
+    mockNext({
+      type: 'ok',
+      stdout:
+        'openrouter (1 credentials):\n' +
+        '  #0  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY rate-limited (429) (12m 3s left) ←\n\n',
+      stderr: '',
+    });
+
+    const result = await probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(false);
+    expect(result.exitCode).toBe(0);
+    expect(result.errorCode).toBeUndefined();
+    expect(result.unusableReason).toBe('throttled');
+  });
+
+  it('reports unusableReason "throttled" when the only credential is exhausted with a wait window still open', async () => {
+    mockNext({
+      type: 'ok',
+      stdout:
+        'openrouter (1 credentials):\n' +
+        '  #0  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY exhausted (1h 4m left) ←\n\n',
+      stderr: '',
+    });
+
+    const result = await probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(false);
+    expect(result.unusableReason).toBe('throttled');
+  });
+
+  it('reports unusableReason "auth_failed" when the only credential is a hard auth failure', async () => {
+    mockNext({
+      type: 'ok',
+      stdout:
+        'openrouter (1 credentials):\n' +
+        '  #0  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY auth failed (401) (re-auth may be required) ←\n\n',
+      stderr: '',
+    });
+
+    const result = await probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(false);
+    expect(result.unusableReason).toBe('auth_failed');
+  });
+
+  it('reports unusableReason "auth_failed" when the pool mixes a rejection with a throttle', async () => {
+    // One credential the provider rejected, one it is merely throttling. The
+    // pool is unusable either way, and the rejection is the half that needs an
+    // operator — reporting `throttled` here would let a genuinely broken
+    // credential ride out as advisory.
+    mockNext({
+      type: 'ok',
+      stdout:
+        'openrouter (2 credentials):\n' +
+        '  #0  key-one   api_key env:OPENROUTER_API_KEY rate-limited (429) (5m 0s left)\n' +
+        '  #1  key-two   api_key manual auth failed (401) (re-auth may be required)\n\n',
+      stderr: '',
+    });
+
+    const result = await probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(false);
+    expect(result.unusableReason).toBe('auth_failed');
+  });
+
+  it('leaves unusableReason unset when at least one pooled credential is usable', async () => {
+    mockNext({
+      type: 'ok',
+      stdout:
+        'openrouter (2 credentials):\n' +
+        '  #0  key-one   api_key env:OPENROUTER_API_KEY rate-limited (429) (5m 0s left)\n' +
+        '  #1  key-two   api_key manual ←\n\n',
+      stderr: '',
+    });
+
+    const result = await probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(true);
+    expect(result.unusableReason).toBeUndefined();
+  });
+
+  it('leaves unusableReason unset when the exhaustion window has elapsed (ready to retry)', async () => {
+    // The `(ready to retry)` escape still wins over every keyword: the pool is
+    // usable, so there is no unusable reason to report.
+    mockNext({
+      type: 'ok',
+      stdout:
+        'openrouter (1 credentials):\n' +
+        '  #0  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY rate-limited (429) (ready to retry) ←\n\n',
+      stderr: '',
+    });
+
+    const result = await probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(true);
+    expect(result.unusableReason).toBeUndefined();
+  });
+
+  it('leaves unusableReason unset when the credential pool is empty — nothing was rejected or throttled', async () => {
+    mockNext({ type: 'ok', stdout: '', stderr: '' });
+
+    const result = await probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(false);
+    expect(result.unusableReason).toBeUndefined();
+  });
+
   it('reports not-authed gracefully when the hermes binary is not found (ENOENT)', async () => {
     mockNext({ type: 'error', code: 'ENOENT', message: 'spawn hermes ENOENT' });
 

@@ -14,6 +14,14 @@
  * wedged CLI is an infrastructure fault (`error`, advisory); only a credential
  * the runtime actually rejected is `invalid` (blocking, and boot-fatal when
  * hosted).
+ *
+ * "Rejected" is the load-bearing word. A credential the provider
+ * AUTHENTICATED and is rate-limiting for a stated window has not been
+ * rejected: it is correct, it needs no operator, and it works again when the
+ * window elapses. That is `throttled` — a real verdict, and deliberately
+ * outside the blocking set. Claim-level readiness
+ * (`HermesAgentHarness.isReady()`) still declines work for it, which is where
+ * a temporary condition belongs; a boot gate that refuses to start is not.
  */
 
 import {
@@ -41,16 +49,47 @@ import {
 } from '../api/codex-doctor-endpoint.js';
 
 export type CredentialRuntime = 'claude' | 'hermes' | 'codex';
-export type CredentialValidity = 'valid' | 'absent' | 'invalid' | 'malformed' | 'error';
+/**
+ * `valid` / `absent` / `invalid` / `malformed` / `error` — plus `throttled`:
+ * the provider accepted the credential and is rate-limiting it for a stated
+ * window. It is a determinate answer (unlike `error`, which means the probe
+ * could not be trusted to answer) about a credential that is not broken
+ * (unlike `invalid`), so it is neither of the two existing members and gets
+ * its own. See {@link BLOCKING_VALIDITIES}.
+ */
+export type CredentialValidity =
+  | 'valid'
+  | 'absent'
+  | 'invalid'
+  | 'malformed'
+  | 'error'
+  | 'throttled';
+
+/**
+ * The verdicts that fail `credentials_valid` — and therefore refuse the boot
+ * of a required runtime in a hosted deployment (`credentials_valid` is in
+ * `deployment-readiness.ts`'s `HARD_CHECK_NAMES`).
+ *
+ * Closed on purpose, and small on purpose: only a credential the runtime
+ * actually rejected belongs here. Everything else — a probe that could not
+ * run, a provider that was never in play, a credential the provider is merely
+ * throttling — is advisory.
+ */
+const BLOCKING_VALIDITIES: ReadonlySet<CredentialValidity> = new Set<CredentialValidity>([
+  'invalid',
+  'malformed',
+]);
 
 export interface RuntimeCredentialFact {
   runtime: CredentialRuntime;
   validity: CredentialValidity;
   /**
    * Why this verdict happened, when we know: `timed out`, the spawn errno
-   * (`ENOENT`, `EACCES`, `ETIMEDOUT`), or why the probe was not a credential
-   * question at all (`local hermes provider`). Diagnostic only, never secret
-   * material — it names the tool or mode, not the credential.
+   * (`ENOENT`, `EACCES`, `ETIMEDOUT`), why the probe was not a credential
+   * question at all (`local hermes provider`), or which provider is
+   * rate-limiting an accepted credential (`openrouter credential
+   * rate-limited`). Diagnostic only, never secret material — it names the
+   * tool, mode or provider, not the credential.
    */
   note?: string;
 }
@@ -153,7 +192,7 @@ export async function checkCredentialsValid(
     });
   }
 
-  const blocking = facts.filter((fact) => fact.validity === 'invalid' || fact.validity === 'malformed');
+  const blocking = facts.filter((fact) => BLOCKING_VALIDITIES.has(fact.validity));
   const detail = facts
     .map((fact) =>
       fact.note !== undefined
@@ -261,6 +300,27 @@ async function runProbe(
         return { validity: 'error', note: 'hermes CLI probe failed' };
       }
       if (probe.authed) return { validity: 'valid' };
+      // The pool has credentials and none is usable, but WHY decides whether
+      // an operator is needed. `throttled` means the provider authenticated
+      // the credential and is rate-limiting it for a stated window
+      // (`rate-limited (12m 3s left)`, `exhausted (1h 4m left)`) — nothing was
+      // rejected, the key is correct, and it works again in minutes with no
+      // operator action. Judged on `authed` alone this falls through to the
+      // env-presence split below and reads as `invalid`: blocking, and
+      // boot-fatal for a required runtime in a hosted deployment, so a daemon
+      // restarting inside the window crash-loops until it elapses, takes the
+      // operator console down with it, and prints a remedy naming the one
+      // credential that is not broken. `unusableReason: 'auth_failed'` — a
+      // credential the provider genuinely rejected — deliberately falls
+      // through and keeps today's `invalid`.
+      //
+      // This is read BEFORE the provider split: a throttle is a fact about
+      // whichever provider was probed, and calling a provider that HAS a
+      // pooled credential `absent` would misclassify the same answer a second
+      // time, more quietly.
+      if (probe.unusableReason === 'throttled') {
+        return { validity: 'throttled', note: `${provider} credential rate-limited` };
+      }
       // `HERMES_ENV_KEYS` is OpenRouter's key and nothing else. It is only
       // evidence that a credential was supplied-and-rejected when OpenRouter
       // is the provider that was actually probed; for any other provider a
