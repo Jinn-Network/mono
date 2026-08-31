@@ -5,6 +5,7 @@
 // --- pinned identifiers (protocol, media types, record-kind URIs, method URIs, scope) ---
 export {
   ANCHOR_INTENT_EXTENSION,
+  TASK_SELECTION_EXTENSION,
   ASSEMBLY_PROCEDURE,
   ASSEMBLY_PROCEDURE_VERSION,
   BENCHMARK_ACCOUNTING_MEDIA_TYPE,
@@ -84,6 +85,17 @@ export {
   withRunAnchorIntentExtension,
 } from "./anchor-intent-extension.js";
 export type { RunAnchorIntentExtension } from "./anchor-intent-extension.js";
+
+export {
+  TASK_SELECTION_MODES,
+  RunTaskSelectionExtensionSchema,
+  TaskSelectionModeSchema,
+  readRunTaskSelectionExtension,
+  readTaskSelectionMode,
+  runTaskSelectionExtension,
+  withRunTaskSelectionExtension,
+} from "./task-selection.js";
+export type { RunTaskSelectionExtension, TaskSelectionMode } from "./task-selection.js";
 
 export type {
   MatrixPublicationExtension,

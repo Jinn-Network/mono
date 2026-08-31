@@ -20,6 +20,7 @@ export type {
   PublicDescriptiveComparison,
 } from "./comparison.js";
 export { buildPublicAssets } from "./assets.js";
+export { assertTaskSelectionConsistency, taskSelectionContradiction } from "./profile/task-selection.js";
 export type { PublicAssetInput } from "./assets.js";
 // The three node:crypto ports the RFC 3161 anchor rule engine injects
 // (anchor-evidence design §6.1 "Placement"). They live here, in the standalone

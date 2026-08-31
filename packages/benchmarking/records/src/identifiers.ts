@@ -46,6 +46,13 @@ export const BENCHMARK_PUBLICATION_EXTENSION =
  */
 export const ANCHOR_INTENT_EXTENSION =
   "https://spec.jinn.network/extensions/anchor-intent/v1";
+/**
+ * Declared task-selection provenance, sealed into the Run record (issue #2980). The value names who
+ * chose the tasks — claimant-chosen, a fixed public set, or drawn by rule after the lock — from a
+ * closed vocabulary, so the answer is fixed at the lock rather than written in prose afterwards.
+ */
+export const TASK_SELECTION_EXTENSION =
+  "https://spec.jinn.network/extensions/task-selection/v1";
 
 export const ASSEMBLY_PROCEDURE = "jinn.benchmarking.assembly";
 export const ASSEMBLY_PROCEDURE_VERSION = "1.0";

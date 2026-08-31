@@ -393,6 +393,81 @@ bundle that carries these five assets renders the human comparison. There is no
 fallback profile: an asset set that is not the projection the closure selects is
 refused, whichever profile it happens to resemble.
 
+## Task-selection provenance
+
+Who chose the tasks changes what a headline number means as much as the number
+itself, so the answer is a sealed field rather than prose. A Run record may carry
+the `https://spec.jinn.network/extensions/task-selection/v1` extension, whose
+`mode` is one of exactly three values:
+
+- `claimant-chosen` — the claimant picked the tasks;
+- `fixed-public-set` — the tasks are a complete set that was already public
+  before the lock;
+- `drawn-post-lock` — the tasks were fixed by rule only after the lock.
+
+Because the declaration is sealed into the Run, it is fixed at the lock and
+cannot be softened once results are known. Sealing does not make it true, so the
+verifier refuses a bundle whose other sealed records positively contradict it,
+under the `claim-consistency` check:
+
+- `fixed-public-set` is refused when the Benchmark record names no author — a set
+  nobody declared was never publicly declared — and when its reveal policy
+  withholds its items past the end of the run (`after-run`, or `scheduled` with a
+  `notBefore` at or after the Run's `closeAt`, or `scheduled` with no `notBefore`
+  at all, which announces no instant at which the items become readable);
+- `drawn-post-lock` is refused when the Benchmark reveals its items
+  `immediate`ly, because the run was then locked against a set the claimant could
+  already read, and nothing was drawn afterwards.
+
+`claimant-chosen` carries no structural obligation. It asserts nothing about
+anyone but the claimant, and constraining it would only make the honest answer
+the expensive one.
+
+The same rule runs twice, on purpose: `run lock` applies it before sealing, so a
+contradicted declaration is a draft-validation refusal the claimant can still act
+on, and the cold verifier applies it again on bytes alone. Left to publish time
+only, a contradiction would surface after the run had been locked, executed,
+reported, and materialized — a bundle the workspace can never verify, with no way
+back.
+
+`drawn-post-lock` therefore needs a Benchmark whose reveal is withheld, and no
+task-set intake in this product mints one yet — every intake reveals `immediate`.
+Declaring it today is refused at the lock, by name; the value is reachable as soon
+as an intake supports a withheld reveal, and it stays in the vocabulary because
+that vocabulary lives in the shared protocol package, not in this product.
+
+Two limits are worth stating plainly rather than leaving a reader to assume more.
+
+**These checks refuse; they never endorse.** No check can establish that a
+`fixed-public-set` declaration is true: the bundle carries no independent witness
+of the upstream set, so a claimant who assembled a private subset and declared it
+public will pass. The declaration's force comes from being sealed and attributable,
+not from being proved.
+
+**The comparison is against the run's close, not its lock.** `closeAt` is
+`lockedAt` plus a strictly positive interval, and no bundle carries `lockedAt`, so
+only the far side of the comparison is sound: a `notBefore` at or after `closeAt`
+is provably after the lock, while one before it settles nothing. A schedule that
+opens mid-run is therefore not refused under either mode.
+
+**Nothing about the declaration reaches the published face.** `index.html`,
+`README.md`, `share.txt`, `badge.svg`, and `social-card.svg` carry no projection
+of it: the asset builder is never given the mode, so a declaring bundle's five
+assets are exactly what a reader that has never heard of `task-selection/v1`
+rebuilds from the same records. (Its Run *digest* still differs, as it would for
+any other Run field, and every reader derives that digest from the bundle's own
+Run.) This is a compatibility requirement rather than an editorial choice. The classic and anchored allocations
+pin `npx @colophon-claims/verify@0.1.0`, and that verifier byte-compares every
+presentation asset against its own rebuild; a bundle that rendered the sentence
+would therefore instruct its reader to run a verifier that refuses it. Rendering
+the declaration is held for issue #3416, to land once the reader line the bundle
+pins derives the sentence too. Until then the declaration is readable where it is
+sealed — in the Run record — and enforced where it is checked, under
+`claim-consistency`.
+
+The declaration is also not a claim-package field, and will not become one:
+`claim-package.json` pins its own key set byte-for-byte.
+
 ## Presentation and citation
 
 This section describes the five deterministic presentation assets of the v2-derived closures
