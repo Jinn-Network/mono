@@ -819,7 +819,7 @@ test('records authority status per governing document', () => {
 
 test('the canonical repository catalog validates its topology without a second membership authority', () => {
   const catalog = loadPlatformCatalog(repoRoot);
-  assert.deepEqual(catalog.ownerGroups['architecture-control'], ['@oaksprout', '@ritsukai']);
+  assert.deepEqual(catalog.ownerGroups['architecture-control'], ['@oaksprout', '@ritsukai', '@ritsuKai2000']);
   for (const [releaseGroup, definition] of Object.entries(catalog.releaseGroups)) {
     const members = catalog.packages.filter((pkg) => pkg.releaseGroup === releaseGroup);
     assert.equal(members.length, definition.expectedPackageCount, releaseGroup);

@@ -1143,12 +1143,14 @@ The exact 74-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-bare-extension-key.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-bare-hex-subject.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-duplicate-rail.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-equivalent-rail-spelling.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-leading-zero-amount.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-missing-rails.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-rail-spelled-twice.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-relative-gate-uri.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-relative-rail-identifier.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-signed-amount.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-spoofable-rail-destination.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-unnormalized-rail-identifier.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-unsorted-rails.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-zero-amount.json | — | — | — |
@@ -1786,7 +1788,7 @@ The exact 74-package trusted-publisher set is the union of stack-published group
 
 ## Architecture-control ownership
 
-Task 6's validator enforces that every architecture-controlled path resolves to exactly these effective owners: `@oaksprout` `@ritsukai`. A path that does not reds `platform-architecture-control`.
+Task 6's validator enforces that every architecture-controlled path resolves to exactly these effective owners: `@oaksprout` `@ritsukai` `@ritsuKai2000`. A path that does not reds `platform-architecture-control`.
 The exhaustive path list and its per-category counts are a file census, not architecture: they move whenever any file is added, renamed, or deleted in scope, which made independent branches mutually inconsistent under merge (#3076). They are no longer committed. Run `node .github/scripts/architecture-control.mjs` for the full report, or read the coverage artifact that `platform-architecture-control` uploads on every run.
 
 ## Transitional and deprecated entries

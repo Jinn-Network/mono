@@ -1354,6 +1354,9 @@ describe("produceReport recordExtensions (issue #2839)", () => {
     expect(coreFields).toContain("limitations");
     expect(coreFields.length).toBeGreaterThan(5);
     for (const field of coreFields) {
+      // The MESSAGE match is load-bearing, not decoration. A bare `rejects.toThrow()` would pass on
+      // the schema's own refusal, which fires for a different reason, and this test would go vacuous
+      // again for exactly the `limitations` case it exists to catch. Do not relax it.
       await expect(
         produceWithExtensions(fixture, { [field]: "hijacked" }),
         `core field "${field}" must be refused as an extension key`,

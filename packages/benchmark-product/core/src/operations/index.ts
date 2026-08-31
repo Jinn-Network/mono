@@ -130,6 +130,7 @@ export {
 } from "./run-launch.js";
 export { runStatus, type RunDriverStatus, type RunStatusCell, type RunStatusCounts, type RunStatusResult } from "./run-status.js";
 export { runCollect, type RunCollectInput, type RunCollectResult } from "./run-collect.js";
+export { importRunRecords, type RunImportInput, type RunImportResult } from "./run-import.js";
 export {
   runResults,
   LOCAL_VENUE_LIMITS,

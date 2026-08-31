@@ -42,7 +42,11 @@ The protocol takes no fee and no cut, ever. There is no fee field to take one wi
   — which is why `rails` is required and may be empty, rather than optional.
 - **Rails are self-describing and the vocabulary is open.** A rail identifier is any
   absolute URI, joining the identifier namespace the way scheme IRIs do. No rail binding
-  ships with this package; concrete rails arrive as their own adapters.
+  ships with this package; concrete rails arrive as their own adapters. `to` keeps that
+  openness — its syntax is opaque, because no address shape can be imposed on a rail that
+  does not exist yet — but it must carry at least one character that is neither whitespace nor
+  a format character, and it may not carry control characters, line separators, or Unicode
+  bidi controls, whose whole effect here is to make one destination display as another.
 - **No reference currency and no conversion, anywhere.** Equivalence across a multi-rail
   offer is the holder's assertion, sealed with the offer.
 - **Repricing is supersession, never mutation.** A new price is a new record with a new
@@ -58,12 +62,37 @@ gate matches a rail entry by integer-exact amount. Sorted because equal terms mu
 equal bytes and JCS does not sort arrays, so the schema does.
 
 Both rules compare identifiers as exact strings, so a rail identifier must arrive already in
-its normalized spelling — `new URL` round-trips it unchanged. Without that,
-`HTTPS://R.EXAMPLE/v1` and `https://r.example/v1` would pass uniqueness and sortedness alike
-and the offer would carry one rail at two prices. That guarantee reaches exactly as far as
-WHATWG URL normalization does: it case-folds scheme and host for the special schemes and drops
-default ports and dot segments, but opaque hosts and opaque paths round-trip verbatim, so a
-rail vocabulary minted under a scheme like `ipfs://` or `urn:` owes its own spelling rule.
+its normalized spelling. Without that, `HTTPS://R.EXAMPLE/v1` and `https://r.example/v1` would
+pass uniqueness and sortedness alike and the offer would carry one rail at two prices.
+
+`new URL` round-tripping the string unchanged is most of that rule but not all of it, because
+WHATWG round-trips several spellings RFC 3986 calls equivalent, and several its grammar does not
+permit at all. So the check also refuses a percent-escape that is not in RFC 3986 §6.2.2 normal
+form (`%2f` for `%2F`, `%62` for the `b` it encodes) and a raw octet the component's grammar
+requires escaped (`…/a^b` beside `…/a%5Eb` — WHATWG's percent-encode sets are narrower than
+`pchar`, so it round-trips both). Each was otherwise a second identifier for one rail: a seller
+could seal `…/a%5Eb` at one price and `…/a^b` at another, and both would pass.
+
+Two further refusals are this package's own identity policy rather than RFC 3986 normalization,
+and are worth naming as such: a trailing-dot host under a special scheme (`r.example.`), and an
+empty query or fragment (`…/v1?`, `…/v1#`). RFC 3986 §6.2.3 withholds the empty-query elision
+absent a scheme license and disclaims fragment normalization outright, and §3.2.2 treats a
+trailing dot as meaningful. Refusing these keeps one destination from arriving under three
+identifiers, and the cost is stated rather than hidden: `https://r.example./v1`,
+`https://r.example/v1?`, and `https://r.example/v1#` have **no** accepted spelling here at all. A
+vocabulary that means something by any of them needs its own rule, the same way an opaque scheme
+does.
+
+Stated positively, and this is the whole of it: under a special scheme, two strings this check
+calls equivalent never both pass, and every equivalence class it admits has an accepted spelling.
+Both directions are pinned by a test rather than asserted here.
+
+The raw-octet rule reaches every scheme: `urn:a^b` and `ipfs://bafybeigd/a^b` are refused under
+it, same as under a special scheme. What the rest of the rule does **not** reach is opaque hosts
+and opaque paths, which otherwise round-trip verbatim: `ipfs://BAFYBEIGD/x` and
+`ipfs://bafybeigd/x` are two distinct rails here, as are `urn:UUID:x` and `urn:uuid:x`. A rail vocabulary minted under such a scheme owes its own spelling rule; this
+check cannot supply one without knowing that scheme's equivalence law — which is also why the
+trailing-dot rule stops at the special schemes rather than reaching into a host it cannot read.
 
 Sealing refuses an unsorted list rather than reordering it, because a canonicalizer that
 silently rewrites content is how one document quietly becomes another; `sortOfferRails` puts a

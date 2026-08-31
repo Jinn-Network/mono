@@ -16,6 +16,8 @@ import { GUI_SERVER_ACTIONS } from "./gui-action-registry";
  * No core-package gate catches this one, because the assertion lives here in `web`.
  */
 const EXPECTED_UNAVAILABLE_REASONS = {
+  importRunRecords:
+    "reads a local run dump and every evidence file it names by relative path; browser upload of a path-rooted evidence tree is intentionally unavailable",
   importBinaryItemBank:
     "requires local licensed item, source/license, and human-admission manifests; browser upload is intentionally unavailable",
   createHumanReviewPackets:

@@ -755,6 +755,13 @@ function neutralClaimHtml(facts: MethodFacts): string {
   return '<p class="neutral">Verified binary-instrument qualification. Facts are presented per instrument without comparative conclusions.</p>';
 }
 
+// Task-selection provenance (issue #2980) is sealed into the Run and verified under
+// `claim-consistency`, but deliberately renders NOTHING here, and no asset below projects it.
+// The classic and anchored allocations pin `@colophon-claims/verify@0.1.0`, whose
+// `verifyPublicBundleSnapshot` byte-compares every presentation asset against its own rebuild, so
+// a bundle that rendered the sentence would carry an instruction to run a verifier that refuses
+// it. Restoring the render is issue #3416, once the reader line that derives it is re-pinned.
+
 function buildIndex(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {
   const outcome = input.matrix.completeness.runOutcome;
   const status = reportFacts.kind === "binary" ? qualificationOutcomeLabel(outcome) : outcomeLabel(outcome);
