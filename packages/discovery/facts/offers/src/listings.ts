@@ -228,7 +228,10 @@ export interface OfferListingQuery {
   readonly subject: string;
   /** The rail the caller settles in; ordering only ever exists within one rail. */
   readonly rail: string;
-  /** Offer digests the followed feeds have withdrawn (`delisted` / `superseded`). */
+  /**
+   * Record digests the followed feeds have withdrawn (`delisted` / `superseded`). Omitted
+   * means nothing is known to be withdrawn — never that nothing is live.
+   */
   readonly withdrawnOfferDigests?: ReadonlySet<string>;
 }
 
@@ -241,6 +244,16 @@ export interface OfferListingQuery {
  * and its offer announced beside it. Nobody's permission is needed to publish those, and
  * nobody's permission is needed to build an index over them — competing indexes are the
  * intended shape.
+ *
+ * Fetching no offer is the feature and also the limit. Every row this returns is an
+ * unverified statement by whoever announced it, filtered only for what a card can be checked
+ * for on its own. A row is a candidate to show, never a term to settle on: what a buyer
+ * commits to is checked against the fetched, digest-checked, signature-verified offer.
+ * Announcing `priced: false` is the cheapest lie available here, and it is caught the moment
+ * anyone verifies — so a catalog that will take money on a row verifies before it does.
+ *
+ * `withdrawnOfferDigests` is keyed on announcement record digests, which is what a
+ * `withdrawn` announcement names and what `readOfferCard` binds each card to.
  */
 export function listOffersForSubject(
   items: readonly AnnouncedItem[],
