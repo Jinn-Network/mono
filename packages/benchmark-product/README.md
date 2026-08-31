@@ -58,6 +58,12 @@ For a received bundle, the smaller reader surface is:
 npx @colophon-claims/verify@0.1 ./bundle
 ```
 
+That line reads the bundle formats through public-bundle/6. Reader lines are not
+forward compatible, and a reader that predates a format refuses it with the same
+code an invalid bundle earns, so read the `format` string in the bundle's own
+`bundle.json` and take its row from the per-format table in
+[`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md) before concluding anything from a refusal.
+
 To verify a bundle with tools that are not ours, see
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).
 
