@@ -232,6 +232,14 @@ jobs:
           yarn build
           yarn check:fixtures
           yarn pack:smoke
+      - name: Verify Evidence Gate
+        working-directory: packages/evidence/gate
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
       - name: Verify Evidence Contribution
         working-directory: packages/evidence/contribution
         run: |
