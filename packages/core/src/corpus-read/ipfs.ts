@@ -1,16 +1,20 @@
 const IPFS_FETCH_TIMEOUT_MS = 15_000;
 /**
- * Bound on the whole `fetchFromIpfs` call. The per-attempt timer above is
- * re-armed for every gateway x CID candidate, so without this a single call
- * could legitimately run for the product of the two. Every candidate is still
- * attempted: the per-attempt timer is clamped to an equal share of whatever
- * budget remains.
+ * Bound on one whole `fetchFromIpfs` / `fetchBytesFromIpfs` call. The
+ * per-attempt timer above is re-armed for every gateway x CID candidate, so
+ * without this a single call could legitimately run for the product of the
+ * two. Every candidate is still attempted: the per-attempt timer is clamped
+ * to an equal share of whatever budget remains.
  */
 const IPFS_TOTAL_FETCH_TIMEOUT_MS = 45_000;
 /**
- * Corpus manifests and donation artifacts are JSON envelopes orders of
- * magnitude smaller than this; a response above it is hostile or broken, and
- * buffering it would exhaust memory (#3410).
+ * Cap on any single gateway response, JSON or raw. Corpus manifests and
+ * donation artifacts are JSON envelopes orders of magnitude smaller than this
+ * (#3410); the raw-bytes path added in #3438 also carries source-bundle files
+ * and sealed documents, which are larger but nowhere near this. A response
+ * above it is hostile or broken, and buffering it would exhaust memory — so
+ * size this against the largest legitimate *source file*, not against the
+ * JSON envelopes alone.
  */
 const MAX_IPFS_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_IPFS_REDIRECT_HOPS = 3;
@@ -108,8 +112,8 @@ async function discardBody(response: Response): Promise<void> {
   }
 }
 
-/** Read a response body as text, refusing anything past the byte cap. */
-async function readBoundedText(response: Response): Promise<string> {
+/** Read a response body as bytes, refusing anything past the byte cap. */
+async function readBoundedBytes(response: Response): Promise<Uint8Array> {
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > MAX_IPFS_RESPONSE_BYTES) {
     await discardBody(response);
@@ -119,7 +123,7 @@ async function readBoundedText(response: Response): Promise<string> {
     );
   }
   const body = response.body;
-  if (!body) return '';
+  if (!body) return new Uint8Array(0);
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -147,6 +151,12 @@ async function readBoundedText(response: Response): Promise<string> {
     joined.set(chunk, offset);
     offset += chunk.byteLength;
   }
+  return joined;
+}
+
+/** Read a response body as text, refusing anything past the byte cap. */
+async function readBoundedText(response: Response): Promise<string> {
+  const joined = await readBoundedBytes(response);
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(joined);
   } catch {
@@ -154,12 +164,15 @@ async function readBoundedText(response: Response): Promise<string> {
   }
 }
 
-async function fetchJson(url: URL, signal: AbortSignal): Promise<unknown> {
+/**
+ * Request `url`, resolving redirects here rather than in `fetch`, so every hop
+ * is revalidated against the configured gateway before it is requested.
+ * Returns the first non-redirect, ok response; its body is still unread.
+ */
+async function fetchThroughGateway(url: URL, signal: AbortSignal): Promise<Response> {
   const gateway = url;
   let current = new URL(url);
   for (let hop = 0; ; hop += 1) {
-    // Redirects are resolved here rather than by `fetch`, so every hop is
-    // revalidated against the configured gateway before it is requested.
     const response = await fetch(current, { method: 'GET', redirect: 'manual', signal });
     if (REDIRECT_STATUSES.has(response.status)) {
       await discardBody(response);
@@ -187,14 +200,23 @@ async function fetchJson(url: URL, signal: AbortSignal): Promise<unknown> {
           `(${displayUrl(current)}…)`,
       );
     }
-    const contentType = response.headers.get('content-type') ?? '';
-    const text = await readBoundedText(response);
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      throw new Error(`IPFS response is not JSON (content-type: ${contentType || 'none'})`);
-    }
+    return response;
   }
+}
+
+async function fetchJson(url: URL, signal: AbortSignal): Promise<unknown> {
+  const response = await fetchThroughGateway(url, signal);
+  const contentType = response.headers.get('content-type') ?? '';
+  const text = await readBoundedText(response);
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Error(`IPFS response is not JSON (content-type: ${contentType || 'none'})`);
+  }
+}
+
+async function fetchBytes(url: URL, signal: AbortSignal): Promise<Uint8Array> {
+  return readBoundedBytes(await fetchThroughGateway(url, signal));
 }
 
 export type FetchFromIpfsOptions = {
@@ -217,12 +239,18 @@ function resolveFallbackGatewayBases(
   return [['fallback', FALLBACK_IPFS_GATEWAY_BASE] as const];
 }
 
-/** Read-only multi-codec, primary-plus-fallback IPFS JSON fetch. */
-export async function fetchFromIpfs(
+/**
+ * Run every gateway x CID candidate through `read`, under one whole-operation
+ * deadline. Shared by the JSON and raw-bytes entry points so both inherit the
+ * same redirect revalidation, byte cap, and deadline (#3438).
+ */
+async function fetchCandidatesFromIpfs<T>(
   gatewayUrl: string,
   cid: string,
-  opts?: FetchFromIpfsOptions,
-): Promise<unknown> {
+  opts: FetchFromIpfsOptions | undefined,
+  read: (url: URL, signal: AbortSignal) => Promise<T>,
+  failureLabel: string,
+): Promise<T> {
   const primary = normalizeIpfsGatewayBase(gatewayUrl);
   const gateways: Array<readonly [string, string]> = [
     ['primary', primary] as const,
@@ -264,7 +292,7 @@ export async function fetchFromIpfs(
       continue;
     }
     try {
-      return await fetchJson(target, controller.signal);
+      return await read(target, controller.signal);
     } catch (error) {
       errors.push(
         `${name}:${displayUrl(target)}: ` +
@@ -274,5 +302,39 @@ export async function fetchFromIpfs(
       clearTimeout(timer);
     }
   }
-  throw new Error(`IPFS JSON fetch failed after all candidates: ${errors.join(' | ')}`);
+  throw new Error(`${failureLabel}: ${errors.join(' | ')}`);
+}
+
+/** Read-only multi-codec, primary-plus-fallback IPFS JSON fetch. */
+export async function fetchFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+  opts?: FetchFromIpfsOptions,
+): Promise<unknown> {
+  return fetchCandidatesFromIpfs(
+    gatewayUrl,
+    cid,
+    opts,
+    fetchJson,
+    'IPFS JSON fetch failed after all candidates',
+  );
+}
+
+/**
+ * Read-only multi-codec, primary-plus-fallback IPFS fetch returning the exact
+ * bytes stored at the CID — no JSON parse/re-encode roundtrip. Use this
+ * whenever the bytes will be hashed, or whenever the content is not JSON.
+ */
+export async function fetchBytesFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+  opts?: FetchFromIpfsOptions,
+): Promise<Uint8Array> {
+  return fetchCandidatesFromIpfs(
+    gatewayUrl,
+    cid,
+    opts,
+    fetchBytes,
+    'IPFS raw bytes fetch failed after all candidates',
+  );
 }
