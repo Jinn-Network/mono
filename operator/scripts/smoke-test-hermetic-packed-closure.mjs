@@ -263,8 +263,17 @@ try {
 
   copyPackage(clientRoot, productRoot, '@jinn-network/operator');
   const tsc = join(consumerRoot, 'node_modules', '.bin', 'tsc');
+  // Type-checking the whole client against the packed closure sits close to
+  // Node's default old-space ceiling and has run out of heap on a CI runner,
+  // failing the gate for reasons unrelated to the change under test. Give this
+  // one child explicit headroom; a caller-supplied NODE_OPTIONS is appended
+  // last so it still wins.
+  const compilerNodeOptions = ['--max-old-space-size=8192', process.env.NODE_OPTIONS]
+    .filter((value) => typeof value === 'string' && value.length > 0)
+    .join(' ');
   run(tsc, ['--project', 'tsconfig.json'], 'compile client against clean packed closure', {
     cwd: productRoot,
+    env: { ...process.env, NODE_OPTIONS: compilerNodeOptions },
   });
   const clientArchive = stageAndPack(productRoot, '@jinn-network/operator');
   assertArchiveContains(clientArchive, 'package/dist/bin/jinn.js', 'packed client');

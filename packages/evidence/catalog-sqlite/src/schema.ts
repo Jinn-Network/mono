@@ -9,7 +9,7 @@ import {
 
 import { catalogIoError } from "./errors.js";
 
-export const SQLITE_EVIDENCE_CATALOG_SCHEMA_VERSION = 2 as const;
+export const SQLITE_EVIDENCE_CATALOG_SCHEMA_VERSION = 3 as const;
 
 const SCHEMA_SQL = `
 CREATE TABLE catalog_metadata (
@@ -138,6 +138,30 @@ CREATE TABLE location_withdrawals (
     REFERENCES announcement_keys(source_id, announcement_id)
 );
 
+-- The announcement edge index (record-discovery design section 12, amendment 2026-08-28). Unlike
+-- every table above it is fed from announcement facts cards, never from a fetched record: a card
+-- declares its kind's outbound references, and those edges are what lets an index answer join
+-- -- "this environment, its attempts, their verdicts" -- without fetching anything.
+--
+-- Keyed by announcing source, like every other announcement-derived table here, because a card is
+-- a holder-authored claim and nothing is checked against the record. Without the source in the
+-- key, one feed could delete another feed's edges for a record simply by announcing that record's
+-- digest. Rows are not foreign-keyed to announcement_keys: an edge set is derived from a card,
+-- which a source may publish without ever observing a location for the record.
+--
+-- record_kind is a column rather than part of the key for the same reason: the kind is holder-
+-- authored, so keying on it would let one source hold two edge sets for one record.
+CREATE TABLE announcement_edges (
+  source_id TEXT NOT NULL,
+  announcement_id TEXT NOT NULL,
+  record_kind TEXT NOT NULL,
+  record_digest TEXT NOT NULL,
+  field TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+  target_digest TEXT NOT NULL,
+  PRIMARY KEY (source_id, record_digest, field, ordinal)
+);
+
 CREATE INDEX records_family_digest_idx
   ON records(family, digest);
 CREATE INDEX entity_keys_entity_family_digest_idx
@@ -192,6 +216,11 @@ CREATE INDEX location_withdrawals_target_idx
   ON location_withdrawals(source_id, retracts_announcement_id);
 CREATE INDEX announcement_keys_kind_idx
   ON announcement_keys(event_kind, source_id, announcement_id);
+CREATE INDEX announcement_edges_record_idx
+  ON announcement_edges(record_digest, source_id, field, ordinal);
+-- The referrers inversion (design section 8): which records point at this digest.
+CREATE INDEX announcement_edges_target_idx
+  ON announcement_edges(target_digest, source_id, record_digest, field, ordinal);
 `;
 
 interface MetadataRow {

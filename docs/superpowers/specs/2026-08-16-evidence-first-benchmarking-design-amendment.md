@@ -9,6 +9,7 @@
 | **Issue** | [#2711](https://github.com/Jinn-Network/mono/issues/2711) |
 | **Depends on** | [stack design principles](./2026-07-30-stack-design-principles.md), [benchmarking application](./2026-07-28-benchmarking-application-design.md), [execution evidence](./2026-07-23-jinn-execution-evidence-protocol-design.md), [evidence capture](./2026-07-26-execution-evidence-capture-design.md), [record discovery](./2026-07-27-record-discovery-protocol-design.md), and [benchmark publication interoperability](./2026-08-13-benchmark-publication-interoperability-profile.md) |
 | **Foundation** | PR [#2706](https://github.com/Jinn-Network/mono/pull/2706), exact reviewed implementation base `a9773b27a7bc81d66887dc295e4423ea25e56caf` |
+| **Implementation** | acceptance criteria delivered, with residual work in [§11](#11-implementation-status) |
 
 ## 0. Decision in plain language
 
@@ -380,6 +381,39 @@ Every stack preserves all Evidence v1, BenchmarkAccounting v1, Matrix v1, Report
 claim-package 1–2, bundle 2–4, and managed Harbor/Inspect fixtures. No implementation stack may
 merge ahead of its approved dependency. PR #2706 must land before these stacks merge; development
 may proceed against its exact immutable head.
+
+## 11. Implementation status
+
+Delivery stacks 1–9 in §10 have landed on `next`; stack 10 landed its commissioning link but not
+its dual-write and backfill tail (§11.2). Each of issue #2711's eight acceptance criteria is
+carried by a test that runs in CI. This section records where each proof lives so a reader can
+re-run it rather than take the claim on trust.
+
+### 11.1 Acceptance criteria and their proofs
+
+| Criterion | Proof |
+|---|---|
+| Evidence Protocol v1 and current benchmarking/publication bytes unchanged | Evidence v1 identifiers untouched (`packages/evidence/protocol/src/identifiers.ts`); the evidence-native work took a new namespace, `https://spec.jinn.network/protocols/benchmarking/v2` (`packages/benchmarking/protocol/src/identifiers.ts`); legacy bytes stay pinned by `packages/benchmarking/records/fixtures/manifest.sha256.json` and `packages/benchmark-product/verify/fixtures/manifest.sha256.json` |
+| One Harbor Trial is one atomic Execution Evidence record | `packages/benchmarking/native-capture/src/harbor.test.ts` — "treats Job as a group and every Trial/retry as one independently accounted unit" |
+| One Inspect judge call is evaluator Execution Evidence plus a Result Evaluation over the subject Task+Result | `packages/benchmarking/native-capture/src/inspect.test.ts` — "atomizes two samples by three epochs into six independent evaluator executions" and "refuses truth-bearing judge input and aggregate extraction in exact Evidence v1 roles"; `packages/benchmarking/evaluation/src/index.test.ts` — "issues a judge opinion over original Task+Result with evaluator execution provenance and no Attempt" |
+| Two human reviews stay independent; unanimity is separately derived | `packages/benchmarking/evaluation/src/index.test.ts` — "preserves two human claims and derives a separately signed unanimous label" and "admits an authoritative imported label without inventing a human evaluation"; `packages/benchmarking/protocol/src/records.test.ts` — "keeps two human opinions separate from their unanimous label resolution" |
+| Cohort, Matrix, and Report rebuild without Submission/Attempt/Delivery | `packages/benchmarking/evidence/src/evidence.test.ts` — "verifies exact Task+Result claim bindings with no commissioning records", which verifies a Cohort and assembles a Matrix from evidence records alone; `packages/benchmarking/evidence/src/golden-lifecycle.test.ts` additionally scans the assembled Matrix bytes for any commissioning term. The Report is covered structurally, by issuing from the Matrix bytes, rather than by a byte scan |
+| 12 × 4 × 3 yields 144 automated and 24 human claims; appending D does not mutate the A/B/C cohort | `packages/benchmarking/evidence/src/golden-lifecycle.test.ts` — "appends evaluator D without rerunning or mutating twelve original memory subjects" asserts the twelve subjects, 144 evaluator executions, 144 automated claims, and 24 human claims, then builds the A/B/C/D chain as a separately sealed chain that supersedes the A/B/C cohort by digest (132 admitted evaluations for A/B/C against 168 for A/B/C/D) rather than replacing it, and re-checks the captured A/B/C cohort, matrix, and report-payload digests plus the report envelope re-digested from its own bytes. No golden digest is pinned as a literal, so the test shows that building D leaves the A/B/C artifacts untouched, not that their bytes match a value fixed outside it |
+| TEP commissioning adds lineage without changing evidence semantics | `packages/benchmark-product/core/src/conformance/evidence-native-commissioning-parity.test.ts` — "a real Submission/Attempt/Delivery link does not change evaluator-D evidence identity" |
+| claim-package/3 and public-bundle/5 verify independently; claim-package/2 and bundle/4 still accepted | The two claim closures have separate parsers that neither share nor supersede each other: `packages/benchmark-product/verify/src/profile/claim.ts` accepts claim-package/1 and /2 (and the later anchored /4 and /5), while claim-package/3 is sealed and parsed by `packages/benchmarking/evidence/src/portable.ts`, exercised end to end in `packages/benchmarking/evidence/src/golden-lifecycle.test.ts` and in `packages/benchmark-product/verify/src/signers.test.ts`. On the bundle side `SUPPORTED_BUNDLE_FORMATS` in `packages/benchmark-product/verify/src/manifest.ts` carries v2, v4, and v5 (plus the later anchored v6/v7) side by side, and `packages/benchmark-product/verify/test/cli.test.mjs` exercises every bundle format, including the seven evidence-native checks and the metadata-first deferral |
+
+### 11.2 Residual work, outside this amendment
+
+Two items are not carried by any acceptance criterion and remain open. They belong in their own
+issues rather than in #2711's closure:
+
+- **Commissioning dual-write and explicit backfill** (§10 stack 10). `ExecutionCommissioningLink`
+  and its parity fixture ship; the operational dual-write and backfill paths do not exist.
+- **A user-facing evidence-native production path.** The shipped `colophon` CLI reads and verifies a
+  `public-bundle/5` closure, but the produce side (native capture, cohort sealing, Matrix v2, Report
+  kind v3) is a library surface, `packages/benchmark-product/core/src/evidence-first.ts`, reached
+  only from repository scripts. The `packages/benchmark-product/web` reader likewise has no
+  evidence-native presentation.
 
 ## Appendix A. Review disposition
 

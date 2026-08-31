@@ -220,6 +220,7 @@ test('the exclusion list is closed: widening it is a reviewed edit', () => {
     'packages/environments/chain-record/src/primitives.test.ts',
     'packages/environments/information-world/src/identifiers.test.ts',
     'packages/environments/record/src/identifiers.test.ts',
+    'packages/evidence/offer/src/identifiers.test.ts',
     'packages/evidence/trace/src/vocabulary.test.ts',
     'packages/task-execution/backend-local/assembly/src/backend.evidence.test.ts',
   ]);

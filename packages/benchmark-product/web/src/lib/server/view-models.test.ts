@@ -22,7 +22,7 @@ function failedStatus(code: ProductErrorCode, detail: string): RunStatusResult {
       error: { code, detail },
     },
     cells: [],
-    counts: { expected: 0, dispatched: 0, delivered: 0, judged: 0, failed: 0 },
+    counts: { expected: 0, dispatched: 0, delivered: 0, judged: 0, failed: 0, awaitingEvaluation: 0 },
   };
 }
 

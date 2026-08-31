@@ -15,9 +15,11 @@ import {
 import {
   defineEvaluatorRegistration,
   makeEvaluationLauncher,
+  resolveEvaluationMethod,
   type EvaluationHarnessDeployment,
   type EvaluatorAdapter,
   type EvaluatorRegistration,
+  type ResourceDescriptor,
 } from "@jinn-network/task-execution-evaluation-harness";
 import {
   PREDICTION_REGISTRATION_ID,
@@ -254,14 +256,44 @@ async function requireModuleDigest(path: string, expected: `sha256:${string}`): 
   }
 }
 
-function methodDigest(registration: EvaluatorRegistration): `sha256:${string}` {
-  const sha256 = registration.evaluationMethod.digest?.sha256;
+/**
+ * The concrete method descriptor this host pins at composition time.
+ *
+ * A registration may instead derive its method from each EvaluationSpec (see the harness's
+ * `EvaluationMethodResolver`) — the binary-judgment evaluator does, because its sealed parser
+ * semantics differ by parser-invalid policy. This host's boot-time gates need a descriptor
+ * BEFORE any EvaluationSpec exists: the trusted configuration pins one digest per registration
+ * id, and grader report sources may be keyed by the method uri. Neither question has an answer
+ * for a derived method, so such a registration is refused here rather than silently skipping the
+ * digest pin. Unreachable today — `HOST_EVALUATION_METHODS` admits only the prediction and
+ * swe-rebench registrations, both of which declare a fixed descriptor.
+ */
+function hostMethodDescriptor(registration: EvaluatorRegistration): ResourceDescriptor {
+  const method = registration.evaluationMethod;
+  if (typeof method === "function") {
+    throw new NativeEvaluatorCompositionError(
+      `${registration.registrationId} evaluator registration derives its evaluation method per `
+      + "EvaluationSpec; this host pins a concrete method descriptor at composition time",
+    );
+  }
+  return method;
+}
+
+function descriptorDigest(
+  descriptor: ResourceDescriptor,
+  registrationId: string,
+): `sha256:${string}` {
+  const sha256 = descriptor.digest?.sha256;
   if (typeof sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(sha256)) {
     throw new NativeEvaluatorCompositionError(
-      `${registration.registrationId} evaluator method descriptor has no canonical sha256 digest`,
+      `${registrationId} evaluator method descriptor has no canonical sha256 digest`,
     );
   }
   return `sha256:${sha256}`;
+}
+
+function methodDigest(registration: EvaluatorRegistration): `sha256:${string}` {
+  return descriptorDigest(hostMethodDescriptor(registration), registration.registrationId);
 }
 
 function expectedMethodDigest(
@@ -304,7 +336,7 @@ function bindGraderReportSource(
   sources: Readonly<Record<string, NativeGraderReportBinding>>,
 ): EvaluatorRegistration {
   const id = registration.registrationId;
-  const uri = registration.evaluationMethod.uri;
+  const uri = hostMethodDescriptor(registration).uri;
   const byId = sources[id];
   const byUri = typeof uri === "string" ? sources[uri] : undefined;
   // Both keys addressing the same registration is fine only when they name the same binding.
@@ -363,7 +395,8 @@ function hostRegistrationSet(input: {
     }
     seen.add(id);
     keys.add(id);
-    if (typeof registration.evaluationMethod.uri === "string") keys.add(registration.evaluationMethod.uri);
+    const methodUri = hostMethodDescriptor(registration).uri;
+    if (typeof methodUri === "string") keys.add(methodUri);
     const method = HOST_EVALUATION_METHODS.get(id);
     if (method === undefined) {
       throw new NativeEvaluatorCompositionError(
@@ -481,11 +514,23 @@ function methodDigestResolver(
   registrations: readonly EvaluatorRegistration[],
 ): (specificationBytes: Uint8Array) => `sha256:${string}` {
   if (registrations.length === 1) {
+    // Composition has already refused any registration that derives its method per
+    // EvaluationSpec (`hostMethodDescriptor`), so one registration means one fixed digest and
+    // this path never needs to parse the specification.
     const digest = methodDigest(registrations[0]!);
     return () => digest;
   }
-  return (specificationBytes) =>
-    methodDigest(compatibleRegistration(registrations, parseEvaluationSpec(specificationBytes)));
+  return (specificationBytes) => {
+    // The spec is in hand here, so the disclosed method is resolved against it rather than read
+    // off the registration: a registration whose sealed method varies by EvaluationSpec must be
+    // checked against the verdict the evaluator actually sealed for THIS spec.
+    const specification = parseEvaluationSpec(specificationBytes);
+    const registration = compatibleRegistration(registrations, specification);
+    return descriptorDigest(
+      resolveEvaluationMethod(registration, specification),
+      registration.registrationId,
+    );
+  };
 }
 
 function digestFromDescriptor(descriptor: { readonly digest?: Readonly<Record<string, string>> }): `sha256:${string}` {

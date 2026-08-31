@@ -1,6 +1,8 @@
 import type { MatrixCell, RunRecord } from "@jinn-network/benchmarking-records";
 import { venueIsolationPostureForPolicy } from "./isolation.js";
 import { anchoredPreRegistration, anchoredVenueLimits, type ClaimAnchor } from "./anchor-claims.js";
+import { runBoundVenueLimits } from "../binding/report-face.js";
+import type { VerifiedRunBinding } from "../binding/beacon-binding.js";
 
 export const LOCAL_VENUE_LIMITS: readonly string[] = [
   "This is a local, self-run venue: the same operator controls task dispatch, execution, and evaluation.",
@@ -14,13 +16,19 @@ export function localVenueLimitsForRun(run: Pick<RunRecord, "policy">): readonly
   return venueIsolationPostureForPolicy(run.policy.submissionBaseline?.isolationPolicy).inventory.length === 1 ? LOCAL_VENUE_LIMITS : [LOCAL_VENUE_LIMITS[0]!, LOCAL_VENUE_LIMITS[1]!, MULTI, ...LOCAL_VENUE_LIMITS.slice(3)];
 }
 /** `anchors` is the same derived section the producer used (anchor-evidence §7.4); the conditional
- * copy is the same pure function on both sides, so claim-consistency stays an exact byte-compare. */
+ * copy is the same pure function on both sides, so claim-consistency stays an exact byte-compare.
+ *
+ * `binding` is the run's verified `beacon-binding/1` record (issue #2976) and obeys the same rule:
+ * omitting it is the identity, so every run that carries no binding keeps its exact limits bytes.
+ * It is only ever passed by a caller that can show BOTH sides the same binding — today that means
+ * it is not passed, because the public bundle carries no binding record yet. */
 export function buildLocalVenueHonesty(
   cells: readonly MatrixCell[],
   run: Pick<RunRecord, "policy">,
   anchors: readonly ClaimAnchor[] = [],
+  binding?: VerifiedRunBinding,
 ) {
   const counts = { harness: 0, model: 0, loadout: 0, isolation: 0 };
   for (const cell of cells) for (const axis of Object.keys(counts) as Array<keyof typeof counts>) if (cell.verification[axis] === "unverifiable") counts[axis] += 1;
-  return { venue: "self-run" as const, preRegistration: anchoredPreRegistration(anchors), limits: anchoredVenueLimits(localVenueLimitsForRun(run), anchors), unverifiableAxisCounts: counts };
+  return { venue: "self-run" as const, preRegistration: anchoredPreRegistration(anchors), limits: runBoundVenueLimits(anchoredVenueLimits(localVenueLimitsForRun(run), anchors), binding), unverifiableAxisCounts: counts };
 }

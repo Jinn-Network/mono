@@ -29,6 +29,12 @@ export const BUNDLE_V4_FORMAT = "benchmark-product-public-bundle/4" as const;
  * had, byte for byte. The evidence-native v5 is unrelated and untouched.
  */
 export const BUNDLE_V6_FORMAT = "benchmark-product-public-bundle/6" as const;
+/**
+ * The anchored binary-qualification closure (issue #3205). A bundle emits this version exactly when
+ * its run both carries an anchor and projects a binary qualification — v6 is v2 plus `anchors/`,
+ * this is v4 plus `anchors/`. Every other bundle keeps the version it already had, byte for byte.
+ */
+export const BUNDLE_V7_FORMAT = "benchmark-product-public-bundle/7" as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -45,6 +51,7 @@ export const BundleManifestSchema = z.object({
     z.literal(BUNDLE_V3_FORMAT),
     z.literal(BUNDLE_V4_FORMAT),
     z.literal(BUNDLE_V6_FORMAT),
+    z.literal(BUNDLE_V7_FORMAT),
   ]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
@@ -73,7 +80,8 @@ export interface BuildBundleManifestOptions {
     | typeof BUNDLE_FORMAT
     | typeof BUNDLE_V3_FORMAT
     | typeof BUNDLE_V4_FORMAT
-    | typeof BUNDLE_V6_FORMAT;
+    | typeof BUNDLE_V6_FORMAT
+    | typeof BUNDLE_V7_FORMAT;
 }
 
 function sha256(bytes: Uint8Array): string {

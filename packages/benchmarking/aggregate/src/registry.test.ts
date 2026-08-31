@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { parseMatrix, sealMatrix, serializeCanonicalJson } from "@jinn-network/benchmarking-records";
+import { canonicalJsonBytes, recordDigest, sealDsseEnvelope } from "@jinn-network/trust-core";
 import { BENCHMARKING_METHOD_REGISTRY } from "./index.js";
 import { createMethodRegistry } from "./registry.js";
+import { MethodInputError } from "./resolved-inputs.js";
+import { MAX_NONINFERIORITY_RESAMPLES_V1 } from "./stats/noninferiority.js";
 import type { MethodComputeInput } from "./method.js";
 
 function baseInput(overrides: Partial<MethodComputeInput> = {}): MethodComputeInput {
@@ -51,6 +54,70 @@ function hostileArmSubject(): MethodComputeInput["subjects"][number] {
     assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
   });
   return { subjectSha256: sealed.digest.slice("sha256:".length), matrix: parseMatrix(sealed.bytes) };
+}
+
+/** One Task judged pass on both arms, whose two passing cells declare different cost units --
+ * the exact shape noninferiority-iut@1's cost leg must keep reporting as a cost-unit failure. */
+function mismatchedCostUnitInput(): MethodComputeInput {
+  const passBytes = sealDsseEnvelope({
+    payloadBytes: canonicalJsonBytes({
+      _type: "https://in-toto.io/Statement/v1",
+      subject: [{ name: "fixture/cost-unit", digest: { sha256: "d".repeat(64) } }],
+      predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
+      predicate: {
+        evaluatedAt: "2026-07-29T00:00:00Z",
+        evaluator: { id: "urn:uuid:77777777-7777-5777-8777-777777777777" },
+        taskSubject: "execution/task/task.json",
+        resultSubjects: ["execution/result/result.json"],
+        verdict: "pass",
+      },
+    }),
+    payloadType: "application/vnd.in-toto+json",
+    signatures: [{ keyid: "did:key:zVerdict", signature: Uint8Array.of(1) }],
+  });
+  const passDigest = recordDigest(passBytes);
+  const taskDigest = "c".repeat(64);
+  const verification = {
+    harness: "match" as const, model: "match" as const,
+    loadout: "match" as const, isolation: "match" as const, checksFailed: [],
+  };
+  const cell = (armId: string, unit: string) => ({
+    cellKey: `${taskDigest}/${armId}/1`,
+    taskDigest,
+    armId,
+    replicate: 1,
+    dispatches: 1,
+    accounted: 1,
+    submission: `sha256:${"3".repeat(64)}`,
+    delivery: `sha256:${"4".repeat(64)}`,
+    verdicts: [passDigest],
+    validVerdicts: [passDigest],
+    outcome: "judged" as const,
+    cost: { value: "1", unit, source: "reported" as const },
+    verification,
+    integrityTier: "attested-only" as const,
+  });
+  const sealed = sealMatrix({
+    protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
+    run: { digest: { sha256: "a".repeat(64) } },
+    closeBoundary: { at: "2026-08-04T00:00:00Z" },
+    cells: [cell("armA", "usd"), cell("armB", "token")],
+    exclusions: [],
+    attrition: {
+      perArm: Object.fromEntries(["armA", "armB"].map((armId) => [armId, {
+        expected: 1, judged: 1, unjudged: 0, unscorable: 0,
+        expired: 0, invalidated: 0, excluded: 0, replacements: 0,
+      }])),
+      asymmetryFlags: [],
+    },
+    completeness: { expected: 2, judged: 2, floor: "1", runOutcome: "complete" },
+    assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
+  });
+  return baseInput({
+    subjects: [{ subjectSha256: sealed.digest.slice("sha256:".length), matrix: parseMatrix(sealed.bytes) }],
+    parameters: { baseline: "armA", candidate: "armB", seed: 123456789, resamples: 10 },
+    resolveVerdictBytes: (digest: string) => digest === passDigest ? passBytes : undefined,
+  });
 }
 
 describe("createMethodRegistry", () => {
@@ -186,5 +253,45 @@ describe("clean-subset@1: error handling", () => {
       registry,
       parameters: { cutoff: "2026-01-01T00:00:00Z", basis: "self-declared", delegate: { id: "not-registered", version: "1" } },
     }))).toThrow(/not registered/);
+  });
+});
+
+describe("resamples range guard (#2583)", () => {
+  const IUT_PARAMS = { baseline: "armA", candidate: "armB", seed: 123456789 };
+  const DELTA_PARAMS = { ...IUT_PARAMS, alpha: "0.05" };
+
+  function expectRangeViolation(id: string, parameters: Record<string, unknown>): void {
+    const method = createMethodRegistry().get(id, "1")!;
+    let thrown: unknown;
+    try {
+      method.compute!(baseInput({ parameters }));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(MethodInputError);
+    const error = thrown as MethodInputError;
+    expect(error.code).toBe("method-parameter-out-of-range");
+    expect(error.digest).toBe("resamples");
+    expect(error.message).toContain(`resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
+  }
+
+  test.each([
+    ["jinn.benchmarking.method/noninferiority-iut", IUT_PARAMS],
+    ["jinn.benchmarking.method/paired-delta", DELTA_PARAMS],
+  ])("%s reports an out-of-range resamples as a parameter-range failure", (id, params) => {
+    expectRangeViolation(id, { ...params, resamples: 0 });
+    expectRangeViolation(id, { ...params, resamples: MAX_NONINFERIORITY_RESAMPLES_V1 + 1 });
+  });
+
+  test("noninferiority-iut@1 still reports mismatched cost units as method-incompatible-cost-unit", () => {
+    const method = createMethodRegistry().get("jinn.benchmarking.method/noninferiority-iut", "1")!;
+    let thrown: unknown;
+    try {
+      method.compute!(mismatchedCostUnitInput());
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(MethodInputError);
+    expect((thrown as MethodInputError).code).toBe("method-incompatible-cost-unit");
   });
 });

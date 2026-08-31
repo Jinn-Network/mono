@@ -33,6 +33,7 @@ import {
   BUNDLE_V4_TRUST_FORMAT,
 } from "./schema.js";
 import { BUNDLE_V4_FORMAT, buildBundleManifest } from "./manifest.js";
+import { findLeaks } from "./testing/leak-scan.js";
 import {
   createSyntheticV4BundleFixture,
   type SyntheticV4BundleFixture,
@@ -393,10 +394,10 @@ describe("binary public-bundle/4 producer closure", () => {
       ]) expect(screenedRoles.has(humanRole)).toBe(false);
     }
 
-    const allPublicBytes = Buffer.concat((manifest.files as Array<{ path: string }>).map((file) =>
-      readFileSync(join(bundleDir, file.path))));
-    expect(allPublicBytes.includes(Buffer.from(root))).toBe(false);
-    expect(allPublicBytes.toString("utf8")).not.toMatch(/LoCoMo|licensed benchmark|api[_-]?key/iu);
+    // #3063: scans each published file's text, not the concatenated base64 alphabet.
+    expect((manifest.files as Array<{ path: string }>).flatMap((file) =>
+      findLeaks(readFileSync(join(bundleDir, file.path)), { path: file.path, workspaceDir: root })))
+      .toEqual([]);
 
     const verification = await verifyPublicBundle(bundleDir);
     expect(verification.format).toBe(BUNDLE_V4_FORMAT);

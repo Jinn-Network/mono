@@ -1,9 +1,8 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { finished } from 'node:stream/promises';
-import { fileURLToPath } from 'node:url';
 import type { HarnessAdapter, TaskSessionInputs } from '../types.js';
 
 export interface ClaudeCodeHarnessAdapterConfig {
@@ -38,14 +37,6 @@ export interface ClaudeCodeHarnessAdapterConfig {
    */
   pluginInstallDir?: string;
   /**
-   * Root of the Jinn client install (the dir containing `dist/`/`src/`).
-   * Forwarded to the Network Tools MCP launcher as
-   * `JINN_NETWORK_TOOLS_CLIENT_ROOT` so it can resolve the real Jinn MCP
-   * server. Defaults to {@link defaultClientRoot} (derived from this
-   * module's location). Tests override it.
-   */
-  clientRoot?: string;
-  /**
    * Override spawn for testing. When provided, called instead of
    * node:child_process.spawn so tests can inject a fake child process.
    */
@@ -57,30 +48,6 @@ export interface ClaudeCodeHarnessAdapterConfig {
    * reaped. Injected by tests so they never fire a real signal.
    */
   _killProcessGroup?: (childPid: number, signal: NodeJS.Signals) => void;
-}
-
-/**
- * Resolve the Jinn client install root from this module's runtime location.
- *
- * The Network Tools plugin (`bundled:network-tools`) is materialized into the
- * operator vendor root (`~/.jinn-client/solver-plugins/network-tools`), so the
- * plugin's own MCP launcher cannot find the client tree via `../..` — that
- * resolves to `~/.jinn-client`, which has no `dist/mcp/server.js` or
- * `src/mcp/server.ts`, and the server process exits non-zero (`status:failed`
- * in the agent's MCP server list). This adapter runs *inside* the client
- * process, so it can hand the launcher the real client root via
- * `JINN_NETWORK_TOOLS_CLIENT_ROOT`.
- *
- * Layout (mirrors `defaultClientRoot` in `codex-code.ts`):
- *   - source: `<client>/src/harnesses/impls/learner/adapters/claude-code.ts`
- *   - compiled: `<client>/dist/harnesses/impls/learner/adapters/claude-code.js`
- * Five levels up reaches `<client>` in both layouts. The launcher's
- * `firstExistingServer(<client>)` then finds `<client>/dist/mcp/server.js`
- * (built/published) or `<client>/src/mcp/server.ts` (source checkout).
- */
-function defaultClientRoot(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return resolve(here, '..', '..', '..', '..', '..');
 }
 
 /**
@@ -189,7 +156,6 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
   private readonly daemonApiToken: string | undefined;
   private readonly corpusEnv: ClaudeCodeHarnessAdapterConfig['corpusEnv'];
   private readonly pluginInstallDir: string;
-  private readonly clientRoot: string;
   private readonly spawnFn: typeof spawn;
   private readonly killProcessGroup: (childPid: number, signal: NodeJS.Signals) => void;
 
@@ -201,7 +167,6 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
     this.daemonApiToken = config.daemonApiToken;
     this.corpusEnv = config.corpusEnv;
     this.pluginInstallDir = config.pluginInstallDir ?? join(homedir(), '.claude', 'plugins');
-    this.clientRoot = config.clientRoot ?? defaultClientRoot();
     this.spawnFn = config._spawnFn ?? spawn;
     this.killProcessGroup =
       config._killProcessGroup ?? ((childPid, signal) => { process.kill(-childPid, signal); });
@@ -244,14 +209,6 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       WORKING_DIR: inputs.workingDir,
       JINN_WORKING_DIR: inputs.workingDir,
       JINN_CLAUDE_CODE_LEARNER_PLUGIN_ROOT: pluginRoot,
-      // Network Tools' MCP launcher reads this to locate the real Jinn MCP
-      // server. The `bundled:network-tools` plugin is materialized into the
-      // operator vendor root, detached from the client tree, so its own
-      // `../..` resolution fails — without this the jinn-client MCP server
-      // exits non-zero and the agent never gets submit_typed_payload.
-      // Honor an operator-supplied value if present (e.g. custom install).
-      JINN_NETWORK_TOOLS_CLIENT_ROOT:
-        process.env.JINN_NETWORK_TOOLS_CLIENT_ROOT?.trim() || this.clientRoot,
       DESIRED_STATE_ID: inputs.taskId,
       DESIRED_STATE_DESCRIPTION: stringField(inputs.taskBody?.description),
       DESIRED_STATE_CONTEXT: taskContextJson(inputs),

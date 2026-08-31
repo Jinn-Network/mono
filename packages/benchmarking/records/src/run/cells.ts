@@ -155,3 +155,29 @@ export function cellIdempotencyKey(runDigest: string, cell: string, dispatch: nu
   }
   return [exactRunDigest, exactCell, String(dispatch)].join(IDEMPOTENCY_KEY_UNIT_SEPARATOR);
 }
+
+/**
+ * Reorders a cell set so its tasks run in `taskOrder` (issue #2976).
+ *
+ * `expectedCellSet` orders by `cellKey`, which is a function of the sealed records alone — so the
+ * operator who wrote those records fixed the execution order. A run bound to public randomness
+ * (`beacon-binding/1`) derives that order from a beacon value instead, and this is where the
+ * derived order is applied.
+ *
+ * `taskOrder` holds task digests without the `sha256:` prefix, matching `CellCoord.taskDigest`.
+ * The sort is stable and total: cells of the same task keep their `cellKey` order, and a task the
+ * order does not name keeps its position after every named one rather than being dropped —
+ * reordering must never change WHICH cells run, only when. Passing `undefined` is the identity,
+ * so an unbound run keeps exactly the order it had.
+ */
+export function orderCellsByTask<T extends { readonly taskDigest: string }>(
+  cells: readonly T[],
+  taskOrder: readonly string[] | undefined,
+): readonly T[] {
+  if (taskOrder === undefined || taskOrder.length === 0) return cells;
+  const rank = new Map(taskOrder.map((taskDigest, index) => [taskDigest, index] as const));
+  return cells
+    .map((cell, index) => ({ cell, index, rank: rank.get(cell.taskDigest) ?? Number.POSITIVE_INFINITY }))
+    .sort((left, right) => (left.rank === right.rank ? left.index - right.index : left.rank - right.rank))
+    .map((entry) => entry.cell);
+}

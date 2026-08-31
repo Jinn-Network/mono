@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "offer/free.document.json",
+      "sha256": "d4d51a2a6beb46470da070f1f5ab23086406ad210fbe9d9fc9e70cb96d4c0715"
+    },
+    {
+      "id": "offer/free.json",
+      "sha256": "58b6c08203dbe40f5eb2545ddc05528ab2e81d2a849f71718fe5884cf3ce542f"
+    },
+    {
+      "id": "offer/free.sha256",
+      "sha256": "dd1b9caee316913d481ae0371ca740b509a9b39cab4a46366592461e41b3548c"
+    },
+    {
+      "id": "offer/invalid-bare-extension-key.json",
+      "sha256": "5c57e776228f28d22a160345caf094a30f2f32e979ba39b70320e4545aa4f609"
+    },
+    {
+      "id": "offer/invalid-bare-hex-subject.json",
+      "sha256": "87a851ed49af369556ff2f42e388dbf5062c30dce469ce7e92cf5429ec511bba"
+    },
+    {
+      "id": "offer/invalid-duplicate-rail.json",
+      "sha256": "3206536cab4034db7bd970937ef6ec4a378b8027c7dd340ab513617210dc3465"
+    },
+    {
+      "id": "offer/invalid-leading-zero-amount.json",
+      "sha256": "edd182056a50d48dc04540eebfdee433950fb2d110c61226d695d121f607ff72"
+    },
+    {
+      "id": "offer/invalid-missing-rails.json",
+      "sha256": "98b809361155eecc760176c347a1daaaab76c5e15e010044f6917848b6dce3dc"
+    },
+    {
+      "id": "offer/invalid-rail-spelled-twice.json",
+      "sha256": "64a9ffc0d5340b1358af5e11d461fb8bf3ec0f7b32feae4a1c64ffc28bfd1d5c"
+    },
+    {
+      "id": "offer/invalid-relative-gate-uri.json",
+      "sha256": "1325ab6495b20f2bc3d5e963ffd224a6c6d6c40cdcd9889224336b66592f108f"
+    },
+    {
+      "id": "offer/invalid-relative-rail-identifier.json",
+      "sha256": "09a0f1d15dee4defb9d8e9bffb84ea3d02dc5869b5d5beaa417b70e078930358"
+    },
+    {
+      "id": "offer/invalid-signed-amount.json",
+      "sha256": "fadc33bb215c3e1e59b97155d936c9cdaeeec1553f03e312c5b9f81cb04e81c9"
+    },
+    {
+      "id": "offer/invalid-unnormalized-rail-identifier.json",
+      "sha256": "bf21caee43d693a25877171580a0e764192d40a0ac495a377f505e71e7046d73"
+    },
+    {
+      "id": "offer/invalid-unsorted-rails.json",
+      "sha256": "eb23f9c3981a9ab894ec35965157cd8d0d91c17a2a8405fba7a11bf0270bd054"
+    },
+    {
+      "id": "offer/invalid-zero-amount.json",
+      "sha256": "b7428a300b8ca2ca8634c6dff70681d8dea563a416e1b2ae00b01565d1d41b98"
+    },
+    {
+      "id": "offer/priced.document.json",
+      "sha256": "8636395c5a4c31b68215668b266c26a48c949556d45da67d145d90d9eee659ac"
+    },
+    {
+      "id": "offer/priced.json",
+      "sha256": "62b49fb4debfd4ffdb6416a2c8999bcb4aaf3ff2665b3feddcb3db017813bf1b"
+    },
+    {
+      "id": "offer/priced.sha256",
+      "sha256": "095479cb725ff51b10075c30c5848635f376cd3babcc9e7ee328779c49fb8a46"
+    },
+    {
+      "id": "offer/superseding.document.json",
+      "sha256": "1e5c327a6f59b39c960b039cf7de027ead39dc8cd18ef6a0d39cc58d1d2478a9"
+    },
+    {
+      "id": "offer/superseding.json",
+      "sha256": "3e1a576ec1abeeafa201ae86828bb2e1e5a150c379d68d686867cb8a2f49264f"
+    },
+    {
+      "id": "offer/superseding.sha256",
+      "sha256": "e94f15765c58922a31c1aa343c67753ac05ca34782d7a21eb2e112e9721ec34d"
+    }
+  ],
+  "errata": []
+}

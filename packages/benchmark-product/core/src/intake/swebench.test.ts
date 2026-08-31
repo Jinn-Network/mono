@@ -57,13 +57,30 @@ describe("convertSweBenchRows", () => {
     expect(error.issues[0]?.path).toBe("benchmark-item-distinctness");
   });
 
-  test("an invalid provenanceTimestamp refuses validation naming benchmark-judgeability", () => {
+  test("an invalid provenanceTimestamp refuses validation naming the offending value", () => {
+    // Previously this reached checkJudgeability unvalidated and surfaced as `invalid-provenance`
+    // against a task DIGEST. The platform now validates the batch value at its edge, exactly as it
+    // already did the per-instance map, so the refusal names what an operator can act on. The
+    // `benchmark-judgeability` mapping this test used to trigger is covered by
+    // swebench.judgeability-mapping.test.ts.
     const error = catchError(() =>
       convertSweBenchRows([GOLDEN_ROW], { ...OPTS, provenanceTimestamp: "not-a-timestamp" }),
     );
     expect(error.code).toBe("validation");
     expect(error.issues).toHaveLength(1);
-    expect(error.issues[0]?.path).toBe("benchmark-judgeability");
+    expect(error.issues[0]?.message).toMatch(/provenanceTimestamp: .*"not-a-timestamp"/u);
+    expect(error.issues[0]?.message).not.toMatch(/taskDigest/u);
+  });
+
+  test("a bare-date provenanceTimestamp is repaired, not refused", () => {
+    // The shape upstream datasets actually emit. It must convert to the same sealed benchmark the
+    // already-normalized instant produces, or content addressing forks on input formatting.
+    const bareDate = convertSweBenchRows([GOLDEN_ROW], { ...OPTS, provenanceTimestamp: "2026-03-09" });
+    const explicit = convertSweBenchRows([GOLDEN_ROW], {
+      ...OPTS,
+      provenanceTimestamp: "2026-03-09T00:00:00Z",
+    });
+    expect(bareDate.imported.benchmark.digest).toBe(explicit.imported.benchmark.digest);
   });
 
   test("malformed rows fail before any platform call, naming rows.<index>.<field>", () => {

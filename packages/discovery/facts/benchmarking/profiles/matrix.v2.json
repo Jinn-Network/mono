@@ -1,0 +1,15 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/benchmark-matrix/v1",
+  "profile": "https://spec.jinn.network/facts/benchmark-matrix/v2",
+  "fields": [
+    { "name": "matrixDigest", "class": "record" },
+    { "name": "runDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "run", "scalar": "string" } },
+    { "name": "runOutcome", "class": "record", "cloudEvents": { "attribute": "runoutcome", "scalar": "string" } },
+    { "name": "taskDigests", "class": "record", "referenceBearing": true },
+    { "name": "submissionDigests", "class": "record", "referenceBearing": true },
+    { "name": "deliveryDigests", "class": "record", "referenceBearing": true },
+    { "name": "verdictDigests", "class": "record", "referenceBearing": true },
+    { "name": "accountingDigest", "class": "record", "referenceBearing": true }
+  ]
+}

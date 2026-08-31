@@ -1,4 +1,5 @@
 import {
+  BENCHMARK_PUBLICATION_EXTENSION,
   loadGoldenBytes,
   parseBenchmark,
   parseMatrix,
@@ -20,12 +21,16 @@ import {
 } from "./identifiers.js";
 import {
   BENCHMARKING_FACTS_RECOMPUTE,
+  BENCHMARKING_FACTS_RECOMPUTE_V2,
   benchmarkAccountingRecompute,
   benchmarkRecompute,
+  benchmarkRecomputeV2,
   matrixRecompute,
+  matrixRecomputeV2,
   reportRecompute,
   signedReportRecompute,
   runRecompute,
+  runRecomputeV2,
 } from "./recompute.js";
 
 const noReferencedBytes: ReferencedBytes = {
@@ -343,5 +348,134 @@ describe("facts/benchmarking recompute (program §7.128–§7.130)", () => {
     expect(BENCHMARKING_FACTS_RECOMPUTE.get(REPORT_V2_RECORD_KIND)).toBe(signedReportRecompute);
     expect(BENCHMARKING_FACTS_RECOMPUTE.get(BENCHMARK_ACCOUNTING_RECORD_KIND)).toBe(benchmarkAccountingRecompute);
     expect(BENCHMARKING_FACTS_RECOMPUTE.get("https://spec.jinn.network/records/unknown/v1")).toBeUndefined();
+  });
+});
+
+describe("v2 recompute: the join edges v1 left out", () => {
+  it("names the Tasks a Benchmark is made of", async () => {
+    const bytes = await fixtureBytes("benchmark", "valid");
+    const record = parseBenchmark(bytes);
+    const facts = await benchmarkRecomputeV2(bytes, noReferencedBytes);
+    expect(facts.taskDigests).toEqual(record.items.map((item) => `sha256:${item.task.digest.sha256}`));
+    expect(facts.benchmarkDigest).toBe(recordDigest(bytes));
+  });
+
+  it("keeps every v1 fact and adds nothing else when a Benchmark supersedes nothing", async () => {
+    const bytes = await fixtureBytes("benchmark", "minimal");
+    const v1 = await benchmarkRecompute(bytes, noReferencedBytes);
+    const v2 = await benchmarkRecomputeV2(bytes, noReferencedBytes);
+    expect(v2).toMatchObject(v1);
+    expect(v2).not.toHaveProperty("supersedesDigest");
+  });
+
+  it("names the per-cell Task, Submission, Delivery and verdict records of a Matrix", async () => {
+    const bytes = await fixtureBytes("matrix", "valid");
+    const record = parseMatrix(bytes);
+    const facts = await matrixRecomputeV2(bytes, noReferencedBytes);
+    expect(facts.taskDigests).toEqual([`sha256:${record.cells[0].taskDigest}`]);
+    expect(facts.submissionDigests).toEqual([record.cells[0].submission]);
+    expect(facts.deliveryDigests).toEqual([record.cells[0].delivery]);
+    expect(facts.verdictDigests).toEqual(record.cells[0].verdicts);
+  });
+
+  it("de-duplicates a Task named by more than one cell, preserving record order", async () => {
+    const bytes = await fixtureBytes("matrix", "valid");
+    const record = parseMatrix(bytes);
+    const document = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    const first = record.cells[0];
+    // A second replicate of the same cell: the same Task, a second Delivery and verdict. The
+    // aggregates move with it, because the schema checks that they agree with the cells.
+    const twoCells = {
+      ...document,
+      cells: [
+        first,
+        {
+          ...first,
+          replicate: 2,
+          cellKey: `${first.taskDigest}/${first.armId}/2`,
+          delivery: `sha256:${"a".repeat(64)}`,
+          verdicts: [`sha256:${"b".repeat(64)}`],
+          validVerdicts: [`sha256:${"b".repeat(64)}`],
+        },
+      ],
+      completeness: { ...(document.completeness as object), expected: 2, judged: 2 },
+      attrition: {
+        asymmetryFlags: [],
+        perArm: { [first.armId]: { excluded: 0, expected: 2, expired: 0, invalidated: 0, judged: 2, replacements: 0, unjudged: 0, unscorable: 0 } },
+      },
+    };
+    const facts = await matrixRecomputeV2(sealMatrix(twoCells).bytes, noReferencedBytes);
+    expect(facts.taskDigests).toEqual([`sha256:${first.taskDigest}`]);
+    expect(facts.deliveryDigests).toEqual([first.delivery, `sha256:${"a".repeat(64)}`]);
+    expect(facts.verdictDigests).toEqual([...first.verdicts, `sha256:${"b".repeat(64)}`]);
+  });
+
+  it("names the accounting record an assembly-v2 Matrix pins, entering the dispatch closure", async () => {
+    const bytes = await fixtureBytes("matrix", "valid");
+    const document = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    const accounting = "f".repeat(64);
+    // The extension is mandatory for assembly v2 and rejected for anything else, so the two move
+    // together. This is the hop that makes `matrix -> accounting -> dispatches` walkable.
+    const withAccounting = {
+      ...document,
+      assembly: { procedure: "jinn.benchmarking.assembly", version: "2.0" },
+      [BENCHMARK_PUBLICATION_EXTENSION]: {
+        accounting: { name: "accounting", digest: { sha256: accounting } },
+      },
+    };
+    const facts = await matrixRecomputeV2(sealMatrix(withAccounting).bytes, noReferencedBytes);
+    expect(facts.accountingDigest).toBe(`sha256:${accounting}`);
+  });
+
+  it("omits the accounting edge on an assembly-v1 Matrix, which pins no accounting record", async () => {
+    const bytes = await fixtureBytes("matrix", "valid");
+    const facts = await matrixRecomputeV2(bytes, noReferencedBytes);
+    expect(facts).not.toHaveProperty("accountingDigest");
+  });
+
+  it("names the registration artifacts a Run's publication extension pins", async () => {
+    const bytes = await fixtureBytes("run", "valid");
+    const document = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    // Sorted and unique by role then sha256, which the extension schema enforces.
+    const withArtifacts = {
+      ...document,
+      [BENCHMARK_PUBLICATION_EXTENSION]: {
+        registrationArtifacts: [
+          { role: "https://example.test/preregistration/v1", artifact: { name: "prereg", digest: { sha256: "1".repeat(64) } } },
+          { role: "https://example.test/runtime/v1", artifact: { name: "runtime", digest: { sha256: "2".repeat(64) } } },
+        ],
+      },
+    };
+    const facts = await runRecomputeV2(sealRun(withArtifacts).bytes, noReferencedBytes);
+    expect(facts.registrationArtifactDigests).toEqual([
+      `sha256:${"1".repeat(64)}`,
+      `sha256:${"2".repeat(64)}`,
+    ]);
+    expect(facts.benchmarkDigest).toBeUndefined();
+  });
+
+  it("keeps v1's card unchanged for a Run that registers nothing", async () => {
+    const bytes = await fixtureBytes("run", "valid");
+    const v1 = await runRecompute(bytes, noReferencedBytes);
+    const v2 = await runRecomputeV2(bytes, noReferencedBytes);
+    expect(v2).toEqual(v1);
+    expect(v2).not.toHaveProperty("registrationArtifactDigests");
+  });
+
+  it("emits no facts at all for bytes that are not the record kind", async () => {
+    const junk = new TextEncoder().encode('{"a":1}');
+    expect(await benchmarkRecomputeV2(junk, noReferencedBytes)).toEqual({});
+    expect(await matrixRecomputeV2(junk, noReferencedBytes)).toEqual({});
+    expect(await runRecomputeV2(junk, noReferencedBytes)).toEqual({});
+  });
+
+  it("routes the two revised kinds to v2 and every other kind to its unrevised fn", () => {
+    expect(BENCHMARKING_FACTS_RECOMPUTE_V2.get(BENCHMARK_RECORD_KIND)).toBe(benchmarkRecomputeV2);
+    expect(BENCHMARKING_FACTS_RECOMPUTE_V2.get(MATRIX_RECORD_KIND)).toBe(matrixRecomputeV2);
+    expect(BENCHMARKING_FACTS_RECOMPUTE_V2.get(RUN_RECORD_KIND)).toBe(runRecomputeV2);
+    expect(BENCHMARKING_FACTS_RECOMPUTE_V2.get(REPORT_RECORD_KIND)).toBe(
+      BENCHMARKING_FACTS_RECOMPUTE.get(REPORT_RECORD_KIND),
+    );
+    expect(BENCHMARKING_FACTS_RECOMPUTE_V2.get("https://spec.jinn.network/records/nope/v1")).toBeUndefined();
   });
 });

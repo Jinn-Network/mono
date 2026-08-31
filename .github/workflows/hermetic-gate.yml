@@ -232,6 +232,12 @@ jobs:
       # Their CPU binaries remain bundled in the npm packages.
       ONNXRUNTIME_NODE_INSTALL: skip
       ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+      # The packed-closure smoke test's `tsc` compile of the operator client sits
+      # near Node's default ~4GB heap cap as the tree grows; on 2026-08-28 two
+      # consecutive merge-group runs died there with heap OOM while the push lane
+      # squeaked past. The runner has 16GB; give every node child real headroom.
+      # The smoke script's run() inherits process.env, so this reaches the child.
+      NODE_OPTIONS: --max-old-space-size=8192
       # This job's outcome is the suite signal. The required context is the
       # terminal job `hermetic-gate` below.
     steps:
@@ -328,7 +334,8 @@ jobs:
       # filename-filter form `release:tier-1:T1.1` uses) so the gate's verdict
       # maps 1:1 to the hermetic surface. The daemon full-loop fixture owns the
       # solution leg through SolutionDeliveryClaimed; native evaluator verdict
-      # settlement/activity coverage is tracked separately in issue #2666.
+      # settlement + staking-activity credit is owned by its sibling
+      # test/hermetic/native-evaluator-activity.test.ts (issue #2666).
       # The dedicated hermetic config runs the suite SEQUENTIALLY
       # (fileParallelism:false) with a long timeout — its heavy files each spawn
       # Anvil (+ Ponder / a real daemon) and would contend/flake if run

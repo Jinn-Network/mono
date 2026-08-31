@@ -91,6 +91,43 @@ describe("SWE-bench import — per-instance provenance timestamps", () => {
   });
 });
 
+describe("SWE-bench import — the batch timestamp is validated at the same edge", () => {
+  test("repairs the timestamp shapes upstream datasets actually ship", () => {
+    // A bare date is what upstream datasets emit; the per-instance path already repaired it, so
+    // the batch option carrying the identical value must not fail instead.
+    const bareDate = importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "2026-01-03" });
+    const spaced = importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "2026-01-03 00:00:00" });
+    const explicit = importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "2026-01-03T00:00:00Z" });
+    // Digest equality, not just a resolved string: the repair must produce the SAME sealed bytes
+    // the already-normalized value produces, or content addressing forks on input formatting.
+    expect(bareDate.benchmark.digest).toBe(explicit.benchmark.digest);
+    expect(spaced.benchmark.digest).toBe(explicit.benchmark.digest);
+  });
+
+  test("a malformed batch timestamp names the offending value, not a task digest", () => {
+    // Left to checkJudgeability, this surfaces as `invalid-provenance` against a digest, naming
+    // neither the option nor the bad value — the digest-hunt the per-instance path was fixed to
+    // avoid.
+    expect(() => importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "2026-02-30" }))
+      .toThrow(/^provenanceTimestamp: timestamp "2026-02-30" cannot be converted/u);
+  });
+
+  test("the batch value is refused even when every row carries an override", () => {
+    // The batch conversion runs once, before the row loop, so it fails fast on a value that no row
+    // would have read. Deliberate: the option is documented as the per-instance fallback, and a
+    // malformed fallback is a defect whether or not this particular slate happens to cover it.
+    expect(() =>
+      importSweBench(ROWS, {
+        ...OPTS,
+        provenanceTimestamp: "2026-02-30",
+        provenanceTimestamps: Object.fromEntries(
+          ROWS.map((row) => [row.instance_id, "2026-01-03T00:00:00Z"]),
+        ),
+      }),
+    ).toThrow(/^provenanceTimestamp: /u);
+  });
+});
+
 describe("SWE-bench import — per-instance timestamps are validated at the edge", () => {
   test("repairs the timestamp shapes upstream datasets actually ship", () => {
     const imported = importSweBench(ROWS, {

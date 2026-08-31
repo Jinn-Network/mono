@@ -60,3 +60,42 @@ yarn pack:smoke
 
 See `docs/superpowers/plans/2026-07-28-record-discovery.md` (Task 24) and its Addendum
 2026-07-28-b for the implementation plan.
+
+## Join edges
+
+Facts profiles must declare their kind's complete outbound-reference set (record-discovery
+design §12, amendment 2026-08-28). `task.v2` adds the digest-pinned inputs and the output-slot
+schemas; `delivery.v2` adds the outputs produced, the evidence records about the work, and the
+Delivery it replaces; and `evaluation-spec.v2` adds the graders plus whatever its family block
+pins — the composite crypto environment a state-predicate spec runs against and the ABIs its
+success predicates read through, a deterministic-process image, test material and parser, a
+model-graded rubric and judge output schema, a human-review form, a composite's sub-specs. v1
+declared only the family, which left "which evaluation specs run in this crypto environment"
+unanswerable from a card.
+
+A ResourceDescriptor satisfiable by `uri` or inline `content` alone pins nothing and is not an
+edge, so only digest-bearing members are carried.
+
+`profile-document.v2` adds the output-slot schemas a profile pins. v1 declared only `extends`,
+but `outputConventions.slots[].schema` is the same optional-digest ResourceDescriptor this leaf
+already treats as an edge on an evaluation spec. `task.v2` carries the same field for
+`outputs[].schema`, the corresponding member of a Task's own closed output slot: both kinds
+answer "which records pin output schema `sha256:X`" rather than one of them answering it and the
+other returning empty. The two fields are not identically typed -- the profile-document field is
+an optional ResourceDescriptor, the Task field is `z.unknown()` -- so only a digest-map whose
+`sha256` entry is 64 lowercase hex characters is carried, from either side.
+
+Audited and unchanged: `submission.v1` already declares its one edge, the Task. A Submission's
+harness pin does carry a digest, but it lives under a namespaced key of the structurally open
+`requirements` map, which has no field for a profile to declare — the design amendment states
+that limit.
+
+The plugin and checkpoint profiles stay empty: no defining schema for either exists in-tree, so
+there is nothing to declare, and an empty profile asserts nothing.
+
+Each profile's `referenceBearingFields` is pinned in `profiles.test.ts`. That pin is a
+change-detector authored from the same reading of the schema as the profile itself, not an
+independent completeness proof; see the design amendment's *What enforces this*.
+
+Every kind's set, across all six leaves, is tabulated together in the design amendment's *Audit
+table* (§12).

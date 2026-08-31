@@ -38,6 +38,7 @@ export const STANDALONE_CLI_VERBS: Readonly<Record<string, string>> = {
   "agent credentials": "copies an explicitly selected API-key file into protected Colophon machine storage",
   "agent login": "fails closed unless the exact harness version has a qualified isolated login-artifact flow",
   "doctor": "checks local agent identity and credential readiness without making a provider request",
+  "publication serve": "binds the already-published public archive tree to a socket and mutates no workspace record, so there is no operation to audit behind it",
 };
 
 /**
@@ -72,6 +73,7 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   runQuote: "quote",
   runLock: "lock",
   runAnchor: "anchor",
+  runBind: "bind",
   anchoringConfigure: "anchoring configure",
   publicationConfigure: "publication configure",
   publicationRegister: "publication register",
@@ -119,6 +121,7 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   runQuote: "quote",
   runLock: "lock",
   runAnchor: "anchor",
+  runBind: "bind",
   anchoringConfigure: "anchoring.configure",
   publicationConfigure: "publication.configure",
   publicationRegister: "publication.register",
@@ -167,6 +170,8 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
   runLock: "Seals the Run record and transitions the draft to locked (authority-gated).",
   runAnchor:
     "Obtains third-party time evidence over the run's own sealed Run or Matrix digest from a configured provider, verifies it, and stores it as an AnchorEvidence record.",
+  runBind:
+    "Binds the sealed, not-yet-launched run to a public beacon value that postdates its seal, deriving and sealing the run's execution order from it (issue #2976).",
   anchoringConfigure:
     "Replaces or clears the workspace's ordered anchor provider and endpoint configuration, which is what makes later locks anchor automatically (authority-gated).",
   publicationConfigure: "Configures the mutable public source locator and explicit prospective-publication intent.",
@@ -223,6 +228,7 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   runQuote: { status: "shipped", action: "run.quote" },
   runLock: { status: "shipped", action: "run.lock" },
   runAnchor: { status: "shipped", action: "run.anchor" },
+  runBind: { status: "shipped", action: "run.bind" },
   // The browser never supplies the endpoint — the server's own configuration does, exactly as it
   // does for `publication.configure`. A browser-supplied anchor endpoint would make this action an
   // outbound-request primitive pointed wherever a form said.
