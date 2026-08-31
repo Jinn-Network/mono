@@ -11,8 +11,11 @@ import {
 } from "@jinn-network/record-discovery-client";
 import {
   sealJson,
+  splitOrigin,
   type AnnouncementEntry,
+  type HighWaterMark,
   type HighWaterMarkStore,
+  type SourceHead,
   type SourceIdentity,
 } from "@jinn-network/record-discovery-protocol";
 
@@ -60,6 +63,49 @@ export interface CreateCorpusMirrorOptions {
   readonly chainVerification: ChainVerification;
   readonly transport: Transport;
   readonly log: RuntimeLogger;
+}
+
+/**
+ * Whether a fetched head names EXACTLY the position already on file, and
+ * nothing else.
+ *
+ * All four facts are load-bearing, and every one of them is what keeps the
+ * revalidation path fail-closed:
+ *
+ * - `origin` must name the source being followed. Revalidation resolves keys
+ *   from the head's own origin, so a head that claims another agent must
+ *   never be measured against this source's mark.
+ * - `sequence` and `entry` must equal the mark. A head naming any other chain
+ *   position is making a chain claim -- forward, rewound or forked -- and a
+ *   chain claim is `verifySourceChain`'s to judge, not this path's.
+ * - `issuedAt` must equal the mark's. A LOWER one is a rollback or a
+ *   backdated re-sign and must keep meeting the strict-increase rule; a
+ *   HIGHER one is a genuine re-signing at the same position, which is a new
+ *   head this consumer has not accepted before and goes through the full
+ *   procedure.
+ *
+ * So the only head this admits is one byte-identical to a head already
+ * accepted -- and even that still has to clear signature, key-validity and
+ * freshness on every poll.
+ */
+function isUnchangedHead(
+  head: SourceHead,
+  identity: SourceIdentity,
+  mark: HighWaterMark,
+): boolean {
+  let origin;
+  try {
+    origin = splitOrigin(head.origin);
+  } catch {
+    return false;
+  }
+  return (
+    origin.agent === identity.agent &&
+    origin.name === identity.name &&
+    head.sequence === mark.sequence &&
+    head.entry === mark.entry &&
+    head.issuedAt === mark.issuedAt
+  );
 }
 
 interface Counters {
@@ -131,8 +177,39 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
     };
 
     try {
-      const firstAdoption = (await options.highWaterMarks.get(identity)) === undefined;
+      const mark = await options.highWaterMarks.get(identity);
+      const firstAdoption = mark === undefined;
       const { entries, head } = await collect(source, counters, signal);
+
+      // An archive polled more often than it re-signs re-serves the head this
+      // mirror already accepted. `verifySourceChain` cannot express that: §5.2
+      // requires `issuedAt` to strictly increase on every re-signing, so an
+      // unchanged head is refused `broken-chain` -- which would sit a healthy
+      // mirror red between publishes. Revalidate instead (#3443), which is the
+      // same shape `operator/src/daemon/native-discovery.ts` takes.
+      if (mark !== undefined && entries.length === 0 && isUnchangedHead(head.head, identity, mark)) {
+        const revalidation = await options.chainVerification.revalidateHead({
+          source: identity,
+          head: head.head,
+          ...(head.signature === undefined ? {} : { headSignature: head.signature }),
+        });
+        if (revalidation.status === "rejected") {
+          return {
+            source: identity,
+            status: "failed",
+            ...counters,
+            failure: { code: "chain-verification-rejected", message: revalidation.reason },
+          };
+        }
+        // Nothing to adopt and nothing to advance -- and NOT advancing is the
+        // point: leaving the persisted `issuedAt` in place keeps it the
+        // monotonicity floor the next moving head has to clear.
+        options.log.debug("corpus.mirror.head-revalidated", {
+          source: `${identity.agent}/${identity.name}`,
+          sequence: head.head.sequence,
+        });
+        return { source: identity, status: "synced", ...counters };
+      }
 
       const verification = await options.chainVerification.verify({
         source: identity,
