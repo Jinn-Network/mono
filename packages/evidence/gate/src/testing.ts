@@ -292,6 +292,13 @@ export interface RailAdapterConformanceCase {
 
 const NO_SIGNAL = Object.freeze({});
 
+/**
+ * A stand-in for the bytes being sold. Distinct from any offer digest on purpose: `subject`
+ * and `offerDigest` are both `Sha256Digest`, so passing one for the other typechecks, and
+ * this is the example a rail author copies into their own case.
+ */
+const CONFORMANCE_SUBJECT = `sha256:${"5".repeat(64)}` as Sha256Digest;
+
 function conformanceChallenge(
   subject: RailAdapterConformanceSubject,
   reference: string,
@@ -313,8 +320,9 @@ function conformanceChallenge(
  * rather than merely type-checking against it. It asserts only what the gate actually
  * depends on: that the self-description matches the methods, that an observation reports the
  * payment truthfully rather than approximately, that an unknown reference is `not-found`
- * rather than an invented payment, that a claim is idempotent, and — where payments are
- * public — that a wrong answer is refused.
+ * rather than an invented payment, that both money-moving acts — `deliver` and `claim` — are
+ * idempotent for one payment, and — where payments are public — that a wrong answer is
+ * refused.
  *
  * It deliberately does not assert what a *correct* proof looks like. That is the rail's own
  * cryptography, and a driver that pinned it would be pinning one rail's scheme onto all of
@@ -361,13 +369,15 @@ export function describeRailAdapterConformance(testCase: RailAdapterConformanceC
     test("a payment against another offer is never reported as observed for this one", async () => {
       const subject = await testCase.create();
       const otherOffer = `sha256:${"9".repeat(64)}` as Sha256Digest;
+      // Unconditional. The subject payment demonstrably references `subject.offerDigest`,
+      // and `observe` answers "is there a payment referencing THIS offer", so any `observed`
+      // here is the adapter answering a question it was not asked. Asserting only inside an
+      // `if (observed)` would pass vacuously against every adapter that answers `mismatched`.
       const observation = await subject.adapter.observe(
         { offerDigest: otherOffer, entry: subject.entry, reference: subject.reference },
         NO_SIGNAL,
       );
-      if (observation.status === "observed") {
-        expect(observation.payment.offerDigest).not.toBe(otherOffer);
-      }
+      expect(observation.status).not.toBe("observed");
     });
 
     test("claiming is idempotent, so redelivery is free", async () => {
@@ -395,31 +405,31 @@ export function describeRailAdapterConformance(testCase: RailAdapterConformanceC
     });
 
     test("the delivery act is idempotent, so redelivery is free", async () => {
-    // On an `on-delivery` rail this act is the taking of the money, and the gate runs it on
-    // every collection of the same purchase.
-    const subject = await testCase.create();
-    if (subject.adapter.deliver === undefined) return;
-    const observation = await subject.adapter.observe(
-      {
+      // On an `on-delivery` rail this act is the taking of the money, and the gate runs it
+      // on every collection of the same purchase.
+      const subject = await testCase.create();
+      if (subject.adapter.deliver === undefined) return;
+      const observation = await subject.adapter.observe(
+        {
+          offerDigest: subject.offerDigest,
+          entry: subject.entry,
+          reference: subject.reference,
+        },
+        NO_SIGNAL,
+      );
+      if (observation.status !== "observed") throw new Error("the subject payment must observe");
+      const delivery = {
         offerDigest: subject.offerDigest,
-        entry: subject.entry,
-        reference: subject.reference,
-      },
-      NO_SIGNAL,
-    );
-    if (observation.status !== "observed") throw new Error("the subject payment must observe");
-    const delivery = {
-      offerDigest: subject.offerDigest,
-      subject: subject.offerDigest,
-      payment: observation.payment,
-    };
-    const first = await subject.adapter.deliver(delivery, NO_SIGNAL);
-    const second = await subject.adapter.deliver(delivery, NO_SIGNAL);
-    expect(first.status).toBe("ready");
-    expect(second.status).toBe("already-delivered");
-  });
+        subject: CONFORMANCE_SUBJECT,
+        payment: observation.payment,
+      };
+      const first = await subject.adapter.deliver(delivery, NO_SIGNAL);
+      const second = await subject.adapter.deliver(delivery, NO_SIGNAL);
+      expect(first.status).toBe("ready");
+      expect(second.status).toBe("already-delivered");
+    });
 
-  test("a public rail refuses an answer the paying key did not produce", async () => {
+    test("a public rail refuses an answer the paying key did not produce", async () => {
       const subject = await testCase.create();
       if (!subject.adapter.description.paymentsArePubliclyVisible) return;
       if (subject.adapter.verifyPayerControl === undefined) {

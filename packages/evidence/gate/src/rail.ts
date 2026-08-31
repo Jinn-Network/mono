@@ -88,6 +88,16 @@ export interface ObservePaymentInput {
  * widen its own rail's terms but never the offer's.
  */
 export interface ObservedPayment {
+  /**
+   * The reference the observation was asked about, echoed back **exactly**. The gate refuses
+   * an observation that names a different payment, because the holder's signed sales history
+   * must not be able to record one the buyer never presented.
+   *
+   * So a rail must not canonicalize here — not lowercase a mixed-case transaction hash, not
+   * trim an invoice id. Match however the rail likes; report the string it was given. A rail
+   * with a canonical form should say so in its own vocabulary, so a buyer presents that form
+   * in the first place.
+   */
   readonly reference: string;
   /** The offer digest the payment references, as the rail read it. */
   readonly offerDigest: Sha256Digest;

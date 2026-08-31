@@ -183,9 +183,53 @@ describe("createRetrievalGate — construction", () => {
     expect(outcome.status).toBe("challenge");
   });
 
+  test("a rail that grows a claim after construction is never asked to claim", async () => {
+    // Conformance forbids `claim` on an `on-delivery` rail because delivery is already the
+    // taking. The gate must decide from what it captured, or that refusal buys nothing: an
+    // adapter could pass construction without one and grow it before the first request.
+    const backing = createTestRailAdapter({ rail: RAIL, settlement: "on-delivery" });
+    const grower = backing as TestRailAdapter & { claim?: unknown };
+    const sealed = await sealTestOffer({
+      subject: SUBJECT,
+      rails: [{ rail: RAIL, to: TO, amount: "1200" }],
+    });
+    backing.record({ reference: "tx-1", offerDigest: sealed.digest, to: TO, amount: "1200" });
+    const built = createRetrievalGate({
+      offers: createInMemoryOfferSource([sealed.envelopeBytes]),
+      subjects: createInMemorySubjectSource([SUBJECT_BYTES]),
+      rails: [backing],
+      clock: fixedClock,
+    });
+
+    let claimed = 0;
+    grower.claim = async () => {
+      claimed += 1;
+      return { status: "claimed" as const };
+    };
+
+    expect(
+      delivered(
+        await built.request({ offer: sealed.digest, payment: { rail: RAIL, reference: "tx-1" } }),
+      ).bytes,
+    ).toEqual(SUBJECT_BYTES);
+    expect(claimed).toBe(0);
+    expect(backing.deliveries).toEqual([SUBJECT]);
+  });
+
   test("refuses a nonsense byte bound", () => {
     expect(() => createRetrievalGate({ offers, subjects, hardLimits: { maxSubjectBytes: 0 } }))
       .toThrow(/maxSubjectBytes/u);
+  });
+
+  test("an upward byte-bound override is honored, not merged away", async () => {
+    const raised = createRetrievalGate({
+      offers,
+      subjects,
+      hardLimits: { maxSubjectBytes: DEFAULT_GATE_HARD_LIMITS.maxSubjectBytes * 4 },
+    });
+    expect(raised.hardLimits.maxSubjectBytes).toBe(
+      DEFAULT_GATE_HARD_LIMITS.maxSubjectBytes * 4,
+    );
   });
 
   test("publishes the trust models it accepts, and its own bounds", async () => {

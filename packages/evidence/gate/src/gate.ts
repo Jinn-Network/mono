@@ -18,9 +18,18 @@ import type {
 } from "./ports.js";
 import { assertConformingRailAdapter } from "./rail.js";
 import type {
+  ClaimOutcome,
+  ClaimPaymentInput,
   GateChallenge,
   ObservedPayment,
+  ObservePaymentInput,
+  PayerControlInput,
+  PayerControlOutcome,
+  PaymentObservation,
   RailAdapter,
+  RailDeliveryInput,
+  RailDeliveryOutcome,
+  RailOperationOptions,
   RailSelfDescription,
 } from "./rail.js";
 import { sealDeliveryStatement } from "./statement.js";
@@ -120,8 +129,53 @@ export interface RetrievalGate {
   request(input: GateRequest, options?: GateOperationOptions): Promise<GateOutcome>;
 }
 
+/**
+ * One rail as the gate holds it: the description it validated and the methods it captured, in
+ * the same construction-time read.
+ *
+ * Nothing here is looked up on the adapter again. An adapter is third-party code and every
+ * one of these is an ordinary property that may be a getter: one that grows a `claim` after
+ * passing conformance as `on-delivery` would get both money-moving acts run, which is the
+ * exact double charge conformance refuses that combination to prevent; and one that answers
+ * a function to the presence check and `undefined` to the call would raise a `TypeError`
+ * where a typed refusal belongs. Capturing once is what makes the checks mean anything.
+ */
+interface InstalledRail {
+  readonly description: RailSelfDescription;
+  readonly observe: (
+    input: ObservePaymentInput,
+    options: RailOperationOptions,
+  ) => Promise<PaymentObservation>;
+  readonly verifyPayerControl?: (
+    input: PayerControlInput,
+    options: RailOperationOptions,
+  ) => Promise<PayerControlOutcome>;
+  readonly deliver?: (
+    input: RailDeliveryInput,
+    options: RailOperationOptions,
+  ) => Promise<RailDeliveryOutcome>;
+  readonly claim?: (
+    input: ClaimPaymentInput,
+    options: RailOperationOptions,
+  ) => Promise<ClaimOutcome>;
+}
+
+function installRail(adapter: RailAdapter): InstalledRail {
+  const description = assertConformingRailAdapter(adapter);
+  const { verifyPayerControl, deliver, claim } = adapter;
+  return {
+    description,
+    observe: adapter.observe.bind(adapter),
+    ...(verifyPayerControl === undefined
+      ? {}
+      : { verifyPayerControl: verifyPayerControl.bind(adapter) }),
+    ...(deliver === undefined ? {} : { deliver: deliver.bind(adapter) }),
+    ...(claim === undefined ? {} : { claim: claim.bind(adapter) }),
+  };
+}
+
 interface SettledPayment {
-  readonly adapter: RailAdapter;
+  readonly rail: InstalledRail;
   /** The sealed rail entry the payment matched, which is where the rail spelling comes from. */
   readonly entry: OfferRail;
   readonly payment: ObservedPayment;
@@ -214,22 +268,16 @@ function describe(cause: unknown): string {
  * wrong.
  */
 export function createRetrievalGate(options: CreateRetrievalGateOptions): RetrievalGate {
-  // Every later decision reads `description` -- the frozen copy taken and validated once at
-  // construction -- and never `adapter.description`, which is third-party code and may be a
-  // getter that answers differently the second time it is asked.
-  const adapters = new Map<
-    string,
-    { readonly adapter: RailAdapter; readonly description: RailSelfDescription }
-  >();
+  const adapters = new Map<string, InstalledRail>();
   for (const adapter of options.rails ?? []) {
-    const description = assertConformingRailAdapter(adapter);
-    if (adapters.has(description.rail)) {
+    const installed = installRail(adapter);
+    if (adapters.has(installed.description.rail)) {
       throw new GateConfigurationError(
-        `two rail adapters claim "${description.rail}"; a gate cannot know which one speaks `
-          + "for a payment",
+        `two rail adapters claim "${installed.description.rail}"; a gate cannot know which `
+          + "one speaks for a payment",
       );
     }
-    adapters.set(description.rail, { adapter, description });
+    adapters.set(installed.description.rail, installed);
   }
 
   const publicRail = [...adapters.values()].find(
@@ -340,16 +388,16 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
         `offer ${offerDigest} does not carry rail "${requested.rail}"`,
       );
     }
-    const installed = adapters.get(entry.rail);
-    if (installed === undefined) {
+    const rail = adapters.get(entry.rail);
+    if (rail === undefined) {
       return refuse(
         "rail-unsupported",
         `this gate has no adapter for rail "${entry.rail}"`,
       );
     }
-    const { adapter, description } = installed;
+    const { description } = rail;
 
-    const observation = await adapter.observe(
+    const observation = await rail.observe(
       { offerDigest, entry, reference: requested.reference },
       callOptions,
     );
@@ -410,7 +458,9 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
           "the proof answers a challenge issued for a different pickup",
         );
       }
-      const control = await adapter.verifyPayerControl!(
+      // Captured in the same construction-time read as the description that requires it, so
+      // this cannot be an adapter that has since dropped the method.
+      const control = await rail.verifyPayerControl!(
         { payment, challenge, proof: request.payerProof.proof },
         callOptions,
       );
@@ -419,7 +469,7 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
       }
     }
 
-    return { adapter, entry, payment };
+    return { rail, entry, payment };
   }
 
   return {
@@ -465,11 +515,11 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
       if ("refusal" in read) return read.refusal;
       const { bytes } = read;
 
-      if (settled?.adapter.deliver !== undefined) {
+      if (settled?.rail.deliver !== undefined) {
         // `already-delivered` is a success, like `already-claimed`: the gate keeps no record
         // of who has collected what, so it runs this act on every collection of the same
         // purchase and the rail is the one that knows it has already happened.
-        const delivery = await settled.adapter.deliver(
+        const delivery = await settled.rail.deliver(
           { offerDigest: input.offer, subject, payment: settled.payment },
           callOptions,
         );
@@ -478,11 +528,11 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
         }
       }
 
-      if (settled?.adapter.claim !== undefined) {
+      if (settled?.rail.claim !== undefined) {
         // After the bytes are read and verified, before they are handed back: a capture that
         // fails must cost the buyer their delivery, not the holder their payment. And
         // `already-claimed` is a success, which is what makes redelivery free.
-        const claim = await settled.adapter.claim(
+        const claim = await settled.rail.claim(
           { offerDigest: input.offer, payment: settled.payment },
           callOptions,
         );
