@@ -46,7 +46,7 @@ The protocol takes no fee and no cut, ever. There is no fee field to take one wi
   openness — its syntax is opaque, because no address shape can be imposed on a rail that
   does not exist yet — but it must carry at least one character that is neither whitespace nor
   a format character, and it may not carry control characters, line separators, or Unicode
-  bidi controls, which exist only to make one destination display as another.
+  bidi controls, whose whole effect here is to make one destination display as another.
 - **No reference currency and no conversion, anywhere.** Equivalence across a multi-rail
   offer is the holder's assertion, sealed with the offer.
 - **Repricing is supersession, never mutation.** A new price is a new record with a new

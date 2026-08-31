@@ -78,7 +78,8 @@ const RailDestination = z
   .string()
   .refine(
     (value) => VISIBLE_CHARACTER.test(value),
-    "to is the rail-specific destination and cannot be empty, whitespace-only, or invisible",
+    "to is the rail-specific destination and must carry at least one character that is neither "
+      + "whitespace nor a Unicode format character",
   )
   .refine(
     (value) => !DISPLAY_UNSAFE_CHARACTER.test(value),
