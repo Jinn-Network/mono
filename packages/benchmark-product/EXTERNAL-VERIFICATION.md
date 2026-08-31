@@ -114,22 +114,27 @@ This is deliberately the same encoding as the reference verifier's
 `screening-sample/1` procedure, whose only difference is that it keys on a sealed
 seed rather than on post-seal randomness.
 
-**What each binding establishes.** A beacon-drawn slate on the round the seal names
-could not have been selected after the fact: neither the value nor which post-seal
-value applied was the operator's to pick. On any other round the value was still
-unpredictable, but the slate could have been selected after the fact by waiting
-and choosing among the rounds already published — the face says that instead of
-the stronger sentence. A census run's binding is weaker again and is stated as
-such: it shows the run's ORDER was fixed by randomness postdating the seal, not
-that the population was — a census makes no population choice. A run with no
-binding establishes neither, and its report face says so.
+**What each binding establishes.** A beacon-drawn slate on the round the seal
+names could not have been selected after the fact: neither the value nor which
+post-seal value applied was the operator's to pick. On any other round of a
+*scheduled* source the value was still unpredictable, but the slate could have
+been selected after the fact by waiting and choosing among the rounds already
+published — the face says that instead of the stronger sentence. A
+height-indexed source derives no round from a seal at all, so on that branch the
+face makes no unpredictability claim either: the height was the operator's
+choice, and nothing in the bundle places it after the seal — it is the chain,
+not the bundle, that does that. A census run's binding is weaker again and is
+stated as such: it shows the run's ORDER was fixed by randomness postdating the
+seal, not that the population was — a census makes no population choice. A run
+with no binding establishes neither, and its report face says so.
 
-One residue survives even a seal-derived round: the *source*. Nothing in the seal
-names which beacon a run binds to, so an operator could have bound a different
-one — and `bitcoin/mainnet` derives no round from a seal at all, so through that
-source every height published since the seal is an available alternative. Closing
-this would need the run to name its source in the sealed record itself; today the
-face names the residue instead.
+One residue survives even a seal-derived round: the *source*. Nothing in the
+seal names which beacon a run binds to, so an operator could have bound a
+different one — and `bitcoin/mainnet` derives no round from a seal at all. The
+procedure runs no postdating check on a height-indexed source, so through that
+source every height the chain carries is an available alternative, including
+heights that predate the seal. Closing this would need the run to name its
+source in the sealed record itself; today the face names the residue instead.
 
 ## The record family
 
