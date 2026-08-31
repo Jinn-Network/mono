@@ -4,6 +4,8 @@ import { RunMonitorRefresh } from "@/components/run-monitor-refresh";
 import { LifecycleRail } from "@/components/lifecycle-rail";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
 import { loadRunView } from "@/lib/server/view-models";
 
@@ -18,6 +20,9 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
   const state = status?.state;
   const publication = view.ok && view.publication?.ok ? view.publication.result : undefined;
   const publicationConfiguration = view.ok ? view.publicationConfiguration : undefined;
+  // `?? []` for the same reason `publication` and `publicationConfiguration` above are optional-
+  // chained: a view that failed to load, or a caller holding an older shape, still renders a page.
+  const beaconSources = view.ok ? view.beaconSources ?? [] : [];
   const postHoc = state === "closed" || state === "reported" || state === "published-bundle";
   const reportStage = publication?.stages.find((stage) => stage.name === "report");
   const accountingStage = publication?.stages.find((stage) => stage.name === "accounting");
@@ -68,6 +73,20 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
         <ActionForm action={GUI_SERVER_ACTIONS["run.cancel"]} submitLabel="Request / finalize cancel" gated disabled={state !== "running" && !(state === "closed" && status?.cancelRequested === true)}><HiddenDraft draftId={draftId} /></ActionForm>
         <ActionForm action={GUI_SERVER_ACTIONS["run.collect"]} submitLabel="Collect" disabled={state !== "running" || status?.cancelRequested === true}><HiddenDraft draftId={draftId} /></ActionForm>
       </div></CardContent></Card>
+      <Card><CardHeader><CardTitle>Post-seal randomness</CardTitle></CardHeader><CardContent className="grid min-w-0 gap-5 [&>*]:min-w-0">
+        {status?.binding
+          ? <p className="text-sm">{status.binding.statement}</p>
+          : <ActionForm action={GUI_SERVER_ACTIONS["run.bind"]} submitLabel="Bind to this beacon value" disabled={state !== "locked"}>
+              <HiddenDraft draftId={draftId} />
+              <p className="text-sm text-muted-foreground">Read a round from a public beacon that has already been published, and bind this sealed run to it. A round published before the seal is refused. A run binds once.</p>
+              <Label htmlFor="beacon-source">Beacon</Label>
+              <select id="beacon-source" name="beaconSource" required disabled={state !== "locked"} className="h-10 rounded-md border border-input bg-background px-3 text-sm">{beaconSources.map((id) => <option key={id} value={id}>{id}</option>)}</select>
+              <Label htmlFor="beacon-round">Round or block height</Label>
+              <Input className="font-mono" id="beacon-round" name="beaconRound" required disabled={state !== "locked"} />
+              <Label htmlFor="beacon-value">Published value</Label>
+              <Input className="font-mono" id="beacon-value" name="beaconValue" required disabled={state !== "locked"} />
+            </ActionForm>}
+      </CardContent></Card>
       <Card><CardHeader><CardTitle>Third-party time</CardTitle></CardHeader><CardContent className="grid min-w-0 gap-5 [&>*]:min-w-0">
         <p className="text-sm text-muted-foreground">A configured lock anchors on its own. Anchor the sealed Run record here when a lock-time attempt did not succeed, or the terminal Matrix once the run is closed. Provider and endpoint come from this workspace&rsquo;s configuration; this form never accepts one.</p>
         <p className="text-sm text-muted-foreground">A lock anchor must be obtained before dispatch begins; an anchor never proves a result is correct, only that these bytes existed by a time a third party attests.</p>

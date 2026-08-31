@@ -54,6 +54,10 @@
       "sha256": "78903ad241416a0b59f636c6c8077d219bb7e0cd0d8bc9dda4aa18f317bafe1a"
     },
     {
+      "id": "methods/noninferiority-cluster-bca-repo-keys.json",
+      "sha256": "0debd82dab2a0894d52d6582d10892217ee8430b79f083ec298bcd139b19f636"
+    },
+    {
       "id": "methods/noninferiority-cluster-bca.json",
       "sha256": "c68092bf4213bed1a55195d5ee6223ac08706c78d14342116a42ec1932d51376"
     },

@@ -127,6 +127,24 @@ export const RunAnchorSchema = z.object({
 export type RunAnchor = z.infer<typeof RunAnchorSchema>;
 
 /**
+ * The run's `beacon-binding/1` record (issue #2976): the public randomness a sealed run bound
+ * itself to, and when. Only the digest and the binding time are stored — the beacon reference, the
+ * derived order and the pool digest all live in the sealed record's own bytes, and are re-derived
+ * from them on every read by `verifyRunBinding`. Storing a derivable field here would create a
+ * second place a binding could be edited without moving the digest it is filed under.
+ *
+ * Write-once: a run binds to one beacon or to none. Re-binding is re-drawing, which is precisely
+ * the post-hoc selection the procedure exists to make impossible.
+ */
+export const RunBindingRefSchema = z.object({
+  /** sha256 hex of the sealed binding record's exact bytes. */
+  recordSha256: Sha256HexSchema,
+  boundAt: Rfc3339Schema,
+});
+
+export type RunBindingRef = z.infer<typeof RunBindingRefSchema>;
+
+/**
  * One additional signed Report v1 identity beyond the canonical `reportSha256`/
  * `reportEnvelopeSha256` pair (packet P5, spec §8.3 option 5) — one per `additionalAnalyses` plan
  * entry, keyed by `(method, version)` so a duplicate registered method can never silently collide
@@ -231,6 +249,8 @@ export const RunStateSchema = z.object({
   publishedAt: Rfc3339Schema.optional(),
   /** Append-only; absent on every workspace that has never anchored (anchor-evidence §7.1). */
   anchors: z.array(RunAnchorSchema).optional(),
+  /** Absent on every run that has never bound to public randomness (issue #2976). */
+  binding: RunBindingRefSchema.optional(),
   suiteQuote: z.object({
     protocol: z.enum(SUITE_PROTOCOL_IDS).optional(),
     executionConformance: z.boolean(),
@@ -435,6 +455,22 @@ export function writeRunState(workspaceDir: string, draftId: string, state: RunS
         ) {
           refuse("conflict", `runs.${draftId}.anchors.${index}`, "a recorded anchor cannot be changed or reordered");
         }
+      }
+    }
+    // Write-once (issue #2976). The operation checks this too, but its check reads a snapshot and
+    // writes later, so two concurrent `bind` calls can both pass it. This is what makes the second
+    // one impossible whatever the interleaving, and it holds for any writer rather than only for
+    // `runBind`.
+    if (current?.binding !== undefined) {
+      const proposed = result.data.binding;
+      if (proposed === undefined) {
+        refuse("conflict", `runs.${draftId}.binding`, "a recorded beacon binding cannot be removed");
+      }
+      if (
+        proposed.recordSha256 !== current.binding.recordSha256
+        || proposed.boundAt !== current.binding.boundAt
+      ) {
+        refuse("conflict", `runs.${draftId}.binding`, "a recorded beacon binding cannot be changed — a run binds once");
       }
     }
     if (current?.publication !== undefined) {

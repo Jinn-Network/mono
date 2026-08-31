@@ -140,6 +140,7 @@ export {
   expectedCellCount,
   expectedCellSet,
   MAX_MATERIALIZED_CELLS,
+  orderCellsByTask,
   parseCellKey,
   submissionExtensionBlock,
 } from "./run/cells.js";

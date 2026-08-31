@@ -898,7 +898,7 @@ test('the live catalog publishes sealed-platform-v1 and implementations-v1', () 
   ]);
   const sealed = catalog.releaseGroups['sealed-platform-v1'];
   const implementations = catalog.releaseGroups['implementations-v1'];
-  assert.equal(sealed.expectedPackageCount, 13);
+  assert.equal(sealed.expectedPackageCount, 14);
   assert.equal(implementations.expectedPackageCount, 60);
   assert.deepEqual(sealed.publishPolicies, ['canary-and-stable']);
   assert.deepEqual(implementations.publishPolicies, ['canary-and-stable']);
@@ -924,6 +924,7 @@ test('the live catalog publishes sealed-platform-v1 and implementations-v1', () 
     'benchmarking-testing',
     'chain-environment-record',
     'environment-record',
+    'evidence-offer',
     'evidence-protocol',
     'evidence-trace',
     'record-discovery-protocol',
@@ -954,7 +955,7 @@ test('the live catalog publishes sealed-platform-v1 and implementations-v1', () 
   assert.equal(chainRecord.publishPolicy, 'canary-and-stable');
   assert.equal(
     loadPublishableCatalogPackages(repoRoot, { releaseGroup: 'sealed-platform-v1', lane: 'stable' }).length,
-    13,
+    14,
   );
   assert.equal(
     loadPublishableCatalogPackages(repoRoot, { releaseGroup: 'implementations-v1', lane: 'canary' }).length,

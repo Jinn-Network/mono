@@ -14,6 +14,9 @@ import {
   parseBenchmark,
   parseRun,
 } from "@jinn-network/benchmarking-records";
+import { runBindingClass, runBindingSentence } from "@colophon-claims/verify";
+import type { RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
+import { readRunBindingCarriage } from "../binding/carriage.js";
 import type { LifecycleState } from "../domain/lifecycle.js";
 import { refuse, type ProductErrorEnvelope } from "../errors.js";
 import { cancelRequested } from "../run/cancel-marker.js";
@@ -101,6 +104,19 @@ export interface RunStatusResult {
   readonly driver?: RunDriverStatus;
   readonly cells: readonly RunStatusCell[];
   readonly counts: RunStatusCounts;
+  /**
+   * The run's `beacon-binding/1` binding (issue #2976), recomputed from the sealed record on every
+   * read rather than reported from state. Absent on a run that has never bound; `statement` is the
+   * report face's own words for which binding applied, so an operator reading status sees the same
+   * sentence a reader of the run does.
+   */
+  readonly binding?: {
+    readonly class: RunBindingClass;
+    readonly beacon: VerifiedRunBinding["beacon"];
+    readonly postSeal: VerifiedRunBinding["postSeal"];
+    readonly poolDigest: string;
+    readonly statement: string;
+  };
   readonly evaluationRecovery?: {
     readonly maxInfrastructureRetries: 1;
     readonly retryableFailures: number;
@@ -258,9 +274,20 @@ export function runStatus(
         failed: cells.filter((cell) => cell.status === "failed").length,
       };
 
+      const binding = readRunBindingCarriage(context.workspaceDir, runState);
+
       return {
         state: document.state,
         ...(runState.closeAt !== undefined ? { closeAt: runState.closeAt } : {}),
+        ...(binding === undefined ? {} : {
+          binding: {
+            class: runBindingClass(binding),
+            beacon: binding.beacon,
+            postSeal: binding.postSeal,
+            poolDigest: binding.poolDigest,
+            statement: runBindingSentence(binding),
+          },
+        }),
         cancelRequested: cancelRequested(context.workspaceDir, input.draftId),
         ...(driver !== undefined ? { driver } : {}),
         cells,

@@ -900,6 +900,47 @@ forbids it — and that leaf chooses not to, so that its declared set and its em
 step. Every other profile in the tree declares its whole outbound set. A new profile is held to
 the MUST; this exception is not a precedent to copy.
 
+**Audit table.** The rule, its exclusions, its limit and its exceptions are stated above one at a
+time; this is the same tree read in one pass, so a profile author can see every kind's outbound
+set beside every other's. It is correct at this document's HEAD and describes the profiles in
+`packages/discovery/facts/*`. *Set* is what the newest facts profile registered for the kind
+declares reference-bearing; *v1 declared* is what the kind's first profile declared; *revision*
+is what the later profile did. Every earlier revision stays frozen and registered, so a consumer
+pinned to one keeps working. Like the `profiles.test.ts` pins, this table is an audit written
+from the same reading of the defining schemas as the profiles themselves — it records what was
+audited and does not independently prove any row complete.
+
+| Record kind | Leaf | Set | v1 declared | Revision (facts profile) |
+| --- | --- | --- | --- | --- |
+| `benchmark/v1` | `benchmarking` | `taskDigests`, `supersedesDigest` | _none_ | `benchmark/v2` adds both |
+| `benchmark-run/v1` | `benchmarking` | `benchmarkDigest`, `registrationArtifactDigests` | `benchmarkDigest` | `benchmark-run/v2` adds `registrationArtifactDigests` |
+| `benchmark-matrix/v1` | `benchmarking` | `runDigest`, `taskDigests`, `submissionDigests`, `deliveryDigests`, `verdictDigests`, `accountingDigest` | `runDigest` | `benchmark-matrix/v2` adds the other five |
+| `benchmark-accounting/v1` | `benchmarking` | `runDigest`, `publisherAuthorizationDigest`, `submissionDigests`, `deliveryDigests`, `evidenceDigests`, `evaluationDigests`, `observationArchiveDigests`, `correlationArtifactDigests`, `nativeArtifactDigests` | `runDigest`, `publisherAuthorizationDigest` | `benchmark-accounting/v2` adds the other seven |
+| `benchmark-report/v1`, `benchmark-report/v2` | `benchmarking` | `matrixDigests` | `matrixDigests` | none — the *record kind* was revised to v2 and `benchmark-report/v2` declares the same one edge. `reportPayloadDigest` is the record's own payload, which is identity rather than an edge |
+| `chain-environment/v1` | `chain-environments` | `runtime.image.manifestDigest`, `runtime.image.indexDigest`, `runtime.binary.digest`, `sourceAnchor.headerProofDigest`, `stateMaterialization.stateArtifactDigest`, `stateMaterialization.materializerDigest`, `stateMaterialization.sourceProofsDigest`, `stateMaterialization.fixtureCoverageManifestDigest`, `fixtureModuleDigests`, `capabilityEnvelope.toolInterfaceSchemaDigests`, `verificationContract.probeSuiteDigest`, `verificationContract.observationSchemaDigest`, `verificationContract.baselineObservationDigest`, `verificationContract.comparatorDigest`, `supersedesDigest` | `runtime.image.manifestDigest`, `stateMaterialization.stateArtifactDigest` | `chain-environment/v2` adds the other thirteen |
+| `crypto-environment/v1` | `chain-environments` | `chainWorld.digest`, `informationWorldDigests`, `serviceRuntimeImageDigests`, `composition.missPolicy.bodyDigest`, `supersedesDigest` | `chainWorld.digest` | `crypto-environment/v2` adds the other four |
+| `information-world/v1` | `chain-environments` | `capture.capturerDigest`, `supersedesDigest` | _none_ | `information-world/v2` adds both. A captured corpus's entries are the record's own enumerated content, not edges |
+| `environment/v1` | `environments` | `image.manifestDigest`, `image.indexDigest`, `parser.digest`, `build.recipeDigest` | `image.manifestDigest` | `environment/v2` adds the other three |
+| `execution-evidence/v1` | `evidence` | `taskDigest`, `runtimeDigest`, `resultDigests`, `nativeTraceDigest` — a **strict subset**, see below | `taskDigest` | `execution-evidence/v2` adds `runtimeDigest` and `resultDigests`; `.v3` adds `nativeTraceDigest` |
+| `result-evaluation/v1` | `evidence` | `taskDigest`, `resultDigests`, `supersedesDigests`, `disputesDigests` — a **strict subset**, see below | `taskDigest`, `resultDigest` | `result-evaluation/v2` widens `resultDigest` to `resultDigests`; `.v3` adds `supersedesDigests` and `disputesDigests` |
+| `execution-verification/v1` | `evidence` | `subjectDigest`, `supersedesDigests`, `disputesDigests` — a **strict subset**, see below | `subjectDigest` | `execution-verification/v2` adds the other two |
+| `task/v1` | `task-execution` | `profileDigest`, `evaluationDigest`, `supersedesDigest`, `inputDigests`, `outputSlotSchemaDigests` | `profileDigest`, `evaluationDigest`, `supersedesDigest` | `task/v2` adds `inputDigests` and `outputSlotSchemaDigests` |
+| `submission/v1` | `task-execution` | `taskDigest` | `taskDigest` | none — audited unchanged. The harness pin lives under a namespaced key of the open `requirements` map, which is outside the rule per the limit above |
+| `delivery/v1` | `task-execution` | `taskDigest`, `resultDigests`, `evidenceDigests`, `supersedesDigest` | `taskDigest` | `delivery/v2` adds the other three |
+| `evaluation-spec/v1` | `task-execution` | `graderDigests`, `environmentRecordDigest`, `abiRefDigests`, `imageDigest`, `testMaterialDigests`, `parserDigest`, `rubricDigest`, `judgeOutputSchemaDigest`, `reviewFormDigest`, `subSpecDigests` | _none_ | `evaluation-spec/v2` adds all ten |
+| `profile-document/v1` | `task-execution` | `extendsDigest`, `outputSlotSchemaDigests` | `extendsDigest` | `profile-document/v2` adds `outputSlotSchemaDigests` |
+| `plugin/v1` | `task-execution` | _none_ | _none_ | none — no defining schema exists in-tree, so there is nothing to declare and the empty profile asserts nothing |
+| `checkpoint/v1` | `task-execution` | _none_ | _none_ | none — same reason as `plugin/v1` |
+| `authorization/v1` | `trust` | `subjectDigests`, `proofs`, `revocation` | `revocation` | `authorization/v2` adds `subjectDigests` and `proofs` |
+| `key-binding/v1` | `trust` | `ceremony.digest`, `anchorDigests`, `supersedes` | `supersedes` | `key-binding/v2` adds `ceremony.digest` and `anchorDigests` |
+| `trust-policy/v1` | `trust` | `predecessor` | `predecessor` | none — audited unchanged; `predecessor` is the whole outbound set |
+
+The three `evidence` rows are the exception recorded above. Their sets are strict subsets of
+their kinds' outbound sets, and what each still omits — predicate-block references, runtime
+components, execution inputs, derivation lineage — is tabulated with its blocker in
+`packages/discovery/facts/evidence/README.md`. Every other row declares its kind's whole
+outbound set. Each leaf README explains why a given field is or is not an edge.
+
 Requiring a card to carry every declared edge is a stronger and different rule, and is not
 adopted here: it would reinterpret
 §5.4's contract, under which a card is the subset of facts a holder chooses to publish; it would

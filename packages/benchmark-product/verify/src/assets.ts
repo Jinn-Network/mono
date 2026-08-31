@@ -19,7 +19,12 @@ export interface PublicAssetInput {
   /** Canonically sorted identities for every authenticated `records/<sha>.bin` closure member. */
   readonly recordSha256s: readonly string[];
   readonly dissentCellKeys: readonly string[];
-  /** Verifier-derived, authenticated human projection. Absent only for legacy bundle assets. */
+  /**
+   * Verifier-derived, authenticated human projection. Absent only for the
+   * qualification-projecting profile (`benchmark-product-public-bundle/4` and `/7`), which
+   * carries `binaryQualification` instead. There is no third, comparison-free profile: a
+   * bundle rendered with neither field is refused at verification (issue #2984).
+   */
   readonly comparison?: PublicComparisonView;
   /**
    * Task-selection provenance declared in the sealed Run (issue #2980). Absent means the Run
