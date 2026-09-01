@@ -22,7 +22,17 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
-import { BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT, type VerifiedBundleSnapshot } from "./manifest.js";
+import {
+  BUNDLE_FORMAT,
+  BUNDLE_V4_FORMAT,
+  BUNDLE_V5_FORMAT,
+  BUNDLE_V6_FORMAT,
+  BUNDLE_V7_FORMAT,
+  BUNDLE_V8_FORMAT,
+  SUPPORTED_BUNDLE_FORMATS,
+  type SupportedBundleFormat,
+  type VerifiedBundleSnapshot,
+} from "./manifest.js";
 import { BundleV4EvidenceCatalogSchema, type BundleV4EvidenceRole } from "./schema.js";
 import { BinarySourceManifestEntrySchema, type BinarySourceManifestEntry } from "./admission/intake.js";
 import { refuse } from "./profile/errors.js";
@@ -30,6 +40,42 @@ import { verifyPublicBundleSnapshot } from "./verify.js";
 import type { VerifyPublicBundleDeps } from "./verify.js";
 
 export const FREEZE_REPO_FORMAT = "colophon-freeze-repo/1" as const;
+
+/**
+ * What each public-bundle closure means to this projection.
+ *
+ * `qualification` — the bundle carries the admission/qualification graph, which IS the freeze
+ * artifact set, so the export accepts it. `disclosure` — the bundle carries a sealed
+ * disclosure-specification record. That record is claim-side: it states the variables that produced
+ * the score, it carries no evidence role, and it therefore stays in the bundle a reader verifies
+ * rather than entering this tree. It is recorded here only so the generated README can tell a
+ * reader of such a bundle where to look for it.
+ *
+ * A table rather than an inline list of accepted versions (issue #3540). The guard used to name
+ * v4 and v7 inline, so `benchmark-product-public-bundle/8` — v7's freeze graph exactly, plus one
+ * claim-side record — landed beside it and was refused for its version alone. Keyed by
+ * `SupportedBundleFormat`, a new closure version is a type error here until someone states what it
+ * means to the freeze projection; `freeze-repo.test.ts` makes the same omission a test failure.
+ */
+export interface FreezeRepoBundleSupport {
+  /** Whether the bundle carries the qualification graph, and therefore whether the export accepts it. */
+  readonly qualification: boolean;
+  /** Whether the bundle carries a sealed disclosure-specification record. Always claim-side. */
+  readonly disclosure: boolean;
+}
+
+export const FREEZE_REPO_BUNDLE_SUPPORT: Record<SupportedBundleFormat, FreezeRepoBundleSupport> = {
+  [BUNDLE_FORMAT]: { qualification: false, disclosure: false },
+  [BUNDLE_V4_FORMAT]: { qualification: true, disclosure: false },
+  [BUNDLE_V5_FORMAT]: { qualification: false, disclosure: false },
+  [BUNDLE_V6_FORMAT]: { qualification: false, disclosure: false },
+  [BUNDLE_V7_FORMAT]: { qualification: true, disclosure: false },
+  [BUNDLE_V8_FORMAT]: { qualification: true, disclosure: true },
+};
+
+/** The accepted formats, in the order `SUPPORTED_BUNDLE_FORMATS` declares them. */
+const FREEZE_REPO_ACCEPTED_FORMATS: readonly SupportedBundleFormat[] = SUPPORTED_BUNDLE_FORMATS
+  .filter((format) => FREEZE_REPO_BUNDLE_SUPPORT[format].qualification);
 
 /**
  * The freeze artifacts, as evidence roles. This is the admission/qualification graph — the item
@@ -471,6 +517,7 @@ function renderReadme(
   publication: FreezeRepoPublication,
   bundleIdentity: string,
   bundleFormat: string,
+  support: FreezeRepoBundleSupport,
   roleCounts: readonly { readonly role: string; readonly files: number }[],
 ): Uint8Array {
   const lines: string[] = [
@@ -530,9 +577,27 @@ function renderReadme(
     "  file's name is its own check.",
     "- `LICENSE`, `NOTICE`, `metadata/spdx.json` — generated from the bundle's licence data.",
     "",
+  ];
+  // A reader of a disclosed closure has a specific reason to look for the disclosure record here
+  // and not find it, so that bundle's tree says where it is. Conditional, not unconditional:
+  // every already-published tree of a format that carries no such record must keep its exact
+  // bytes, and a rendered tree is a pure function of the bundle either way.
+  if (support.disclosure) {
+    lines.push(
+      "## The disclosure record",
+      "",
+      "This bundle carries a sealed disclosure-specification record — the six variables that",
+      "produced the score. It is deliberately not in this tree. That record is part of the claim,",
+      "and the claim stays in the bundle a reader verifies, where the bundle's own",
+      "`disclosure-specification` check reads it. What is projected here is the",
+      "admission/qualification graph alone.",
+      "",
+    );
+  }
+  lines.push(
     "## Roles present",
     "",
-  ];
+  );
   for (const entry of roleCounts) lines.push(`- \`${entry.role}\` — ${entry.files} ${entry.files === 1 ? "record" : "records"}`);
   lines.push(
     "",
@@ -554,13 +619,16 @@ function renderReadme(
  */
 export function renderFreezeRepo(snapshot: VerifiedBundleSnapshot): FreezeRepoTree {
   const bundleFormat = snapshot.manifest.format;
-  if (bundleFormat !== BUNDLE_V4_FORMAT && bundleFormat !== BUNDLE_V7_FORMAT) {
+  const support = FREEZE_REPO_BUNDLE_SUPPORT[bundleFormat as SupportedBundleFormat];
+  if (support?.qualification !== true) {
     // The freeze artifacts ARE the qualification graph. A bundle without one has none, and an
-    // empty repository claiming to be a freeze would be worse than a refusal.
+    // empty repository claiming to be a freeze would be worse than a refusal. The accepted list is
+    // read from the support table, so this message cannot name a stale set (issue #3540).
     refuse(
       "conflict",
       "bundle.json.format",
-      `a freeze repository requires a qualification bundle (${BUNDLE_V4_FORMAT} or ${BUNDLE_V7_FORMAT}); this bundle is ${bundleFormat}`,
+      `a freeze repository requires a qualification bundle (${FREEZE_REPO_ACCEPTED_FORMATS.join(" or ")});`
+        + ` this bundle is ${bundleFormat}`,
     );
   }
 
@@ -623,7 +691,13 @@ export function renderFreezeRepo(snapshot: VerifiedBundleSnapshot): FreezeRepoTr
   files.set("metadata/spdx.json", renderSpdxMetadata(publication, snapshot.identity, sources));
   files.set(
     "README.md",
-    renderReadme(publication, snapshot.identity, bundleFormat, roleGroups.map(({ role, files: count }) => ({ role, files: count }))),
+    renderReadme(
+      publication,
+      snapshot.identity,
+      bundleFormat,
+      support,
+      roleGroups.map(({ role, files: count }) => ({ role, files: count })),
+    ),
   );
 
   const listed = [...files.keys()].sort(compareStrings).map((path) => ({

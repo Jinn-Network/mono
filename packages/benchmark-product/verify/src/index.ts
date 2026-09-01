@@ -146,6 +146,7 @@ export {
 // implementation for the producer to drift from.
 export {
   FREEZE_REPO_BUNDLE_MEMBERS,
+  FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
   FREEZE_REPO_ROLES,
@@ -155,6 +156,7 @@ export {
   verifyFreezeRepo,
 } from "./freeze-repo.js";
 export type {
+  FreezeRepoBundleSupport,
   FreezeRepoDifference,
   FreezeRepoDifferenceKind,
   FreezeRepoExportResult,
