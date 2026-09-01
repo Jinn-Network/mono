@@ -191,6 +191,13 @@ export interface NativeDiscoverySource {
    * otherwise-dangerous same-head shortcut: freshness, key rotation and revocation remain a
    * gate even when no entry was appended. The host normally delegates this to its discovery
    * trust driver.
+   *
+   * The implementation MUST bind `head.origin` to `source`. `sameHead` compared the whole
+   * signature envelope, so byte equality bound the origin implicitly; the re-signed head #3468
+   * admits is a NEW envelope at the same `sequence`/`entry`, and `reSignedIdleHead` compares
+   * neither origin nor bytes. Origin binding therefore rests entirely here — a `verifyHead`
+   * that skipped it would let a head claiming another agent write this source's checkpoint.
+   * `verifySourceHead` (`native-discovery-trust.ts`) does it as `head-origin-mismatch`.
    */
   readonly verifyHead: (input: {
     readonly source: SourceIdentity;
@@ -367,6 +374,42 @@ function sameHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): bool
     && checkpoint.signedHighWater.issuedAt === head.head.issuedAt
     && checkpoint.signedHighWater.refreshBy === head.head.refreshBy
     && JSON.stringify(checkpoint.signedHighWater.signature) === JSON.stringify(head.signature);
+}
+
+/**
+ * The same chain position, re-signed at a later instant (#3468).
+ *
+ * §5.2 obliges a live source to re-sign its idle head before `refreshBy` expires even when
+ * it announced nothing — an expired head is a withholding signal, not silence — and `serve`
+ * ships `maintainHead` for exactly that. The result is the same `sequence`, the same
+ * `entry`, a bumped `issuedAt` and `refreshBy`. That is not `sameHead`, and before this
+ * predicate it fell through to the sequence guard as `rewound-or-tampered-head`, so a
+ * conformant archive would go red the moment it re-signed and stay red until its next
+ * append (#2549). Nothing in this tree re-signs while idle yet — every in-tree publisher
+ * calls `maintainHead` only after an append — so the shape arrives from an external source.
+ * This is the same shape the plugin runtime's corpus mirror admits (`classifyIdleHead`,
+ * `plugin/runtime/src/corpus/mirror.ts`), with one difference: that consumer classifies only
+ * after its walk yielded nothing, this one from the head alone.
+ *
+ * `sequence` and `entry` must equal the stored high-water: a head naming any other chain
+ * position is a chain claim, judged by the chain path or refused by the sequence guard,
+ * never here. `issuedAt` must STRICTLY increase, and an unparseable instant yields NaN, whose
+ * every comparison is false — so a rollback, a backdated re-sign and a malformed head all keep
+ * the refusal they have today. What this admits is exactly the honest idle re-sign, onto
+ * `source-head-revalidation`, which re-checks signature, currently-valid key, the §5.2
+ * `refreshBy` window and freshness on every call. That window check is `checkRefreshWindow`
+ * inside `verifySourceHead` (#3467): it returns `refresh-by-ceiling` or `head-issued-ahead`
+ * when the head breaks the published-source profile's §5.2 rules, and this path throws on
+ * every status but `ok` and `stale`, so both are hard refusals here. The far-future
+ * `refreshBy` a re-sign could otherwise install at an unchanged position is therefore refused
+ * rather than admitted: what this predicate opens is bounded, not a widening. The plugin
+ * runtime's mirror documents the same property the same way (`classifyIdleHead`,
+ * `plugin/runtime/src/corpus/mirror.ts`).
+ */
+function reSignedIdleHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): boolean {
+  const held = checkpoint.signedHighWater;
+  if (held.sequence !== head.head.sequence || held.entry !== head.head.entry) return false;
+  return new Date(head.head.issuedAt).getTime() > new Date(held.issuedAt).getTime();
 }
 
 function deduplicateEntries(entries: readonly SyncedEntry[]): SyncedEntry[] {
@@ -665,10 +708,18 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       throw new NativeDiscoverySyncError(source, 'unsigned-head');
     }
 
-    // A byte-identical signed head is a no-card-work cycle only after it is revalidated.
-    // A key can have been revoked or the source head can have crossed refreshBy since the
-    // last poll; cached acceptance is never enough to begin work.
-    if (prior !== undefined && sameHead(prior, syncedHead)) {
+    // A head at the chain position this consumer already holds — byte-identical, or re-signed
+    // at a later instant (#3468) — is a no-card-work cycle only after it is revalidated. A key
+    // can have been revoked or the source head can have crossed refreshBy since the last poll;
+    // cached acceptance is never enough to begin work.
+    const idleHead = prior === undefined
+      ? undefined
+      : sameHead(prior, syncedHead)
+        ? 'unchanged' as const
+        : reSignedIdleHead(prior, syncedHead)
+          ? 're-signed' as const
+          : undefined;
+    if (prior !== undefined && idleHead !== undefined) {
       const revalidated = await configured.verifyHead({
         source,
         head: syncedHead.head,
@@ -717,11 +768,13 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         // `publicBaseUrl` (`buildNativeDiscoverySources`). Delete it and the peer path degrades too,
         // which the peer-refusal test forbids.
         //
-        // (Refreshing the served head at boot instead — "make the head current" — does NOT work with
-        // this consumer: a re-signed head at the SAME sequence is not `sameHead` and trips the
-        // `rewound-or-tampered-head` guard below for every consumer already checkpointed at that
-        // sequence, self AND peer. Degrading the self-consume is the change that closes the deadlock
-        // without touching a byte of peer trust.)
+        // (Refreshing the served head at boot instead — "make the head current" — was not available
+        // when this degrade was written: a re-signed head at the SAME sequence is not `sameHead` and
+        // tripped the `rewound-or-tampered-head` guard below for every consumer already checkpointed
+        // at that sequence, self AND peer (#2549). #3468 admits that shape onto revalidation, so it
+        // is now a real option — but it is the SERVING side's change, and nothing in this tree
+        // re-signs an idle head yet, so this degrade still covers the operator that has not, which
+        // is the condition #2547 actually hit.)
         if (configured.selfServed === true) {
           return {
             reason: 'self-source-stale',
@@ -730,6 +783,19 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
           };
         }
         throw new NativeDiscoverySyncError(source, 'stale');
+      }
+      if (idleHead === 're-signed') {
+        // Nothing was adopted, so the position does not move — but the stored instant,
+        // `refreshBy` and envelope do. Persisting them is what makes the head this re-sign
+        // replaced a REWIND at the next poll (its `issuedAt` is now lower than the stored
+        // one) rather than a byte-identical head this consumer would revalidate forever.
+        queue(source, {
+          sequence: syncedHead.head.sequence,
+          entry: syncedHead.head.entry,
+          issuedAt: syncedHead.head.issuedAt,
+          refreshBy: syncedHead.head.refreshBy,
+          signature: syncedHead.signature,
+        }, [], []);
       }
       return { accepted: 0 };
     }
