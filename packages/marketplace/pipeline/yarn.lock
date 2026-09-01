@@ -49,6 +49,12 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@jinn-network/contract-abis@portal:../../contract-abis::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/contract-abis@portal:../../contract-abis::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
+  languageName: node
+  linkType: soft
+
 "@jinn-network/evidence-discovery@portal:../../evidence/discovery::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/evidence-discovery@portal:../../evidence/discovery::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
@@ -117,6 +123,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/marketplace-binding@portal:../binding::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
   dependencies:
+    "@jinn-network/contract-abis": "npm:0.1.0"
     "@jinn-network/task-execution-backend": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"

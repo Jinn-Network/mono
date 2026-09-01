@@ -92,6 +92,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [],
     peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/contract-abis'],
   }],
   ['pipeline', {
     dependencies: [
@@ -115,7 +116,10 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [],
     peerDependencies: [],
-    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder'],
+    transitivePortalResolutions: [
+      '@jinn-network/contract-abis',
+      '@jinn-network/execution-evidence-builder',
+    ],
   }],
   // venue-base is the tier-3 chain-adapter tree (composition design §6.1). It consumes the
   // binding's port surface and the projector's decode/finality/observe machinery; it may NEVER
@@ -139,6 +143,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [],
     peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/contract-abis'],
   }],
   ['testing', {
     dependencies: [
@@ -172,7 +177,10 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [],
     peerDependencies: [],
-    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder'],
+    transitivePortalResolutions: [
+      '@jinn-network/contract-abis',
+      '@jinn-network/execution-evidence-builder',
+    ],
   }],
 ]);
 

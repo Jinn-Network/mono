@@ -48,6 +48,7 @@
     "@jinn-network/benchmarking-records": "portal:../records",
     "@jinn-network/benchmarking-run": "portal:../run",
     "@jinn-network/benchmarking-testing": "portal:../testing",
+    "@jinn-network/contract-abis": "portal:../../contract-abis",
     "@jinn-network/marketplace-binding": "portal:../../marketplace/binding",
     "@jinn-network/marketplace-projector": "portal:../../marketplace/projector",
     "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",
