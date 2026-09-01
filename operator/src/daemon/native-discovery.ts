@@ -191,6 +191,13 @@ export interface NativeDiscoverySource {
    * otherwise-dangerous same-head shortcut: freshness, key rotation and revocation remain a
    * gate even when no entry was appended. The host normally delegates this to its discovery
    * trust driver.
+   *
+   * The implementation MUST bind `head.origin` to `source`. `sameHead` compared the whole
+   * signature envelope, so byte equality bound the origin implicitly; the re-signed head #3468
+   * admits is a NEW envelope at the same `sequence`/`entry`, and `reSignedIdleHead` compares
+   * neither origin nor bytes. Origin binding therefore rests entirely here — a `verifyHead`
+   * that skipped it would let a head claiming another agent write this source's checkpoint.
+   * `verifySourceHead` (`native-discovery-trust.ts`) does it as `head-origin-mismatch`.
    */
   readonly verifyHead: (input: {
     readonly source: SourceIdentity;
