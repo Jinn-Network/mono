@@ -107,6 +107,18 @@ jobs:
           # translated faithfully from the deleted globs: `**` is a prefix match, a
           # single `*` matches within one path segment, and a literal path is anchored
           # at both ends.
+          #
+          # `packages/**/package.json` is not one of those translations. It is here
+          # because the Dockerfile portal guard
+          # (`operator/test/scripts/dockerfile-workspace-portals.test.ts`) walks the
+          # `portal:` graph reachable from `operator/package.json`, and a `portal:`
+          # edge is declared in a manifest and nowhere else. A manifest under a
+          # `packages/` tree this lane does not otherwise select can therefore add a
+          # portal target the operator image never COPYs, and the guard never runs on
+          # the pull request that did it — the merge queue is the first thing to
+          # notice, and it then ejects every candidate built on that base, not just
+          # the change that caused it (#3527, and #2809 before it). Manifests only:
+          # sources under an unselected package still leave this lane unselected.
           patterns=(
             '^operator/'
             '^apps/operator-console/'
@@ -115,6 +127,7 @@ jobs:
             '^packages/core/'
             '^packages/plugin/'
             '^packages/contract-abis/'
+            '^packages/.*/package\.json$'
             '^\.github/workflows/ci\.yml$'
             '^\.github/workflows/npm-publish\.yml$'
             '^\.github/scripts/npm-publish-workflow\.test\.mjs$'

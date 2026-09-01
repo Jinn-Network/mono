@@ -23,11 +23,20 @@ checks; lower-level entry points include `createCorpusMirror`, `createCorpusRetr
 `createCorpusReader`, `openCorpusMirrorStore` / `withCorpusMirrorStore`, plus admission
 and chain-verification helpers. See the corpus module exports for the full surface.
 
-**Finding F1 (chain verification).** This package ships no announcement-chain verification
-driver. Default posture is fail-closed: with `corpus.acknowledgeUnverifiedChain` left at
-its default (`false`), the mirror indexes nothing. Operators who accept an unverified
-posture set `corpus.acknowledgeUnverifiedChain: true` in config; driver wiring is
-deferred.
+**Chain verification (Finding F1).** `corpus.chainVerification` names one of three
+postures, and the `corpus-chain-verification` health check reports which one is live:
+
+- `verified` (the default) — announcement chains are verified before anything is indexed,
+  through the `VerifyDriver` the composition root injects as `BinIo.corpusVerifyDriver`.
+  This package resolves no keys and implements no cryptography itself (custody law C1/C3),
+  so a runtime composed without that driver cannot honor the posture: it fails closed and
+  indexes nothing, and the health check says so with both exits in its remedy. It never
+  degrades to `unverified`.
+- `unverified` — mirrors without verifying chain signatures, for local development only.
+  Reachable only together with `corpus.acknowledgeUnverifiedChain: true`; naming it
+  without that flag is a configuration error, and setting the flag alone selects this
+  posture. Record-digest validation and producer admission still apply.
+- `rejecting` — verify nothing, admit nothing.
 
 **Binary wiring.** `bin.ts` registers MCP on `serve` and wires corpus, relevance, and
 capture capabilities when the composition root supplies the required ports and signer.

@@ -103,6 +103,115 @@ export const informationWorldRecompute: RecordFactRecompute = async (bytes) => {
 };
 
 /**
+ * Lifts a digest-pinned descriptor's bare-hex `digest.sha256` into the `sha256:` spelling every
+ * digest fact on these cards carries. An absent descriptor yields `undefined`, and the field is
+ * then simply not announced.
+ */
+function descriptorDigest(
+  descriptor: { digest?: Record<string, string> } | undefined,
+): `sha256:${string}` | undefined {
+  const bare = descriptor?.digest?.sha256;
+  return bare === undefined ? undefined : prefixedDigest(bare);
+}
+
+/** Drops the fields whose component this record does not carry, so nothing is announced empty. */
+function present(
+  fields: Record<string, RecordFactValue | undefined>,
+): Record<string, RecordFactValue> {
+  return Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => value !== undefined),
+  ) as Record<string, RecordFactValue>;
+}
+
+// --- v2 revisions (join-edge completeness, protocol design §12 amendment 2026-08-28) --------
+//
+// Every added field is a component the record pins by digest in its own bytes, so all three
+// recompute directly, with the same posture v1 documents: reference-bearing labels the indexing
+// relation and does not by itself imply the target is a retrievable announceable record.
+//
+// The non-null assertions below are sound by schema: `DigestPinnedDescriptorSchema` refines every
+// one of these descriptors to carry `digest.sha256`, so `parseChainEnvironmentRecord` has already
+// rejected a record where one is missing. Writing a runtime branch for it would be unreachable.
+
+/** v1's card plus every remaining component a chain world pins, and its lineage pointer. */
+export const chainEnvironmentRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await chainEnvironmentRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return {};
+  try {
+    const record = parseChainEnvironmentRecord(bytes);
+    const state = record.stateMaterialization;
+    const contract = record.verificationContract;
+    return {
+      ...facts,
+      ...present({
+        "runtime.image.indexDigest": record.runtime.image.indexDigest,
+        "sourceAnchor.headerProofDigest": descriptorDigest(record.sourceAnchor?.headerProof),
+        "stateMaterialization.materializerDigest": state.materializer.digest,
+        "stateMaterialization.sourceProofsDigest": descriptorDigest(state.sourceProofManifest?.proofs),
+        "stateMaterialization.fixtureCoverageManifestDigest": descriptorDigest(state.fixtureCoverage?.manifest),
+        supersedesDigest: descriptorDigest(record.supersedes),
+      }),
+      "runtime.binary.digest": record.runtime.binary.digest,
+      fixtureModuleDigests: record.fixtures.modules.map((module) => descriptorDigest(module.module)!),
+      "capabilityEnvelope.toolInterfaceSchemaDigests": record.capabilityEnvelope.toolInterfaces.map(
+        (tool) => descriptorDigest(tool.schema)!,
+      ),
+      "verificationContract.probeSuiteDigest": descriptorDigest(contract.probeSuite.descriptor)!,
+      "verificationContract.observationSchemaDigest": descriptorDigest(contract.observationSchema)!,
+      "verificationContract.baselineObservationDigest": contract.baselineObservationDigest,
+      "verificationContract.comparatorDigest": contract.comparator.digest,
+    };
+  } catch {
+    return {};
+  }
+};
+
+/** v1's card plus the information worlds, the pinned images and miss body, and the lineage edge. */
+export const cryptoEnvironmentRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await cryptoEnvironmentRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return {};
+  try {
+    const record = parseCryptoEnvironmentRecord(bytes);
+    return {
+      ...facts,
+      informationWorldDigests: record.informationWorlds.map((world) => descriptorDigest(world.record)!),
+      serviceRuntimeImageDigests: record.serviceRuntimes.map((runtime) => runtime.image.manifestDigest),
+      ...present({
+        "composition.missPolicy.bodyDigest": descriptorDigest(record.composition.missPolicy.body),
+        supersedesDigest: descriptorDigest(record.supersedes),
+      }),
+    };
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * v1's card plus the two components this record pins by digest: the world it re-captures and the
+ * capturer that produced it. Its descriptors already carry the `sha256:` spelling.
+ *
+ * The corpus entries' response bodies are deliberately not edges. They are this record's own
+ * content, enumerated inside its bytes and unbounded in number; putting them on the card would
+ * defeat what a card is for -- filtering before retrieval -- and the record digest covers them.
+ */
+export const informationWorldRecomputeV2: RecordFactRecompute = async (bytes, refs) => {
+  const facts = await informationWorldRecompute(bytes, refs);
+  if (Object.keys(facts).length === 0) return {};
+  try {
+    const record = parseInformationWorldRecord(bytes);
+    return {
+      ...facts,
+      ...present({
+        supersedesDigest: record.supersedes?.digest,
+        "capture.capturerDigest": record.capture.capturer?.digest,
+      }),
+    };
+  } catch {
+    return {};
+  }
+};
+
+/**
  * The leaf's `FactsRecompute` registry entry: the host assembles the tree-wide registry by
  * merging each leaf's export. Unknown kinds return `undefined`, preserving discovery's
  * unknown-kind skip behaviour — which is what lets a new record kind deploy with no protocol
@@ -114,5 +223,15 @@ export const CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE: FactsRecompute = {
     if (kind === CRYPTO_ENVIRONMENT_KIND) return cryptoEnvironmentRecompute;
     if (kind === INFORMATION_WORLD_KIND) return informationWorldRecompute;
     return undefined;
+  },
+};
+
+/** Explicit registry for the coexisting v2 profiles. */
+export const CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE_V2: FactsRecompute = {
+  get(kind: string): RecordFactRecompute | undefined {
+    if (kind === CHAIN_ENVIRONMENT_KIND) return chainEnvironmentRecomputeV2;
+    if (kind === CRYPTO_ENVIRONMENT_KIND) return cryptoEnvironmentRecomputeV2;
+    if (kind === INFORMATION_WORLD_KIND) return informationWorldRecomputeV2;
+    return CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get(kind);
   },
 };

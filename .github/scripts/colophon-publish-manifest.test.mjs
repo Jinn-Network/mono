@@ -22,7 +22,7 @@ const PIN_VERSION = `0.1.0-canary.sha.${PIN_SHA}`;
 const PRODUCT_SHA = '2f249073718111afd810127ff7bbbc19b206dc93';
 const V2_PIN_SHA = 'e00b2fc47fc5635b007eb349fb1e41aa81bb3c50';
 const V2_PIN_VERSION = `0.1.0-canary.sha.${V2_PIN_SHA}`;
-const V21_PIN_SHA = '7a138d2c104d09243e306952d0ce77caa64e4707';
+const V21_PIN_SHA = '0533a224cf99f06d7facf0c23455f2781a5b9e62';
 const V21_PIN_VERSION = `0.1.0-canary.sha.${V21_PIN_SHA}`;
 
 function verifyManifest() {
@@ -58,7 +58,7 @@ test('the verifier 0.2 patch release selects its attested parser-capable closure
   assert.equal(pin.product.version, '0.2.1');
   assert.equal(pin.platformSourceSha, V21_PIN_SHA);
   assert.equal(pin.platformVersion, V21_PIN_VERSION);
-  assert.equal(pin.stackPublishRunUrl, 'https://github.com/Jinn-Network/mono/actions/runs/32976208098');
+  assert.equal(pin.stackPublishRunUrl, 'https://github.com/Jinn-Network/mono/actions/runs/33517790412/attempts/2');
   assert.equal(PRODUCT_RELEASE_PLATFORM_PINS_PATH, 'packages/benchmark-product/product-release-platform-pins.json');
   assert.equal(pin.platformPackages.length, 15);
   for (const pkg of pin.platformPackages) {
@@ -72,6 +72,12 @@ test('the verifier 0.2 patch release selects its attested parser-capable closure
   assert.equal(historical.platformSourceSha, V2_PIN_SHA);
   assert.equal(historical.platformVersion, V2_PIN_VERSION);
   assert.equal(loadFirstCutPlatformPin(repoRoot).platformVersion, PIN_VERSION);
+});
+
+test('the shipped README states the pin the selected receipt actually applies', () => {
+  const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/verify/README.md'), 'utf8');
+  assert.match(readme, new RegExp(V21_PIN_VERSION, 'u'));
+  assert.doesNotMatch(readme, /e00b2fc47fc5635b007eb349fb1e41aa81bb3c50/u);
 });
 
 test('the verifier 0.2 exception cannot become an implicit product or version exception', () => {
@@ -210,9 +216,9 @@ test('Increment 1 moves only verify onto a demand-gated independent product line
   assert.equal(catalog.releaseGroups['transitional-or-private'].expectedPackageCount, 12);
 });
 
-test('Colophon trusted publishing is a separate workflow and never joins the stack 74', () => {
+test('Colophon trusted publishing is a separate workflow and never joins the stack 76', () => {
   const stack = buildRegistrationList(repoRoot);
-  assert.equal(stack.length, 74);
+  assert.equal(stack.length, 76);
   assert.equal(stack.some((row) => row.package.startsWith('@colophon-claims/')), false);
   assert.equal(COLOPHON_PUBLISH_WORKFLOW, 'colophon-npm-publish.yml');
   const workflow = readFileSync(join(repoRoot, '.github/workflows', COLOPHON_PUBLISH_WORKFLOW), 'utf8');

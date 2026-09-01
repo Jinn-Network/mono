@@ -1,5 +1,13 @@
 import type { SourceHead, SourceIdentity } from "@jinn-network/record-discovery-protocol";
-import { MEDIA_HEAD, dssePreAuthEncoding, formatOrigin, headPath, sealJson } from "@jinn-network/record-discovery-protocol";
+import {
+  MAX_REFRESH_BY_AHEAD_MS,
+  MEDIA_HEAD,
+  dssePreAuthEncoding,
+  formatOrigin,
+  headPath,
+  refreshByWithinCeiling,
+  sealJson,
+} from "@jinn-network/record-discovery-protocol";
 
 import type { BlobStore, Clock, DsseSigner } from "./ports.js";
 
@@ -26,8 +34,11 @@ export interface DsseEnvelope {
   signatures: DsseEnvelopeSignature[];
 }
 
-/** §5.2's published-source-profile default bound: `refreshBy` at most 24h ahead of `issuedAt`. */
-export const MAX_REFRESH_BY_AHEAD_MS = 24 * 60 * 60 * 1000;
+// The §5.2 ceiling itself lives in `protocol` (`verify/refresh-bound.ts`), so
+// the two named verification procedures and this writing side compare against
+// one definition rather than two. Re-exported here because it is part of
+// `serve`'s published surface.
+export { MAX_REFRESH_BY_AHEAD_MS };
 
 function encodeBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -56,12 +67,22 @@ export async function signHead(head: SourceHead, signer: DsseSigner): Promise<Ds
  * of clock precision, and `refreshBy` never exceeds the published-source
  * profile's bound (`MAX_REFRESH_BY_AHEAD_MS`) ahead of the new `issuedAt`,
  * regardless of the requested `refreshWithinMs`.
+ *
+ * A non-positive or non-finite `refreshWithinMs` falls back to the profile
+ * bound rather than collapsing the window: a head with `refreshBy` equal to
+ * its own `issuedAt` is one both named verification procedures refuse (§5.2 --
+ * the window has to be non-empty), and `writeSourceAppend` already rejects a
+ * non-positive request outright, so producing one here would only mint a head
+ * no consumer can accept.
  */
 export function refreshHead(prev: SourceHead, clock: Clock, refreshWithinMs: number = MAX_REFRESH_BY_AHEAD_MS): SourceHead {
   const prevIssuedAtMs = new Date(prev.issuedAt).getTime();
   const nowMs = clock.now().getTime();
   const issuedAtMs = Math.max(nowMs, prevIssuedAtMs + 1);
-  const boundedAheadMs = Math.min(Math.max(refreshWithinMs, 0), MAX_REFRESH_BY_AHEAD_MS);
+  const requestedAheadMs = Number.isFinite(refreshWithinMs) && refreshWithinMs > 0
+    ? refreshWithinMs
+    : MAX_REFRESH_BY_AHEAD_MS;
+  const boundedAheadMs = Math.min(requestedAheadMs, MAX_REFRESH_BY_AHEAD_MS);
   return {
     ...prev,
     issuedAt: new Date(issuedAtMs).toISOString(),
@@ -101,10 +122,13 @@ export async function maintainHead(
   return envelope === undefined ? { head } : { head, envelope };
 }
 
-/** Whether `head.refreshBy` is at most `maxAheadHours` ahead of `head.issuedAt` (§5.2). */
+/**
+ * Whether `head.refreshBy` is at most `maxAheadHours` ahead of `head.issuedAt`
+ * (§5.2). The hours-shaped conformance-kit signature over the protocol's own
+ * millisecond-shaped comparison -- one ceiling, two callers' units.
+ */
 export function refreshByWithinBound(head: { issuedAt: string; refreshBy: string }, maxAheadHours: number): boolean {
-  const aheadMs = new Date(head.refreshBy).getTime() - new Date(head.issuedAt).getTime();
-  return aheadMs <= maxAheadHours * 60 * 60 * 1000;
+  return refreshByWithinCeiling(head, maxAheadHours * 60 * 60 * 1000);
 }
 
 /**

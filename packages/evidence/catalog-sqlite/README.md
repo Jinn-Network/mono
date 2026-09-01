@@ -56,7 +56,36 @@ busy timeout, private POSIX permissions, and no-symlink path checks. It includes
 the native `better-sqlite3` addon and therefore requires a supported Node 22+
 runtime and native-addon installation environment.
 
-This package stores projections and location observations only. Repository
-bytes, announcement transport, full-text search, corpus management, ranking,
-trust policy, retention, deletion, and migration orchestration are outside its
-boundary.
+This package stores projections, location observations, and the announcement
+edge index. Repository bytes, announcement transport, full-text search, corpus
+management, ranking, trust policy, retention, deletion, and migration
+orchestration are outside its boundary.
+
+## The announcement edge index
+
+`indexAnnouncementEdges` takes an announcement facts card, the source that
+announced it, and the field names its facts profile declares reference-bearing;
+it stores the outbound references the card declares. `queryAnnouncementEdges`
+reads them in either direction: a record's own edges, or the records pointing at
+a target (the `referrers` inversion of record-discovery design §8). Every read
+requires at least one filter and is paged like the rest of this binding — a page
+with more behind it returns a `nextCursor` bound to the query that produced it,
+so a caller never mistakes a full page for the whole answer.
+
+This is the one surface fed from a feed rather than from a fetched record. It is
+what lets an index answer join — "this environment, its attempts, their
+verdicts" — without fetching anything, which for a record behind a payment gate
+is the only way to answer it at all.
+
+A card is a holder-authored claim and nothing here is checked against the
+record, so edges are scoped to the announcing source: a source replacing its own
+card replaces its own rows and can never displace another source's. Two sources
+may disagree about one record, and a reader sees both with attribution. An edge
+is a hint; a decision resting on one re-checks it against the fetched record.
+
+Any table change moves the SQLite schema version, and there is no migration
+path: `openSqliteEvidenceCatalog` throws `IO_FAILURE` on a database written
+under an older version, and that throw surfaces at open rather than triggering
+a rebuild. A catalog is a derived index, so the recovery is to start a fresh
+generation and reproject — today that means removing the stale generation, not
+an automatic rotation.

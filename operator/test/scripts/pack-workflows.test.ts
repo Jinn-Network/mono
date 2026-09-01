@@ -35,6 +35,12 @@ const OPERATOR_CI_SELECTED_PATHS = [
   'packages/sdk/**',
   'packages/core/**',
   'packages/plugin/**',
+  // Manifests only, and for a reason unrelated to the operator surface: a
+  // `portal:` edge is declared in a package.json and nowhere else, so a manifest
+  // under any `packages/` tree can add a portal target the operator image never
+  // COPYs. Without this the Dockerfile portal guard never runs on the pull
+  // request that added the edge (#3527).
+  'packages/**/package.json',
   '.github/workflows/ci.yml',
   '.github/workflows/npm-publish.yml',
   '.github/scripts/npm-publish-workflow.test.mjs',
@@ -76,6 +82,10 @@ function selectionPatterns(path: string): RegExp[] {
 function changedPathFor(glob: string): string {
   if (glob.endsWith('/**')) {
     return `${glob.slice(0, -2)}probe/file.ts`;
+  }
+
+  if (glob.includes('/**/')) {
+    return glob.replace('/**/', '/probe/');
   }
 
   if (glob.includes('*')) {
@@ -138,6 +148,20 @@ describe('packed client workflow coverage', () => {
     );
   });
 
+  it('CI selects on a portal-bearing manifest anywhere under packages/', () => {
+    const patterns = selectionPatterns('.github/workflows/ci.yml');
+    const changedPaths = [
+      // The two manifests whose portal edges ejected PR #3472 from the merge
+      // queue twice: neither tree is otherwise part of the operator lane.
+      'packages/evidence/local-runtime/package.json',
+      'packages/discovery/facts/offers/package.json',
+    ];
+
+    expect(selectionOf(patterns, changedPaths)).toEqual(
+      Object.fromEntries(changedPaths.map((path) => [path, true])),
+    );
+  });
+
   it('CI leaves trees outside the operator surface unselected', () => {
     const patterns = selectionPatterns('.github/workflows/ci.yml');
     const changedPaths = [
@@ -181,6 +205,29 @@ describe('packed client workflow coverage', () => {
       "entry.startsWith('package/plugins/local-trace-distiller')",
     );
     expect(smoke).not.toContain("'jinn-layer',");
+  });
+
+  it('proves the public no-install invocation without letting its guard pass on detection', () => {
+    const smoke = workflow('operator/scripts/smoke-test-pack.mjs');
+
+    expect(smoke).toContain("['--no-install', '@jinn-network/operator', 'doctor']");
+    expect(smoke).toContain("publicOutput.includes('could not determine executable')");
+    // `?? 1` lets a zero status through, so the guard would exit 0 on the exact
+    // ambiguity it detects and skip every remaining check.
+    expect(smoke).toContain('process.exit(publicNpx.status || 1);');
+    expect(smoke).not.toContain('process.exit(publicNpx.status ?? 1);');
+  });
+
+  it('asserts the packed jinn-stop-hook bin link without executing the daemon client', () => {
+    const smoke = workflow('operator/scripts/smoke-test-pack.mjs');
+
+    expect(smoke).toContain('function assertPackedStopHookBinIsLinked()');
+    expect(smoke).toContain('assertPackedStopHookBinIsLinked();');
+    expect(smoke).toContain("join(smokeDir, 'node_modules', '.bin', 'jinn-stop-hook')");
+    // jinn-stop-hook has no --help branch: every argument shape exits non-zero
+    // (no daemon API token, empty stdin, no daemon listening), so executing it
+    // here would make the merge-queue and publish smoke permanently red.
+    expect(smoke).not.toContain("'jinn-stop-hook', '--help'");
   });
 
   it('executes the packed CLI from a Yarn 4 node-modules consumer', () => {

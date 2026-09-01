@@ -17,8 +17,9 @@ node_modules/
 # (jinn-mono-2cl.15). Sub-paths inside .claude/skills/ that are themselves
 # operator-local (e.g. cached state files) can be added back here with
 # explicit .claude/skills/<name>/<path> ignore rules.
-# Cursor/Codex: .cursor/skills/ and .codex/skills/ are symlinks into
-# .claude/skills/ — run ./scripts/sync-skills.sh after adding a skill.
+# Generated skill mirrors (.agents/skills, .cursor/skills, .codex/skills)
+# are committed so tools discover them on clone. Edit only .claude/skills/.
+# Refresh with ./scripts/sync-skills.sh; CI runs --check.
 .claude/*
 !.claude/skills/
 
@@ -105,6 +106,12 @@ packages/*/.pnp.loader.mjs
 # test run can leave this behind, and an uncommitted leftover here fails the NEXT
 # generate-architecture.mjs --check step with a misleading drift error (issue #2409, F8).
 .github/scripts/.tmp-observation-reader-guard-*
+
+# evidence-source-boundaries.test.mjs's intra-repo import-boundary fixture. Dot-prefixed so
+# sibling tree walks skip it (run 32982011618), and ignored here so the git-inventory
+# comparison never sees it as untracked either — both limbs are gated by LIVE_TREE_FIXTURES
+# in .github/scripts/workflow-script-tests.test.mjs (issue #3177).
+packages/evidence/repository-ipfs/.jinn-ipfs-production-boundary-*
 
 # Python bytecode caches. The learner plugin ships `.py` hooks (operator/plugins/learner/
 # hooks/lib/); running them locally materialises `__pycache__/` next to the source, and a

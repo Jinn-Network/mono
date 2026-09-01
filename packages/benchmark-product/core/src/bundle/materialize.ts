@@ -33,8 +33,10 @@ import { parseDraftDocument } from "../domain/draft.js";
 import { atomicWriteFileSync, fsyncDirectorySync } from "../fs/atomic.js";
 import {
   additionalClaimPackagePath,
+  ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ClaimPackageSchema,
+  DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
 } from "../report/claim.js";
 import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../human-review/verification-workspace.js";
 import type { AdmissionAuthorityRole, BinaryJudgmentAdmissionRecordRole } from "../human-review/verification.js";
@@ -54,8 +56,16 @@ import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/sig
 import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import {
+  BUNDLE_V4_FORMAT,
+  BUNDLE_V6_FORMAT,
+  BUNDLE_V7_FORMAT,
+  BUNDLE_V8_FORMAT,
+  buildBundleManifest,
+  verifyBundleManifest,
+} from "./manifest.js";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
+import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildPublicAssets } from "./assets.js";
 import {
   BUNDLE_ASSEMBLY_FORMAT,
@@ -178,12 +188,22 @@ export interface MaterializeBundleDeps {
   /** Fault-injection hooks used only by crash-safety tests. */
   readonly beforeRename?: () => void;
   readonly afterRename?: () => void;
+  /** Called with the digest-addressed target the moment `renameSync` succeeds — before the parent
+   * fsync and before this function returns. A caller that cleans up after a refusal learns the path
+   * of a directory this invocation created even when the throw lands in that window, instead of
+   * only on the success path (issue #3195). Never called for an adopted target: that directory
+   * belongs to whoever published it first. */
+  readonly onRenamed?: (bundleDir: string) => void;
 }
 
 export interface MaterializedBundle {
   readonly bundleDir: string;
   readonly identity: string;
   readonly files: readonly string[];
+  /** True when the digest-addressed target already held these exact bytes and was adopted rather
+   * than created by this call. A caller that cleans up after a refused publication must remove only
+   * what it created — an adopted directory belongs to whoever published it first. */
+  readonly adopted: boolean;
 }
 
 function addRole(
@@ -259,7 +279,9 @@ function recordClosure(input: MaterializeBundleInput): {
   readonly format:
     | "benchmark-product-public-bundle/2"
     | typeof BUNDLE_V4_FORMAT
-    | typeof BUNDLE_V6_FORMAT;
+    | typeof BUNDLE_V6_FORMAT
+    | typeof BUNDLE_V7_FORMAT
+    | typeof BUNDLE_V8_FORMAT;
 } {
   const { workspaceDir, draftId, benchmarkSha256, runState, reportSelector } = input;
   if (
@@ -326,7 +348,15 @@ function recordClosure(input: MaterializeBundleInput): {
   if (!Buffer.from(canonicalJsonBytes(claim)).equals(Buffer.from(claimBytes))) {
     refuse("record-integrity", "claim-package.json", "claim package is not in exact canonical JSON encoding");
   }
-  const binaryQualification = claim.claimSchema === BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID;
+  // Both binary allocations project the same qualification and carry the same `qualification.json`:
+  // claim-package/5 is /2 plus the anchors section (issue #3205). Whether the run is ALSO anchored
+  // is read below from the run's own recorded anchors, never from the claim's schema id.
+  const binaryQualification = claim.claimSchema === BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID
+    || claim.claimSchema === ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID
+    // claim-package/6 is /5 plus a disclosure section (issue #2839): same projection, same
+    // `qualification.json`. Whether the run is also disclosed is read below from the run's own
+    // sealed declaration, never from the claim's schema id.
+    || claim.claimSchema === DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID;
   if (binaryQualification !== (report.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument)) {
     refuse("record-integrity", "claim-package.json", "claim schema and sealed Report method disagree on binary qualification");
   }
@@ -347,7 +377,7 @@ function recordClosure(input: MaterializeBundleInput): {
         Buffer.from(canonicalJsonBytes(claim.qualification as never)),
       )
     ) {
-      refuse("record-integrity", "claim-package.json", "claim-package/2 must exactly project the sealed binary-instrument@1 Report result");
+      refuse("record-integrity", "claim-package.json", `${claim.claimSchema} must exactly project the sealed binary-instrument@1 Report result`);
     }
   }
 
@@ -360,14 +390,6 @@ function recordClosure(input: MaterializeBundleInput): {
   // reader that its own carried evidence does not back.
   const anchorCarriage = readRunAnchorCarriage(workspaceDir, runState);
   const anchored = anchorCarriage.anchoredClosure;
-  if (anchored && binaryQualification) {
-    refuse(
-      "conflict",
-      "anchors",
-      "the anchored binary-qualification closure is a later allocation; this run carries both a"
-      + " binary qualification projection and an anchor, and no closure version expresses both",
-    );
-  }
   // Presence is compared, not only contents: an unanchored claim inside an anchored closure is
   // exactly as wrong as an anchored claim whose section drifted, and an omitted section is not an
   // empty one.
@@ -381,6 +403,44 @@ function recordClosure(input: MaterializeBundleInput): {
       "claim-package.json",
       "the sealed claim's anchors section is not the projection of the anchors this run records"
       + " — an anchor obtained after the run was reported is recorded and audited, but this claim"
+      + " predates it and cannot be republished as though it did not",
+    );
+  }
+
+  // ── The disclosed closure (disclosure-specification-record design §6.6, issue #2839) ────────
+  //
+  // The sealed record's own bytes travel as an ordinary `records/<sha256>.bin` member, driven by the
+  // evidence catalog like every other record. Its claim section is compared for PRESENCE as well as
+  // contents, for the same reason the anchors section is: an undisclosed claim inside a disclosed
+  // closure is exactly as wrong as a disclosed claim whose section drifted.
+  const disclosureCarriage = readRunDisclosureCarriage(workspaceDir, runState);
+  // A run publishes one bundle per analysis. Only the QUALIFICATION bundle can be disclosed, because
+  // `/8` is the one disclosed cell; a sibling headline or comparison analysis publishes on its own
+  // closure without the section, exactly as it did before this feature existed.
+  const disclosed = disclosureCarriage !== undefined && anchored && binaryQualification;
+  if (disclosureCarriage !== undefined && binaryQualification && !anchored) {
+    // The one enumerated cell this closure occupies. Refusing loudly here rather than inventing a
+    // second disclosed allocation is deliberate: every extra cell doubles the enumeration that the
+    // capability-composition design (issue #2889) exists to replace, and the flagship case is
+    // anchored and qualification-projecting.
+    refuse(
+      "conflict",
+      "disclosure",
+      `${BUNDLE_V8_FORMAT} is the anchored binary-qualification closure plus a disclosure record, and`
+      + " no other closure version expresses a disclosure declaration; this run carries a declaration"
+      + " and a binary-qualification projection but no anchor",
+    );
+  }
+  const storedDisclosure = (claim as { readonly disclosure?: unknown }).disclosure;
+  const expectedDisclosure = disclosed ? disclosureCarriage.disclosure : undefined;
+  if (!Buffer.from(canonicalJsonBytes({ disclosure: storedDisclosure ?? null } as never)).equals(
+    Buffer.from(canonicalJsonBytes({ disclosure: expectedDisclosure ?? null } as never)),
+  )) {
+    refuse(
+      "record-integrity",
+      "claim-package.json",
+      "the sealed claim's disclosure section is not the projection of the record this run declares"
+      + " — a declaration made or replaced after the run was reported is recorded, but this claim"
       + " predates it and cannot be republished as though it did not",
     );
   }
@@ -399,6 +459,12 @@ function recordClosure(input: MaterializeBundleInput): {
   }
 
   const evidenceRecords = new Map<string, Set<BundleV4EvidenceRole>>();
+  // The one graph edge the disclosed closure adds. It is derived from the run's own sealed
+  // declaration, and the verifier derives the same edge from the Report extension that names it, so
+  // the record is reachable in the evidence closure from exactly one place on exactly one closure.
+  if (disclosed) {
+    addRole(evidenceRecords, disclosureCarriage!.recordSha256, "disclosure-specification");
+  }
   const admissionReviewerBindings = new Map<string, string>();
   const admissionAuthorityBindings = new Map<"roster-attestor" | "truth-reveal-attestor" | "operator-truth-attestor", string>();
   let binaryAssetQualification: {
@@ -515,6 +581,9 @@ function recordClosure(input: MaterializeBundleInput): {
     }).sort((left, right) => compareCodeUnitStrings(left.armId, right.armId));
     const qualification = BundleQualificationSchema.parse({
       format: BUNDLE_QUALIFICATION_FORMAT,
+      // Stays claim-package/2 on every closure, including the anchored one (issue #3205): this
+      // names the projection SHAPE the qualification graph was built for, which claim-package/5
+      // reuses byte-identically. See `verify/src/schema.ts`'s own note on the same literal.
       claimSchema: BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
       sourceManifestSha256: extension.sourceManifestSha256,
       admissionManifestSha256: extension.admissionManifestSha256,
@@ -524,11 +593,20 @@ function recordClosure(input: MaterializeBundleInput): {
       strata: admission.strata,
       arms,
       items: qualificationItems,
-      exclusions: admission.excluded.map((entry) => ({
-        itemSha256: entry.itemSha256,
-        replacementItemSha256: entry.replacementItemSha256,
-        reason: entry.reason,
-      })),
+      // Sorted by `itemSha256`, like `items` and `arms` above, because
+      // `BundleQualificationSchema` requires this projection to be code-unit sorted and unique.
+      // The authenticated `admission.excluded` list is in REPLACEMENT-LEDGER order, which is the
+      // ledger's own authenticated order and carries no sortedness guarantee, so every admission
+      // whose ledger happened to be unsorted refused at the schema instead of publishing. No
+      // previously producible bundle moves: an unsorted projection never got past this parse, so
+      // the only lists this sort can reorder are ones that could not be published at all.
+      exclusions: admission.excluded
+        .map((entry) => ({
+          itemSha256: entry.itemSha256,
+          replacementItemSha256: entry.replacementItemSha256,
+          reason: entry.reason,
+        }))
+        .sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256)),
       admissionRecords: admission.reachableRecords,
       reachableSha256s: admission.reachableSha256s,
     });
@@ -622,6 +700,20 @@ function recordClosure(input: MaterializeBundleInput): {
     evalAttempt?: string;
     evalIndex: number;
   }>();
+  /**
+   * One graph edge per evaluation coordinate (`cellKey:evalIndex:evaluationAttempt` — exactly the
+   * identity `verify.ts` requires to be unique).
+   *
+   * The journal is append-only and correctly records every backend acceptance, including the
+   * REPLAY a resume performs for a leg the backend had already accepted before the process died
+   * (see `../run/drive.ts`'s `acceptedEvaluationSubmissionBytes`). That replay is byte-exact, so
+   * the second entry carries the IDENTICAL `submissionSha256` and describes the same single
+   * Submission — it collapses to one edge here rather than making a recovered run unpublishable.
+   *
+   * Two DIFFERENT digests on one coordinate is the opposite situation: two distinct Submissions
+   * claiming one evaluator leg, which is real corruption and still fails closed.
+   */
+  const evaluationSubmissionByCoordinate = new Map<string, string>();
   const pinningBySubmission = new Map<string, string>();
   for (const entry of journal) {
     if (entry.kind !== "submission-pinning-evidence") continue;
@@ -675,6 +767,18 @@ function recordClosure(input: MaterializeBundleInput): {
         ) {
           refuse("record-integrity", "evidence-closure", `evaluation Submission ${entry.submissionSha256} lacks its exact journal/evaluator/task binding`);
         }
+        const coordinate = `${entry.cellKey}:${evalIndex}:${evaluationAttempt}`;
+        const priorSha256 = evaluationSubmissionByCoordinate.get(coordinate);
+        if (priorSha256 === entry.submissionSha256) continue;
+        if (priorSha256 !== undefined) {
+          refuse(
+            "record-integrity",
+            "evidence-closure",
+            `evaluation coordinate ${coordinate} names two different Submissions `
+            + `(${priorSha256} and ${entry.submissionSha256})`,
+          );
+        }
+        evaluationSubmissionByCoordinate.set(coordinate, entry.submissionSha256);
         graph.evaluationSubmissions.push({
           cellKey: entry.cellKey,
           dispatch: entry.dispatch,
@@ -1015,10 +1119,16 @@ function recordClosure(input: MaterializeBundleInput): {
   return {
     files,
     evidenceRecords,
-    // Carrying an anchor is what moves a bundle onto the anchored closure. Everything else emits
-    // exactly the version it emitted before this feature existed, byte for byte (§12).
+    // Three independent axes: carrying an anchor moves a bundle onto an anchored closure,
+    // projecting a binary qualification moves it onto a qualification closure, and declaring a
+    // disclosure record moves it onto the disclosed one. Everything else emits exactly the version
+    // it emitted before any of these features existed, byte for byte.
     format: anchored
-      ? BUNDLE_V6_FORMAT
+      ? binaryQualification
+        ? disclosed
+          ? BUNDLE_V8_FORMAT
+          : BUNDLE_V7_FORMAT
+        : BUNDLE_V6_FORMAT
       : binaryQualification
         ? BUNDLE_V4_FORMAT
         : "benchmark-product-public-bundle/2",
@@ -1053,6 +1163,7 @@ export function materializePublicBundle(
     try {
       renameSync(stage, target);
       renamed = true;
+      deps.onRenamed?.(target);
       fsyncDirectorySync(parent);
     } catch (cause) {
       const code = nodeCode(cause);
@@ -1062,10 +1173,10 @@ export function materializePublicBundle(
         refuse("conflict", "bundle.target", "the digest-addressed publication target is occupied by different bytes; refusing to overwrite it");
       }
       deps.afterRename?.();
-      return { bundleDir: target, identity: existing.identity, files: existing.manifest.files.map((file) => file.path) };
+      return { bundleDir: target, identity: existing.identity, files: existing.manifest.files.map((file) => file.path), adopted: true };
     }
     deps.afterRename?.();
-    return { bundleDir: target, identity: built.identity, files: built.manifest.files.map((file) => file.path) };
+    return { bundleDir: target, identity: built.identity, files: built.manifest.files.map((file) => file.path), adopted: false };
   } finally {
     if (!renamed && existsSync(stage)) rmSync(stage, { recursive: true, force: true });
   }

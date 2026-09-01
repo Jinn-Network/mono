@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
@@ -9,7 +10,7 @@ import { loadPlatformCatalog } from './platform-catalog.mjs';
 
 const implementation = import('./architecture-control.mjs');
 const repoRoot = resolve(import.meta.dirname, '../..');
-const REQUIRED = ['@oaksprout', '@ritsukai'];
+const REQUIRED = ['@oaksprout', '@ritsukai', '@ritsuKai2000'];
 const ARCHITECTURE_OWNERS = '.github/architecture-owners';
 
 function write(path, value = '') {
@@ -18,9 +19,23 @@ function write(path, value = '') {
 }
 
 function walkFirstPartyFiles(root, current = root) {
+  // Dot-prefixed directories are never tracked generator sources - they are
+  // editor state, caches, or transient test fixtures. Skipping them (and
+  // tolerating a directory that vanishes between the readdir and the
+  // recursive descent) keeps this walk immune to concurrent suites' temp
+  // directories; the boundary suite drops one inside .github/scripts for the
+  // length of its run, and .gitignore keeps it out of the tracked inventory.
+  let entries;
+  try {
+    entries = readdirSync(current, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
   const files = [];
-  for (const entry of readdirSync(current, { withFileTypes: true })) {
+  for (const entry of entries) {
     if (entry.isDirectory() && ['node_modules', 'dist', 'build', '.yarn'].includes(entry.name)) continue;
+    if (entry.isDirectory() && entry.name.startsWith('.')) continue;
     const path = join(current, entry.name);
     if (entry.isDirectory()) files.push(...walkFirstPartyFiles(root, path));
     else if (entry.isFile()) files.push(path.slice(root.length + 1).split('\\').join('/'));
@@ -52,7 +67,7 @@ function completeFixture(catalog = fixtureCatalog()) {
     ...catalog.packages.map((pkg) => `/${pkg.path}/`),
     '/docs/fixture-authority.md',
   ];
-  write(join(root, '.github/CODEOWNERS'), '/PRINCIPLES.md @oaksprout @ritsukai\n');
+  write(join(root, '.github/CODEOWNERS'), '/PRINCIPLES.md @oaksprout @ritsukai @ritsuKai2000\n');
   write(join(root, ARCHITECTURE_OWNERS), `${rules.map((rule) => `${rule} ${REQUIRED.join(' ')}`).join('\n')}\n`);
   return root;
 }
@@ -61,8 +76,8 @@ test('parser implements root anchoring, directories, *, **, and last match', asy
   const { effectiveOwners, parseCodeowners } = await implementation;
   const rules = parseCodeowners([
     '/packages/*/schemas/ @wrong',
-    '/packages/**/schemas/ @oaksprout @ritsukai',
-    '/exact/file.json @oaksprout @ritsukai',
+    '/packages/**/schemas/ @oaksprout @ritsukai @ritsuKai2000',
+    '/exact/file.json @oaksprout @ritsukai @ritsuKai2000',
   ].join('\n'));
   assert.deepEqual(effectiveOwners(rules, 'packages/a/nested/schemas/item.json'), REQUIRED);
   assert.deepEqual(effectiveOwners(rules, 'exact/file.json'), REQUIRED);
@@ -202,10 +217,10 @@ test('rejects prototype-inherited owner group names', async () => {
 test('parser rejects malformed and unsupported patterns fail closed', async (t) => {
   const { parseCodeowners } = await implementation;
   for (const [name, source] of [
-    ['unanchored', 'packages/** @oaksprout @ritsukai'],
-    ['negation', '!/packages/** @oaksprout @ritsukai'],
-    ['character class', '/packages/[ab]/** @oaksprout @ritsukai'],
-    ['triple star', '/packages/***/x @oaksprout @ritsukai'],
+    ['unanchored', 'packages/** @oaksprout @ritsukai @ritsuKai2000'],
+    ['negation', '!/packages/** @oaksprout @ritsukai @ritsuKai2000'],
+    ['character class', '/packages/[ab]/** @oaksprout @ritsukai @ritsuKai2000'],
+    ['triple star', '/packages/***/x @oaksprout @ritsukai @ritsuKai2000'],
     ['missing owner', '/packages/**'],
   ]) {
     await t.test(name, () => assert.throws(() => parseCodeowners(source), /CODEOWNERS/u));
@@ -234,7 +249,7 @@ test('later CODEOWNERS override and missing required owner are rejected', async 
   const { validateArchitectureControl } = await implementation;
   for (const [name, mutate, pattern] of [
     ['later override', (source) => `${source}/packages/fixture/protocol/** @attacker\n`, /effective owners/u],
-    ['missing owner', (source) => source.replace('/architecture/ @oaksprout @ritsukai', '/architecture/ @oaksprout'), /effective owners/u],
+    ['missing owner', (source) => source.replace('/architecture/ @oaksprout @ritsukai @ritsuKai2000', '/architecture/ @oaksprout'), /effective owners/u],
   ]) {
     await t.test(name, () => {
       const root = completeFixture();
@@ -254,7 +269,7 @@ test('effective ownership compares as a set and reports canonical owner order', 
   const root = completeFixture();
   try {
     const path = join(root, ARCHITECTURE_OWNERS);
-    write(path, readFileSync(path, 'utf8').replaceAll('@oaksprout @ritsukai', '@ritsukai @oaksprout'));
+    write(path, readFileSync(path, 'utf8').replaceAll('@oaksprout @ritsukai @ritsuKai2000', '@ritsuKai2000 @ritsukai @oaksprout'));
     const report = validateArchitectureControl({ repoRoot: root });
     assert.deepEqual(report.requiredOwners, REQUIRED);
     assert.ok(report.paths.every((entry) => JSON.stringify(entry.owners) === JSON.stringify(REQUIRED)));
@@ -299,7 +314,7 @@ test('catalog owner groups require exact local GitHub usernames and exact archit
       const root = fixtureRepo({ catalog });
       try {
         for (const path of ['contracts/.keep', 'docs/superpowers/specs/.keep', 'packages/marketplace/binding/.keep', 'packages/marketplace/testing/.keep']) write(join(root, path));
-        write(join(root, ARCHITECTURE_OWNERS), '/** @oaksprout @ritsukai\n');
+        write(join(root, ARCHITECTURE_OWNERS), '/** @oaksprout @ritsukai @ritsuKai2000\n');
         assert.throws(() => validateArchitectureControl({ repoRoot: root }), pattern);
       } finally {
         rmSync(root, { recursive: true, force: true });
@@ -381,6 +396,24 @@ test('repository coverage enumerates every manifest and all control-path categor
       assert.ok(entries.get(path)?.has('generatorSources'), `repository generator ${path}`);
     }
   }
+});
+
+test('the generator walk ignores dot-prefixed directories and tolerates vanished entries', () => {
+  // Regression for the boundary-fixture race: observation-reader-gate-boundary
+  // deliberately mkdtemps .github/scripts/.tmp-observation-reader-guard-* inside
+  // the live checkout, and node --test schedules it in parallel with this file.
+  // .gitignore keeps that directory out of the tracked inventory, so walking it
+  // would assert on a path that can never be a declared generator source.
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-architecture-control-walk-'));
+  try {
+    const transient = join(fixture, '.tmp-observation-reader-guard-abc123');
+    mkdirSync(join(fixture, 'nested'), { recursive: true });
+    mkdirSync(transient);
+    write(join(fixture, 'nested/real-generator.mjs'));
+    write(join(transient, 'synthetic-gate.test.mjs'));
+    assert.deepEqual(walkFirstPartyFiles(fixture), ['nested/real-generator.mjs']);
+    assert.deepEqual(walkFirstPartyFiles(join(fixture, 'gone')), []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
 test('GitHub CODEOWNERS is the human-surface enqueue gate, not the architecture inventory', () => {
