@@ -108,7 +108,8 @@ export interface CreateCorpusMirrorOptions {
  * re-sign that would be revalidated as fresh -- and minting one needs the
  * source's own currently-valid signing key, which already buys the ability to
  * re-sign correctly. It is not a door an outsider can reach. Enforcing the
- * §5.2 `refreshBy` ceiling on a revalidated head is tracked separately.
+ * §5.2 `refreshBy` ceiling on a revalidated head is the other half of the
+ * inversion #3468 names, and is deliberately not closed here.
  */
 function classifyIdleHead(
   head: SourceHead,
