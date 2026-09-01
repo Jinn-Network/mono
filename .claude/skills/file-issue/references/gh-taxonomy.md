@@ -311,7 +311,9 @@ prerequisite is an open PR, an issue must stand for it — the PR carries
 `Closes #N`, and the native edge points at `#N`.
 
 `closedByPullRequestsReferences` is the query that proves the link exists (it
-is the inverse of a PR's `closingIssuesReferences`):
+is the inverse of a PR's `closingIssuesReferences`).
+These two fields are not behind the `issue_dependencies` feature flag, so they
+need no `GraphQL-Features` header (unlike `addBlockedBy` / `blockedBy` above).
 
 ```bash
 # Which PRs will close this issue?
