@@ -2,6 +2,7 @@
 
 import type { DsseChainVerifier, Sha256Digest } from "@jinn-network/trust-core";
 import type { Transport, VerifyDriver } from "@jinn-network/record-discovery-client";
+import type { SourceIdentity } from "@jinn-network/record-discovery-protocol";
 
 import type { CapabilityContext, RuntimeCapability } from "../capability.js";
 import type { CorpusConfig, RuntimeConfig } from "../config.js";
@@ -23,6 +24,7 @@ import {
   type ChainVerification,
   type ChainVerificationInput,
   type ChainVerificationOutcome,
+  type HeadRevalidationInput,
 } from "./chain-verification.js";
 import { describeError } from "./errors.js";
 import type { CorpusFilesystem } from "./fs.js";
@@ -211,11 +213,26 @@ export function createCorpusCapability(
       ];
 
       if (state.corpus.trust === undefined) {
+        // Empty by configuration, exactly as `corpus-mirror` treats a
+        // followed-nothing install: with no archives there is no producer to
+        // admit, so an absent trust policy is not a fault. Reporting it as one
+        // made every default `serve` process red — no in-repo entry point
+        // passes a config `file`, so `corpus.trust` is `undefined` on every
+        // real launch — with a remedy naming two keys nothing reads, which is
+        // the operator-unfixable remedy spec §9.3 forbids by name. Declining a
+        // trust policy WHILE following archives is still a fault, and stays
+        // red. See Finding F-C7-1.
         checks.push({
           name: "corpus-trust-policy",
-          ok: false,
-          detail: "No trust policy is configured, so no producer is admitted.",
-          remedy: "Set `corpus.trust.genesisDigest` and `corpus.trust.policyDirectory`.",
+          ok: followed === 0,
+          detail:
+            followed === 0
+              ? "No trust policy is configured — with no archives followed, there is no producer to admit."
+              : "No trust policy is configured, so no producer is admitted.",
+          remedy:
+            followed === 0
+              ? null
+              : "Set `corpus.trust.genesisDigest` and `corpus.trust.policyDirectory`.",
         });
       } else if (state.policyError !== undefined) {
         checks.push({
@@ -316,13 +333,33 @@ export function createCorpusCapability(
     return Object.freeze({
       mode: inner.mode,
       async verify(input: ChainVerificationInput): Promise<ChainVerificationOutcome> {
-        const key = `${input.source.agent}/${input.source.name}`;
-        const outcome = await inner.verify(input);
-        if (outcome.status === "rejected") rejections.set(key, outcome.reason);
-        else rejections.delete(key);
-        return outcome;
+        return record(input.source, await inner.verify(input));
+      },
+      // A revalidated unchanged head clears the source's standing rejection
+      // exactly as an accepted chain does -- otherwise a mirror that recovers
+      // between publishes would stay red until the archive next appends.
+      //
+      // Newest-wins is the whole contract here, and it cuts both ways: a
+      // source that equivocated and then rolled back to re-serving its last
+      // accepted head clears its own `forked` rejection this way. That is
+      // deliberate rather than overlooked -- this map is in-memory and a
+      // restart forgets it regardless, so it reports what the LAST poll saw,
+      // never a durable verdict on a source. Durable equivocation evidence is
+      // the chain procedure's `forked` outcome, not this health chip.
+      async revalidateHead(input: HeadRevalidationInput): Promise<ChainVerificationOutcome> {
+        return record(input.source, await inner.revalidateHead(input));
       },
     });
+
+    function record(
+      source: SourceIdentity,
+      outcome: ChainVerificationOutcome,
+    ): ChainVerificationOutcome {
+      const key = `${source.agent}/${source.name}`;
+      if (outcome.status === "rejected") rejections.set(key, outcome.reason);
+      else rejections.delete(key);
+      return outcome;
+    }
   }
 
   function storePathsOf(config: RuntimeConfig) {

@@ -372,6 +372,7 @@ __metadata:
     "@jinn-network/execution-recorder": "npm:0.1.0"
     "@jinn-network/record-discovery-client": "npm:0.1.0"
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-transport-http": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
     "@modelcontextprotocol/sdk": "npm:1.29.0"
     "@types/better-sqlite3": "npm:7.6.13"
@@ -412,6 +413,16 @@ __metadata:
   dependencies:
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-discovery-transport-http@portal:../../packages/discovery/transport-http::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-transport-http@portal:../../packages/discovery/transport-http::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-client": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-serve": "npm:0.1.0"
   languageName: node
   linkType: soft
 

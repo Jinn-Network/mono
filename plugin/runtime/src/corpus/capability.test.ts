@@ -23,6 +23,7 @@ const source = () => ({
   servingRoot: "https://archive.test",
   archiveRootUrl: "https://archive.test/sources/attempts/entries/0000000000000001",
   repositoryId: "archive.test/attempts",
+  signingKeys: [],
 });
 
 const transport = {
@@ -53,8 +54,10 @@ function capability(file?: unknown, verifyDriver?: VerifyDriver) {
 
 /**
  * A `VerifyDriver` whose source-chain verdict the test picks. Only
- * `verifySource` is reachable from the corpus mirror; the two item-level
- * methods belong to the read path C6 owns and are never called here.
+ * `verifySource` is reachable from these tests — every one of them syncs a
+ * fresh state directory, so no source is ever re-presented at a position this
+ * mirror already holds; the two item-level methods belong to the read path C6
+ * owns and are never called either.
  */
 function driverReturning(outcome: SourceChainOutcome): VerifyDriver & { readonly calls: VerifySourceOptions[] } {
   const calls: VerifySourceOptions[] = [];
@@ -66,6 +69,9 @@ function driverReturning(outcome: SourceChainOutcome): VerifyDriver & { readonly
       for await (const _entry of opts.entries) void _entry;
       calls.push(opts);
       return outcome;
+    },
+    async verifyHead(): Promise<never> {
+      throw new Error("no source here is re-presented at a held position");
     },
     async verifyForDecision() {
       throw new Error("the corpus mirror never verifies items");
@@ -216,6 +222,35 @@ describe("corpus capability", () => {
       (check) => b.find((other) => other.name === check.name)!.ok !== check.ok,
     );
     expect(differing.length).toBeGreaterThan(0);
+  });
+
+  test("an absent trust policy with no archives followed is GREEN with no remedy", async () => {
+    // Empty by configuration, the same state `corpus-mirror` already treats as
+    // green. No in-repo entry point passes a config `file`, so this IS the
+    // default install; reporting it red made every default `serve` process
+    // report `ok: false` behind a remedy naming two keys nothing reads.
+    const { capability: built, context: built_context } = capability();
+    await built.start!(built_context);
+
+    const trust = (await built.healthChecks!()).find(
+      (check) => check.name === "corpus-trust-policy",
+    )!;
+    expect(trust.ok).toBe(true);
+    expect(trust.remedy).toBeNull();
+    expect(trust.detail).toContain("no producer to admit");
+  });
+
+  test("an absent trust policy WHILE following archives stays red with its remedy", async () => {
+    const { capability: built, context: built_context } = capability({
+      corpus: { sources: [source()] },
+    });
+    await built.start!(built_context);
+
+    const trust = (await built.healthChecks!()).find(
+      (check) => check.name === "corpus-trust-policy",
+    )!;
+    expect(trust.ok).toBe(false);
+    expect(trust.remedy).toContain("corpus.trust.genesisDigest");
   });
 
   test("reports the trust policy as not fixable from this machine when unresolvable", async () => {

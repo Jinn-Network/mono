@@ -107,6 +107,12 @@ packages/*/.pnp.loader.mjs
 # generate-architecture.mjs --check step with a misleading drift error (issue #2409, F8).
 .github/scripts/.tmp-observation-reader-guard-*
 
+# evidence-source-boundaries.test.mjs's intra-repo import-boundary fixture. Dot-prefixed so
+# sibling tree walks skip it (run 32982011618), and ignored here so the git-inventory
+# comparison never sees it as untracked either — both limbs are gated by LIVE_TREE_FIXTURES
+# in .github/scripts/workflow-script-tests.test.mjs (issue #3177).
+packages/evidence/repository-ipfs/.jinn-ipfs-production-boundary-*
+
 # Python bytecode caches. The learner plugin ships `.py` hooks (operator/plugins/learner/
 # hooks/lib/); running them locally materialises `__pycache__/` next to the source, and a
 # stray `.pyc` was committed once already (PR #2655 fix round). Never tracked.

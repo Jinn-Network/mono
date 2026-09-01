@@ -29,9 +29,9 @@ const PRODUCT_RELEASES = {
   },
   '@colophon-claims/verify@0.2.1': {
     decision: 'operator-authorization-2026-08-26',
-    platformSourceSha: '7a138d2c104d09243e306952d0ce77caa64e4707',
-    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/32976208098',
-    receiptSha256: 'fdd1ecf49eb6c0cec4b05e5c0d201dfcacbbeaf8164f766b9ca5e27b646b6dad',
+    platformSourceSha: '0533a224cf99f06d7facf0c23455f2781a5b9e62',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/33517790412/attempts/2',
+    receiptSha256: '2f2aa7e82f75c2775bd8de8673d3286caf8c6b9a92133a5a93f1766f942b1797',
   },
 };
 const PRODUCT_RELEASE_KEYS = Object.keys(PRODUCT_RELEASES);

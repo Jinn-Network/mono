@@ -34,6 +34,7 @@ import {
 } from "./relevance/index.js";
 import { createPluginRuntime, type PluginRuntime } from "./runtime.js";
 import { describeUnknownError } from "./safe-error.js";
+import { resolveCorpusBinIoFields } from "./session-host-corpus.js";
 import { RUNTIME_VERSION } from "./version.js";
 
 const USAGE = [
@@ -160,7 +161,13 @@ function hasCorpusPorts(io: BinIo): boolean {
   );
 }
 
-function buildServeCapabilities(
+/**
+ * Exported for the composition test that asserts a default `serve` install is
+ * aggregate-healthy. `main` builds the capability set inline and never renders
+ * a report on the serve path, so the only way to assert on the composed
+ * runtime's health is to compose it exactly as `main` does.
+ */
+export function buildServeCapabilities(
   role: RuntimeRole,
   io: BinIo,
   runtimeHealth: () => ReturnType<ReturnType<typeof createPluginRuntime>["health"]>,
@@ -349,10 +356,17 @@ if (isProcessEntry()) {
       process.once("SIGTERM", finish);
     });
 
-  process.exitCode = await main(process.argv.slice(2), readConfigEnvFromProcess(), {
+  const env = readConfigEnvFromProcess();
+  const homeDirectory = process.env.JINN_PLUGIN_HOME ?? join(homedir(), ".jinn-plugin");
+
+  process.exitCode = await main(process.argv.slice(2), env, {
     writeOut: (line) => process.stdout.write(`${line}\n`),
     writeErr: (line) => process.stderr.write(`${line}\n`),
-    homeDirectory: process.env.JINN_PLUGIN_HOME ?? join(homedir(), ".jinn-plugin"),
+    homeDirectory,
     untilShutdown,
+    // The corpus composition root. Unresolvable configuration yields no
+    // fields, so `main` still owns the `configuration failed` message and its
+    // exit code rather than this block replacing it with a crash.
+    ...resolveCorpusBinIoFields({ env, homeDirectory }),
   });
 }

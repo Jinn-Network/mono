@@ -18,6 +18,7 @@ import { SWE_REBENCH_PARSER } from "./parser-identity.js";
 import {
   containerGraderReportSource,
   DEFAULT_GRADER_CONTAINER_WORKDIR,
+  DEFAULT_MAX_GRADER_REPORT_BYTES,
   EVALUATION_CONTEXT_NAME,
   GRADER_CONTEXT_SCHEMA,
   GRADER_OUTPUT_NAME,
@@ -167,6 +168,42 @@ describe("containerGraderReportSource", () => {
     expect(error.recoveryAdvice).toBe("new-attempt-required");
     expect(error.safeDetail).toContain(GRADER_OUTPUT_NAME);
     expect(error.safeDetail).toContain("137");
+  });
+
+  test("a report file over the byte bound fails cleanly instead of loading it into memory", async () => {
+    const { workspaceRoot } = await workspace();
+    // Far larger than the configured bound: a hostile grader ballooning its report file.
+    const runtime = runtimeWriting(`{"pad":"${"a".repeat(4096)}"}`);
+    const error = await operationalFrom(
+      read(containerGraderReportSource({ runtime, workspaceRoot, maxReportBytes: 64 })),
+    );
+
+    expect(error.canonicalCode).toBe("UNAVAILABLE");
+    expect(error.reason).toBe("provider-unavailable");
+    expect(error.recoveryAdvice).toBe("new-attempt-required");
+    expect(error.safeDetail).toContain(GRADER_OUTPUT_NAME);
+    expect(error.safeDetail).toContain("64");
+  });
+
+  test("a report file at exactly the byte bound is still read", async () => {
+    const { workspaceRoot } = await workspace();
+    const padding = "a".repeat(64 - '{"pad":""}'.length);
+    const output = `{"pad":"${padding}"}`;
+    expect(encoder.encode(output).byteLength).toBe(64);
+    const runtime = runtimeWriting(output);
+    const raw = await read(containerGraderReportSource({ runtime, workspaceRoot, maxReportBytes: 64 }));
+
+    expect(raw.report).toEqual({ pad: padding });
+  });
+
+  test("the report bound defaults to the driver's stdout bound and is a positive byte count", async () => {
+    const { workspaceRoot } = await workspace();
+    expect(DEFAULT_MAX_GRADER_REPORT_BYTES).toBe(4 * 1024 * 1024);
+    const runtime = runtimeWriting("{}");
+    for (const maxReportBytes of [0, -1, 1.5, Number.NaN]) {
+      expect(() => containerGraderReportSource({ runtime, workspaceRoot, maxReportBytes }))
+        .toThrow(TypeError);
+    }
   });
 
   test("a report that is not a JSON object is an operational failure, never a verdict", async () => {

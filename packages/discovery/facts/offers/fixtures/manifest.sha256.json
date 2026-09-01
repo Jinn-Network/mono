@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "README.md",
+      "sha256": "dd054df8a08d4c340db2a09dede5f3aff8f04651fe2a6037b517226f39ebb7f2"
+    },
+    {
+      "id": "catalog/free.json",
+      "sha256": "58b6c08203dbe40f5eb2545ddc05528ab2e81d2a849f71718fe5884cf3ce542f"
+    },
+    {
+      "id": "catalog/priced.json",
+      "sha256": "62b49fb4debfd4ffdb6416a2c8999bcb4aaf3ff2665b3feddcb3db017813bf1b"
+    },
+    {
+      "id": "catalog/superseding.json",
+      "sha256": "3e1a576ec1abeeafa201ae86828bb2e1e5a150c379d68d686867cb8a2f49264f"
+    }
+  ],
+  "errata": []
+}

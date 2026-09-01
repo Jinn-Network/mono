@@ -14,6 +14,17 @@ export interface ChainVerificationInput {
   readonly firstAdoption: boolean;
 }
 
+/**
+ * The head of a source that is re-serving the exact chain position this
+ * mirror already holds. `entries` is deliberately absent: the caller only
+ * reaches this input having established that the walk yielded nothing.
+ */
+export interface HeadRevalidationInput {
+  readonly source: SourceIdentity;
+  readonly head: SourceHead;
+  readonly headSignature?: DsseEnvelope;
+}
+
 export type ChainVerificationOutcome =
   | { readonly status: "ok" }
   | { readonly status: "rejected"; readonly reason: string };
@@ -21,6 +32,14 @@ export type ChainVerificationOutcome =
 export interface ChainVerification {
   readonly mode: "verified" | "unverified";
   verify(input: ChainVerificationInput): Promise<ChainVerificationOutcome>;
+  /**
+   * `source-head-revalidation`: the same posture applied to an unchanged
+   * head. Every posture must answer it, and must answer it as strictly as it
+   * answers `verify` -- it is the one path a source can take repeatedly
+   * without appending anything, so a posture that waved it through would let
+   * a revoked key keep a mirror green indefinitely.
+   */
+  revalidateHead(input: HeadRevalidationInput): Promise<ChainVerificationOutcome>;
 }
 
 /**
@@ -36,6 +55,9 @@ export function createRejectingChainVerification(): ChainVerification {
   return Object.freeze({
     mode: "unverified" as const,
     async verify(): Promise<ChainVerificationOutcome> {
+      return { status: "rejected", reason: "chain-verification-not-configured" };
+    },
+    async revalidateHead(): Promise<ChainVerificationOutcome> {
       return { status: "rejected", reason: "chain-verification-not-configured" };
     },
   });
@@ -60,6 +82,9 @@ export function createUnverifiedChainVerification(
   return Object.freeze({
     mode: "unverified" as const,
     async verify(): Promise<ChainVerificationOutcome> {
+      return { status: "ok" };
+    },
+    async revalidateHead(): Promise<ChainVerificationOutcome> {
       return { status: "ok" };
     },
   });
@@ -96,6 +121,28 @@ export function createDriverChainVerification(driver: VerifyDriver): ChainVerifi
           headSignature,
           entries: entries(),
           firstAdoption: input.firstAdoption,
+        });
+        return outcome.status === "ok"
+          ? { status: "ok" }
+          : { status: "rejected", reason: outcome.status };
+      } catch (error) {
+        void describeError(error);
+        return { status: "rejected", reason: "verification-failed" };
+      }
+    },
+
+    async revalidateHead(input: HeadRevalidationInput): Promise<ChainVerificationOutcome> {
+      const headSignature = input.headSignature;
+      if (headSignature === undefined) {
+        // Same fail-closed rule as `verify`: this runtime does not accept an
+        // unsigned head, and an unchanged one is no different.
+        return { status: "rejected", reason: "head-unsigned" };
+      }
+      try {
+        const outcome = await driver.verifyHead({
+          source: input.source,
+          head: input.head,
+          headSignature,
         });
         return outcome.status === "ok"
           ? { status: "ok" }

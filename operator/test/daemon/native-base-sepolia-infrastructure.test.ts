@@ -6,7 +6,9 @@ import {
   createBaseSepoliaFinalizedAnchorClient,
   createBaseSepoliaEvaluatorReads,
   createBaseSepoliaRecordTransport,
+  NativeRecordDestinationError,
   createNativeInfrastructure,
+  reportRefusedRecordDestination,
   createSolverReads,
   createViemBaseSepoliaReadClients,
   mountBaseSepoliaPublicSource,
@@ -19,6 +21,7 @@ import {
 import { documentDigest } from '@jinn-network/task-execution-protocol';
 import { recordPath } from '@jinn-network/record-discovery-protocol';
 import { buildNativeEvaluationSpecResolver } from '../../src/daemon/native-assembly.js';
+import { buildFleetDeliveryBytesResolver } from '../../src/daemon/native-fleet-runtime.js';
 import type { NativeInfrastructureFactoryInput } from '../../src/daemon/native-infrastructure-bundle.js';
 import type { NativeEngagementRow, NativeOperationRow } from '../../src/daemon/native-operator-state.js';
 
@@ -221,6 +224,7 @@ describe('first-party Base Sepolia public record transport', () => {
     const fetchImpl = vi.fn(async () => new Response(bytes));
     const transport = createBaseSepoliaRecordTransport({
       ipfsApiUrl: 'https://ipfs.example.invalid',
+      recordOrigins: [],
       fetchImpl,
     });
 
@@ -234,6 +238,7 @@ describe('first-party Base Sepolia public record transport', () => {
   it('refuses a digest response whose exact bytes do not match the advertised digest', async () => {
     const transport = createBaseSepoliaRecordTransport({
       ipfsApiUrl: 'https://ipfs.example.invalid',
+      recordOrigins: [],
       fetchImpl: async () => new Response('tampered'),
     });
     await expect(transport.byDigest(`sha256:${'00'.repeat(32)}`)).rejects.toThrow(/digest mismatch/u);
@@ -242,6 +247,7 @@ describe('first-party Base Sepolia public record transport', () => {
   it('restricts direct locations to HTTP(S) and bounds every public response', async () => {
     const transport = createBaseSepoliaRecordTransport({
       ipfsApiUrl: 'https://ipfs.example.invalid',
+      recordOrigins: ['https://records.example.invalid'],
       maxBytes: 3,
       fetchImpl: async () => new Response('four'),
     });
@@ -257,6 +263,7 @@ describe('first-party Base Sepolia public record transport', () => {
   it('abandons a hanging IPFS block fetch after the bounded timeout instead of blocking forever', async () => {
     const transport = createBaseSepoliaRecordTransport({
       ipfsApiUrl: 'https://ipfs.example.invalid',
+      recordOrigins: [],
       ipfsFetchTimeoutMs: 20,
       fetchImpl: () => new Promise<Response>(() => { /* DHT lookup that never returns */ }),
     });
@@ -266,10 +273,288 @@ describe('first-party Base Sepolia public record transport', () => {
   it('abandons a hanging HTTP location fetch after the bounded timeout instead of blocking forever', async () => {
     const transport = createBaseSepoliaRecordTransport({
       ipfsApiUrl: 'https://ipfs.example.invalid',
+      recordOrigins: ['https://records.example.invalid'],
       httpFetchTimeoutMs: 20,
       fetchImpl: () => new Promise<Response>(() => { /* serving plane that never responds */ }),
     });
     await expect(transport.byLocation('https://records.example.invalid/slow')).rejects.toThrow(/timed out/u);
+  });
+
+  // #3431: a peer-announced `locations[].locator` reaches `byLocation` straight off an
+  // announcement. Only the operator's OWN configured record origins may be named; the assertion is
+  // that no fetch happens at all, not merely that something threw — a guard that refuses after the
+  // request has already left is no guard.
+  describe('peer-supplied locator destination policy (#3431)', () => {
+    const CONFIGURED = 'https://records.example.invalid/records/';
+
+    const hostile = [
+      'http://127.0.0.1:8545/',
+      'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
+      'http://10.0.0.5/records/x',
+      'http://192.168.1.9/records/x',
+      'http://100.64.3.4/records/x',
+      'http://[::1]:8545/',
+      'http://localhost:8545/',
+      // A public origin the operator never configured is refused too: the promise is containment to
+      // an origin the operator CHOSE, not merely "not private".
+      'https://attacker.example.test/records/x',
+      // Same origin, outside the configured path prefix.
+      'https://records.example.invalid/etc/passwd',
+      // Credentials, and a non-HTTP(S) scheme.
+      'https://user:pass@records.example.invalid/records/x',
+      'file:///private/operator.db',
+      // The classic deny-list bypasses: octal, hex and bare-integer spellings of 127.0.0.1.
+      'http://0177.0.0.1/records/x',
+      'http://0x7f000001/records/x',
+      'http://2130706433/records/x',
+    ] as const;
+
+    it.each(hostile)('never fetches %s', async (locator) => {
+      const fetchImpl = vi.fn(async () => new Response('unreachable'));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl,
+      });
+
+      await expect(transport.byLocation(locator)).rejects.toThrow();
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it('keeps a configured loopback serving root working (local deployments)', async () => {
+      const bytes = new TextEncoder().encode('{"record":"local"}');
+      const fetchImpl = vi.fn(async () => new Response(bytes));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: ['http://localhost:7331'],
+        fetchImpl,
+      });
+
+      await expect(transport.byLocation('http://localhost:7331/records/abc')).resolves.toEqual(bytes);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('never fetches a redirect target outside the configured record origins', async () => {
+      const escape = 'http://169.254.169.254/latest/meta-data/';
+      const fetchImpl = vi.fn(async (request: string | URL) => {
+        if (String(request) === `${CONFIGURED}abc`) {
+          return new Response(null, { status: 302, headers: { location: escape } });
+        }
+        return new Response('metadata');
+      });
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl,
+      });
+
+      await expect(transport.byLocation(`${CONFIGURED}abc`)).rejects.toThrow(/redirect leaves/u);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(fetchImpl.mock.calls.some(([request]) => String(request).startsWith('http://169.254'))).toBe(false);
+    });
+
+    it('follows a redirect that stays inside the configured record origins', async () => {
+      const bytes = new TextEncoder().encode('{"record":"moved"}');
+      const fetchImpl = vi.fn(async (request: string | URL) => {
+        if (String(request) === `${CONFIGURED}abc`) {
+          return new Response(null, { status: 301, headers: { location: `${CONFIGURED}abc-v2` } });
+        }
+        return new Response(bytes);
+      });
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl,
+      });
+
+      await expect(transport.byLocation(`${CONFIGURED}abc`)).resolves.toEqual(bytes);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it('stops the chain at the redirect cap instead of following it', async () => {
+      const fetchImpl = vi.fn(async (request: string | URL) => new Response(null, {
+        status: 302,
+        headers: { location: `${String(request)}+` },
+      }));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl,
+      });
+
+      // `toBe`, not `toBeLessThanOrEqual`: the cap is 1 initial request plus 5 follows, and a
+      // bound-from-above assertion also passes for a cap silently shrunk to 1.
+      await expect(transport.byLocation(`${CONFIGURED}abc`)).rejects.toThrow(/more than 5 redirects/u);
+      expect(fetchImpl.mock.calls.length).toBe(6);
+    });
+
+    it('never fetches a same-origin redirect that escapes the configured path prefix', async () => {
+      const fetchImpl = vi.fn(async () => new Response(null, {
+        status: 302,
+        headers: { location: 'https://records.example.invalid/etc/passwd' },
+      }));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl,
+      });
+
+      await expect(transport.byLocation(`${CONFIGURED}abc`)).rejects.toThrow(/redirect leaves/u);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(fetchImpl.mock.calls.some(([request]) => String(request).includes('/etc/passwd'))).toBe(false);
+    });
+
+    it('reports a redirect status carrying no Location as the HTTP error it is', async () => {
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl: async () => new Response(null, { status: 302 }),
+      });
+
+      await expect(transport.byLocation(`${CONFIGURED}abc`)).rejects.toThrow(/status 302/u);
+    });
+
+    // The whole chain shares ONE budget. Each hop here answers comfortably inside the per-hop
+    // bound, so a per-hop budget would let the chain run to ~5x it and still succeed — which is
+    // how the bound stops being below the fleet worker's 30s lease TTL. Mutation check: give
+    // `fetchWithTimeout` the whole `timeoutMs` per hop and this resolves instead of rejecting.
+    it('spends one timeout budget across a whole redirect chain', async () => {
+      const bytes = new TextEncoder().encode('{"record":"late"}');
+      let hop = 0;
+      const fetchImpl = vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        hop += 1;
+        return hop > 5
+          ? new Response(bytes)
+          : new Response(null, { status: 302, headers: { location: `${CONFIGURED}hop-${hop}` } });
+      });
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        httpFetchTimeoutMs: 90,
+        fetchImpl,
+      });
+
+      // Asserted by hop count rather than by wall clock: elapsed time is bounded by scheduler
+      // drift on a loaded runner as much as by the budget, and a per-hop budget would let all six
+      // hops run — so the chain stopping short of the cap is the property, without a clock.
+      await expect(transport.byLocation(`${CONFIGURED}abc`)).rejects.toThrow(/timed out/u);
+      expect(fetchImpl.mock.calls.length).toBeLessThan(6);
+    });
+
+    it('refuses every location when no record origin is configured', async () => {
+      const fetchImpl = vi.fn(async () => new Response('unreachable'));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [],
+        fetchImpl,
+      });
+
+      await expect(transport.byLocation('https://records.example.invalid/records/x'))
+        .rejects.toBeInstanceOf(NativeRecordDestinationError);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it('never follows an IPFS API redirect off the configured API origin', async () => {
+      const fetchImpl = vi.fn(async () => new Response(null, {
+        status: 307,
+        headers: { location: 'http://127.0.0.1:5001/api/v0/block/get' },
+      }));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [],
+        fetchImpl,
+      });
+
+      await expect(transport.byDigest(`sha256:${'00'.repeat(32)}`)).rejects.toThrow(/redirect leaves/u);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    // `fetchBytes` is shared with `byRawCid`, whose containment is the IPFS API origin, not the
+    // record origins. A fixed record-origin wording sent an operator to `recordSources` when the
+    // problem was `ipfs.apiUrl`, so the policy applied is named in the refusal itself.
+    it('names the policy that refused the destination, not always the record origins', async () => {
+      const ipfs = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl: async () => new Response(null, {
+          status: 307,
+          headers: { location: 'http://127.0.0.1:5001/api/v0/block/get' },
+        }),
+      });
+      await expect(ipfs.byDigest(`sha256:${'00'.repeat(32)}`)).rejects.toThrow(/ipfs\.apiUrl/u);
+
+      const records = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl: async () => new Response('unreachable'),
+      });
+      await expect(records.byLocation('https://attacker.example.test/records/x'))
+        .rejects.toThrow(/recordSources\[\]\.baseUrl/u);
+    });
+  });
+
+  // #3431 acceptance criterion 1's second half: a refused locator "does not produce a daemon fetch,
+  // AND the refusal is named in logs". Three of the five peer-supplied `byLocation` paths iterate
+  // replicas inside a bare catch and fall through to the IPFS plane, where native records are never
+  // pinned — so without this the operator sees an IPFS "block was not found" that names neither the
+  // destination nor the refusal, and has no route back to the configuration mistake.
+  describe('refused destinations are named in logs (#3431)', () => {
+    it('warns with the destination and the reason', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const named = reportRefusedRecordDestination(
+          'delivery card location',
+          new NativeRecordDestinationError('http://169.254.169.254/latest/meta-data/', 'it is not contained'),
+        );
+        expect(named).toBe(true);
+        const line = String(warn.mock.calls.at(-1)?.[0]);
+        expect(line).toContain('delivery card location');
+        expect(line).toContain('http://169.254.169.254/latest/meta-data/');
+        expect(line).toContain('it is not contained');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('stays silent for an ordinary serving-plane miss, which is not a refusal', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(reportRefusedRecordDestination('fleet delivery serving plane', new Error('fetch failed')))
+          .toBe(false);
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    // A real call site, not just the helper: this resolver returns `undefined` on refusal, so
+    // nothing downstream can tell a refusal from a plain miss unless it is logged here.
+    it('names a refusal reached through buildFleetDeliveryBytesResolver, and still falls through', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const fetchImpl = vi.fn(async () => new Response('unreachable'));
+        const transport = createBaseSepoliaRecordTransport({
+          ipfsApiUrl: 'https://ipfs.example.invalid',
+          recordOrigins: ['https://records.example.invalid/records/'],
+          fetchImpl,
+        });
+        const resolve = buildFleetDeliveryBytesResolver(
+          transport.byLocation,
+          ['https://peer.example.test'],
+        );
+
+        const digest = `sha256:${'11'.repeat(32)}` as const;
+        await expect(resolve(digest)).resolves.toBeUndefined();
+        expect(fetchImpl).not.toHaveBeenCalled();
+        const line = String(warn.mock.calls.at(-1)?.[0]);
+        expect(line).toContain('fleet delivery serving plane');
+        expect(line).toContain(`https://peer.example.test${recordPath(digest)}`);
+        expect(line).toContain('not contained');
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 
   // #30 root fix, integrated: the eval-spec resolver's #2559 HTTP-locator fallback only fires on a
@@ -290,6 +575,7 @@ describe('first-party Base Sepolia public record transport', () => {
     });
     const transport = createBaseSepoliaRecordTransport({
       ipfsApiUrl: 'https://ipfs.example.invalid',
+      recordOrigins: [servingBase],
       ipfsFetchTimeoutMs: 20,
       fetchImpl,
     });

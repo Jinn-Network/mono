@@ -267,7 +267,13 @@ type CapturedDelivery = Pick<DeliveryRecord, "outputs" | "evidenceRecords"> & { 
 
 /** A managed LocalVenue which proves ownership returns product-captured records without foreign
  * source coordinates. Bind only its locally-created Delivery and execution record families at
- * that first durable boundary; result-evaluation is bound after this product fetches its bytes. */
+ * that first durable boundary; result-evaluation is bound after this product fetches its bytes.
+ *
+ * The deferral is the point, not an omission: at this boundary the evaluation's envelope bytes
+ * are still the evaluator's, and authorship over bytes this workspace has not sealed would be a
+ * claim it cannot support. `dispatchEvaluation` below seals those bytes and records their
+ * `resultEvaluation` authorship there, and `operations/publication-accounting.ts` announces
+ * evaluations from the journal's verdicts for exactly that reason. */
 function recordManagedDeliveryAuthorship(
   deps: DriveDeps,
   deliverySha256: string,

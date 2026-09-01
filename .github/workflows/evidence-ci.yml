@@ -223,6 +223,15 @@ jobs:
           yarn build
           yarn check:fixtures
           yarn pack:smoke
+      - name: Verify Evidence Offer
+        working-directory: packages/evidence/offer
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn check:fixtures
+          yarn pack:smoke
       - name: Verify Evidence Contribution
         working-directory: packages/evidence/contribution
         run: |
@@ -241,6 +250,11 @@ jobs:
           yarn pack:smoke
       - name: Build cross-tree portal dependency from source (record-discovery-source-evidence-journal, §7.8)
         working-directory: packages/discovery/sources/evidence-journal
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (record-discovery-facts-offers, §7.8)
+        working-directory: packages/discovery/facts/offers
         run: |
           yarn install --immutable
           yarn build

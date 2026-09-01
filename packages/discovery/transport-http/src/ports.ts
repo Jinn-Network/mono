@@ -27,5 +27,7 @@ export type FetchLike = (
     headers?: Record<string, string>;
     body?: string;
     signal?: AbortSignal;
+    /** `"manual"` surfaces a 3xx as a response instead of following it, so the caller can decide per hop. */
+    redirect?: "follow" | "manual" | "error";
   },
 ) => Promise<Response>;

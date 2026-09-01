@@ -60,8 +60,21 @@ For a received bundle, the smaller reader surface is:
 npx @colophon-claims/check@0.2 ./bundle
 ```
 
+That line reads the bundle formats through public-bundle/6, and only the claims
+that pin it. Reader lines are not forward compatible, and a reader that is too
+old refuses with the same code an invalid bundle earns, so before concluding
+anything from a refusal, read the line the bundle's own claim package pins in
+`verification.command` — the producer named it for that exact bundle. The
+per-format table in [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md) covers the case where
+you have only `bundle.json`; the format string alone is not sufficient, because
+prompted-screening bundles pin a later line without changing their format.
+
 To verify a bundle with tools that are not ours, see
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).
+
+To import results another harness already produced, see
+[`EXTERNAL-RUN-IMPORT.md`](EXTERNAL-RUN-IMPORT.md). Publication of an
+imported run is refused pending issue #3417.
 
 The contributor proof remains available from the mono:
 
@@ -173,6 +186,10 @@ Procedure, receipt checklist, and the fail-closed
 - [Public bundle](./PUBLIC-BUNDLE.md) — frozen
   `benchmark-product-public-bundle/2` layout, citation, trust, privacy,
   limitations, and portable verification.
+- [External run-record import](./EXTERNAL-RUN-IMPORT.md) — the per-attempt
+  record shape, both dump dialects, the closed import vocabulary, the
+  `--template` workflow, and why publication of an imported run is refused
+  pending issue #3417.
 - [Inspect runtime](./INSPECT-RUNTIME.md) — optional real Inspect selection,
   execution, scorer attribution, native logs, and security limitations.
 - [Security and threat model](./SECURITY.md) — protected assets, boundaries,
