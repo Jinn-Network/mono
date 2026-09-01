@@ -333,6 +333,23 @@ describe("mirror sync", () => {
       expect(posture.revalidateHead).not.toHaveBeenCalled();
     });
 
+    test("a FORKED head — same sequence, a different entry, a later instant — keeps the chain path (#3468)", async () => {
+      // The half of the position check `sequence` alone cannot pin: this head
+      // clears the sequence comparison and the strict-increase rule, and is
+      // still a chain claim because it cites an entry the mark does not name.
+      const marks = await seeded();
+      const posture = spyPosture();
+      const { transport } = buildArchive(executionEvidenceFixture.bytes, {
+        entry: "sha256:" + "ff".repeat(32),
+        issuedAt: "2026-07-31T00:00:00Z",
+      });
+
+      await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
+
+      expect(posture.verify).toHaveBeenCalledTimes(1);
+      expect(posture.revalidateHead).not.toHaveBeenCalled();
+    });
+
     test("a head whose origin names another source keeps the chain path", async () => {
       const marks = await seeded();
       const posture = spyPosture();
