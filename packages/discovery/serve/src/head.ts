@@ -67,12 +67,22 @@ export async function signHead(head: SourceHead, signer: DsseSigner): Promise<Ds
  * of clock precision, and `refreshBy` never exceeds the published-source
  * profile's bound (`MAX_REFRESH_BY_AHEAD_MS`) ahead of the new `issuedAt`,
  * regardless of the requested `refreshWithinMs`.
+ *
+ * A non-positive or non-finite `refreshWithinMs` falls back to the profile
+ * bound rather than collapsing the window: a head with `refreshBy` equal to
+ * its own `issuedAt` is one both named verification procedures refuse (§5.2 --
+ * the window has to be non-empty), and `writeSourceAppend` already rejects a
+ * non-positive request outright, so producing one here would only mint a head
+ * no consumer can accept.
  */
 export function refreshHead(prev: SourceHead, clock: Clock, refreshWithinMs: number = MAX_REFRESH_BY_AHEAD_MS): SourceHead {
   const prevIssuedAtMs = new Date(prev.issuedAt).getTime();
   const nowMs = clock.now().getTime();
   const issuedAtMs = Math.max(nowMs, prevIssuedAtMs + 1);
-  const boundedAheadMs = Math.min(Math.max(refreshWithinMs, 0), MAX_REFRESH_BY_AHEAD_MS);
+  const requestedAheadMs = Number.isFinite(refreshWithinMs) && refreshWithinMs > 0
+    ? refreshWithinMs
+    : MAX_REFRESH_BY_AHEAD_MS;
+  const boundedAheadMs = Math.min(requestedAheadMs, MAX_REFRESH_BY_AHEAD_MS);
   return {
     ...prev,
     issuedAt: new Date(issuedAtMs).toISOString(),

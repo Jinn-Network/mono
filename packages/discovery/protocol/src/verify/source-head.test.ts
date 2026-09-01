@@ -82,7 +82,9 @@ describe("verifySourceHead", () => {
   });
 
   it("refuses a head that has crossed refreshBy, however often it was accepted before", async () => {
-    const head = makeHead({ refreshBy: "2026-07-27T00:00:00.000Z" });
+    // A real expired head, not an inverted one: the window is valid (12h,
+    // inside the ceiling) and `NOW` has simply run past its end.
+    const head = makeHead({ issuedAt: "2026-07-26T12:00:00.000Z", refreshBy: "2026-07-27T00:00:00.000Z" });
     expect(await verifySourceHead({ source: SOURCE, head, headSignature: signedHead(head), ports })).toEqual({
       status: "stale",
     });
@@ -181,5 +183,37 @@ describe("verifySourceHead: the published-profile refreshBy ceiling (#3467, §5.
     expect(await verifySourceHead({ source: SOURCE, head, headSignature: signedHead(head), ports })).toEqual({
       status: "refresh-by-ceiling",
     });
+  });
+});
+
+describe("verifySourceHead: the future-issued head the ceiling alone cannot see (#3467, §5.2)", () => {
+  it("refuses a head issued further into the future than one freshness window, even with a conformant window", async () => {
+    // The exploit a refreshBy-vs-issuedAt ceiling leaves open: both
+    // timestamps belong to the source, so it mints a 24h-conformant window
+    // decades out and the head is fresh against every clock this consumer
+    // will ever read.
+    const head = makeHead({ issuedAt: "2099-01-01T00:00:00.000Z", refreshBy: "2099-01-02T00:00:00.000Z" });
+    expect(await verifySourceHead({ source: SOURCE, head, headSignature: signedHead(head), ports })).toEqual({
+      status: "head-issued-ahead",
+    });
+  });
+
+  it("refuses a head whose refreshBy is not after its issuedAt", async () => {
+    const head = makeHead({ issuedAt: "2099-01-01T00:00:00.000Z", refreshBy: "2098-01-01T00:00:00.000Z" });
+    expect(await verifySourceHead({ source: SOURCE, head, headSignature: signedHead(head), ports })).toEqual({
+      status: "refresh-by-ceiling",
+    });
+  });
+
+  it("cannot be widened by a caller-supplied ceiling -- a profile may only tighten", async () => {
+    const head = makeHead({ issuedAt: "2026-07-27T12:00:00.000Z", refreshBy: "2030-01-01T00:00:00.000Z" });
+    expect(
+      await verifySourceHead({
+        source: SOURCE,
+        head,
+        headSignature: signedHead(head),
+        ports: { ...ports, maxRefreshByAheadMs: 4 * 365 * 24 * 60 * 60 * 1000 },
+      }),
+    ).toEqual({ status: "refresh-by-ceiling" });
   });
 });

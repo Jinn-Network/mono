@@ -21,7 +21,13 @@ export type SourceChainOutcome =
 export type SourceHeadOutcome =
   | { status: "ok" }
   | { status: "stale" } // refreshBy expired
-  | { status: "refresh-by-ceiling" } // refreshBy runs further ahead of issuedAt than the profile allows (§5.2)
+  // The §5.2 freshness-window refusals, slugs shared with the chain procedure,
+  // which reports the SAME defects as `broken-chain` with `at` set to the same
+  // string (alongside the entry ceilings its linkage walk enforces). This
+  // procedure has no chain to fold them into, so they surface at the top
+  // level; a caller correlating the two reads one vocabulary either way.
+  | { status: "refresh-by-ceiling" } // empty/inverted window, or refreshBy further ahead of issuedAt than the profile allows
+  | { status: "head-issued-ahead" } // issuedAt further ahead of `now` than one freshness window
   | { status: "unauthorized-signer" } // no signature by a key valid at `now`
   | { status: "head-origin-mismatch" } // head names a source other than the one followed
   | { status: "head-payload-mismatch" } // envelope does not carry these head bytes

@@ -1,5 +1,5 @@
-// The published-source profile's `refreshBy` ceiling (design §5.2), in the
-// one place both named verification procedures and the serving side can
+// The published-source profile's head freshness-window rules (design §5.2), in
+// the one place both named verification procedures and the serving side can
 // reach.
 //
 // §5.2 bounds how far ahead of its own `issuedAt` a head may set `refreshBy`
@@ -11,13 +11,44 @@
 // true forever. Enforcing the bound on the writing side alone leaves that
 // door open to a source that mints its own heads, which is every source.
 //
+// A ceiling measured only between the head's OWN two timestamps does not
+// close that door on its own, because both of them are the source's to
+// choose: a head issued in 2099 with a conformant 24h window passes the
+// ceiling and stays fresh for decades, and on first adoption (or the §13.3
+// cold mirror-set comparison, which prefers the highest `(sequence,
+// issuedAt)`) it also becomes the consumer's high-water mark and refuses
+// every honest head after it. So the window is checked as a whole, against
+// the consumer's own clock:
+//
+//   1. `refreshBy` must be strictly after `issuedAt` -- a head with an empty
+//      or inverted window is one `serve` already refuses to write
+//      (`source-writer.ts`), and a consumer that accepts it is accepting a
+//      shape no conforming source produces;
+//   2. `refreshBy` at most `maxAheadMs` past `issuedAt` (§5.2 proper);
+//   3. `issuedAt` at most `maxAheadMs` past `now`. A head is not issued
+//      further into the future than one freshness window is long. This
+//      introduces no second constant and no second knob -- it reuses the
+//      profile's own ceiling as the skew allowance, which is orders of
+//      magnitude more tolerance than any real clock disagreement needs and
+//      far less than an honest source would ever consume, since a live
+//      source issues at its own `now`. Together the three bound a valid
+//      head's `refreshBy` to at most `2 x maxAheadMs` past the consumer's
+//      clock: finite, which is the property §5.2 is after.
+//
 // Deployment profiles pin their own, TIGHTER bound (the marketplace profile
-// does); a profile may never widen it. That is why the checking functions
-// take the ceiling as a parameter defaulting to the published-source value
-// rather than reading a constant directly.
+// does); a profile may never widen it. The verification procedures therefore
+// clamp what they are handed against the published-source value, so a caller
+// cannot re-open the window by passing a larger number.
 
 /** §5.2's published-source-profile default bound: `refreshBy` at most 24h ahead of `issuedAt`. */
 export const MAX_REFRESH_BY_AHEAD_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Why a head's freshness window is not acceptable under the verifying
+ * profile, or `undefined` when it is. The slugs are shared by both named
+ * verification procedures so one defect reads the same either side.
+ */
+export type RefreshWindowFailure = "refresh-by-ceiling" | "head-issued-ahead";
 
 /**
  * Whether `head.refreshBy` sits at most `maxAheadMs` ahead of `head.issuedAt`.
@@ -25,6 +56,11 @@ export const MAX_REFRESH_BY_AHEAD_MS = 24 * 60 * 60 * 1000;
  * Fail-closed on anything it cannot compare: an unparseable `issuedAt` or
  * `refreshBy` makes the difference `NaN`, and `NaN <= n` is `false`, so a head
  * whose timestamps cannot be read is refused rather than waved through.
+ *
+ * This is the §5.2 ceiling alone. Consumers want `checkRefreshWindow`, which
+ * also rejects the inverted and future-issued shapes the ceiling by itself
+ * cannot see; `serve`'s writing side wants this one, because it checks those
+ * shapes separately and against its own intended position.
  */
 export function refreshByWithinCeiling(
   head: { issuedAt: string; refreshBy: string },
@@ -32,4 +68,28 @@ export function refreshByWithinCeiling(
 ): boolean {
   const aheadMs = new Date(head.refreshBy).getTime() - new Date(head.issuedAt).getTime();
   return aheadMs <= maxAheadMs;
+}
+
+/**
+ * The whole §5.2 freshness-window check a consumer applies to a presented
+ * head, per the three rules above. Returns the first rule violated, or
+ * `undefined` when the window is acceptable.
+ *
+ * `maxAheadMs` is clamped against the published-source ceiling: a deployment
+ * profile may only tighten the bound, never widen it, and this is where that
+ * sentence is enforced rather than merely documented. A non-finite or
+ * negative value fails closed on its own (every comparison below goes false).
+ */
+export function checkRefreshWindow(
+  head: { issuedAt: string; refreshBy: string },
+  now: Date,
+  maxAheadMs: number = MAX_REFRESH_BY_AHEAD_MS,
+): RefreshWindowFailure | undefined {
+  const ceilingMs = Math.min(maxAheadMs, MAX_REFRESH_BY_AHEAD_MS);
+  const issuedAtMs = new Date(head.issuedAt).getTime();
+  const refreshByMs = new Date(head.refreshBy).getTime();
+  if (!(refreshByMs > issuedAtMs)) return "refresh-by-ceiling";
+  if (!(refreshByMs - issuedAtMs <= ceilingMs)) return "refresh-by-ceiling";
+  if (!(issuedAtMs - now.getTime() <= ceilingMs)) return "head-issued-ahead";
+  return undefined;
 }

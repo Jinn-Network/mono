@@ -18,6 +18,17 @@ const manifest = JSON.parse(
   readFileSync(fileURLToPath(new URL("../fixtures/manifest.sha256.json", import.meta.url)), "utf8"),
 ) as { errata: readonly { id: string; supersededBy: string }[] };
 
+// Errata may name any fixture, not only a vector directory (`benchmarking/
+// testing`'s manifest already carries a non-vector one), so both assertions
+// below filter by the same shape `vectors.ts` filters by rather than assuming
+// every erratum is a vector.
+const VECTOR_ERRATUM = /^vectors\/([^/]+)\/vector\.json$/u;
+const vectorErrata = manifest.errata.flatMap((erratum) => {
+  const superseded = VECTOR_ERRATUM.exec(erratum.id)?.[1];
+  const replacement = VECTOR_ERRATUM.exec(erratum.supersededBy)?.[1];
+  return superseded === undefined ? [] : [{ superseded, replacement }];
+});
+
 // Vectors that are deliberately malformed at the Announcement Entry parse
 // level (§18 "missing reason code" / "non-genesis previous:null") -- their
 // primary coverage is M1's entry.test.ts; here they only need to
@@ -29,7 +40,7 @@ describe("loadVectors", () => {
     const directoryCount = readdirSync(vectorsRoot, { withFileTypes: true }).filter((entry) =>
       entry.isDirectory(),
     ).length;
-    expect(loadVectors().length).toBe(directoryCount - manifest.errata.length);
+    expect(loadVectors().length).toBe(directoryCount - vectorErrata.length);
     expect(loadVectors().length).toBeGreaterThan(0);
   });
 
@@ -37,15 +48,21 @@ describe("loadVectors", () => {
     // The superseded bytes stay on disk unedited (fixtures are append-only),
     // so the corpus has to skip them explicitly or it keeps asserting the
     // statement the erratum retracted.
-    const names = new Set(loadVectors().map((vector) => vector.name));
-    expect(manifest.errata.length).toBeGreaterThan(0);
-    for (const erratum of manifest.errata) {
-      const superseded = /^vectors\/([^/]+)\/vector\.json$/u.exec(erratum.id)?.[1];
-      const replacement = /^vectors\/([^/]+)\/vector\.json$/u.exec(erratum.supersededBy)?.[1];
-      expect(superseded).toBeDefined();
+    const loaded = loadVectors();
+    const byName = new Map(loaded.map((vector) => [vector.name, vector] as const));
+    expect(vectorErrata.length).toBeGreaterThan(0);
+    for (const { superseded, replacement } of vectorErrata) {
+      expect(byName.has(superseded)).toBe(false);
+      // A supersession must REPLACE the coverage, not delete it: an erratum
+      // whose `supersededBy` is not itself a loaded vector of the same kind
+      // would let a JSON edit quietly retire a rule from the corpus.
       expect(replacement).toBeDefined();
-      expect(names.has(superseded!)).toBe(false);
-      expect(names.has(replacement!)).toBe(true);
+      const superseding = byName.get(replacement!);
+      expect(superseding).toBeDefined();
+      const original = JSON.parse(
+        readFileSync(fileURLToPath(new URL(`../fixtures/vectors/${superseded}/vector.json`, import.meta.url)), "utf8"),
+      ) as { kind: string };
+      expect(superseding!.kind).toBe(original.kind);
     }
   });
 

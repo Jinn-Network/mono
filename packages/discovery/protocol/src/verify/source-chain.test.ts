@@ -421,3 +421,70 @@ describe("verifySourceChain: the published-profile refreshBy ceiling (#3467, §5
     expect(outcome).toEqual({ status: "broken-chain", at: "refresh-by-ceiling" });
   });
 });
+
+describe("verifySourceChain: the future-issued head the ceiling alone cannot see (#3467, §5.2)", () => {
+  function futureHead(entryDigest: `sha256:${string}`, issuedAt: string, refreshBy: string): SourceHead {
+    return {
+      protocol: RECORD_DISCOVERY_VERSION,
+      origin: `${AGENT}/feed`,
+      sequence: GENESIS_SEQUENCE,
+      entry: entryDigest,
+      issuedAt,
+      refreshBy,
+    };
+  }
+
+  it("rejects a head issued further into the future than one freshness window, even with a conformant window", async () => {
+    // Left open by a refreshBy-vs-issuedAt ceiling alone, and worse here than
+    // on the revalidation path: on first adoption this head also becomes the
+    // persisted high-water mark, so every honest head after it fails
+    // issued-at monotonicity.
+    const entry = genesisEntry();
+    const head = futureHead(sealJson(entry).digest, "2099-01-01T00:00:00.000Z", "2099-01-02T00:00:00.000Z");
+
+    const outcome = await verifySourceChain({
+      head,
+      headSignature: signedHead(head),
+      entries: oneEntry(entry),
+      ports: { keys, sigs, fresh, hwm: makeHwmStore(), now: new Date("2026-07-28T01:00:00.000Z"), firstAdoption: true },
+    });
+
+    expect(outcome).toEqual({ status: "broken-chain", at: "head-issued-ahead" });
+  });
+
+  it("rejects a head whose refreshBy is not after its issuedAt", async () => {
+    const entry = genesisEntry();
+    const head = futureHead(sealJson(entry).digest, "2099-01-01T00:00:00.000Z", "2098-01-01T00:00:00.000Z");
+
+    const outcome = await verifySourceChain({
+      head,
+      headSignature: signedHead(head),
+      entries: oneEntry(entry),
+      ports: { keys, sigs, fresh, hwm: makeHwmStore(), now: new Date("2026-07-28T01:00:00.000Z"), firstAdoption: true },
+    });
+
+    expect(outcome).toEqual({ status: "broken-chain", at: "refresh-by-ceiling" });
+  });
+
+  it("cannot be widened by a caller-supplied ceiling -- a profile may only tighten", async () => {
+    const entry = genesisEntry();
+    const head = futureHead(sealJson(entry).digest, "2026-07-28T00:00:00.000Z", "2030-01-01T00:00:00.000Z");
+
+    const outcome = await verifySourceChain({
+      head,
+      headSignature: signedHead(head),
+      entries: oneEntry(entry),
+      ports: {
+        keys,
+        sigs,
+        fresh,
+        hwm: makeHwmStore(),
+        now: new Date("2026-07-28T01:00:00.000Z"),
+        firstAdoption: true,
+        maxRefreshByAheadMs: 4 * 365 * 24 * 60 * 60 * 1000,
+      },
+    });
+
+    expect(outcome).toEqual({ status: "broken-chain", at: "refresh-by-ceiling" });
+  });
+});
