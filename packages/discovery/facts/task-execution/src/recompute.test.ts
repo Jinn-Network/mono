@@ -446,3 +446,56 @@ describe("v2 recompute: the join edges v1 left out", () => {
     expect(TASK_EXECUTION_FACTS_RECOMPUTE_V2.get("https://spec.jinn.network/records/nope/v1")).toBeUndefined();
   });
 });
+
+describe("a digest source the schemas do not constrain", () => {
+  it("skips a Task's non-hex profile digest rather than minting a non-digest fact", async () => {
+    const golden = JSON.parse(new TextDecoder().decode(await loadGoldenTaskBytes())) as Record<string, unknown>;
+    const profile = golden.profile as Record<string, unknown>;
+    for (const malformed of [
+      "12345",
+      `sha256:${"b".repeat(64)}`,
+      "A".repeat(64),
+      `${"a".repeat(64)} `,
+    ]) {
+      const bytes = sealTask({ ...golden, profile: { ...profile, digest: { sha256: malformed } } });
+      const facts = await taskRecompute(bytes, noReferencedBytes);
+      expect(facts.profileDigest).toBeUndefined();
+      // The card's other well-formed references survive the one malformed member.
+      expect(facts.profileUri).toBe((profile as { uri: string }).uri);
+    }
+  });
+
+  it("skips a Task output slot whose `z.unknown()` schema carries a non-string digest", async () => {
+    const golden = JSON.parse(new TextDecoder().decode(await loadGoldenTaskBytes())) as Record<string, unknown>;
+    const slots = golden.outputs as Record<string, unknown>[];
+    const bytes = sealTask({
+      ...golden,
+      outputs: [
+        { ...slots[0], schema: { name: "nested", digest: { sha256: { not: "a string" } } } },
+        { ...slots[0], name: "numeric", schema: { name: "numeric", digest: { sha256: 12345 } } },
+        { ...slots[0], name: "good", schema: { name: "good", digest: { sha256: "e".repeat(64) } } },
+      ],
+    });
+    const facts = await taskRecomputeV2(bytes, noReferencedBytes);
+    expect(facts.outputSlotSchemaDigests).toEqual([`sha256:${"e".repeat(64)}`]);
+    expect(facts.profileDigest).toBe(
+      `sha256:${(((golden.profile as Record<string, unknown>).digest as Record<string, string>).sha256)}`,
+    );
+  });
+
+  it("skips a Submission's malformed Task digest instead of fetching a non-digest reference", async () => {
+    const golden = JSON.parse(new TextDecoder().decode(await loadGoldenSubmissionBytes())) as Record<string, unknown>;
+    const bytes = sealSubmission({ ...golden, task: { digest: { sha256: "not-a-digest" } } });
+    const fetched: string[] = [];
+    const facts = await submissionRecompute(bytes, {
+      async "fetch"(digest: string) {
+        fetched.push(digest);
+        return undefined;
+      },
+    });
+    expect(facts.taskDigest).toBeUndefined();
+    expect(facts.taskProfileUri).toBeUndefined();
+    expect(fetched).toEqual([]);
+    expect(facts.requesterIri).toBe(golden.requester);
+  });
+});

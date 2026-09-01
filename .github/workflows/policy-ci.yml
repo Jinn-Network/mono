@@ -149,7 +149,8 @@ jobs:
       # consolidating the packages or gating either upload on a path filter
       # would have changed the layout with no gate to catch it. Restoring by
       # name has no such dependency, and `policy-ci-workflow.test.mjs` keeps it
-      # that way. Same shape as plugin-tree-ci.yml.
+      # that way.
+      # Precedent: plugin-tree-ci.yml.
       - name: Restore Policy Identity distribution
         uses: actions/download-artifact@v8
         with:

@@ -86,6 +86,10 @@
       "sha256": "5dc156f400efb40c596d37dfacdb1d903083210ce2d8a8dce6da9e8be5b8ad5f"
     },
     {
+      "id": "vectors/issued-at-regression-v2/vector.json",
+      "sha256": "ffdc63f2d676ec65e79756e4c23c6bb8304f2b33da77e0aacc4f75cdf3004a78"
+    },
+    {
       "id": "vectors/issued-at-regression/vector.json",
       "sha256": "6f722d6964558a5595fbae2dcfa0cc941e50c8acf4b45340190325ea7c8796f6"
     },
@@ -250,5 +254,12 @@
       "sha256": "3d13ea117928b7132dcbf1db34263780d3580449eaec8c0b1a1ff4971e7a330c"
     }
   ],
-  "errata": []
+  "errata": [
+    {
+      "id": "vectors/issued-at-regression/vector.json",
+      "supersededBy": "vectors/issued-at-regression-v2/vector.json",
+      "date": "2026-09-01",
+      "reason": "The superseded head set refreshBy 60h past its own issuedAt, which the published-source profile's 24h ceiling forbids (#3467, design §5.2). Both named verification procedures now check that ceiling before freshness and monotonicity, so the vector's own head is refused refresh-by-ceiling and can no longer demonstrate issued-at-monotonicity. The superseding vector states the same rule with a within-ceiling head; the original is retained unedited."
+    }
+  ]
 }

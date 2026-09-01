@@ -819,7 +819,7 @@ test('records authority status per governing document', () => {
 
 test('the canonical repository catalog validates its topology without a second membership authority', () => {
   const catalog = loadPlatformCatalog(repoRoot);
-  assert.deepEqual(catalog.ownerGroups['architecture-control'], ['@oaksprout', '@ritsukai']);
+  assert.deepEqual(catalog.ownerGroups['architecture-control'], ['@oaksprout', '@ritsukai', '@ritsuKai2000']);
   for (const [releaseGroup, definition] of Object.entries(catalog.releaseGroups)) {
     const members = catalog.packages.filter((pkg) => pkg.releaseGroup === releaseGroup);
     assert.equal(members.length, definition.expectedPackageCount, releaseGroup);
@@ -899,7 +899,7 @@ test('the live catalog publishes sealed-platform-v1 and implementations-v1', () 
   const sealed = catalog.releaseGroups['sealed-platform-v1'];
   const implementations = catalog.releaseGroups['implementations-v1'];
   assert.equal(sealed.expectedPackageCount, 14);
-  assert.equal(implementations.expectedPackageCount, 60);
+  assert.equal(implementations.expectedPackageCount, 61);
   assert.deepEqual(sealed.publishPolicies, ['canary-and-stable']);
   assert.deepEqual(implementations.publishPolicies, ['canary-and-stable']);
   assert.equal(sealed.stackPublished, true);
@@ -959,6 +959,6 @@ test('the live catalog publishes sealed-platform-v1 and implementations-v1', () 
   );
   assert.equal(
     loadPublishableCatalogPackages(repoRoot, { releaseGroup: 'implementations-v1', lane: 'canary' }).length,
-    60,
+    61,
   );
 });

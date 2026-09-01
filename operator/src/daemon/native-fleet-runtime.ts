@@ -59,6 +59,7 @@ import {
   createBaseSepoliaRecordTransport,
   createSolverReads,
   createViemBaseSepoliaReadClients,
+  reportRefusedRecordDestination,
 } from './native-base-sepolia-infrastructure.js';
 import {
   buildFleetNativeDiscovery,
@@ -101,7 +102,12 @@ export function buildFleetDeliveryBytesResolver(
         // eslint-disable-next-line no-await-in-loop -- alternate content-addressed serving planes.
         const bytes = await byLocation(`${base}${recordPath(digest)}`);
         if (documentDigest(bytes) === digest) return bytes;
-      } catch { /* serving-plane miss/failure — try the next configured origin, then IPFS */ }
+      } catch (cause) {
+        // Serving-plane miss/failure — try the next configured origin, then IPFS. A destination
+        // refusal is named first (#3431): this resolver returns `undefined` on refusal, so nothing
+        // downstream can tell one apart from a plain miss.
+        reportRefusedRecordDestination('fleet delivery serving plane', cause);
+      }
     }
     return undefined;
   };
@@ -410,6 +416,9 @@ export async function buildFleetNativeRuntime(
 
   const records = createBaseSepoliaRecordTransport({
     ipfsApiUrl,
+    // The record origins this operator configured (#3431): its own serving plane plus every
+    // configured record source. A peer-announced locator outside them is refused before the fetch.
+    recordOrigins: [publicBaseUrl, ...(config.recordSources ?? []).map(({ baseUrl }) => baseUrl)],
     fetchImpl: input.fetchImpl ?? globalThis.fetch,
   });
   // One `createViemBaseSepoliaReadClients` call supplies both trust-catalog chain reads: the

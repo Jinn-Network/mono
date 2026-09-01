@@ -45,6 +45,135 @@ The trust root is equally blunt, from `claim-package.json` `verification.trustRo
 "Signatures verify against the bundle-carried public keys minted by this
 workspace; there is no third-party trust anchor on the self-run venue."
 
+## Post-seal randomness: `beacon-binding/1`
+
+A seal shows a method document existed by a given time. It does not show the run
+followed it: a party could run privately, write a method describing what already
+happened, seal it, and re-run. A run closes that gap by binding a run property to
+a **public beacon value that did not exist when the seal was taken**
+(`beacon-binding/1`, issue #2976). `colophon status` reports the binding, and
+the derivation below is the whole procedure — recompute it yourself.
+
+The binding record names the sealed digest it postdates (`sealDigest`), when that
+seal was taken (`sealedAt`), the beacon (`source`, `round`, `value`), optionally the
+beacon source the sealed record declared (`declaredSource`), and either a drawn
+`sample` or, for a census run, the derived `order`.
+
+**Step 1 — check the beacon postdates the seal.** For a scheduled beacon the round
+index gives the instant by arithmetic, with no network access:
+
+| `source` | round 1 published at (Unix seconds) | period (seconds) |
+| --- | --- | --- |
+| `drand/quicknet` | 1692803367 | 3 |
+| `drand/default` | 1595431050 | 30 |
+
+`instant = genesis + (round - 1) * period`, and it must be strictly later than
+`sealedAt`. `bitcoin/mainnet` indexes by block height, whose time needs block
+headers; that ordering is what the chain asserts, not something the bundle proves,
+and the report face says so in those words.
+
+**Step 2 — check the beacon value against the beacon itself.** The `(round, value)`
+pair is public. Fetch it from the beacon and compare; a value the beacon never
+published binds nothing, and no Colophon code can tell you that.
+
+**Step 2b — check the round was not chosen.** Postdating the seal is not enough on
+its own. If a run could bind to *any* later round, an operator could watch the
+rounds published between sealing and launching, derive what each would produce,
+and bind the one they preferred: the value would be unpredictable, but the choice
+among realized values would not be. So for a scheduled beacon the seal names
+exactly one admissible round — the first published strictly after it:
+
+```text
+round = max(1, floor((sealedAt - genesis) / period) + 2)
+```
+
+with `sealedAt` and `genesis` in the same units. Recompute it from the record's
+own `sealedAt` and check the record names that round. Colophon's `bind` refuses
+any later round, so a bundle from this product will match; a record from anywhere
+else that names a different round tells you the operator chose which post-seal
+value applied, and its report face says so in those words.
+
+`bitcoin/mainnet` has no such round: a block height carries no schedule, so
+nothing derives one from the seal and the height stays the operator's choice.
+That residue is stated on the face rather than removed.
+
+**Step 2c — check the source was not chosen either.** A round rule binds only the
+round *within a source*. Choosing the source is choosing which rule applies, and
+one admitted source has no rule at all: `bitcoin/mainnet` derives no round from a
+seal, and nothing in the bundle places its value after the seal. So a run that
+left the source open left the round rule one selection away from having no
+effect. A run closes this by naming its beacon in the sealed Run record itself,
+under the extension key
+
+```text
+https://spec.jinn.network/extensions/beacon-source/v1
+```
+
+whose value is `{ "source": "<beacon source id>" }`. Two checks, and they are
+separate:
+
+1. **Inside the binding record.** If it carries `declaredSource`, it must equal
+   `beacon.source`. The reference verifier refuses a record where it does not.
+2. **Against the sealed Run.** Read the extension from the Run record the binding's
+   `sealDigest` names, and check it agrees with the binding's `declaredSource` —
+   *including when the binding carries none*. This second check is the one that
+   matters, and omission is why: a binding that simply drops the field verifies
+   clean on its own and reads as an operator-chosen source, which is exactly how a
+   run that declared a beacon would bind a different one and still look honest.
+
+A Run that declares no source is a legitimate and historical state — every run
+sealed before this extension existed is one — and its face says the beacon was the
+operator's choice. A Run that declares one gets the stronger sentence, and
+Colophon's `bind` refuses a binding naming any other source. Declaring a source
+does **not** rescue `bitcoin/mainnet`: the beacon is then fixed, but no round
+follows from a seal on a height-indexed source, so the height remains the
+operator's choice and the face keeps saying so.
+
+**Step 3 — recompute the derivation.** For each item identity — a
+`sha256:`-prefixed lowercase-hex task digest — compute
+
+```text
+HMAC-SHA256(key = utf8(sealDigest || value), message = utf8(itemSha256))
+```
+
+`sealDigest` enters as its `sha256:`-prefixed lowercase-hex string (71
+characters) and `value` as its 64 lowercase hex digits. Both are fixed-length, so
+**no delimiter separates them**. Sort the items ascending by those 32 HMAC bytes
+compared as *unsigned* bytes, breaking ties by `itemSha256` in code-unit order.
+That order is the answer: for a census run it is the execution order, and for a
+sampled run the slate is its first `sampleSize` entries.
+
+This is deliberately the same encoding as the reference verifier's
+`screening-sample/1` procedure, whose only difference is that it keys on a sealed
+seed rather than on post-seal randomness.
+
+**What each binding establishes.** A beacon-drawn slate on the round the seal
+names could not have been selected after the fact: neither the value nor which
+post-seal value applied was the operator's to pick. On any other round of a
+*scheduled* source the value was still unpredictable, but the slate could have
+been selected after the fact by waiting and choosing among the rounds already
+published — the face says that instead of the stronger sentence. A
+height-indexed source derives no round from a seal at all, so on that branch the
+face makes no unpredictability claim either: the height was the operator's
+choice, and nothing in the bundle places it after the seal — it is the chain,
+not the bundle, that does that. A census run's binding is weaker again and is
+stated as such: on a scheduled source it shows the run's ORDER was fixed by
+randomness postdating the seal, not that the population was — a census makes no
+population choice — and on a height-indexed source it concedes the postdating
+too, showing the order was tied to a value the bundle cannot place after the
+seal. A run with no binding establishes neither, and its report face says so.
+
+Where the sealed Run declares no beacon source, one residue survives even a
+seal-derived round: the *source*. An operator could have bound a different beacon
+— and `bitcoin/mainnet` derives no round from a seal at all. The procedure runs no
+postdating check on a height-indexed source, so through that source every height
+the chain carries is an available alternative, including heights that predate the
+seal. The face names that residue. Where the Run does declare a source (step 2c),
+the face drops it: with the source fixed at the seal and the round determined by
+`(source, sealedAt)`, the beacon is fixed outright. On a height-indexed declared
+source the face states the narrower truth — the beacon was fixed, the height
+within it was not.
+
 ## The record family
 
 A `benchmark-product-public-bundle/2` bundle is one directory:

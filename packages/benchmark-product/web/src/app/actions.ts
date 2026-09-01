@@ -22,6 +22,7 @@ import {
   inspectDraft,
   listDrafts,
   runAnchor,
+  runBind,
   runLock,
   publicationAccounting,
   publicationConfigure,
@@ -49,6 +50,7 @@ import {
   summarizeVerificationOutcome,
   verifyPublicBundle,
 } from "@colophon-claims/core";
+import type { BeaconReference } from "@colophon-claims/core";
 import type { GuiActionState } from "@/lib/action-state";
 import {
   executeOperation,
@@ -502,6 +504,26 @@ export async function runAnchorAction(_previous: GuiActionState, formData: FormD
       throw new ProductContextConfigurationError("subject must be lock or matrix");
     }
     return runAnchor(context, { draftId, subject });
+  }, { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
+}
+
+/**
+ * Binds a locked run to a public beacon value (issue #2976). Unlike `run.anchor`, the browser DOES
+ * supply the beacon reference: it is three public values read off a beacon, not an endpoint the
+ * server would call, so nothing here becomes an outbound-request primitive pointed wherever a form
+ * says. The operation validates the source against its own registry and refuses a round that does
+ * not postdate the seal.
+ */
+export async function runBindAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  const source = field(formData, "beaconSource");
+  const round = Number(field(formData, "beaconRound"));
+  const value = field(formData, "beaconValue");
+  return executeOperation((context) => {
+    if (!Number.isInteger(round)) {
+      throw new ProductContextConfigurationError("beaconRound must be an integer round or block height");
+    }
+    return runBind(context, { draftId, beacon: { source: source as BeaconReference["source"], round, value } });
   }, { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
 }
 

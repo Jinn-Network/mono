@@ -10,6 +10,7 @@ import {
   listDrafts,
   runStatus,
   runResults,
+  BEACON_SOURCE_IDS,
   publicationStatus,
   type OperationResult,
   type AgentRuntimeReadinessCode,
@@ -174,6 +175,10 @@ export function loadRunView(draftId: string) {
         ? { ...status, result: projectRunStatusForGui(status.result) }
         : { ...status, error: projectProductErrorForGui(status.error) },
       publication: publication.ok ? publication : { ...publication, error: projectProductErrorForGui(publication.error) },
+      // The admitted beacon sources come from the product core, not a second list in the browser
+      // bundle: the operation refuses a source this registry does not name, so a drifted copy here
+      // would offer a choice that cannot be bound (issue #2976).
+      beaconSources: BEACON_SOURCE_IDS,
       publicationConfiguration: {
         available: configuration.publicationPublicBaseUrl !== undefined,
         ...(configuration.publicationPublicBaseUrl === undefined ? {} : { publicBaseUrl: configuration.publicationPublicBaseUrl }),

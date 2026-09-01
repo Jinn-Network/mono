@@ -223,8 +223,20 @@ export interface NativeDiscoveryDecodeInput {
  *   itself, so its own idle-lapsed head degrades this poll rather than refusing — otherwise a
  *   co-located requester+evaluator that idles >24h deadlocks its own boot. A PEER's lapsed head is
  *   NEVER this: it stays the hard `stale` refusal. See `pollSource` and `buildNativeDiscoverySources`.
+ * - `self-source-future-head` — the same #2547 deadlock, reached from the other end (#3467). §5.2
+ *   now bounds a head's `issuedAt` against the consumer's clock as well as its `refreshBy`, so a
+ *   publishing node with a fast clock mints a head every consumer refuses `head-issued-ahead` --
+ *   and stickily, since `refreshHead` carries the future `issuedAt` forward on every re-sign. For
+ *   the operator's OWN source that would abort `WorkLoop.initialize` over its own clock error, so
+ *   it degrades on exactly the #2547 reasoning: a self-hosted source cannot equivocate against
+ *   itself. A PEER's future-dated head still refuses, fail-closed.
  */
-export type NativeDiscoveryDegradedReason = 'unpublished' | 'unreachable' | 'undecodable' | 'self-source-stale';
+export type NativeDiscoveryDegradedReason =
+  | 'unpublished'
+  | 'unreachable'
+  | 'undecodable'
+  | 'self-source-stale'
+  | 'self-source-future-head';
 
 export interface NativeDiscoveryDegradedSource {
   readonly source: SourceIdentity;
@@ -662,10 +674,23 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         head: syncedHead.head,
         signature: syncedHead.signature,
       });
+      // A self-hosted source whose own head is dated into the future degrades for the same
+      // reason a lapsed one does (#3467, #2547): it is this operator's clock error, not a peer's
+      // trust signal, and refusing would abort its own boot over it. A peer's future-dated head
+      // still throws below.
+      if (revalidated.status === 'head-issued-ahead' && configured.selfServed === true) {
+        return {
+          reason: 'self-source-future-head',
+          detail: `self-hosted source head issued at ${syncedHead.head.issuedAt}, further ahead `
+            + 'than the profile freshness window allows; degrading this poll rather than refusing '
+            + 'this operator its own boot',
+        };
+      }
       // A revalidation failure that is NOT freshness — a bad signature, a wrong or revoked key, a
       // head/payload mismatch — refuses for EVERY source, self-hosted or peer alike: a source
-      // serving a wrongly-signed head is a real fault, never idle staleness. Only `stale` is
-      // eligible for the self-source degrade below.
+      // serving a wrongly-signed head is a real fault, never idle staleness. Only `stale` and the
+      // future-dated head handled directly above are eligible for the self-source degrade; both
+      // are this operator's own clock, and every other status is a trust signal.
       if (revalidated.status !== 'ok' && revalidated.status !== 'stale') {
         throw new NativeDiscoverySyncError(source, revalidated.status);
       }
@@ -789,9 +814,27 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       //
       // The discriminator is identical to #2548's: `configured.selfServed === true` only for a
       // source this operator serves from its own archive (`buildNativeDiscoverySources`), never
-      // for a peer. Only `status === 'stale'` degrades — every other verify failure (`forked`,
-      // `broken-chain` at any `at:`, `unauthorized-signer`, etc.) still throws, fail-closed, for
-      // self and peer alike, exactly as it always has.
+      // for a peer. Two statuses degrade, and only for a self-hosted source: `stale`, and the
+      // `broken-chain at: 'head-issued-ahead'` handled directly above (#3467) — the two shapes
+      // this operator's own clock produces. Every other verify failure (`forked`, `broken-chain`
+      // at any other `at:` — including `refresh-by-ceiling`, which is a writer fault rather than a
+      // clock one and should stay loud — `unauthorized-signer`, etc.) still throws, fail-closed,
+      // for self and peer alike, exactly as it always has.
+      // Same #3467 clock-error degrade as the revalidation branch, for a self-hosted source with
+      // no prior checkpoint: the chain procedure reports a future-dated head as `broken-chain`
+      // with `at: 'head-issued-ahead'`.
+      if (
+        outcome.status === 'broken-chain'
+        && outcome.at === 'head-issued-ahead'
+        && configured.selfServed === true
+      ) {
+        return {
+          reason: 'self-source-future-head',
+          detail: `self-hosted source head issued at ${syncedHead.head.issuedAt}, further ahead `
+            + 'than the profile freshness window allows, at cold verify (no prior checkpoint); '
+            + 'degrading this poll rather than refusing this operator its own boot',
+        };
+      }
       if (outcome.status === 'stale' && configured.selfServed === true) {
         return {
           reason: 'self-source-stale',

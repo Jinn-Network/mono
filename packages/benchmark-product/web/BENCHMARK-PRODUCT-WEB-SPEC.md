@@ -529,8 +529,9 @@ accounts, billing, registries, or report delivery are live. These future SaaS
 views are intentionally retained as product-direction prototypes rather than
 removed; implementation claims remain limited to the local workspace.
 
-The frozen public bundle keeps the exact `benchmark-product-public-bundle/1`
-file roles and evidence semantics. Its five presentation assets use the same
-Colophon identity and embed their fonts and mark for source-deleted, offline
-rendering. No presentation asset computes a winner or changes a stored Matrix,
-Report, or Claim fact.
+The frozen public bundle is `benchmark-product-public-bundle/2`; the anchored
+and qualification-projecting closures (`/4`, `/6`, and `/7`) add members to it
+and keep its file roles and evidence semantics. Its five presentation assets
+use the same Colophon identity and embed their fonts and mark for
+source-deleted, offline rendering. No presentation asset computes a winner or
+changes a stored Matrix, Report, or Claim fact.

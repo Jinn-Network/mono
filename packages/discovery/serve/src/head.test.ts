@@ -161,3 +161,13 @@ describe("maintainsFreshness (for ServeUnderTest.maintainsFreshness)", () => {
     expect(maintainsFreshness([{ payload: btoa(binary) }])).toBe(true);
   });
 });
+
+describe("refreshHead: the window is never collapsed (#3467, §5.2)", () => {
+  it("falls back to the profile bound rather than minting refreshBy === issuedAt", () => {
+    for (const requested of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const refreshed = refreshHead(BASE_HEAD, makeClock("2026-07-28T01:00:00.000Z"), requested);
+      const aheadMs = new Date(refreshed.refreshBy).getTime() - new Date(refreshed.issuedAt).getTime();
+      expect(aheadMs).toBe(MAX_REFRESH_BY_AHEAD_MS);
+    }
+  });
+});

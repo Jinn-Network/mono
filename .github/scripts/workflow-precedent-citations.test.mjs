@@ -12,106 +12,23 @@
 // `paths:` filter — so the pull request that removed a cited workflow's
 // restores never ran the gate, and it fired later against an unrelated author.
 // The invariant is repository-wide, so the gate lives here, under Repository
-// structure, which runs on every pull request with no path filtering.
+// structure, which runs on every pull request with no path filtering. The
+// citation shape itself lives in `workflow-precedent-citations.mjs`, a plain
+// module, so the per-workflow marker guards can share the parser without
+// importing this file and dragging the repository-wide gate back behind their
+// `paths:` filters.
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
-const root = resolve(import.meta.dirname, '../..');
-const workflowsDir = resolve(root, '.github/workflows');
-
-// True at the first line that cannot belong to the step opened at `stepIndent`:
-// the next step, or any dedent out of the step's block. Without the dedent arm a
-// `pattern:` restore that is the last step of its job keeps scanning into the
-// next job and matches that job's `name:`, scoring a workflow that restores
-// nothing by name as compliant.
-function leavesStep(line, stepIndent) {
-  if (line.trim() === '') return false;
-  const indent = line.match(/^\s*/)[0].length;
-  return indent <= stepIndent;
-}
-
-// Reads the `name:` of every `actions/download-artifact` step. A bare search
-// for `name:` over the whole file also matches the upload steps, so the walk
-// stays inside the step it started in.
-export function restoredArtifactNames(source) {
-  const names = [];
-  const lines = source.split('\n');
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!lines[index].includes('uses: actions/download-artifact')) continue;
-    const stepIndent = stepOpenerIndent(lines, index);
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      if (leavesStep(lines[cursor], stepIndent)) break;
-      const name = lines[cursor].match(/^\s+name: (\S+)$/);
-      if (name) {
-        names.push(name[1]);
-        break;
-      }
-    }
-  }
-  return names;
-}
-
-// The indentation of the `- ` line that opens the step containing `index`.
-function stepOpenerIndent(lines, index) {
-  for (let cursor = index; cursor >= 0; cursor -= 1) {
-    const opener = lines[cursor].match(/^(\s*)- /);
-    if (opener) return opener[1].length;
-  }
-  return 0;
-}
-
-// Returns every workflow file name cited in a comment attached to a
-// download-artifact step, self-citations excluded. The comment block is the run
-// of `#` lines immediately above the step's `- ` opener; a citation written
-// inside the step body, or separated from the opener by a blank line, is not
-// read. Keep precedent citations in the attached block so this gate sees them.
-export function citedPrecedents(source, selfName) {
-  const lines = source.split('\n');
-  const cited = new Set();
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!lines[index].includes('uses: actions/download-artifact')) continue;
-
-    let start = index;
-    while (start >= 0 && !/^\s*- /.test(lines[start])) start -= 1;
-
-    // No `if (start < 0) continue` guard: when the scan runs off the top of
-    // the file `start` is -1, the comment walk below starts at -2 and does not
-    // execute, and the empty comment cites nothing. The guard was unkillable
-    // because it was redundant (#3168 D).
-    const comment = [];
-    for (let cursor = start - 1; cursor >= 0; cursor -= 1) {
-      if (!/^\s*#/.test(lines[cursor])) break;
-      comment.unshift(lines[cursor]);
-    }
-
-    for (const match of comment.join('\n').match(/[\w-]+\.ya?ml/g) ?? []) {
-      if (match !== selfName) cited.add(match);
-    }
-  }
-  return [...cited];
-}
-
-export function findBrokenCitations(workflowsRoot = workflowsDir) {
-  const broken = [];
-  for (const fileName of readdirSync(workflowsRoot).filter((name) => /\.ya?ml$/.test(name))) {
-    const source = readFileSync(join(workflowsRoot, fileName), 'utf8');
-    for (const cited of citedPrecedents(source, fileName)) {
-      const citedPath = join(workflowsRoot, cited);
-      if (!existsSync(citedPath)) {
-        broken.push(`${fileName} cites ${cited}, which does not exist`);
-        continue;
-      }
-      if (restoredArtifactNames(readFileSync(citedPath, 'utf8')).length === 0) {
-        broken.push(`${fileName} cites ${cited} as by-name-restore precedent, but it restores no artifact by name`);
-      }
-    }
-  }
-  return broken;
-}
+import {
+  citedPrecedents,
+  findBrokenCitations,
+  restoredArtifactNames,
+} from './workflow-precedent-citations.mjs';
 
 test('every workflow cited as by-name precedent actually restores by name', () => {
   assert.deepEqual(findBrokenCitations(), []);
@@ -119,10 +36,10 @@ test('every workflow cited as by-name precedent actually restores by name', () =
 
 test('a citation is only read from the comment attached to a restore step', () => {
   const source = [
-    '      # Unrelated prose mentioning marketplace-ci.yml.',
+    '      # Precedent: marketplace-ci.yml.',
     '      - name: Something else',
     '        run: echo hi',
-    '      # Same shape as plugin-tree-ci.yml.',
+    '      # Precedent: plugin-tree-ci.yml.',
     '      - name: Restore a distribution',
     '        uses: actions/download-artifact@v8',
     '        with:',
@@ -133,6 +50,34 @@ test('a citation is only read from the comment attached to a restore step', () =
 
   assert.deepEqual(citedPrecedents(source, 'self-ci.yml'), ['plugin-tree-ci.yml']);
   assert.deepEqual(restoredArtifactNames(source), ['some-dist']);
+});
+
+test('a marker separated from the step opener by a blank line is not read', () => {
+  const source = [
+    '      # Precedent: marketplace-ci.yml.',
+    '',
+    '      - name: Restore a distribution',
+    '        uses: actions/download-artifact@v8',
+    '        with:',
+    '          name: some-dist',
+    '',
+  ].join('\n');
+
+  assert.deepEqual(citedPrecedents(source, 'self-ci.yml'), []);
+});
+
+test('a workflow named outside a Precedent line is prose, not a citation', () => {
+  const source = [
+    '      # Unlike marketplace-ci.yml, we restore by name. See also policy-ci.yml.',
+    '      # Precedent: plugin-tree-ci.yml.',
+    '      - name: Restore a distribution',
+    '        uses: actions/download-artifact@v8',
+    '        with:',
+    '          name: some-dist',
+    '',
+  ].join('\n');
+
+  assert.deepEqual(citedPrecedents(source, 'self-ci.yml'), ['plugin-tree-ci.yml']);
 });
 
 // A workflows directory holding exactly the given files, so a citation can be
@@ -149,7 +94,7 @@ function fixtureWorkflows(files) {
 }
 
 const citingConsolidated = [
-  '      # Same shape as consolidated-ci.yml.',
+  '      # Precedent: consolidated-ci.yml.',
   '      - name: Restore a distribution',
   '        uses: actions/download-artifact@v8',
   '        with:',
@@ -230,7 +175,7 @@ test('a restore step at the end of a job does not read the next job\'s name', ()
 // Cites its own file name, and restores by `pattern:` rather than by name — so
 // dropping the self-citation guard makes this file report itself.
 const citingSelf = [
-  '      # Same shape as self-ci.yml.',
+  '      # Precedent: self-ci.yml.',
   '      - name: Restore a distribution',
   '        uses: actions/download-artifact@v8',
   '        with:',
@@ -262,7 +207,7 @@ test('a .yaml workflow is scanned for broken citations', () => {
 
 test('every broken citation is reported, not just the first', () => {
   const citingTwo = [
-    '      # Same shape as consolidated-ci.yml and archived-ci.yml.',
+    '      # Precedent: consolidated-ci.yml and archived-ci.yml.',
     '      - name: Restore a distribution',
     '        uses: actions/download-artifact@v8',
     '        with:',
@@ -289,7 +234,7 @@ test('every broken citation is reported, not just the first', () => {
 // target, so without this one the `ya?ml` arm of the citation regex is latent:
 // narrowing it to `yml` would read no citation at all and pass silently.
 const citingYamlNeighbor = [
-  '      # Same shape as consolidated-ci.yaml.',
+  '      # Precedent: consolidated-ci.yaml.',
   '      - name: Restore a distribution',
   '        uses: actions/download-artifact@v8',
   '        with:',
