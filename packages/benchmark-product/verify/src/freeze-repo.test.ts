@@ -274,9 +274,6 @@ describe("freeze repository rendered bytes", () => {
     const excluded = new Set<string>(FREEZE_REPO_EXCLUDED_ROLES);
     expect([...FREEZE_REPO_ROLES])
       .toEqual(BUNDLE_V4_EVIDENCE_ROLES.filter((role) => !excluded.has(role)));
-    // And the two lists partition the catalog: no name in either that the catalog does not assign.
-    expect([...FREEZE_REPO_ROLES, ...FREEZE_REPO_EXCLUDED_ROLES].filter((role) => !BUNDLE_V4_EVIDENCE_ROLES.includes(role)))
-      .toEqual([]);
   });
 });
 

@@ -146,7 +146,6 @@ export {
 // implementation for the producer to drift from.
 export {
   FREEZE_REPO_BUNDLE_MEMBERS,
-  FREEZE_REPO_EXCLUDED_ROLES,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
   FREEZE_REPO_ROLES,
