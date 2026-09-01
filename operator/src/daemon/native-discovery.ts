@@ -688,8 +688,9 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       }
       // A revalidation failure that is NOT freshness — a bad signature, a wrong or revoked key, a
       // head/payload mismatch — refuses for EVERY source, self-hosted or peer alike: a source
-      // serving a wrongly-signed head is a real fault, never idle staleness. Only `stale` is
-      // eligible for the self-source degrade below.
+      // serving a wrongly-signed head is a real fault, never idle staleness. Only `stale` and the
+      // future-dated head handled directly above are eligible for the self-source degrade; both
+      // are this operator's own clock, and every other status is a trust signal.
       if (revalidated.status !== 'ok' && revalidated.status !== 'stale') {
         throw new NativeDiscoverySyncError(source, revalidated.status);
       }
@@ -813,9 +814,12 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       //
       // The discriminator is identical to #2548's: `configured.selfServed === true` only for a
       // source this operator serves from its own archive (`buildNativeDiscoverySources`), never
-      // for a peer. Only `status === 'stale'` degrades — every other verify failure (`forked`,
-      // `broken-chain` at any `at:`, `unauthorized-signer`, etc.) still throws, fail-closed, for
-      // self and peer alike, exactly as it always has.
+      // for a peer. Two statuses degrade, and only for a self-hosted source: `stale`, and the
+      // `broken-chain at: 'head-issued-ahead'` handled directly above (#3467) — the two shapes
+      // this operator's own clock produces. Every other verify failure (`forked`, `broken-chain`
+      // at any other `at:` — including `refresh-by-ceiling`, which is a writer fault rather than a
+      // clock one and should stay loud — `unauthorized-signer`, etc.) still throws, fail-closed,
+      // for self and peer alike, exactly as it always has.
       // Same #3467 clock-error degrade as the revalidation branch, for a self-hosted source with
       // no prior checkpoint: the chain procedure reports a future-dated head as `broken-chain`
       // with `at: 'head-issued-ahead'`.
