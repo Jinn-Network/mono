@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
@@ -14,6 +14,9 @@ import { loadVectors, loadVectorsByKind, VECTOR_KINDS } from "./vectors.js";
 // wired against the M2 skeletons, intentionally RED until M4).
 
 const vectorsRoot = fileURLToPath(new URL("../fixtures/vectors/", import.meta.url));
+const manifest = JSON.parse(
+  readFileSync(fileURLToPath(new URL("../fixtures/manifest.sha256.json", import.meta.url)), "utf8"),
+) as { errata: readonly { id: string; supersededBy: string }[] };
 
 // Vectors that are deliberately malformed at the Announcement Entry parse
 // level (§18 "missing reason code" / "non-genesis previous:null") -- their
@@ -22,12 +25,28 @@ const vectorsRoot = fileURLToPath(new URL("../fixtures/vectors/", import.meta.ur
 const PARSE_ERROR_VECTORS = new Set(["missing-withdrawal-reason", "non-genesis-previous-null"]);
 
 describe("loadVectors", () => {
-  it("loads exactly one vector per fixtures/vectors/<name> directory", () => {
+  it("loads exactly one vector per fixtures/vectors/<name> directory the manifest has not superseded", () => {
     const directoryCount = readdirSync(vectorsRoot, { withFileTypes: true }).filter((entry) =>
       entry.isDirectory(),
     ).length;
-    expect(loadVectors().length).toBe(directoryCount);
+    expect(loadVectors().length).toBe(directoryCount - manifest.errata.length);
     expect(loadVectors().length).toBeGreaterThan(0);
+  });
+
+  it("excludes every vector the fixture manifest records as superseded, and loads what replaced it", () => {
+    // The superseded bytes stay on disk unedited (fixtures are append-only),
+    // so the corpus has to skip them explicitly or it keeps asserting the
+    // statement the erratum retracted.
+    const names = new Set(loadVectors().map((vector) => vector.name));
+    expect(manifest.errata.length).toBeGreaterThan(0);
+    for (const erratum of manifest.errata) {
+      const superseded = /^vectors\/([^/]+)\/vector\.json$/u.exec(erratum.id)?.[1];
+      const replacement = /^vectors\/([^/]+)\/vector\.json$/u.exec(erratum.supersededBy)?.[1];
+      expect(superseded).toBeDefined();
+      expect(replacement).toBeDefined();
+      expect(names.has(superseded!)).toBe(false);
+      expect(names.has(replacement!)).toBe(true);
+    }
   });
 
   it("every vector's directory name matches its own name field", () => {
