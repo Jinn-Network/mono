@@ -351,7 +351,11 @@ function archiveDocuments(source: MirrorSourceConfig, recordBytes: readonly Uint
     sequence: "0000000000000001",
     entry: sealJson(entry).digest,
     issuedAt: "2026-07-30T00:00:00Z",
-    refreshBy: "2026-08-30T00:00:00Z",
+    // At — not past — the published-source profile's 24h ceiling ahead of
+    // `issuedAt` (§5.2). A month-long window, which this fixture used to
+    // carry, is exactly the head both verification procedures now refuse
+    // `refresh-by-ceiling` (#3467).
+    refreshBy: "2026-07-31T00:00:00Z",
   };
   const recordsByDigest = new Map(
     recordBytes.map((bytes) => [recordDigest(bytes), bytes] as const),

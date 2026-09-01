@@ -56,7 +56,9 @@ function makeHead(overrides: Partial<SourceHead> = {}): SourceHead {
     sequence: GENESIS_SEQUENCE,
     entry: `sha256:${"a".repeat(64)}`,
     issuedAt: "2026-07-27T12:00:00.000Z",
-    refreshBy: "2026-07-29T00:00:00.000Z",
+    // Exactly the published-source profile's 24h ceiling ahead of `issuedAt`
+    // (§5.2), and still ahead of `NOW`: fresh AND within bound.
+    refreshBy: "2026-07-28T12:00:00.000Z",
     ...overrides,
   };
 }
@@ -80,7 +82,9 @@ describe("verifySourceHead", () => {
   });
 
   it("refuses a head that has crossed refreshBy, however often it was accepted before", async () => {
-    const head = makeHead({ refreshBy: "2026-07-27T00:00:00.000Z" });
+    // A real expired head, not an inverted one: the window is valid (12h,
+    // inside the ceiling) and `NOW` has simply run past its end.
+    const head = makeHead({ issuedAt: "2026-07-26T12:00:00.000Z", refreshBy: "2026-07-27T00:00:00.000Z" });
     expect(await verifySourceHead({ source: SOURCE, head, headSignature: signedHead(head), ports })).toEqual({
       status: "stale",
     });
@@ -133,5 +137,83 @@ describe("verifySourceHead", () => {
     expect(await verifySourceHead({ source: SOURCE, head, headSignature: signedHead(head), ports })).toEqual({
       status: "head-origin-mismatch",
     });
+  });
+});
+
+describe("verifySourceHead: the published-profile refreshBy ceiling (#3467, §5.2)", () => {
+  it("refuses a head whose refreshBy runs further ahead of issuedAt than the profile allows", async () => {
+    // The head is validly signed by a currently-valid key and is trivially
+    // "fresh" -- that is exactly the point. Without the ceiling, one head
+    // minted with a far-future `refreshBy` never expires for any consumer,
+    // and the withholding-detection window §5.2 bounds becomes unbounded.
+    const head = makeHead({ issuedAt: "2026-07-28T00:00:00.000Z", refreshBy: "2030-01-01T00:00:00.000Z" });
+    expect(await verifySourceHead({ source: SOURCE, head, headSignature: signedHead(head), ports })).toEqual({
+      status: "refresh-by-ceiling",
+    });
+  });
+
+  it("accepts a head sitting exactly on the published-profile ceiling", async () => {
+    const head = makeHead({ issuedAt: "2026-07-28T00:00:00.000Z", refreshBy: "2026-07-29T00:00:00.000Z" });
+    const now = new Date("2026-07-28T06:00:00.000Z");
+    expect(
+      await verifySourceHead({ source: SOURCE, head, headSignature: signedHead(head), ports: { ...ports, now } }),
+    ).toEqual({ status: "ok" });
+  });
+
+  it("honors a tighter profile ceiling supplied by the caller", async () => {
+    // A deployment profile may only TIGHTEN the published bound (the
+    // marketplace profile pins its own). A head the default accepts is
+    // refused under a one-hour ceiling.
+    const head = makeHead({ issuedAt: "2026-07-28T00:00:00.000Z", refreshBy: "2026-07-28T12:00:00.000Z" });
+    const now = new Date("2026-07-28T06:00:00.000Z");
+    expect(
+      await verifySourceHead({
+        source: SOURCE,
+        head,
+        headSignature: signedHead(head),
+        ports: { ...ports, now, maxRefreshByAheadMs: 60 * 60 * 1000 },
+      }),
+    ).toEqual({ status: "refresh-by-ceiling" });
+  });
+
+  it("refuses a head whose timestamps cannot be compared at all", async () => {
+    // Fail-closed: an unreadable `issuedAt` makes the ahead-of window NaN,
+    // which is neither within the ceiling nor comparable to a clock.
+    const head = makeHead({ issuedAt: "not-a-timestamp", refreshBy: "2026-07-29T00:00:00.000Z" });
+    expect(await verifySourceHead({ source: SOURCE, head, headSignature: signedHead(head), ports })).toEqual({
+      status: "refresh-by-ceiling",
+    });
+  });
+});
+
+describe("verifySourceHead: the future-issued head the ceiling alone cannot see (#3467, §5.2)", () => {
+  it("refuses a head issued further into the future than one freshness window, even with a conformant window", async () => {
+    // The exploit a refreshBy-vs-issuedAt ceiling leaves open: both
+    // timestamps belong to the source, so it mints a 24h-conformant window
+    // decades out and the head is fresh against every clock this consumer
+    // will ever read.
+    const head = makeHead({ issuedAt: "2099-01-01T00:00:00.000Z", refreshBy: "2099-01-02T00:00:00.000Z" });
+    expect(await verifySourceHead({ source: SOURCE, head, headSignature: signedHead(head), ports })).toEqual({
+      status: "head-issued-ahead",
+    });
+  });
+
+  it("refuses a head whose refreshBy is not after its issuedAt", async () => {
+    const head = makeHead({ issuedAt: "2099-01-01T00:00:00.000Z", refreshBy: "2098-01-01T00:00:00.000Z" });
+    expect(await verifySourceHead({ source: SOURCE, head, headSignature: signedHead(head), ports })).toEqual({
+      status: "refresh-by-ceiling",
+    });
+  });
+
+  it("cannot be widened by a caller-supplied ceiling -- a profile may only tighten", async () => {
+    const head = makeHead({ issuedAt: "2026-07-27T12:00:00.000Z", refreshBy: "2030-01-01T00:00:00.000Z" });
+    expect(
+      await verifySourceHead({
+        source: SOURCE,
+        head,
+        headSignature: signedHead(head),
+        ports: { ...ports, maxRefreshByAheadMs: 4 * 365 * 24 * 60 * 60 * 1000 },
+      }),
+    ).toEqual({ status: "refresh-by-ceiling" });
   });
 });
