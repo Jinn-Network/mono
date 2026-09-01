@@ -156,8 +156,8 @@ Three Project fields route the issue to the right queue. Set all three — an is
 
   **`addBlockedBy` accepts only an Issue node.** Passing a pull-request node id fails with `Could not resolve to Issue node with the global id of 'PR_…'`. So when the prerequisite is an open PR, the PR has to be represented by an issue before the edge can exist:
 
-  1. **Find or file the PR's issue.** If the PR already closes one (`Closes #N` in its body, or the `closedByPullRequestsReferences` check in `references/gh-taxonomy.md`), use that issue. Otherwise file a parent issue describing the PR's work, with the same taxonomy discipline as any other issue.
-  2. **Link the PR to it.** Add `Closes #N` to the PR body (`gh pr edit <pr> --body-file …`) so the issue closes when the PR merges and the dependent auto-unblocks.
+  1. **Find or file the PR's issue.** If the PR already closes one (`Closes #N` in its body, or the `closingIssuesReferences` check in `references/gh-taxonomy.md` — the PR-keyed direction, which is the one you can run here because you hold a PR number and no issue number), use that issue. Otherwise file a parent issue describing the PR's work, with the same taxonomy discipline as any other issue.
+  2. **Link the PR to it.** Add `Closes #N` to the PR body. `gh pr edit --body-file` **replaces** the whole body, so read the current body into the file first and append to it — never write a file containing only `Closes #N`, which wipes the PR description: `gh pr view <pr> --json body --jq .body > body.md && printf '\n\nCloses #N\n' >> body.md && gh pr edit <pr> --body-file body.md`.
   3. **Set the native edge to that issue**, using the `addBlockedBy` recipe above with the parent issue's node id as `blockingIssueId`.
   4. **Verify the link** with the `closedByPullRequestsReferences` query in `references/gh-taxonomy.md`, and the edge with the `blockedBy` query above.
 
