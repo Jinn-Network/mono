@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // The shape of a precedent citation: which comment block a marker must sit in
-// to be read, and which artifacts a workflow restores by name. Both halves of
-// the invariant read the shape from here rather than re-deriving it, so a
-// marker deleted, misspelled, or moved out of the attached comment block fails
-// the same way everywhere.
+// to be read. Every gate reads that shape from here rather than re-deriving it,
+// so a marker deleted, misspelled, or moved out of the attached comment block
+// fails the same way everywhere. The other half of the invariant — which
+// artifacts a workflow restores by name — is read through
+// `workflow-artifact-steps.mjs`, the one copy of that walk in `.github/scripts`;
+// defining a second one here is the drift #3131 removed.
 //
 // This is a plain module, not a test file. The repository-wide gate over
 // `.github/workflows` lives in `workflow-precedent-citations.test.mjs`, which
@@ -17,49 +19,10 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
+import { restoredArtifactNames } from './workflow-artifact-steps.mjs';
+
 const root = resolve(import.meta.dirname, '../..');
 const workflowsDir = resolve(root, '.github/workflows');
-
-// True at the first line that cannot belong to the step opened at `stepIndent`:
-// the next step, or any dedent out of the step's block. Without the dedent arm a
-// `pattern:` restore that is the last step of its job keeps scanning into the
-// next job and matches that job's `name:`, scoring a workflow that restores
-// nothing by name as compliant.
-function leavesStep(line, stepIndent) {
-  if (line.trim() === '') return false;
-  const indent = line.match(/^\s*/)[0].length;
-  return indent <= stepIndent;
-}
-
-// Reads the `name:` of every `actions/download-artifact` step. A bare search
-// for `name:` over the whole file also matches the upload steps, so the walk
-// stays inside the step it started in.
-export function restoredArtifactNames(source) {
-  const names = [];
-  const lines = source.split('\n');
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!lines[index].includes('uses: actions/download-artifact')) continue;
-    const stepIndent = stepOpenerIndent(lines, index);
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      if (leavesStep(lines[cursor], stepIndent)) break;
-      const name = lines[cursor].match(/^\s+name: (\S+)$/);
-      if (name) {
-        names.push(name[1]);
-        break;
-      }
-    }
-  }
-  return names;
-}
-
-// The indentation of the `- ` line that opens the step containing `index`.
-function stepOpenerIndent(lines, index) {
-  for (let cursor = index; cursor >= 0; cursor -= 1) {
-    const opener = lines[cursor].match(/^(\s*)- /);
-    if (opener) return opener[1].length;
-  }
-  return 0;
-}
 
 // Returns every workflow file name cited as precedent in a comment attached to
 // a download-artifact step, self-citations excluded. A citation is a line of
