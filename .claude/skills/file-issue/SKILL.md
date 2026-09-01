@@ -138,7 +138,7 @@ Three Project fields route the issue to the right queue. Set all three — an is
 - `Nothing` (default — almost all fresh dogfooding issues)
 - `Human` — only if a product or design decision is needed before any work can start
 - `Another issue` — the person names a prerequisite. Two kinds both map here (the Project option is named `Another issue`; put the specific issue/PR number in the issue body):
-  - **Branch/base dependency** — the work builds on unmerged code (a stacked PR / unmerged schema change / a shared file an open PR also edits), so it must start from that base, not `next`. Example: "builds on the JinnRouterV3 ABI change in unmerged PR #1461." This is the case the `Base / stacking` body line names.
+  - **Branch/base dependency** — the work builds on unmerged code (a stacked PR / unmerged schema change / a shared file an open PR also edits), so it must start from that base, not `next`. Example: "builds on the JinnRouterV3 ABI change in unmerged PR #1462 (issue #1461)." This is the case the `Base / stacking` body line names.
   - **Resource / logical blocker** — a pure prerequisite that is not a code-base dependency (a decision, an external dependency, an ordering constraint). Example: "can't start until the testnet-gate secrets are provisioned."
 
   **Whenever the prerequisite is another issue, ALSO set the GitHub-native `blocked_by` edge — the Project field alone is not machine-readable.** The dispatcher's stacking resolver (#1626) reads ONLY native `blocked_by` edges: with the edge set, a dependent auto-unblocks the moment its blocker's PR opens and dispatches **stacked on that PR's branch**; without it, the tri-state field leaves the issue waiting for a manual flip, and same-surface siblings dispatched in parallel invalidate each other (observed 2026-07-15: Stage 1 PRs #1730/#1731 were built on stale bases and thrown away because the plan's ordering existed only as prose). Recipe:
@@ -223,6 +223,6 @@ If any check fails, fix before showing the draft.
 | Leaving a routing field unset | All three fields must be set; an issue without them is not triage-complete |
 | Putting external URLs or Slack links in the body | Put web/Slack links in a comment after filing; internal repo paths in `Files/components` are fine |
 | Long body with multiple problems bundled | One issue per problem; offer to file separate issues if scope is unclear |
-| Filing as `Blocked on: Nothing` when the issue stacks on an unmerged PR | Set `Another issue` (referencing that PR) and add the `Base / stacking` line naming the branch/base |
+| Filing as `Blocked on: Nothing` when the issue stacks on an unmerged PR | Set `Another issue` (referencing the issue that PR closes) and add the `Base / stacking` line naming the branch/base |
 | Leaving a PR blocker as prose after `addBlockedBy` rejects the PR node | File or find the issue the PR closes, add `Closes #N` to the PR body, then set the edge to that issue (Step 5) |
 | Filing a frontend / operator-visible change without the human-surface fields | Run the Step 3.5 check; if it's a human-surface change, add the label and the `## Human-surface change` block, or `implement-issue` will refuse it |
