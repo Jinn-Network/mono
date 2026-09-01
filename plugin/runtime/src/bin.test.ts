@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { DsseSigner } from "@jinn-network/trust-core";
 import { describe, expect, test } from "vitest";
 
-import { main, buildOwnedEnvSnapshot, buildServeCapabilities } from "./bin.js";
+import { main, buildMirrorCapabilities, buildOwnedEnvSnapshot, buildServeCapabilities } from "./bin.js";
 import { resolveRuntimeConfig } from "./config.js";
 import { createLineLogger } from "./logger.js";
 import { createPluginRuntime, type PluginRuntime } from "./runtime.js";
@@ -150,6 +150,39 @@ describe("main", () => {
     expect(err.join("\n")).toContain("--role");
   });
 
+  test("mirror runs until shutdown, then stops and exits zero", async () => {
+    let released = () => {};
+    const gate = new Promise<void>((resolve) => {
+      released = resolve;
+    });
+    const home = await mkdtemp(join(tmpdir(), "jinn-bin-mirror-"));
+    const err: string[] = [];
+    const exit = main(["mirror"], {}, {
+      writeOut: () => {},
+      writeErr: (line) => err.push(line),
+      homeDirectory: home,
+      untilShutdown: () => gate,
+      ...resolveCorpusBinIoFields({ env: {}, homeDirectory: home }),
+    });
+    released();
+    await expect(exit).resolves.toBe(0);
+    expect(err.join("\n")).toContain("corpus.mirror.cycle");
+  });
+
+  test("mirror without the corpus ports fails loudly rather than syncing nothing", async () => {
+    const home = await writableHome();
+    const { err, value } = io(async () => {}, { homeDirectory: home });
+    const code = await main(["mirror"], {}, value);
+    expect(code).not.toBe(0);
+    expect(err.join("\n")).toContain("corpus ports");
+  });
+
+  test("--help lists mirror", async () => {
+    const { err, value } = io();
+    await expect(main(["--help"], {}, value)).resolves.toBe(0);
+    expect(err.join("\n")).toContain("mirror");
+  });
+
   test("--version prints the version to stdout and exits zero", async () => {
     const { out, value } = io();
     await expect(main(["--version"], {}, value)).resolves.toBe(0);
@@ -185,6 +218,21 @@ describe("the composed corpus ports", () => {
     // for every in-repo entry point, so the capability was never constructed.
     expect(err.join("\n")).toContain("corpus.capability.started");
     expect(err.join("\n")).not.toContain("corpus ports not injected");
+  });
+
+  test("the mirror command composes the corpus capability and the sync loop, and no MCP surface", async () => {
+    const home = await mkdtemp(join(tmpdir(), "jinn-bin-mirror-compose-"));
+    const binIo = {
+      writeOut: () => {},
+      writeErr: () => {},
+      homeDirectory: home,
+      untilShutdown: async () => {},
+      ...resolveCorpusBinIoFields({ env: {}, homeDirectory: home }),
+    };
+    expect(buildMirrorCapabilities(binIo).map((capability) => capability.name)).toEqual([
+      "corpus",
+      "corpus-sync",
+    ]);
   });
 
   test("a default install with no config file is aggregate-healthy", async () => {
