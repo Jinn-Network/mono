@@ -15,20 +15,35 @@ import type { SourceHeadOutcome } from "./outcomes.js";
 //      `now`;
 //   3. verify `refreshBy` freshness.
 //
-// It exists for the ONE case the seven-step procedure cannot express: a
-// source re-serving a head byte-identical to the one this consumer already
-// accepted. §5.2 requires `issuedAt` to strictly increase on every
-// re-signing, so `verifySourceChain` refuses an unchanged head as
-// `issued-at-monotonicity` -- correct for a chain walk, wrong for a poll that
-// simply outran the archive's re-signing.
+// It exists for the cases the seven-step procedure cannot express, both of
+// them a source serving the chain position this consumer already holds:
+//
+//   - a head BYTE-IDENTICAL to the one already accepted. §5.2 requires
+//     `issuedAt` to strictly increase on every re-signing, so
+//     `verifySourceChain` refuses it as `issued-at-monotonicity` -- correct
+//     for a chain walk, wrong for a poll that simply outran the archive's
+//     re-signing.
+//   - the same position RE-SIGNED at a later instant, which a live source
+//     produces on every idle source at least daily (`serve`'s `maintainHead`).
+//     `issuedAt` monotonicity passes, and then the linkage walk fails:
+//     a returning consumer is fed only entries ABOVE its mark, so the head's
+//     own cited entry -- the boundary itself -- is absent from the fed set
+//     and the walk reports `linkage` (#3468).
 //
 // The caller is responsible for establishing that the presented head names
 // EXACTLY the chain position it already holds before calling this; a head
 // that names any other position is a chain claim and must go through
-// `verifySourceChain`. This procedure deliberately neither reads nor advances
-// the high-water mark: a revalidated head adopts nothing, and leaving the
-// persisted `issuedAt` in place keeps it the monotonicity floor for the next
-// head that does move.
+// `verifySourceChain`. Position is `sequence` and `entry`: an `issuedAt` that
+// does not strictly increase is a rollback or a backdated re-sign and belongs
+// to the chain procedure's monotonicity rule, so the caller must exclude it
+// here too.
+//
+// This procedure deliberately neither reads nor advances the high-water mark:
+// a revalidated head adopts nothing. What the CALLER does with the instant
+// differs by case, and both keep `issuedAt` a monotonicity floor -- an
+// identical head leaves it where it is, an accepted re-sign raises it to the
+// instant just accepted, so the head it replaced becomes a regression rather
+// than an indefinitely replayable one.
 //
 // What it is NOT is a cached acceptance. Signature, currently-valid-key and
 // freshness are re-checked on every call, so a rotated-out or revoked signer,

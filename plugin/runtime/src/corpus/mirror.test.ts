@@ -232,7 +232,7 @@ describe("mirror sync", () => {
       });
     });
 
-    test("revalidation does not rewrite the mark, so the monotonicity floor survives", async () => {
+    test("revalidating an IDENTICAL head does not rewrite the mark, so the floor survives", async () => {
       const marks = await seeded();
       const before = await marks.get({ agent: AGENT, name: NAME });
 
@@ -252,22 +252,56 @@ describe("mirror sync", () => {
       expect(posture.revalidateHead).not.toHaveBeenCalled();
     });
 
-    test("a genuinely re-signed head at the same position keeps the chain path -- where it is still refused", async () => {
+    test("a re-signed head at the same position revalidates too, and does NOT take the chain path (#3468)", async () => {
       const marks = await seeded();
       const posture = spyPosture();
       const { transport } = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "2026-07-31T00:00:00Z" });
 
       const outcome = await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
 
+      expect(posture.revalidateHead).toHaveBeenCalledTimes(1);
+      expect(posture.verify).not.toHaveBeenCalled();
+      expect(outcome.sources[0]).toMatchObject({ status: "synced", entriesWalked: 0, indexed: 0 });
+      expect(outcome.sources[0]!.failure).toBeUndefined();
+    });
+
+    test("a re-signed head advances the mark's instant, leaving its position alone (#3468)", async () => {
+      const marks = await seeded();
+      const before = await marks.get({ agent: AGENT, name: NAME });
+      const { transport } = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "2026-07-31T00:00:00Z" });
+
+      await mirror({ highWaterMarks: marks, chainVerification: spyPosture(), transport }).syncOnce();
+
+      expect(await marks.get({ agent: AGENT, name: NAME })).toEqual({
+        ...before,
+        issuedAt: "2026-07-31T00:00:00Z",
+      });
+    });
+
+    test("replaying the head the re-sign replaced is then a chain claim, not a revalidation (#3468)", async () => {
+      const marks = await seeded();
+      const resigned = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "2026-07-31T00:00:00Z" });
+      await mirror({ highWaterMarks: marks, chainVerification: spyPosture(), transport: resigned.transport }).syncOnce();
+
+      // The ORIGINAL head, re-served after the mark advanced past it: same
+      // position, a now-lower `issuedAt`. The advanced floor is what makes it
+      // a regression rather than the byte-identical head it once was.
+      const posture = spyPosture();
+      await mirror({ highWaterMarks: marks, chainVerification: posture }).syncOnce();
+
       expect(posture.verify).toHaveBeenCalledTimes(1);
       expect(posture.revalidateHead).not.toHaveBeenCalled();
-      // Routing alone would be a satisfying-looking assertion that hides the
-      // outcome, so state the outcome: this posture ADMITS everything, and the
-      // sync is still a clean one only because the mocked chain path says ok.
-      // The real `verifySourceChain` refuses this head -- see
-      // `isUnchangedHead`'s note on the gap, and the protocol-level test that
-      // pins the refusal (`source-chain.test.ts`, "re-signed idle head").
-      expect(outcome.sources[0]!.status).toBe("synced");
+    });
+
+    test("a head whose issuedAt is unparseable is never revalidated (#3468)", async () => {
+      const marks = await seeded();
+      const posture = spyPosture();
+      const { transport } = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "not-a-date" });
+
+      await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
+
+      expect(posture.verify).toHaveBeenCalledTimes(1);
+      expect(posture.revalidateHead).not.toHaveBeenCalled();
     });
 
     test("a head naming a different chain position keeps the chain path", async () => {

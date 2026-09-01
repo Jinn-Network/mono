@@ -19,6 +19,7 @@ import {
   recordPath,
   sealJson,
 } from "@jinn-network/record-discovery-protocol";
+import type { SourceHead } from "@jinn-network/record-discovery-protocol";
 import type { Transport, TransportResponse } from "@jinn-network/record-discovery-client";
 import {
   TRUST_POLICY_FORMAT,
@@ -465,6 +466,14 @@ export interface SignedFixtureArchive {
   readonly policyVersions: readonly Uint8Array[];
   readonly genesisDigest: Sha256Digest;
   readonly reference: EvidenceRecordReference;
+  /** The head this archive serves, so a caller can derive a re-signed one from it. */
+  readonly head: SourceHead;
+  /**
+   * Signs `next` with the archive's own signer and serves it at the head path,
+   * replacing what was there -- the idle re-signing a live source performs
+   * (`serve`'s `maintainHead`).
+   */
+  readonly serveHead: (next: SourceHead) => Promise<void>;
 }
 
 export interface BuildSignedFixtureArchiveOptions {
@@ -546,5 +555,12 @@ export async function buildSignedFixtureArchive(
     policyVersions: [policy.envelopeBytes],
     genesisDigest: policy.recordDigest,
     reference: { family: "execution-evidence", digest: recordDigest(aliceBytes[0]!) },
+    head,
+    async serveHead(next: SourceHead): Promise<void> {
+      routes.set(
+        `${source.servingRoot}${headPath(source.name)}`,
+        encode(await signedEnvelope(MEDIA_HEAD, sealJson(next).bytes, signer, options.tamper === "head")),
+      );
+    },
   };
 }

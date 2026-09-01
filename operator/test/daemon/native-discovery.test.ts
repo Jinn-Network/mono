@@ -399,12 +399,14 @@ describe('native discovery consumer', () => {
       await expect(restarted.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [] });
     });
 
-    // FINDING (#2547): the alternative "refresh the served head at boot" does NOT work with this
-    // consumer. A head re-signed at the SAME sequence (issuedAt/refreshBy bumped, entry unchanged)
-    // is not `sameHead`, so it falls to the sequence guard and trips `rewound-or-tampered-head` for
-    // ANY consumer already checkpointed at that sequence — self OR peer. Degrading the self-consume
-    // is the change that closes the deadlock without touching a byte of peer trust.
-    it('demonstrates why refreshing the served head instead trips rewound-or-tampered-head', async () => {
+    // FINDING (#2547), SUPERSEDED BY #3468: the alternative "refresh the served head at boot" used
+    // to be unavailable, because a head re-signed at the SAME sequence (issuedAt/refreshBy bumped,
+    // entry unchanged) is not `sameHead` and fell to the sequence guard as `rewound-or-tampered-head`
+    // for ANY consumer already checkpointed at that sequence — self OR peer. #3468 admits that shape
+    // onto revalidation, so it is now accepted and advances the stored instant. The self-consume
+    // degrade below stays: it covers the operator that has NOT re-signed, which is the condition
+    // #2547 actually hit.
+    it('accepts a served head refreshed at the same position, and advances the stored instant', async () => {
       const first = entry('0000000000000001', null, DIGEST_A);
       const store = new Store(':memory:');
       const initial = consumer({
@@ -423,15 +425,142 @@ describe('native discovery consumer', () => {
         ...head(first, '2026-08-04T00:00:00.000Z'),
         refreshBy: '2026-08-05T00:00:00.000Z',
       }));
+      const verify = vi.fn(async () => ({ status: 'ok' as const }));
       const afterRefresh = consumer({
         store,
         routes: refreshedRoutes,
-        verify: async () => ({ status: 'ok' }),
+        verify,
         verifyHead: async () => ({ status: 'ok' }),
         now: () => new Date('2026-08-04T01:00:00.000Z'),
         selfServed: true,
       });
-      await expect(afterRefresh.sync()).rejects.toMatchObject({ reason: 'rewound-or-tampered-head' });
+      await expect(afterRefresh.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [] });
+      expect(verify).not.toHaveBeenCalled();
+      expect(afterRefresh.checkpoint({ agent: AGENT, name: SOURCE_NAME })?.signedHighWater).toMatchObject({
+        sequence: '0000000000000001',
+        issuedAt: '2026-08-04T00:00:00.000Z',
+        refreshBy: '2026-08-05T00:00:00.000Z',
+      });
+    });
+  });
+
+  // #3468 — a live source re-signs its idle head at least daily (`serve`'s `maintainHead`): same
+  // sequence, same entry, a later `issuedAt`. That is not `sameHead`, and before #3468 it fell to
+  // the sequence guard, so a healthy archive went red the moment it re-signed.
+  describe('a re-signed idle head at an unchanged position (#3468)', () => {
+    async function checkpointed() {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const store = new Store(':memory:');
+      const initial = consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'ok' }),
+        now: () => new Date('2026-08-02T01:00:00.000Z'),
+      });
+      await initial.sync();
+      for (const item of initial.takePending()) initial.acknowledge(item);
+      return { store, first };
+    }
+
+    function reSignedRoutes(first: AnnouncementEntry, issuedAt: string, refreshBy: string) {
+      const routes = routesFor([first]);
+      routes.set(`${ROOT}${headPath(SOURCE_NAME)}`, wireHead({ ...head(first, issuedAt), refreshBy }));
+      return routes;
+    }
+
+    it('revalidates it, does no card work, and never reaches the chain path', async () => {
+      const { store, first } = await checkpointed();
+      const verify = vi.fn(async () => ({ status: 'ok' as const }));
+      const verifyHead = vi.fn(async () => ({ status: 'ok' as const }));
+      const polled = consumer({
+        store,
+        routes: reSignedRoutes(first, '2026-08-02T12:00:00.000Z', '2026-08-03T12:00:00.000Z'),
+        verify,
+        verifyHead,
+        now: () => new Date('2026-08-02T13:00:00.000Z'),
+      });
+
+      await expect(polled.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [] });
+      expect(verifyHead).toHaveBeenCalledOnce();
+      expect(verify).not.toHaveBeenCalled();
+      expect(polled.takePending()).toEqual([]);
+    });
+
+    it('makes the head it replaced a rewind, not a byte-identical re-serve', async () => {
+      const { store, first } = await checkpointed();
+      const now = () => new Date('2026-08-02T13:00:00.000Z');
+      await consumer({
+        store,
+        routes: reSignedRoutes(first, '2026-08-02T12:00:00.000Z', '2026-08-03T12:00:00.000Z'),
+        verify: async () => ({ status: 'ok' }),
+        now,
+      }).sync();
+
+      const replayed = consumer({ store, routes: routesFor([first]), verify: async () => ({ status: 'ok' }), now });
+      await expect(replayed.sync()).rejects.toMatchObject({ reason: 'rewound-or-tampered-head' });
+    });
+
+    it('still refuses one whose revalidation fails', async () => {
+      const { store, first } = await checkpointed();
+      const refused = consumer({
+        store,
+        routes: reSignedRoutes(first, '2026-08-02T12:00:00.000Z', '2026-08-03T12:00:00.000Z'),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead: async () => ({ status: 'unauthorized-signer' }),
+        now: () => new Date('2026-08-02T13:00:00.000Z'),
+      });
+
+      await expect(refused.sync()).rejects.toMatchObject({ reason: 'unauthorized-signer' });
+      expect(refused.checkpoint({ agent: AGENT, name: SOURCE_NAME })?.signedHighWater).toMatchObject({
+        issuedAt: '2026-08-02T01:00:00.000Z',
+      });
+    });
+
+    it('still refuses a PEER one that is already past refreshBy', async () => {
+      const { store, first } = await checkpointed();
+      const lapsed = consumer({
+        store,
+        routes: reSignedRoutes(first, '2026-08-02T12:00:00.000Z', '2026-08-03T12:00:00.000Z'),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead: async () => ({ status: 'stale' }),
+        now: () => new Date('2026-08-05T00:00:00.000Z'),
+      });
+
+      await expect(lapsed.sync()).rejects.toMatchObject({ reason: 'stale' });
+    });
+
+    it('keeps the chain path for a head whose entry digest differs at the same sequence', async () => {
+      const { store } = await checkpointed();
+      const forked = entry('0000000000000001', null, DIGEST_C);
+      const routes = routesFor([forked]);
+      routes.set(`${ROOT}${headPath(SOURCE_NAME)}`, wireHead(head(forked, '2026-08-02T12:00:00.000Z')));
+      const verifyHead = vi.fn(async () => ({ status: 'ok' as const }));
+
+      const polled = consumer({
+        store,
+        routes,
+        verify: async () => ({ status: 'ok' }),
+        verifyHead,
+        now: () => new Date('2026-08-02T13:00:00.000Z'),
+      });
+
+      await expect(polled.sync()).rejects.toMatchObject({ reason: 'rewound-or-tampered-head' });
+      expect(verifyHead).not.toHaveBeenCalled();
+    });
+
+    it('keeps the chain path for a head whose issuedAt is unparseable', async () => {
+      const { store, first } = await checkpointed();
+      const verifyHead = vi.fn(async () => ({ status: 'ok' as const }));
+      const polled = consumer({
+        store,
+        routes: reSignedRoutes(first, 'not-a-date', '2026-08-03T12:00:00.000Z'),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead,
+        now: () => new Date('2026-08-02T13:00:00.000Z'),
+      });
+
+      await expect(polled.sync()).rejects.toMatchObject({ reason: 'rewound-or-tampered-head' });
+      expect(verifyHead).not.toHaveBeenCalled();
     });
   });
 
