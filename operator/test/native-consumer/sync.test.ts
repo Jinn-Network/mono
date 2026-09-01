@@ -294,6 +294,61 @@ describe('independent public source sync', () => {
     unknownState.close();
   });
 
+  it('re-gates the §5.2 freshness window on the unchanged-head shortcut, so a pre-#3467 checkpoint is not grandfathered', async () => {
+    // The shortcut returns on `isFresh` alone without reaching
+    // `verifySourceHead`, so a checkpoint written before the ceiling existed
+    // would otherwise stay permanently live: `refreshBy` years out is fresh
+    // against every clock this consumer will ever read.
+    const state = await ConsumerState.open(await stateRoot());
+    const sourceEntry = entry(1, null);
+    const overCeilingHead: SourceHead = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      origin: formatOrigin(SOURCE.agent, SOURCE.name),
+      sequence: sourceEntry.sequence,
+      entry: sealJson(sourceEntry).digest,
+      issuedAt: '2026-08-02T12:01:00.000Z',
+      refreshBy: '2099-01-01T00:00:00.000Z',
+    };
+    const headSignature = envelope(MEDIA_HEAD, overCeilingHead);
+    state.commitSource({
+      source: SOURCE,
+      head: {
+        sequence: overCeilingHead.sequence,
+        entry: overCeilingHead.entry,
+        issuedAt: overCeilingHead.issuedAt,
+        refreshBy: overCeilingHead.refreshBy,
+        envelope: new TextDecoder().decode(sealJson(headSignature).bytes),
+      },
+      entries: [{
+        sequence: sourceEntry.sequence,
+        digest: sealJson(sourceEntry).digest,
+        entryJson: new TextDecoder().decode(sealJson(sourceEntry).bytes),
+        signatureJson: new TextDecoder().decode(sealJson(envelope(MEDIA_ENTRY, sourceEntry)).bytes),
+      }],
+    });
+
+    const verifier = createProtocolSourceVerifier({
+      state,
+      keys: {
+        async resolve() { return [{ keyid: KEY, publicKey: 'test', algorithm: 'test' }]; },
+        async everBound() { return true; },
+      },
+      sigs: { async verify() { return true; } },
+      // A real clock comparison: the head IS fresh, which is the whole problem.
+      fresh: { isFresh: (refreshBy, now) => new Date(refreshBy).getTime() > now.getTime() },
+      now: () => new Date('2026-08-02T13:00:00.000Z'),
+    });
+
+    await expect(verifier.verify({
+      mode: 'unchanged',
+      source: SOURCE,
+      head: overCeilingHead,
+      headSignature,
+      entries: [],
+    })).resolves.toEqual({ status: 'rejected', reason: 'refresh-by-ceiling' });
+    state.close();
+  });
+
   it('wraps a malformed/tampered head document as a typed ConsumerSyncError, not a raw schema error', async () => {
     const state = await ConsumerState.open(await stateRoot());
     const source = publicSource([entry(1, null)], '2026-08-02T12:01:00.000Z');

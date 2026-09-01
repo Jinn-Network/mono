@@ -8,6 +8,7 @@ import {
   type Transport,
 } from '@jinn-network/record-discovery-client';
 import {
+  checkRefreshWindow,
   compareCodeUnitStrings,
   formatOrigin,
   parseAnnouncementEntry,
@@ -122,6 +123,14 @@ export function createProtocolSourceVerifier(options: ProtocolSourceVerifierOpti
       if (input.mode === 'unchanged'
         && checkpoint !== undefined
         && checkpoint.envelope === canonicalJson(input.headSignature)) {
+        // The §5.2 freshness-window rules apply on this path too (#3467).
+        // A clock comparison alone cannot see a head whose window runs past
+        // the profile ceiling or whose `issuedAt` is in the future -- such a
+        // head is fresh forever -- and a checkpoint written before that rule
+        // existed would otherwise never be re-gated, because this shortcut
+        // returns on `isFresh` without reaching `verifySourceHead`.
+        const windowFailure = checkRefreshWindow(input.head, options.now());
+        if (windowFailure !== undefined) return { status: 'rejected', reason: windowFailure };
         return options.fresh.isFresh(input.head.refreshBy, options.now())
           ? { status: 'ok' }
           : { status: 'rejected', reason: 'stale-source-head' };
