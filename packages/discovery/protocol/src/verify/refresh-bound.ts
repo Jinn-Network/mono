@@ -95,6 +95,11 @@ export function checkRefreshWindow(
   now: Date,
   maxAheadMs: number = MAX_REFRESH_BY_AHEAD_MS,
 ): RefreshWindowFailure | undefined {
+  // A timestamp that is not an offset-bearing RFC 3339 date-time (§5.2,
+  // #3482) parses to `NaN`, every comparison below goes false, and the head is
+  // refused as `refresh-by-ceiling`. The slug names the rule, not the cause --
+  // the grammar failure is caught with its own message at `parseSourceHead`,
+  // and reaching here means a caller built the head without the schema.
   const ceilingMs = Math.min(maxAheadMs, MAX_REFRESH_BY_AHEAD_MS);
   const issuedAtMs = parseHeadTimestamp(head.issuedAt);
   const refreshByMs = parseHeadTimestamp(head.refreshBy);

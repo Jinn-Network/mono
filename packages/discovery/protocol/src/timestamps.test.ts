@@ -37,6 +37,21 @@ describe("parseHeadTimestamp (§5.2 head timestamps, #3482)", () => {
     expect(parseHeadTimestamp("2026-07-28T00:00:00+30:00")).toBeNaN();
   });
 
+  it("refuses a day the calendar does not have, which a bare Date.parse rolls forward instead", () => {
+    expect(parseHeadTimestamp("2026-02-30T00:00:00Z")).toBeNaN();
+    expect(Number.isNaN(Date.parse("2026-02-30T00:00:00Z"))).toBe(false);
+  });
+
+  it("reads a leap second at a real boundary as the instant just past 23:59:59", () => {
+    expect(parseHeadTimestamp("2026-06-30T23:59:60Z")).toBe(parseHeadTimestamp("2026-06-30T23:59:59Z") + 1);
+    expect(parseHeadTimestamp("2026-07-28T23:59:60Z")).toBeNaN();
+  });
+
+  it("truncates sub-millisecond precision rather than handing an unpinned spelling to the engine", () => {
+    expect(parseHeadTimestamp("2026-07-28T00:00:00.1Z")).toBe(Date.UTC(2026, 6, 28) + 100);
+    expect(parseHeadTimestamp("2026-07-28T00:00:00.123999Z")).toBe(Date.UTC(2026, 6, 28) + 123);
+  });
+
   it("refuses a non-string", () => {
     expect(isHeadTimestamp(undefined)).toBe(false);
     expect(isHeadTimestamp(1_767_225_600_000)).toBe(false);

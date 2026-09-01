@@ -1,3 +1,5 @@
+import { isCalendarStrictRfc3339 } from "@jinn-network/trust-core";
+
 // The one strict reading of a Source Head's `issuedAt` / `refreshBy` (§5.2).
 //
 // Both fields were typed as any non-empty string and read back through bare
@@ -10,41 +12,53 @@
 // into a typed refusal -- the same signed bytes accepted on one host and
 // refused on another. Consensus divergence, not a widened window.
 //
-// The fix is to make the instant unambiguous before anything compares it: a
-// head timestamp is ISO-8601 extended date-time WITH an explicit offset, "Z"
-// or "+/-HH:MM". That is exactly the subset ECMAScript pins in its own Date
-// Time String Format, so every conforming engine reads it as the same instant.
-// Lowercase "t"/"z" is permitted by RFC 3339's own note but sits outside that
-// pinned subset, so it is refused rather than left to the host's fallback
-// parser -- the point here is determinism, not maximal acceptance.
+// Validity is trust-core's `isCalendarStrictRfc3339`, not a second regex: the
+// repository already owns one calendar-strict RFC 3339 reading (offset
+// mandatory, real month lengths, leap seconds only at a true boundary), and
+// protocol already depends on trust-core. A private grammar here would be a
+// second answer to the same question -- and a laxer one, since a bare
+// `Date.parse` silently rolls "2026-02-30" forward to March.
+//
+// What trust-core does not offer is a millisecond value, which the §5.2
+// ceiling arithmetic needs, so this module supplies exactly that and nothing
+// else. It reaches `Date.parse` only after narrowing the validated string to
+// the spelling ECMAScript pins in its Date Time String Format -- three
+// fraction digits, seconds at most 59 -- so no accepted head is ever handed
+// to an engine's implementation-defined fallback.
 //
 // One helper, not a regex per call site: the schema (`parseSourceHead`) and
-// every comparison that reads these fields (`refresh-bound`, the chain
-// procedure's `issuedAt` monotonicity) go through it, so a head object that
-// reached a verifier without passing the schema still fails closed instead of
-// being read host-locally.
+// every §5.2 comparison in this package and in `serve` go through it, so a
+// head object that reached a verifier without passing the schema still fails
+// closed instead of being read host-locally.
+
+/** Splits a validated RFC 3339 date-time into the parts `Date.parse` needs pinned. */
+const VALIDATED_SHAPE = /^(.{17})(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/u;
 
 /**
- * ISO-8601 extended date-time with a mandatory, explicit UTC offset. Shape
- * only -- component ranges are left to `Date.parse`, which applies the
- * spec's own bounds (month 13, offset +30:00 and second 60 are all NaN).
- */
-const HEAD_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u;
-
-/**
- * The instant `value` names, in milliseconds since the epoch, or `NaN` when
- * it is not an offset-bearing ISO-8601 date-time.
+ * The instant `value` names, in milliseconds since the epoch, or `NaN` when it
+ * is not a calendar-strict, offset-bearing RFC 3339 date-time.
  *
  * `NaN` is the deliberate failure shape: every comparison against it is
  * `false`, so callers that already fail closed on an unreadable timestamp
  * (the §5.2 window checks do) keep doing so without a second code path.
+ *
+ * Sub-millisecond precision is truncated, and a leap second is reported as the
+ * instant one millisecond after 23:59:59.000 -- both are the same collapse
+ * trust-core's own instant comparison applies, and neither can reorder two
+ * timestamps a millisecond-granular window bound could tell apart.
  */
 export function parseHeadTimestamp(value: unknown): number {
-  if (typeof value !== "string" || !HEAD_TIMESTAMP.test(value)) return Number.NaN;
-  return Date.parse(value);
+  if (!isCalendarStrictRfc3339(value)) return Number.NaN;
+  const parts = VALIDATED_SHAPE.exec(value);
+  if (parts === null) return Number.NaN;
+  const [, upToSeconds, second, fraction, offset] = parts;
+  const isLeapSecond = second === "60";
+  const milliseconds = (fraction ?? "").slice(0, 3).padEnd(3, "0");
+  const parsed = Date.parse(`${upToSeconds}${isLeapSecond ? "59" : second}.${milliseconds}${offset}`);
+  return isLeapSecond ? parsed + 1 : parsed;
 }
 
-/** Whether `value` is an offset-bearing ISO-8601 date-time (§5.2). */
+/** Whether `value` is a calendar-strict, offset-bearing RFC 3339 date-time (§5.2). */
 export function isHeadTimestamp(value: unknown): boolean {
   return !Number.isNaN(parseHeadTimestamp(value));
 }
