@@ -16,6 +16,7 @@ import {
   RECORD_KINDS,
   dssePreAuthEncoding,
   headPath,
+  nextSequence,
   recordPath,
   sealJson,
 } from "@jinn-network/record-discovery-protocol";
@@ -492,6 +493,13 @@ export interface BuildSignedFixtureArchiveOptions {
   readonly signer: DsseSigner;
   /** Corrupts one signature so the driver's refusal can be observed. */
   readonly tamper?: "head" | "entry";
+  /**
+   * Total entries on the chain, default 1. Above 1 the archive serves a
+   * genuinely linked, contiguous, individually signed chain whose head cites
+   * the NEWEST entry -- the shape a consumer with a per-pass entry bound
+   * smaller than the backlog cannot walk in one pass (#3252).
+   */
+  readonly entryCount?: number;
 }
 
 /**
@@ -507,24 +515,44 @@ export async function buildSignedFixtureArchive(
   const aliceBytes = VARIANT_BYTES.filter(
     (entry) => entry.variant.executorId === "https://agents.test/alice",
   ).map((entry) => entry.bytes);
-  const { entry, head, recordsByDigest } = archiveDocuments(source, aliceBytes);
+  const { entry, head: genesisHead, recordsByDigest } = archiveDocuments(source, aliceBytes);
+
+  // Successors to the genesis entry, each linked to the one before it and
+  // announcing the same records under fresh announcementIds (§5.3 requires
+  // announcementIds to be source-wide unique; it says nothing about a record
+  // being announced twice).
+  const chain: Array<Omit<typeof entry, "previous"> & { previous: string | null }> = [entry];
+  for (let index = 1; index < (options.entryCount ?? 1); index += 1) {
+    const previous = chain[index - 1]!;
+    chain.push({
+      ...previous,
+      sequence: nextSequence(previous.sequence),
+      previous: sealJson(previous).digest,
+      announcements: previous.announcements.map((announcement, position) => ({
+        ...announcement,
+        announcementId: `ann-${String(index)}-${String(position + 1)}`,
+      })),
+    });
+  }
+  const newest = chain[chain.length - 1]!;
+  const head = { ...genesisHead, sequence: newest.sequence, entry: sealJson(newest).digest };
 
   const page = {
     protocol: RECORD_DISCOVERY_VERSION,
     source: `${source.agent}/${source.name}`,
     page: "0000000000000001",
     prevArchive: null,
-    entries: [
-      {
-        entry,
+    entries: await Promise.all(
+      chain.map(async (link) => ({
+        entry: link,
         signature: await signedEnvelope(
           MEDIA_ENTRY,
-          sealJson(entry).bytes,
+          sealJson(link).bytes,
           signer,
           options.tamper === "entry",
         ),
-      },
-    ],
+      })),
+    ),
   };
   const headEnvelope = await signedEnvelope(
     MEDIA_HEAD,

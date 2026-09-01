@@ -11,6 +11,19 @@ export interface ChainVerificationInput {
   readonly head: SourceHead;
   readonly headSignature?: DsseEnvelope;
   readonly entries: readonly SyncedEntry[];
+  /**
+   * Whether the mirror abandoned the walk before it ran out -- its per-pass
+   * entry bound was reached, or the operation was aborted -- so `entries` is a
+   * PREFIX of the chain above the mark rather than the whole of it (#3252).
+   *
+   * The walk yields oldest-first, so a prefix is missing the newest entries,
+   * including the one the head cites. Whether that is fatal is the posture's
+   * to say, which is why the fact travels here rather than being judged in the
+   * mirror: a posture that verifies linkage cannot accept it, and one that
+   * verifies nothing loses nothing by indexing the prefix and resuming from it
+   * on the next pass.
+   */
+  readonly truncated: boolean;
   readonly firstAdoption: boolean;
 }
 
@@ -96,6 +109,16 @@ export function createDriverChainVerification(driver: VerifyDriver): ChainVerifi
   return Object.freeze({
     mode: "verified" as const,
     async verify(input: ChainVerificationInput): Promise<ChainVerificationOutcome> {
+      if (input.truncated) {
+        // Refused ahead of every check on the source, because a cut chain is
+        // this runtime's own doing: `verifySourceChain` walks linkage from the
+        // head's cited entry, which a truncated walk does not contain, so
+        // asking it here would return `broken-chain` and blame the archive for
+        // a bound the operator set. Naming the real cause is what lets that
+        // operator raise `maxEntriesPerSync` instead of hunting a phantom
+        // linkage break (#3252).
+        return { status: "rejected", reason: "sync-truncated" };
+      }
       const headSignature = input.headSignature;
       if (headSignature === undefined) {
         // The unpublished-source profile omits head signatures. A runtime

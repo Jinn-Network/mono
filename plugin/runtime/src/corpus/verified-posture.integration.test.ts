@@ -82,6 +82,8 @@ function loopback(routes: ReadonlyMap<string, Uint8Array>): FetchLike {
 async function compose(options: {
   readonly declareSigningKey?: boolean;
   readonly tamper?: "head" | "entry";
+  readonly entryCount?: number;
+  readonly maxEntriesPerSync?: number;
 } = {}) {
   const { didKey, signer } = archiveSigner();
   const archive = await buildSignedFixtureArchive({
@@ -90,6 +92,7 @@ async function compose(options: {
     signerKeyid: didKey,
     signer,
     ...(options.tamper === undefined ? {} : { tamper: options.tamper }),
+    ...(options.entryCount === undefined ? {} : { entryCount: options.entryCount }),
   });
 
   const policyDirectory = join(home, "policy");
@@ -111,6 +114,9 @@ async function compose(options: {
           },
         ],
         chainVerification: "verified",
+        ...(options.maxEntriesPerSync === undefined
+          ? {}
+          : { maxEntriesPerSync: options.maxEntriesPerSync }),
         trust: { genesisDigest: archive.genesisDigest, policyDirectory: "policy" },
       },
     },
@@ -349,5 +355,45 @@ describe("the verified posture fails closed", () => {
       message: "broken-chain",
     });
     expect(outcome.sources[0]!.indexed).toBe(0);
+  });
+});
+
+describe("a backlog larger than the per-pass entry bound (#3252)", () => {
+  test("is refused as truncated, not as a broken chain", async () => {
+    // A cold adoption of a two-entry archive under a one-entry bound. The walk
+    // yields oldest-first, so the entry the bound drops is the one the head
+    // cites: handed to `verifySourceChain` this is `broken-chain` at linkage,
+    // blaming the archive for a cut this runtime made. And because the mark
+    // only advances on a clean verification, every later pass cuts the walk
+    // in exactly the same place -- a permanent red on a healthy source.
+    const { capability } = await compose({ entryCount: 2, maxEntriesPerSync: 1 });
+
+    const outcome = await capability.mirror.syncOnce();
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.sources[0]!.failure).toEqual({
+      code: "chain-verification-rejected",
+      message: "sync-truncated",
+    });
+    expect(outcome.sources[0]!.indexed).toBe(0);
+
+    // The reason reaches the operator surface naming the bound, rather than a
+    // linkage break they would go looking for in the archive.
+    const check = await chainVerificationCheck(capability);
+    expect(check.ok).toBe(false);
+    expect(check.detail).toContain(`${source.agent}/${source.name} (sync-truncated)`);
+  });
+
+  test("the same archive verifies once the bound covers the backlog", async () => {
+    const { capability, config } = await compose({ entryCount: 2, maxEntriesPerSync: 2 });
+
+    const outcome = await capability.mirror.syncOnce();
+
+    expect(outcome.status).toBe("synced");
+    expect(outcome.sources[0]!.entriesWalked).toBe(2);
+    const state = JSON.parse(await readFile(config.mirrorStatePath, "utf8")) as {
+      readonly marks: Record<string, { readonly sequence: string }>;
+    };
+    expect(state.marks[`${source.agent}/${source.name}`]?.sequence).toBe("0000000000000002");
   });
 });
