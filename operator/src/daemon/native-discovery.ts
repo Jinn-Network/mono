@@ -360,28 +360,32 @@ function sameHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): bool
 /**
  * The same chain position, re-signed at a later instant (#3468).
  *
- * A live source re-signs its idle head at least daily even when it announced nothing
- * (`serve`'s `maintainHead`, §5.2 — an expired head is a withholding signal, not silence):
- * same `sequence`, same `entry`, a bumped `issuedAt` and `refreshBy`. That is not
- * `sameHead`, and before this predicate it fell through to the sequence guard as
- * `rewound-or-tampered-head` — so a healthy archive went red the moment it re-signed, and
- * stayed red until its next append. This is the same shape the plugin runtime's corpus
- * mirror admits (`classifyIdleHead`, `plugin/runtime/src/corpus/mirror.ts`).
+ * §5.2 obliges a live source to re-sign its idle head before `refreshBy` expires even when
+ * it announced nothing — an expired head is a withholding signal, not silence — and `serve`
+ * ships `maintainHead` for exactly that. The result is the same `sequence`, the same
+ * `entry`, a bumped `issuedAt` and `refreshBy`. That is not `sameHead`, and before this
+ * predicate it fell through to the sequence guard as `rewound-or-tampered-head`, so a
+ * conformant archive would go red the moment it re-signed and stay red until its next
+ * append (#2549). Nothing in this tree re-signs while idle yet — every in-tree publisher
+ * calls `maintainHead` only after an append — so the shape arrives from an external source.
+ * This is the same shape the plugin runtime's corpus mirror admits (`classifyIdleHead`,
+ * `plugin/runtime/src/corpus/mirror.ts`), with one difference: that consumer classifies only
+ * after its walk yielded nothing, this one from the head alone.
  *
  * `sequence` and `entry` must equal the stored high-water: a head naming any other chain
  * position is a chain claim, judged by the chain path or refused by the sequence guard,
- * never here. `issuedAt` must STRICTLY increase, and an unparseable instant on either side
- * is not an increase — so a rollback, a backdated re-sign and a malformed head all keep the
- * refusal they have today. What this admits is exactly the honest idle re-sign, onto
- * `source-head-revalidation`, which re-checks signature, currently-valid key and freshness
- * on every call.
+ * never here. `issuedAt` must STRICTLY increase, and an unparseable instant yields NaN, whose
+ * every comparison is false — so a rollback, a backdated re-sign and a malformed head all keep
+ * the refusal they have today. What this admits is exactly the honest idle re-sign, onto
+ * `source-head-revalidation`, which re-checks signature, currently-valid key and freshness on
+ * every call — but not the §5.2 `refreshBy` ceiling, which neither named procedure enforces
+ * (#3467). This widens that gap's reach: a source can now install a far-future `refreshBy`
+ * at an unchanged position, without appending. Closing it is #3467's, not this change's.
  */
 function reSignedIdleHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): boolean {
   const held = checkpoint.signedHighWater;
   if (held.sequence !== head.head.sequence || held.entry !== head.head.entry) return false;
-  const issued = new Date(head.head.issuedAt).getTime();
-  const prior = new Date(held.issuedAt).getTime();
-  return Number.isFinite(issued) && Number.isFinite(prior) && issued > prior;
+  return new Date(head.head.issuedAt).getTime() > new Date(held.issuedAt).getTime();
 }
 
 function deduplicateEntries(entries: readonly SyncedEntry[]): SyncedEntry[] {
@@ -730,9 +734,10 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         // (Refreshing the served head at boot instead — "make the head current" — was not available
         // when this degrade was written: a re-signed head at the SAME sequence is not `sameHead` and
         // tripped the `rewound-or-tampered-head` guard below for every consumer already checkpointed
-        // at that sequence, self AND peer. #3468 admits that shape onto revalidation, so it is now a
-        // real option — but it is the SERVING side's change, and this degrade still covers the
-        // operator that has not re-signed, which is the condition #2547 actually hit.)
+        // at that sequence, self AND peer (#2549). #3468 admits that shape onto revalidation, so it
+        // is now a real option — but it is the SERVING side's change, and nothing in this tree
+        // re-signs an idle head yet, so this degrade still covers the operator that has not, which
+        // is the condition #2547 actually hit.)
         if (configured.selfServed === true) {
           return {
             reason: 'self-source-stale',

@@ -118,8 +118,9 @@ describe("verifySourceChain: issuedAt monotonicity (§10.3 step 3, §5.2, MAJOR 
   });
 
   it("rejects a re-signed idle head at the SAME position: that shape belongs to revalidation, not to the chain walk (#3468)", async () => {
-    // A live source re-signs its idle head at least daily (`serve`'s
-    // `maintainHead`): same `sequence`, same `entry`, a bumped `issuedAt`.
+    // §5.2 obliges a live source to re-sign its idle head before `refreshBy`
+    // expires (`serve`'s `maintainHead`): same `sequence`, same `entry`, a
+    // bumped `issuedAt`.
     // `issuedAt` monotonicity passes -- and then the linkage walk looks the
     // head's own cited entry up in the fed set, which a returning consumer's
     // walk above its mark is legitimately empty for, and fails `linkage`

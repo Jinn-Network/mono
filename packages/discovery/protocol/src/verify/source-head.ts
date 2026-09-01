@@ -23,8 +23,9 @@ import type { SourceHeadOutcome } from "./outcomes.js";
 //     `verifySourceChain` refuses it as `issued-at-monotonicity` -- correct
 //     for a chain walk, wrong for a poll that simply outran the archive's
 //     re-signing.
-//   - the same position RE-SIGNED at a later instant, which a live source
-//     produces on every idle source at least daily (`serve`'s `maintainHead`).
+//   - the same position RE-SIGNED at a later instant, which §5.2 obliges a
+//     live source to do before `refreshBy` expires (`serve` ships
+//     `maintainHead` for it, though no in-tree publisher calls it while idle).
 //     `issuedAt` monotonicity passes, and then the linkage walk fails:
 //     a returning consumer is fed only entries ABOVE its mark, so the head's
 //     own cited entry -- the boundary itself -- is absent from the fed set

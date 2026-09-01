@@ -71,10 +71,13 @@ export interface CreateCorpusMirrorOptions {
  *
  * `"unchanged"` is the archive re-serving the exact head this consumer already
  * accepted; `"re-signed"` is the same chain position re-signed at a later
- * instant, which a live source produces on every idle source at least daily
- * (`serve`'s `maintainHead`). Both are revalidation's to judge (#3443, #3468);
- * `undefined` means the head is making a chain claim, which is
- * `verifySourceChain`'s to judge and never this path's.
+ * instant. §5.2 obliges a live source to re-sign an idle head before
+ * `refreshBy` expires, and `serve` ships `maintainHead` for exactly that -- but
+ * every in-tree publisher calls it only after an append, so the shape arrives
+ * from a conformant external source rather than from anything here (#2549).
+ * Both are revalidation's to judge (#3443, #3468); `undefined` means the head
+ * is making a chain claim, which is `verifySourceChain`'s to judge and never
+ * this path's.
  *
  * Every fact below is load-bearing, and every one of them is what keeps the
  * revalidation path fail-closed:
@@ -98,7 +101,7 @@ export interface CreateCorpusMirrorOptions {
  * indefinitely-replayable window open at that position. The mark's POSITION
  * (`sequence`/`entry`) is untouched: nothing was adopted.
  *
- * ## One divergence worth naming
+ * ## Two divergences worth naming
  *
  * The operator's equivalent (`sameHead`, `operator/src/daemon/native-discovery.ts`)
  * compares `refreshBy` and the signature bytes too, because it persists a whole
@@ -107,9 +110,18 @@ export interface CreateCorpusMirrorOptions {
  * same position and `issuedAt` but a stretched `refreshBy` is a §5.2-violating
  * re-sign that would be revalidated as fresh -- and minting one needs the
  * source's own currently-valid signing key, which already buys the ability to
- * re-sign correctly. It is not a door an outsider can reach. Enforcing the
- * §5.2 `refreshBy` ceiling on a revalidated head is the other half of the
- * inversion #3468 names, and is deliberately not closed here.
+ * re-sign correctly. It is not a door an outsider can reach. Admitting the
+ * re-signed head does widen that door's reach -- a source can now install a
+ * far-future `refreshBy` without appending -- and closing it is #3467's
+ * (the ceiling neither named procedure enforces), deliberately not this
+ * change's.
+ *
+ * The second divergence is one of shape: this consumer classifies only after
+ * the walk yielded nothing (`entries.length === 0` at the call site), while
+ * the operator classifies from the head alone and never walks. A source whose
+ * archive holds entries ABOVE its advertised head therefore fails here and
+ * reads as a clean idle poll there. Both are fail-closed; they are not
+ * identical.
  */
 function classifyIdleHead(
   head: SourceHead,
@@ -125,10 +137,12 @@ function classifyIdleHead(
   if (origin.agent !== identity.agent || origin.name !== identity.name) return undefined;
   if (head.sequence !== mark.sequence || head.entry !== mark.entry) return undefined;
   if (head.issuedAt === mark.issuedAt) return "unchanged";
-  const issued = new Date(head.issuedAt).getTime();
-  const held = new Date(mark.issuedAt).getTime();
-  if (!Number.isFinite(issued) || !Number.isFinite(held)) return undefined;
-  return issued > held ? "re-signed" : undefined;
+  // An unparseable instant on either side yields NaN, and every comparison
+  // with NaN is false -- so a malformed head takes the chain path with the
+  // rollback and the backdated re-sign, without a separate guard.
+  return new Date(head.issuedAt).getTime() > new Date(mark.issuedAt).getTime()
+    ? "re-signed"
+    : undefined;
 }
 
 interface Counters {
@@ -206,7 +220,9 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
 
       // An archive polled more often than it appends re-serves the chain
       // position this mirror already accepted -- byte-identical if the poll
-      // outran the re-signing, re-signed at a later instant if it did not.
+      // outran the re-signing, re-signed at a later instant if it did not
+      // (§5.2 obliges a live source to re-sign an idle head; see
+      // `classifyIdleHead` on why nothing in this tree does it yet).
       // `verifySourceChain` can express neither: §5.2 requires `issuedAt` to
       // strictly increase, so the unchanged head is refused
       // `issued-at-monotonicity`, and the re-signed one clears that only to

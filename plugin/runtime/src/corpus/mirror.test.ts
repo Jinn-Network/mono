@@ -183,7 +183,7 @@ describe("mirror sync", () => {
     expect(second.status).toBe("synced");
   });
 
-  describe("an unchanged head is revalidated, not re-walked (#3443)", () => {
+  describe("a head at the position already on file is revalidated, not re-walked (#3443, #3468)", () => {
     /**
      * A posture that records which of its two entry points the mirror chose.
      * Which path a re-served head takes is the whole subject here: the
@@ -276,6 +276,24 @@ describe("mirror sync", () => {
         ...before,
         issuedAt: "2026-07-31T00:00:00Z",
       });
+    });
+
+    test("a refused revalidation of a re-signed head leaves the mark exactly where it was (#3468)", async () => {
+      const marks = await seeded();
+      const before = await marks.get({ agent: AGENT, name: NAME });
+      const posture = spyPosture({ revalidate: { status: "rejected", reason: "unauthorized-signer" } });
+      const { transport } = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "2026-07-31T00:00:00Z" });
+
+      const outcome = await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
+
+      expect(outcome.sources[0]!.failure).toEqual({
+        code: "chain-verification-rejected",
+        message: "unauthorized-signer",
+      });
+      // The instant advances only for an ACCEPTED re-sign. A refused one must
+      // not raise the floor, or a rejected head would still move the record
+      // the next verification is monotonic against.
+      expect(await marks.get({ agent: AGENT, name: NAME })).toEqual(before);
     });
 
     test("replaying the head the re-sign replaced is then a chain claim, not a revalidation (#3468)", async () => {

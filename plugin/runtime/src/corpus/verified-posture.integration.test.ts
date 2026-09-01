@@ -208,9 +208,10 @@ describe("the verified posture over a genuinely signed archive", () => {
     const { archive, capability, config } = await compose();
     expect((await capability.mirror.syncOnce()).status).toBe("synced");
 
-    // The idle re-signing a live source performs at least daily (`serve`'s
-    // `maintainHead`): same `sequence`, same `entry`, a later `issuedAt` and
-    // `refreshBy`, genuinely re-signed by the archive's own key. Before #3468
+    // The idle re-signing §5.2 obliges a live source to perform before
+    // `refreshBy` expires (`serve`'s `maintainHead`): same `sequence`, same
+    // `entry`, a later `issuedAt` and `refreshBy`, genuinely re-signed by the
+    // archive's own key. Before #3468
     // this reached `verifySourceChain`, whose linkage walk is fed no entries
     // above the mark and reported `broken-chain` at `linkage` -- so a healthy
     // archive went red the moment it re-signed.

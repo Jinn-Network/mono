@@ -444,9 +444,11 @@ describe('native discovery consumer', () => {
     });
   });
 
-  // #3468 — a live source re-signs its idle head at least daily (`serve`'s `maintainHead`): same
-  // sequence, same entry, a later `issuedAt`. That is not `sameHead`, and before #3468 it fell to
-  // the sequence guard, so a healthy archive went red the moment it re-signed.
+  // #3468 — §5.2 obliges a live source to re-sign its idle head before `refreshBy` expires
+  // (`serve`'s `maintainHead`): same sequence, same entry, a later `issuedAt`. That is not
+  // `sameHead`, and before #3468 it fell to the sequence guard, so a conformant archive would go
+  // red the moment it re-signed (#2549). No in-tree publisher re-signs while idle, so the shape
+  // arrives from an external source — which is why these fixtures mint it by hand.
   describe('a re-signed idle head at an unchanged position (#3468)', () => {
     async function checkpointed() {
       const first = entry('0000000000000001', null, DIGEST_A);
@@ -527,6 +529,32 @@ describe('native discovery consumer', () => {
       });
 
       await expect(lapsed.sync()).rejects.toMatchObject({ reason: 'stale' });
+    });
+
+    it('degrades a SELF-HOSTED one that is past refreshBy without advancing the checkpoint', async () => {
+      // The ordering guard: the stale branch returns before the checkpoint write. Hoist the
+      // write above it and this test goes red — a lapsed head would raise the stored instant
+      // and stretch the stored `refreshBy` on a poll that accepted nothing.
+      const { store, first } = await checkpointed();
+      const degraded = consumer({
+        store,
+        routes: reSignedRoutes(first, '2026-08-02T12:00:00.000Z', '2026-08-03T12:00:00.000Z'),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead: async () => ({ status: 'stale' }),
+        now: () => new Date('2026-08-05T00:00:00.000Z'),
+        selfServed: true,
+      });
+
+      const outcome = await degraded.sync();
+
+      expect(outcome.accepted).toBe(0);
+      expect(outcome.degraded).toEqual([
+        { source: { agent: AGENT, name: SOURCE_NAME }, reason: 'self-source-stale', detail: expect.any(String) },
+      ]);
+      expect(degraded.checkpoint({ agent: AGENT, name: SOURCE_NAME })?.signedHighWater).toMatchObject({
+        issuedAt: '2026-08-02T01:00:00.000Z',
+        refreshBy: '2026-08-03T01:00:00.000Z',
+      });
     });
 
     it('keeps the chain path for a head whose entry digest differs at the same sequence', async () => {

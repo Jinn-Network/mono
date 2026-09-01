@@ -466,7 +466,11 @@ export interface SignedFixtureArchive {
   readonly policyVersions: readonly Uint8Array[];
   readonly genesisDigest: Sha256Digest;
   readonly reference: EvidenceRecordReference;
-  /** The head this archive serves, so a caller can derive a re-signed one from it. */
+  /**
+   * The head this archive was BUILT serving, so a caller can derive a re-signed
+   * one from it. `serveHead` replaces what is served; this stays the original,
+   * which is what lets a caller replay it after a re-sign.
+   */
   readonly head: SourceHead;
   /**
    * Signs `next` with the archive's own signer and serves it at the head path,
