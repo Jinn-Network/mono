@@ -58,6 +58,15 @@ For a received bundle, the smaller reader surface is:
 npx @colophon-claims/verify@0.1 ./bundle
 ```
 
+That line reads the bundle formats through public-bundle/6, and only the claims
+that pin it. Reader lines are not forward compatible, and a reader that is too
+old refuses with the same code an invalid bundle earns, so before concluding
+anything from a refusal, read the line the bundle's own claim package pins in
+`verification.command` — the producer named it for that exact bundle. The
+per-format table in [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md) covers the case where
+you have only `bundle.json`; the format string alone is not sufficient, because
+prompted-screening bundles pin a later line without changing their format.
+
 To verify a bundle with tools that are not ours, see
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).
 
