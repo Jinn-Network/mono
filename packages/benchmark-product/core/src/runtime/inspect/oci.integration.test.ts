@@ -79,16 +79,33 @@ async function expectNoInspectContainers(): Promise<void> {
  * leak against whichever test happens to run next. Sweep after each test so a single reap failure
  * fails the test that caused it and no other. The assertions above have already run, so detection
  * is unaffected.
+ *
+ * Every docker call here is best effort and must never be the thing that fails a test. The two
+ * ways it could: `docker ps` failing on a wedged daemon, and -- the race this whole helper exists
+ * because of -- Docker Engine finishing its own asynchronous `--rm` removal between the listing
+ * and the `docker rm`, which then exits non-zero on a name that no longer resolves. Either would
+ * turn a green test red from inside cleanup, which is exactly the misattribution the sweep was
+ * added to stop.
  */
 afterEach(() => {
   if (imageDigest === undefined || datasetCacheDir === undefined) return;
-  const leaked = listInspectContainers();
+  let leaked: string;
+  try {
+    leaked = listInspectContainers();
+  } catch (error) {
+    console.warn(`could not list Inspect containers to sweep: ${String(error)}`);
+    return;
+  }
   if (leaked === "") return;
   console.warn(`sweeping leaked Inspect containers:\n${leaked}`);
   for (const line of leaked.split("\n")) {
     const [name] = line.split("\t");
     if (name === undefined || name === "") continue;
-    execFileSync(dockerPath, ["rm", "--force", name], { stdio: "ignore" });
+    try {
+      execFileSync(dockerPath, ["rm", "--force", name], { stdio: "ignore" });
+    } catch (error) {
+      console.warn(`could not sweep Inspect container ${name}: ${String(error)}`);
+    }
   }
 });
 
