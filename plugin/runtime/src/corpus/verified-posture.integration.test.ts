@@ -249,6 +249,9 @@ describe("the verified posture over a genuinely signed archive", () => {
   test("the head a re-sign replaced is then refused as a chain regression (#3468)", async () => {
     const { archive, capability, advanceTo } = await compose();
     expect((await capability.mirror.syncOnce()).status).toBe("synced");
+    // The same conformant re-sign as the test above: the clock moves with the
+    // source, and the window it carries sits at the profile ceiling rather
+    // than past it (#3467). All this test needs from it is the raised floor.
     advanceTo(new Date("2026-07-30T12:00:00Z"));
     await archive.serveHead({
       ...archive.head,
