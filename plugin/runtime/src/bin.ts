@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { DsseChainVerifier, DsseSigner } from "@jinn-network/trust-core";
-import type { Transport } from "@jinn-network/record-discovery-client";
+import type { Transport, VerifyDriver } from "@jinn-network/record-discovery-client";
 import { createEvidenceRetrievalFailure } from "@jinn-network/evidence-retrieval";
 import { openLocalEvidenceRuntime } from "@jinn-network/evidence-local-runtime";
 
@@ -34,6 +34,7 @@ import {
 } from "./relevance/index.js";
 import { createPluginRuntime, type PluginRuntime } from "./runtime.js";
 import { describeUnknownError } from "./safe-error.js";
+import { resolveCorpusBinIoFields } from "./session-host-corpus.js";
 import { RUNTIME_VERSION } from "./version.js";
 
 const USAGE = [
@@ -120,6 +121,14 @@ export interface BinIo {
   readonly corpusFs?: CorpusFilesystem;
   readonly dsseVerifier?: DsseChainVerifier;
   readonly readPolicyVersions?: (directory: string) => Promise<readonly Uint8Array[]>;
+  /**
+   * Announcement-chain verification driver. Optional like the rest of the
+   * corpus ports, and for the same reason: this runtime resolves no keys and
+   * implements no cryptography. Absent, the `verified` posture cannot be
+   * honored and the corpus capability fails closed — see its
+   * `corpus-chain-verification` health check.
+   */
+  readonly corpusVerifyDriver?: VerifyDriver;
 }
 
 /** `serve [--role tools|session]`. Default `tools`: read-only MCP without capture signer. */
@@ -152,7 +161,13 @@ function hasCorpusPorts(io: BinIo): boolean {
   );
 }
 
-function buildServeCapabilities(
+/**
+ * Exported for the composition test that asserts a default `serve` install is
+ * aggregate-healthy. `main` builds the capability set inline and never renders
+ * a report on the serve path, so the only way to assert on the composed
+ * runtime's health is to compose it exactly as `main` does.
+ */
+export function buildServeCapabilities(
   role: RuntimeRole,
   io: BinIo,
   runtimeHealth: () => ReturnType<ReturnType<typeof createPluginRuntime>["health"]>,
@@ -174,6 +189,7 @@ function buildServeCapabilities(
       fs: io.corpusFs!,
       dsseVerifier: io.dsseVerifier!,
       readPolicyVersions: io.readPolicyVersions!,
+      ...(io.corpusVerifyDriver === undefined ? {} : { verifyDriver: io.corpusVerifyDriver }),
     });
     capabilities.push(corpusCapability);
   }
@@ -340,10 +356,17 @@ if (isProcessEntry()) {
       process.once("SIGTERM", finish);
     });
 
-  process.exitCode = await main(process.argv.slice(2), readConfigEnvFromProcess(), {
+  const env = readConfigEnvFromProcess();
+  const homeDirectory = process.env.JINN_PLUGIN_HOME ?? join(homedir(), ".jinn-plugin");
+
+  process.exitCode = await main(process.argv.slice(2), env, {
     writeOut: (line) => process.stdout.write(`${line}\n`),
     writeErr: (line) => process.stderr.write(`${line}\n`),
-    homeDirectory: process.env.JINN_PLUGIN_HOME ?? join(homedir(), ".jinn-plugin"),
+    homeDirectory,
     untilShutdown,
+    // The corpus composition root. Unresolvable configuration yields no
+    // fields, so `main` still owns the `configuration failed` message and its
+    // exit code rather than this block replacing it with a crash.
+    ...resolveCorpusBinIoFields({ env, homeDirectory }),
   });
 }

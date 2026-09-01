@@ -62,6 +62,11 @@ import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
+import {
+  DISCLOSURE_SPECIFICATION_EXTENSION,
+  DISCLOSURE_SPECIFICATION_MEDIA_TYPE,
+} from "@jinn-network/benchmarking-records";
+import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
 import {
@@ -311,6 +316,11 @@ export function runReport(
       // method-independent, so every entry's claim package shares it.
       const carriage = readRunAnchorCarriage(clockedContext.workspaceDir, runState);
       const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells, runRecord, carriage.anchors);
+      // issue #2839: the sealed disclosure declaration, if this run has one. Read once for the same
+      // reason the anchors are -- it is method-independent, so every entry's Report carries the same
+      // extension and every entry's claim the same section. Absent for every run that never
+      // declared, which is what keeps existing Reports and claims byte-identical.
+      const disclosureCarriage = readRunDisclosureCarriage(clockedContext.workspaceDir, runState);
 
       interface SealedReportEntry {
         readonly method: string;
@@ -367,6 +377,13 @@ export function runReport(
             ? [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits]
             : [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits, previewLimitation];
 
+        // ONE predicate for both halves of the binding (issue #2839). The Report extension and the
+        // claim section have to agree: G0 refuses a Report carrying the extension on any closure
+        // other than `/8`, and `/8` is the anchored binary-qualification cell. A run's sibling
+        // analyses project no qualification, so their Reports carry neither.
+        const entryIsDisclosed = disclosureCarriage !== undefined
+          && carriage.anchoredClosure
+          && entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument;
         let produced: ProducedReport;
         try {
           produced = await produceReport(
@@ -377,6 +394,18 @@ export function runReport(
               verdictRule,
               limitations,
               author: runState.owner,
+              // The extension's digest has to be INSIDE the signed payload for the report author's
+              // signature to cover the record (design §6.3), so it is supplied here, before sealing,
+              // rather than added to a sealed document afterwards.
+              ...(entryIsDisclosed ? {
+                recordExtensions: {
+                  [DISCLOSURE_SPECIFICATION_EXTENSION]: {
+                    name: "disclosure-specification",
+                    mediaType: DISCLOSURE_SPECIFICATION_MEDIA_TYPE,
+                    digest: { sha256: disclosureCarriage!.recordSha256 },
+                  },
+                },
+              } : {}),
             },
             signer,
           );
@@ -421,6 +450,7 @@ export function runReport(
             },
           },
           ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
+          ...(entryIsDisclosed ? { disclosure: disclosureCarriage!.disclosure } : {}),
           ...(previewLog !== undefined && previewLog.count > 0
             ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }
             : {}),
@@ -442,6 +472,34 @@ export function runReport(
           preregistered: produced.record.preregistered ?? false,
           claimPackage,
         };
+      }
+
+      // A declaration that nothing will carry is a silent loss, and this is the last point where the
+      // operator can still act on it: `report` is single-shot, and after it the declaration can never
+      // enter any claim (issue #2839, review finding I1).
+      //
+      // The per-bundle guard in `materialize.ts` cannot catch this. It refuses a declared run whose
+      // QUALIFICATION bundle is unanchored, but a run with no binary-instrument analysis has no
+      // qualification bundle at all, so there is nothing there to refuse and the declaration is
+      // dropped with no message. `buildClaimPackage`'s own refusal cannot catch it either, because
+      // the section is gated out per entry above before the builder ever sees it.
+      if (disclosureCarriage !== undefined) {
+        const carriedBy = [primarySelected, ...additionalSelected].filter((entry) =>
+          entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument);
+        if (carriedBy.length === 0 || !carriage.anchoredClosure) {
+          refuse(
+            "conflict",
+            "disclosure",
+            "this run carries a sealed disclosure declaration that no report it is about to produce"
+            + " could carry: the disclosed closure is the anchored binary-qualification cell, and this"
+            + " run has"
+            + (carriedBy.length === 0 ? " no binary-instrument analysis" : "")
+            + (carriedBy.length === 0 && !carriage.anchoredClosure ? " and" : "")
+            + (!carriage.anchoredClosure ? " no anchor" : "")
+            + ". Anchor the run and give it a binary-instrument analysis, or remove the declaration"
+            + " before reporting; a declaration made now could never enter any sealed claim.",
+          );
+        }
       }
 
       const primaryResult = await sealReportEntry(primarySelected);

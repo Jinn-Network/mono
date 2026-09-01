@@ -77,7 +77,7 @@ export const DEFAULT_EXCLUSIONS = {
     // -- Legacy-rejection vectors --
     // Each of these asserts that a pre-re-seal spelling NO LONGER parses as a record kind.
     // The literal is the assertion; without it the narrowing has no regression test. The
-    // authoritative grammar plus the six mirrors that copy it (those packages declare no
+    // authoritative grammar plus the seven mirrors that copy it (those packages declare no
     // Jinn dependency and so cannot import `assertRecordKindUri`).
     'packages/discovery/protocol/src/grammar.test.ts',
     'packages/benchmarking/records/src/identifiers.test.ts',
@@ -86,6 +86,7 @@ export const DEFAULT_EXCLUSIONS = {
     'packages/environments/chain-record/src/primitives.test.ts',
     'packages/environments/information-world/src/identifiers.test.ts',
     'packages/environments/record/src/identifiers.test.ts',
+    'packages/evidence/offer/src/identifiers.test.ts',
     'packages/evidence/trace/src/vocabulary.test.ts',
   ],
   // Repository-relative directory prefixes (trailing slash), excluded wholesale.

@@ -9,9 +9,10 @@ import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../seal
 import { isCalendarStrictRfc3339 } from "../rfc3339.js";
 import { ArmIdSchema, ReplicateSchema } from "./cells.js";
 import { exactDecimalInUnitInterval } from "../decimal.js";
-import { ANCHOR_INTENT_EXTENSION, BENCHMARK_PUBLICATION_EXTENSION } from "../identifiers.js";
+import { ANCHOR_INTENT_EXTENSION, BENCHMARK_PUBLICATION_EXTENSION, TASK_SELECTION_EXTENSION } from "../identifiers.js";
 import { RunPublicationExtensionSchema } from "../publication-extension.js";
 import { RunAnchorIntentExtensionSchema } from "../anchor-intent-extension.js";
+import { RunTaskSelectionExtensionSchema } from "../task-selection.js";
 
 const Rfc3339 = z.string().refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
 
@@ -108,6 +109,19 @@ export const RunRecordSchema = topLevelRecordSchema({
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
           ctx.addIssue({ ...issue, path: [ANCHOR_INTENT_EXTENSION, ...issue.path] });
+        }
+      }
+    }
+
+    // Task-selection provenance (#2980) gets the same treatment for the same reason: a present but
+    // out-of-vocabulary declaration is a malformed RECORD, and saying so here keeps it a typed
+    // record refusal rather than a raw schema error out of whichever reader touches it first.
+    const taskSelectionExtension = run[TASK_SELECTION_EXTENSION];
+    if (taskSelectionExtension !== undefined) {
+      const parsed = RunTaskSelectionExtensionSchema.safeParse(taskSelectionExtension);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          ctx.addIssue({ ...issue, path: [TASK_SELECTION_EXTENSION, ...issue.path] });
         }
       }
     }

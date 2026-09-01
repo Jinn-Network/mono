@@ -23,3 +23,33 @@ export const cryptoEnvironmentFactsProfile: FactsProfileDocument =
 
 export const informationWorldFactsProfile: FactsProfileDocument =
   loadProfile("information-world.v1.json");
+
+// The v2 revisions close the join-edge gap the completeness rule names (protocol design §12,
+// amendment 2026-08-28). Each coexists with its v1; v1 bytes and meaning stay frozen.
+
+/**
+ * Adds the thirteen components a chain world pins by digest that v1 left unnamed — the pinned
+ * simulator binary, the multi-arch index, the header proof, the materializer, the source
+ * proofs, the fixture-coverage manifest, the fixture modules, the tool-interface schemas, the
+ * probe suite, the observation schema, the baseline observation and the comparator — plus the
+ * promotion-lineage edge every chain environment may carry.
+ */
+export const chainEnvironmentFactsProfileV2: FactsProfileDocument =
+  loadProfile("chain-environment.v2.json");
+
+/**
+ * Adds the composite's remaining outbound references: the information worlds it composes (v1
+ * counted them without naming them, so "which composites use this world" was unanswerable from
+ * the card), the service-runtime images it pins, and its lineage pointer.
+ */
+export const cryptoEnvironmentFactsProfileV2: FactsProfileDocument =
+  loadProfile("crypto-environment.v2.json");
+
+/**
+ * Adds the re-capture lineage edge. The corpus entries' bodies stay off the card under the
+ * amendment's own-content exclusion -- they are this record's enumerated content, covered by the
+ * record digest and unbounded in number -- not because they are inline: their descriptors carry a
+ * required `sha256:` digest. The genuinely inline body is `missPolicy.body.inlineUtf8`.
+ */
+export const informationWorldFactsProfileV2: FactsProfileDocument =
+  loadProfile("information-world.v2.json");

@@ -117,7 +117,7 @@ export function fixtureCatalog() {
     ],
     manifestExclusions: [],
     ownerGroups: {
-      'architecture-control': ['@oaksprout', '@ritsukai'],
+      'architecture-control': ['@oaksprout', '@ritsukai', '@ritsuKai2000'],
     },
     gateDefinitions: {
       'fixture-ci': { kind: 'workflow', path: '.github/workflows/fixture.yml' },

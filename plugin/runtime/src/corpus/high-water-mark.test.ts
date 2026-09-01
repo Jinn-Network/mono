@@ -33,6 +33,32 @@ afterEach(async () => {
 });
 
 describe("file-backed high-water-mark store", () => {
+  test("a second store over the same file never reverts a mark the first advanced", async () => {
+    // The verify driver, the mirror and the reader each build their own store
+    // over one path, so the FILE is the shared position. A store that kept a
+    // private snapshot of it would rewrite the whole document from that stale
+    // map on its next `put`, silently reverting the other's mark and stranding
+    // every entry between the two positions.
+    const driverStore = createFileHighWaterMarkStore({ filePath, fs });
+    const mirrorStore = createFileHighWaterMarkStore({ filePath, fs });
+
+    await driverStore.put(alice, mark("0000000000000009"));
+    await mirrorStore.put(bob, mark("0000000000000002"));
+
+    expect(await driverStore.get(alice)).toEqual(mark("0000000000000009"));
+    expect(await driverStore.get(bob)).toEqual(mark("0000000000000002"));
+    expect(await mirrorStore.get(alice)).toEqual(mark("0000000000000009"));
+  });
+
+  test("a store observes a mark another instance advanced after it first read the file", async () => {
+    const reader = createFileHighWaterMarkStore({ filePath, fs });
+    expect(await reader.get(alice)).toBeUndefined();
+
+    await createFileHighWaterMarkStore({ filePath, fs }).put(alice, mark("0000000000000004"));
+
+    expect(await reader.get(alice)).toEqual(mark("0000000000000004"));
+  });
+
   test("returns undefined for a source it has never seen", async () => {
     const store = createFileHighWaterMarkStore({ filePath, fs });
     expect(await store.get(alice)).toBeUndefined();

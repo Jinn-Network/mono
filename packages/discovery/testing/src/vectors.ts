@@ -38,20 +38,45 @@ const VectorSchema = z.object({
 });
 
 const vectorsRoot = fileURLToPath(new URL("../fixtures/vectors/", import.meta.url));
+const manifestPath = fileURLToPath(new URL("../fixtures/manifest.sha256.json", import.meta.url));
+
+/**
+ * The vector ids the fixture manifest records as superseded. Published
+ * fixtures are append-only -- a wrong one is never edited, it is retained
+ * unchanged and replaced by a new fixture plus a dated erratum -- so the
+ * corpus must skip the superseded copy or every consumer keeps asserting the
+ * statement the erratum retracted. Same rule, same shape, as
+ * `benchmarking/testing`'s method conformance.
+ */
+function supersededDirectories(): Set<string> {
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+    errata?: readonly { readonly id: string }[];
+  };
+  const superseded = new Set<string>();
+  for (const erratum of manifest.errata ?? []) {
+    const match = /^vectors\/([^/]+)\/vector\.json$/u.exec(erratum.id);
+    if (match !== null) superseded.add(match[1]!);
+  }
+  return superseded;
+}
 
 let cache: Vector[] | undefined;
 
 /**
- * Loads and structurally validates the full golden-vector corpus, sorted by
+ * Loads and structurally validates the golden-vector corpus, sorted by
  * name under UTF-16 code-unit order (never locale order, per the discovery
  * tree's ordering rule). Each vector's directory name must equal its own
- * `name` field.
+ * `name` field. Vectors the fixture manifest records as superseded are
+ * excluded: their bytes stay on disk, unedited, as the fixture-immutability
+ * contract requires, but the corpus asserts the superseding vector instead.
  */
 export function loadVectors(): Vector[] {
   if (cache !== undefined) return cache;
+  const superseded = supersededDirectories();
   const directories = readdirSync(vectorsRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
+    .filter((name) => !superseded.has(name))
     .sort(compareCodeUnitStrings);
 
   cache = directories.map((directory) => {

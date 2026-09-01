@@ -28,6 +28,7 @@ const EVIDENCE_PACKAGES = [
   ['contribution', '@jinn-network/evidence-contribution'],
   ['trace', '@jinn-network/evidence-trace'],
   ['trace-decode', '@jinn-network/evidence-trace-decode'],
+  ['offer', '@jinn-network/evidence-offer'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -66,11 +67,20 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     devDependencies: [
       '@jinn-network/execution-recorder',
+      // The card-only offer catalog demonstration (issue #3218). facts/offers is the one
+      // sanctioned edge to the offer record kind, and the boundary guard keeps this package
+      // off `@jinn-network/evidence-offer` directly -- so evidence-offer appears below as a
+      // transitive portal only, never as a declared dependency of this package.
+      '@jinn-network/record-discovery-facts-offers',
       '@jinn-network/record-discovery-source-evidence-journal',
     ],
     optionalDependencies: [],
     peerDependencies: [],
-    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder', '@jinn-network/trust-core'],
+    transitivePortalResolutions: [
+      '@jinn-network/evidence-offer',
+      '@jinn-network/execution-evidence-builder',
+      '@jinn-network/trust-core',
+    ],
   }],
   ['execution-recorder-bridge', {
     dependencies: ['@jinn-network/evidence-repository', '@jinn-network/execution-recorder'],
@@ -126,6 +136,14 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     optionalDependencies: [],
     peerDependencies: [],
   }],
+  // The offer kind composes trust-core alone: sealing and verifying a price must not
+  // require running the rest of the evidence stack.
+  ['offer', {
+    dependencies: ['@jinn-network/trust-core'],
+    devDependencies: [],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
 ]);
 
 function readPackage(directory) {
@@ -171,6 +189,7 @@ function expectedPortal(directory, dependencyName) {
   }
   const recordDiscoveryDirectory = new Map([
     ['@jinn-network/record-publication', '../../discovery/publication'],
+    ['@jinn-network/record-discovery-facts-offers', '../../discovery/facts/offers'],
     ['@jinn-network/record-discovery-protocol', '../../discovery/protocol'],
     ['@jinn-network/record-discovery-serve', '../../discovery/serve'],
     ['@jinn-network/record-discovery-source-evidence-journal', '../../discovery/sources/evidence-journal'],
@@ -183,8 +202,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
 }
 
-test('the evidence package inventory is explicit and has seventeen manifests', () => {
-  assert.equal(EVIDENCE_PACKAGES.length, 17);
+test('the evidence package inventory is explicit and has eighteen manifests', () => {
+  assert.equal(EVIDENCE_PACKAGES.length, 18);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
@@ -237,7 +256,7 @@ test('evidence package Jinn dependencies and portal resolutions match the approv
 });
 
 test('testing entrypoints declare Vitest as an exact optional peer', () => {
-  for (const directory of ['derivation', 'retrieval', 'trace', 'trace-decode']) {
+  for (const directory of ['derivation', 'retrieval', 'trace', 'trace-decode', 'offer']) {
     const manifest = readPackage(directory);
     assert.deepEqual(manifest.peerDependencies, { vitest: '^4.1.8' });
     assert.deepEqual(manifest.peerDependenciesMeta, {

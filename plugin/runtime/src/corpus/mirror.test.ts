@@ -43,6 +43,7 @@ const source = {
   servingRoot: "https://archive.test",
   archiveRootUrl: `https://archive.test${archivePagePath(NAME, "0000000000000001")}`,
   repositoryId: "archive.test/attempts",
+  signingKeys: [],
 };
 
 let directory: string;
@@ -50,7 +51,10 @@ let paths: { catalogPath: string; objectsDirectory: string; fs: CorpusFilesystem
 let lockPath: string;
 let statePath: string;
 
-function buildArchive(recordBytes: Uint8Array): { transport: Transport; entryDigest: string } {
+function buildArchive(
+  recordBytes: Uint8Array,
+  headOverrides: Partial<{ origin: string; sequence: string; entry: string; issuedAt: string; refreshBy: string }> = {},
+): { transport: Transport; entryDigest: string } {
   const digest = recordDigest(recordBytes);
   const entry = {
     protocol: RECORD_DISCOVERY_VERSION,
@@ -74,6 +78,7 @@ function buildArchive(recordBytes: Uint8Array): { transport: Transport; entryDig
     entry: entryDigest,
     issuedAt: "2026-07-30T00:00:00Z",
     refreshBy: "2026-08-30T00:00:00Z",
+    ...headOverrides,
   };
   const page = {
     protocol: RECORD_DISCOVERY_VERSION,
@@ -176,6 +181,126 @@ describe("mirror sync", () => {
     const second = await mirror({ highWaterMarks: marks }).syncOnce();
     expect(second.sources[0]!.entriesWalked).toBe(0);
     expect(second.status).toBe("synced");
+  });
+
+  describe("an unchanged head is revalidated, not re-walked (#3443)", () => {
+    /**
+     * A posture that records which of its two entry points the mirror chose.
+     * Which path a re-served head takes is the whole subject here: the
+     * revalidation path exists so a healthy mirror stops reporting
+     * `broken-chain` between publishes, and the chain path has to keep every
+     * head that is making a chain claim.
+     */
+    function spyPosture(outcomes: {
+      verify?: { status: "ok" } | { status: "rejected"; reason: string };
+      revalidate?: { status: "ok" } | { status: "rejected"; reason: string };
+    } = {}) {
+      const verify = vi.fn(async () => outcomes.verify ?? ({ status: "ok" } as const));
+      const revalidateHead = vi.fn(async () => outcomes.revalidate ?? ({ status: "ok" } as const));
+      return { mode: "verified" as const, verify, revalidateHead };
+    }
+
+    async function seeded() {
+      const marks = createFileHighWaterMarkStore({ filePath: statePath, fs: corpusFs });
+      await mirror({ highWaterMarks: marks }).syncOnce();
+      return marks;
+    }
+
+    test("a re-served identical head revalidates and reports a clean, empty sync", async () => {
+      const marks = await seeded();
+      const posture = spyPosture();
+
+      const second = await mirror({ highWaterMarks: marks, chainVerification: posture }).syncOnce();
+
+      expect(posture.revalidateHead).toHaveBeenCalledTimes(1);
+      expect(posture.verify).not.toHaveBeenCalled();
+      expect(second.status).toBe("synced");
+      expect(second.sources[0]).toMatchObject({ status: "synced", entriesWalked: 0, indexed: 0 });
+      expect(second.sources[0]!.failure).toBeUndefined();
+    });
+
+    test("a refused revalidation is still a chain-verification failure", async () => {
+      const marks = await seeded();
+      const posture = spyPosture({ revalidate: { status: "rejected", reason: "stale" } });
+
+      const second = await mirror({ highWaterMarks: marks, chainVerification: posture }).syncOnce();
+
+      expect(second.status).toBe("failed");
+      expect(second.sources[0]!.failure).toEqual({
+        code: "chain-verification-rejected",
+        message: "stale",
+      });
+    });
+
+    test("revalidation does not rewrite the mark, so the monotonicity floor survives", async () => {
+      const marks = await seeded();
+      const before = await marks.get({ agent: AGENT, name: NAME });
+
+      await mirror({ highWaterMarks: marks, chainVerification: spyPosture() }).syncOnce();
+
+      expect(await marks.get({ agent: AGENT, name: NAME })).toEqual(before);
+    });
+
+    test("a head whose issuedAt REGRESSED is a chain claim and keeps the chain path", async () => {
+      const marks = await seeded();
+      const posture = spyPosture();
+      const { transport } = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "2026-07-29T00:00:00Z" });
+
+      await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
+
+      expect(posture.verify).toHaveBeenCalledTimes(1);
+      expect(posture.revalidateHead).not.toHaveBeenCalled();
+    });
+
+    test("a genuinely re-signed head at the same position keeps the chain path -- where it is still refused", async () => {
+      const marks = await seeded();
+      const posture = spyPosture();
+      const { transport } = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "2026-07-31T00:00:00Z" });
+
+      const outcome = await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
+
+      expect(posture.verify).toHaveBeenCalledTimes(1);
+      expect(posture.revalidateHead).not.toHaveBeenCalled();
+      // Routing alone would be a satisfying-looking assertion that hides the
+      // outcome, so state the outcome: this posture ADMITS everything, and the
+      // sync is still a clean one only because the mocked chain path says ok.
+      // The real `verifySourceChain` refuses this head -- see
+      // `isUnchangedHead`'s note on the gap, and the protocol-level test that
+      // pins the refusal (`source-chain.test.ts`, "re-signed idle head").
+      expect(outcome.sources[0]!.status).toBe("synced");
+    });
+
+    test("a head naming a different chain position keeps the chain path", async () => {
+      const marks = await seeded();
+      const posture = spyPosture();
+      const { transport } = buildArchive(executionEvidenceFixture.bytes, { sequence: "0000000000000002" });
+
+      await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
+
+      expect(posture.verify).toHaveBeenCalledTimes(1);
+      expect(posture.revalidateHead).not.toHaveBeenCalled();
+    });
+
+    test("a head whose origin names another source keeps the chain path", async () => {
+      const marks = await seeded();
+      const posture = spyPosture();
+      const { transport } = buildArchive(executionEvidenceFixture.bytes, {
+        origin: "https://agents.test/mallory/attempts",
+      });
+
+      await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
+
+      expect(posture.verify).toHaveBeenCalledTimes(1);
+      expect(posture.revalidateHead).not.toHaveBeenCalled();
+    });
+
+    test("a FIRST sync never revalidates: there is no mark to be unchanged against", async () => {
+      const posture = spyPosture();
+      await mirror({ chainVerification: posture }).syncOnce();
+
+      expect(posture.verify).toHaveBeenCalledTimes(1);
+      expect(posture.revalidateHead).not.toHaveBeenCalled();
+    });
   });
 
   test("SKIPS without waiting when the lock is held, and never throws", async () => {

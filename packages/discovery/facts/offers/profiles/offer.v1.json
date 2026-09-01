@@ -1,0 +1,13 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/offer/v1",
+  "profile": "https://spec.jinn.network/facts/offer/v1",
+  "fields": [
+    { "name": "offerRecordDigest", "class": "record" },
+    { "name": "subject", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "offersubject", "scalar": "string" } },
+    { "name": "priced", "class": "record", "cloudEvents": { "attribute": "priced", "scalar": "boolean" } },
+    { "name": "rails.rail", "class": "record" },
+    { "name": "rails.amount", "class": "record" },
+    { "name": "supersedes", "class": "record", "referenceBearing": true }
+  ]
+}

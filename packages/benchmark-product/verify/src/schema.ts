@@ -60,6 +60,17 @@ export const BUNDLE_V4_EVIDENCE_ROLES = [
   "screening-pool",
   "screening-sample-commitment",
   "screening-transcript",
+  // Appended at the very end (disclosure-specification-record design §6.2, issue #2839). Appending
+  // is the ONLY additive move available here: this array's index order is the frozen role-ordering
+  // map used by both the catalog schema's ordering refinement and the bundle writer, so inserting
+  // anywhere earlier would re-order existing bundles' role arrays and move their bytes. The /2
+  // catalog is a SEPARATE constant (`BUNDLE_EVIDENCE_ROLES` below) and is untouched by this append.
+  //
+  // The token is admitted on every v4-graph closure, because the enum is one shared constant and
+  // there is no per-closure role vocabulary. What keeps a disclosure record off an earlier closure
+  // is that nothing DERIVES the role there: off `/8` the Report extension is never read, so the
+  // evidence closure's own size and per-digest guards refuse the record as unreachable (§6.5.2).
+  "disclosure-specification",
 ] as const;
 export type BundleV4EvidenceRole = (typeof BUNDLE_V4_EVIDENCE_ROLES)[number];
 export const BUNDLE_V4_ADMISSION_EVIDENCE_ROLES = [
@@ -226,6 +237,12 @@ const PrefixedSha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 const IDENTIFIER_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u;
 export const BundleQualificationSchema = z.strictObject({
   format: z.literal(BUNDLE_QUALIFICATION_FORMAT),
+  // Deliberately NOT widened when a later closure allocates a new claim id (issue #3205's
+  // claim-package/5; the same resolution the disclosure-record design reached in its §6.5.1).
+  // This field names WHICH CLAIM PROJECTION SHAPE the qualification graph was built for, and the
+  // anchors section changes nothing about that graph: the qualification projection under /5 is
+  // byte-identical to the one under /2. Widening the literal would make this schema co-vary with
+  // an unrelated section, and would need widening again for every future closure.
   claimSchema: z.literal("benchmark-product.claim-package/2"),
   sourceManifestSha256: PrefixedSha256Schema,
   admissionManifestSha256: PrefixedSha256Schema,

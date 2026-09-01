@@ -7,12 +7,14 @@ import {
 } from "@jinn-network/benchmarking-evidence";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import {
+  DISCLOSURE_SPECIFICATION_EXTENSION,
   cellIdempotencyKey,
   expectedCellSet,
   parseBenchmark,
   parseMatrix,
   parseReport,
   parseRun,
+  readReportDisclosureExtension,
   readRunAnchorIntentExtension,
   readRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
@@ -30,10 +32,15 @@ import {
 import { DeliveryRecordSchema, SubmissionRecordSchema, TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
 import { canonicalJsonBytes, dssePreAuthEncoding, parseExactDsseEnvelope } from "@jinn-network/trust-core";
 import { refuse } from "./profile/errors.js";
-import { ClaimPackageSchema } from "./profile/claim.js";
+import {
+  BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  ClaimPackageSchema,
+  DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
+} from "./profile/claim.js";
 import { buildMethodPortsFromResolver } from "./profile/ports.js";
 import { didKeyFromEd25519PublicKey } from "./profile/signing.js";
 import { buildPublicReportTrustDeps } from "./profile/trust.js";
+import { evidenceNativeBundleSigners, legacyBundleSigners, type PublicBundleSigner } from "./signers.js";
 import { buildAssemblyPortsFromFacts, type AssemblyPublicKeyRecord } from "./profile/assembly-ports.js";
 import {
   parseRunPinningEvidenceArtifact,
@@ -77,6 +84,7 @@ import {
   inspectLogVerifierMethod,
 } from "./profile/inspect-assurance.js";
 import { assertClaimConsistency } from "./profile/claim-consistency.js";
+import { assertTaskSelectionConsistency } from "./profile/task-selection.js";
 import { buildPublicAssets } from "./assets.js";
 import { derivePublicComparison, type PublicComparisonView } from "./comparison.js";
 import {
@@ -85,7 +93,15 @@ import {
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
 import { PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, BUNDLE_V6_FORMAT } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, BUNDLE_V8_FORMAT } from "./manifest.js";
+import {
+  DISCLOSURE_SPECIFICATION_BUNDLE_ROLE,
+  DisclosureProjectionError,
+  assertDisclosureSpecification,
+  deriveDisclosureSpecification,
+  type ClaimDisclosureSection,
+  type DisclosureSpecificationReport,
+} from "./profile/disclosure.js";
 import {
   evaluateIntegrityAnchors,
   type IntegrityAnchorsReport,
@@ -131,15 +147,21 @@ export type PublicBundleVerificationCheck =
   | "matrix-rederivation"
   | "report-verification"
   | "claim-consistency"
-  /** Always present for `benchmark-product-public-bundle/6`, never for any earlier closure
-   * (anchor-evidence design §8, §12). */
-  | "integrity-anchors";
+  /** Always present for the anchored closures, `benchmark-product-public-bundle/6`, `/7`, and `/8`,
+   * never for any earlier one (anchor-evidence design §8, §12). */
+  | "integrity-anchors"
+  /** Always present for `benchmark-product-public-bundle/8`, never for any earlier closure
+   * (disclosure-specification-record design §7, issue #2839). Runs last: the claim's `disclosure`
+   * section is among the things it depends on having already been byte-compared. */
+  | "disclosure-specification";
 
-export interface LegacyPublicBundleVerificationResult {
+export interface LegacyPublicBundleVerificationResult extends PublicBundleSignerDisclosure {
   readonly format:
     | "benchmark-product-public-bundle/2"
     | "benchmark-product-public-bundle/4"
-    | "benchmark-product-public-bundle/6";
+    | "benchmark-product-public-bundle/6"
+    | "benchmark-product-public-bundle/7"
+    | "benchmark-product-public-bundle/8";
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
   readonly benchmarkSha256: string;
@@ -152,6 +174,10 @@ export interface LegacyPublicBundleVerificationResult {
    * subject's context outcome (anchor-evidence design §8). Statuses are disclosed facts, not a
    * summary — nothing here is folded into a single verified badge. */
   readonly anchors?: IntegrityAnchorsReport;
+  /** Present exactly for the disclosed closure (issue #2839, design §7 step 11): the sealed record's
+   * identity and all six variables' statuses. Statuses are DISCLOSED FACTS, never folded into a
+   * single badge and never counted — the same posture `anchors` takes, and for the same reason. */
+  readonly disclosure?: DisclosureSpecificationReport;
   readonly qualification?: {
     readonly publicationGrade: boolean;
     readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
@@ -165,9 +191,14 @@ export interface LegacyPublicBundleVerificationResult {
   };
 }
 
+/** Who signed the bundle, with the identifiers the human surface deliberately does not print. */
+export interface PublicBundleSignerDisclosure {
+  readonly signers?: readonly PublicBundleSigner[];
+}
+
 export type PublicBundleVerificationResult =
   | LegacyPublicBundleVerificationResult
-  | EvidenceNativePortableBundleVerification;
+  | (EvidenceNativePortableBundleVerification & PublicBundleSignerDisclosure);
 
 export interface VerifyPublicBundleDeps extends VerifyBundleSnapshotDeps {
   /**
@@ -387,13 +418,58 @@ export async function verifyPublicBundleSnapshot(
   deps: VerifyPublicBundleDeps = {},
 ): Promise<VerifiedPublicBundleSnapshot> {
   const checked = verifyBundleSnapshot(bundleDir, deps);
+  // ── G0, the closure-INDEPENDENT extension guard (disclosure design §7 preamble, issue #2839) ──
+  //
+  // A Report carrying `DISCLOSURE_SPECIFICATION_EXTENSION` on any format other than `/8` refuses,
+  // here, before the format branch — so this holds for `/2`, `/4`, `/5`, `/6`, and `/7` alike, the
+  // evidence-native path included.
+  //
+  // Without it there is a real hole: a `/7` bundle could carry both the extension and the record,
+  // have the record's role derived by the extension edge, satisfy the evidence-closure reachability
+  // guard, and never be looked at by any check — because the named check runs only on `/8`. G0
+  // closes that direction; the evidence closure's own size and per-digest guards close the
+  // complementary one (role present, extension absent). The two together are what make the
+  // extension and the closure inseparable.
+  //
+  // Read deliberately at the JSON level rather than through `parseReport`: this must fire on a
+  // format whose `report.json` this function never otherwise parses, and it must fire on the
+  // extension's PRESENCE, not on its well-formedness.
+  if (checked.manifest.format !== BUNDLE_V8_FORMAT) {
+    const carriedReport = checked.fileBytes.get("report.json");
+    if (carriedReport !== undefined) {
+      let parsedReportJson: unknown;
+      try {
+        parsedReportJson = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(carriedReport));
+      } catch {
+        parsedReportJson = undefined;
+      }
+      if (
+        typeof parsedReportJson === "object" && parsedReportJson !== null && !Array.isArray(parsedReportJson)
+        && (parsedReportJson as Record<string, unknown>)[DISCLOSURE_SPECIFICATION_EXTENSION] !== undefined
+      ) {
+        refuse(
+          "record-integrity",
+          "report.json",
+          `a Report carrying ${DISCLOSURE_SPECIFICATION_EXTENSION} is publishable only on`
+          + ` ${BUNDLE_V8_FORMAT}, whose disclosure-specification check reads it; this bundle`
+          + ` declares ${checked.manifest.format}`,
+        );
+      }
+    }
+  }
   if (checked.manifest.format === BUNDLE_V5_FORMAT) {
     try {
+      const claimPackageBytes = checked.fileBytes.get("claim-package.json");
+      if (claimPackageBytes === undefined) throw new TypeError("portable bundle is missing claim-package.json");
+      const verification = await verifyEvidenceNativePortableBundle({
+        files: checked.fileBytes,
+        verifySignature: verifyEvidenceNativeSignature,
+      });
       return {
-        verification: await verifyEvidenceNativePortableBundle({
-          files: checked.fileBytes,
-          verifySignature: verifyEvidenceNativeSignature,
-        }),
+        verification: {
+          ...verification,
+          signers: evidenceNativeBundleSigners(claimPackageBytes, verification.verifiedSignerKeyIds),
+        },
         snapshot: checked,
       };
     } catch (cause) {
@@ -411,17 +487,25 @@ export async function verifyPublicBundleSnapshot(
   };
   const checks: PublicBundleVerificationCheck[] = ["manifest"];
   const manifestPaths = new Set(checked.manifest.files.map((file) => file.path));
-  const isV4 = checked.manifest.format === BUNDLE_V4_FORMAT;
-  // The anchored closure is v2's graph plus `anchors/`, so it takes v2's mandatory member list; the
-  // binary qualification projection has its own later anchored allocation and is not this one.
-  const isV6 = checked.manifest.format === BUNDLE_V6_FORMAT;
-  const mandatoryFiles = isV4 ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
+  // Three independent axes, five formats. The qualification axis decides the mandatory member list,
+  // the evidence-catalog grammar, and the trust grammar; the anchor axis decides the `anchors/`
+  // allowlist and the `integrity-anchors` check; the disclosure axis decides the Report-extension
+  // edge and the `disclosure-specification` check. v6 is v2 plus anchors, v7 is v4 plus anchors
+  // (issue #3205), v8 is v7 plus disclosure (issue #2839) — no axis reinterprets another.
+  const carriesQualification = checked.manifest.format === BUNDLE_V4_FORMAT
+    || checked.manifest.format === BUNDLE_V7_FORMAT
+    || checked.manifest.format === BUNDLE_V8_FORMAT;
+  const carriesAnchors = checked.manifest.format === BUNDLE_V6_FORMAT
+    || checked.manifest.format === BUNDLE_V7_FORMAT
+    || checked.manifest.format === BUNDLE_V8_FORMAT;
+  const carriesDisclosure = checked.manifest.format === BUNDLE_V8_FORMAT;
+  const mandatoryFiles = carriesQualification ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }
 
   const evidenceBytes = read("evidence.json");
-  const evidence = isV4
+  const evidence = carriesQualification
     ? parseJson(evidenceBytes, BundleV4EvidenceCatalogSchema, "evidence.json")
     : parseJson(evidenceBytes, BundleEvidenceCatalogSchema, "evidence.json");
   requireCanonical(evidenceBytes, evidence, "evidence.json");
@@ -435,10 +519,10 @@ export async function verifyPublicBundleSnapshot(
   for (const path of manifestPaths) {
     if (/^native\/inspect\/[a-f0-9]{64}\.eval$/u.test(path)) expectedPaths.add(path);
   }
-  // `anchors/<sha256>.bin` is allowlisted only by the closure version that defines it: an anchor
-  // member in a v2 or v4 bundle is a non-allowlisted file, exactly as it was before this format.
+  // `anchors/<sha256>.bin` is allowlisted only by the closure versions that define it: an anchor
+  // member in a v2 or v4 bundle is a non-allowlisted file, exactly as it was before these formats.
   const anchorPaths: string[] = [];
-  if (isV6) {
+  if (carriesAnchors) {
     for (const path of manifestPaths) {
       if (/^anchors\/[a-f0-9]{64}\.bin$/u.test(path)) {
         expectedPaths.add(path);
@@ -459,7 +543,7 @@ export async function verifyPublicBundleSnapshot(
   }
 
   const trustBytes = read("trust/public-keys.json");
-  const trust = isV4
+  const trust = carriesQualification
     ? parseJson(trustBytes, BundleV4TrustSchema, "trust/public-keys.json")
     : parseJson(trustBytes, BundleTrustSchema, "trust/public-keys.json");
   requireCanonical(trustBytes, trust, "trust/public-keys.json");
@@ -470,7 +554,7 @@ export async function verifyPublicBundleSnapshot(
   ] as const));
 
   let qualification: BundleQualification | undefined;
-  if (isV4) {
+  if (carriesQualification) {
     const qualificationBytes = read("qualification.json");
     qualification = parseJson(qualificationBytes, BundleQualificationSchema, "qualification.json");
     requireCanonical(qualificationBytes, qualification, "qualification.json");
@@ -519,7 +603,7 @@ export async function verifyPublicBundleSnapshot(
   // empty section and an omitted one are different claims, and §7.3's declared-but-absent bundle
   // carries the first.
   let claimAnchors: readonly import("./profile/anchor-claims.js").ClaimAnchor[] | undefined;
-  if (isV6) {
+  if (carriesAnchors) {
     const anchorRecords = anchorPaths
       .map((path) => {
         const bytes = read(path);
@@ -559,6 +643,41 @@ export async function verifyPublicBundleSnapshot(
     }
   }
 
+  // ── The disclosed closure's Report-extension edge and claim projection (issue #2839) ────────
+  //
+  // Read here, beside the anchors, and for the same two reasons: the evidence-closure walk below
+  // needs the edge to derive the record's role, and `assertClaimConsistency` needs the projection to
+  // rebuild the claim from the RECORD'S OWN BYTES rather than from the claim under test.
+  let disclosureExtensionDigest: string | undefined;
+  let claimDisclosure: ClaimDisclosureSection | undefined;
+  if (carriesDisclosure) {
+    const descriptor = readReportDisclosureExtension(report as unknown as Record<string, unknown>);
+    if (descriptor === undefined) {
+      refuse(
+        "record-integrity",
+        "disclosure-specification",
+        `a ${BUNDLE_V8_FORMAT} bundle must carry ${DISCLOSURE_SPECIFICATION_EXTENSION} on its Report`,
+      );
+    }
+    disclosureExtensionDigest = descriptor.digest.sha256;
+    const disclosureBytes = records.get(disclosureExtensionDigest);
+    if (disclosureBytes === undefined) {
+      refuse(
+        "record-integrity",
+        `records/${disclosureExtensionDigest}.bin`,
+        "the bundle does not carry the disclosure-specification record its Report names",
+      );
+    }
+    try {
+      claimDisclosure = deriveDisclosureSpecification(disclosureBytes);
+    } catch (cause) {
+      if (cause instanceof DisclosureProjectionError) {
+        refuse("record-integrity", `records/${disclosureExtensionDigest}.bin`, cause.message);
+      }
+      throw cause;
+    }
+  }
+
   const assembly = parseAssembly(read("verification/assembly.jsonl"));
   const expectedNativePaths = new Set(
     assembly.header.graph.solveDeliveries.flatMap((delivery) => delivery.outputs
@@ -590,6 +709,18 @@ export async function verifyPublicBundleSnapshot(
   const cellsByKey = new Map(assembly.cells.map((cell) => [cell.cellKey, cell]));
   const coordinatesByKey = new Map(expectedCoordinates.map((coord) => [coord.cellKey, coord]));
   const expectedRoles = new Map<string, Set<EvidenceRole>>();
+  // ── The disclosed closure's one graph edge (issue #2839, design §6.2 / §10.2) ───────────────
+  //
+  // The Report extension IS the edge: it is the only thing that derives the
+  // `disclosure-specification` role for any record. Adding it here — and only on `/8` — is what
+  // makes the two refusals in §6.5.2 fire on every other format without a bespoke guard. A
+  // standalone disclosure record on a `/7` bundle makes `declaredRoles` exceed `expectedRoles` and
+  // trips the size compare; the role appended to an existing graph record's array leaves the sizes
+  // equal and trips the per-digest compare instead. Both refusals already existed and cannot be
+  // forgotten.
+  if (disclosureExtensionDigest !== undefined) {
+    addRole(expectedRoles, disclosureExtensionDigest, DISCLOSURE_SPECIFICATION_BUNDLE_ROLE);
+  }
   const evaluationSpecs = new Map<string, ReturnType<typeof parseEvaluationSpec>>();
   const taskSpecs = new Map<string, ReturnType<typeof TaskSpecificationSchema.parse>>();
   const inspectSelections = new Map<string, InspectSelectionManifest>();
@@ -1712,6 +1843,11 @@ export async function verifyPublicBundleSnapshot(
   if (!verifiedReport.ok) refuse("record-integrity", "report-verification", `${verifiedReport.check}: ${verifiedReport.detail}`);
   if (!equalBytes(canonicalJsonBytes(verifiedReport.record), reportBytes)) refuse("record-integrity", "report-verification", "verified Report payload does not match report.json");
   checks.push("report-verification");
+  // Task-selection provenance (#2980). Runs under the `claim-consistency` check because that is
+  // exactly the question it answers -- does the claim's declared selection survive contact with
+  // the records? -- and because the claim pins the check list byte-for-byte, so a new named check
+  // would be a bundle-format bump rather than an addition.
+  assertTaskSelectionConsistency({ benchmarkRecord: benchmark, runRecord: run });
   assertClaimConsistency({
     claim,
     identities,
@@ -1726,11 +1862,49 @@ export async function verifyPublicBundleSnapshot(
       : {}),
     ...(assembly.header.rehearsal === undefined ? {} : { rehearsal: assembly.header.rehearsal }),
     ...(claimAnchors === undefined ? {} : { anchors: claimAnchors }),
+    ...(claimDisclosure === undefined ? {} : { disclosure: claimDisclosure }),
   });
   checks.push("claim-consistency");
-  // Always present for this closure version, and never for any earlier one: an anchored bundle
-  // whose anchors were stripped is a closure failure above, not a shorter check list here.
-  if (isV6) checks.push("integrity-anchors");
+  // Always present for the anchored closure versions, and never for any earlier one: an anchored
+  // bundle whose anchors were stripped is a closure failure above, not a shorter check list here.
+  if (carriesAnchors) checks.push("integrity-anchors");
+
+  // ── disclosure-specification (issue #2839, design §7 steps 1-9) ────────────────────────────
+  //
+  // Runs after `claim-consistency` because step 10 — projection equality — is delivered BY that
+  // check's existing whole-claim byte-compare rather than by a second comparison here. What is left
+  // for this block is authenticating the record itself and pairing the two claim identifiers.
+  let disclosureReport: DisclosureSpecificationReport | undefined;
+  if (carriesDisclosure) {
+    // Step 9: claim-id pairing. `qualification.json`'s `claimSchema` names WHICH PROJECTION SHAPE
+    // the qualification graph was built for, and that shape is claim-package/2's on every binary
+    // allocation — so the frozen literal does not move, while `claim-package.json` declares the
+    // closure. Either field carrying the other's value refuses, so the two cannot drift together.
+    if (claim.claimSchema !== DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID) {
+      refuse(
+        "record-integrity",
+        "claim-package.json",
+        `a ${BUNDLE_V8_FORMAT} bundle's claim must declare ${DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID}`,
+      );
+    }
+    if (qualification?.claimSchema !== BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID) {
+      refuse(
+        "record-integrity",
+        "qualification.json",
+        `a ${BUNDLE_V8_FORMAT} bundle's qualification document must keep its frozen`
+        + ` ${BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID} projection literal`,
+      );
+    }
+    disclosureReport = assertDisclosureSpecification({
+      extensionDigestSha256: disclosureExtensionDigest!,
+      catalogRoles: declaredRoles,
+      recordBytes: records,
+      matrixSha256: identities.matrixSha256,
+      reportAuthor: verifiedReport.record.author,
+      refuse: (path, message) => refuse("record-integrity", path, message),
+    });
+    checks.push("disclosure-specification");
+  }
 
   const dissentCellKeys = assembly.cells
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
@@ -1756,17 +1930,15 @@ export async function verifyPublicBundleSnapshot(
     }),
     dissentCellKeys,
   };
-  // Reader v1 remains able to authenticate bundles published before the
-  // human comparison projection existed. A bundle must match one complete,
-  // deterministic presentation profile; individual assets cannot be mixed.
-  const legacyAssets = qualification === undefined ? buildPublicAssets(assetFacts) : undefined;
-  const isLegacyPresentation = legacyAssets !== undefined
-    && Object.entries(legacyAssets).every(([path, bytes]) => equalBytes(read(path), bytes));
+  // The closure selects the presentation profile and the bundle must byte-match that one
+  // profile completely — assets cannot be mixed, and there is no second profile to fall back
+  // to (issue #2984). A qualification-projecting bundle (`/4`, `/7`) renders the
+  // instrument-qualification graph; every other one renders the human comparison, which
+  // `derivePublicComparison` above always produces. The comparison-absent rendering a
+  // pre-comparison producer would have written is therefore no bundle's profile.
   const expectedAssets = qualification !== undefined
     ? buildPublicAssets({ ...assetFacts, binaryQualification: binaryAssetQualification })
-    : isLegacyPresentation
-      ? legacyAssets!
-      : buildPublicAssets({ ...assetFacts, comparison });
+    : buildPublicAssets({ ...assetFacts, comparison });
   for (const [path, bytes] of Object.entries(expectedAssets)) {
     if (!equalBytes(read(path), bytes)) refuse("record-integrity", path, `${path} is not the exact projection of verified public facts`);
   }
@@ -1786,9 +1958,11 @@ export async function verifyPublicBundleSnapshot(
       format: checked.manifest.format,
       identity: checked.identity,
       checks,
+      signers: legacyBundleSigners(trust, new Set(verdictCatalog.verdicts.map((verdict) => verdict.evaluator))),
       ...identities,
       ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
       ...(anchorReport === undefined ? {} : { anchors: anchorReport }),
+      ...(disclosureReport === undefined ? {} : { disclosure: disclosureReport }),
       ...(qualification === undefined ? {} : {
         qualification: {
           publicationGrade: qualification.publicationGrade,

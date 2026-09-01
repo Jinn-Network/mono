@@ -21,6 +21,7 @@
  */
 
 import { z } from "zod";
+import { TASK_SELECTION_MODES } from "@jinn-network/benchmarking-records";
 import { refuse, refuseWithIssues, type ProductIssue } from "../errors.js";
 import { LifecycleStateSchema } from "./lifecycle.js";
 
@@ -225,6 +226,23 @@ export type DraftAnchoring = z.infer<typeof DraftAnchoringSchema>;
  */
 export const AdditionalAnalysesSchema = z.array(AnalysisSchema).min(1);
 
+/**
+ * Declared task-selection provenance (issue #2980), sealed into the Run record's
+ * `task-selection/v1` extension at lock.
+ *
+ * Who chose the tasks changes what a headline number means as much as the number itself, and the
+ * three values are a closed vocabulary so the answer cannot be softened into prose after the
+ * results are known. It is the claimant's own statement, never derived from workspace state:
+ * deriving it would make the sealed Run bytes depend on the machine that produced them, and would
+ * also let a tool assert on the claimant's behalf a fact only the claimant knows.
+ *
+ * Optional and additive, for the same reasons `anchoring` above is: an absent field means the
+ * behavior every draft had before it existed, no entry joins `DRAFT_SPEC_DEFAULTS`, and no stored
+ * draft's `specSha256` moves. Two of the three values also carry obligations the cold verifier
+ * enforces against the sealed Benchmark and Run — declaring one is a claim, not a label.
+ */
+export const TaskSelectionSchema = z.enum(TASK_SELECTION_MODES);
+
 export const DraftSpecSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
@@ -240,6 +258,7 @@ export const DraftSpecSchema = z.object({
   analysis: AnalysisSchema.optional(),
   additionalAnalyses: AdditionalAnalysesSchema.optional(),
   anchoring: DraftAnchoringSchema.optional(),
+  taskSelection: TaskSelectionSchema.optional(),
 });
 
 export type DraftSpec = z.infer<typeof DraftSpecSchema>;

@@ -318,11 +318,11 @@ On the ${result.informativeTasks}-task informative subset, the paired Skill-minu
 
 This is one model and one self-run comparison. It does not establish a general result about Skills, \`CLAUDE.md\`, SkillsBench as a whole, or other models. The estimate uses 14 informative tasks out of a flat 41-task population and does not meet the official 21-unit / 13-cluster floor. Two host oracles failed and remain in the fail-closed 492-cell denominator.
 
-The canonical signed report is \`report-envelope.json\` at \`sha256:${presentation.verification.reportEnvelopeSha256}\`. Run \`${presentation.verification.command}\` with the public npm reader to check the manifest, evidence closure, artifact integrity, signatures, matrix rederivation, report verification, and claim consistency.
+The signed report is \`report-envelope.json\` at \`sha256:${presentation.verification.reportEnvelopeSha256}\`. Run \`${presentation.verification.command}\` with the public npm reader to check this bundle. The check recomputes the numbers from the per-run evidence, confirms every file listed in \`bundle.json\` still matches its recorded digest, and confirms that the evidence, the calculations, and the report the claim was signed over are the ones in this bundle. Any mismatch is reported.
 
-Protocol identifiers under \`https://spec.jinn.network/\` are names; that origin is not hosted yet. Verification uses the exact platform bytes installed from npm.
+Identifiers inside the record files are internal names, not addresses the check visits, even where they look like web addresses. The check runs on code installed from npm and fetches nothing from the web.
 
-See \`presentation.json\` for the public reading record and \`claim-package.json\` for the authenticated machine-readable claim closure.
+See \`presentation.json\` for the claim as a reader record, and \`claim-package.json\` for the same claim, its method, and its evidence in machine-readable form.
 `;
 }
 

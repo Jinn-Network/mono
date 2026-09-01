@@ -78,8 +78,11 @@ export function citedPrecedents(source, selfName) {
 
     let start = index;
     while (start >= 0 && !/^\s*- /.test(lines[start])) start -= 1;
-    if (start < 0) continue;
 
+    // No `if (start < 0) continue` guard: when the scan runs off the top of
+    // the file `start` is -1, the comment walk below starts at -2 and does not
+    // execute, and the empty comment cites nothing. The guard was unkillable
+    // because it was redundant (#3168 D).
     const comment = [];
     for (let cursor = start - 1; cursor >= 0; cursor -= 1) {
       if (!/^\s*#/.test(lines[cursor])) break;

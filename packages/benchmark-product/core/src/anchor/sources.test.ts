@@ -499,7 +499,14 @@ describe("createOpenTimestampsProofSource — permanent versus transient", () =>
 // --- N4: the bound is on the operation, not on each request ----------------
 
 describe("the acquisition bound covers the whole operation", () => {
-  /** Honours the signal, so a bound that is never passed through simply hangs the test. */
+  /**
+   * The message a source raises when the operation signal actually fired. Distinguishes an
+   * honoured bound from a transport whose result was consumed, which the shared
+   * `venue-unavailable` code cannot.
+   */
+  const ABORTED_ACQUISITION = expect.stringContaining("unreachable: aborted");
+
+  /** Honours the signal, so a bound that is never passed through simply rejects on its own terms. */
   function slowTransport(delayMs: number): AnchorHttpFetch {
     return (request) => new Promise((resolve, reject) => {
       const timer = setTimeout(() => resolve({ status: 200, bytes: new Uint8Array(0) }), delayMs);
@@ -524,8 +531,11 @@ describe("the acquisition bound covers the whole operation", () => {
 
   test("the RFC 3161 source is bounded the same way", async () => {
     const source = createRfc3161ProofSource({ fetch: slowTransport(5_000), timeoutMs: 30 });
+    // The code alone cannot discriminate — every acquisition failure is `venue-unavailable` — so
+    // assert the abort detail. A bound that is never threaded through lets the transport resolve
+    // with empty bytes, which refuses under the same code with an unreadable-DER message instead.
     await expect(source.obtainProof({ subjectSha256: SUBJECT, endpoint: TSA_ENDPOINT }))
-      .rejects.toMatchObject({ code: "venue-unavailable" });
+      .rejects.toMatchObject({ code: "venue-unavailable", message: ABORTED_ACQUISITION });
   });
 
   test("a caller's own signal still aborts, alongside the deadline", async () => {
@@ -533,7 +543,7 @@ describe("the acquisition bound covers the whole operation", () => {
     const source = createRfc3161ProofSource({ fetch: slowTransport(5_000), timeoutMs: 60_000 });
     const pending = source.obtainProof({ subjectSha256: SUBJECT, endpoint: TSA_ENDPOINT, signal: controller.signal });
     controller.abort();
-    await expect(pending).rejects.toMatchObject({ code: "venue-unavailable" });
+    await expect(pending).rejects.toMatchObject({ code: "venue-unavailable", message: ABORTED_ACQUISITION });
   });
 
   test("every request carries a signal, so no transport call is unbounded", async () => {
