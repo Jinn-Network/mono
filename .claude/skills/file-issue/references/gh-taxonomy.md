@@ -331,8 +331,10 @@ query($owner:String!,$name:String!,$number:Int!){
 ```
 
 An empty array means the PR body has no `Closes #N` for this issue — add it
-(`gh pr edit <pr> --body-file …`) before relying on the edge, or the dependent
-never auto-unblocks when the PR merges.
+before relying on the edge, or the dependent never auto-unblocks when the PR
+merges. `gh pr edit --body-file` replaces the whole body, so read the existing
+body into the file first (`gh pr view <pr> --json body --jq .body`) and append
+`Closes #N` to it.
 
 The mirror check, from the PR side:
 

@@ -253,6 +253,11 @@ jobs:
         run: |
           yarn install --immutable
           yarn build
+      - name: Build cross-tree portal dependency from source (record-discovery-facts-offers, §7.8)
+        working-directory: packages/discovery/facts/offers
+        run: |
+          yarn install --immutable
+          yarn build
       - name: Verify Local Evidence Runtime
         working-directory: packages/evidence/local-runtime
         run: |

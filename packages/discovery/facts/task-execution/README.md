@@ -97,5 +97,5 @@ Each profile's `referenceBearingFields` is pinned in `profiles.test.ts`. That pi
 change-detector authored from the same reading of the schema as the profile itself, not an
 independent completeness proof; see the design amendment's *What enforces this*.
 
-Every kind's set, across all six leaves, is tabulated together in the design amendment's *Audit
+Every kind's set, across every leaf, is tabulated together in the design amendment's *Audit
 table* (§12).
