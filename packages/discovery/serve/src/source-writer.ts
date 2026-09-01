@@ -670,6 +670,7 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     // wedge the source. Once the intent is durable, finishing the commit is the only
     // safe act. The same reasoning exempts the operator's pre-C6 requester-source-v1
     // compatibility reader, which freezes a head the old requester already minted.
+
     // `Number.isFinite` above admits timestamps near the ECMAScript Date limit, whose
     // window end overflows the range and makes `toISOString()` throw a bare RangeError.
     // Such a head is refused by the bound below anyway; refuse it in this taxonomy.
