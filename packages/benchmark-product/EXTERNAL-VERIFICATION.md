@@ -124,8 +124,10 @@ height-indexed source derives no round from a seal at all, so on that branch the
 face makes no unpredictability claim either: the height was the operator's
 choice, and nothing in the bundle places it after the seal — it is the chain,
 not the bundle, that does that. A census run's binding is weaker again and is
-stated as such: it shows the run's ORDER was fixed by randomness postdating the
-seal, not that the population was — a census makes no population choice. A run
+stated as such: on a scheduled source it shows the run's ORDER was fixed by
+randomness postdating the seal, not that the population was — a census makes no
+population choice — and on a height-indexed source it concedes the postdating
+too, tying the order to a value the bundle cannot place after the seal. A run
 with no binding establishes neither, and its report face says so.
 
 One residue survives even a seal-derived round: the *source*. Nothing in the

@@ -22,7 +22,10 @@
  * sentence says it is the weaker binding.** Ordering-only binding shows the run's order was fixed by
  * randomness that postdates the seal; it does not show the population was, because with a census
  * there was no population choice to make. Letting the two modes share one confident sentence would
- * be the failure this feature exists to prevent.
+ * be the failure this feature exists to prevent. Issue #3425 subjects that sentence to the first
+ * rule as well: `censusOrderClause` asserts the postdating only under `proven-offline`, and concedes
+ * it under `attributive` in the register the sampled opening already uses, because the clauses on
+ * either side of it concede exactly that.
  */
 
 import {
@@ -100,6 +103,21 @@ function roundChoiceClause(binding: VerifiedRunBinding): string {
     + `nonetheless one of several the operator could have realized by waiting.`;
 }
 
+/**
+ * What the census binding shows about the ORDER (issue #3425). The postdating half keys on
+ * `postSeal` for the same reason the sampled opening does: on a height-indexed source nothing in
+ * the bundle places the value after the seal, so asserting that the order was fixed by randomness
+ * postdating it would be conceded by `postSealClause` two clauses earlier and again by
+ * `roundChoiceClause` two clauses later. The population half is unconditional -- a census makes no
+ * population choice on any basis.
+ */
+function censusOrderClause(binding: VerifiedRunBinding): string {
+  const order = binding.postSeal === "proven-offline"
+    ? "It shows the run's order was fixed by randomness postdating the seal"
+    : "It ties the run's order to a value this bundle cannot place after the seal";
+  return `${order}; it does not show the population was, because a census makes no population choice.`;
+}
+
 const RECOMPUTE_CLAUSE =
   `Any reader recomputes the derivation offline from the sealed digest, the published beacon value and the `
   + `item identities alone, by procedure ${BEACON_BINDING_PROCEDURE}; the verifier fails the run when its `
@@ -141,9 +159,8 @@ export function runBindingSentence(binding: VerifiedRunBinding | undefined): str
   return `This run evaluated its whole declared population of ${binding.poolSize} items, so no slate was selected `
     + `and none could be selected after the fact. The beacon binds execution ORDER only: the order was derived by `
     + `procedure ${BEACON_BINDING_PROCEDURE} from this run's sealed digest together with ${beaconName(binding)} — `
-    + `${postSealClause(binding)}. This is a weaker binding than a beacon-drawn slate. It shows the run's order was `
-    + `fixed by randomness postdating the seal; it does not show the population was, because a census makes no `
-    + `population choice. ${roundChoiceClause(binding)} ${RECOMPUTE_CLAUSE}`;
+    + `${postSealClause(binding)}. This is a weaker binding than a beacon-drawn slate. `
+    + `${censusOrderClause(binding)} ${roundChoiceClause(binding)} ${RECOMPUTE_CLAUSE}`;
 }
 
 /**
