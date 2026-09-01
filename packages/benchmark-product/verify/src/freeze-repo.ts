@@ -47,9 +47,10 @@ export const FREEZE_REPO_FORMAT = "colophon-freeze-repo/1" as const;
  * `qualification` — the bundle carries the admission/qualification graph, which IS the freeze
  * artifact set, so the export accepts it. `disclosure` — the bundle carries a sealed
  * disclosure-specification record. That record is claim-side: it states the variables that produced
- * the score, it carries no evidence role, and it therefore stays in the bundle a reader verifies
- * rather than entering this tree. It is recorded here only so the generated README can tell a
- * reader of such a bundle where to look for it.
+ * the score, and its `disclosure-specification` evidence role is deliberately not in
+ * `FREEZE_REPO_ROLES`, so it stays in the bundle a reader verifies rather than entering this tree.
+ * It is recorded here only so the generated README can tell a reader of such a bundle where to
+ * look for it.
  *
  * A table rather than an inline list of accepted versions (issue #3540). The guard used to name
  * v4 and v7 inline, so `benchmark-product-public-bundle/8` — v7's freeze graph exactly, plus one

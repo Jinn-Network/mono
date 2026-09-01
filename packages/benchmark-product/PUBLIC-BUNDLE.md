@@ -761,8 +761,9 @@ it means to this projection.
 
 A `/8` bundle's freeze artifacts are a `/7` bundle's exactly. The sealed
 disclosure-specification record that closure adds is claim-side --- it states the
-variables that produced the score, carries no evidence role, and stays in the bundle
-a reader verifies, where the `disclosure-specification` check reads it. The tree
+variables that produced the score, and its `disclosure-specification` evidence role
+is not a freeze-artifact role, so it stays in the bundle a reader verifies, where the
+`disclosure-specification` check reads it. The tree
 rendered from such a bundle says so in its generated `README.md`; a tree rendered
 from a closure that carries no such record is byte-identical to what it always was.
 

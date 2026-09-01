@@ -257,8 +257,9 @@ describe("freeze repository rendering", () => {
   });
 
   test("renders the disclosed closure: its freeze graph is the anchored qualification graph", () => {
-    // `/8` is `/7`'s member list plus a claim-side disclosure record that carries no evidence
-    // role, so the freeze artifacts are identical and only the recorded format differs.
+    // `/8` is `/7`'s member list plus a claim-side disclosure record whose evidence role is not a
+    // freeze-artifact role, so the freeze artifacts are identical and only the recorded format
+    // differs.
     const v7 = renderFreezeRepo(snapshotOf({ format: BUNDLE_V7_FORMAT }));
     const v8 = renderFreezeRepo(snapshotOf({ format: BUNDLE_V8_FORMAT }));
 
