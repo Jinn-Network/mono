@@ -42,8 +42,17 @@ describe("parseHeadTimestamp (§5.2 head timestamps, #3482)", () => {
     expect(Number.isNaN(Date.parse("2026-02-30T00:00:00Z"))).toBe(false);
   });
 
-  it("reads a leap second at a real boundary as the instant just past 23:59:59", () => {
-    expect(parseHeadTimestamp("2026-06-30T23:59:60Z")).toBe(parseHeadTimestamp("2026-06-30T23:59:59Z") + 1);
+  it("orders a leap second after every millisecond of the second it follows and before the next day", () => {
+    const leap = parseHeadTimestamp("2026-06-30T23:59:60Z");
+    expect(leap).toBeGreaterThan(parseHeadTimestamp("2026-06-30T23:59:59.998Z"));
+    expect(leap).toBeLessThan(parseHeadTimestamp("2026-07-01T00:00:00Z"));
+  });
+
+  it("collapses two leap-second spellings onto one value, so a strict `>` rule refuses rather than admits", () => {
+    expect(parseHeadTimestamp("2026-06-30T23:59:60.500Z")).toBe(parseHeadTimestamp("2026-06-30T23:59:60.000Z"));
+  });
+
+  it("refuses a second 60 that is not a real leap boundary", () => {
     expect(parseHeadTimestamp("2026-07-28T23:59:60Z")).toBeNaN();
   });
 

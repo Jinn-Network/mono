@@ -26,13 +26,21 @@ import { isCalendarStrictRfc3339 } from "@jinn-network/trust-core";
 // fraction digits, seconds at most 59 -- so no accepted head is ever handed
 // to an engine's implementation-defined fallback.
 //
-// One helper, not a regex per call site: the schema (`parseSourceHead`) and
-// every §5.2 comparison in this package and in `serve` go through it, so a
-// head object that reached a verifier without passing the schema still fails
-// closed instead of being read host-locally.
+// One helper, not a regex per call site: the schema (`parseSourceHead`), the
+// §5.2 window checks, the chain procedure's `issuedAt` monotonicity, and
+// `serve`'s head maintenance and durable writer all go through it, so a head
+// object that reached one of them without passing the schema still fails
+// closed instead of being read host-locally. A `FreshnessPolicy` is a
+// consumer-supplied port and is not covered; both verification procedures run
+// the window check, which is covered, before they consult it.
 
-/** Splits a validated RFC 3339 date-time into the parts `Date.parse` needs pinned. */
-const VALIDATED_SHAPE = /^(.{17})(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/u;
+/**
+ * Splits an already-validated RFC 3339 date-time into the parts `Date.parse`
+ * needs pinned. It restates the grammar rather than indexing into it, so a
+ * future edit to trust-core's own pattern cannot silently misalign the split;
+ * a string this fails to match is refused (`NaN`) rather than guessed at.
+ */
+const VALIDATED_SHAPE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:)(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/u;
 
 /**
  * The instant `value` names, in milliseconds since the epoch, or `NaN` when it
@@ -42,10 +50,20 @@ const VALIDATED_SHAPE = /^(.{17})(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/u;
  * `false`, so callers that already fail closed on an unreadable timestamp
  * (the §5.2 window checks do) keep doing so without a second code path.
  *
- * Sub-millisecond precision is truncated, and a leap second is reported as the
- * instant one millisecond after 23:59:59.000 -- both are the same collapse
- * trust-core's own instant comparison applies, and neither can reorder two
- * timestamps a millisecond-granular window bound could tell apart.
+ * Sub-millisecond precision is truncated, so two timestamps that differ only
+ * below the millisecond collapse to one value -- again the fail-closed side of
+ * a strict `>`, and finer than any bound §5.2 expresses. This is a narrower
+ * reading than trust-core's own `compareCalendarStrictRfc3339Instants`, which
+ * compares fractions exactly; nothing here needs that resolution, and only
+ * this module needs a number at all.
+ *
+ * A leap second has no millisecond
+ * representation at all -- 23:59:60 sits between 23:59:59.999 and the next
+ * day's 00:00:00.000 -- so it is reported as 23:59:59.999, the last instant
+ * that orders correctly against both neighbours. Two leap-second timestamps
+ * therefore collapse to one value, and a monotonicity rule comparing them
+ * with a strict `>` refuses rather than accepting the later one; that is the
+ * fail-closed side, and no `toISOString` producer emits a leap second.
  */
 export function parseHeadTimestamp(value: unknown): number {
   if (!isCalendarStrictRfc3339(value)) return Number.NaN;
@@ -53,9 +71,8 @@ export function parseHeadTimestamp(value: unknown): number {
   if (parts === null) return Number.NaN;
   const [, upToSeconds, second, fraction, offset] = parts;
   const isLeapSecond = second === "60";
-  const milliseconds = (fraction ?? "").slice(0, 3).padEnd(3, "0");
-  const parsed = Date.parse(`${upToSeconds}${isLeapSecond ? "59" : second}.${milliseconds}${offset}`);
-  return isLeapSecond ? parsed + 1 : parsed;
+  const milliseconds = isLeapSecond ? "999" : (fraction ?? "").slice(0, 3).padEnd(3, "0");
+  return Date.parse(`${upToSeconds}${isLeapSecond ? "59" : second}.${milliseconds}${offset}`);
 }
 
 /** Whether `value` is a calendar-strict, offset-bearing RFC 3339 date-time (§5.2). */

@@ -330,6 +330,25 @@ describe("durable Record Discovery source writer", () => {
     await expect(writer(harness).recover()).rejects.toThrow("signature is not valid");
   });
 
+  // The command's timestamp becomes the head's `issuedAt` verbatim, so a
+  // timestamp the head schema will refuse (#3482) has to be refused HERE:
+  // admitting it signs a head and persists the append intent before the
+  // schema sees it, and the claimed intent then replays the same failure on
+  // every recover, wedging the source permanently.
+  it.each([
+    ["offset-less", "2026-08-03T12:00:00"],
+    ["a day the calendar does not have", "2026-02-30T00:00:00Z"],
+  ])("refuses %s timestamp before anything is signed or persisted", async (_label, timestamp) => {
+    const harness = makeHarness();
+    const sourceWriter = writer(harness);
+
+    await expect(sourceWriter.append({ ...command(), timestamp })).rejects.toBeInstanceOf(SourceWriterIntegrityError);
+    expect(await harness.intents.read("any")).toBeUndefined();
+    expect(harness.signCount()).toBe(0);
+
+    await expect(sourceWriter.append(command())).resolves.toBeDefined();
+  });
+
   it("requires exact record bytes and source-local available withdrawal targets", async () => {
     const harness = makeHarness();
     const sourceWriter = writer(harness);

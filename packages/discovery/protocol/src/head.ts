@@ -22,7 +22,7 @@ const SequenceSchema = z.string().regex(/^[0-9]{16}$/);
 // same instant on every host (#3482); an offset-less string is host-LOCAL
 // time and is refused here rather than reinterpreted per consumer.
 const HeadTimestampSchema = z.string().refine(isHeadTimestamp, {
-  message: "must be an ISO-8601 date-time with an explicit UTC offset ('Z' or '+/-HH:MM')",
+  message: "must be a calendar-strict RFC 3339 date-time with an explicit offset ('Z' or '+/-HH:MM')",
 });
 
 const SourceHeadSchema = z.looseObject({
