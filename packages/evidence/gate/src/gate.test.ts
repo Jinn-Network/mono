@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 
 import { GateConfigurationError } from "./errors.js";
 import { createRetrievalGate, DEFAULT_GATE_HARD_LIMITS } from "./gate.js";
-import type { CreateRetrievalGateOptions, GateOutcome } from "./gate.js";
+import type { CreateRetrievalGateOptions, GateOutcome, GateRequest } from "./gate.js";
 import {
   createInMemoryChallengeStore,
   createInMemoryOfferSource,
@@ -339,6 +339,21 @@ describe("createRetrievalGate — construction", () => {
     ]);
     expect(gate.hardLimits).toEqual(DEFAULT_GATE_HARD_LIMITS);
   });
+
+  test("the published bounds are the bounds every request reads, and are frozen", async () => {
+    // One object, published and consulted, so an unfrozen one lets a later write change what
+    // the gate serves.
+    const { gate, offerDigest } = await priced({}, { hardLimits: { maxSubjectBytes: 1 } });
+    expect(Object.isFrozen(gate.hardLimits)).toBe(true);
+    expect(() => {
+      (gate.hardLimits as { maxSubjectBytes: number }).maxSubjectBytes = 1024 * 1024;
+    }).toThrow(TypeError);
+    expect(
+      refused(
+        await gate.request({ offer: offerDigest, payment: { rail: RAIL, reference: "tx-1" } }),
+      ).code,
+    ).toBe("subject-too-large");
+  });
 });
 
 describe("createRetrievalGate — resolving the offer", () => {
@@ -562,6 +577,167 @@ describe("createRetrievalGate — the paid path", () => {
     expect(outcome.detail).toContain("a different payment than the one the request named");
   });
 
+  test.each([
+    ["null", null],
+    ["a string", "tx-1"],
+    ["a number", 7],
+    ["an array", []],
+    ["an object with no rail", { reference: "tx-1" }],
+    ["an object whose rail is not a string", { rail: 7, reference: "tx-1" }],
+    ["an object whose reference is not a string", { rail: RAIL, reference: null }],
+  ])("a payment field that is %s is refused, never thrown on", async (_name, payment) => {
+    // `GateRequest` is a TypeScript type, not a validated brand, and `JSON.parse` returns
+    // `any` -- so `const request: GateRequest = JSON.parse(body)` needs no cast and a
+    // stranger reaches here with whatever they sent. A throw would be read by a transport as
+    // a resolver outage, because that is what this package promises a throw means, so five
+    // bytes from a stranger would flip the holder to 5xx and hide in their logs next to real
+    // outages.
+    const { gate, offerDigest } = await priced();
+    const outcome = refused(
+      await gate.request({ offer: offerDigest, payment } as unknown as GateRequest),
+    );
+    expect(outcome.code).toBe("payment-required");
+  });
+
+  test("a rail identifier the offer does not carry is quoted back, not interpolated raw", async () => {
+    // A detail string is what a human reads back in a dispute, and this one is
+    // caller-supplied. Quoted the same way the digest refusal quotes its own: the value is
+    // delimited, and the control characters an offer's sealed rail identifier could never
+    // contain are escaped rather than carried into whatever reads the detail.
+    const { gate, offerDigest } = await priced();
+    const hostile = 'https://evil.example/v1"\n  and this line is not the gate speaking';
+    const outcome = refused(
+      await gate.request({ offer: offerDigest, payment: { rail: hostile, reference: "tx-1" } }),
+    );
+    expect(outcome.code).toBe("rail-not-offered");
+    expect(outcome.detail).toContain(JSON.stringify(hostile));
+    expect(outcome.detail).not.toContain("\n  and this line");
+  });
+
+  test("a payment object read twice cannot answer differently between the two reads", async () => {
+    // The request's own fields get the same distrust the adapter's do: an in-process caller
+    // can hand the gate getters, and the rail the lookup matched must be the rail the
+    // refusal names.
+    const { gate, offerDigest } = await priced();
+    let reads = 0;
+    const shifty = {
+      get rail() {
+        reads += 1;
+        return reads === 1 ? RAIL : "https://rails.other.example/v1";
+      },
+      reference: "tx-1",
+    };
+    expect(
+      delivered(
+        await gate.request({ offer: offerDigest, payment: shifty } as unknown as GateRequest),
+      ).bytes,
+    ).toEqual(SUBJECT_BYTES);
+    expect(reads).toBe(1);
+  });
+
+  test("the payment the gate signs is the payment it checked, not a second read", async () => {
+    // `PaymentObservation.payment` is the adapter's own object, and an adapter is third-party
+    // code whose properties may be getters. The check that the observation names the payment
+    // the request named exists so the holder's signed sales history can never name a payment
+    // the buyer never presented -- which it cannot do if the checked read and the signed read
+    // are two different reads of a hostile getter.
+    const sealed = await sealTestOffer({
+      subject: SUBJECT,
+      rails: [{ rail: RAIL, to: TO, amount: "1200" }],
+    });
+    let referenceReads = 0;
+    const honestOnce: RailAdapter = {
+      description: {
+        rail: RAIL,
+        trustModel: "unassured",
+        settlement: "already-settled",
+        paymentsArePubliclyVisible: false,
+      },
+      observe: async (): Promise<PaymentObservation> => ({
+        status: "observed",
+        payment: {
+          get reference() {
+            referenceReads += 1;
+            return referenceReads === 1 ? "tx-1" : "tx-SOMEONE-ELSES-PAYMENT";
+          },
+          offerDigest: sealed.digest,
+          to: TO,
+          amount: "1200",
+        },
+      }),
+    };
+    const gate = createRetrievalGate({
+      offers: createInMemoryOfferSource([sealed.envelopeBytes]),
+      subjects: createInMemorySubjectSource([SUBJECT_BYTES]),
+      rails: [honestOnce],
+      clock: fixedClock,
+      deliveryStatements: { signer: createFixtureSigner() },
+    });
+    const outcome = delivered(
+      await gate.request({ offer: sealed.digest, payment: { rail: RAIL, reference: "tx-1" } }),
+    );
+    expect(referenceReads).toBe(1);
+    expect(outcome.statement?.statement.payment).toEqual({ rail: RAIL, reference: "tx-1" });
+  });
+
+  test("every member of an observation is read exactly once", async () => {
+    // The shape-agnostic form of the guard above, for the same reason the adapter has one: a
+    // getter can only be watched where someone thought to put one, and counting through a
+    // Proxy needs no foresight about which member the next mistake will be on.
+    const sealed = await sealTestOffer({
+      subject: SUBJECT,
+      rails: [{ rail: RAIL, to: TO, amount: "1200" }],
+    });
+    const reads: Record<string, number> = {};
+    const watched: RailAdapter = {
+      description: {
+        rail: RAIL,
+        trustModel: "unassured",
+        settlement: "already-settled",
+        paymentsArePubliclyVisible: false,
+      },
+      observe: async (): Promise<PaymentObservation> => ({
+        status: "observed",
+        payment: new Proxy(
+          {
+            reference: "tx-1",
+            offerDigest: sealed.digest,
+            to: TO,
+            amount: "1200",
+            payer: "payer-a",
+            observedAt: "2026-08-31T11:59:00.000Z",
+          },
+          {
+            get(held, key, receiver) {
+              if (typeof key === "string") reads[key] = (reads[key] ?? 0) + 1;
+              return Reflect.get(held, key, receiver);
+            },
+          },
+        ),
+      }),
+    };
+    const gate = createRetrievalGate({
+      offers: createInMemoryOfferSource([sealed.envelopeBytes]),
+      subjects: createInMemorySubjectSource([SUBJECT_BYTES]),
+      rails: [watched],
+      clock: fixedClock,
+      deliveryStatements: { signer: createFixtureSigner() },
+    });
+
+    delivered(
+      await gate.request({ offer: sealed.digest, payment: { rail: RAIL, reference: "tx-1" } }),
+    );
+
+    expect(reads).toEqual({
+      reference: 1,
+      offerDigest: 1,
+      to: 1,
+      amount: 1,
+      payer: 1,
+      observedAt: 1,
+    });
+  });
+
   test("an untidy but integer-equal amount is honored", async () => {
     const { gate, offerDigest, rail } = await priced();
     rail.record({ reference: "tx-padded", offerDigest, to: TO, amount: "0001200" });
@@ -734,6 +910,129 @@ describe("createRetrievalGate — payer-proof pickup", () => {
     expect(outcome.detail).toContain("a different pickup");
   });
 
+  test.each([
+    ["null", null],
+    ["a string", "the-proof"],
+    ["an object with no proof", { challengeId: "c1" }],
+    ["an object whose challengeId is not a string", { challengeId: 7, proof: "anything" }],
+    ["an object whose proof is not a string", { challengeId: "c1", proof: null }],
+  ])(
+    "a payerProof field that is %s is answered with a fresh question, never thrown on",
+    async (_name, payerProof) => {
+      // Same reachability as a malformed payment: nothing casts on the way in. A proof the
+      // gate cannot read is not an answer, so it gets the answer no answer gets -- and the
+      // holder's own challenge store, which carries no promise about what it is handed,
+      // never sees the value.
+      const asked: unknown[] = [];
+      const { gate, offerDigest } = await priced(
+        {
+          paymentsArePubliclyVisible: true,
+          payerSecrets: { "payer-a": "only-the-payer-knows-this" },
+        },
+        {
+          challenges: {
+            issue: async (input) => ({
+              id: "c1",
+              nonce: "n1",
+              offerDigest: input.offerDigest,
+              rail: input.rail,
+              paymentReference: input.paymentReference,
+              expiresAt: "2026-08-31T13:00:00.000Z",
+            }),
+            consume: async (challengeId) => {
+              asked.push(challengeId);
+              return undefined;
+            },
+          },
+        },
+      );
+      const outcome = await gate.request({
+        offer: offerDigest,
+        payment: { rail: RAIL, reference: "tx-1" },
+        payerProof,
+      } as unknown as GateRequest);
+      expect(outcome.status).toBe("challenge");
+      expect(asked).toEqual([]);
+    },
+  );
+
+  test("a challenge that expired on a leap-second clock is still expired", async () => {
+    // `isCalendarStrictRfc3339` accepts a real leap second and `Date.parse` answers `NaN`
+    // for one, and every comparison against `NaN` is false -- so a host-parser expiry check
+    // skipped its own branch entirely on the one instant the gate had just called valid, and
+    // honored a long-dead challenge. A belt added so the store is not the only thing
+    // deciding an answer is live must not fail in the open direction.
+    const leapSecond: Clock = { now: () => "2016-12-31T23:59:60Z" };
+    const stale = {
+      id: "c1",
+      nonce: "n1",
+      rail: RAIL,
+      paymentReference: "tx-1",
+      // Sixteen years before the clock above.
+      expiresAt: "2000-01-01T00:00:00.000Z",
+    };
+    const { gate, offerDigest } = await priced(
+      {
+        paymentsArePubliclyVisible: true,
+        payerSecrets: { "payer-a": "only-the-payer-knows-this" },
+      },
+      {
+        clock: leapSecond,
+        challenges: {
+          issue: async (input) => ({ ...stale, offerDigest: input.offerDigest }),
+          consume: async () => ({ ...stale, offerDigest: offerDigest }),
+        },
+      },
+    );
+    const outcome = refused(
+      await gate.request({
+        offer: offerDigest,
+        payment: { rail: RAIL, reference: "tx-1" },
+        payerProof: { challengeId: "c1", proof: "anything" },
+      }),
+    );
+    expect(outcome.code).toBe("challenge-unknown");
+    expect(outcome.detail).toContain("expired");
+  });
+
+  test("an expiry neither side can parse is expired, not live", async () => {
+    const { gate, offerDigest } = await priced(
+      {
+        paymentsArePubliclyVisible: true,
+        payerSecrets: { "payer-a": "only-the-payer-knows-this" },
+      },
+      {
+        challenges: {
+          issue: async (input) => ({
+            id: "c1",
+            nonce: "n1",
+            offerDigest: input.offerDigest,
+            rail: input.rail,
+            paymentReference: input.paymentReference,
+            expiresAt: "whenever",
+          }),
+          consume: async () => ({
+            id: "c1",
+            nonce: "n1",
+            offerDigest: offerDigest,
+            rail: RAIL,
+            paymentReference: "tx-1",
+            expiresAt: "whenever",
+          }),
+        },
+      },
+    );
+    const outcome = refused(
+      await gate.request({
+        offer: offerDigest,
+        payment: { rail: RAIL, reference: "tx-1" },
+        payerProof: { challengeId: "c1", proof: "anything" },
+      }),
+    );
+    expect(outcome.code).toBe("challenge-unknown");
+    expect(outcome.detail).toContain("expired");
+  });
+
   test("an expired challenge is refused even by a store that hands it back", async () => {
     // The gate re-checks the store's binding, and its expiry belongs to the same distrust:
     // `expiresAt` is on the value the store returned, so a store that forgets to age its
@@ -825,8 +1124,15 @@ describe("createRetrievalGate — the delivery statement flag", () => {
     const outcome = delivered(await gate.request({ offer: offerDigest }));
     expect(outcome.bytes).toEqual(SUBJECT_BYTES);
     expect(outcome.statement).toBeUndefined();
+    // The buyer is told a statement did not come with their bytes and nothing else. A
+    // signer is the holder's own key material, and a KMS refusal naming a key ARN and an
+    // internal hostname must not reach an unauthenticated stranger through this field.
     expect(outcome.warnings).toEqual([
-      { code: "statement-not-emitted", detail: "the signing key is offline" },
+      {
+        code: "statement-not-emitted",
+        detail: "this gate could not seal a delivery statement for this delivery",
+      },
     ]);
+    expect(JSON.stringify(outcome.warnings)).not.toContain("the signing key is offline");
   });
 });

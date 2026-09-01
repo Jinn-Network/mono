@@ -253,13 +253,32 @@ export function assertConformingRailAdapter(adapter: RailAdapter): RailSelfDescr
   // itself is: they belong to third-party data and a getter can answer differently twice. An
   // `assuredBy` answering a party name to a presence test and `undefined` to the read would
   // otherwise put an `assuredBy` key on an `unassured` rail, past the rule that forbids one.
-  const declared = adapter.description;
+  //
+  // Widened on purpose: `description` is an ordinary property of third-party code, so the
+  // declared type is a claim rather than a fact, and reading a member off `null` would leave
+  // this function as a TypeError against the same promise every rule below keeps — that a
+  // construction defect is a GateConfigurationError. A getter that throws is caught for the
+  // same reason.
+  let declared: RailSelfDescription | null | undefined;
+  try {
+    declared = adapter.description as RailSelfDescription | null | undefined;
+  } catch (cause) {
+    fail(
+      "a rail adapter's description could not be read: "
+        + (cause instanceof Error ? cause.message : String(cause)),
+    );
+  }
+  if (typeof declared !== "object" || declared === null) {
+    fail("a rail adapter's description must be an object");
+  }
   const assuredBy = declared.assuredBy;
   if (assuredBy !== undefined && typeof assuredBy !== "string") {
-    // `null` and every other non-string would otherwise reach `.trim()` below as a
-    // TypeError, and this package promises `GateConfigurationError` for every construction
-    // defect. The rail identifier is read from the same third-party object, so the message
-    // does not quote it.
+    // `0`, `{}`, `[]` and `true` would otherwise reach `.trim()` below as a TypeError, and
+    // this package promises `GateConfigurationError` for every construction defect. (`null`
+    // would not: `null?.trim()` short-circuits and falls through to the `unassured` rule,
+    // which fails loudly anyway. It is refused here because an `assuredBy` present as `null`
+    // is a defect wherever it lands.) The rail identifier is read from the same third-party
+    // object, so the message does not quote it.
     fail("a rail adapter's assuredBy must be a string when it is present");
   }
   const description: RailSelfDescription = Object.freeze({

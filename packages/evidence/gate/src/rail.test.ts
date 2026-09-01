@@ -127,9 +127,33 @@ describe("assertConformingRailAdapter", () => {
       )).toThrow(/nothing left to take/u);
   });
 
+  test("a description that is not an object is a configuration error, not a TypeError", () => {
+    // Same promise, one level up: `description` is an ordinary property of third-party code,
+    // so reading `assuredBy` off `null` would leave here as a TypeError instead.
+    for (const description of [null, undefined, 0, "a rail", true]) {
+      expect(() =>
+        assertConformingRailAdapter({
+          description,
+          observe: observeNothing,
+        } as unknown as RailAdapter)).toThrow(GateConfigurationError);
+    }
+  });
+
+  test("a description getter that throws is a configuration error too", () => {
+    expect(() =>
+      assertConformingRailAdapter({
+        get description(): RailSelfDescription {
+          throw new Error("the rail's own config is unreadable");
+        },
+        observe: observeNothing,
+      })).toThrow(GateConfigurationError);
+  });
+
   test("a non-string assuredBy is a configuration error, not a TypeError", () => {
     // This package promises `GateConfigurationError` for every construction defect, and
-    // `null` would otherwise reach `.trim()` and escape as a TypeError instead.
+    // `0`, `{}`, `[]` and `true` would otherwise reach `.trim()` and escape as a TypeError
+    // instead. `null` short-circuits through `?.` and is refused here anyway, because an
+    // `assuredBy` present as `null` is a defect wherever it lands.
     for (const assuredBy of [null, 0, {}, [], true]) {
       expect(() =>
         assertConformingRailAdapter(

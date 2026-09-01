@@ -314,6 +314,37 @@ function conformanceChallenge(
 }
 
 /**
+ * The other challenges a proof might have been won against, each differing from the one the
+ * gate asked in exactly one field.
+ *
+ * `nonce` is the freshness of the question and `paymentReference` is the pickup it is about.
+ * A proof that survives either substitution is a proof an onlooker can lift off the wire and
+ * present as their own, because the gate hands the adapter whatever challenge it just issued
+ * and takes the adapter's word for whether the answer belongs to it.
+ */
+const DIFFERING_CHALLENGES: readonly {
+  readonly name: string;
+  readonly from: (asked: GateChallenge) => GateChallenge;
+}[] = Object.freeze([
+  {
+    name: "a different challenge nonce",
+    from: (asked) => ({
+      ...asked,
+      id: "conformance-challenge-other",
+      nonce: "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+    }),
+  },
+  {
+    name: "a different payment reference",
+    from: (asked) => ({
+      ...asked,
+      id: "conformance-challenge-other",
+      paymentReference: `${asked.paymentReference}-someone-elses`,
+    }),
+  },
+]);
+
+/**
  * The contract every rail adapter owes the gate, as a runnable driver.
  *
  * A rail author runs this against their adapter to prove it honors the three-step lifecycle
@@ -322,11 +353,16 @@ function conformanceChallenge(
  * payment truthfully rather than approximately, that an unknown reference is `not-found`
  * rather than an invented payment, that both money-moving acts — `deliver` and `claim` — are
  * idempotent for one payment, and — where payments are public — that a wrong answer is
- * refused.
+ * refused and that an answer won for one challenge does not verify against another.
  *
  * It deliberately does not assert what a *correct* proof looks like. That is the rail's own
  * cryptography, and a driver that pinned it would be pinning one rail's scheme onto all of
- * them.
+ * them. "A proof for one challenge must not verify against another" is a different kind of
+ * claim: it names no scheme and pins no cryptography, and it is the one property the gate's
+ * whole payer-proof leg rests on. The gate's own one-shot `consume` does not stand behind
+ * it — an onlooker who sniffs a proof off the wire does not replay the challenge, they ask
+ * for a fresh one and replay the answer — so the adapter is the only thing that can, and
+ * this driver is the only thing standing behind the adapter.
  */
 export function describeRailAdapterConformance(testCase: RailAdapterConformanceCase): void {
   describe(`rail adapter conformance: ${testCase.name}`, () => {
@@ -478,5 +514,41 @@ export function describeRailAdapterConformance(testCase: RailAdapterConformanceC
       );
       expect(outcome.status).toBe("proven");
     });
+
+    for (const differing of DIFFERING_CHALLENGES) {
+      test(`a public rail refuses a proof produced for ${differing.name}`, async () => {
+        const subject = await testCase.create();
+        if (!subject.adapter.description.paymentsArePubliclyVisible) return;
+        if (subject.proofFor === undefined) {
+          throw new Error("a publicly visible rail's conformance case must supply proofFor");
+        }
+        const observation = await subject.adapter.observe(
+          {
+            offerDigest: subject.offerDigest,
+            entry: subject.entry,
+            reference: subject.reference,
+          },
+          NO_SIGNAL,
+        );
+        if (observation.status !== "observed") {
+          throw new Error("the subject payment must observe");
+        }
+        // The proof is won against one challenge and presented against another. An adapter
+        // that verifies a static signature over the payer alone, or one that covers the
+        // nonce but not the pickup, answers `proven` here — and that adapter serves every
+        // onlooker who has seen one payer's answer go past.
+        const asked = conformanceChallenge(subject, observation.payment.reference);
+        const answered = differing.from(asked);
+        const outcome = await subject.adapter.verifyPayerControl!(
+          {
+            payment: observation.payment,
+            challenge: asked,
+            proof: await subject.proofFor(observation.payment, answered),
+          },
+          NO_SIGNAL,
+        );
+        expect(outcome.status).toBe("refused");
+      });
+    }
   });
 }

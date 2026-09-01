@@ -63,6 +63,13 @@ export interface IssueChallengeInput {
  */
 export interface ChallengeStore {
   issue(input: IssueChallengeInput, options: GateOperationOptions): Promise<GateChallenge>;
+  /**
+   * `challengeId` is always a string, and it is the string the requester supplied: the gate
+   * checks the shape of the caller's proof before it calls this, but it has no way to know
+   * which of its own challenges the requester meant, so a store must treat it as untrusted
+   * input of its own. The inverse of `OfferSource.read`'s promise — that one is safe to
+   * interpolate, this one is not.
+   */
   consume(
     challengeId: string,
     now: string,
