@@ -1181,8 +1181,8 @@ The kit precedes all real implementations (the CSI discipline, again):
   (must reject); stale heads; rolled-back heads; `issuedAt` regressions; a head issued
   further ahead of the verifier's clock than one profile window (must reject
   `head-issued-ahead`, §5.2 rule 3) and a head whose window is inverted (must reject
-  `refresh-by-ceiling`, §5.2 rule 1); a competing head
-  signed by a rotated-out key (must reject); entries with bad facts cards; facts requiring
+  `refresh-by-ceiling`, §5.2 rule 1); a competing head signed by a rotated-out key (must
+  reject); entries with bad facts cards; facts requiring
   unavailable referenced bytes (must yield `indeterminate` and fail closed at decision
   grade); genesis edge cases (pinned first sequence, `previous: null` uniqueness);
   withdrawal of foreign announcements, withdrawal-of-withdrawal, and missing reason codes
