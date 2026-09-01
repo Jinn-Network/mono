@@ -88,11 +88,14 @@ export interface CreateCorpusMirrorOptions {
  * The operator's equivalent (`sameHead`, `operator/src/daemon/native-discovery.ts`)
  * compares `refreshBy` and the signature bytes too, because it persists a whole
  * signed high-water record. `HighWaterMark` carries only `sequence`/`entry`/
- * `issuedAt`, so this predicate cannot. The residue is narrow: a head with the
- * same position and `issuedAt` but a stretched `refreshBy` is a §5.2-violating
- * re-sign that would be revalidated as fresh -- and minting one needs the
- * source's own currently-valid signing key, which already buys the ability to
- * re-sign correctly. It is not a door an outsider can reach.
+ * `issuedAt`, so this predicate cannot. What that leaves is now bounded rather
+ * than merely narrow: a head with the same position and `issuedAt` but a
+ * stretched `refreshBy` still reaches revalidation, but `verifySourceHead`
+ * refuses it `refresh-by-ceiling` once the stretch passes the published-source
+ * profile's bound (#3467, §5.2) -- and it does so whether the stretch arrived
+ * by re-signing or was baked into the original head at adoption, which is the
+ * shape this comment previously framed as needing a re-sign. Inside the bound
+ * the divergence is a scheduling difference, not a trust one.
  *
  * The other divergence is a gap, not a residue: a head re-signed at the SAME
  * position with a HIGHER `issuedAt` -- which `serve`'s `maintainHead` produces

@@ -7,6 +7,7 @@ import { dssePreAuthEncoding } from "../dsse.js";
 import { parseWireDsseEnvelope } from "../dsse.js";
 import { sealJson } from "../sealing.js";
 import { checkGlobalChainRules, digestEntries, walkLinkage, type DigestedEntry } from "./chain-rules.js";
+import { MAX_REFRESH_BY_AHEAD_MS, refreshByWithinCeiling } from "./refresh-bound.js";
 import type { FreshnessPolicy, HighWaterMark, HighWaterMarkStore, KeyResolver, ResolvedKey, SignatureVerifier } from "./ports.js";
 import type { SourceChainOutcome } from "./outcomes.js";
 
@@ -17,7 +18,8 @@ import type { SourceChainOutcome } from "./outcomes.js";
 //      `now` (a rotated-out/expired/revoked signer is unauthorized-signer,
 //      regardless of any embedded timestamp -- entries, by contrast, are
 //      accepted through the head's chain commitment, §10.1);
-//   3. verify `refreshBy` freshness and `issuedAt` monotonicity;
+//   3. verify the `refreshBy` ceiling, `refreshBy` freshness, and `issuedAt`
+//      monotonicity;
 //   4. verify linkage from the head's entry back to the high-water mark (or
 //      genesis on first adoption);
 //   5. verify entry signatures as corroboration (a key that held the scope
@@ -69,10 +71,18 @@ export async function verifySourceChain(opts: {
     hwm: HighWaterMarkStore;
     now: Date;
     firstAdoption: boolean;
+    /**
+     * The verifying profile's `refreshBy` ceiling (§5.2), in milliseconds
+     * ahead of the head's own `issuedAt`. Defaults to the published-source
+     * profile's bound; a deployment profile that pins a tighter one (the
+     * marketplace profile does) passes it here. A profile may only tighten.
+     */
+    maxRefreshByAheadMs?: number;
   };
 }): Promise<SourceChainOutcome> {
   const { head, headSignature } = opts;
   const { keys, sigs, fresh, hwm, now, firstAdoption } = opts.ports;
+  const maxRefreshByAheadMs = opts.ports.maxRefreshByAheadMs ?? MAX_REFRESH_BY_AHEAD_MS;
   const source = splitOrigin(head.origin);
 
   // Step 1 + 2: resolve working keys under the discovery scope, verify the
@@ -82,7 +92,15 @@ export async function verifySourceChain(opts: {
     return { status: "unauthorized-signer" };
   }
 
-  // Step 3: refreshBy freshness.
+  // Step 3: the profile's `refreshBy` ceiling, checked BEFORE freshness --
+  // a head that sets `refreshBy` beyond the bound is always fresh, so asking
+  // the clock first can never catch it (§5.2, §14.1). Reported as a ceiling
+  // failure alongside the entry ceilings the linkage walk enforces.
+  if (!refreshByWithinCeiling(head, maxRefreshByAheadMs)) {
+    return { status: "broken-chain", at: "refresh-by-ceiling" };
+  }
+
+  // Step 3 (continued): refreshBy freshness.
   if (!fresh.isFresh(head.refreshBy, now)) {
     return { status: "stale" };
   }

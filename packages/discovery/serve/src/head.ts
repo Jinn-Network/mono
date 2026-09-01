@@ -1,5 +1,13 @@
 import type { SourceHead, SourceIdentity } from "@jinn-network/record-discovery-protocol";
-import { MEDIA_HEAD, dssePreAuthEncoding, formatOrigin, headPath, sealJson } from "@jinn-network/record-discovery-protocol";
+import {
+  MAX_REFRESH_BY_AHEAD_MS,
+  MEDIA_HEAD,
+  dssePreAuthEncoding,
+  formatOrigin,
+  headPath,
+  refreshByWithinCeiling,
+  sealJson,
+} from "@jinn-network/record-discovery-protocol";
 
 import type { BlobStore, Clock, DsseSigner } from "./ports.js";
 
@@ -26,8 +34,11 @@ export interface DsseEnvelope {
   signatures: DsseEnvelopeSignature[];
 }
 
-/** §5.2's published-source-profile default bound: `refreshBy` at most 24h ahead of `issuedAt`. */
-export const MAX_REFRESH_BY_AHEAD_MS = 24 * 60 * 60 * 1000;
+// The §5.2 ceiling itself lives in `protocol` (`verify/refresh-bound.ts`), so
+// the two named verification procedures and this writing side compare against
+// one definition rather than two. Re-exported here because it is part of
+// `serve`'s published surface.
+export { MAX_REFRESH_BY_AHEAD_MS };
 
 function encodeBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -101,10 +112,13 @@ export async function maintainHead(
   return envelope === undefined ? { head } : { head, envelope };
 }
 
-/** Whether `head.refreshBy` is at most `maxAheadHours` ahead of `head.issuedAt` (§5.2). */
+/**
+ * Whether `head.refreshBy` is at most `maxAheadHours` ahead of `head.issuedAt`
+ * (§5.2). The hours-shaped conformance-kit signature over the protocol's own
+ * millisecond-shaped comparison -- one ceiling, two callers' units.
+ */
 export function refreshByWithinBound(head: { issuedAt: string; refreshBy: string }, maxAheadHours: number): boolean {
-  const aheadMs = new Date(head.refreshBy).getTime() - new Date(head.issuedAt).getTime();
-  return aheadMs <= maxAheadHours * 60 * 60 * 1000;
+  return refreshByWithinCeiling(head, maxAheadHours * 60 * 60 * 1000);
 }
 
 /**

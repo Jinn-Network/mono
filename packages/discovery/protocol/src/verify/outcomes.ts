@@ -21,6 +21,7 @@ export type SourceChainOutcome =
 export type SourceHeadOutcome =
   | { status: "ok" }
   | { status: "stale" } // refreshBy expired
+  | { status: "refresh-by-ceiling" } // refreshBy runs further ahead of issuedAt than the profile allows (§5.2)
   | { status: "unauthorized-signer" } // no signature by a key valid at `now`
   | { status: "head-origin-mismatch" } // head names a source other than the one followed
   | { status: "head-payload-mismatch" } // envelope does not carry these head bytes
