@@ -668,7 +668,8 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     // already-signed bytes, and `recover()` runs at the top of every append -- so
     // re-bounding a head that was in-window when minted would not delay it, it would
     // wedge the source. Once the intent is durable, finishing the commit is the only
-    // safe act.
+    // safe act. The same reasoning exempts the operator's pre-C6 requester-source-v1
+    // compatibility reader, which freezes a head the old requester already minted.
     // `Number.isFinite` above admits timestamps near the ECMAScript Date limit, whose
     // window end overflows the range and makes `toISOString()` throw a bare RangeError.
     // Such a head is refused by the bound below anyway; refuse it in this taxonomy.
@@ -682,16 +683,17 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     const windowFailure = checkRefreshWindow({ issuedAt: command.timestamp, refreshBy }, now);
     if (windowFailure === "head-issued-ahead") {
       throw new SourceWriterIntegrityError(
-        `announcement timestamp is further ahead of this source's clock than the freshness window allows`
+        "announcement timestamp is further ahead of this source's clock than the freshness window allows"
         + ` (issuedAt ${command.timestamp}, now ${now.toISOString()},`
-        + ` ceiling ${MAX_REFRESH_BY_AHEAD_MS}ms); check this host's clock`,
+        + ` ceiling ${MAX_REFRESH_BY_AHEAD_MS / 3_600_000}h); check this host's clock`,
       );
     }
     // Reachable: a sub-millisecond `refreshWithinMs` truncates to an empty window, which
     // §5.2 rule 1 refuses. Before this check such a writer minted it silently.
     if (windowFailure !== undefined) {
       throw new SourceWriterIntegrityError(
-        `announcement timestamp yields a head freshness window no consumer accepts (${windowFailure})`,
+        "announcement timestamp yields a head freshness window no consumer accepts"
+        + ` -- it is empty or wider than the ceiling (${windowFailure})`,
       );
     }
 

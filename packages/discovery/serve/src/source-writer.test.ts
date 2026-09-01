@@ -168,6 +168,9 @@ function clockAt(iso: string): Clock {
   return { now: () => new Date(iso) };
 }
 
+/** Pinned so the suite does not depend on wall clock now that appends are clock-bounded. */
+const DEFAULT_TEST_CLOCK = clockAt("2026-08-03T12:00:00.000Z");
+
 function writer(
   harness: ReturnType<typeof makeHarness>,
   faultBoundary?: SourceWriterFaultBoundary,
@@ -180,7 +183,7 @@ function writer(
     blobs: harness.blobs,
     states: harness.states,
     intents: harness.intents,
-    ...(clock === undefined ? {} : { clock }),
+    clock: clock ?? DEFAULT_TEST_CLOCK,
     ...(faultBoundary === undefined ? {} : {
       faults: {
         async at(boundary: SourceWriterFaultBoundary) {
