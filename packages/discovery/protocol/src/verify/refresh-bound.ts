@@ -77,8 +77,15 @@ export function refreshByWithinCeiling(
  *
  * `maxAheadMs` is clamped against the published-source ceiling: a deployment
  * profile may only tighten the bound, never widen it, and this is where that
- * sentence is enforced rather than merely documented. A non-finite or
- * negative value fails closed on its own (every comparison below goes false).
+ * sentence is enforced rather than merely documented. `Infinity` therefore
+ * clamps to the published ceiling rather than widening; `NaN` and negatives
+ * fail closed on their own, because every comparison below goes false.
+ *
+ * Note that rule 3 reuses `ceilingMs` as the clock-skew allowance, so a
+ * profile that pins a very tight ceiling pins an equally tight skew tolerance
+ * for every head it verifies. That coupling is intentional -- the allowance
+ * should shrink with the window it protects, and one parameter is better than
+ * two -- but a profile author choosing a ceiling is choosing both.
  */
 export function checkRefreshWindow(
   head: { issuedAt: string; refreshBy: string },
