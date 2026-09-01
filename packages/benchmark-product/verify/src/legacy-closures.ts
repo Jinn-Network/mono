@@ -226,11 +226,16 @@ export const LEGACY_CLOSURES: { readonly [F in LegacyBundleFormat]: LegacyClosur
  * lookup untyped: a missing cell must be the verifier's own refusal rather than a bare property
  * access on `undefined`, and it must never fall back to some other closure's answer — printing one
  * closure's check denominator over another closure's bytes is exactly the accounting P4 forbids.
+ *
+ * The membership test is `Object.hasOwn`, not a truthiness or `undefined` check on the looked-up
+ * value: `LEGACY_CLOSURES` is an ordinary object literal, so `"constructor"`, `"toString"`, and
+ * `"__proto__"` all resolve to truthy inherited members. An untyped caller passing one of those
+ * would slip past a value check and reach `.checks.length` on a non-cell — a bare `TypeError`
+ * escaping the typed error envelope, which is the outcome this guard exists to prevent.
  */
 export function legacyClosure(format: LegacyBundleFormat): LegacyClosure {
-  const closure = LEGACY_CLOSURES[format];
-  if (closure === undefined) {
+  if (!Object.hasOwn(LEGACY_CLOSURES, format)) {
     refuse("record-integrity", "bundle.manifest.format", `unknown legacy bundle format "${format}"`);
   }
-  return closure;
+  return LEGACY_CLOSURES[format];
 }

@@ -137,10 +137,20 @@ describe("the four closure cells", () => {
 
   test("a format outside the frozen four is refused, never answered from another cell", () => {
     // Unreachable from TypeScript; `summarizeVerificationOutcome` is published, so a JavaScript
-    // caller reaches this lookup untyped.
-    expect(() => legacyClosure("benchmark-product-public-bundle/8" as never)).toThrow(
-      /unknown legacy bundle format/u,
-    );
+    // caller reaches this lookup untyped. `Object.prototype`'s members are in that untyped
+    // reachable set too: a value check would let `"constructor"` through as a truthy non-cell and
+    // `summarizeVerificationOutcome` would throw a bare TypeError instead of the typed refusal.
+    for (const format of [
+      "benchmark-product-public-bundle/8",
+      "benchmark-product-public-bundle/5",
+      "constructor",
+      "toString",
+      "valueOf",
+      "__proto__",
+      "",
+    ]) {
+      expect(() => legacyClosure(format as never), format).toThrow(/unknown legacy bundle format/u);
+    }
   });
 
   test("two independent axes: v6 is v2 plus anchors, v7 is v4 plus anchors", () => {

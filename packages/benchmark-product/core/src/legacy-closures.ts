@@ -6,10 +6,12 @@
  * the claim-package schema ids, the pinned reader instructions, and the check arrays the claim
  * builder stamps — is read from here and nowhere else. The verifier keeps the mirror of this file
  * (`@colophon-claims/verify`'s own `legacy-closures`) forever; this one exists so the C5 cutover to
- * the composed `/8` generation is the deletion of one import surface rather than a hunt through the
+ * the composed `/8` generation retargets one import surface rather than hunting through the
  * producer for hand-allocated numbers
  * (`docs/superpowers/specs/2026-08-29-bundle-capability-composition-design.md` §10 step 1, §13
- * packet C2).
+ * packet C2). Retargets, not deletes: the check arrays and pinned commands below are re-exported
+ * from the verifier rather than copied, so cutover moves that edge to the registry instead of
+ * removing it. A fifth copy of a frozen string is the worse trade.
  *
  * **Closed.** Existing bundles never change: no re-materialization, no re-signing, no digest churn.
  * Nothing in here is edited again, and no fifth cell is added — a new combination is declared by a

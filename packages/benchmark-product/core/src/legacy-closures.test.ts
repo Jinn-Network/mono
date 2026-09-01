@@ -6,7 +6,17 @@ import * as producer from "./legacy-closures.js";
  * The producer names the legacy closures in its own module because it must keep naming them until
  * the `/8` cutover, and the verifier keeps its copy forever. Two copies of a frozen fact drift
  * silently: a producer that stamped a different pinned command, member list, or claim-package id
- * than the verifier guards would emit bundles no released reader accepts. This is the drift guard.
+ * than the verifier guards would emit bundles no released reader accepts.
+ *
+ * The two sides are guarded two different ways, and this block is only the first. The format
+ * literals are genuinely duplicated declarations, so they are compared across the package
+ * boundary. The check arrays and pinned commands are re-exported from the verifier, so asserting
+ * equality on them proves only that they are still re-exports and not copies — which is the whole
+ * point of that half of the module, and what fails if someone inlines one. The claim-package ids
+ * and the member lists are the ones with no cross-check available: the verifier does not publish
+ * them through its entry point, so each side pins the same literal in its own test file
+ * (`frozen producer values` below, and the verifier's own `legacy-closures.test.ts`) and a
+ * one-sided edit fails that side's pin.
  */
 describe("the producer's legacy closures match the verifier's", () => {
   test("format literals", () => {
