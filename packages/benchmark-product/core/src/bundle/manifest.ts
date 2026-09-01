@@ -26,6 +26,14 @@ import {
  * frozen classic closures, so it keeps its constant here.
  */
 export const BUNDLE_V3_FORMAT = "benchmark-product-public-bundle/3" as const;
+/**
+ * The disclosed anchored binary-qualification closure (issue #2839). A bundle emits this version
+ * exactly when its run is anchored, projects a binary qualification, AND has a sealed
+ * disclosure-specification declaration. Every other bundle keeps the version it already had, byte
+ * for byte. This constant is a SECOND, independent copy of the verifier's own -- both must carry it
+ * or the producer cannot emit what the verifier accepts.
+ */
+export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -43,6 +51,7 @@ export const BundleManifestSchema = z.object({
     z.literal(BUNDLE_V4_FORMAT),
     z.literal(BUNDLE_V6_FORMAT),
     z.literal(BUNDLE_V7_FORMAT),
+    z.literal(BUNDLE_V8_FORMAT),
   ]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
@@ -72,7 +81,8 @@ export interface BuildBundleManifestOptions {
     | typeof BUNDLE_V3_FORMAT
     | typeof BUNDLE_V4_FORMAT
     | typeof BUNDLE_V6_FORMAT
-    | typeof BUNDLE_V7_FORMAT;
+    | typeof BUNDLE_V7_FORMAT
+    | typeof BUNDLE_V8_FORMAT;
 }
 
 function sha256(bytes: Uint8Array): string {

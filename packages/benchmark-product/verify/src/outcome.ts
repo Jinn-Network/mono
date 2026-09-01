@@ -1,5 +1,6 @@
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
 import { legacyClosure } from "./legacy-closures.js";
+import { PUBLIC_BUNDLE_V8_CHECKS } from "./reader-instructions.js";
 import type { PublicBundleVerificationResult } from "./verify.js";
 
 /**
@@ -38,7 +39,9 @@ export interface VerificationOutcome {
 export function summarizeVerificationOutcome(result: PublicBundleVerificationResult): VerificationOutcome {
   const total = result.format === "benchmark-product-public-bundle/5"
     ? EVIDENCE_NATIVE_BUNDLE_V5_CHECKS.length
-    : legacyClosure(result.format).checks.length;
+    : result.format === "benchmark-product-public-bundle/8"
+      ? PUBLIC_BUNDLE_V8_CHECKS.length
+      : legacyClosure(result.format).checks.length;
   const deferred = result.format === "benchmark-product-public-bundle/5"
     && result.artifactContent.status === "not-fetched"
     ? result.artifactContent

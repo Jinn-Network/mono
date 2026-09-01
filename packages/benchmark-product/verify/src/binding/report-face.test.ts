@@ -5,6 +5,7 @@
 import { describe, expect, test } from "vitest";
 import {
   computeBeaconOrder,
+  requiredBeaconRound,
   verifyRunBinding,
   type VerifiedRunBinding,
 } from "./beacon-binding.js";
@@ -17,24 +18,35 @@ const POOL = [ID("1"), ID("2"), ID("3"), ID("4"), ID("5")];
 const ORDER = computeBeaconOrder({ sealDigest: SEAL, beaconValue: VALUE, itemSha256s: POOL }).order;
 const SEALED_AT = "2026-08-01T00:00:00.000Z";
 
-const census = (source: "drand/quicknet" | "bitcoin/mainnet" = "drand/quicknet"): VerifiedRunBinding =>
+/** The one round the seal above names on quicknet's schedule -- what `bind` now admits (#3322). */
+const SEAL_DERIVED_ROUND = requiredBeaconRound("drand/quicknet", SEALED_AT)!.round;
+/** A later round: postdates the seal, but the operator picked it from among those published since. */
+const CHOSEN_ROUND = SEAL_DERIVED_ROUND + 1_000;
+
+const census = (
+  source: "drand/quicknet" | "bitcoin/mainnet" = "drand/quicknet",
+  round = source === "drand/quicknet" ? SEAL_DERIVED_ROUND : 900_000,
+): VerifiedRunBinding =>
   verifyRunBinding({
     procedure: "beacon-binding/1",
     mode: "census",
     sealDigest: SEAL,
     sealedAt: SEALED_AT,
-    beacon: { source, round: source === "drand/quicknet" ? 100_000_000 : 900_000, value: VALUE },
+    beacon: { source, round, value: VALUE },
     itemSha256s: POOL,
     order: ORDER,
   });
 
-const sampled = (): VerifiedRunBinding =>
+const sampled = (
+  source: "drand/quicknet" | "bitcoin/mainnet" = "drand/quicknet",
+  round = source === "drand/quicknet" ? SEAL_DERIVED_ROUND : 900_000,
+): VerifiedRunBinding =>
   verifyRunBinding({
     procedure: "beacon-binding/1",
     mode: "sampled",
     sealDigest: SEAL,
     sealedAt: SEALED_AT,
-    beacon: { source: "drand/quicknet", round: 100_000_000, value: VALUE },
+    beacon: { source, round, value: VALUE },
     poolItemSha256s: POOL,
     sampleSize: 2,
     sample: ORDER.slice(0, 2),
@@ -63,7 +75,7 @@ describe("runBindingSentence", () => {
     expect(sentence).toContain("2 items");
     expect(sentence).toContain("declared pool of 5");
     expect(sentence).toContain("beacon-binding/1");
-    expect(sentence).toContain("drand quicknet round 100000000");
+    expect(sentence).toContain(`drand quicknet round ${SEAL_DERIVED_ROUND}`);
     expect(sentence).toContain("recomputes the derivation offline");
     expect(sentence).toContain(SEALED_AT);
   });
@@ -86,6 +98,109 @@ describe("runBindingSentence", () => {
 
   test("the two modes never share one sentence", () => {
     expect(runBindingSentence(sampled())).not.toBe(runBindingSentence(census()));
+  });
+
+  /**
+   * Issue #3322. The sampled sentence used to assert, unconditionally, that selecting the slate
+   * after the fact would have required predicting the beacon value. That is true only where the
+   * seal named the round; where the operator picked one, selecting the slate after the fact needed
+   * no prediction at all, only a wait.
+   */
+  describe("round choice", () => {
+    test("the sampled sentence claims an unchosen slate only where the seal named the round", () => {
+      const sealDerived = runBindingSentence(sampled());
+      expect(sealDerived).toContain("drawn, not chosen");
+      expect(sealDerived).toContain("would have required predicting that value");
+      expect(sealDerived).toContain("first round this source publishes after the seal");
+
+      const chosen = runBindingSentence(sampled("drand/quicknet", CHOSEN_ROUND));
+      expect(chosen).not.toContain("drawn, not chosen");
+      expect(chosen).not.toContain("would have required predicting that value");
+      expect(chosen).toContain("one of several the operator could have realized");
+      expect(chosen).toContain("different slate from the same inputs");
+    });
+
+    test("the operator-chosen sentence names the residue in plain words", () => {
+      const chosen = runBindingSentence(sampled("drand/quicknet", CHOSEN_ROUND));
+      expect(chosen).toContain("names a round selected after the seal");
+      expect(chosen).toContain("available alternative");
+      // The value's own unpredictability survives; only the choice among values is retracted.
+      expect(chosen).toContain("could not have been predicted");
+    });
+
+    // Both modes, because the rule is the branch's and not one mode's: `runBindingSentence` is
+    // exported for readers of foreign bundles, which reach sampled x height-indexed even though
+    // this product's own `runBind` writes census bindings only.
+    test.each(["census", "sampled"] as const)(
+      "a height-indexed beacon is operator-chosen in %s mode, and claims no unpredictability it cannot check",
+      (mode) => {
+        const sentence = runBindingSentence(
+          mode === "census" ? census("bitcoin/mainnet") : sampled("bitcoin/mainnet"),
+        );
+        expect(sentence).toContain("No round follows from a seal on a height-indexed source");
+        expect(sentence).toContain("it is the chain, not this bundle, that places it after the seal");
+        // Nothing places this height after the seal, so no clause -- the opening included -- may
+        // say the value was unpredictable, in either of the two wordings the module can produce.
+        expect(sentence).not.toContain("could not have been predicted");
+        expect(sentence).not.toContain("could not have predicted");
+        expect(sentence).not.toContain("selected after the seal");
+      },
+    );
+
+    test("the sampled opening on a height-indexed beacon concedes what the bundle cannot place", () => {
+      const sentence = runBindingSentence(sampled("bitcoin/mainnet"));
+      expect(sentence).toContain("drawn from a value this bundle cannot place after the seal");
+      expect(sentence).not.toContain("drawn, not chosen");
+      expect(sentence).toContain("different slate from the same inputs");
+    });
+
+    test("the census sentence gains the residue and nothing stronger", () => {
+      const chosen = runBindingSentence(census("drand/quicknet", CHOSEN_ROUND));
+      expect(chosen).toContain("binds execution ORDER only");
+      expect(chosen).toContain("weaker binding than a beacon-drawn slate");
+      expect(chosen).toContain("does not show the population was");
+      expect(chosen).toContain("still the operator's choice");
+      // Nothing in the census branch may claim the stronger property, on either basis.
+      for (const sentence of [chosen, runBindingSentence(census())]) {
+        expect(sentence).not.toContain("drawn, not chosen");
+        expect(sentence).not.toContain("would have required predicting that value");
+      }
+    });
+
+    /**
+     * Issue #3425. The census sentence used to assert, unconditionally, that the order was fixed by
+     * randomness postdating the seal -- on the `attributive` branch too, where the clauses either
+     * side of it both concede that nothing in the bundle places the value after the seal.
+     */
+    test.each([
+      ["drand/quicknet", true],
+      ["bitcoin/mainnet", false],
+    ] as const)("the census postdating claim keys on postSeal (%s)", (source, asserts) => {
+      const sentence = runBindingSentence(census(source));
+      expect(sentence).toContain("does not show the population was");
+      if (asserts) {
+        expect(sentence).toContain("order was fixed by randomness postdating the seal");
+        expect(sentence).not.toContain("cannot place after the seal");
+      } else {
+        expect(sentence).toContain("order was tied to a value this bundle cannot place after the seal");
+        expect(sentence).not.toContain("postdating the seal");
+      }
+    });
+
+    test("the seal-derived clause names the source choice that survives it, without miscounting it", () => {
+      const sentence = runBindingSentence(census());
+      expect(sentence).toContain("What choosing remains is the source");
+      // The height-indexed source has no derivable round at all, so its alternatives are every
+      // height published since -- a sentence that counted sources would understate exactly that.
+      expect(sentence).toContain("indexed by block height");
+    });
+
+    test("the census residue is about the ORDER, and never contradicts the population claim", () => {
+      const chosen = runBindingSentence(census("drand/quicknet", CHOSEN_ROUND));
+      expect(chosen).toContain("none could be selected after the fact");
+      expect(chosen).toContain("different order from the same inputs");
+      expect(chosen).not.toContain("slate from the same inputs");
+    });
   });
 });
 

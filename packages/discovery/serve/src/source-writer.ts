@@ -20,6 +20,7 @@ import {
   parseSourceHead,
   recordDigest,
   recordPath,
+  refreshByWithinCeiling,
   sealJson,
 } from "@jinn-network/record-discovery-protocol";
 
@@ -475,7 +476,7 @@ async function assertIntentOwnership(
     || (intent.previousHeadIssuedAt !== null
       && new Date(head.issuedAt).getTime() <= new Date(intent.previousHeadIssuedAt).getTime())
     || new Date(head.refreshBy).getTime() <= new Date(head.issuedAt).getTime()
-    || new Date(head.refreshBy).getTime() - new Date(head.issuedAt).getTime() > MAX_REFRESH_BY_AHEAD_MS
+    || !refreshByWithinCeiling(head)
   ) {
     throw new SourceWriterIntegrityError("frozen source head does not match the intended source position");
   }

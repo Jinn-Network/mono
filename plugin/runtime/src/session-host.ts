@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { main, readConfigEnvFromProcess } from "./bin.js";
+import { resolveCorpusBinIoFields } from "./session-host-corpus.js";
 import { loadOrCreateLocalCaptureSigner } from "./session-host-signer.js";
 
 /** True when this module is the process entry point rather than an imported module. */
@@ -40,11 +41,16 @@ if (isProcessEntry()) {
   const homeDirectory = process.env.JINN_PLUGIN_HOME ?? join(homedir(), ".jinn-plugin");
   const captureSigner = await loadOrCreateLocalCaptureSigner(homeDirectory);
 
-  process.exitCode = await main(["serve", "--role", "session"], readConfigEnvFromProcess(), {
+  const env = readConfigEnvFromProcess();
+
+  process.exitCode = await main(["serve", "--role", "session"], env, {
     writeOut: (line) => process.stdout.write(`${line}\n`),
     writeErr: (line) => process.stderr.write(`${line}\n`),
     homeDirectory,
     untilShutdown,
     captureSigner,
+    // Same composition root as `bin.ts`: a session host mirrors the public
+    // corpus under the same posture a tools host does.
+    ...resolveCorpusBinIoFields({ env, homeDirectory }),
   });
 }

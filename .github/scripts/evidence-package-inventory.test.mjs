@@ -67,11 +67,20 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     devDependencies: [
       '@jinn-network/execution-recorder',
+      // The card-only offer catalog demonstration (issue #3218). facts/offers is the one
+      // sanctioned edge to the offer record kind, and the boundary guard keeps this package
+      // off `@jinn-network/evidence-offer` directly -- so evidence-offer appears below as a
+      // transitive portal only, never as a declared dependency of this package.
+      '@jinn-network/record-discovery-facts-offers',
       '@jinn-network/record-discovery-source-evidence-journal',
     ],
     optionalDependencies: [],
     peerDependencies: [],
-    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder', '@jinn-network/trust-core'],
+    transitivePortalResolutions: [
+      '@jinn-network/evidence-offer',
+      '@jinn-network/execution-evidence-builder',
+      '@jinn-network/trust-core',
+    ],
   }],
   ['execution-recorder-bridge', {
     dependencies: ['@jinn-network/evidence-repository', '@jinn-network/execution-recorder'],
@@ -180,6 +189,7 @@ function expectedPortal(directory, dependencyName) {
   }
   const recordDiscoveryDirectory = new Map([
     ['@jinn-network/record-publication', '../../discovery/publication'],
+    ['@jinn-network/record-discovery-facts-offers', '../../discovery/facts/offers'],
     ['@jinn-network/record-discovery-protocol', '../../discovery/protocol'],
     ['@jinn-network/record-discovery-serve', '../../discovery/serve'],
     ['@jinn-network/record-discovery-source-evidence-journal', '../../discovery/sources/evidence-journal'],

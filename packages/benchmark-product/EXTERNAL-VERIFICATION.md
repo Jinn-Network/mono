@@ -75,6 +75,27 @@ and the report face says so in those words.
 pair is public. Fetch it from the beacon and compare; a value the beacon never
 published binds nothing, and no Colophon code can tell you that.
 
+**Step 2b — check the round was not chosen.** Postdating the seal is not enough on
+its own. If a run could bind to *any* later round, an operator could watch the
+rounds published between sealing and launching, derive what each would produce,
+and bind the one they preferred: the value would be unpredictable, but the choice
+among realized values would not be. So for a scheduled beacon the seal names
+exactly one admissible round — the first published strictly after it:
+
+```text
+round = max(1, floor((sealedAt - genesis) / period) + 2)
+```
+
+with `sealedAt` and `genesis` in the same units. Recompute it from the record's
+own `sealedAt` and check the record names that round. Colophon's `bind` refuses
+any later round, so a bundle from this product will match; a record from anywhere
+else that names a different round tells you the operator chose which post-seal
+value applied, and its report face says so in those words.
+
+`bitcoin/mainnet` has no such round: a block height carries no schedule, so
+nothing derives one from the seal and the height stays the operator's choice.
+That residue is stated on the face rather than removed.
+
 **Step 3 — recompute the derivation.** For each item identity — a
 `sha256:`-prefixed lowercase-hex task digest — compute
 
@@ -93,11 +114,29 @@ This is deliberately the same encoding as the reference verifier's
 `screening-sample/1` procedure, whose only difference is that it keys on a sealed
 seed rather than on post-seal randomness.
 
-**What each binding establishes.** A beacon-drawn slate could not have been
-selected after the fact without predicting the beacon. A census run's binding is
-weaker and is stated as such: it shows the run's ORDER was fixed by randomness
-postdating the seal, not that the population was — a census makes no population
-choice. A run with no binding establishes neither, and its report face says so.
+**What each binding establishes.** A beacon-drawn slate on the round the seal
+names could not have been selected after the fact: neither the value nor which
+post-seal value applied was the operator's to pick. On any other round of a
+*scheduled* source the value was still unpredictable, but the slate could have
+been selected after the fact by waiting and choosing among the rounds already
+published — the face says that instead of the stronger sentence. A
+height-indexed source derives no round from a seal at all, so on that branch the
+face makes no unpredictability claim either: the height was the operator's
+choice, and nothing in the bundle places it after the seal — it is the chain,
+not the bundle, that does that. A census run's binding is weaker again and is
+stated as such: on a scheduled source it shows the run's ORDER was fixed by
+randomness postdating the seal, not that the population was — a census makes no
+population choice — and on a height-indexed source it concedes the postdating
+too, showing the order was tied to a value the bundle cannot place after the
+seal. A run with no binding establishes neither, and its report face says so.
+
+One residue survives even a seal-derived round: the *source*. Nothing in the
+seal names which beacon a run binds to, so an operator could have bound a
+different one — and `bitcoin/mainnet` derives no round from a seal at all. The
+procedure runs no postdating check on a height-indexed source, so through that
+source every height the chain carries is an available alternative, including
+heights that predate the seal. Closing this would need the run to name its
+source in the sealed record itself; today the face names the residue instead.
 
 ## The record family
 

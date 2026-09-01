@@ -8,7 +8,7 @@
  * `running --resume--> running`: "crash-safe resumption via the records' cell idempotency
  * keys"). One journal per draftId (`runJournalPath`), JSON Lines, entries never rewritten.
  *
- * Eleven entry kinds (driver start/terminals included):
+ * Twelve entry kinds (driver start/terminals included):
  * - `launched` — the run driver started (one per `runLaunch` call).
  * - `cell-event` — a solve-side `CellStatusEvent` from `launchAndWatch`/`resumeRun`, verbatim.
  *   Optionally carries `blame` (BP-22): for an "error" terminal, the platform-derived
@@ -192,6 +192,22 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     category: z.enum(["backend-unavailable", "dependency-unavailable", "transport-failure"]),
     recoveryAdvice: z.literal("new-attempt-required"),
     detail: z.string(),
+  }),
+  /** `run.import` (#2979) wrote this run's evidence from an external harness's dump instead of
+   * driving it. Names the sealed `ExternalRunImportDeclaration` that carries the per-slot reasons
+   * and timings the protocol records have no field for, plus the harness it came from. Carries no
+   * per-cell accounting — the per-cell entries the importer writes alongside it are ordinary
+   * `cell-event` / `submission-accepted` / `delivery` / `evaluation` entries, so the fold below
+   * ignores this one exactly like "launched". */
+  z.object({
+    kind: z.literal("external-import"),
+    at: Rfc3339Schema,
+    declarationSha256: Sha256HexSchema,
+    source: z.object({
+      harness: z.string().min(1),
+      version: z.string().min(1).optional(),
+      note: z.string().min(1).optional(),
+    }),
   }),
   /** `run.cancel` recorded a cancellation request (BP-22) — written once per run, alongside the
    * durable cancel marker (`./cancel-marker.ts`). Carries no per-cell accounting; the fold below
@@ -513,7 +529,7 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       fold.evaluationLegs.set(entry.evalIndex, leg);
       fold.detail = entry.detail;
     }
-    // "launched", "cancel-requested", and "closed" carry no per-cell accounting.
+    // "launched", "external-import", "cancel-requested", and "closed" carry no per-cell accounting.
   }
 
   const result = new Map<string, CellJournalFold>();

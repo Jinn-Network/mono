@@ -17,6 +17,7 @@ import {
   RunBindingError,
   beaconRoundInstant,
   computeBeaconOrder,
+  requiredBeaconRound,
   verifyRunBinding,
   type BeaconReference,
   type BeaconSourceId,
@@ -300,5 +301,79 @@ describe("verifyRunBinding", () => {
   test("round-trips a typed binding", () => {
     const binding = censusBinding() as unknown as RunBinding;
     expect(verifyRunBinding(binding).sealDigest).toBe(SEAL);
+  });
+});
+
+/**
+ * Issue #3322: a beacon that merely postdates the seal leaves the operator choosing WHICH post-seal
+ * value applies. For a scheduled source the seal already names one round, so there is nothing to
+ * choose -- and where no round is derivable the choice remains and has to be reported, not hidden.
+ */
+describe("requiredBeaconRound", () => {
+  const QUICKNET = BEACON_SOURCES["drand/quicknet"];
+  const genesisAt = (offsetMs: number): string =>
+    new Date(QUICKNET.genesisTimeSeconds * 1000 + offsetMs).toISOString();
+
+  test("is the first round published strictly after the seal", () => {
+    // Genesis itself is round 1's instant, so a seal AT genesis is not postdated by round 1.
+    expect(requiredBeaconRound("drand/quicknet", genesisAt(0))?.round).toBe(2);
+    expect(requiredBeaconRound("drand/quicknet", genesisAt(1))?.round).toBe(2);
+    // Round 2's own instant, one period in: the first round strictly after it is round 3.
+    expect(requiredBeaconRound("drand/quicknet", genesisAt(3000))?.round).toBe(3);
+    expect(requiredBeaconRound("drand/quicknet", genesisAt(2999))?.round).toBe(2);
+  });
+
+  test("names the instant that round publishes, so the arithmetic round-trips", () => {
+    const required = requiredBeaconRound("drand/quicknet", "2026-08-01T00:00:00.000Z")!;
+    expect(required.publishedAt).toBe(beaconRoundInstant(beacon({ round: required.round })));
+    expect(Date.parse(required.publishedAt)).toBeGreaterThan(Date.parse("2026-08-01T00:00:00.000Z"));
+    // And it is the FIRST such round: its predecessor does not postdate the seal.
+    expect(Date.parse(beaconRoundInstant(beacon({ round: required.round - 1 }))!))
+      .toBeLessThanOrEqual(Date.parse("2026-08-01T00:00:00.000Z"));
+  });
+
+  test("clamps to round 1 for a seal that predates genesis", () => {
+    expect(requiredBeaconRound("drand/quicknet", genesisAt(-1))?.round).toBe(1);
+    expect(requiredBeaconRound("drand/quicknet", "1970-01-01T00:00:00.000Z")?.round).toBe(1);
+  });
+
+  test("is undefined where no round follows from the seal", () => {
+    // A block height carries no schedule, so the height stays the operator's choice.
+    expect(requiredBeaconRound("bitcoin/mainnet", "2026-08-01T00:00:00.000Z")).toBeUndefined();
+    expect(requiredBeaconRound("drand/quicknet", "yesterday")).toBeUndefined();
+    // Past the schema ceiling and past what a timestamp represents, respectively.
+    expect(requiredBeaconRound("drand/quicknet", "+097089-11-09T20:29:24.000Z")).toBeUndefined();
+    expect(requiredBeaconRound("drand/default", "+275760-09-13T00:00:00.000Z")).toBeUndefined();
+  });
+
+  test.each(BEACON_SOURCE_IDS.filter((id) => BEACON_SOURCES[id].timeBasis === "deterministic-round-time"))(
+    "%s derives a round for an ordinary seal",
+    (source) => {
+      expect(requiredBeaconRound(source, "2026-08-01T00:00:00.000Z")?.round).toBeGreaterThan(1);
+    },
+  );
+});
+
+describe("verifyRunBinding roundBasis", () => {
+  const SEALED_AT = "2026-08-01T00:00:00.000Z";
+  const REQUIRED = requiredBeaconRound("drand/quicknet", SEALED_AT)!;
+
+  test("is seal-derived only for the one round the seal names", () => {
+    expect(verifyRunBinding(censusBinding({ beacon: beacon({ round: REQUIRED.round }) })).roundBasis)
+      .toBe("seal-derived");
+    expect(verifyRunBinding(censusBinding({ beacon: beacon({ round: REQUIRED.round + 1 }) })).roundBasis)
+      .toBe("operator-chosen");
+    expect(verifyRunBinding(censusBinding({ beacon: beacon() })).roundBasis).toBe("operator-chosen");
+  });
+
+  test("is operator-chosen for a height-indexed source, whose seal names no round", () => {
+    expect(verifyRunBinding(censusBinding({ beacon: beacon({ source: "bitcoin/mainnet", round: 900_000 }) })).roundBasis)
+      .toBe("operator-chosen");
+  });
+
+  test("reports rather than refuses: a chosen round still verifies, so sealed records stay readable", () => {
+    const binding = verifyRunBinding(censusBinding({ beacon: beacon() }));
+    expect(binding.postSeal).toBe("proven-offline");
+    expect(binding.roundBasis).toBe("operator-chosen");
   });
 });

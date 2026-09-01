@@ -6,7 +6,13 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { EXECUTION_EVIDENCE_MEDIA_TYPE } from '@jinn-network/evidence-protocol';
 import { createHttpTransport } from '@jinn-network/record-discovery-transport-http';
-import { DISCOVERY_SIGNING_SCOPE, type SourceIdentity } from '@jinn-network/record-discovery-protocol';
+import {
+  DISCOVERY_SIGNING_SCOPE,
+  RECORD_DISCOVERY_VERSION,
+  WELL_KNOWN_PATH,
+  sealJson,
+  type SourceIdentity,
+} from '@jinn-network/record-discovery-protocol';
 import {
   DELIVERY_MEDIA_TYPE,
   SUBMISSION_MEDIA_TYPE,
@@ -30,7 +36,7 @@ import type { NativePublicationRow, NativeSolutionArtifactRow } from '../../src/
 import type { NativeEvaluationArtifactRow, NativeEvaluationPublicationRow } from '../../src/daemon/native-evaluator-state.js';
 import { deriveConsumerEngagementId, deriveConsumerEvaluationId } from '../../src/native-consumer/graph.js';
 import type { NativeConsumerConfig } from '../../src/native-consumer/config.js';
-import { runNativeConsumer, type NativeConsumerPorts } from '../../src/native-consumer/driver.js';
+import { NativeConsumerDriverError, runNativeConsumer, type NativeConsumerPorts } from '../../src/native-consumer/driver.js';
 import type { NativeConsumerChainReader } from '../../src/native-consumer/chain-facts.js';
 import { NativeVerificationError } from '../../src/native-consumer/verification.js';
 import { createRealTrustFixture, realIdentity, signedEnvelope, type RealIdentity } from './_real-identity.js';
@@ -598,6 +604,56 @@ describe('native consumer driver', () => {
 
         expect(rejection).toBeInstanceOf(NativeVerificationError);
         expect((rejection as NativeVerificationError).reason).toBe('named-verdict-gate-failed');
+      } finally {
+        await producer.solutionPublisher.close();
+        await producer.evaluatorPublisher.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  /**
+   * #3411 — the requester's `.well-known` is peer-supplied, and `new URL(candidate, base)` DISCARDS
+   * the base whenever the candidate is absolute. An introduction naming loopback used to become the
+   * consumer's fetch target verbatim; it must now be refused before any request leaves the process.
+   */
+  it('refuses a `.well-known` archive root that points outside the source it was fetched from', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jinn-native-consumer-driver-archiveroot-'));
+    try {
+      const producer = await buildPublicVerticalFixture({ root });
+      try {
+        const ports = fakePorts(producer);
+        const { bytes } = sealJson({
+          protocol: RECORD_DISCOVERY_VERSION,
+          sources: [{
+            agent: REQUESTER_AGENT,
+            name: 'requester',
+            headPath: '/sources/requester/head.json',
+            archiveRoot: 'http://127.0.0.1:8545/',
+          }],
+        });
+        const hostileIntroduction: NativeConsumerPorts['transportFor'] = (publicBaseUrl) => {
+          const inner = ports.transportFor!(publicBaseUrl);
+          if (publicBaseUrl !== REQUESTER_BASE) return inner;
+          return {
+            async fetch(url: string) {
+              if (url === `${REQUESTER_BASE}${WELL_KNOWN_PATH}`) {
+                return { status: 200, contentType: 'application/json', declaredLength: bytes.length, bytes };
+              }
+              if (url.startsWith('http://127.0.0.1')) throw new Error(`the guard must refuse before fetching ${url}`);
+              return inner.fetch(url);
+            },
+          };
+        };
+
+        const rejection = await runNativeConsumer(
+          config(join(root, 'consumer-only'), producer),
+          { ...ports, transportFor: hostileIntroduction },
+        ).catch((error: unknown) => error);
+
+        expect(rejection).toBeInstanceOf(NativeConsumerDriverError);
+        expect((rejection as Error).message).toContain('archive root outside its serving root');
       } finally {
         await producer.solutionPublisher.close();
         await producer.evaluatorPublisher.close();
