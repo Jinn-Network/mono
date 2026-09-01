@@ -298,6 +298,33 @@ describe("verifyEnvelopeBinding", () => {
     expect(outcome.reason).toBe("envelope-signature-invalid");
   });
 
+  // A resolver contracted never to resolve by key alone (interfaces.ts) may still
+  // do so through a buggy key-only cache. Step 2 asserts the resolved binding names
+  // the claimed Agent IRI so no call site has to remember to (issue #3385).
+  test("step 2 rejects a binding the resolver returned for a different Agent IRI", async () => {
+    const otherAgent = "urn:uuid:eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const keyOnlyResolver: BindingResolver = {
+      async resolveBinding() {
+        return resolvedBinding({
+          binding: keyBinding({
+            agent: otherAgent,
+            key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+            voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+          }),
+        });
+      },
+    };
+    const envelopeBytes = sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2);
+
+    const outcome = await verifyEnvelopeBinding(
+      { envelopeBytes, key: KEY_2, agent: AGENT, family: "deliveries", atTime: "2026-03-01T00:00:00Z" },
+      { bindingResolver: keyOnlyResolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+    );
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
+    expect(outcome.reason).toBe("binding-not-resolved");
+    expect(outcome.resolvedBinding?.binding.agent).toBe(otherAgent);
+  });
+
   test("(b) an envelope whose family is not in the binding's scope fails at step 4", async () => {
     const binding = keyBinding({
       agent: AGENT,
