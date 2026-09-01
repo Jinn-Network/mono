@@ -86,6 +86,10 @@
       "sha256": "5dc156f400efb40c596d37dfacdb1d903083210ce2d8a8dce6da9e8be5b8ad5f"
     },
     {
+      "id": "vectors/head-issued-ahead/vector.json",
+      "sha256": "c75f3ffd47259daaa15b0f22ec0151cf065d93ba7a3490b5be8081b1f2ad64a4"
+    },
+    {
       "id": "vectors/issued-at-regression-v2/vector.json",
       "sha256": "ffdc63f2d676ec65e79756e4c23c6bb8304f2b33da77e0aacc4f75cdf3004a78"
     },

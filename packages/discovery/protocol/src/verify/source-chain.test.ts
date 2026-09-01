@@ -497,3 +497,83 @@ describe("verifySourceChain: the future-issued head the ceiling alone cannot see
     expect(outcome).toEqual({ status: "broken-chain", at: "refresh-by-ceiling" });
   });
 });
+
+describe("verifySourceChain: a refused future-dated head writes no monotonicity floor (#3491, §5.2)", () => {
+  // The damage the window rule exists to prevent is not the acceptance, it is
+  // what the acceptance PERSISTS. An admitted `issuedAt` becomes the
+  // consumer's strict-increase floor -- `native_discovery_source_checkpoints.
+  // issued_at` for the operator, the mark's `issuedAt` for the corpus mirror
+  // -- and nothing in the tree repairs one that has been set beyond reach, so
+  // a floor in 2099 refuses every honest head after it, forever. These two
+  // pin the property the outcome assertions above cannot see: the store is
+  // never written on the way to the refusal.
+  function recordingHwmStore(seed?: HighWaterMark): {
+    store: HighWaterMarkStore;
+    puts: HighWaterMark[];
+  } {
+    const puts: HighWaterMark[] = [];
+    let held = seed;
+    return {
+      puts,
+      store: {
+        async get(): Promise<HighWaterMark | undefined> {
+          return held;
+        },
+        async put(_source, mark): Promise<void> {
+          puts.push(mark);
+          held = mark;
+        },
+      },
+    };
+  }
+
+  function futureHead(entryDigest: `sha256:${string}`): SourceHead {
+    return {
+      protocol: RECORD_DISCOVERY_VERSION,
+      origin: `${AGENT}/feed`,
+      sequence: GENESIS_SEQUENCE,
+      entry: entryDigest,
+      issuedAt: "2099-01-01T00:00:00.000Z",
+      refreshBy: "2099-01-02T00:00:00.000Z",
+    };
+  }
+
+  it("creates no mark on first adoption", async () => {
+    const entry = genesisEntry();
+    const hwm = recordingHwmStore();
+    const head = futureHead(sealJson(entry).digest);
+
+    const outcome = await verifySourceChain({
+      head,
+      headSignature: signedHead(head),
+      entries: oneEntry(entry),
+      ports: { keys, sigs, fresh, hwm: hwm.store, now: new Date("2026-07-28T01:00:00.000Z"), firstAdoption: true },
+    });
+
+    expect(outcome).toEqual({ status: "broken-chain", at: "head-issued-ahead" });
+    expect(hwm.puts).toEqual([]);
+    await expect(hwm.store.get(SOURCE)).resolves.toBeUndefined();
+  });
+
+  it("leaves a returning consumer's honest mark exactly where it was", async () => {
+    const entry = genesisEntry();
+    const mark: HighWaterMark = {
+      sequence: GENESIS_SEQUENCE,
+      entry: sealJson(entry).digest,
+      issuedAt: "2026-07-27T12:00:00.000Z",
+    };
+    const hwm = recordingHwmStore(mark);
+    const head = futureHead(sealJson(entry).digest);
+
+    const outcome = await verifySourceChain({
+      head,
+      headSignature: signedHead(head),
+      entries: oneEntry(entry),
+      ports: { keys, sigs, fresh, hwm: hwm.store, now: new Date("2026-07-28T01:00:00.000Z"), firstAdoption: false },
+    });
+
+    expect(outcome).toEqual({ status: "broken-chain", at: "head-issued-ahead" });
+    expect(hwm.puts).toEqual([]);
+    await expect(hwm.store.get(SOURCE)).resolves.toEqual(mark);
+  });
+});

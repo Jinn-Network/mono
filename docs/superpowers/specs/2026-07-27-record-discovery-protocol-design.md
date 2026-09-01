@@ -301,6 +301,25 @@ else in the stack:
   `refreshBy`** (design default: at most 24 hours ahead of `issuedAt`; the marketplace
   profile pins its own tighter bound) — because, as §14.1 states plainly, the `refreshBy`
   window *is* the rollback-exposure window for consumers without a high-water mark.
+- **The freshness window is bounded as a whole, against the consumer's own clock.** A ceiling
+  measured only between the head's own two timestamps closes nothing on its own: both of them
+  are the source's to choose, so a head issued in 2099 with a conformant 24-hour window passes
+  the ceiling and stays fresh for decades. Worse, the accepted `issuedAt` is what a consumer
+  persists as its strict-increase floor (the bullet below), so one far-future head refuses
+  every honest head after it, permanently and with no protocol-level repair. A verifying
+  consumer therefore checks three rules, in order, before it reads or advances its high-water
+  mark: (1) `refreshBy` strictly after `issuedAt` — an empty or inverted window is a shape no
+  conforming source mints; (2) `refreshBy` at most the profile ceiling past `issuedAt`; and
+  (3) **`issuedAt` at most the profile ceiling past the consumer's own `now`.** Rule 3's
+  tolerance IS the profile ceiling, deliberately: the stack adds no second constant and no
+  second knob for clock skew, one freshness window is orders of magnitude more slack than any
+  real clock disagreement needs, and an honest source consumes none of it because a live
+  source issues at its own `now`. The three together bound a valid head's `refreshBy` to at
+  most twice the ceiling past the consumer's clock — finite, which is the property this
+  section is after. A profile that pins a tighter ceiling pins an equally tight skew
+  allowance; a profile may only tighten, never widen, and a verifier clamps what it is handed.
+  Rules are checked ahead of freshness, since a head that breaks any of them is always fresh
+  and the clock could never catch it.
 - **Anti-rollback is the consumer's high-water mark, plus mirror-set comparison for cold
   starts.** Consumers persist, per source, the highest verified `(sequence, entry digest)`.
   A consumer with no high-water mark for a source (first adoption, fresh device) MUST fetch
@@ -734,8 +753,11 @@ Accepting a synced source means, in order:
    accountability, not the acceptance path) — this asymmetry is exactly what makes rotation
    survivable (§10.1) while denying a compromised *old* key the power to vouch a competing
    head or resurrect history;
-3. verify the head's `refreshBy` freshness and `issuedAt` monotonicity against any
-   previously seen head;
+3. verify the head's freshness window as a whole (§5.2: non-empty, within the profile
+   ceiling, and not issued further ahead of the verifier's own clock than that ceiling),
+   then `refreshBy` freshness, then `issuedAt` monotonicity against any previously seen
+   head. The window is checked first, and before the high-water mark is read or advanced,
+   so a head that breaks it can never become the monotonicity floor;
 4. verify chain linkage from the head's entry digest back to the consumer's high-water mark —
    or, on first adoption of the source, to genesis (§5.3 rule 5);
 5. verify entry signatures (published-source profile) as *corroboration*: an entry
@@ -1130,7 +1152,9 @@ The kit precedes all real implementations (the CSI discipline, again):
 
 - **Golden vectors:** valid chains; forked chains (including fork-at-shared-`previous`);
   broken linkage; sequence gaps and duplicates (must reject); duplicate `announcementId`
-  (must reject); stale heads; rolled-back heads; `issuedAt` regressions; a competing head
+  (must reject); stale heads; rolled-back heads; `issuedAt` regressions; future-dated heads
+  (`issuedAt` further ahead of the consumer's clock than one freshness window, even with an
+  otherwise conformant window — must reject, and must persist no high-water mark); a competing head
   signed by a rotated-out key (must reject); entries with bad facts cards; facts requiring
   unavailable referenced bytes (must yield `indeterminate` and fail closed at decision
   grade); genesis edge cases (pinned first sequence, `previous: null` uniqueness);
