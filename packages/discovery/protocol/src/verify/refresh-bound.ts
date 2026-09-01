@@ -40,6 +40,8 @@
 // clamp what they are handed against the published-source value, so a caller
 // cannot re-open the window by passing a larger number.
 
+import { parseHeadTimestamp } from "../timestamps.js";
+
 /** §5.2's published-source-profile default bound: `refreshBy` at most 24h ahead of `issuedAt`. */
 export const MAX_REFRESH_BY_AHEAD_MS = 24 * 60 * 60 * 1000;
 
@@ -53,9 +55,10 @@ export type RefreshWindowFailure = "refresh-by-ceiling" | "head-issued-ahead";
 /**
  * Whether `head.refreshBy` sits at most `maxAheadMs` ahead of `head.issuedAt`.
  *
- * Fail-closed on anything it cannot compare: an unparseable `issuedAt` or
- * `refreshBy` makes the difference `NaN`, and `NaN <= n` is `false`, so a head
- * whose timestamps cannot be read is refused rather than waved through.
+ * Fail-closed on anything it cannot compare: a timestamp that is not an
+ * offset-bearing ISO-8601 date-time (§5.2, #3482) makes the difference `NaN`,
+ * and `NaN <= n` is `false`, so a head whose timestamps cannot be read the
+ * same way on every host is refused rather than waved through.
  *
  * This is the §5.2 ceiling alone. Consumers want `checkRefreshWindow`, which
  * also rejects the inverted and future-issued shapes the ceiling by itself
@@ -66,7 +69,7 @@ export function refreshByWithinCeiling(
   head: { issuedAt: string; refreshBy: string },
   maxAheadMs: number = MAX_REFRESH_BY_AHEAD_MS,
 ): boolean {
-  const aheadMs = new Date(head.refreshBy).getTime() - new Date(head.issuedAt).getTime();
+  const aheadMs = parseHeadTimestamp(head.refreshBy) - parseHeadTimestamp(head.issuedAt);
   return aheadMs <= maxAheadMs;
 }
 
@@ -93,8 +96,8 @@ export function checkRefreshWindow(
   maxAheadMs: number = MAX_REFRESH_BY_AHEAD_MS,
 ): RefreshWindowFailure | undefined {
   const ceilingMs = Math.min(maxAheadMs, MAX_REFRESH_BY_AHEAD_MS);
-  const issuedAtMs = new Date(head.issuedAt).getTime();
-  const refreshByMs = new Date(head.refreshBy).getTime();
+  const issuedAtMs = parseHeadTimestamp(head.issuedAt);
+  const refreshByMs = parseHeadTimestamp(head.refreshBy);
   if (!(refreshByMs > issuedAtMs)) return "refresh-by-ceiling";
   if (!(refreshByMs - issuedAtMs <= ceilingMs)) return "refresh-by-ceiling";
   if (!(issuedAtMs - now.getTime() <= ceilingMs)) return "head-issued-ahead";

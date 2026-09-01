@@ -89,3 +89,25 @@ describe("checkRefreshWindow (§5.2 as a whole, #3467)", () => {
     expect(checkRefreshWindow(head, NOW, Number.POSITIVE_INFINITY)).toBeUndefined();
   });
 });
+
+describe("offset-less head timestamps (§5.2, #3482)", () => {
+  const NOW = new Date("2026-07-28T00:00:00.000Z");
+
+  it("refuses an offset-less `issuedAt` rather than reading it as host-local time", () => {
+    expect(refreshByWithinCeiling({ issuedAt: "2026-07-28T00:00:00", refreshBy: "2026-07-29T00:00:00.000Z" })).toBe(false);
+    expect(checkRefreshWindow({ issuedAt: "2026-07-28T00:00:00", refreshBy: "2026-07-29T00:00:00.000Z" }, NOW)).toBe(
+      "refresh-by-ceiling",
+    );
+  });
+
+  it("refuses an offset-less `refreshBy` the same way", () => {
+    expect(refreshByWithinCeiling({ issuedAt: "2026-07-28T00:00:00.000Z", refreshBy: "2026-07-29T00:00:00" })).toBe(false);
+    expect(checkRefreshWindow({ issuedAt: "2026-07-28T00:00:00.000Z", refreshBy: "2026-07-29T00:00:00" }, NOW)).toBe(
+      "refresh-by-ceiling",
+    );
+  });
+
+  it("reads an offset-bearing window as the instant it names, wherever the consumer sits", () => {
+    expect(checkRefreshWindow({ issuedAt: "2026-07-28T02:00:00+02:00", refreshBy: "2026-07-29T02:00:00+02:00" }, NOW)).toBeUndefined();
+  });
+});
