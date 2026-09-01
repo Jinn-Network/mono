@@ -46,6 +46,8 @@ const DRAFT_SPEC_FIELD_NAMES = new Set([
   "analysis",
   "additionalAnalyses",
   "anchoring",
+  "taskSelection",
+  "beaconSource",
 ]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

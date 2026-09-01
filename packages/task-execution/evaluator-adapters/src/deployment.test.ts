@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { resolveEvaluationMethod } from "@jinn-network/task-execution-evaluation-harness";
 import { describe, expect, test } from "vitest";
-import { binaryJudgmentEvaluationMethodDescriptor } from "./binary-judgment/adapter.js";
+import {
+  binaryJudgmentEvaluationMethodDescriptor,
+  buildBinaryJudgmentEvaluationSpecification,
+} from "./binary-judgment/adapter.js";
 import { createEvaluatorDeployment } from "./deployment.js";
 import { BINARY_JUDGMENT_REGISTRATION_ID } from "./registrations.js";
 
@@ -38,7 +42,13 @@ describe("createEvaluatorDeployment", () => {
     const binary = deployment.registrations.find(
       ({ registrationId }) => registrationId === BINARY_JUDGMENT_REGISTRATION_ID,
     );
-    expect(binary?.evaluationMethod).toEqual(binaryJudgmentEvaluationMethodDescriptor());
+    // Profiles-owned and policy-derived, never the deployment-supplied descriptor.
+    for (const policy of ["reject", "abstain"] as const) {
+      expect(resolveEvaluationMethod(
+        binary!,
+        buildBinaryJudgmentEvaluationSpecification(`sha256:${"2".repeat(64)}`, policy),
+      )).toEqual(binaryJudgmentEvaluationMethodDescriptor(policy));
+    }
     expect(deployment.registrations
       .filter(({ registrationId }) => registrationId !== BINARY_JUDGMENT_REGISTRATION_ID)
       .every(({ evaluationMethod }) => evaluationMethod === config.evaluationMethod))

@@ -4,7 +4,12 @@ import { runConsumerConformance } from "@jinn-network/record-discovery-testing";
 import { checkLocator } from "@jinn-network/record-discovery-client";
 
 import type { FetchLike } from "./ports.js";
-import { TransportHttpError, TransportOversizeError, createHttpTransport } from "./fetch-transport.js";
+import {
+  TransportHttpError,
+  TransportOversizeError,
+  TransportRedirectError,
+  createHttpTransport,
+} from "./fetch-transport.js";
 
 const encoder = new TextEncoder();
 
@@ -151,3 +156,95 @@ const underTest: ClientUnderTest = {
 };
 
 runConsumerConformance(underTest);
+
+// A destination guard that inspects the requested URL buys nothing if the
+// server at that URL can post a forwarding address (#3411). The archive's
+// serving root is operator-configured but PEER-OPERATED, so the peer answers a
+// perfectly contained request with a 302 and, under fetch's default
+// `redirect: "follow"`, undici walks the daemon wherever it points.
+describe("createHttpTransport redirect containment (#3411)", () => {
+  function redirecting(location: string, status = 302): ReturnType<typeof stubFetch> {
+    return stubFetch((url) => (url === "https://peer.example/archive/0001.json"
+      ? new Response(null, { status, headers: { location } })
+      : new Response(encoder.encode("internal-secret"), { status: 200 })));
+  }
+
+  it("asks the fetch primitive not to follow redirects itself", async () => {
+    const stub = stubFetch(() => new Response(encoder.encode("x"), { status: 200 }));
+    let seen: string | undefined;
+    const transport = createHttpTransport("", async (url, init) => {
+      seen = init?.redirect;
+      return stub.fetchLike(url, init);
+    });
+    await transport.fetch("https://peer.example/archive/0001.json");
+    expect(seen).toBe("manual");
+  });
+
+  const offOrigin = [
+    ["loopback", "http://127.0.0.1:8545/"],
+    ["cloud metadata", "http://169.254.169.254/latest/meta-data/"],
+    ["private space", "http://10.0.0.5:8080/x"],
+    ["another public origin", "https://evil.example/collect"],
+    ["a protocol-relative target", "//evil.example/collect"],
+    ["a scheme downgrade on the same host", "http://peer.example/archive/0001.json"],
+    ["a port change on the same host", "https://peer.example:8443/archive/0001.json"],
+  ] as const;
+
+  for (const [label, location] of offOrigin) {
+    it(`refuses a redirect to ${label}, and never fetches it`, async () => {
+      const stub = redirecting(location);
+      const transport = createHttpTransport("", stub.fetchLike);
+      await expect(transport.fetch("https://peer.example/archive/0001.json"))
+        .rejects.toThrow(TransportRedirectError);
+      expect(stub.calls.map((call) => call.url)).toEqual(["https://peer.example/archive/0001.json"]);
+    });
+  }
+
+  it("refuses a non-HTTP redirect target", async () => {
+    const stub = redirecting("file:///etc/passwd");
+    const transport = createHttpTransport("", stub.fetchLike);
+    await expect(transport.fetch("https://peer.example/archive/0001.json"))
+      .rejects.toThrow(TransportRedirectError);
+  });
+
+  it("follows a same-origin redirect, which is inside the origin the operator chose", async () => {
+    const stub = redirecting("/archive/0001-final.json");
+    const transport = createHttpTransport("", stub.fetchLike);
+    const response = await transport.fetch("https://peer.example/archive/0001.json");
+    expect(new TextDecoder().decode(response.bytes)).toBe("internal-secret");
+    expect(stub.calls.map((call) => call.url)).toEqual([
+      "https://peer.example/archive/0001.json",
+      "https://peer.example/archive/0001-final.json",
+    ]);
+  });
+
+  it("refuses a same-origin redirect loop rather than following it forever", async () => {
+    const stub = stubFetch((url) => new Response(null, {
+      status: 302,
+      headers: { location: `${url}?next` },
+    }));
+    const transport = createHttpTransport("", stub.fetchLike);
+    await expect(transport.fetch("https://peer.example/archive/0001.json"))
+      .rejects.toThrow(TransportRedirectError);
+    expect(stub.calls.length).toBe(6); // the first request plus MAX_REDIRECTS hops
+  });
+
+  it("reports a redirect with no Location as the HTTP error it is", async () => {
+    const stub = stubFetch(() => new Response(null, { status: 302 }));
+    const transport = createHttpTransport("", stub.fetchLike);
+    await expect(transport.fetch("https://peer.example/archive/0001.json"))
+      .rejects.toThrow(TransportHttpError);
+  });
+
+  // 304 shares the 3xx band but is the ETag revalidation hit, not a redirect.
+  it("still serves the cached body on 304 rather than treating it as a redirect", async () => {
+    const stub = stubFetch((_url, init) => (init?.headers?.["if-none-match"] === '"e1"'
+      ? new Response(null, { status: 304, headers: { etag: '"e1"' } })
+      : new Response(encoder.encode("page"), { status: 200, headers: { etag: '"e1"' } })));
+    const transport = createHttpTransport("https://peer.example", stub.fetchLike);
+    await transport.fetch("/archive/0001.json");
+    const again = await transport.fetch("/archive/0001.json");
+    expect(new TextDecoder().decode(again.bytes)).toBe("page");
+    expect(transport.stats().revalidations).toBe(1);
+  });
+});

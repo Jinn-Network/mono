@@ -1,0 +1,18 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/evaluation-spec/v1",
+  "profile": "https://spec.jinn.network/facts/evaluation-spec/v2",
+  "fields": [
+    { "name": "family", "class": "record", "cloudEvents": { "attribute": "family", "scalar": "string" } },
+    { "name": "graderDigests", "class": "record", "referenceBearing": true },
+    { "name": "environmentRecordDigest", "class": "record", "referenceBearing": true },
+    { "name": "abiRefDigests", "class": "record", "referenceBearing": true },
+    { "name": "imageDigest", "class": "record", "referenceBearing": true },
+    { "name": "testMaterialDigests", "class": "record", "referenceBearing": true },
+    { "name": "parserDigest", "class": "record", "referenceBearing": true },
+    { "name": "rubricDigest", "class": "record", "referenceBearing": true },
+    { "name": "judgeOutputSchemaDigest", "class": "record", "referenceBearing": true },
+    { "name": "reviewFormDigest", "class": "record", "referenceBearing": true },
+    { "name": "subSpecDigests", "class": "record", "referenceBearing": true }
+  ]
+}

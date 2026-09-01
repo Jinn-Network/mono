@@ -17,7 +17,7 @@ jobs:
   changes:
     # Push-lane dedup probe (#2996): a queue landing is the byte-identical
     # commit its merge_group build verified, so a completed successful
-    # `repo-structure-gate` check-run on this exact SHA proves all four
+    # `repo-structure-gate` check-run on this exact SHA proves all five
     # structure jobs already executed against this tree. Probing the GATE name
     # is sound HERE because this workflow has no merge-group selection: the
     # gate only reports success after every worker ran (if selection is ever
@@ -87,6 +87,11 @@ jobs:
         run: node --test .github/scripts/published-artifacts-smoke-workflow.test.mjs
       - name: Vitest temp-directory sweep seam is wired everywhere
         run: node --test .github/scripts/vitest-tmp-isolation.test.mjs
+      # Repository-wide, so it must not sit behind any one workflow's `paths:`
+      # filter: the pull request that removes a cited workflow's restores has to
+      # be the one that goes red (#3126).
+      - name: Every by-name-restore precedent citation is still true
+        run: node --test .github/scripts/workflow-precedent-citations.test.mjs
   identifier-origin:
     name: Identifier origin tripwire
     needs: changes
@@ -144,16 +149,42 @@ jobs:
         with:
           node-version: 22
       - run: node --test .github/scripts/workflow-selection-shell.test.mjs
+  skills-mirror:
+    name: Skills mirror
+    # Behind the same push-lane dedup probe as every other worker: the gate
+    # asserts `skipped` for all of them when the probe unselects, so an
+    # ungated job here would fail the gate on every deduplicated push (#2996).
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Skill-mirror unit tests
+        run: node --test scripts/sync-skills.test.mjs
+      - name: Fail on generated skill-mirror drift
+        run: ./scripts/sync-skills.sh --check
   repo-structure-gate:
     # The check-run name GitHub reports is this job's display `name:` below, and that
     # string is the required-status-check context registered on the `next` ruleset
     # (DR-2026-08-18-b D3) — keep them in sync.
     name: repo-structure-gate
-    needs: [changes, gitlinks, identifier-origin, evidence-architecture, workflow-selection]
+    needs:
+      - changes
+      - gitlinks
+      - identifier-origin
+      - evidence-architecture
+      - workflow-selection
+      - skills-mirror
     if: always()
     runs-on: ubuntu-latest
-    # The bound keeps a wedged runner from holding the required context open for
-    # the 360-minute default.
+    # One `test` per upstream result. The bound keeps a wedged runner from
+    # holding the required context open for the 360-minute default.
     timeout-minutes: 5
     steps:
       - name: Require exact success from every structure job unless dedup unselected them
@@ -164,11 +195,12 @@ jobs:
           IDENTIFIER_ORIGIN_RESULT: ${{ needs.identifier-origin.result }}
           EVIDENCE_ARCHITECTURE_RESULT: ${{ needs.evidence-architecture.result }}
           WORKFLOW_SELECTION_RESULT: ${{ needs.workflow-selection.result }}
+          SKILLS_MIRROR_RESULT: ${{ needs.skills-mirror.result }}
         run: |
           set -euo pipefail
           test "${CHANGES_RESULT}" = success
           # Empty must never be read as "unselected": a broken probe step would
-          # otherwise turn into a green gate over four skipped workers.
+          # otherwise turn into a green gate over five skipped workers.
           case "${SELECTED}" in
             true|false) ;;
             *)
@@ -184,3 +216,4 @@ jobs:
           test "${IDENTIFIER_ORIGIN_RESULT}" = "${expected}"
           test "${EVIDENCE_ARCHITECTURE_RESULT}" = "${expected}"
           test "${WORKFLOW_SELECTION_RESULT}" = "${expected}"
+          test "${SKILLS_MIRROR_RESULT}" = "${expected}"

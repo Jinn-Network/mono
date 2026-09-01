@@ -25,10 +25,23 @@ export interface EvaluationSignerRegistration {
   readonly handle: string;
 }
 
+/**
+ * Host-owned derivation of the disclosed method for one EvaluationSpec. A registration whose
+ * method bytes vary with something the spec pins — a sealed parser identity, say — supplies this
+ * instead of a fixed descriptor, and the runtime resolves it once the spec is in hand.
+ *
+ * This is deliberately a HOST seam, not an adapter one: `evaluationMethod` stays in
+ * `AUTHORITY_OVERRIDE_FIELDS`, so an adapter's `CompletedEvaluation` still cannot name its own
+ * method. The registration is the sole authority either way.
+ */
+export type EvaluationMethodResolver = (
+  specification: EvaluationSpec,
+) => ResourceDescriptor;
+
 export interface EvaluatorRegistration {
   readonly registrationId: string;
   readonly adapter: EvaluatorAdapter;
-  readonly evaluationMethod: ResourceDescriptor;
+  readonly evaluationMethod: ResourceDescriptor | EvaluationMethodResolver;
   readonly specificationCompatibility: (
     specification: EvaluationSpec,
   ) => boolean;
@@ -38,6 +51,16 @@ export interface EvaluatorRegistration {
     evaluation: CompletedEvaluation,
   ) => CompletedEvaluation;
   readonly interruptionBehavior: InterruptionBehavior;
+}
+
+/** The one place a registration's disclosed method is read; never bypass it. */
+export function resolveEvaluationMethod(
+  registration: EvaluatorRegistration,
+  specification: EvaluationSpec,
+): ResourceDescriptor {
+  return typeof registration.evaluationMethod === "function"
+    ? registration.evaluationMethod(specification)
+    : registration.evaluationMethod;
 }
 
 function nonEmpty(value: string, field: string): void {

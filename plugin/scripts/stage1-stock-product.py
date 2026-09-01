@@ -710,6 +710,13 @@ def main() -> None:
     server, thread = start_corpus_server(fixture)
     os.environ["JINN_DISCOVERY_URL"] = fixture.endpoint
     os.environ["JINN_IPFS_GATEWAY_URL"] = fixture.endpoint
+    # This fixture *is* the corpus origin, so the manifest's `access.endpoint`
+    # is a loopback address. Production refuses that by default -- a
+    # manifest-supplied loopback origin is the SSRF case the origin guard
+    # exists to block (#1901), and it cannot tell our fixture from a hostile
+    # manifest by address alone. Opt in here, next to the bind that makes it
+    # necessary, rather than in CI config where the reason would be invisible.
+    os.environ["JINN_CORPUS_ALLOW_PRIVATE_ORIGINS"] = "1"
 
     # Smoke-check the real jinn-layer against the real fixture rails before
     # driving any session — search finds the source episode by content, get

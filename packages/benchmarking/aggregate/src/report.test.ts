@@ -1267,3 +1267,108 @@ describe("byte-first produceReport / verifyReport", () => {
     expect(() => sealMatrix({ ...parsed, "example.fixture.note": "\ud800" })).toThrow();
   });
 });
+
+// --- issue #2839: the `recordExtensions` seam ---
+
+/**
+ * The narrow seam that lets a caller seal a namespaced extension key into the Report payload BEFORE
+ * signing, so the author's signature covers it. The disclosure-specification record's Report binding
+ * is its only consumer today.
+ *
+ * The property that matters most is the first test's: absent, the sealed bytes are exactly what they
+ * were before the parameter existed. Everything else in this block guards the ways a caller could
+ * use it to overwrite something this module owns.
+ */
+const DISCLOSURE_EXTENSION_KEY = "https://spec.jinn.network/extensions/disclosure-specification/v1";
+const DISCLOSURE_DESCRIPTOR = {
+  name: "disclosure-specification",
+  mediaType: "application/vnd.jinn.disclosure-specification.v1+json",
+  digest: { sha256: "b".repeat(64) },
+};
+
+async function produceWithExtensions(fixture: Fixture, recordExtensions?: Readonly<Record<string, unknown>>) {
+  return produceReport(
+    {
+      ...fixture.ports,
+      subjects: fixture.subjectBytes,
+      method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+      verdictRule: "unanimous",
+      author: AUTHOR,
+      ...(recordExtensions === undefined ? {} : { recordExtensions }),
+    },
+    signer,
+  );
+}
+
+describe("produceReport recordExtensions (issue #2839)", () => {
+  test("absent, the sealed payload is byte-identical to what it was before the parameter existed", async () => {
+    const fixture = makeFixture();
+    const withoutParameter = await produce(fixture);
+    const withUndefined = await produceWithExtensions(fixture, undefined);
+    const withEmpty = await produceWithExtensions(fixture, {});
+
+    expect(withUndefined.bytes).toEqual(withoutParameter.bytes);
+    // An empty bag is the same document too: it must not add a key or reorder one.
+    expect(withEmpty.bytes).toEqual(withoutParameter.bytes);
+  });
+
+  test("a namespaced key lands in the payload and is covered by the signature", async () => {
+    const fixture = makeFixture();
+    const produced = await produceWithExtensions(fixture, { [DISCLOSURE_EXTENSION_KEY]: DISCLOSURE_DESCRIPTOR });
+
+    expect((produced.record as unknown as Record<string, unknown>)[DISCLOSURE_EXTENSION_KEY])
+      .toEqual(DISCLOSURE_DESCRIPTOR);
+    // The payload the signature was computed over is the payload carrying the key: the envelope's
+    // own bytes are these bytes, so there is no window in which the key is outside the signature.
+    const envelope = JSON.parse(new TextDecoder().decode(produced.envelope)) as { payload: string };
+    expect(Buffer.from(envelope.payload, "base64")).toEqual(Buffer.from(produced.bytes));
+    expect(new TextDecoder().decode(produced.bytes)).toContain(DISCLOSURE_EXTENSION_KEY);
+    // And it changes the bytes, so the first test's equality is a real assertion rather than vacuous.
+    expect(produced.bytes).not.toEqual((await produce(fixture)).bytes);
+  });
+
+  test("the publication extension is this module's own and cannot be supplied by a caller", async () => {
+    const fixture = makeFixture();
+    await expect(produceWithExtensions(fixture, { [BENCHMARK_PUBLICATION_EXTENSION]: {} }))
+      .rejects.toThrow(/is owned by this module/);
+  });
+
+  test("a key colliding with any core Report field is refused, not spread over", async () => {
+    const fixture = makeFixture();
+    // Derived from a record that carries EVERY field the literal can write, optional ones included.
+    // Deriving from a default fixture would silently skip `limitations`, because that fixture never
+    // sets it -- and a hand-maintained guard that forgot `limitations` would then pass this test.
+    // Verified by mutation: reverting the guard to a hardcoded list missing `limitations` fails here.
+    const withOptionalFields = await produceReport(
+      {
+        ...fixture.ports,
+        subjects: fixture.subjectBytes,
+        method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+        verdictRule: "unanimous",
+        author: AUTHOR,
+        limitations: ["a limitation, so the optional field is present in the key set below"],
+      },
+      signer,
+    );
+    const coreFields = Object.keys(withOptionalFields.record);
+    expect(coreFields).toContain("limitations");
+    expect(coreFields.length).toBeGreaterThan(5);
+    for (const field of coreFields) {
+      // The MESSAGE match is load-bearing, not decoration. A bare `rejects.toThrow()` would pass on
+      // the schema's own refusal, which fires for a different reason, and this test would go vacuous
+      // again for exactly the `limitations` case it exists to catch. Do not relax it.
+      await expect(
+        produceWithExtensions(fixture, { [field]: "hijacked" }),
+        `core field "${field}" must be refused as an extension key`,
+      ).rejects.toThrow(/collides with a core Report field|is owned by this module/);
+    }
+  });
+
+  test("a non-namespaced key is refused by the record schema at sealing", async () => {
+    const fixture = makeFixture();
+    // Not this module's guard: `topLevelRecordSchema` admits only reverse-DNS or absolute-URI
+    // extension names, so a bare key never reaches the wire even though it collides with nothing.
+    await expect(produceWithExtensions(fixture, { disclosure: DISCLOSURE_DESCRIPTOR }))
+      .rejects.toThrow();
+  });
+});

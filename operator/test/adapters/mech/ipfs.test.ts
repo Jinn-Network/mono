@@ -79,15 +79,21 @@ const VALID_SIGNED_TASK = {
   },
 };
 
-function makeFetchStub(body: unknown, ok = true) {
-  return vi.fn().mockResolvedValue({
-    ok,
+/**
+ * Serve `body` as a real `Response`. `fetchFromIpfs` reads the payload through
+ * `response.body.getReader()` and is handed a `URL`, so a hand-rolled object
+ * literal with only `json`/`text` no longer satisfies its contract.
+ */
+function makeJsonResponse(body: unknown, ok = true): Response {
+  return new Response(JSON.stringify(body), {
     status: ok ? 200 : 500,
     statusText: ok ? 'OK' : 'Internal Server Error',
-    headers: { get: () => 'application/json' },
-    json: () => Promise.resolve(body),
-    text: () => Promise.resolve(JSON.stringify(body)),
+    headers: { 'content-type': 'application/json' },
   });
+}
+
+function makeFetchStub(body: unknown, ok = true) {
+  return vi.fn().mockImplementation(() => Promise.resolve(makeJsonResponse(body, ok)));
 }
 
 describe('fetchSignedTaskFromIpfs', () => {
@@ -179,32 +185,22 @@ function makeSourceBundleFetchStub(
   manifest: Record<string, unknown>,
   fileText: string,
 ) {
-  return vi.fn().mockImplementation((url: string) => {
-    const isFileCid = url.includes(FILE_CID);
-    if (isFileCid) {
+  return vi.fn().mockImplementation((input: RequestInfo | URL) => {
+    // The JSON path is handed a `URL`; the raw-bytes path a string. `String`
+    // normalizes both.
+    const url = String(input);
+    if (url.includes(FILE_CID)) {
       // Simulate a text/plain response for source files
-      const encoder = new TextEncoder();
-      const bytes = encoder.encode(fileText);
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-        headers: { get: () => 'text/plain; charset=utf-8' },
-        arrayBuffer: () => Promise.resolve(bytes.buffer),
-        json: () => Promise.reject(new Error('Not JSON')),
-        text: () => Promise.resolve(fileText),
-      });
+      return Promise.resolve(
+        new Response(fileText, {
+          status: 200,
+          statusText: 'OK',
+          headers: { 'content-type': 'text/plain; charset=utf-8' },
+        }),
+      );
     }
     // Serve the manifest as JSON
-    return Promise.resolve({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      headers: { get: () => 'application/json' },
-      json: () => Promise.resolve(manifest),
-      text: () => Promise.resolve(JSON.stringify(manifest)),
-      arrayBuffer: () => Promise.resolve(new TextEncoder().encode(JSON.stringify(manifest)).buffer),
-    });
+    return Promise.resolve(makeJsonResponse(manifest));
   });
 }
 
@@ -314,15 +310,7 @@ describe('fetchSourceBundleFromIpfs', () => {
   it('returns empty files map when manifest has no files array', async () => {
     const manifest = { version: 1 };
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      headers: { get: () => 'application/json' },
-      json: () => Promise.resolve(manifest),
-      text: () => Promise.resolve(JSON.stringify(manifest)),
-      arrayBuffer: () => Promise.resolve(new TextEncoder().encode(JSON.stringify(manifest)).buffer),
-    }));
+    vi.stubGlobal('fetch', makeFetchStub(manifest));
 
     const result = await fetchSourceBundleFromIpfs(
       'https://gateway.autonolas.tech',

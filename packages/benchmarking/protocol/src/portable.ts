@@ -13,6 +13,7 @@ import {
   topLevelRecordSchema,
 } from "./common.js";
 import {
+  BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
   BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE,
   CLAIM_PACKAGE_V3_PROFILE,
 } from "./identifiers.js";
@@ -88,9 +89,28 @@ export const EvidenceNativeClaimPackageV3Schema = topLevelRecordSchema({
 
 export type EvidenceNativeClaimPackageV3 = z.infer<typeof EvidenceNativeClaimPackageV3Schema>;
 
+/**
+ * The two declared profiles of `benchmark-product-public-bundle/5` (issue #2986). The profile is
+ * carried in the bundle's own bytes, so which members a reader must find is a fact the bundle
+ * states rather than one the reader infers from what happens to be present.
+ */
+export const EvidenceNativeBundleProfileSchema = z.union([
+  z.literal(BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE),
+  z.literal(BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE),
+]);
+
+export type EvidenceNativeBundleProfile = z.infer<typeof EvidenceNativeBundleProfileSchema>;
+
+/** True exactly for the metadata-first profile; a narrowing so no call site re-spells the IRI. */
+export function isMetadataFirstBundleProfile(
+  profile: EvidenceNativeBundleProfile,
+): profile is typeof BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE {
+  return profile === BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE;
+}
+
 export const EvidenceNativeBundleManifestV5Schema = z.strictObject({
   format: z.literal("benchmark-product-public-bundle/5"),
-  profile: z.literal(BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE),
+  profile: EvidenceNativeBundleProfileSchema,
   files: z.array(z.strictObject({
     path: z.string().min(1),
     sha256: z.string().regex(/^[0-9a-f]{64}$/u),

@@ -1,0 +1,7 @@
+{
+  "kind": "https://spec.jinn.network/records/offer/v1",
+  "subject": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "gate": {
+    "uri": "https://gate.example/offers"
+  }
+}
