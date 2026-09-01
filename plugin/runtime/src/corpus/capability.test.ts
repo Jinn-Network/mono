@@ -54,8 +54,10 @@ function capability(file?: unknown, verifyDriver?: VerifyDriver) {
 
 /**
  * A `VerifyDriver` whose source-chain verdict the test picks. Only
- * `verifySource` is reachable from the corpus mirror; the two item-level
- * methods belong to the read path C6 owns and are never called here.
+ * `verifySource` is reachable from these tests — every one of them syncs a
+ * fresh state directory, so no source is ever re-presented at a position this
+ * mirror already holds; the two item-level methods belong to the read path C6
+ * owns and are never called either.
  */
 function driverReturning(outcome: SourceChainOutcome): VerifyDriver & { readonly calls: VerifySourceOptions[] } {
   const calls: VerifySourceOptions[] = [];
@@ -67,6 +69,9 @@ function driverReturning(outcome: SourceChainOutcome): VerifyDriver & { readonly
       for await (const _entry of opts.entries) void _entry;
       calls.push(opts);
       return outcome;
+    },
+    async verifyHead(): Promise<never> {
+      throw new Error("no source here is re-presented at a held position");
     },
     async verifyForDecision() {
       throw new Error("the corpus mirror never verifies items");

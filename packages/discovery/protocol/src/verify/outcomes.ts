@@ -12,6 +12,20 @@ export type SourceChainOutcome =
   | { status: "broken-chain"; at: string } // linkage, contiguity, ceiling, or duplicate-announcementId failure -- sequence or entry digest
   | { status: "unauthorized-signer" }; // including the old-key head case
 
+/**
+ * `source-head-revalidation`'s typed outcome: the same fail-closed vocabulary
+ * as the chain procedure's steps 1-3, plus the two envelope-shaped refusals
+ * that procedure folds into `unauthorized-signer` and this one keeps separate
+ * so a caller can tell a malformed envelope from a wrong signer.
+ */
+export type SourceHeadOutcome =
+  | { status: "ok" }
+  | { status: "stale" } // refreshBy expired
+  | { status: "unauthorized-signer" } // no signature by a key valid at `now`
+  | { status: "head-origin-mismatch" } // head names a source other than the one followed
+  | { status: "head-payload-mismatch" } // envelope does not carry these head bytes
+  | { status: "invalid-head-envelope" }; // not a parseable wire DSSE envelope
+
 export type FactsConsistency = "consistent" | "inconsistent" | "indeterminate";
 
 export type ItemOutcome =

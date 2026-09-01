@@ -20,4 +20,5 @@ export * from "./query.js";
 export * from "./verify/ports.js";
 export * from "./verify/outcomes.js";
 export * from "./verify/source-chain.js";
+export * from "./verify/source-head.js";
 export * from "./verify/item.js";
