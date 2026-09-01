@@ -208,6 +208,7 @@ import type { VenueBroadcaster } from '../adapters/mech/safe.js';
 import { setDefaultEoaBroadcastLock } from '../tx-retry.js';
 import type { Store } from '../store/store.js';
 import { fetchRawBytesFromIpfs } from '../adapters/mech/ipfs.js';
+import { classifyIpfsFetchFailure } from '@jinn-network/core/corpus-read';
 import { getTaskCidDigest } from '../adapters/mech/contracts.js';
 import { openOperatorEvidence, type OperatorEvidence } from './evidence-join.js';
 import { buildLegacyExecutionEnvelope, LEGACY_ENVELOPE_EXTENSION_KEY, synthesizeLegacyExecutionDocuments } from './bridge-legacy-delivery.js';
@@ -859,16 +860,75 @@ const GET_TASK_VIEW_ABI = [{
   }],
 }] as const;
 
-/** Real (gap 1 CLOSED): a raw sha256-digest IPFS fetch, reusing the existing gateway machinery
- * (`operator/src/adapters/mech/ipfs.ts`) already proven for the rest of the daemon. */
-function buildFetchIpfsBytes(gatewayUrl: string): (digest: `sha256:${string}`) => Promise<Uint8Array | undefined> {
+/**
+ * Why a fetch produced no bytes. FAILURE IS NOT ABSENCE (#2647), applied to the IPFS leg (#3451):
+ *
+ *   - `'too-large'` — a gateway ANSWERED for the content and the byte cap refused it. Positive
+ *     evidence the document exists; reporting it as absent turns a size-policy decision into a
+ *     silent data gap the resolver cannot tell from a genuine miss.
+ *   - `'unavailable'` — transport failure or timeout. Nothing was learned about this digest.
+ */
+export type IpfsBytesRefusal = 'too-large' | 'unavailable';
+
+/**
+ * Real (gap 1 CLOSED): a raw sha256-digest IPFS fetch, reusing the existing gateway machinery
+ * (`operator/src/adapters/mech/ipfs.ts`) already proven for the rest of the daemon.
+ *
+ * Three answers, on the {@link buildReadTodayDeliveryFacts} precedent (#2647). Every failure used
+ * to collapse into the one `undefined` the caller reads as "this digest is not on IPFS", so the
+ * 8 MiB cap added in #3438 made a merely-large sealed document indistinguishable from one that was
+ * never pinned:
+ *
+ *   - `Uint8Array` — the bytes. Never trusted by the caller without re-deriving the digest.
+ *   - `undefined` — genuine absence: every candidate answered, and every answer was 404/410. The
+ *     strictest answer, and so the rarest — see `classifyIpfsFetchFailure`.
+ *   - {@link IpfsBytesRefusal} — the fetch did not answer the absence question at all.
+ *
+ * Exported so `operator/test/daemon/*` can drive this exact production resolver, matching the
+ * `buildReadTodayDeliveryFacts` / `buildResolveSubmissionBytes` precedents in this file.
+ */
+export function buildFetchIpfsBytes(
+  gatewayUrl: string,
+): (digest: `sha256:${string}`) => Promise<Uint8Array | IpfsBytesRefusal | undefined> {
   return async (digest) => {
     const hex = digest.slice('sha256:'.length);
     try {
       return await fetchRawBytesFromIpfs(gatewayUrl, `f01551220${hex}`);
-    } catch {
+    } catch (error) {
+      const classified = classifyIpfsFetchFailure(error);
+      return classified === 'not-found' ? undefined : classified;
+    }
+  };
+}
+
+/**
+ * Adapts the classified fetch above to the `Uint8Array | undefined` shape the projector, archive
+ * and legacy sealed-document ports still consume. The narrowing is deliberate — every one of those
+ * callers drops and retries on any non-answer, so the refusal changes no control flow — but it is
+ * no longer SILENT: each class is reported separately, which is the whole point of the #2647
+ * discipline ("same drop; the difference is what the operator goes and fixes").
+ */
+export function narrowIpfsBytes(
+  fetchClassified: (digest: `sha256:${string}`) => Promise<Uint8Array | IpfsBytesRefusal | undefined>,
+  logger?: { warn(message: string): void },
+): (digest: `sha256:${string}`) => Promise<Uint8Array | undefined> {
+  return async (digest) => {
+    const result = await fetchClassified(digest);
+    if (result === 'too-large') {
+      logger?.warn(
+        `[ipfs] ${digest} was ANSWERED FOR but exceeds the response byte cap -- refused for size, `
+          + 'not absent; the document exists and needs a larger bound or an out-of-band read',
+      );
       return undefined;
     }
+    if (result === 'unavailable') {
+      logger?.warn(
+        `[ipfs] ${digest} could not be fetched (transport failure or timeout) -- nothing was `
+          + 'learned about whether it is pinned; a later tick can retry',
+      );
+      return undefined;
+    }
+    return result;
   };
 }
 
@@ -1989,7 +2049,7 @@ function buildProjector(input: {
   const isAuthorizedMechOrigin = (address: Address): boolean =>
     address.toLowerCase() === input.mechAddress.toLowerCase();
 
-  const fetchIpfsBytes = buildFetchIpfsBytes(input.ipfsGatewayUrl);
+  const fetchIpfsBytes = narrowIpfsBytes(buildFetchIpfsBytes(input.ipfsGatewayUrl), input.logger);
   const resolveAssociation = input.mode === 'native'
     ? createNativeRequesterSubmissionResolver(input.nativeRequester ?? (() => {
       throw new Error('native projector requires a requester association directory and B2 requester-submission identity');
@@ -2410,7 +2470,7 @@ export async function buildOperatorComposition(
     release: venue.release,
   };
 
-  const fetchIpfsBytes = buildFetchIpfsBytes(config.ipfsGatewayUrl);
+  const fetchIpfsBytes = narrowIpfsBytes(buildFetchIpfsBytes(config.ipfsGatewayUrl), input.logger);
   const readLegacySealedDocuments = async (card: AnnouncedSubmissionCard): Promise<SealedDocuments> => {
     const taskDigest = card.facts['taskDigest'];
     if (typeof taskDigest !== 'string' || !taskDigest.startsWith('sha256:')) {
