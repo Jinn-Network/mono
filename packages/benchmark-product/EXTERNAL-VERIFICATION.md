@@ -127,8 +127,8 @@ not the bundle, that does that. A census run's binding is weaker again and is
 stated as such: on a scheduled source it shows the run's ORDER was fixed by
 randomness postdating the seal, not that the population was — a census makes no
 population choice — and on a height-indexed source it concedes the postdating
-too, tying the order to a value the bundle cannot place after the seal. A run
-with no binding establishes neither, and its report face says so.
+too, showing the order was tied to a value the bundle cannot place after the
+seal. A run with no binding establishes neither, and its report face says so.
 
 One residue survives even a seal-derived round: the *source*. Nothing in the
 seal names which beacon a run binds to, so an operator could have bound a

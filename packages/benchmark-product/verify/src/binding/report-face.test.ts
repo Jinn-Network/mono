@@ -182,7 +182,7 @@ describe("runBindingSentence", () => {
         expect(sentence).toContain("order was fixed by randomness postdating the seal");
         expect(sentence).not.toContain("cannot place after the seal");
       } else {
-        expect(sentence).toContain("ties the run's order to a value this bundle cannot place after the seal");
+        expect(sentence).toContain("order was tied to a value this bundle cannot place after the seal");
         expect(sentence).not.toContain("postdating the seal");
       }
     });

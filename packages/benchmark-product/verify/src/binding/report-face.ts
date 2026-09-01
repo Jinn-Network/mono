@@ -22,7 +22,7 @@
  * sentence says it is the weaker binding.** Ordering-only binding shows the run's order was fixed by
  * randomness that postdates the seal; it does not show the population was, because with a census
  * there was no population choice to make. Letting the two modes share one confident sentence would
- * be the failure this feature exists to prevent. Issue #3425 subjects that sentence to the first
+ * be the failure this feature exists to prevent. Issue #3425 subjects that sentence to the third
  * rule as well: `censusOrderClause` asserts the postdating only under `proven-offline`, and concedes
  * it under `attributive` in the register the sampled opening already uses, because the clauses on
  * either side of it concede exactly that.
@@ -114,7 +114,7 @@ function roundChoiceClause(binding: VerifiedRunBinding): string {
 function censusOrderClause(binding: VerifiedRunBinding): string {
   const order = binding.postSeal === "proven-offline"
     ? "It shows the run's order was fixed by randomness postdating the seal"
-    : "It ties the run's order to a value this bundle cannot place after the seal";
+    : "It shows the run's order was tied to a value this bundle cannot place after the seal";
   return `${order}; it does not show the population was, because a census makes no population choice.`;
 }
 
