@@ -579,6 +579,24 @@ describe("createRetrievalGate — the paid path", () => {
 
   test.each([
     ["null", null],
+    ["undefined", undefined],
+    ["a string", "sha256:x"],
+    ["a number", 7],
+    ["true", true],
+  ])("a request that is %s is refused, never thrown on", async (_name, request) => {
+    // The request itself, one level up from its payment, and for the same reason: a
+    // transport reaches `request()` with whatever a stranger sent, because
+    // `const request: GateRequest = JSON.parse(body)` needs no cast. `null` is the one JSON
+    // value where reading a property throws instead of answering `undefined` -- and a throw
+    // from this package means "a port failed", so a four-byte body would put the holder's
+    // gate into 5xx beside their real outages.
+    const { gate } = await freeHarness();
+    const outcome = refused(await gate.request(request as unknown as GateRequest));
+    expect(outcome.code).toBe("unknown-offer");
+  });
+
+  test.each([
+    ["null", null],
     ["a string", "tx-1"],
     ["a number", 7],
     ["an array", []],
@@ -633,6 +651,63 @@ describe("createRetrievalGate — the paid path", () => {
       ).bytes,
     ).toEqual(SUBJECT_BYTES);
     expect(reads).toBe(1);
+  });
+
+  test("an offer digest read twice cannot answer differently between the two reads", async () => {
+    // The request's most load-bearing field, given the same distrust as its payment. Every
+    // money check -- rail matching, destination, integer-exact amount -- can pass honestly
+    // against a cheap offer on the early reads, and a later read then chooses what `claim()`
+    // is handed and what the holder signs a sale of.
+    const { gate, offerDigest } = await priced(
+      { settlement: "explicit-claim" },
+      { deliveryStatements: { signer: createFixtureSigner() } },
+    );
+    const pricey = `sha256:${"1".repeat(64)}` as Sha256Digest;
+    let reads = 0;
+    const outcome = delivered(
+      await gate.request({
+        get offer() {
+          reads += 1;
+          return reads === 1 ? offerDigest : pricey;
+        },
+        payment: { rail: RAIL, reference: "tx-1" },
+      }),
+    );
+    expect(reads).toBe(1);
+    expect(outcome.offer).toBe(offerDigest);
+    expect(outcome.statement?.statement.offer).toBe(offerDigest);
+  });
+
+  test("the digest the OfferSource is handed is the digest whose shape was checked", async () => {
+    // `ports.ts` promises a source that `offerDigest` is always `sha256:<64 lowercase hex>`,
+    // so it may interpolate the value into a path or a URL without escaping it. That promise
+    // is about the value the source receives, not a sibling read of it: checking one read and
+    // passing another leaves `sha256:../../../../etc/hosts` reaching the port, which is the
+    // traversal the shape check was added to stop.
+    const { offerDigest, offers, subjects } = await freeHarness();
+    const traversal = "sha256:../../../../etc/hosts" as Sha256Digest;
+    const handed: Sha256Digest[] = [];
+    const watching: OfferSource = {
+      read: async (digest, options) => {
+        handed.push(digest);
+        return offers.read(digest, options);
+      },
+    };
+    const gate = createRetrievalGate({
+      offers: watching,
+      subjects,
+      clock: fixedClock,
+    });
+    let reads = 0;
+    delivered(
+      await gate.request({
+        get offer() {
+          reads += 1;
+          return reads === 1 ? offerDigest : traversal;
+        },
+      }),
+    );
+    expect(handed).toEqual([offerDigest]);
   });
 
   test("the payment the gate signs is the payment it checked, not a second read", async () => {
@@ -736,6 +811,52 @@ describe("createRetrievalGate — the paid path", () => {
       payer: 1,
       observedAt: 1,
     });
+  });
+
+  test("an observation's status is read once, so it cannot answer two branches differently", async () => {
+    // The discriminant above the payment gets the read-once discipline the payment already
+    // has. A `status` getter answering "observed" to the first branch and "not-found" to the
+    // second used to fall through to a `TypeError` on the payment that is not there. Nothing
+    // widens either way -- whatever `payment` turns out to be is still checked against the
+    // sealed entry -- but a documented invariant should hold.
+    const sealed = await sealTestOffer({
+      subject: SUBJECT,
+      rails: [{ rail: RAIL, to: TO, amount: "1200" }],
+    });
+    let statusReads = 0;
+    const shifty: RailAdapter = {
+      description: {
+        rail: RAIL,
+        trustModel: "unassured",
+        settlement: "already-settled",
+        paymentsArePubliclyVisible: false,
+      },
+      observe: async () =>
+        ({
+          get status() {
+            statusReads += 1;
+            return statusReads === 1 ? "observed" : "not-found";
+          },
+          payment: {
+            reference: "tx-1",
+            offerDigest: sealed.digest,
+            to: TO,
+            amount: "1200",
+          },
+        }) as unknown as PaymentObservation,
+    };
+    const gate = createRetrievalGate({
+      offers: createInMemoryOfferSource([sealed.envelopeBytes]),
+      subjects: createInMemorySubjectSource([SUBJECT_BYTES]),
+      rails: [shifty],
+      clock: fixedClock,
+    });
+    expect(
+      delivered(
+        await gate.request({ offer: sealed.digest, payment: { rail: RAIL, reference: "tx-1" } }),
+      ).bytes,
+    ).toEqual(SUBJECT_BYTES);
+    expect(statusReads).toBe(1);
   });
 
   test("an untidy but integer-equal amount is honored", async () => {

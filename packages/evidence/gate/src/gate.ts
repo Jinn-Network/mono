@@ -238,6 +238,19 @@ const GatePayerProofSchema = z.object({
 });
 
 /**
+ * Whether the request is a thing whose properties can be read at all.
+ *
+ * The same reasoning as the two schemas above, one level up: `GateRequest`'s fields are
+ * ordinary TypeScript types, so `const request: GateRequest = JSON.parse(body)` needs no
+ * cast, and a transport reaches `request()` with whatever a stranger sent. `null` is the one
+ * JSON value where reading a property throws instead of answering `undefined`, and a throw
+ * from this package means "a port failed" to anything written against it.
+ */
+function isReadableGateRequest(input: unknown): input is GateRequest {
+  return typeof input === "object" && input !== null;
+}
+
+/**
  * The gate's own copy of an observation, read exactly once per member.
  *
  * `PaymentObservation.payment` is the adapter's own object, and an adapter is third-party
@@ -502,10 +515,17 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
       { offerDigest, entry, reference: requested.reference },
       callOptions,
     );
-    if (observation.status === "not-found") {
+    // The discriminant, read once, for the reason `captureObservedPayment` reads the payment
+    // once: an adapter whose `status` is a getter would otherwise answer `"observed"` to the
+    // first branch and `"not-found"` to the second, and fall through to a `TypeError` on the
+    // payment that is not there. No terms can widen either way — whatever `payment` turns out
+    // to be is still checked against the sealed entry — but a documented invariant should
+    // hold.
+    const status = observation.status;
+    if (status === "not-found") {
       return refuse("payment-not-found", observation.detail);
     }
-    if (observation.status === "mismatched") {
+    if (status === "mismatched") {
       return refuse("payment-mismatch", observation.detail);
     }
     const payment = captureObservedPayment(observation.payment);
@@ -614,6 +634,30 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
         );
       }
 
+      // The request itself is caller-supplied, so it is checked before any property is read
+      // off it — for the reason `GateRequestPaymentSchema` exists one level down.
+      // `JSON.parse("null")` is a four-byte body and a valid JSON document, and `null` is the
+      // one JSON value where a property access throws rather than answering `undefined`.
+      // Every other shape (`[]`, `"x"`, `123`, `true`, `{}`) already refused correctly. A
+      // `TypeError` here would be indistinguishable from the holder's store being down,
+      // because this package's contract is that a port that throws is left to throw.
+      if (!isReadableGateRequest(input)) {
+        return refuse("unknown-offer", "this request named no offer");
+      }
+
+      // Read once, and it is this read that is checked and this read that is used.
+      //
+      // `input` is caller-supplied and an in-process caller can hand the gate getters, so
+      // re-reading `input.offer` at each use is the `ObservedPayment` hazard at the request's
+      // own most load-bearing field: reads 1–3 could answer a cheap offer honestly through
+      // resolution and every amount and destination check, and reads 4–6 a pricey one — which
+      // is what `claim()` would then be handed and what the holder would sign a sale of. The
+      // shape check below likewise has to guard the value the `OfferSource` actually sees,
+      // not a sibling read of it, or `ports.ts`'s promise that a source is always handed
+      // `sha256:<64 lowercase hex>` — the promise that makes interpolating it into a path
+      // safe — is not kept.
+      const offerDigest = input.offer;
+
       // The offer digest is caller-supplied and goes to a holder-written `OfferSource` as
       // the first thing this does, so its shape is checked before any I/O. `Sha256Digest` is
       // a template-literal type rather than a validated brand, so a transport that builds the
@@ -623,14 +667,14 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
       // refusal code that distinguishes "no such path" from "not an offer", are a
       // file-existence oracle for any stranger. `unknown-offer` is the right answer: it is
       // already indistinguishable from delisting, which is the posture this gate takes.
-      if (!Sha256DigestSchema.safeParse(input.offer).success) {
+      if (!Sha256DigestSchema.safeParse(offerDigest).success) {
         return refuse(
           "unknown-offer",
-          `this gate holds no offer ${JSON.stringify(input.offer)}`,
+          `this gate holds no offer ${JSON.stringify(offerDigest)}`,
         );
       }
 
-      const resolved = await resolveOffer(input.offer, callOptions);
+      const resolved = await resolveOffer(offerDigest, callOptions);
       if ("refusal" in resolved) return resolved.refusal;
       const { offer } = resolved;
       // The offer schema already refuses anything that is not `sha256:<64 lowercase hex>`;
@@ -644,12 +688,12 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
         if (input.payment !== undefined) {
           return refuse(
             "payment-not-expected",
-            `offer ${input.offer} is free and is served on sight; the request named a `
+            `offer ${offerDigest} is free and is served on sight; the request named a `
               + "payment, which is not the terms it was sealed with",
           );
         }
       } else {
-        const outcome = await settle(offer, input.offer, input, callOptions, now);
+        const outcome = await settle(offer, offerDigest, input, callOptions, now);
         if ("status" in outcome) return outcome;
         settled = outcome;
       }
@@ -663,7 +707,7 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
         // of who has collected what, so it runs this act on every collection of the same
         // purchase and the rail is the one that knows it has already happened.
         const delivery = await settled.rail.deliver(
-          { offerDigest: input.offer, subject, payment: settled.payment },
+          { offerDigest, subject, payment: settled.payment },
           callOptions,
         );
         if (delivery.status === "refused") {
@@ -676,7 +720,7 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
         // fails must cost the buyer their delivery, not the holder their payment. And
         // `already-claimed` is a success, which is what makes redelivery free.
         const claim = await settled.rail.claim(
-          { offerDigest: input.offer, payment: settled.payment },
+          { offerDigest, payment: settled.payment },
           callOptions,
         );
         if (claim.status === "failed") {
@@ -691,7 +735,7 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
           statement = await sealDeliveryStatement({
             statement: {
               kind: DELIVERY_STATEMENT_RECORD_KIND,
-              offer: input.offer,
+              offer: offerDigest,
               subject,
               ...(settled === undefined
                 ? {}
@@ -726,7 +770,7 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
 
       return {
         status: "delivered",
-        offer: input.offer,
+        offer: offerDigest,
         subject,
         bytes,
         ...(statement === undefined ? {} : { statement }),

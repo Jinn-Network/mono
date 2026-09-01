@@ -317,10 +317,15 @@ function conformanceChallenge(
  * The other challenges a proof might have been won against, each differing from the one the
  * gate asked in exactly one field.
  *
- * `nonce` is the freshness of the question and `paymentReference` is the pickup it is about.
- * A proof that survives either substitution is a proof an onlooker can lift off the wire and
+ * One entry per field `signTestPayerProof` binds, because those four are what make an answer
+ * worthless anywhere but the pickup it was asked about: `nonce` is the freshness of the
+ * question, and `offerDigest`, `rail`, and `paymentReference` are the pickup it is about. A
+ * proof that survives any one substitution is a proof an onlooker can lift off the wire and
  * present as their own, because the gate hands the adapter whatever challenge it just issued
- * and takes the adapter's word for whether the answer belongs to it.
+ * and takes the adapter's word for whether the answer belongs to it. Certifying a subset
+ * certifies an adapter that binds a subset — and an adapter binding only `(nonce,
+ * paymentReference)` is relayable across offers, which is the attack the signing helper's
+ * own docblock describes.
  */
 const DIFFERING_CHALLENGES: readonly {
   readonly name: string;
@@ -340,6 +345,22 @@ const DIFFERING_CHALLENGES: readonly {
       ...asked,
       id: "conformance-challenge-other",
       paymentReference: `${asked.paymentReference}-someone-elses`,
+    }),
+  },
+  {
+    name: "a different offer",
+    from: (asked) => ({
+      ...asked,
+      id: "conformance-challenge-other",
+      offerDigest: `sha256:${"9".repeat(64)}` as Sha256Digest,
+    }),
+  },
+  {
+    name: "a different rail",
+    from: (asked) => ({
+      ...asked,
+      id: "conformance-challenge-other",
+      rail: `${asked.rail}/someone-elses`,
     }),
   },
 ]);
