@@ -372,6 +372,44 @@ describe("createRetrievalGate — resolving the offer", () => {
     });
     expect(refused(await gate.request({ offer: recordDigest(junk) })).code).toBe("offer-invalid");
   });
+
+  test("a digest that is not one is refused without the offer source being read at all", async () => {
+    // `Sha256Digest` is a template-literal type, not a validated brand, so a transport that
+    // builds the string reaches the port with no cast. A holder's five-line source doing
+    // `join(dir, `${digest}.dsse`)` would read outside its store, and the refusal code would
+    // tell a stranger whether the path exists. Asserting the port was never called is the
+    // part that pins it: refusing after the read would still be a read.
+    const asked: string[] = [];
+    const offers: OfferSource = {
+      read: async (offerDigest) => {
+        asked.push(offerDigest);
+        return null;
+      },
+    };
+    const gate = createRetrievalGate({
+      offers,
+      subjects: createInMemorySubjectSource([SUBJECT_BYTES]),
+      clock: fixedClock,
+    });
+    for (const shape of [
+      "sha256:../../../../../../etc/hosts",
+      "sha256:",
+      `sha256:${"0".repeat(63)}`,
+      `sha256:${"F".repeat(64)}`,
+      `sha256:${"0".repeat(64)}/../secret`,
+      "not-a-digest",
+      "",
+    ]) {
+      expect(refused(await gate.request({ offer: shape as Sha256Digest })).code)
+        .toBe("unknown-offer");
+    }
+    expect(asked).toEqual([]);
+
+    // And a well-formed digest still reaches the source, so the check is a shape gate rather
+    // than a blanket refusal.
+    expect(refused(await gate.request({ offer: ABSENT })).code).toBe("unknown-offer");
+    expect(asked).toEqual([ABSENT]);
+  });
 });
 
 describe("createRetrievalGate — the free path", () => {
@@ -694,6 +732,48 @@ describe("createRetrievalGate — payer-proof pickup", () => {
     );
     expect(outcome.code).toBe("challenge-unknown");
     expect(outcome.detail).toContain("a different pickup");
+  });
+
+  test("an expired challenge is refused even by a store that hands it back", async () => {
+    // The gate re-checks the store's binding, and its expiry belongs to the same distrust:
+    // `expiresAt` is on the value the store returned, so a store that forgets to age its
+    // own challenges out must not be the only thing deciding an answer is still live.
+    const { gate, offerDigest } = await priced(
+      {
+        paymentsArePubliclyVisible: true,
+        payerSecrets: { "payer-a": "only-the-payer-knows-this" },
+      },
+      {
+        challenges: {
+          issue: async (input) => ({
+            id: "c1",
+            nonce: "n1",
+            offerDigest: input.offerDigest,
+            rail: input.rail,
+            paymentReference: input.paymentReference,
+            // An hour before `fixedClock`.
+            expiresAt: "2026-08-31T11:00:00.000Z",
+          }),
+          consume: async () => ({
+            id: "c1",
+            nonce: "n1",
+            offerDigest,
+            rail: RAIL,
+            paymentReference: "tx-1",
+            expiresAt: "2026-08-31T11:00:00.000Z",
+          }),
+        },
+      },
+    );
+    const outcome = refused(
+      await gate.request({
+        offer: offerDigest,
+        payment: { rail: RAIL, reference: "tx-1" },
+        payerProof: { challengeId: "c1", proof: "anything" },
+      }),
+    );
+    expect(outcome.code).toBe("challenge-unknown");
+    expect(outcome.detail).toContain("expired");
   });
 });
 

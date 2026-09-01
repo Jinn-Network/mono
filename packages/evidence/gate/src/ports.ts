@@ -21,6 +21,11 @@ export interface GateOperationOptions {
  * Returning `null` is delisting. It is the holder's only way to stop honoring terms, and it
  * is a different act from repricing — superseding an offer announces new terms and says
  * nothing about the old one, which the gate goes on honoring until it is taken off the gate.
+ *
+ * `offerDigest` is always `sha256:<64 lowercase hex>`: the gate validates the shape of the
+ * caller's digest before it calls this, so a source may interpolate it into a path or a URL
+ * without escaping it. `Sha256Digest` is a template-literal type rather than a validated
+ * brand, so this is a promise the gate keeps rather than one the type does.
  */
 export interface OfferSource {
   read(

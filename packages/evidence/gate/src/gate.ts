@@ -2,7 +2,11 @@
 
 import { isFreeOffer, parseOfferEnvelope } from "@jinn-network/evidence-offer";
 import type { OfferRail, OfferRecord } from "@jinn-network/evidence-offer";
-import { isCalendarStrictRfc3339, recordDigest } from "@jinn-network/trust-core";
+import {
+  isCalendarStrictRfc3339,
+  recordDigest,
+  Sha256DigestSchema,
+} from "@jinn-network/trust-core";
 import type { DsseSigner, Sha256Digest } from "@jinn-network/trust-core";
 
 import { GateConfigurationError } from "./errors.js";
@@ -481,6 +485,18 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
           "the proof answers a challenge issued for a different pickup",
         );
       }
+      // And its expiry, for the same reason: `expiresAt` is on the value the store returned,
+      // so the store is not the only thing that gets to decide the answer is still live. The
+      // shipped store checks it; a holder's does not have to be trusted to.
+      // Compared as instants rather than strings: RFC 3339 permits an offset, so two
+      // spellings of the same moment do not order lexically.
+      const expiresAtMs = Date.parse(challenge.expiresAt);
+      if (Number.isNaN(expiresAtMs) || expiresAtMs <= Date.parse(now)) {
+        return refuse(
+          "challenge-unknown",
+          "the proof answers a challenge that has expired; ask again",
+        );
+      }
       // Captured in the same construction-time read as the description that requires it, so
       // this cannot be an adapter that has since dropped the method.
       const control = await rail.verifyPayerControl!(
@@ -507,6 +523,22 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
         // sealed with one is not a record. Loud, and the same answer for every path.
         throw new GateConfigurationError(
           `the gate clock produced ${JSON.stringify(now)}, which is not an RFC 3339 instant`,
+        );
+      }
+
+      // The offer digest is caller-supplied and goes to a holder-written `OfferSource` as
+      // the first thing this does, so its shape is checked before any I/O. `Sha256Digest` is
+      // a template-literal type rather than a validated brand, so a transport that builds the
+      // string satisfies it with no cast: `sha256:../../../../etc/hosts` reaches the port,
+      // where the natural `join(dir, `${digest}.dsse`)` reads outside the store. Content
+      // never leaks — `resolveOffer` re-derives the digest — but the read itself, and the
+      // refusal code that distinguishes "no such path" from "not an offer", are a
+      // file-existence oracle for any stranger. `unknown-offer` is the right answer: it is
+      // already indistinguishable from delisting, which is the posture this gate takes.
+      if (!Sha256DigestSchema.safeParse(input.offer).success) {
+        return refuse(
+          "unknown-offer",
+          `this gate holds no offer ${JSON.stringify(input.offer)}`,
         );
       }
 

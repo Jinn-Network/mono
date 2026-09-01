@@ -126,4 +126,40 @@ describe("assertConformingRailAdapter", () => {
         adapter({ settlement: "already-settled" }, { claim: claimIt }),
       )).toThrow(/nothing left to take/u);
   });
+
+  test("a non-string assuredBy is a configuration error, not a TypeError", () => {
+    // This package promises `GateConfigurationError` for every construction defect, and
+    // `null` would otherwise reach `.trim()` and escape as a TypeError instead.
+    for (const assuredBy of [null, 0, {}, [], true]) {
+      expect(() =>
+        assertConformingRailAdapter(
+          adapter({ assuredBy: assuredBy as unknown as string }),
+        )).toThrow(GateConfigurationError);
+    }
+  });
+
+  test("each method is read once, so a getter cannot answer the rules differently", () => {
+    // A public export that `describeRailAdapterConformance` runs against a raw adapter, so a
+    // getter answering a function to the typeof loop and `undefined` to the settlement rule
+    // would otherwise get a green pass from the shipped conformance driver.
+    const reads: string[] = [];
+    let deliverAnswers = 0;
+    const sneaky = new Proxy(
+      adapter({ settlement: "on-delivery" }, { deliver: readyToDeliver }),
+      {
+        get(target, property, receiver) {
+          if (typeof property === "string") reads.push(property);
+          if (property === "deliver") {
+            deliverAnswers += 1;
+            return deliverAnswers === 1 ? readyToDeliver : undefined;
+          }
+          return Reflect.get(target, property, receiver) as unknown;
+        },
+      },
+    ) as RailAdapter;
+    expect(() => assertConformingRailAdapter(sneaky)).not.toThrow();
+    for (const member of ["description", "observe", "verifyPayerControl", "deliver", "claim"]) {
+      expect(reads.filter((name) => name === member)).toHaveLength(1);
+    }
+  });
 });

@@ -255,6 +255,13 @@ export function assertConformingRailAdapter(adapter: RailAdapter): RailSelfDescr
   // otherwise put an `assuredBy` key on an `unassured` rail, past the rule that forbids one.
   const declared = adapter.description;
   const assuredBy = declared.assuredBy;
+  if (assuredBy !== undefined && typeof assuredBy !== "string") {
+    // `null` and every other non-string would otherwise reach `.trim()` below as a
+    // TypeError, and this package promises `GateConfigurationError` for every construction
+    // defect. The rail identifier is read from the same third-party object, so the message
+    // does not quote it.
+    fail("a rail adapter's assuredBy must be a string when it is present");
+  }
   const description: RailSelfDescription = Object.freeze({
     rail: declared.rail,
     trustModel: declared.trustModel,
@@ -292,11 +299,21 @@ export function assertConformingRailAdapter(adapter: RailAdapter): RailSelfDescr
   // Before any presence rule, because `claim: null` is "present" to `!== undefined` and
   // would otherwise reach a caller as a TypeError from a later `.bind`. This package
   // promises `GateConfigurationError` for every construction defect.
+  // Each method is read into a local once, for the same reason the description is: this is a
+  // public export, and `describeRailAdapterConformance` calls it on a raw adapter. A
+  // getter-based `on-delivery` adapter answering a function to the `typeof` loop and
+  // `undefined` to the settlement rule below would otherwise get a green pass from the
+  // shipped conformance driver.
+  const observe = adapter.observe;
+  const verifyPayerControl = adapter.verifyPayerControl;
+  const deliver = adapter.deliver;
+  const claim = adapter.claim;
+
   for (const [name, value, required] of [
-    ["observe", adapter.observe, true],
-    ["verifyPayerControl", adapter.verifyPayerControl, false],
-    ["deliver", adapter.deliver, false],
-    ["claim", adapter.claim, false],
+    ["observe", observe, true],
+    ["verifyPayerControl", verifyPayerControl, false],
+    ["deliver", deliver, false],
+    ["claim", claim, false],
   ] as const) {
     if (value === undefined && !required) continue;
     if (typeof value !== "function") {
@@ -304,13 +321,13 @@ export function assertConformingRailAdapter(adapter: RailAdapter): RailSelfDescr
     }
   }
 
-  if (description.paymentsArePubliclyVisible && adapter.verifyPayerControl === undefined) {
+  if (description.paymentsArePubliclyVisible && verifyPayerControl === undefined) {
     fail(
       `rail adapter "${rail}" says its payments are publicly visible but implements no `
         + "payer-control check, so any onlooker could redeem someone else's payment",
     );
   }
-  if (!description.paymentsArePubliclyVisible && adapter.verifyPayerControl !== undefined) {
+  if (!description.paymentsArePubliclyVisible && verifyPayerControl !== undefined) {
     fail(
       `rail adapter "${rail}" implements a payer-control check the gate would never call, `
         + "because it says its payments are not publicly visible",
@@ -318,23 +335,23 @@ export function assertConformingRailAdapter(adapter: RailAdapter): RailSelfDescr
   }
 
   if (description.settlement === "on-delivery") {
-    if (adapter.deliver === undefined) {
+    if (deliver === undefined) {
       fail(
         `rail adapter "${rail}" settles on delivery and must implement deliver(), which is `
           + "where that settlement happens",
       );
     }
-    if (adapter.claim !== undefined) {
+    if (claim !== undefined) {
       fail(
         `rail adapter "${rail}" settles on delivery and must not implement claim(): `
           + "delivery is the claim, and a second taking step is a second charge",
       );
     }
   }
-  if (description.settlement === "explicit-claim" && adapter.claim === undefined) {
+  if (description.settlement === "explicit-claim" && claim === undefined) {
     fail(`rail adapter "${rail}" settles by explicit claim and must implement claim()`);
   }
-  if (description.settlement === "already-settled" && adapter.claim !== undefined) {
+  if (description.settlement === "already-settled" && claim !== undefined) {
     fail(
       `rail adapter "${rail}" says an observed payment is already settled and must not `
         + "implement claim(): there is nothing left to take",
