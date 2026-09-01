@@ -60,10 +60,11 @@ const VALIDATED_SHAPE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:)(\d{2})(?:\.(\d+))?(Z|
  * A leap second has no millisecond
  * representation at all -- 23:59:60 sits between 23:59:59.999 and the next
  * day's 00:00:00.000 -- so it is reported as 23:59:59.999, the last instant
- * that orders correctly against both neighbours. Two leap-second timestamps
- * therefore collapse to one value, and a monotonicity rule comparing them
- * with a strict `>` refuses rather than accepting the later one; that is the
- * fail-closed side, and no `toISOString` producer emits a leap second.
+ * that orders correctly against both neighbours. Every leap-second spelling
+ * therefore collapses onto that one value, and onto `23:59:59.999` with it, so
+ * a monotonicity rule comparing two of them with a strict `>` refuses rather
+ * than accepting the later one; that is the fail-closed side, and no
+ * `toISOString` producer emits a leap second in the first place.
  */
 export function parseHeadTimestamp(value: unknown): number {
   if (!isCalendarStrictRfc3339(value)) return Number.NaN;
