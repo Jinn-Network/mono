@@ -341,7 +341,7 @@ window by passing a bigger number.
 The two refusals are named once, here, and reused verbatim by both named verification
 procedures (§10.3):
 
-- **`refresh-by-ceiling`** — rules 1 and 2 together. It covers the *empty or inverted* window
+- **`refresh-by-ceiling`** — rules 1–2 together. It covers the *empty or inverted* window
   as well as the too-wide one; an operator reading this slug for a collapsed window should not
   go looking for an over-long one.
 - **`head-issued-ahead`** — rule 3.
@@ -1180,8 +1180,8 @@ The kit precedes all real implementations (the CSI discipline, again):
   broken linkage; sequence gaps and duplicates (must reject); duplicate `announcementId`
   (must reject); stale heads; rolled-back heads; `issuedAt` regressions; a head issued
   further ahead of the verifier's clock than one profile window (must reject
-  `head-issued-ahead`, §5.2 rule 3) and a head whose window is empty, inverted, or wider
-  than the profile allows (must reject `refresh-by-ceiling`, §5.2 rules 1–2); a competing head
+  `head-issued-ahead`, §5.2 rule 3) and a head whose window is inverted (must reject
+  `refresh-by-ceiling`, §5.2 rule 1); a competing head
   signed by a rotated-out key (must reject); entries with bad facts cards; facts requiring
   unavailable referenced bytes (must yield `indeterminate` and fail closed at decision
   grade); genesis edge cases (pinned first sequence, `previous: null` uniqueness);
@@ -1193,8 +1193,7 @@ The kit precedes all real implementations (the CSI discipline, again):
   announcement (must reject).
 - **Source conformance:** published (signed) and unpublished profiles; correction-by-append
   with `reorged` reasons; head freshness and `issuedAt` monotonicity maintenance;
-  `refreshBy` within profile bounds; a profile bound wider than the published-source ceiling
-  (must clamp, never widen).
+  `refreshBy` within profile bounds.
 - **Query-plane conformance:** provenance on every item; fabricated-provenance detection via
   §10.4 step 3; `complete` honesty (empty-vs-truncated); cursor determinism with digest
   tie-break; no origination.
@@ -1208,7 +1207,7 @@ The kit precedes all real implementations (the CSI discipline, again):
   withdrawal of a retrospective-kind item (must not prune the decision store); `reorged`
   withdrawal (must trigger recompute).
 - **Named checks in isolation:** `source-chain-verification` outcomes (`stale`, `forked`,
-  `broken-chain` — including `at: refresh-by-ceiling` and `at: head-issued-ahead`,
+  `broken-chain` (including `at: refresh-by-ceiling` and `at: head-issued-ahead`),
   `unauthorized-signer`), `facts-consistency` (all three outcomes),
   `derivation-consistency` (present, fabricated, reorged-away).
 
