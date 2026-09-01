@@ -45,6 +45,53 @@ afterEach(() => {
   for (const workspace of workspaces.splice(0)) rmSync(workspace, { recursive: true, force: true });
 });
 
+const INSPECT_CONTAINER_FILTER = "name=jinn-inspect-";
+
+function listInspectContainers(): string {
+  return execFileSync(dockerPath, [
+    "ps", "-a", "--filter", INSPECT_CONTAINER_FILTER, "--format", "{{.Names}}\t{{.Status}}",
+  ], { encoding: "utf8" }).trim();
+}
+
+const CONTAINER_REAP_BUDGET_MS = 30_000;
+
+/**
+ * Docker Engine removes a `--rm` container asynchronously, so a container the runtime has already
+ * released can still be listed for a while on a loaded runner. Poll to a bounded deadline instead
+ * of sleeping a fixed interval, and report what survived it: a bare `expected 'jinn-inspect-…' to
+ * be ''` cannot tell an environment that was merely slow from a reap path that is genuinely broken.
+ */
+async function expectNoInspectContainers(): Promise<void> {
+  const deadline = Date.now() + CONTAINER_REAP_BUDGET_MS;
+  let remaining = listInspectContainers();
+  while (remaining !== "" && Date.now() < deadline) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+    remaining = listInspectContainers();
+  }
+  expect(
+    remaining,
+    `Inspect containers survived ${String(CONTAINER_REAP_BUDGET_MS)}ms of polling after the run released them:\n${remaining}`,
+  ).toBe("");
+}
+
+/**
+ * A container one test leaks is visible to every later test's global assertion, which reports the
+ * leak against whichever test happens to run next. Sweep after each test so a single reap failure
+ * fails the test that caused it and no other. The assertions above have already run, so detection
+ * is unaffected.
+ */
+afterEach(() => {
+  if (imageDigest === undefined || datasetCacheDir === undefined) return;
+  const leaked = listInspectContainers();
+  if (leaked === "") return;
+  console.warn(`sweeping leaked Inspect containers:\n${leaked}`);
+  for (const line of leaked.split("\n")) {
+    const [name] = line.split("\t");
+    if (name === undefined || name === "") continue;
+    execFileSync(dockerPath, ["rm", "--force", name], { stdio: "ignore" });
+  }
+});
+
 describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("real OCI Inspect runtime", () => {
   test("runs multiple Inspect scorers through the runtime-hosted sandbox and preserves native evidence", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-sandbox-"));
@@ -177,8 +224,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       "--entrypoint=inspect", imageDigest!, "view", "bundle", "--log-dir=/logs", "--output-dir=/output/inspect-view-bundle",
     ], { encoding: "utf8" });
     expect(readdirSync(join(viewerOutputRoot, "inspect-view-bundle")).length).toBeGreaterThan(0);
-    const remaining = execFileSync(dockerPath, ["ps", "-a", "--filter", "name=jinn-inspect-", "--format", "{{.Names}}"], { encoding: "utf8" }).trim();
-    expect(remaining).toBe("");
+    await expectNoInspectContainers();
   }, 300_000);
 
   test.skipIf(humanEvalCacheDir === undefined)("runs one unmodified Inspect Evals HumanEval sample in the hosted sandbox", async () => {
@@ -251,8 +297,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       "--entrypoint=inspect", imageDigest!, "view", "bundle", "--log-dir=/logs", "--output-dir=/output/inspect-view-bundle",
     ], { encoding: "utf8" });
     expect(readdirSync(join(viewerOutputRoot, "inspect-view-bundle")).length).toBeGreaterThan(0);
-    const remaining = execFileSync(dockerPath, ["ps", "-a", "--filter", "name=jinn-inspect-", "--format", "{{.Names}}"], { encoding: "utf8" }).trim();
-    expect(remaining).toBe("");
+    await expectNoInspectContainers();
   }, 300_000);
 
   test("runs one exact sample across two arms through preview and the official lifecycle", async () => {
@@ -368,11 +413,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     expect(cancellation).toBeDefined();
     if (cancellation === undefined) throw new Error("unreachable");
     expect((await cancellation).ok).toBe(true);
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
-    const remaining = execFileSync(dockerPath, ["ps", "-a", "--filter", "name=jinn-inspect-", "--format", "{{.Names}}"], {
-      encoding: "utf8",
-    }).trim();
-    expect(remaining).toBe("");
+    await expectNoInspectContainers();
   }, 180_000);
 
   test("preserves a fake Responses call as a genuine Inspect transcript through detached verification", async () => {
@@ -579,8 +620,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       expect(bytes.includes(Buffer.from(keyPath))).toBe(false);
     }
     expect(readFileSync(responsePath, "utf8")).not.toContain(keySentinel);
-    const remaining = execFileSync(dockerPath, ["ps", "-a", "--filter", "name=jinn-inspect-", "--format", "{{.Names}}"], { encoding: "utf8" }).trim();
-    expect(remaining).toBe("");
+    await expectNoInspectContainers();
     const networks = execFileSync(dockerPath, ["network", "ls", "--filter", "name=jinn-inspect-", "--format", "{{.Name}}"], { encoding: "utf8" }).trim();
     const volumes = execFileSync(dockerPath, ["volume", "ls", "--filter", "name=jinn-inspect-", "--format", "{{.Name}}"], { encoding: "utf8" }).trim();
     expect({ networks, volumes }).toEqual({ networks: "", volumes: "" });
