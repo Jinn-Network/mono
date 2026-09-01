@@ -363,7 +363,7 @@ describe('independent public source sync', () => {
     // about whether the signer is STILL valid. `ConsumerState` is durable
     // across runs, so a checkpoint written while the key was valid outlives
     // that key's rotation, expiry, or revocation -- and the shortcut would
-    // keep honouring it for as long as the source re-serves the same bytes.
+    // keep honoring it for as long as the source re-serves the same bytes.
     const state = await ConsumerState.open(await stateRoot());
     const sourceEntry = entry(1, null);
     const head: SourceHead = {

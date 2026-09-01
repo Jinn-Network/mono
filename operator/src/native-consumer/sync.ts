@@ -114,8 +114,8 @@ function outcomeReason(status: Exclude<Awaited<ReturnType<typeof verifySourceCha
 
 /**
  * `source-head-revalidation`'s outcomes in the same reason vocabulary the chain
- * procedure's already use, so one defect reads the same whichever path refused
- * it. The envelope-shaped refusals the chain procedure folds into
+ * procedure's outcomes already use, so one defect reads the same whichever path
+ * refused it. The envelope-shaped refusals the chain procedure folds into
  * `unauthorized-signer` keep their own slugs, as the procedure intends.
  */
 function headOutcomeReason(status: Exclude<SourceHeadOutcome['status'], 'ok'>): string {
@@ -149,7 +149,7 @@ export function createProtocolSourceVerifier(options: ProtocolSourceVerifierOpti
         // Byte-identical head bytes are not a cached acceptance: they say
         // nothing about whether the signer is STILL a key valid at `now`, so a
         // head signed by a since-rotated-out, expired, or revoked key would be
-        // honoured forever for as long as the source re-serves the same bytes
+        // honored forever for as long as the source re-serves the same bytes
         // -- and `ConsumerState` is durable across runs, so a checkpoint
         // written while the key was valid outlives its revocation. Design
         // §10.3 step 2 refuses such a head regardless of any embedded
