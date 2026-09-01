@@ -189,3 +189,70 @@ test('write replaces a forked directory with the canonical symlink', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('--check fails on a dangling symlink under .claude/skills', () => {
+  const root = fixture(['eng-day']);
+  try {
+    assert.equal(run(root).status, 0);
+    const dangling = join(root, '.claude', 'skills', 'eng-day', 'reference.md');
+    symlinkSync('../../gone/reference.md', dangling);
+    const result = run(root, ['--check']);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /dangling/i);
+    assert.match(result.stderr, /reference\.md/);
+    assert.ok(lstatSync(dangling).isSymbolicLink(), '--check must not repair canonical content');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('write reports a dangling symlink under .claude/skills instead of silently passing', () => {
+  const root = fixture(['eng-day']);
+  try {
+    const dangling = join(root, '.claude', 'skills', 'eng-day', 'reference.md');
+    symlinkSync('../../gone/reference.md', dangling);
+    const result = run(root);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /dangling/i);
+    assert.ok(lstatSync(dangling).isSymbolicLink(), 'write must not mutate canonical content');
+    // The mirrors it can own are still generated before the failure.
+    for (const mirror of MIRRORS) {
+      assert.equal(readlinkSync(mirrorLink(root, mirror, 'eng-day')), `${REL}/eng-day`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('--check fails on a dangling symlink under a generated mirror', () => {
+  const root = fixture(['eng-day']);
+  try {
+    assert.equal(run(root).status, 0);
+    for (const mirror of ['.codex/skills', '.cursor/skills']) {
+      const dangling = mirrorLink(root, mirror, 'removed-skill');
+      symlinkSync(`${REL}/removed-skill`, dangling);
+      const result = run(root, ['--check']);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /dangling/i);
+      assert.match(result.stderr, /removed-skill/);
+      assert.ok(lstatSync(dangling).isSymbolicLink(), '--check must not prune');
+      rmSync(dangling);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('write prunes a dangling mirror link and then passes', () => {
+  const root = fixture(['eng-day']);
+  try {
+    assert.equal(run(root).status, 0);
+    symlinkSync(`${REL}/removed-skill`, mirrorLink(root, '.codex/skills', 'removed-skill'));
+    const result = run(root);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(existsSync(mirrorLink(root, '.codex/skills', 'removed-skill')), false);
+    assert.equal(run(root, ['--check']).status, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
