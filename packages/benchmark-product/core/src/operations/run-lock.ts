@@ -23,6 +23,7 @@ import {
   sealRun,
   withRunAnchorIntentExtension,
   withRunTaskSelectionExtension,
+  withRunBeaconSourceExtension,
   withRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
@@ -226,11 +227,20 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       const runWithTaskSelection = declaredTaskSelection === undefined
         ? runWithDeclaredIntent
         : withRunTaskSelectionExtension(runWithDeclaredIntent, { mode: declaredTaskSelection });
+      // The beacon source this run will bind to (#3426), sealed on exactly the same terms. Naming
+      // it here — before any admissible beacon value exists — is what leaves `bind` no source to
+      // choose: with the round already determined by `(source, sealedAt)` (#3322), a sealed source
+      // determines the beacon outright. Declaring nothing stays legal and seals byte-identical
+      // bytes; it just leaves the choice where PR #3375 found it, and the report face says so.
+      const declaredBeaconSource = document.spec.beaconSource;
+      const runWithBeaconSource = declaredBeaconSource === undefined
+        ? runWithTaskSelection
+        : withRunBeaconSourceExtension(runWithTaskSelection, { source: declaredBeaconSource });
       // Check the declaration against the records BEFORE the irreversible seal, using the exact
       // rule the cold verifier applies afterwards. Left to publish time, a contradiction would
       // surface only once the run had been locked, executed, reported, and materialized -- a
       // bundle the workspace can never verify, and no way back. Same rule, earlier and cheaper.
-      const sealed = sealRun(runWithTaskSelection);
+      const sealed = sealRun(runWithBeaconSource);
       if (declaredTaskSelection !== undefined) {
         // Judged on the exact bytes just sealed, so the rule cannot be shown a different Run from
         // the one that gets stored. This is the only refusal after `sealRun`, and it is safe there

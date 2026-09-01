@@ -22,6 +22,7 @@
 
 import { z } from "zod";
 import { TASK_SELECTION_MODES } from "@jinn-network/benchmarking-records";
+import { BeaconSourceIdSchema } from "@colophon-claims/verify";
 import { refuse, refuseWithIssues, type ProductIssue } from "../errors.js";
 import { LifecycleStateSchema } from "./lifecycle.js";
 
@@ -259,6 +260,24 @@ export const DraftSpecSchema = z.object({
   additionalAnalyses: AdditionalAnalysesSchema.optional(),
   anchoring: DraftAnchoringSchema.optional(),
   taskSelection: TaskSelectionSchema.optional(),
+  /**
+   * The beacon source this run will bind to (issue #3426), sealed into the Run record's
+   * `beacon-source/v1` extension at lock.
+   *
+   * Issue #3322 fixed the ROUND a sealed run may bind to, but left the SOURCE to the operator — and
+   * that residue is larger than a swap between equally constrained beacons: one admitted source is
+   * indexed by block height, where no round follows from a seal at all and nothing in the bundle
+   * places the value after the seal. So an operator who disliked the round the seal named could select
+   * that source instead, at any height the chain carries. Declaring the source before the beacon
+   * values exist is what removes the choice; `bind` then refuses a binding naming any other source.
+   *
+   * The vocabulary is the reference verifier's own admitted-source registry rather than a second list
+   * here, so a source this product could never derive from cannot be declared. Optional and additive
+   * on the same terms as `anchoring` and `taskSelection` above: an absent field is the behavior every
+   * draft had before it existed, no entry joins `DRAFT_SPEC_DEFAULTS`, and no stored draft's
+   * `specSha256` moves.
+   */
+  beaconSource: BeaconSourceIdSchema.optional(),
 });
 
 export type DraftSpec = z.infer<typeof DraftSpecSchema>;

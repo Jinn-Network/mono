@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   ANCHOR_INTENT_EXTENSION,
+  BEACON_SOURCE_EXTENSION,
   parseRun,
+  readBeaconSource,
   readRunAnchorIntentExtension,
   sealRun,
 } from "@jinn-network/benchmarking-records";
@@ -304,4 +306,42 @@ describe("declared anchoring intent (anchor-evidence design §7.3)", () => {
     const record = JSON.parse(new TextDecoder().decode(declared)) as Record<string, unknown>;
     expect(record[ANCHOR_INTENT_EXTENSION]).toEqual({ providers: [profile] });
   }, 60_000);
+});
+
+/**
+ * Issue #3426. Declaring the beacon source before the lock is what leaves `bind` no source to
+ * choose; declaring nothing must stay exactly as legal and as byte-identical as it was.
+ */
+describe("runLock — declared beacon source", () => {
+  const sealedRun = (draftId = "draft-1"): Record<string, unknown> => {
+    const runSha256 = readRunState(workspaceDir, draftId)?.runSha256;
+    if (runSha256 === undefined) throw new Error("no sealed Run");
+    return parseRun(getSealedBytes(workspaceDir, runSha256)) as unknown as Record<string, unknown>;
+  };
+
+  test("seals the declaration when the draft makes one", async () => {
+    const clock = makeClock();
+    await setUpQuotedDraft(clock);
+    // Patched before the quote invalidation check would fire, then re-quoted, the way any
+    // spec edit reaches a lock.
+    updateDraft(contextFor(clock), { draftId: "draft-1", patch: { beaconSource: "drand/quicknet" } });
+    await runQuote(contextFor(clock), { draftId: "draft-1" });
+    expect(runLock(contextFor(clock), { draftId: "draft-1" }).ok).toBe(true);
+    expect(readBeaconSource(sealedRun())).toBe("drand/quicknet");
+  });
+
+  test("touches the record at all only when the draft declares one", async () => {
+    const clock = makeClock();
+    await setUpQuotedDraft(clock);
+    expect(runLock(contextFor(clock), { draftId: "draft-1" }).ok).toBe(true);
+    expect(sealedRun()).not.toHaveProperty(BEACON_SOURCE_EXTENSION);
+    expect(readBeaconSource(sealedRun())).toBeUndefined();
+  });
+
+  test("refuses a source no beacon procedure admits, at the draft rather than at the seal", async () => {
+    const clock = makeClock();
+    await setUpQuotedDraft(clock);
+    const patched = updateDraft(contextFor(clock), { draftId: "draft-1", patch: { beaconSource: "drand/nonesuch" } });
+    expect(patched.ok).toBe(false);
+  });
 });

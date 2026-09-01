@@ -377,3 +377,44 @@ describe("verifyRunBinding roundBasis", () => {
     expect(binding.roundBasis).toBe("operator-chosen");
   });
 });
+
+/** Issue #3426: the beacon SOURCE the sealed record named, restated inside the binding record. */
+describe("verifyRunBinding sourceBasis", () => {
+  test("is operator-chosen when the record declares no source, so pre-#3426 records read unchanged", () => {
+    const binding = verifyRunBinding(censusBinding());
+    expect(binding.sourceBasis).toBe("operator-chosen");
+    expect(binding.declaredSource).toBeUndefined();
+  });
+
+  test("is seal-declared when the record restates the source the seal named", () => {
+    const binding = verifyRunBinding(censusBinding({ declaredSource: "drand/quicknet" }));
+    expect(binding.sourceBasis).toBe("seal-declared");
+    expect(binding.declaredSource).toBe("drand/quicknet");
+  });
+
+  test.each(["census", "sampled"] as const)(
+    "refuses a %s record whose declared source is not the source it binds to",
+    (mode) => {
+      const build = mode === "census" ? censusBinding : sampledBinding;
+      expect(() => verifyRunBinding(build({ declaredSource: "bitcoin/mainnet" })))
+        .toThrow(/^declaredSource: /u);
+      expect(() => verifyRunBinding(build({ declaredSource: "bitcoin/mainnet" })))
+        .toThrow(/fixes nothing/u);
+    },
+  );
+
+  test("refuses a declared source outside the admitted set", () => {
+    expect(() => verifyRunBinding(censusBinding({ declaredSource: "drand/nonesuch" })))
+      .toThrow(RunBindingError);
+  });
+
+  test("a declared height-indexed source is seal-declared and still attributive", () => {
+    const binding = verifyRunBinding(censusBinding({
+      declaredSource: "bitcoin/mainnet",
+      beacon: beacon({ source: "bitcoin/mainnet", round: 900_000 }),
+    }));
+    expect(binding.sourceBasis).toBe("seal-declared");
+    expect(binding.postSeal).toBe("attributive");
+    expect(binding.roundBasis).toBe("operator-chosen");
+  });
+});
