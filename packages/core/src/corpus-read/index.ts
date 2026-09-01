@@ -6,5 +6,7 @@ export * from './fetch-artifact.js';
 export * from './fetch.js';
 export * from './http-discovery.js';
 export * from './ipfs.js';
+export * from './origin-guard.js';
+export * from './pinned-fetch.js';
 export * from './route-resolver.js';
 export * from './types.js';

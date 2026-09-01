@@ -1,4 +1,9 @@
-import { resolveSolverPlugin } from '../plugins/index.js';
+import {
+  defaultSolverPluginVendorRoot,
+  gcOrphanedBundledLocalVendorCopies,
+  remoteVendorNamesFromEntries,
+  resolveSolverPlugin,
+} from '../plugins/index.js';
 import type { SolverPluginEntry } from '../plugins/types.js';
 import type { RuntimePlugin } from '../harnesses/types.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from '../harnesses/names.js';
@@ -376,11 +381,44 @@ export async function registerWiringEntry(
   });
 }
 
+export interface LoadSolverNetsOptions {
+  /**
+   * Run one-shot vendor cleanup for legacy bundled/local copies. Only the
+   * daemon boot path opts in — eval/UX helpers call loadSolverNets with a
+   * partial wiring slice and must not GC remote materializations (#1242).
+   */
+  gcOrphanedVendorCopies?: boolean;
+  /**
+   * Vendor root the cleanup targets. Defaults to
+   * `defaultSolverPluginVendorRoot()` — the operator's real
+   * `~/.jinn-operator/solver-plugins`. Tests must pass a temp directory so no
+   * test run can resolve, let alone delete inside, the default root.
+   */
+  vendorRoot?: string;
+}
+
 export async function loadSolverNets(
   config: {
     executionWiring?: readonly ExecutionWiringConfigEntry[];
   },
+  opts: LoadSolverNetsOptions = {},
 ): Promise<SolverNetRegistry> {
+  if (opts.gcOrphanedVendorCopies) {
+    const pluginEntriesForGc: SolverPluginEntry[] = [JINN_NETWORK_TOOLS_PLUGIN];
+    for (const wiring of config.executionWiring ?? []) {
+      pluginEntriesForGc.push(...wiring.plugins);
+      const contractRef = contractRefFromWorkKind(wiring.workKind);
+      if (contractRef) {
+        const solverType = `${contractRef.id}.${contractRef.version}`;
+        pluginEntriesForGc.push(...defaultRuntimePluginsForSolverType(solverType));
+      }
+    }
+    gcOrphanedBundledLocalVendorCopies(
+      opts.vendorRoot ?? defaultSolverPluginVendorRoot(),
+      remoteVendorNamesFromEntries(pluginEntriesForGc),
+    );
+  }
+
   const registry = new SolverNetRegistry();
   for (const entry of config.executionWiring ?? []) {
     await registerWiringEntry(registry, entry);

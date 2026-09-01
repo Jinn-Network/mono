@@ -167,7 +167,6 @@ jobs:
             .github/scripts/colophon-publish-manifest.test.mjs \
             .github/scripts/generate-architecture.test.mjs \
             .github/scripts/build-platform-public-surface.test.mjs \
-            .github/scripts/build-prepublication-bundle.test.mjs \
             .github/scripts/platform-publisher-surface.test.mjs \
             .github/scripts/prepublication-external-consumer.test.mjs \
             .github/scripts/publish-stack.test.mjs \
@@ -175,6 +174,12 @@ jobs:
             .github/scripts/publish-verified-platform.test.mjs \
             .github/scripts/stack-external-acceptance.test.mjs \
             .github/scripts/stack-publish-manifest.test.mjs
+      # Runs alone. Its native-vertical case packs the real checkout, and packWave
+      # patches each packages/*/package.json in place for the duration of that pack.
+      # A suite co-scheduled by `node --test` reads those same manifests and sees
+      # truncated or canary-versioned JSON. workflow-script-tests.test.mjs pins this.
+      - name: Prove the prepublication bundle packs the catalog without publishing
+        run: node --test .github/scripts/build-prepublication-bundle.test.mjs
       # The publication surface's other half: that the deploy bundle is actually servable,
       # and that the live-host gate passes over a real socket rather than an injected
       # fetch. Hermetic by construction -- an ephemeral loopback listener with a throwaway

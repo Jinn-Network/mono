@@ -69,6 +69,11 @@ export interface NativeInfrastructureFactoryInput {
   readonly marketplaceAgentAddress?: `0x${string}`;
   readonly evmCustody: NativeOperatorConfig['evmCustody'];
   readonly publicBaseUrl: string;
+  /**
+   * Every configured record serving root. With `publicBaseUrl` these are the destinations a
+   * peer-announced locator may name (#3431); the transport refuses anything outside them.
+   */
+  readonly recordSources?: NativeOperatorConfig['sources'];
   readonly publicListen: NativeOperatorConfig['publicListen'];
   readonly ipfs: NativeOperatorConfig['ipfs'];
   readonly chain: {

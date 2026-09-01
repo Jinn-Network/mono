@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.3 |
-| **Date** | 2026-08-19 (v0.1 same day; v0.2 independent review same day; v0.3 2026-08-20 applies §13 rulings) |
+| **Version** | 0.4 |
+| **Date** | 2026-08-19 (v0.1 same day; v0.2 independent review same day; v0.3 2026-08-20 applies §13 rulings; v0.4 2026-08-31 S2 erratum) |
 | **Author** | S1 design session (Claude Fable 5, lane coordinator); seam citations read against `next` @ `4f4ad46f2` |
 | **Shape** | `design` (packet S1). Implementation is packet S2 and lands separately |
 | **Status** | ruled — operator 2026-08-20; §13's six questions are closed ([#2839 comment 5358262402](https://github.com/Jinn-Network/mono/issues/2839#issuecomment-5358262402)) |
@@ -14,6 +14,7 @@
 | **Never run-blocking** | Per operator ruling D3 (2026-08-19): S1 designs now, S2 implements during report-writing week, and the confirmatory run never waits on either |
 | **v0.2 changes** | Independent review, verdict *with fixes*. The record design (§3–§5, §7, §8) is unchanged; every fix landed in the closure/bundle-binding analysis and the S2 map. New: §6.5.1 (claim-id collision), §6.5.2 (real refusal mechanisms), §6.5.3 (the five `isV4` sites), §7's G0/steps split, §10.5 (grep pass), §12.2 (anchoring non-goal), Q5/Q6, and T20–T25 |
 | **v0.3 changes** | G3 erratum. §13 flipped from open questions to operator rulings. Cross-references in §2.1, §4.3, §7, §10.3, §10.4, and §12.2 now point at those rulings. No record-schema change. The structural fix named by Q5 is [#2889](https://github.com/Jinn-Network/mono/issues/2889) (design, still open). |
+| **v0.4 changes** | S2 erratum only (§14), written back per §10.5's own instruction. Records what the implementation found: the closure allocation moved to the anchored branch, §12.2's premise was dissolved by [#3212](https://github.com/Jinn-Network/mono/pull/3212), and two seams this document cites by line no longer exist. **The record design (§3–§5) and the ruling (§13) are unchanged**, and nothing in §1–§13 is rewritten. |
 
 ## 0. Decision in plain language
 
@@ -995,3 +996,54 @@ shows it.
 mixtures in the statement text with the status meaning fixed-and-stated for the items
 it covers. Structural per-subset statuses are designed when a second real experiment
 shows what mixtures look like, alongside the composition refactor.
+
+## 14. S2 erratum (2026-08-31)
+
+Written back per §10.5's standing instruction that seams which moved are recorded here rather than
+rediscovered during review. Implementation is [#3418](https://github.com/Jinn-Network/mono/pull/3418).
+**Nothing above is rewritten**, including §13's rulings; this section records where the tree moved
+out from under the document and what S2 did about it.
+
+### 14.1 The allocation moved to the anchored branch, and §12.2's premise is false
+
+§6.5 reserved `benchmark-product-public-bundle/7` and `benchmark-product.claim-package/5`. Both were
+taken by [#3212](https://github.com/Jinn-Network/mono/pull/3212) (the anchored binary-qualification
+closure), so S2 took the then-next free numbers per §6.5's own rule: **`/8` and `claim-package/6`**.
+
+The larger consequence is that §12.2's central sentence is now false. It reads "an anchored,
+qualified, disclosed bundle has no closure version and cannot be published", and both that non-goal
+and ruling Q5 rest on the anchored-plus-qualification exclusion that #3212 removed. The published
+official LoCoMo bundle is anchored *and* qualified today.
+
+S2 therefore allocated disclosure on the **anchored** branch: `/8` is `/7` plus the sealed record
+member, and `claim-package/6` is `/5` plus §6.6's section. Had it followed §12.2 literally, the
+flagship would have had to choose between its anchor and its disclosure record, which is the trade
+Q5 accepted only because it believed no alternative existed. The unanchored disclosed cell §6.5
+described is deliberately **not** built: its premise is gone, and building both would double the
+enumeration [#2889](https://github.com/Jinn-Network/mono/issues/2889) exists to remove.
+
+This departure was reviewed independently on the implementation PR and ruled sound.
+
+### 14.2 Two cited seams no longer exist
+
+- **§6.5.3's five `isV4` sites.** `verify.ts` no longer decides the graph from one strict-equality
+  test. #3212 replaced it with independent format facts, and S2 added a third: `carriesQualification`,
+  `carriesAnchors`, `carriesDisclosure`. The `usesV4Graph(format)` predicate §10.2 prescribes was
+  therefore unnecessary; `/8` sets all three facts.
+- **§6.2 and §10.3's `ROLE_ORDER.slice(0, 12)`.** The producer no longer derives the v2 catalog by
+  slicing the v4 order; it filters a separate `BUNDLE_EVIDENCE_ROLES` constant. The hazard §6.2 warns
+  about is real but now lives elsewhere, so S2 pinned the current mechanism instead: the v2
+  vocabulary, the admission-only subset, and the v4 prefix are each pinned by measured digest.
+
+### 14.3 What the implementation added beyond the map
+
+- **§10.3's author-only re-seal on key rotation is not built.** No rotation case arose and building
+  an unexercised re-seal path would have been speculative. A declaration is re-declarable before
+  `report` instead, which covers the same operator need.
+- **One seam §10.3 did not anticipate**: the Report extension's digest has to be inside the signed
+  payload, so `produceReport` gained an optional `recordExtensions` parameter. Absent, every existing
+  caller's sealed bytes are unchanged.
+- **A run publishes one bundle per analysis, and only the qualification one is disclosed.** The
+  document is written throughout as though a run produces a single bundle. It does not, and the
+  sibling analyses project no qualification, so they carry neither the section nor the extension.
+  Three separate refusals were needed to keep that honest rather than silent.

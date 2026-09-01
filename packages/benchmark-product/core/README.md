@@ -46,7 +46,7 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **41 generated operations**, all shipped through the library and CLI
+contains **45 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -59,6 +59,8 @@ with an explicit shipped/deferred GUI disposition:
 | `authorityRevoke` | `colophon authority revoke` | Sponsor-only grant or membership revocation. |
 | `authorityShow` | `colophon authority show` | Read the authority policy. |
 | `anchoringConfigure` | `colophon anchoring configure` | Replace or clear the workspace anchor provider and endpoint configuration. |
+| `disclosureDeclare` | `colophon disclosure declare` | Seal this run's six-variable disclosure-specification record over its sealed Matrix. |
+| `disclosureShow` | `colophon disclosure show` | Read the sealed disclosure-specification record back out of the workspace store. |
 | `createDraft` | `colophon draft create` | Create a draft, optionally from JSON. |
 | `getDraft` | `colophon draft show` | Read one draft. |
 | `createHumanReviewPackets` | `colophon human-review packet create` | Create blind item packets and visibility receipts before lock. |
@@ -66,6 +68,7 @@ with an explicit shipped/deferred GUI disposition:
 | `admitHumanTruth` | `colophon human-review admit` | Derive two-person unanimous or explicitly operator-only truth records, including exclusion/replacement accounting. |
 | `importBinaryItemBank` | `colophon import item-bank` | Import admitted binary-judgment items from three canonical JSONL manifests. |
 | `importSweBenchRows` | `colophon import swebench` | Import SWE-bench-shaped rows through interop. |
+| `importRunRecords` | `colophon run import` | Turn a locked run into a run from an external harness's per-attempt records over the whole sealed slate. |
 | `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
 | `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
 | `listDrafts` | `colophon draft list` | List drafts. |
@@ -80,6 +83,7 @@ with an explicit shipped/deferred GUI disposition:
 | `runLaunch` | `colophon launch` | Drive the real local venue, serially by default or with `--concurrency 1-32`. |
 | `runLock` | `colophon lock` | Seal the preregistered Run. |
 | `runAnchor` | `colophon anchor` | Obtain, verify, and store third-party time evidence over the sealed Run or Matrix digest. |
+| `runBind` | `colophon bind` | Bind the sealed, not-yet-launched Run to a public beacon value that postdates its seal, sealing the derived execution order. |
 | `runPreview` | `colophon preview` | Run a disclosed, non-official rehearsal. |
 | `runPublish` | `colophon publish` | Verify and emit one immutable local bundle. |
 | `runQuote` | `colophon quote` | Present size, coverage, cap, and honest estimates. |
@@ -224,7 +228,10 @@ always exactly one final envelope.
 Mutable drafts, grants, journals, scratch state, and private signing keys remain
 inside the workspace. Sealed records are stored as exact digest-addressed bytes.
 `publish` is **local immutable emission only: no upload, no hosting, no deployment**, package publication, or remote write. The emitted closure is
-public and not a general PII or confidentiality scrubber.
+public and not a general PII or confidentiality scrubber. `publication serve` is
+the separate, explicitly invoked verb that puts the already-emitted public
+archive tree on a socket; it announces nothing and writes no workspace record.
+See `docs/runbooks/colophon-announcement-source-serving.md`.
 
 For staged publication, `publicBaseUrl` is the exact archive mount, not merely an origin. For
 example, `https://example.test/publication` resolves records beneath
