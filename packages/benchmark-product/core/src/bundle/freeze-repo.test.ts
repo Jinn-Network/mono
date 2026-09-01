@@ -73,6 +73,9 @@ describe("freeze-repository export against a real v4 bundle", () => {
     const checked = await verifyFreezeRepo(bundleDir, repoDir);
     expect(checked.ok).toBe(true);
     expect(checked.differences).toEqual([]);
+    // A POSIX temp directory carries the bit, so the check reports that it looked at modes
+    // rather than quietly resting on bytes alone (issue #3349).
+    expect(checked.executableBitChecked).toBe(true);
     expect(checked.commitId).toBe(exported.commitId);
   });
 

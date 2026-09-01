@@ -729,6 +729,13 @@ export interface FreezeRepoDifference {
 
 export interface FreezeRepoVerificationResult {
   readonly ok: boolean;
+  /**
+   * False when the filesystem holding the tree does not carry an executable bit (or could not be
+   * asked), so the mode dimension was not checked and `ok` rests on bytes and entry type alone.
+   * Reported rather than assumed: a check that silently drops a dimension is the kind of quiet
+   * claim this tool exists to avoid.
+   */
+  readonly executableBitChecked: boolean;
   readonly bundleIdentity: string;
   readonly commitId: string;
   readonly fileCount: number;
@@ -745,6 +752,8 @@ interface TreeEntry {
 }
 
 /**
+ * @internal Exported for this module's own tests; not part of the package's public surface.
+ *
  * Decide whether the filesystem under `dir` actually carries an executable bit, the way git
  * autodetects `core.fileMode`: write a probe file, and see whether the owner-execute bit reads
  * back the way it was set.
@@ -761,9 +770,20 @@ interface TreeEntry {
  * failure the other way.
  */
 export function execBitIsCarried(dir: string): boolean {
-  const probe = join(dir, `.colophon-filemode-probe-${randomBytes(8).toString("hex")}`);
+  // Written inside the repository's own `.git` when it has one — same filesystem, and the walk
+  // already skips root `.git`, so a probe stranded by a SIGKILL between create and unlink cannot
+  // later read back as an unexpected member of the published tree.
+  const name = `.colophon-filemode-probe-${randomBytes(8).toString("hex")}`;
+  const gitDir = join(dir, ".git");
+  let probeDir = dir;
   try {
-    writeFileSync(probe, "", { mode: 0o644 });
+    if (statSync(gitDir).isDirectory()) probeDir = gitDir;
+  } catch {
+    // no `.git`, or an unreadable one: probe the tree itself
+  }
+  const probe = join(probeDir, name);
+  try {
+    writeFileSync(probe, "", { mode: 0o644, flag: "wx" });
     // A filesystem that reports the bit on a file created without it is reporting a constant.
     if ((statSync(probe).mode & 0o111) !== 0) return false;
     chmodSync(probe, 0o755);
@@ -771,11 +791,19 @@ export function execBitIsCarried(dir: string): boolean {
   } catch {
     return false;
   } finally {
-    rmSync(probe, { force: true });
+    // The probe answers a question; it never raises one. A cleanup refusal (EPERM on an unusual
+    // mount) must not escape as the caller's failure — at worst it strands the file note below.
+    try {
+      rmSync(probe, { force: true });
+    } catch {
+      // deliberately ignored
+    }
   }
 }
 
 /**
+ * @internal Exported for this module's own tests; not part of the package's public surface.
+ *
  * Enumerate a published tree the way git sees it. Three rules earn their place:
  *
  * - `.git` is skipped ONLY at the root, and before the entry type is dispatched on. A nested
@@ -826,9 +854,11 @@ export async function verifyFreezeRepo(
   const differences: FreezeRepoDifference[] = [];
 
   let present: readonly TreeEntry[];
+  let executableBitChecked = false;
   try {
     if (!statSync(repoDir).isDirectory()) throw new Error("not a directory");
-    present = listTree(repoDir, execBitIsCarried(repoDir));
+    executableBitChecked = execBitIsCarried(repoDir);
+    present = listTree(repoDir, executableBitChecked);
   } catch {
     refuse("not-found", repoDir, `"${repoDir}" is not a readable directory`);
   }
@@ -855,6 +885,7 @@ export async function verifyFreezeRepo(
 
   return {
     ok: differences.length === 0,
+    executableBitChecked,
     bundleIdentity: tree.bundleIdentity,
     commitId: tree.commitId,
     fileCount: tree.files.size,

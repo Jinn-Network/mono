@@ -9,7 +9,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -444,6 +444,16 @@ describe("published-tree enumeration", () => {
 
     expect(execBitIsCarried(dir)).toBe(true);
     expect(listTree(dir, true)).toEqual([]);
+  });
+
+  test("the probe uses the repository's own .git and leaves neither directory changed", () => {
+    const dir = treeDir();
+    mkdirSync(join(dir, ".git"));
+    writeFileSync(join(dir, "README.md"), "text\n");
+
+    expect(execBitIsCarried(dir)).toBe(true);
+    expect(readdirSync(join(dir, ".git"))).toEqual([]);
+    expect(listTree(dir, true).map((entry) => entry.path)).toEqual(["README.md"]);
   });
 
   test("the probe answers no rather than throwing when it cannot write", () => {
