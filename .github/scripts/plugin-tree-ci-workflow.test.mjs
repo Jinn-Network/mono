@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
-import { citedPrecedents } from './workflow-precedent-citations.test.mjs';
+import { citedPrecedents } from './workflow-precedent-citations.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const workflow = readFileSync(
@@ -94,11 +94,12 @@ test('the runtime distribution is restored straight into its package', () => {
 // precedent cited. The repository-wide gate in
 // `workflow-precedent-citations.test.mjs` checks that every cited workflow
 // still restores by name; this keeps the `# Precedent:` marker line it reads
-// from simply disappearing from this workflow. The guard calls that gate's own
-// `citedPrecedents` rather than re-deriving the citation shape, so the two
-// halves of the invariant cannot drift apart: a marker deleted, misspelled, or
-// moved out of the attached comment block fails here instead of silently
-// leaving the repository-wide gate with nothing to enforce.
+// from simply disappearing from this workflow. The guard calls the shared
+// `citedPrecedents` from `workflow-precedent-citations.mjs` rather than
+// re-deriving the citation shape, so the two halves of the invariant cannot
+// drift apart: a marker deleted, misspelled, or moved out of the attached
+// comment block fails here instead of silently leaving the repository-wide
+// gate with nothing to enforce.
 test('the restore step carries a comment citing a precedent workflow', () => {
   const lines = workflow.split('\n');
   const restoreStep = lines.findIndex((line) => line.includes('- name: Restore Plugin Runtime distribution'));
