@@ -219,9 +219,10 @@ function createDeclaredVerifyDriver(
     // PATH would leave the two disagreeing from the second sync onward, and
     // the linkage walk would refuse a sound chain.
     hwm: createFileHighWaterMarkStore({ filePath: config.mirrorStatePath, fs }),
-    // Item-grade ports, fail-closed. This composition offers CHAIN
-    // verification only: the mirror calls `verifySource` and nothing else, so
-    // `verifyForDecision` / `verifyForFilter` are off its path entirely.
+    // Item-grade ports, fail-closed. This composition offers SOURCE-level
+    // verification only: the mirror calls `verifySource` and `verifyHead` and
+    // nothing else, so `verifyForDecision` / `verifyForFilter` are off its
+    // path entirely.
     // Stubs that admit nothing are honest about that; fakes that returned
     // plausible facts would not be. The fetchers answer with empty bytes
     // rather than throwing (the same shape `client`'s own driver tests use):

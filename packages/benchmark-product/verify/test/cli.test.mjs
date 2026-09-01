@@ -39,6 +39,7 @@ test("a missing bundle exits 1 with machine-readable invalid-bundle output", asy
       "benchmark-product-public-bundle/5",
       "benchmark-product-public-bundle/6",
       "benchmark-product-public-bundle/7",
+      "benchmark-product-public-bundle/8",
     ],
     code: "record-integrity",
     message: "bundle directory is missing",

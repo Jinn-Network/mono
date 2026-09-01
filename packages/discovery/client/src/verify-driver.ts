@@ -3,6 +3,7 @@ import {
   sealJson,
   verifyItem,
   verifySourceChain,
+  verifySourceHead,
 } from "@jinn-network/record-discovery-protocol";
 import type {
   AnnouncedItem,
@@ -14,6 +15,7 @@ import type {
   RecordFetcher,
   SourceChainOutcome,
   SourceHead,
+  SourceHeadOutcome,
   SourceIdentity,
   SubstrateChecker,
 } from "@jinn-network/record-discovery-protocol";
@@ -53,9 +55,21 @@ export interface VerifySourceOptions {
   firstAdoption: boolean;
 }
 
+export interface VerifyHeadOptions {
+  source: SourceIdentity;
+  head: SourceHead;
+  headSignature: DsseEnvelope;
+}
+
 export interface VerifyDriver {
   /** Runs `source-chain-verification` (§10.3) and, on `ok`, records every walked entry as verified-onto-chain for later `verifyItem` provenance checks (§10.4 step 3). */
   verifySource(opts: VerifySourceOptions): Promise<SourceChainOutcome>;
+  /**
+   * Runs `source-head-revalidation` on a head that names the chain position
+   * this consumer already holds. Adopts nothing and advances no mark; the
+   * caller must have established the same-position precondition first.
+   */
+  verifyHead(opts: VerifyHeadOptions): Promise<SourceHeadOutcome>;
   /** Decision-grade item verification (§10.4): chain-verified provenance required, derivation-consistency mandatory for projected items (§6.2). */
   verifyForDecision(item: AnnouncedItem): Promise<ItemOutcome>;
   /** Shallow, filter-only item verification (§13.1): derivation-consistency is an optional spot-check, not required. */
@@ -113,6 +127,15 @@ export function createVerifyDriver(deps: VerifyDriverDeps): VerifyDriver {
     return outcome;
   }
 
+  async function verifyHead(opts: VerifyHeadOptions): Promise<SourceHeadOutcome> {
+    return verifySourceHead({
+      source: opts.source,
+      head: opts.head,
+      headSignature: opts.headSignature,
+      ports: { keys: deps.trust.keys, sigs: deps.trust.sigs, fresh: deps.trust.fresh, now: deps.now() },
+    });
+  }
+
   async function verifiedChain(cursor: { entry: string }): Promise<boolean> {
     return isVerified(cursor.entry);
   }
@@ -152,5 +175,5 @@ export function createVerifyDriver(deps: VerifyDriverDeps): VerifyDriver {
     });
   }
 
-  return { verifySource, verifyForDecision, verifyForFilter };
+  return { verifySource, verifyHead, verifyForDecision, verifyForFilter };
 }

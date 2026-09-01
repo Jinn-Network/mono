@@ -13,12 +13,14 @@ import {
   parseAnnouncementEntry,
   sealJson,
   verifySourceChain,
+  verifySourceHead,
   type AnnouncementEntry,
   type FreshnessPolicy,
   type HighWaterMark,
   type KeyResolver,
   type SignatureVerifier,
   type SourceHead,
+  type SourceHeadOutcome,
   type SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
 import { ConsumerState } from './state.js';
@@ -111,6 +113,24 @@ function outcomeReason(status: Exclude<Awaited<ReturnType<typeof verifySourceCha
 }
 
 /**
+ * `source-head-revalidation`'s outcomes in the same reason vocabulary the chain
+ * procedure's outcomes already use, so one defect reads the same whichever path
+ * refused it. The envelope-shaped refusals the chain procedure folds into
+ * `unauthorized-signer` keep their own slugs, as the procedure intends.
+ */
+function headOutcomeReason(status: Exclude<SourceHeadOutcome['status'], 'ok'>): string {
+  switch (status) {
+    case 'stale': return 'stale-source-head';
+    case 'unauthorized-signer': return 'unauthorized-source-signer';
+    case 'refresh-by-ceiling': return 'refresh-by-ceiling';
+    case 'head-issued-ahead': return 'head-issued-ahead';
+    case 'head-origin-mismatch': return 'source-head-origin-mismatch';
+    case 'head-payload-mismatch': return 'head-payload-mismatch';
+    case 'invalid-head-envelope': return 'invalid-head-envelope';
+  }
+}
+
+/**
  * Adapts the consumer's durable checkpoint to the protocol's named source-chain verification.
  * Verification uses a transaction-local high-water mark; only `syncPublicSource` advances durable
  * state after the complete result succeeds.
@@ -122,9 +142,34 @@ export function createProtocolSourceVerifier(options: ProtocolSourceVerifierOpti
       if (input.mode === 'unchanged'
         && checkpoint !== undefined
         && checkpoint.envelope === canonicalJson(input.headSignature)) {
-        return options.fresh.isFresh(input.head.refreshBy, options.now())
+        // The protocol's `source-head-revalidation`, exactly as the daemon's
+        // consumer (`native-discovery-trust.ts`) already runs it, so the two
+        // consumers close this shortcut the same way (#3480).
+        //
+        // Byte-identical head bytes are not a cached acceptance: they say
+        // nothing about whether the signer is STILL a key valid at `now`, so a
+        // head signed by a since-rotated-out, expired, or revoked key would be
+        // honored forever for as long as the source re-serves the same bytes
+        // -- and `ConsumerState` is durable across runs, so a checkpoint
+        // written while the key was valid outlives its revocation. Design
+        // §10.3 step 2 refuses such a head regardless of any embedded
+        // timestamp. Freshness and the §5.2 window (#3467) are re-checked by
+        // the same procedure, after the signer, so nothing this path used to
+        // check is given up.
+        const outcome = await verifySourceHead({
+          source: input.source,
+          head: input.head,
+          headSignature: input.headSignature,
+          ports: {
+            keys: options.keys,
+            sigs: options.sigs,
+            fresh: options.fresh,
+            now: options.now(),
+          },
+        });
+        return outcome.status === 'ok'
           ? { status: 'ok' }
-          : { status: 'rejected', reason: 'stale-source-head' };
+          : { status: 'rejected', reason: headOutcomeReason(outcome.status) };
       }
 
       let firstAdoption = input.mode === 'cold' && checkpoint === undefined;

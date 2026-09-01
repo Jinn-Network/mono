@@ -4,12 +4,9 @@ import {
   type Transport,
 } from '@jinn-network/record-discovery-client';
 import {
-  MEDIA_HEAD,
   WELL_KNOWN_PATH,
-  dssePreAuthEncoding,
-  parseWireDsseEnvelope,
-  sealJson,
   verifySourceChain,
+  verifySourceHead,
   type HighWaterMark,
   type SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
@@ -59,10 +56,6 @@ export class NativeDiscoverySourceResolutionError extends Error {
     // has always done. Degrading is opt-in and only the transport-never-answered case opts in.
     this.kind = options?.kind ?? 'unintroduced';
   }
-}
-
-function same(left: Uint8Array, right: Uint8Array): boolean {
-  return left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
 }
 
 function sourceCheckpoint(store: Store, source: SourceIdentity): HighWaterMark | undefined {
@@ -273,24 +266,24 @@ export function buildNativeDiscoverySources(input: {
           },
         });
       },
+      // The protocol's `source-head-revalidation` procedure, shared with the
+      // plugin runtime's corpus mirror (#3443) so the same-head shortcut is
+      // closed the same way in both consumers.
+      //
+      // One deliberate change from the inline body this replaces: that one
+      // wrapped the whole procedure in a try/catch, so a throwing key resolve
+      // or signature verify surfaced as `invalid-head-envelope`. The shared
+      // procedure guards only the envelope parse, and a trust-catalog throw
+      // now propagates -- which is what `verify` above has always done, and a
+      // catalog fault deserves its own stack rather than a lie about the
+      // envelope. `pollSource` still refuses the source either way.
       async verifyHead(candidate) {
-        try {
-          const parsed = parseWireDsseEnvelope(candidate.signature);
-          if (parsed.envelope.payloadType !== MEDIA_HEAD || !same(parsed.payloadBytes, sealJson(candidate.head).bytes)) {
-            return { status: 'head-payload-mismatch' };
-          }
-          const keys = await trust.keys.resolve(candidate.source.agent, now());
-          const pae = dssePreAuthEncoding(MEDIA_HEAD, parsed.payloadBytes);
-          for (const signature of parsed.signatures) {
-            const key = keys.find(({ keyid }) => keyid === signature.keyid);
-            if (key !== undefined && await trust.sigs.verify(pae, signature.signatureBytes, key)) {
-              return { status: trust.fresh.isFresh(candidate.head.refreshBy, now()) ? 'ok' : 'stale' };
-            }
-          }
-          return { status: 'unauthorized-signer' };
-        } catch {
-          return { status: 'invalid-head-envelope' };
-        }
+        return verifySourceHead({
+          source: candidate.source,
+          head: candidate.head,
+          headSignature: candidate.signature,
+          ports: { keys: trust.keys, sigs: trust.sigs, fresh: trust.fresh, now: now() },
+        });
       },
     };
     result.push(source);

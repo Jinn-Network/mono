@@ -34,6 +34,7 @@
 
 import { readFileSync } from "node:fs";
 import {
+  BENCHMARKING_METHOD_IDS,
   expectedCellSet,
   parseBenchmark,
   parseMatrix,
@@ -44,6 +45,7 @@ import { evaluateIntegrityAnchors } from "@colophon-claims/verify";
 import { verifyMatrix } from "@jinn-network/benchmarking-run";
 import { verifyReport } from "@jinn-network/benchmarking-aggregate";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
+import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { refuse } from "../errors.js";
 import { additionalClaimPackagePath, ClaimPackageSchema } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
@@ -96,7 +98,11 @@ export type RunVerifyCheck =
   /** Only for a run on the anchored closure — one that carries an anchor, or whose sealed Run
    * declared anchoring intent (anchor-evidence design §8). The same shared implementation the
    * portable reader runs, over this workspace's own sealed anchor bytes. */
-  | "integrity-anchors";
+  | "integrity-anchors"
+  /** Only for a run that carries a sealed disclosure declaration (issue #2839). The section is
+   * re-derived from the record's own bytes by the shared projection and byte-compared inside
+   * `claim-consistency`; this name records that the run had one to compare. */
+  | "disclosure-specification";
 
 /** One additional sealed Report this invocation also independently verified (packet P5, spec §8.3
  * option 5) — one per `runState.additionalReports` entry. It passed the SAME report-verification +
@@ -213,6 +219,9 @@ export async function verifyRunWorkspace(
       let sharedContext: {
         readonly previewLog: ReturnType<typeof readPreviewLog>;
         readonly carriage: ReturnType<typeof readRunAnchorCarriage>;
+        /** issue #2839: the disclosure section re-derived from the sealed record's own bytes, so
+         * this workspace-side rebuild compares the same projection the portable reader does. */
+        readonly disclosureCarriage: ReturnType<typeof readRunDisclosureCarriage>;
         readonly additionalLimitations: readonly string[];
         readonly suiteComparability?: {
           readonly executionConformance: boolean;
@@ -279,6 +288,7 @@ export async function verifyRunWorkspace(
           // below. Computed once — the anchors are a property of the Run/Matrix, not of any one
           // Report.
           const carriage = readRunAnchorCarriage(context.workspaceDir, runState);
+          const disclosureCarriage = readRunDisclosureCarriage(context.workspaceDir, runState);
           // The same shared check the portable reader runs, over the workspace's own sealed bytes
           // and with no trust material — roots and headers are verifier-side configuration, and a
           // producer that supplied its own here would be grading its own homework. `invalid`
@@ -370,6 +380,7 @@ export async function verifyRunWorkspace(
           sharedContext = {
             previewLog,
             carriage,
+            disclosureCarriage,
             additionalLimitations: [
               ...inspectAdditional,
               ...(suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation]),
@@ -383,7 +394,7 @@ export async function verifyRunWorkspace(
             }),
           };
         }
-        const { previewLog, carriage, additionalLimitations, suiteComparability } = sharedContext;
+        const { previewLog, carriage, disclosureCarriage, additionalLimitations, suiteComparability } = sharedContext;
 
         assertClaimConsistency({
           claim,
@@ -403,6 +414,15 @@ export async function verifyRunWorkspace(
           ...(additionalLimitations.length > 0 ? { additionalLimitations } : {}),
           ...(suiteComparability === undefined ? {} : { suiteComparability }),
           ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
+          // Scoped exactly as `report` scopes it (issue #2839): only the anchored
+          // binary-qualification entry carries the section, because `/8` is the one disclosed cell.
+          // A run's sibling analyses project no qualification, so rebuilding THEIR claim with a
+          // disclosure would be rebuilding a claim no closure could have published.
+          ...(disclosureCarriage === undefined
+            || !carriage.anchoredClosure
+            || reportRecord.method.id !== BENCHMARKING_METHOD_IDS.binaryInstrument
+            ? {}
+            : { disclosure: disclosureCarriage.disclosure }),
           ...(previewLog === undefined
             ? {}
             : {
@@ -434,6 +454,7 @@ export async function verifyRunWorkspace(
       checks.push("report-verification");
       checks.push("claim-consistency");
       if (sharedContext!.carriage.anchoredClosure) checks.push("integrity-anchors");
+      if (sharedContext!.disclosureCarriage !== undefined) checks.push("disclosure-specification");
 
       return {
         draftId: input.draftId,

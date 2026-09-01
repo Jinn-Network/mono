@@ -1,5 +1,5 @@
 import { BENCHMARKING_METHOD_IDS, type BenchmarkRecord, type MatrixRecord, type ReportRecord, type RunRecord } from "@jinn-network/benchmarking-records";
-import { firstDifference, type ClaimAnchor } from "@colophon-claims/verify";
+import { firstDifference, type ClaimAnchor, type ClaimDisclosureSection } from "@colophon-claims/verify";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";
@@ -47,6 +47,9 @@ export function assertClaimConsistency(input: {
    * verification path authenticated, never read out of the claim being checked. Empty rebuilds the
    * unanchored claim, so a stored claim asserting an anchor nobody carries fails here. */
   readonly anchors?: readonly ClaimAnchor[];
+  /** disclosure-specification-record design §7 step 10 (issue #2839): the disclosure section
+   * re-derived from the sealed record's own bytes, never read from the claim under test. */
+  readonly disclosure?: ClaimDisclosureSection;
   readonly suiteComparability?: {
     readonly executionConformance: boolean;
     readonly coverage: "one_task" | "ten_task" | "full" | "custom";
@@ -94,6 +97,7 @@ export function assertClaimConsistency(input: {
     },
     ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }),
     ...(input.anchors === undefined ? {} : { anchors: input.anchors }),
+    ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }),
     ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   });
   if (!bytesEqual(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) {

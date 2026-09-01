@@ -21,13 +21,15 @@
 //    deployment, and containment there is both stronger and correct.
 //
 // Scope, stated exactly so the next audit does not have to re-derive it: only
-// the ARCHIVE-ROOT path is guarded here. The operator's own record fetches by
-// locator (`NativePublicRecordTransport.byLocation`, reached from a peer's
-// announcement `locations[]`) still carry no destination policy; their bytes are
-// digest-verified, which guards the response and not the request. That path is
-// behind trust verification and is a separate surface with its own containment
-// question -- what root would a locator be contained TO -- so it is deliberately
-// left for its own change rather than half-solved here.
+// the ARCHIVE-ROOT path is guarded here. The sibling surface -- the operator's
+// own record fetches by locator (`NativePublicRecordTransport.byLocation`,
+// reached from a peer's announcement `locations[]`) -- was closed separately in
+// #3431 and answers the containment question this comment used to leave open:
+// a locator is contained to the set of record serving roots the OPERATOR
+// configured (its own `publicBaseUrl` plus each `recordSources[].baseUrl`),
+// using `resolveContainedUrl` below against each. That keeps the loopback
+// serving root of a local deployment usable, which `isPrivateOrReservedHost`
+// would not.
 //
 // Neither primitive resolves DNS, and containment restricts the URL, not the
 // socket. A peer owns DNS for its own hostname, so it can point the configured

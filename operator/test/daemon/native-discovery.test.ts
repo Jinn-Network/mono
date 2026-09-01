@@ -346,6 +346,86 @@ describe('native discovery consumer', () => {
       expect(restarted.takePending()).toEqual([]);
     });
 
+    // #3467 — §5.2 now bounds `issuedAt` against the consumer's clock too, so a publishing node
+    // with a fast clock mints a head every consumer refuses `head-issued-ahead`, and stickily:
+    // `refreshHead` carries the future `issuedAt` forward on every re-sign. On the operator's OWN
+    // source that would reopen the #2547 boot deadlock from the other end.
+    //
+    // Seeded exactly like the lapsed-head helper: a checkpoint written while the head verified,
+    // then a restart where the SAME byte-identical head is now refused for its `issuedAt`. `now`
+    // does not advance, so this is the future-head path and not the stale one.
+    async function futureHeadedSelfSource(selfServed: boolean) {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const now = new Date('2026-08-02T01:00:00.000Z');
+      const store = new Store(':memory:');
+      const initial = consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead: async () => ({ status: 'ok' }),
+        now: () => now,
+      });
+      await initial.sync();
+      for (const item of initial.takePending()) initial.acknowledge(item);
+      return consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead: async () => ({ status: 'head-issued-ahead' }),
+        now: () => now,
+        selfServed,
+      });
+    }
+
+    it('degrades a self-hosted source whose own head is dated into the future, rather than aborting its boot', async () => {
+      const restarted = await futureHeadedSelfSource(true);
+      const report = await restarted.sync();
+      expect(report.degraded).toMatchObject([{ reason: 'self-source-future-head' }]);
+      expect(report.accepted).toBe(0);
+      expect(report.verifiedSources).toBe(0);
+      // A degrade advances nothing; the next honestly-dated head resumes the ordinary path.
+      expect(restarted.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toMatchObject({
+        sequence: '0000000000000001',
+      });
+      expect(restarted.takePending()).toEqual([]);
+    });
+
+    // MUTATION GUARD, the same line as the stale one: a PEER's future-dated head is a real fault
+    // this consumer cannot distinguish from a hostile one, so it must still refuse.
+    it('still refuses a PEER head dated into the future — fail-closed', async () => {
+      const restarted = await futureHeadedSelfSource(false);
+      await expect(restarted.sync()).rejects.toMatchObject({ reason: 'head-issued-ahead' });
+      expect(restarted.takePending()).toEqual([]);
+    });
+
+    // The cold path (#2549's residual, same shape): no prior checkpoint, so the chain procedure
+    // reports the future-dated head as `broken-chain` with `at: 'head-issued-ahead'`.
+    it('degrades a self-hosted future-dated head at cold verify too, and still refuses a peer there', async () => {
+      const routes = routesFor([entry('0000000000000001', null, DIGEST_A)]);
+      const now = new Date('2026-08-02T01:00:00.000Z');
+      const selfCold = consumer({
+        store: new Store(':memory:'),
+        routes,
+        verify: async () => ({ status: 'broken-chain', at: 'head-issued-ahead' }),
+        verifyHead: async () => ({ status: 'ok' }),
+        now: () => now,
+        selfServed: true,
+      });
+      const report = await selfCold.sync();
+      expect(report.degraded).toMatchObject([{ reason: 'self-source-future-head' }]);
+      expect(selfCold.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toBeUndefined();
+
+      const peerCold = consumer({
+        store: new Store(':memory:'),
+        routes,
+        verify: async () => ({ status: 'broken-chain', at: 'head-issued-ahead' }),
+        verifyHead: async () => ({ status: 'ok' }),
+        now: () => now,
+        selfServed: false,
+      });
+      await expect(peerCold.sync()).rejects.toMatchObject({ reason: 'broken-chain (at: head-issued-ahead)' });
+    });
+
     it('refuses a self-hosted source whose head is wrongly-signed — only staleness degrades, never a bad signature', async () => {
       const restarted = await idledSelfSource(true);
       // Reissue the consumer with a self-hosted source whose head fails signature revalidation.

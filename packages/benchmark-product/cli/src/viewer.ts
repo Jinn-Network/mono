@@ -7,6 +7,7 @@ import {
   PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
   summarizeVerificationOutcome,
   verifyPublicBundleSnapshot,
   type PublicComparisonCell,
@@ -87,11 +88,13 @@ function viewerHtml(
   // (issue #3205), so it is named before the fall-through rather than inheriting it.
   const verificationCommand = verification.format === "benchmark-product-public-bundle/5"
     ? PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND
-    : verification.format === "benchmark-product-public-bundle/7"
-      ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
-      : verification.format === "benchmark-product-public-bundle/4"
-        ? PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND
-        : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
+    : verification.format === "benchmark-product-public-bundle/8"
+      ? PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND
+      : verification.format === "benchmark-product-public-bundle/7"
+        ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
+        : verification.format === "benchmark-product-public-bundle/4"
+          ? PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND
+          : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
   // No released npx line understands the metadata-first profile -- an older reader refuses it at
   // manifest parse -- so this page offers the local command that does work instead of an
   // instruction to fail.

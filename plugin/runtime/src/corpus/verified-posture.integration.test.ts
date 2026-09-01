@@ -116,10 +116,14 @@ async function compose(options: {
     },
   });
 
+  // Mutable so one composition can be polled twice at different clocks --
+  // the only way to show that an unchanged head is re-checked for freshness
+  // rather than remembered as accepted.
+  let clock = NOW;
   const ports = createLocalCorpusPorts({
     config,
     fetchLike: loopback(archive.routes),
-    now: () => NOW,
+    now: () => clock,
   });
   const capability = createCorpusCapability({
     transport: ports.corpusTransport,
@@ -127,10 +131,17 @@ async function compose(options: {
     dsseVerifier: ports.dsseVerifier,
     readPolicyVersions: ports.readPolicyVersions,
     verifyDriver: ports.corpusVerifyDriver,
-    now: () => NOW,
+    now: () => clock,
   });
   await capability.start!({ config, log: log() });
-  return { archive, capability, config };
+  return {
+    archive,
+    capability,
+    config,
+    advanceTo(instant: Date) {
+      clock = instant;
+    },
+  };
 }
 
 async function chainVerificationCheck(capability: Awaited<ReturnType<typeof compose>>["capability"]) {
@@ -165,35 +176,68 @@ describe("the verified posture over a genuinely signed archive", () => {
     });
   });
 
-  test("the driver reads the mark the mirror stored, so a re-presented head is not re-accepted", async () => {
-    const { capability } = await compose();
+  test("a second sync of an unchanged head is a clean no-op, not a broken chain (#3443)", async () => {
+    const { capability, config } = await compose();
+    expect((await capability.mirror.syncOnce()).status).toBe("synced");
+    const markAfterFirst = JSON.parse(await readFile(config.mirrorStatePath, "utf8")) as unknown;
+
+    // The fixture archive is static, so the second sync re-presents the head
+    // the first one accepted -- exactly what any real archive polled more
+    // often than it re-signs presents. `verifySourceChain` cannot express
+    // that: §5.2 requires `issuedAt` to strictly increase, so the head it is
+    // handed is a chain regression. The mirror recognizes the position as its
+    // own and revalidates the head instead.
+    const second = await capability.mirror.syncOnce();
+
+    expect(second.status).toBe("synced");
+    expect(second.sources[0]!.failure).toBeUndefined();
+    expect(second.sources[0]!.indexed).toBe(0);
+    expect(await chainVerificationCheck(capability)).toMatchObject({
+      name: "corpus-chain-verification",
+      ok: true,
+    });
+
+    // Nothing adopted means nothing advanced. The persisted `issuedAt` is the
+    // floor the next head that DOES move has to strictly clear, so a
+    // revalidated no-op must leave it exactly where it was -- otherwise the
+    // no-op path would quietly become a way to launder a replayed head.
+    expect(JSON.parse(await readFile(config.mirrorStatePath, "utf8"))).toEqual(markAfterFirst);
+  });
+
+  test("the shared mark still governs: the driver resumes from the position the mirror stored", async () => {
+    // The linkage that would break if the driver and the mirror kept separate
+    // state files: the second sync can only recognize the re-served head as
+    // its OWN position because both read the same mark.
+    const { capability, config } = await compose();
+    await capability.mirror.syncOnce();
+
+    const state = JSON.parse(await readFile(config.mirrorStatePath, "utf8")) as {
+      readonly marks: Record<string, { readonly sequence: string; readonly issuedAt: string }>;
+    };
+    const mark = state.marks[`${source.agent}/${source.name}`];
+    expect(mark?.sequence).toBe("0000000000000001");
+
+    const second = await capability.mirror.syncOnce();
+    expect(second.sources[0]!.entriesWalked).toBe(0);
+    expect(second.sources[0]!.status).toBe("synced");
+  });
+
+  test("an unchanged head that has crossed refreshBy is refused, so revalidation is not a cached acceptance", async () => {
+    const { capability, advanceTo } = await compose();
     expect((await capability.mirror.syncOnce()).status).toBe("synced");
 
-    // The subject here is the SHARED MARK: the second sync can only see the
-    // first sync's position because the driver and the mirror read the same
-    // state file. `verifySourceChain` compares the re-served head's `issuedAt`
-    // against that persisted mark (§5.2 requires it to strictly increase) and
-    // refuses the regression, so the refusal is the proof the mark carried.
-    //
-    // The refusal's SHAPE is a known gap, not a property worth keeping. The
-    // fixture archive is static, so a second sync re-presents an unchanged
-    // head — but so does any real archive polled more often than it re-signs,
-    // and this mirror has no same-head revalidation path (the one
-    // `operator/src/daemon/native-discovery.ts` documents as `verifyHead`).
-    // A live source would therefore report `broken-chain` between publishes
-    // and drive `corpus-chain-verification` red in ordinary operation. It is
-    // not reachable yet — no entry point supplies a config file, so
-    // `corpus.sources` is empty in every real process — and closing it is a
-    // design call about what a same-head sync should report, which is why it
-    // is left open here rather than decided. It has to be settled before an
-    // entry point starts supplying sources, because that is the change that
-    // makes it reachable.
+    // Same bytes, same signature, same chain position -- only the clock moved
+    // past the head's own `refreshBy`. A source that stops re-signing stops
+    // being followed, exactly as it would on the chain path.
+    advanceTo(new Date("2026-09-15T00:00:00Z"));
     const second = await capability.mirror.syncOnce();
+
+    expect(second.status).toBe("failed");
     expect(second.sources[0]!.failure).toEqual({
       code: "chain-verification-rejected",
-      message: "broken-chain",
+      message: "stale",
     });
-    expect(second.sources[0]!.indexed).toBe(0);
+    expect((await chainVerificationCheck(capability)).ok).toBe(false);
   });
 });
 

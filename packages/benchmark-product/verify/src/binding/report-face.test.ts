@@ -171,6 +171,26 @@ describe("runBindingSentence", () => {
       }
     });
 
+    /**
+     * Issue #3425. The census sentence used to assert, unconditionally, that the order was fixed by
+     * randomness postdating the seal -- on the `attributive` branch too, where the clauses either
+     * side of it both concede that nothing in the bundle places the value after the seal.
+     */
+    test.each([
+      ["drand/quicknet", true],
+      ["bitcoin/mainnet", false],
+    ] as const)("the census postdating claim keys on postSeal (%s)", (source, asserts) => {
+      const sentence = runBindingSentence(census(source));
+      expect(sentence).toContain("does not show the population was");
+      if (asserts) {
+        expect(sentence).toContain("order was fixed by randomness postdating the seal");
+        expect(sentence).not.toContain("cannot place after the seal");
+      } else {
+        expect(sentence).toContain("order was tied to a value this bundle cannot place after the seal");
+        expect(sentence).not.toContain("postdating the seal");
+      }
+    });
+
     test("the seal-derived clause names the source choice that survives it, without miscounting it", () => {
       const sentence = runBindingSentence(census());
       expect(sentence).toContain("What choosing remains is the source");
