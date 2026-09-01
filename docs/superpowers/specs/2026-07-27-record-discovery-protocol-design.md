@@ -318,8 +318,11 @@ else in the stack:
   most twice the ceiling past the consumer's clock — finite, which is the property this
   section is after. A profile that pins a tighter ceiling pins an equally tight skew
   allowance; a profile may only tighten, never widen, and a verifier clamps what it is handed.
-  Rules are checked ahead of freshness, since a head that breaks any of them is always fresh
-  and the clock could never catch it.
+  The window is checked ahead of freshness, and reported as a window failure rather than as
+  staleness, so one broken shape reports one slug however the clock happens to fall. Rule 3
+  in particular could not be caught any later: a head issued into the future is fresh against
+  every clock the consumer will ever read, so a freshness test first would pass it and then
+  never see it again.
 - **Anti-rollback is the consumer's high-water mark, plus mirror-set comparison for cold
   starts.** Consumers persist, per source, the highest verified `(sequence, entry digest)`.
   A consumer with no high-water mark for a source (first adoption, fresh device) MUST fetch
