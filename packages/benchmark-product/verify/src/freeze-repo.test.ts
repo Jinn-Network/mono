@@ -247,13 +247,14 @@ describe("freeze repository rendering", () => {
     // (issue #3540). It is generated from the support table, so it cannot go stale again.
     const accepted = SUPPORTED_BUNDLE_FORMATS.filter((format) => FREEZE_REPO_BUNDLE_SUPPORT[format].qualification);
     expect(accepted.length).toBeGreaterThan(1);
+    let message: string | undefined;
     try {
       renderFreezeRepo(snapshotOf({ format: BUNDLE_FORMAT }));
-      expect.unreachable("a bundle with no qualification graph must be refused");
     } catch (error) {
-      const message = (error as Error).message;
-      for (const format of accepted) expect(message, format).toContain(format);
+      message = (error as Error).message;
     }
+    expect(message, "a bundle with no qualification graph must be refused").toBeDefined();
+    for (const format of accepted) expect(message!, format).toContain(format);
   });
 
   test("renders the disclosed closure: its freeze graph is the anchored qualification graph", () => {
