@@ -396,10 +396,15 @@ function sameHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): bool
  * never here. `issuedAt` must STRICTLY increase, and an unparseable instant yields NaN, whose
  * every comparison is false — so a rollback, a backdated re-sign and a malformed head all keep
  * the refusal they have today. What this admits is exactly the honest idle re-sign, onto
- * `source-head-revalidation`, which re-checks signature, currently-valid key and freshness on
- * every call — but not the §5.2 `refreshBy` ceiling, which neither named procedure enforces
- * (#3467). This widens that gap's reach: a source can now install a far-future `refreshBy`
- * at an unchanged position, without appending. Closing it is #3467's, not this change's.
+ * `source-head-revalidation`, which re-checks signature, currently-valid key, the §5.2
+ * `refreshBy` window and freshness on every call. That window check is `checkRefreshWindow`
+ * inside `verifySourceHead` (#3467): it returns `refresh-by-ceiling` or `head-issued-ahead`
+ * when the head breaks the published-source profile's §5.2 rules, and this path throws on
+ * every status but `ok` and `stale`, so both are hard refusals here. The far-future
+ * `refreshBy` a re-sign could otherwise install at an unchanged position is therefore refused
+ * rather than admitted: what this predicate opens is bounded, not a widening. The plugin
+ * runtime's mirror documents the same property the same way (`classifyIdleHead`,
+ * `plugin/runtime/src/corpus/mirror.ts`).
  */
 function reSignedIdleHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): boolean {
   const held = checkpoint.signedHighWater;
