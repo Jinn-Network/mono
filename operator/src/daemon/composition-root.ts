@@ -863,9 +863,9 @@ const GET_TASK_VIEW_ABI = [{
 /**
  * Why a fetch produced no bytes. FAILURE IS NOT ABSENCE (#2647), applied to the IPFS leg (#3451):
  *
- *   - `'too-large'` — a gateway SERVED the content and the byte cap refused it. Positive evidence
- *     the document exists; reporting it as absent turns a size-policy decision into a silent data
- *     gap the resolver cannot tell from a genuine miss.
+ *   - `'too-large'` — a gateway ANSWERED for the content and the byte cap refused it. Positive
+ *     evidence the document exists; reporting it as absent turns a size-policy decision into a
+ *     silent data gap the resolver cannot tell from a genuine miss.
  *   - `'unavailable'` — transport failure or timeout. Nothing was learned about this digest.
  */
 export type IpfsBytesRefusal = 'too-large' | 'unavailable';
@@ -880,7 +880,8 @@ export type IpfsBytesRefusal = 'too-large' | 'unavailable';
  * never pinned:
  *
  *   - `Uint8Array` — the bytes. Never trusted by the caller without re-deriving the digest.
- *   - `undefined` — genuine absence: every candidate answered, and every answer was 404/410.
+ *   - `undefined` — genuine absence: every candidate answered, and every answer was 404/410. The
+ *     strictest answer, and so the rarest — see `classifyIpfsFetchFailure`.
  *   - {@link IpfsBytesRefusal} — the fetch did not answer the absence question at all.
  *
  * Exported so `operator/test/daemon/*` can drive this exact production resolver, matching the
@@ -915,7 +916,7 @@ export function narrowIpfsBytes(
     const result = await fetchClassified(digest);
     if (result === 'too-large') {
       logger?.warn(
-        `[ipfs] ${digest} was SERVED but exceeds the response byte cap -- refused for size, `
+        `[ipfs] ${digest} was ANSWERED FOR but exceeds the response byte cap -- refused for size, `
           + 'not absent; the document exists and needs a larger bound or an out-of-band read',
       );
       return undefined;

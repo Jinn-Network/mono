@@ -23,9 +23,10 @@ const FALLBACK_IPFS_GATEWAY_BASE = 'https://ipfs.io/ipfs/';
 
 /**
  * A gateway response the byte cap refused. FAILURE IS NOT ABSENCE (#2647, #3451): the gateway
- * served this content, so the refusal is positive evidence that it EXISTS and is merely larger
- * than policy allows. A caller that reports it as "not on IPFS" turns a size-policy decision
- * into a silent data gap.
+ * answered FOR this content, so the refusal is positive evidence that it EXISTS and is merely
+ * larger than policy allows. (On the declared-`content-length` path the body is discarded unread,
+ * so the evidence is the headers rather than the bytes — still an answer, not a miss.) A caller
+ * that reports it as "not on IPFS" turns a size-policy decision into a silent data gap.
  */
 export class IpfsResponseTooLargeError extends Error {
   override readonly name = 'IpfsResponseTooLargeError';
@@ -72,6 +73,11 @@ export class IpfsFetchFailedError extends Error {
  *   - `'not-found'` — every candidate answered, and every answer was "not there". Genuine absence.
  *   - `'unavailable'` — anything else (transport error, timeout, malformed candidate URL). Nothing
  *     was learned about whether the content exists.
+ *
+ * `'not-found'` is deliberately strict, and in production it is therefore the rarest answer: a
+ * default fetch also tries the `ipfs.io` fallback, which typically stalls into a 504 or an abort
+ * for an unpinned digest rather than answering 404. Such a run classifies `'unavailable'` — the
+ * safe direction, since absence is never claimed without proof of it.
  */
 export function classifyIpfsFetchFailure(
   error: unknown,
